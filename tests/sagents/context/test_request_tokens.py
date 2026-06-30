@@ -83,6 +83,108 @@ def test_multiple_serial_requests_each_have_own_file(tmp_path):
     asyncio.run(_run())
 
 
+def test_mcp_calls_are_grouped_by_request_file(tmp_path):
+    async def _run():
+        ctx = _make_session(tmp_path)
+        rid = ctx.start_request({"agent_mode": "simple"})
+
+        ctx.add_mcp_call(
+            {
+                "tool_name": "fetch",
+                "server_name": "web",
+                "started_at": 1.0,
+                "ended_at": 1.2,
+                "duration_sec": 0.2,
+                "status": "success",
+                "arguments": {"url": "https://example.com"},
+                "request": {
+                    "tool_name": "fetch",
+                    "server_name": "web",
+                    "payload": {
+                        "tool_name": "fetch",
+                        "arguments": {"url": "https://example.com"},
+                    },
+                },
+                "response": {"content": "ok"},
+            }
+        )
+        ctx.add_mcp_call(
+            {
+                "tool_name": "fetch",
+                "server_name": "web",
+                "started_at": 2.0,
+                "ended_at": 2.1,
+                "duration_sec": 0.1,
+                "status": "error",
+                "arguments": {"url": "https://invalid.example"},
+                "request": {
+                    "tool_name": "fetch",
+                    "server_name": "web",
+                    "payload": {
+                        "tool_name": "fetch",
+                        "arguments": {"url": "https://invalid.example"},
+                    },
+                },
+                "error": "failed",
+            }
+        )
+
+        ctx.end_request("completed")
+        file_path = os.path.join(ctx.session_workspace, "mcp_calls", f"{rid}.json")
+        assert os.path.exists(file_path)
+        assert file_path.endswith(os.path.join("mcp_calls", f"{rid}.json"))
+
+        data = json.loads(open(file_path, "r", encoding="utf-8").read())
+        assert data["request_id"] == rid
+        assert data["call_count"] == 2
+        assert len(data["calls"]) == 2
+        assert data["calls"][0]["index"] == 0
+        assert data["calls"][0]["request"]["payload"]["arguments"] == {
+            "url": "https://example.com"
+        }
+        assert data["calls"][1]["index"] == 1
+        assert data["calls"][1]["status"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_mcp_trace_events_include_arguments(tmp_path):
+    ctx = _make_session(tmp_path)
+    rid = ctx.start_request({"agent_mode": "simple"})
+
+    ctx.record_timing_event(
+        "mcp_request_start",
+        request_id=rid,
+        tool_name="fetch",
+        server_name="web",
+        arguments={"url": "https://example.com"},
+    )
+    ctx.record_timing_event(
+        "mcp_request_end",
+        request_id=rid,
+        tool_name="fetch",
+        server_name="web",
+        status="success",
+        duration_sec=0.2,
+    )
+
+    start_events = [
+        event
+        for event in ctx.execution_timeline_events
+        if event.get("event_type") == "mcp_request_start"
+    ]
+    end_events = [
+        event
+        for event in ctx.execution_timeline_events
+        if event.get("event_type") == "mcp_request_end"
+    ]
+
+    assert start_events[-1]["request_id"] == rid
+    assert start_events[-1]["arguments"] == {"url": "https://example.com"}
+    assert end_events[-1]["status"] == "success"
+    assert end_events[-1]["duration_sec"] == 0.2
+
+
 def test_nested_start_finalizes_previous_as_interrupted(tmp_path):
     async def _run():
         ctx = _make_session(tmp_path)

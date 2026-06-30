@@ -44,6 +44,15 @@ def _copy_json_like(value: Any, fallback: Any) -> Any:
         return fallback
 
 
+def _decode_json_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
 def _get_display_input_schema(
     tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
 ) -> Dict[str, Any]:
@@ -662,10 +671,6 @@ class ToolManager:
 
         # 工具不存在，直接注册
         self.tools[tool_spec.name] = tool_spec
-        tool_type = type(tool_spec).__name__
-        logger.debug(
-            f"Successfully registered new tool: {tool_spec.name} ({tool_type})"
-        )
         return True
 
     async def remove_tool_by_mcp(
@@ -1191,6 +1196,131 @@ class ToolManager:
 
         return self._apply_system_context_overrides(tool, normalized, trusted_context)
 
+    def _record_mcp_call(
+        self,
+        session_context: Optional[SessionContext],
+        tool: McpToolSpec,
+        arguments: Dict[str, Any],
+        started_at: float,
+        status: str,
+        response: Any = None,
+        error: Optional[str] = None,
+    ) -> None:
+        if session_context is None:
+            return
+
+        ended_at = time.time()
+        payload = {
+            "tool_name": tool.name,
+            "arguments": make_serializable(arguments),
+        }
+        call = {
+            "tool_name": tool.name,
+            "server_name": tool.server_name,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_sec": max(0.0, ended_at - started_at),
+            "status": status,
+            "arguments": make_serializable(arguments),
+            "request": {
+                "tool_name": tool.name,
+                "server_name": tool.server_name,
+                "payload": payload,
+            },
+        }
+        if response is not None:
+            call["response"] = make_serializable(_decode_json_payload(response))
+        if error is not None:
+            call["error"] = error
+        session_context.add_mcp_call(call)
+
+    def _get_active_request_id(
+        self, session_context: Optional[SessionContext]
+    ) -> Optional[str]:
+        if session_context is None:
+            return None
+        return session_context.current_request_id()
+
+    def _mcp_request_logger(self, session_id: str, request_id: Optional[str]):
+        bound_context: Dict[str, Any] = {}
+        if session_id:
+            bound_context["session_id"] = session_id
+        if request_id:
+            bound_context["request_id"] = request_id
+        return logger.bind(**bound_context) if bound_context else logger
+
+    def _log_mcp_request_start(
+        self,
+        tool: McpToolSpec,
+        session_id: str,
+        request_id: Optional[str],
+    ) -> None:
+        self._mcp_request_logger(session_id, request_id).debug(
+            f"MCP request start | tool={tool.name} | server={tool.server_name}"
+        )
+
+    def _log_mcp_request_end(
+        self,
+        tool: McpToolSpec,
+        session_id: str,
+        request_id: Optional[str],
+        started_at: float,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        duration_sec = max(0.0, time.time() - started_at)
+        message = (
+            f"MCP request end | tool={tool.name} | server={tool.server_name} | "
+            f"status={status} | duration_sec={duration_sec:.3f}"
+        )
+        if error:
+            message += f" | error={error}"
+        self._mcp_request_logger(session_id, request_id).debug(message)
+
+    def _record_mcp_trace_start(
+        self,
+        session_context: Optional[SessionContext],
+        tool: McpToolSpec,
+        request_id: Optional[str],
+        arguments: Dict[str, Any],
+        started_at: float,
+    ) -> None:
+        if session_context is None:
+            return
+        session_context.record_timing_event(
+            "mcp_request_start",
+            request_id=request_id,
+            tool_name=tool.name,
+            server_name=tool.server_name,
+            started_at=started_at,
+            arguments=make_serializable(arguments),
+        )
+
+    def _record_mcp_trace_end(
+        self,
+        session_context: Optional[SessionContext],
+        tool: McpToolSpec,
+        request_id: Optional[str],
+        started_at: float,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        if session_context is None:
+            return
+        ended_at = time.time()
+        fields: Dict[str, Any] = {
+            "request_id": request_id,
+            "tool_name": tool.name,
+            "server_name": tool.server_name,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_sec": max(0.0, ended_at - started_at),
+            "status": status,
+        }
+        if error:
+            fields["error"] = error
+        session_context.record_timing_event("mcp_request_end", **fields)
+
     async def run_tool_async(
         self,
         tool_name: str,
@@ -1200,9 +1330,6 @@ class ToolManager:
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
-        logger.debug(
-            f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}"
-        )
         session_context = _resolve_session_context(session_id)
         resolved_user_id = user_id or getattr(session_context, "user_id", None)
 
@@ -1223,12 +1350,86 @@ class ToolManager:
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                final_result = await self._execute_mcp_tool(
-                    tool,
-                    runtime_session_id=session_id,
-                    runtime_user_id=resolved_user_id,
-                    **kwargs,
+                mcp_started_at = time.time()
+                request_id = self._get_active_request_id(session_context)
+                self._record_mcp_trace_start(
+                    session_context, tool, request_id, kwargs, mcp_started_at
                 )
+                self._log_mcp_request_start(tool, session_id, request_id)
+                try:
+                    final_result = await self._execute_mcp_tool(
+                        tool,
+                        runtime_session_id=session_id,
+                        runtime_user_id=resolved_user_id,
+                        **kwargs,
+                    )
+                    self._record_mcp_call(
+                        session_context,
+                        tool,
+                        kwargs,
+                        mcp_started_at,
+                        "success",
+                        response=final_result,
+                    )
+                    self._record_mcp_trace_end(
+                        session_context, tool, request_id, mcp_started_at, "success"
+                    )
+                    self._log_mcp_request_end(
+                        tool, session_id, request_id, mcp_started_at, "success"
+                    )
+                except asyncio.CancelledError:
+                    self._record_mcp_call(
+                        session_context,
+                        tool,
+                        kwargs,
+                        mcp_started_at,
+                        "cancelled",
+                        error="cancelled",
+                    )
+                    self._record_mcp_trace_end(
+                        session_context,
+                        tool,
+                        request_id,
+                        mcp_started_at,
+                        "cancelled",
+                        error="cancelled",
+                    )
+                    self._log_mcp_request_end(
+                        tool,
+                        session_id,
+                        request_id,
+                        mcp_started_at,
+                        "cancelled",
+                        error="cancelled",
+                    )
+                    raise
+                except Exception as e:
+                    error_detail = _innermost_exception_message(e)
+                    self._record_mcp_call(
+                        session_context,
+                        tool,
+                        kwargs,
+                        mcp_started_at,
+                        "error",
+                        error=error_detail,
+                    )
+                    self._record_mcp_trace_end(
+                        session_context,
+                        tool,
+                        request_id,
+                        mcp_started_at,
+                        "error",
+                        error=error_detail,
+                    )
+                    self._log_mcp_request_end(
+                        tool,
+                        session_id,
+                        request_id,
+                        mcp_started_at,
+                        "error",
+                        error=error_detail,
+                    )
+                    raise
             elif isinstance(tool, SageMcpToolSpec):
                 final_result = await self._execute_standard_tool_async(
                     tool, runtime_session_id=session_id, **kwargs
@@ -1271,12 +1472,6 @@ class ToolManager:
                 return self._format_error_response(
                     error_msg, tool_name, "UNKNOWN_TOOL_TYPE"
                 )
-
-            # Step 4: Validate Result (for non-streaming tools)
-            execution_time = time.time() - execution_start
-            logger.info(
-                f"[Tool Execution] SUCCESS | tool={tool_name} | time={execution_time:.3f}s | result_length={len(str(final_result))}"
-            )
 
             # Validate JSON format
             is_valid, validation_msg = self._validate_json_response(

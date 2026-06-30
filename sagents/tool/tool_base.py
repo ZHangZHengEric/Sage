@@ -144,8 +144,6 @@ def tool(
 
         tool_name = func.__name__
         logger.debug(f"Registering tool: {tool_name}")
-        logger.debug(f"Parameters: {parameters}")
-        logger.debug(f"Required: {required}")
 
         spec_return_data: Optional[Dict[str, Any]] = None
         _t_returns_start = time.perf_counter() if _profile else None
@@ -209,17 +207,13 @@ def tool(
 
             @wraps(func)
             async def wrapper(*args, **kwargs):  # pyright: ignore[reportRedeclaration]
-                logger.debug(f"Calling async tool: {tool_name} with {len(kwargs)} args")
                 result = await func(*args, **kwargs)
-                logger.debug(f"Completed async tool: {tool_name}")
                 return result
         else:
 
             @wraps(func)
             def wrapper(*args, **kwargs):
-                logger.debug(f"Calling tool: {tool_name} with {len(kwargs)} args")
                 result = func(*args, **kwargs)
-                logger.debug(f"Completed tool: {tool_name}")
                 return result
 
         wrapper._tool_spec = spec  # pyright: ignore[reportAttributeAccessIssue]

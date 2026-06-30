@@ -66,6 +66,25 @@ class PartialStreamConsumedError(RuntimeError):
         self.original_error = original_error
 
 
+def _model_config_log_summary(model_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(model_config, dict):
+        return {}
+    keys = (
+        "base_url",
+        "model",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "presence_penalty",
+        "max_model_len",
+        "supports_multimodal",
+        "supports_structured_output",
+        "fast_base_url",
+        "fast_model_name",
+    )
+    return {key: model_config.get(key) for key in keys if key in model_config}
+
+
 class AgentBase(ABC):
     """
     智能体基类
@@ -112,7 +131,7 @@ class AgentBase(ABC):
         self.max_model_input_len = min(requested_max_input, max_model_len)
 
         logger.debug(
-            f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
+            f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {_model_config_log_summary(model_config)}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
         )
 
     def _get_live_session(self, session_id: Optional[str]):
@@ -2389,7 +2408,6 @@ class AgentBase(ABC):
                         yield chunk
             else:
                 # 处理非流式响应
-                logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(
                     tool_response,  # pyright: ignore[reportArgumentType]
                     tool_call["id"],  # pyright: ignore[reportArgumentType]

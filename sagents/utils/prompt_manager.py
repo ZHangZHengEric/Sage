@@ -377,7 +377,6 @@ class PromptManager:
                         if hasattr(agent_runtime, "agent"):
                             class_name = agent_runtime.agent.__class__.__name__
                     # 直接返回类名，不进行格式转换
-                    logger.debug(f"自动获取到类名: {class_name}")
                     return class_name
 
         except Exception as e:
