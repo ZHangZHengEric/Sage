@@ -2526,7 +2526,6 @@ class AgentBase(ABC):
             tool_name = tool_call["function"]["name"]
             raw_arguments = tool_call["function"]["arguments"]
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
-            logger.debug(f"{self.agent_name}: 参数 {raw_arguments}")
 
             # 验证工具参数是否为有效的JSON
             # 将复杂的解析逻辑放到线程池中执行
