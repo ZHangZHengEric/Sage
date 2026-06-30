@@ -1,9 +1,10 @@
-from typing import Dict, Any, List, Union, Optional
 import contextvars
+import dataclasses
+import hashlib
 import json
 import random
-import hashlib
-import dataclasses
+from datetime import datetime
+from typing import Dict, Any, List, Union, Optional
 from opentelemetry import trace, context
 from opentelemetry.trace import Status, StatusCode
 
@@ -71,6 +72,11 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             span.set_attribute(key, self._serialize_attribute_value(value))
         except Exception as e:
             logger.error(f"Error setting {key} attribute: {e}")
+
+    def _format_epoch_millis(self, value: Any) -> str:
+        return datetime.fromtimestamp(float(value)).strftime("%Y-%m-%d %H:%M:%S.%f")[
+            :-3
+        ]
 
     def _set_final_system_context_attribute(
         self, span: Optional[trace.Span], **kwargs: Any
@@ -404,6 +410,8 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         ):
             value = kwargs.get(key)
             if value is not None:
+                if key == "start_ts":
+                    value = self._format_epoch_millis(value)
                 attrs[key] = value
 
         try:

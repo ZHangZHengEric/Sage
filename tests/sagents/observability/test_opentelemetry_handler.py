@@ -17,6 +17,10 @@ class FakeSpan:
     def record_exception(self, error):
         self.error = error
 
+    def add_event(self, name, attributes=None):
+        self.event_name = name
+        self.event_attributes = attributes or {}
+
     def end(self):
         self.ended = True
 
@@ -63,3 +67,28 @@ def test_chain_error_records_final_system_context(monkeypatch):
         "session_id": "session-1",
         "private_workspace": "/tmp/ws",
     }
+
+
+def test_message_start_formats_start_ts_for_trace(monkeypatch):
+    handler = OpenTelemetryTraceHandler()
+    span = FakeSpan()
+
+    monkeypatch.setattr(handler, "_get_current_span", lambda: span)
+    monkeypatch.setattr(
+        handler,
+        "_format_epoch_millis",
+        lambda value: "2026-06-30 13:46:34.871",
+    )
+
+    handler.on_message_start(
+        "session-1",
+        "message-1",
+        role="assistant",
+        message_type="tool_call",
+        sequence_index=3,
+        start_ts=1782798394.871,
+    )
+
+    assert span.event_name == "message.start"
+    assert span.event_attributes["start_ts"] == "2026-06-30 13:46:34.871"
+    assert span.event_attributes["sequence_index"] == 3

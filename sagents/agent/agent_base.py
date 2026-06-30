@@ -50,12 +50,15 @@ from sagents.utils.agent_session_helper import (
     get_live_session_context as _get_live_session_context_util,
     should_abort_due_to_session as _should_abort_due_to_session_util,
 )
+from sagents.utils.concurrency import run_with_concurrency_limit_ordered
 import traceback
 import time
 import os
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
 from openai.types.chat import chat_completion_chunk
+
+TOOL_CALL_CONCURRENCY_LIMIT = 10
 
 
 class PartialStreamConsumedError(RuntimeError):
@@ -2519,13 +2522,14 @@ class AgentBase(ABC):
         """
         logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
 
+        executable_tool_calls: List[Dict[str, Any]] = []
+
         for tool_call_id, tool_call in tool_calls.items():
             # 增加让出主线程逻辑，防止工具循环处理导致卡死
             await asyncio.sleep(0)
 
             tool_name = tool_call["function"]["name"]
             raw_arguments = tool_call["function"]["arguments"]
-            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
 
             # 验证工具参数是否为有效的JSON
             # 将复杂的解析逻辑放到线程池中执行
@@ -2580,13 +2584,37 @@ class AgentBase(ABC):
                 output_messages = self._create_tool_call_message(tool_call)
                 yield (output_messages, False)
 
-            # 执行工具
+            executable_tool_calls.append(tool_call)
+
+        async def collect_tool_result(
+            tool_call: Dict[str, Any],
+        ) -> List[List[MessageChunk]]:
+            tool_name = tool_call["function"]["name"]
+            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
+
+            chunks: List[List[MessageChunk]] = []
             async for message_chunk_list in self._execute_tool(
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id,
             ):
+                chunks.append(message_chunk_list)
+            return chunks
+
+        if not executable_tool_calls:
+            return
+
+        tool_results = await run_with_concurrency_limit_ordered(
+            TOOL_CALL_CONCURRENCY_LIMIT,
+            [
+                lambda tool_call=tool_call: collect_tool_result(tool_call)
+                for tool_call in executable_tool_calls
+            ],
+        )
+
+        for tool_result in tool_results:
+            for message_chunk_list in tool_result:
                 yield (message_chunk_list, False)
 
     def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:
