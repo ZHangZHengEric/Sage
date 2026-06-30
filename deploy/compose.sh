@@ -595,4 +595,9 @@ if [ "${1:-}" = "up" ]; then
   exit 0
 fi
 
+if [ "$ENABLE_OBSERVABILITY" = "true" ] && [ "${1:-}" = "down" ]; then
+  start_observability "$SHARED_NETWORK" "$@"
+  exit 0
+fi
+
 run_compose "" "${COMPOSE_ARGS[@]}" "$@"
