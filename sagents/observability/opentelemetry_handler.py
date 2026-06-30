@@ -281,9 +281,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
         try:
-            messages_str = json.dumps(
-                redact_base64_data_urls_in_value(messages), ensure_ascii=False
-            )
+            messages_str = json.dumps(messages, ensure_ascii=False, default=str)
             span.set_attribute("llm.messages", messages_str)
         except Exception as e:
             logger.error(f"Error setting llm.messages attribute: {e}")
