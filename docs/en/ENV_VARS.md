@@ -173,7 +173,6 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
-| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | `false` | Deprecated compatibility switch. It is ignored for normal tool calls and can only force `tool_choice=required` when `SAGE_TASK_COMPLETION_MODE=turn_status` and the request exposes only the internal `turn_status` protocol tool. |
 | `SAGE_TOOL_PROGRESS_ENABLED` | `true` | Enable the tool live-progress channel (NDJSON `type=tool_progress` events for the UI only; never sent to MessageManager or the LLM) |
 | `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` | `50` | Coalesce window (ms). Multiple `emit_tool_progress` calls within the window for the same `(tool_call, stream)` are merged into one event. Set to `0` to disable coalescing and emit immediately |
 | `SAGE_TOOL_PROGRESS_FLUSH_BYTES` | `16384` | Per-stream byte threshold; once accumulated text reaches it, flush immediately (prevents fast-producing commands from saturating the channel) |
@@ -237,6 +236,9 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Replacement / status |
 | --- | --- |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | Removed and ignored. Use `SAGE_TASK_COMPLETION_MODE=turn_status` / `no_tool_call` / `llm_judge`. |
+| `SAGE_CONTINUE_ON_PROCESSING_KEYWORDS` | Removed and ignored. The SimpleAgent "processing keyword" must-continue rule has been removed. |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | Deprecated and ignored. `tool_choice=required` for turn_status-only rounds is controlled internally by the agent loop; code support will be removed in a future release. |
 | `SAGE_COMPLETE_ON_NO_TOOL_CALL` | Removed and ignored. Use `SAGE_TASK_COMPLETION_MODE=no_tool_call`. |
 | `SAGE_SPLIT_SYSTEM` | Deprecated and ignored. Split system messages are always enabled. |
 | `SAGE_STABLE_TOOLS_ORDER` | Deprecated and ignored. Tools are always sorted by `function.name` before LLM requests. |
