@@ -17,6 +17,6 @@ pub(crate) use handle::BackendHandle;
 pub use types::{
     AgentInfo, BackendEvent, BackendGoal, BackendPhaseTiming, BackendRequest, BackendSessionMeta,
     BackendStats, BackendToolStep, ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderMutation,
-    ProviderVerifyInfo, SandboxApprovalRequest, SessionDetail, SessionMessage, SessionSummary,
-    SkillInfo,
+    ProviderVerifyInfo, SandboxApprovalRequest, SandboxApprovalResolution, SessionDetail,
+    SessionMessage, SessionSummary, SkillInfo,
 };
