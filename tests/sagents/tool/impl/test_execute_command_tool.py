@@ -239,6 +239,12 @@ def test_sandbox_approval_broker_discard_removes_pending_approval():
 
         assert pending.future.done()
         assert pending.future.result() == "deny"
+        audit = broker.list_audit(session_id="session-discard", limit=1)
+        assert audit[0]["approval_id"] == pending.approval_id
+        assert audit[0]["command_hash"] == pending.command_hash
+        assert audit[0]["status"] == "discarded"
+        assert audit[0]["decision"] == "deny"
+        assert audit[0]["resolved_at"] is not None
         assert (
             resolve_sandbox_approval(
                 session_id="session-discard",
@@ -248,6 +254,41 @@ def test_sandbox_approval_broker_discard_removes_pending_approval():
             )
             == "not_found"
         )
+
+    asyncio.run(run_flow())
+
+
+def test_sandbox_approval_broker_records_resolved_decision_audit():
+    async def run_flow():
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id="session-audit",
+            command="git push origin feature-x",
+            category="git_remote_write",
+            reason="requires approval",
+            approval_mode="on-request",
+        )
+
+        created_audit = broker.list_audit(session_id="session-audit", limit=1)
+        assert created_audit[0]["approval_id"] == pending.approval_id
+        assert created_audit[0]["status"] == "pending"
+        assert created_audit[0]["decision"] is None
+        assert created_audit[0]["created_at"].endswith("Z")
+
+        status = resolve_sandbox_approval(
+            session_id="session-audit",
+            approval_id=pending.approval_id,
+            decision="approve",
+            command_hash_value=pending.command_hash,
+        )
+
+        assert status == "resolved"
+        resolved_audit = broker.list_audit(session_id="session-audit", limit=1)
+        assert resolved_audit[0]["approval_id"] == pending.approval_id
+        assert resolved_audit[0]["command"] == "git push origin feature-x"
+        assert resolved_audit[0]["status"] == "resolved"
+        assert resolved_audit[0]["decision"] == "approve"
+        assert resolved_audit[0]["resolved_at"].endswith("Z")
 
     asyncio.run(run_flow())
 

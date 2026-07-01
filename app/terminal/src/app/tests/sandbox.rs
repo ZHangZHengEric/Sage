@@ -128,7 +128,42 @@ fn sandbox_approval_request_sets_pending_status() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("sandbox approval required"));
+    assert!(rendered.contains("approval_mode: on-request"));
+    assert!(rendered.contains("command_hash: hash_demo"));
     assert!(rendered.contains("Use /approve to run it once"));
+}
+
+#[test]
+fn status_command_reports_pending_sandbox_approval_details() {
+    let mut app = App::new();
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        command_hash: Some("hash_demo".to_string()),
+        category: Some("git-push".to_string()),
+        reason: Some("git push changes remote state".to_string()),
+        approval_mode: Some("on-request".to_string()),
+        hint: None,
+    });
+    let _ = app.take_pending_history_lines();
+
+    assert!(matches!(
+        app.handle_command("/status"),
+        SubmitAction::Handled
+    ));
+
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("sandbox approval: pending shapproval_demo"));
+    assert!(rendered.contains("approval command: git push origin main"));
+    assert!(rendered.contains("approval category: git-push"));
+    assert!(rendered.contains("approval mode: on-request"));
+    assert!(rendered.contains("approval hash: hash_demo"));
 }
 
 #[test]
