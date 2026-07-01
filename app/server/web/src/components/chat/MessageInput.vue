@@ -268,6 +268,21 @@ const currentSkills = ref([])
 // 当前命中的 slash 查询：{ keyword, deleteLength } —— deleteLength 用于在选中技能后从光标前删掉 `/keyword`。
 const activeSkillQuery = ref(null)
 const uploadedFiles = ref([])
+
+const findUploadedFileIndex = (fileItem) => {
+  if (!fileItem) return -1
+  return uploadedFiles.value.findIndex((item) => item === fileItem || item?.id === fileItem.id)
+}
+
+const updateUploadedFile = (fileItem, updates) => {
+  const index = findUploadedFileIndex(fileItem)
+  if (index < 0) return false
+  uploadedFiles.value.splice(index, 1, {
+    ...uploadedFiles.value[index],
+    ...updates,
+  })
+  return true
+}
 const isComposing = ref(false)
 const isDraggingOver = ref(false)
 const planEnabled = ref(false)
@@ -765,30 +780,34 @@ const pasteMarkdownRemoteImagesIntoEditor = async (segments) => {
     try {
       const payload = await mirrorPromise
 
-      if (uploadedFiles.value.indexOf(fileItem) < 0) {
+      if (findUploadedFileIndex(fileItem) < 0) {
         continue
       }
 
-      fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
+      const uploadedUrl = payload?.url || (typeof payload === 'string' ? payload : '')
       const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
+      const updates = {
+        url: uploadedUrl,
+        uploading: false,
+      }
       if (serverFilename) {
-        fileItem.name = cleanupAttachmentName(serverFilename)
+        updates.name = cleanupAttachmentName(serverFilename)
         try {
           editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
         } catch (_) { /* noop */ }
       }
-      fileItem.uploading = false
-      if (/^https?:\/\//i.test(fileItem.preview) && /^https?:\/\//i.test(fileItem.url)) {
-        fileItem.preview = fileItem.url
+      if (/^https?:\/\//i.test(fileItem.preview) && /^https?:\/\//i.test(uploadedUrl)) {
+        updates.preview = uploadedUrl
       }
-      if ((payload && typeof payload === 'object') && payload.http_url && !/^https?:\/\//i.test(String(fileItem.url || ''))) {
-        fileItem.preview = payload.http_url
+      if ((payload && typeof payload === 'object') && payload.http_url && !/^https?:\/\//i.test(String(uploadedUrl || ''))) {
+        updates.preview = payload.http_url
       }
-      if (/^https?:\/\//i.test(String(fileItem.url || '')) && (!fileItem.preview || !/^https?:\/\//i.test(String(fileItem.preview)))) {
-        fileItem.preview = fileItem.url
+      if (/^https?:\/\//i.test(String(uploadedUrl || '')) && (!fileItem.preview || !/^https?:\/\//i.test(String(fileItem.preview)))) {
+        updates.preview = uploadedUrl
       }
+      updateUploadedFile(fileItem, updates)
     } catch (err) {
-      const index = uploadedFiles.value.indexOf(fileItem)
+      const index = findUploadedFileIndex(fileItem)
       if (index > -1) {
         uploadedFiles.value.splice(index, 1)
       }
@@ -992,22 +1011,25 @@ const processFile = async (file) => {
     const response = await ossApi.uploadFile(file)
     const payload = response?.data ?? response
 
-    if (uploadedFiles.value.indexOf(fileItem) < 0) {
+    if (findUploadedFileIndex(fileItem) < 0) {
       if (preview) URL.revokeObjectURL(preview)
       return
     }
 
-    fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
+    const updates = {
+      url: payload?.url || (typeof payload === 'string' ? payload : ''),
+      uploading: false,
+    }
     const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
     if (serverFilename) {
-      fileItem.name = serverFilename
+      updates.name = serverFilename
       try {
         editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
       } catch (_) { /* noop */ }
     }
-    fileItem.uploading = false
+    updateUploadedFile(fileItem, updates)
   } catch (error) {
-    const index = uploadedFiles.value.indexOf(fileItem)
+    const index = findUploadedFileIndex(fileItem)
     if (index > -1) {
       uploadedFiles.value.splice(index, 1)
       if (preview) {
