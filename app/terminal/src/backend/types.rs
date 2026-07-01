@@ -119,6 +119,16 @@ pub struct SandboxApprovalRequest {
     pub hint: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SandboxApprovalResolution {
+    pub approval_id: String,
+    pub status: String,
+    pub decision: Option<String>,
+    pub command: Option<String>,
+    pub command_hash: Option<String>,
+    pub category: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendStats {
     pub elapsed_seconds: Option<f64>,
@@ -159,6 +169,7 @@ pub enum BackendEvent {
     ToolStarted(String),
     ToolFinished(String),
     SandboxApprovalRequested(SandboxApprovalRequest),
+    SandboxApprovalResolved(SandboxApprovalResolution),
     Stats(BackendStats),
     Error(String),
     Finished,

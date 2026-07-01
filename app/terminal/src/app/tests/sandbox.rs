@@ -1,5 +1,5 @@
 use super::super::{App, SubmitAction};
-use crate::backend::SandboxApprovalRequest;
+use crate::backend::{SandboxApprovalRequest, SandboxApprovalResolution};
 
 #[test]
 fn sandbox_command_sets_override_and_requests_restart() {
@@ -185,6 +185,42 @@ fn approve_command_routes_to_backend_decision_action() {
     assert!(app.pending_sandbox_approval.is_some());
     app.clear_pending_sandbox_approval();
     assert!(app.pending_sandbox_approval.is_none());
+}
+
+#[test]
+fn sandbox_approval_resolution_clears_matching_pending_request() {
+    let mut app = App::new();
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        command_hash: Some("hash_demo_123456789".to_string()),
+        category: Some("git-push".to_string()),
+        reason: None,
+        approval_mode: Some("on-request".to_string()),
+        hint: None,
+    });
+    let _ = app.take_pending_history_lines();
+
+    app.apply_sandbox_approval_resolution(SandboxApprovalResolution {
+        approval_id: "shapproval_demo".to_string(),
+        status: "approved".to_string(),
+        decision: Some("approve".to_string()),
+        command: Some("git push origin main".to_string()),
+        command_hash: Some("hash_demo_123456789".to_string()),
+        category: Some("git-push".to_string()),
+    });
+
+    assert!(app.pending_sandbox_approval.is_none());
+    let rendered = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("sandbox approval approved"));
+    assert!(rendered.contains("approval_id: shapproval_demo"));
+    assert!(rendered.contains("command_hash: hash_demo_12"));
 }
 
 #[test]

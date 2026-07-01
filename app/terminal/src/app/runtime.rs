@@ -12,7 +12,7 @@ use crate::app::runtime_support::{
 };
 use crate::app::{ActiveToolRecord, App, MessageKind};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
-use crate::backend::SandboxApprovalRequest;
+use crate::backend::{SandboxApprovalRequest, SandboxApprovalResolution};
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
 impl App {
@@ -86,6 +86,33 @@ impl App {
 
     pub fn clear_pending_sandbox_approval(&mut self) {
         self.pending_sandbox_approval = None;
+    }
+
+    pub fn apply_sandbox_approval_resolution(&mut self, resolution: SandboxApprovalResolution) {
+        if self
+            .pending_sandbox_approval
+            .as_ref()
+            .map(|request| request.approval_id.as_str())
+            == Some(resolution.approval_id.as_str())
+        {
+            self.pending_sandbox_approval = None;
+        }
+
+        let mut lines = vec![
+            format!("sandbox approval {}", resolution.status),
+            format!("approval_id: {}", resolution.approval_id),
+        ];
+        if let Some(command) = resolution.command.as_ref() {
+            lines.push(format!("command: {}", truncate_for_status(command, 120)));
+        }
+        if let Some(category) = resolution.category.as_ref() {
+            lines.push(format!("category: {category}"));
+        }
+        if let Some(command_hash) = resolution.command_hash.as_ref() {
+            lines.push(format!("command_hash: {}", short_hash(command_hash)));
+        }
+        self.queue_message(MessageKind::Tool, lines.join("\n"));
+        self.status = format!("approval {}  {}", resolution.status, self.session_label());
     }
 
     pub(crate) fn pending_sandbox_approval_status_lines(&self) -> Vec<String> {

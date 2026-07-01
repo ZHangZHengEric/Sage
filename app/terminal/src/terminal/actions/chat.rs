@@ -132,7 +132,6 @@ pub(super) fn approve_sandbox_command(
             request.approval_id
         ),
     );
-    app.clear_pending_sandbox_approval();
     app.set_status(format!("approval sent  {}", app.session_id));
     Ok(true)
 }
@@ -150,14 +149,21 @@ pub(super) fn deny_sandbox_command(
         return Ok(true);
     };
 
-    if let Some(handle) = backend.as_ref() {
-        handle.send_sandbox_approval_decision(
-            &app.session_id,
-            &request.approval_id,
-            request.command_hash.as_deref(),
-            "deny",
-        )?;
-    }
-    app.deny_pending_sandbox_approval();
+    let Some(handle) = backend.as_ref() else {
+        app.deny_pending_sandbox_approval();
+        return Ok(true);
+    };
+
+    handle.send_sandbox_approval_decision(
+        &app.session_id,
+        &request.approval_id,
+        request.command_hash.as_deref(),
+        "deny",
+    )?;
+    app.push_message(
+        crate::app::MessageKind::Tool,
+        format!("sandbox denial sent\napproval_id: {}", request.approval_id),
+    );
+    app.set_status(format!("denial sent  {}", app.session_id));
     Ok(true)
 }

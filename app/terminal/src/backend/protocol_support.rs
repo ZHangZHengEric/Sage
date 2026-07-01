@@ -2,7 +2,7 @@ use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{
     BackendGoal, BackendPhaseTiming, BackendSessionMeta, BackendStats, BackendToolStep,
-    SandboxApprovalRequest,
+    SandboxApprovalRequest, SandboxApprovalResolution,
 };
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
 
@@ -197,7 +197,9 @@ pub(super) fn sandbox_approval_from_event(
     })
 }
 
-pub(super) fn sandbox_approval_resolved_message(event: &CliStreamEvent) -> Option<String> {
+pub(super) fn sandbox_approval_resolution_from_event(
+    event: &CliStreamEvent,
+) -> Option<SandboxApprovalResolution> {
     if event.event_type != "sandbox_approval_resolved" {
         return None;
     }
@@ -206,20 +208,14 @@ pub(super) fn sandbox_approval_resolved_message(event: &CliStreamEvent) -> Optio
         .or_else(|| trimmed_option(event.decision.as_deref()))
         .unwrap_or_else(|| "resolved".to_string());
 
-    let mut lines = vec![
-        format!("sandbox approval {status}"),
-        format!("approval_id: {approval_id}"),
-    ];
-    if let Some(command) = trimmed_option(event.command.as_deref()) {
-        lines.push(format!("command: {}", truncate(&command, 120)));
-    }
-    if let Some(category) = trimmed_option(event.category.as_deref()) {
-        lines.push(format!("category: {category}"));
-    }
-    if let Some(command_hash) = trimmed_option(event.command_hash.as_deref()) {
-        lines.push(format!("command_hash: {}", short_hash(&command_hash)));
-    }
-    Some(lines.join("\n"))
+    Some(SandboxApprovalResolution {
+        approval_id,
+        status,
+        decision: trimmed_option(event.decision.as_deref()),
+        command: trimmed_option(event.command.as_deref()),
+        command_hash: trimmed_option(event.command_hash.as_deref()),
+        category: trimmed_option(event.category.as_deref()),
+    })
 }
 
 pub(super) fn truncate(text: &str, max_len: usize) -> String {
@@ -241,8 +237,4 @@ fn trimmed_option(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-}
-
-fn short_hash(value: &str) -> String {
-    value.chars().take(12).collect()
 }
