@@ -197,6 +197,31 @@ pub(super) fn sandbox_approval_from_event(
     })
 }
 
+pub(super) fn sandbox_approval_resolved_message(event: &CliStreamEvent) -> Option<String> {
+    if event.event_type != "sandbox_approval_resolved" {
+        return None;
+    }
+    let approval_id = trimmed_option(event.approval_id.as_deref())?;
+    let status = trimmed_option(event.approval_status.as_deref())
+        .or_else(|| trimmed_option(event.decision.as_deref()))
+        .unwrap_or_else(|| "resolved".to_string());
+
+    let mut lines = vec![
+        format!("sandbox approval {status}"),
+        format!("approval_id: {approval_id}"),
+    ];
+    if let Some(command) = trimmed_option(event.command.as_deref()) {
+        lines.push(format!("command: {}", truncate(&command, 120)));
+    }
+    if let Some(category) = trimmed_option(event.category.as_deref()) {
+        lines.push(format!("category: {category}"));
+    }
+    if let Some(command_hash) = trimmed_option(event.command_hash.as_deref()) {
+        lines.push(format!("command_hash: {}", short_hash(&command_hash)));
+    }
+    Some(lines.join("\n"))
+}
+
 pub(super) fn truncate(text: &str, max_len: usize) -> String {
     if text.chars().count() <= max_len {
         return text.to_string();
@@ -216,4 +241,8 @@ fn trimmed_option(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn short_hash(value: &str) -> String {
+    value.chars().take(12).collect()
 }

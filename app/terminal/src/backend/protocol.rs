@@ -5,7 +5,7 @@ use crate::backend::contract::parse_stream_event;
 use crate::backend::protocol_support::{
     backend_session_meta_from_event, backend_stats_from_event, collect_tool_names,
     is_internal_reasoning_event, live_message_kind, sandbox_approval_from_event,
-    summarize_tool_event, truncate,
+    sandbox_approval_resolved_message, summarize_tool_event, truncate,
 };
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
@@ -219,6 +219,10 @@ fn parse_backend_line_with_state(
     } else if event_type == "sandbox_approval_requested" {
         if let Some(request) = sandbox_approval_from_event(&event) {
             events.push(BackendEvent::SandboxApprovalRequested(request));
+        }
+    } else if event_type == "sandbox_approval_resolved" {
+        if let Some(message) = sandbox_approval_resolved_message(&event) {
+            events.push(BackendEvent::Message(MessageKind::Tool, message));
         }
     } else if let Some(kind) = live_message_kind(event_type, role, &content) {
         let content = match state.as_mut() {

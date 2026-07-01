@@ -212,6 +212,12 @@ def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
                     command_hash_value=event["command_hash"],
                 )
                 assert status == "resolved"
+                resolved_event = await asyncio.wait_for(queue.get(), timeout=1)
+                assert resolved_event["type"] == "sandbox_approval_resolved"
+                assert resolved_event["approval_id"] == event["approval_id"]
+                assert resolved_event["decision"] == "approve"
+                assert resolved_event["approval_status"] == "approved"
+                assert resolved_event["command_hash"] == event["command_hash"]
                 result = await asyncio.wait_for(task, timeout=1)
                 return result
         finally:

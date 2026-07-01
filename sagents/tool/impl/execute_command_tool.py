@@ -347,6 +347,14 @@ class ExecuteCommandTool:
             )
         except asyncio.TimeoutError:
             broker.discard(pending.approval_id)
+            await emit_tool_event(
+                self._approval_resolved_event(
+                    pending=pending,
+                    decision="deny",
+                    status="timeout",
+                    content="Sandbox approval timed out before the command was run.",
+                )
+            )
             return make_tool_error(
                 ToolErrorCode.SAFETY_BLOCKED,
                 "Sandbox approval timed out before the command was run.",
@@ -360,6 +368,14 @@ class ExecuteCommandTool:
             )
 
         if decision != "approve":
+            await emit_tool_event(
+                self._approval_resolved_event(
+                    pending=pending,
+                    decision="deny",
+                    status="denied",
+                    content="Sandbox approval was denied; the command was not run.",
+                )
+            )
             return make_tool_error(
                 ToolErrorCode.SAFETY_BLOCKED,
                 "Sandbox approval was denied; the command was not run.",
@@ -375,7 +391,39 @@ class ExecuteCommandTool:
             "sandbox policy approval resolved: "
             f"approval_id={pending.approval_id} category={policy_decision.category}"
         )
+        await emit_tool_event(
+            self._approval_resolved_event(
+                pending=pending,
+                decision="approve",
+                status="approved",
+                content="Sandbox approval was approved; running the command.",
+            )
+        )
         return None
+
+    @staticmethod
+    def _approval_resolved_event(
+        *,
+        pending: Any,
+        decision: str,
+        status: str,
+        content: str,
+    ) -> Dict[str, Any]:
+        return {
+            "type": "sandbox_approval_resolved",
+            "role": "system",
+            "content": content,
+            "session_id": pending.session_id,
+            "approval_id": pending.approval_id,
+            "command": pending.command,
+            "command_hash": pending.command_hash,
+            "category": pending.category,
+            "reason": pending.reason,
+            "approval_mode": pending.approval_mode,
+            "decision": decision,
+            "approval_status": status,
+            "tool_name": "execute_shell_command",
+        }
 
     @staticmethod
     def _get_agent_workspace_log_dir(

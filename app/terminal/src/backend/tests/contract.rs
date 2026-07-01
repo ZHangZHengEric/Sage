@@ -114,6 +114,34 @@ fn parse_backend_line_turns_sandbox_policy_ask_into_approval_request() {
 }
 
 #[test]
+fn parse_backend_line_turns_sandbox_approval_resolved_into_tool_message() {
+    let line = json!({
+        "type": "sandbox_approval_resolved",
+        "tool_name": "execute_shell_command",
+        "approval_id": "shapproval_demo",
+        "approval_status": "approved",
+        "decision": "approve",
+        "command": "git push origin main",
+        "command_hash": "hash_demo_123456789",
+        "category": "git-push"
+    })
+    .to_string();
+
+    let events = parse_backend_line(&line);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        BackendEvent::Message(kind, message)
+            if *kind == crate::app::MessageKind::Tool
+                && message.contains("sandbox approval approved")
+                && message.contains("approval_id: shapproval_demo")
+                && message.contains("command: git push origin main")
+                && message.contains("category: git-push")
+                && message.contains("command_hash: hash_demo_12")
+    )));
+}
+
+#[test]
 fn parse_backend_line_turns_cli_stats_into_stats_then_finished() {
     let events = parse_backend_line(
         r#"{
