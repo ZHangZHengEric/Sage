@@ -15,6 +15,8 @@ use crate::app_render::{format_message, format_message_continuation, welcome_lin
 use crate::backend::{SandboxApprovalRequest, SandboxApprovalResolution};
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
+use super::state::{SandboxApprovalHistoryEntry, APPROVAL_HISTORY_LIMIT};
+
 impl App {
     pub fn append_assistant_chunk(&mut self, chunk: &str) {
         self.append_live_chunk(MessageKind::Assistant, chunk);
@@ -79,6 +81,7 @@ impl App {
             lines.push(format!("next: {hint}"));
         }
         lines.push("Use /approve to run it once, or /deny to skip it.".to_string());
+        self.record_sandbox_approval_pending(&request);
         self.pending_sandbox_approval = Some(request);
         self.queue_message(MessageKind::Tool, lines.join("\n"));
         self.status = format!("approval required  {}", self.session_label());
@@ -89,6 +92,7 @@ impl App {
     }
 
     pub fn apply_sandbox_approval_resolution(&mut self, resolution: SandboxApprovalResolution) {
+        self.record_sandbox_approval_resolution(&resolution);
         if self
             .pending_sandbox_approval
             .as_ref()
@@ -138,10 +142,34 @@ impl App {
         lines
     }
 
+    pub(crate) fn sandbox_approval_history_lines(&self) -> Vec<String> {
+        if self.sandbox_approval_history.is_empty() {
+            return vec!["sandbox approvals: none".to_string()];
+        }
+        let mut lines = vec!["sandbox approvals".to_string()];
+        for entry in self.sandbox_approval_history.iter().rev().take(10) {
+            let mut line = format!(
+                "- {}  {}  {}",
+                entry.status,
+                entry.approval_id,
+                truncate_for_status(&entry.command, 72)
+            );
+            if let Some(category) = entry.category.as_ref() {
+                line.push_str(&format!("  category: {category}"));
+            }
+            if let Some(command_hash) = entry.command_hash.as_ref() {
+                line.push_str(&format!("  #{}", short_hash(command_hash)));
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
     pub fn deny_pending_sandbox_approval(&mut self) -> bool {
         let Some(request) = self.pending_sandbox_approval.take() else {
             return false;
         };
+        self.record_sandbox_approval_local_denial(&request);
         self.queue_message(
             MessageKind::Tool,
             format!(
@@ -151,6 +179,76 @@ impl App {
         );
         self.status = format!("ready  {}", self.session_label());
         true
+    }
+
+    fn record_sandbox_approval_pending(&mut self, request: &SandboxApprovalRequest) {
+        self.upsert_sandbox_approval_history(SandboxApprovalHistoryEntry {
+            approval_id: request.approval_id.clone(),
+            status: "pending".to_string(),
+            decision: None,
+            command: request.command.clone(),
+            command_hash: request.command_hash.clone(),
+            category: request.category.clone(),
+        });
+    }
+
+    fn record_sandbox_approval_resolution(&mut self, resolution: &SandboxApprovalResolution) {
+        let command = resolution.command.clone().or_else(|| {
+            self.pending_sandbox_approval
+                .as_ref()
+                .filter(|request| request.approval_id == resolution.approval_id)
+                .map(|request| request.command.clone())
+        });
+        let command_hash = resolution.command_hash.clone().or_else(|| {
+            self.pending_sandbox_approval
+                .as_ref()
+                .filter(|request| request.approval_id == resolution.approval_id)
+                .and_then(|request| request.command_hash.clone())
+        });
+        let category = resolution.category.clone().or_else(|| {
+            self.pending_sandbox_approval
+                .as_ref()
+                .filter(|request| request.approval_id == resolution.approval_id)
+                .and_then(|request| request.category.clone())
+        });
+        self.upsert_sandbox_approval_history(SandboxApprovalHistoryEntry {
+            approval_id: resolution.approval_id.clone(),
+            status: resolution.status.clone(),
+            decision: resolution.decision.clone(),
+            command: command.unwrap_or_else(|| "(unknown command)".to_string()),
+            command_hash,
+            category,
+        });
+    }
+
+    fn record_sandbox_approval_local_denial(&mut self, request: &SandboxApprovalRequest) {
+        self.upsert_sandbox_approval_history(SandboxApprovalHistoryEntry {
+            approval_id: request.approval_id.clone(),
+            status: "denied".to_string(),
+            decision: Some("deny".to_string()),
+            command: request.command.clone(),
+            command_hash: request.command_hash.clone(),
+            category: request.category.clone(),
+        });
+    }
+
+    fn upsert_sandbox_approval_history(&mut self, entry: SandboxApprovalHistoryEntry) {
+        if let Some(existing) = self
+            .sandbox_approval_history
+            .iter_mut()
+            .find(|existing| existing.approval_id == entry.approval_id)
+        {
+            *existing = entry;
+        } else {
+            self.sandbox_approval_history.push(entry);
+        }
+        let overflow = self
+            .sandbox_approval_history
+            .len()
+            .saturating_sub(APPROVAL_HISTORY_LIMIT);
+        if overflow > 0 {
+            self.sandbox_approval_history.drain(..overflow);
+        }
     }
 
     pub fn set_active_phase(&mut self, phase: impl Into<String>) {

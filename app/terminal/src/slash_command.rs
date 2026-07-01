@@ -16,7 +16,7 @@ impl SlashCommandDef {
                 "Runtime"
             }
             "/skills" | "/skill" | "/config" | "/doctor" | "/providers" | "/provider" => "Setup",
-            "/interrupt" | "/retry" | "/approve" | "/deny" | "/status" => "Control",
+            "/interrupt" | "/retry" | "/approve" | "/deny" | "/status" | "/approvals" => "Control",
             _ => "Help",
         }
     }
@@ -51,6 +51,10 @@ impl SlashCommandDef {
                 "Shows the current session, runtime selection, workspace, sandbox, display mode, and goal state.",
                 "Use this when the footer is too narrow to show all active runtime context.",
             ],
+            "/approvals" => &[
+                "Shows recent sandbox approval requests and runtime decisions for this terminal session.",
+                "Use this to verify which command was approved, denied, or is still pending.",
+            ],
             "/help" => &[
                 "Open /help for the command list, or /help <command> for focused usage notes.",
             ],
@@ -70,7 +74,7 @@ impl SlashCommandDef {
     }
 }
 
-const COMMANDS: [SlashCommandDef; 26] = [
+const COMMANDS: [SlashCommandDef; 27] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -208,6 +212,12 @@ const COMMANDS: [SlashCommandDef; 26] = [
         description: "Show current session state",
         usage: "/status",
         example: "/status",
+    },
+    SlashCommandDef {
+        command: "/approvals",
+        description: "Show recent sandbox approvals",
+        usage: "/approvals",
+        example: "/approvals",
     },
     SlashCommandDef {
         command: "/transcript",

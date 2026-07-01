@@ -533,6 +533,21 @@ impl App {
                 self.status = format!("status  {}", self.session_id);
                 SubmitAction::Handled
             }
+            "/approvals" => match (parts.next(), parts.next()) {
+                (None, None) => {
+                    self.queue_message(
+                        MessageKind::System,
+                        self.sandbox_approval_history_lines().join("\n"),
+                    );
+                    self.status = format!("approvals  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /approvals");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/transcript" => {
                 self.open_transcript_overlay();
                 SubmitAction::Handled

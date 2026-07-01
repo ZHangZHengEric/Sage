@@ -167,6 +167,75 @@ fn status_command_reports_pending_sandbox_approval_details() {
 }
 
 #[test]
+fn approvals_command_reports_recent_sandbox_approval_history() {
+    let mut app = App::new();
+
+    assert!(matches!(
+        app.handle_command("/approvals"),
+        SubmitAction::Handled
+    ));
+    let empty = app
+        .take_pending_history_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(empty.contains("sandbox approvals: none"));
+
+    app.apply_sandbox_approval_request(SandboxApprovalRequest {
+        command: "git push origin main".to_string(),
+        approval_id: "shapproval_demo".to_string(),
+        command_hash: Some("hash_demo_123456789".to_string()),
+        category: Some("git-push".to_string()),
+        reason: None,
+        approval_mode: Some("on-request".to_string()),
+        hint: None,
+    });
+    let _ = app.take_pending_history_lines();
+
+    assert!(matches!(
+        app.handle_command("/approvals"),
+        SubmitAction::Handled
+    ));
+    let pending = app
+        .take_pending_history_lines()
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(pending.contains("sandbox approvals"));
+    assert!(pending.contains("pending  shapproval_demo"));
+    assert!(pending.contains("git push origin main"));
+    assert!(pending.contains("category: git-push"));
+    assert!(pending.contains("#hash_demo_12"));
+
+    app.apply_sandbox_approval_resolution(SandboxApprovalResolution {
+        approval_id: "shapproval_demo".to_string(),
+        status: "approved".to_string(),
+        decision: Some("approve".to_string()),
+        command: Some("git push origin main".to_string()),
+        command_hash: Some("hash_demo_123456789".to_string()),
+        category: Some("git-push".to_string()),
+    });
+    let _ = app.take_pending_history_lines();
+
+    assert!(matches!(
+        app.handle_command("/approvals"),
+        SubmitAction::Handled
+    ));
+    let resolved = app
+        .pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(resolved.contains("approved  shapproval_demo"));
+}
+
+#[test]
 fn approve_command_routes_to_backend_decision_action() {
     let mut app = App::new();
     app.apply_sandbox_approval_request(SandboxApprovalRequest {
