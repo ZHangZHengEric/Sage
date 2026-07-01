@@ -286,6 +286,30 @@ async def emit_tool_progress_closed(*, stream: str = "info") -> None:
         pass
 
 
+async def emit_tool_event(event: Dict[str, Any]) -> None:
+    """Emit a structured tool/runtime event on the current session stream."""
+    if not _is_progress_enabled():
+        return
+    session_id = _current_session_id.get() or str(event.get("session_id") or "")
+    tool_call_id = _current_tool_call_id.get()
+    if not session_id:
+        return
+    queue = _progress_queues.get(session_id)
+    if queue is None:
+        return
+    payload = dict(event)
+    payload.setdefault("session_id", session_id)
+    if tool_call_id:
+        payload.setdefault("tool_call_id", tool_call_id)
+    payload.setdefault("ts", time.time())
+    try:
+        queue.put_nowait(payload)
+    except asyncio.QueueFull:
+        pass
+    except Exception:
+        pass
+
+
 def _build_event(
     session_id: str, tool_call_id: str, text: str, stream: str, closed: bool
 ) -> Dict[str, Any]:
@@ -305,6 +329,7 @@ __all__ = [
     "unregister_progress_queue",
     "get_progress_queue",
     "bind_tool_progress_context",
+    "emit_tool_event",
     "emit_tool_progress",
     "emit_tool_progress_closed",
 ]

@@ -16,7 +16,7 @@ impl SlashCommandDef {
                 "Runtime"
             }
             "/skills" | "/skill" | "/config" | "/doctor" | "/providers" | "/provider" => "Setup",
-            "/interrupt" | "/retry" | "/status" => "Control",
+            "/interrupt" | "/retry" | "/approve" | "/deny" | "/status" => "Control",
             _ => "Help",
         }
     }
@@ -63,12 +63,14 @@ impl SlashCommandDef {
             ],
             "/interrupt" => &["Stops the active backend request while keeping any partial output visible."],
             "/retry" => &["Resubmits the last task with the current runtime selections."],
+            "/approve" => &["Approves the pending sandbox command once."],
+            "/deny" => &["Denies the pending sandbox command."],
             _ => &[],
         }
     }
 }
 
-const COMMANDS: [SlashCommandDef; 24] = [
+const COMMANDS: [SlashCommandDef; 26] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -167,9 +169,9 @@ const COMMANDS: [SlashCommandDef; 24] = [
     },
     SlashCommandDef {
         command: "/sandbox",
-        description: "Show or override the current sandbox mode",
-        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
-        example: "/sandbox set local",
+        description: "Show or override sandbox type and approval mode",
+        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox approval set <untrusted|on-request|never> | /sandbox clear",
+        example: "/sandbox approval set untrusted",
     },
     SlashCommandDef {
         command: "/goal",
@@ -188,6 +190,18 @@ const COMMANDS: [SlashCommandDef; 24] = [
         description: "Retry the last submitted task",
         usage: "/retry",
         example: "/retry",
+    },
+    SlashCommandDef {
+        command: "/approve",
+        description: "Approve the pending sandbox command once",
+        usage: "/approve",
+        example: "/approve",
+    },
+    SlashCommandDef {
+        command: "/deny",
+        description: "Deny the pending sandbox command",
+        usage: "/deny",
+        example: "/deny",
     },
     SlashCommandDef {
         command: "/status",

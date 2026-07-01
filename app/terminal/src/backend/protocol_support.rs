@@ -2,6 +2,7 @@ use crate::app::MessageKind;
 use crate::backend::contract::CliStreamEvent;
 use crate::backend::{
     BackendGoal, BackendPhaseTiming, BackendSessionMeta, BackendStats, BackendToolStep,
+    SandboxApprovalRequest,
 };
 use crate::display_policy::{internal_tool_count, visible_tool_names, DisplayMode};
 
@@ -176,6 +177,26 @@ pub(super) fn collect_tool_names(event: &CliStreamEvent) -> Vec<String> {
     names
 }
 
+pub(super) fn sandbox_approval_from_event(
+    event: &CliStreamEvent,
+) -> Option<SandboxApprovalRequest> {
+    if event.event_type != "sandbox_approval_requested" {
+        return None;
+    }
+    let approval_id = trimmed_option(event.approval_id.as_deref())?;
+    let command = trimmed_option(event.command.as_deref())?;
+
+    Some(SandboxApprovalRequest {
+        command,
+        approval_id,
+        command_hash: trimmed_option(event.command_hash.as_deref()),
+        category: trimmed_option(event.category.as_deref()),
+        reason: trimmed_option(event.reason.as_deref()),
+        approval_mode: trimmed_option(event.approval_mode.as_deref()),
+        hint: trimmed_option(event.hint.as_deref()),
+    })
+}
+
 pub(super) fn truncate(text: &str, max_len: usize) -> String {
     if text.chars().count() <= max_len {
         return text.to_string();
@@ -188,4 +209,11 @@ pub(super) fn truncate(text: &str, max_len: usize) -> String {
 
 fn clean_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn trimmed_option(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }

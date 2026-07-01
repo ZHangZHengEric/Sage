@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats};
+use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats, SandboxApprovalRequest};
 use crate::display_policy::DisplayMode;
 
 #[derive(Debug)]
@@ -14,6 +14,8 @@ pub enum SubmitAction {
     RunTask(String),
     Interrupt,
     RetryLastTask,
+    ApproveSandboxCommand,
+    DenySandboxCommand,
     OpenSessionPicker {
         mode: SessionPickerMode,
         limit: usize,
@@ -161,6 +163,8 @@ pub struct App {
     pub workspace_label: String,
     pub(crate) workspace_override: Option<PathBuf>,
     pub(crate) sandbox_type: Option<String>,
+    pub(crate) sandbox_approval_mode: String,
+    pub(crate) pending_sandbox_approval: Option<SandboxApprovalRequest>,
     pub current_goal: Option<BackendGoal>,
     pub pending_goal_mutation: Option<PendingGoalMutation>,
     pub status: String,
@@ -228,6 +232,8 @@ impl App {
             workspace_label: default_workspace_label(),
             workspace_override: None,
             sandbox_type: None,
+            sandbox_approval_mode: "on-request".to_string(),
+            pending_sandbox_approval: None,
             current_goal: None,
             pending_goal_mutation: None,
             status: String::new(),
@@ -279,6 +285,7 @@ impl App {
         self.clear_live_response_state();
         self.current_goal = None;
         self.pending_goal_mutation = None;
+        self.pending_sandbox_approval = None;
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;

@@ -145,6 +145,24 @@ class AgentBase(ABC):
             session_id, log_prefix=self.__class__.__name__
         )
 
+    @staticmethod
+    def _timezone_from_current_time(value: Any) -> Optional[datetime.timezone]:
+        if not isinstance(value, str):
+            return None
+
+        _, _, offset = value.rpartition(" ")
+        if len(offset) != 5 or offset[0] not in "+-" or not offset[1:].isdigit():
+            return None
+
+        hours = int(offset[1:3])
+        minutes = int(offset[3:5])
+        if hours > 23 or minutes > 59:
+            return None
+
+        sign = 1 if offset[0] == "+" else -1
+        delta = datetime.timedelta(hours=hours, minutes=minutes)
+        return datetime.timezone(sign * delta)
+
     def _consume_user_injections(
         self, session_context: Optional[SessionContext]
     ) -> List[MessageChunk]:

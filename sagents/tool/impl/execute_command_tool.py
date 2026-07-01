@@ -15,6 +15,7 @@ Execute Command Tool
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json as _json
 import os
 import re
@@ -24,11 +25,13 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..tool_base import tool
-from ..tool_progress import emit_tool_progress
+from ..tool_progress import emit_tool_event, emit_tool_progress, get_progress_queue
 from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
+from sagents.utils.sandbox.policy import SandboxPolicyDecision, SandboxPolicyGateway
+from sagents.utils.sandbox.approval import get_sandbox_approval_broker
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
@@ -99,100 +102,13 @@ _BG_TASK_MAX_AGE_S = 12 * 3600
 
 
 class SecurityManager:
-    """安全管理器 - 负责命令安全检查。
-
-    黑名单同时做：
-    1. 命令名前缀匹配（base command 在 ``DANGEROUS_COMMANDS`` 中）。
-    2. 高危子串匹配（``DANGEROUS_SUBSTRINGS``，如 ``rm -rf /``、``git push --force`` 等）。
-    3. 管道下载执行检测（``curl ... | sh`` / ``wget ... | bash``）。
-    """
-
-    DANGEROUS_COMMANDS = {
-        # 文件系统破坏 / 分区
-        "format",
-        "fdisk",
-        "mkfs",
-        "parted",
-        "wipefs",
-        # 提权 / 账户
-        "sudo",
-        "su",
-        "passwd",
-        "visudo",
-        "useradd",
-        "userdel",
-        "usermod",
-        # 系统状态
-        "shutdown",
-        "reboot",
-        "halt",
-        "poweroff",
-        "init",
-        "systemctl",
-        "service",
-        # 直接写盘 / 调度
-        "dd",
-        "crontab",
-        "at",
-        "batch",
-        # 内核/驱动
-        "insmod",
-        "rmmod",
-        "modprobe",
-    }
-
-    DANGEROUS_SUBSTRINGS = (
-        "rm -rf /",
-        "rm -rf /*",
-        "rm -rf ~",
-        ":() { :|:& };:",  # fork bomb
-        "mkfs.",
-        "chmod 777 /",
-        "chown -r root",
-        "mv / ",
-        "mv /* ",
-        "> /dev/sda",
-        "> /dev/sdb",
-        "> /dev/nvme",
-        "git push --force",
-        "git push -f ",
-        "git push --force-with-lease origin main",
-        "git push --force-with-lease origin master",
-        "git reset --hard origin",
-    )
-
-    # 管道下载 + 直接执行的常见模式
-    _PIPE_EXEC_RE = re.compile(
-        r"\b(curl|wget|fetch)\b[^|;&]+?\|\s*(sudo\s+)?(ba)?sh\b",
-        re.IGNORECASE,
-    )
+    """Compatibility wrapper around the sandbox policy gateway."""
 
     def is_command_safe(self, command: str) -> Tuple[bool, str]:
-        if not command or not command.strip():
-            return False, "命令不能为空"
-
-        original = command.strip()
-        lowered = original.lower()
-
-        # 子串匹配
-        for sub in self.DANGEROUS_SUBSTRINGS:
-            if sub in lowered:
-                return False, f"危险命令被阻止（含子串 {sub!r}）"
-
-        # 管道 sh
-        if self._PIPE_EXEC_RE.search(original):
-            return False, "危险命令被阻止：检测到 curl/wget ... | sh 类下载即执行模式"
-
-        # 命令名前缀（按管道/分号切分逐段检查）
-        for segment in re.split(r"[|;&]+", lowered):
-            parts = segment.strip().split()
-            if not parts:
-                continue
-            base = parts[0].split("/")[-1]
-            if base in self.DANGEROUS_COMMANDS or base.startswith("mkfs."):
-                return False, f"危险命令被阻止: {base}"
-
-        return True, "命令安全检查通过"
+        decision = SandboxPolicyGateway().evaluate_shell_command(command)
+        if decision.action == "allow":
+            return True, "命令安全检查通过"
+        return False, decision.reason
 
 
 def _gen_task_id() -> str:
@@ -229,8 +145,52 @@ class ExecuteCommandTool:
     # 两条路径互斥：被 await_shell 消费过的不会再走 LLM flush。
     _COMPLETION_EVENTS: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
+    # session_id -> approval_id -> {command, created_at}
+    _PENDING_APPROVALS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    _APPROVAL_TTL_S = 30 * 60
+
     def __init__(self):
         self.security_manager = SecurityManager()
+
+    @classmethod
+    def _gc_stale_approvals(cls) -> None:
+        now = time.time()
+        for session_id, bucket in list(cls._PENDING_APPROVALS.items()):
+            for approval_id, approval in list(bucket.items()):
+                if now - approval.get("created_at", now) > cls._APPROVAL_TTL_S:
+                    bucket.pop(approval_id, None)
+            if not bucket:
+                cls._PENDING_APPROVALS.pop(session_id, None)
+
+    @classmethod
+    def _create_command_approval(cls, session_id: str, command: str) -> str:
+        cls._gc_stale_approvals()
+        approval_id = "shapproval_" + uuid.uuid4().hex[:12]
+        cls._PENDING_APPROVALS.setdefault(session_id, {})[approval_id] = {
+            "command": command.strip(),
+            "created_at": time.time(),
+        }
+        return approval_id
+
+    @classmethod
+    def _consume_matching_command_approval(
+        cls, session_id: str, approval_id: Optional[str], command: str
+    ) -> bool:
+        if not session_id or not approval_id:
+            return False
+        cls._gc_stale_approvals()
+        bucket = cls._PENDING_APPROVALS.get(session_id)
+        if not bucket:
+            return False
+        approval = bucket.get(approval_id)
+        if not approval:
+            return False
+        if approval.get("command") != command.strip():
+            return False
+        bucket.pop(approval_id, None)
+        if not bucket:
+            cls._PENDING_APPROVALS.pop(session_id, None)
+        return True
 
     @classmethod
     def pop_completion_events(cls, session_id: str) -> List[Dict[str, Any]]:
@@ -286,6 +246,136 @@ class ExecuteCommandTool:
 
     def _get_sandbox(self, session_id: str):
         return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
+
+    def _policy_blocked_error(
+        self,
+        command: str,
+        session_id: str,
+        policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
+    ) -> Dict[str, Any]:
+        logger.warning(
+            "sandbox policy blocked command: "
+            f"action={policy_decision.action} "
+            f"category={policy_decision.category} "
+            f"reason={policy_decision.reason}"
+        )
+        approval_id = None
+        approval_expires_at = None
+        next_action = None
+        if policy_decision.action == "ask":
+            approval_id = self._create_command_approval(session_id, command)
+            approval_expires_at = (
+                datetime.fromtimestamp(time.time() + self._APPROVAL_TTL_S, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            message = (
+                "Sandbox policy requires confirmation before running this command: "
+                f"{policy_decision.reason}"
+            )
+            hint = (
+                policy_decision.next_step
+                or "Ask the user for confirmation before retrying this command."
+            )
+            next_action = {
+                "requires_user_confirmation": True,
+                "after_user_confirms": {
+                    "tool": "execute_shell_command",
+                    "args": {
+                        "command": command,
+                        "approval_id": approval_id,
+                    },
+                },
+                "do_not": "do not retry without user confirmation",
+            }
+        else:
+            message = f"Sandbox policy denied this command: {policy_decision.reason}"
+            hint = (
+                policy_decision.next_step
+                or "Use a safer, workspace-scoped command instead."
+            )
+        return make_tool_error(
+            ToolErrorCode.SAFETY_BLOCKED,
+            message,
+            hint=hint,
+            command=command,
+            policy_action=policy_decision.action,
+            policy_category=policy_decision.category,
+            policy_reason=policy_decision.reason,
+            policy_approval_mode=policy_gateway.approval_mode,
+            approval_id=approval_id,
+            approval_expires_at=approval_expires_at,
+            next_action=next_action,
+        )
+
+    async def _await_policy_approval(
+        self,
+        *,
+        command: str,
+        session_id: str,
+        policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
+    ) -> Optional[Dict[str, Any]]:
+        if get_progress_queue(session_id) is None:
+            return self._policy_blocked_error(
+                command=command,
+                session_id=session_id,
+                policy_decision=policy_decision,
+                policy_gateway=policy_gateway,
+            )
+
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id=session_id,
+            command=command,
+            category=policy_decision.category,
+            reason=policy_decision.reason,
+            approval_mode=policy_gateway.approval_mode,
+            hint=policy_decision.next_step,
+            ttl_s=self._APPROVAL_TTL_S,
+        )
+        await emit_tool_event(pending.event_payload())
+        logger.info(
+            "sandbox policy approval requested: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        try:
+            decision = await asyncio.wait_for(
+                pending.future,
+                timeout=max(1, pending.expires_at_epoch - time.time()),
+            )
+        except asyncio.TimeoutError:
+            broker.discard(pending.approval_id)
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                "Sandbox approval timed out before the command was run.",
+                hint="Ask the user to retry the command if it is still needed.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_timeout",
+                policy_reason="sandbox approval timed out",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+
+        if decision != "approve":
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                "Sandbox approval was denied; the command was not run.",
+                hint="Choose a safer command or ask the user for a different approval.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_denied",
+                policy_reason="user denied sandbox approval",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+        logger.info(
+            "sandbox policy approval resolved: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        return None
 
     @staticmethod
     def _get_agent_workspace_log_dir(
@@ -778,6 +868,18 @@ class ExecuteCommandTool:
                 "zh": "会话ID（必填，自动注入）",
                 "en": "Session ID (Required, Auto-injected)",
             },
+            "approval_id": {
+                "zh": "可选的一次性确认ID；仅在用户确认后，用上一次 SAFETY_BLOCKED 返回的 approval_id 重试同一命令",
+                "en": "Optional one-shot approval id; after user confirmation, retry the same command with the approval_id returned by the previous SAFETY_BLOCKED result",
+            },
+            "sandbox_approval_mode": {
+                "zh": "运行时审批模式（自动注入）",
+                "en": "Runtime approval mode (auto-injected)",
+            },
+            "command_policy": {
+                "zh": "运行时命令策略（自动注入）",
+                "en": "Runtime command policy (auto-injected)",
+            },
         },
         param_schema={
             "command": {"type": "string", "description": "Shell command to execute"},
@@ -791,6 +893,9 @@ class ExecuteCommandTool:
                 "description": "Additional env vars as JSON object string",
             },
             "session_id": {"type": "string", "description": "Session ID"},
+            "approval_id": {"type": "string"},
+            "sandbox_approval_mode": {"type": "string"},
+            "command_policy": {"type": "object"},
         },
         return_data={
             "type": "object",
@@ -804,6 +909,7 @@ class ExecuteCommandTool:
                 "output_file": {"type": "string"},
                 "stdout": {"type": "string"},
                 "exit_code": {"type": "integer"},
+                "approval_id": {"type": "string"},
             },
             "required": ["success"],
         },
@@ -814,6 +920,9 @@ class ExecuteCommandTool:
         workdir: Optional[str] = None,
         block_until_ms: int = 30000,
         env_vars: Optional[str] = None,
+        approval_id: Optional[str] = None,
+        sandbox_approval_mode: Optional[str] = None,
+        command_policy: Optional[Dict[str, Any]] = None,
         session_id: str = None,  # pyright: ignore[reportArgumentType]
     ) -> Dict[str, Any]:
         if not session_id:
@@ -824,16 +933,35 @@ class ExecuteCommandTool:
             f"🖥️ ExecuteCommandTool: {command[:100]}{'...' if len(command) > 100 else ''} block_until_ms={block_until_ms}"
         )
 
-        # 安全检查
-        is_safe, reason = self.security_manager.is_command_safe(command)
-        if not is_safe:
-            logger.warning(f"安全检查失败: {reason}")
-            return make_tool_error(
-                ToolErrorCode.SAFETY_BLOCKED,
-                f"安全检查失败: {reason}",
-                hint="请改用更安全的命令；如确需高危操作，请改由用户在终端手动执行。",
-                command=command,
-            )
+        # Sandbox policy gateway: allow safe commands immediately; block commands
+        # that need a confirmation channel or must never run automatically.
+        policy_gateway = SandboxPolicyGateway(
+            approval_mode=sandbox_approval_mode,
+            command_policy=command_policy,
+        )
+        policy_decision = policy_gateway.evaluate_shell_command(
+            command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
+        )
+        if policy_decision.action != "allow":
+            if (
+                policy_decision.action == "ask"
+                and self._consume_matching_command_approval(
+                    session_id, approval_id, command
+                )
+            ):
+                logger.info(
+                    "sandbox policy approval consumed: "
+                    f"approval_id={approval_id} category={policy_decision.category}"
+                )
+            else:
+                approval_error = await self._await_policy_approval(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
+                )
+                if approval_error is not None:
+                    return approval_error
 
         sandbox = self._get_sandbox(session_id)
 

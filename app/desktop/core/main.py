@@ -85,7 +85,6 @@ def _safe_print(*args, sep: str = " ", end: str = "\n", flush: bool = False) -> 
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
-
     # 1) 核心系统初始化（必须先完成）
     await initialize_system()
 
