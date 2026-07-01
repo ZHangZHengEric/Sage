@@ -87,7 +87,7 @@ async def resolve_sandbox_approval_decision(
 
 @chat_router.get("/api/sandbox/approval/audit")
 async def get_sandbox_approval_audit(
-    session_id: str | None = None,
+    session_id: str = Query(..., min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
 ):
     return {
