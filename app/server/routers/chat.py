@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
@@ -26,7 +26,10 @@ from common.schemas.chat import (
     StreamRequest,
     UserInputOptimizeRequest,
 )
-from sagents.utils.sandbox.approval import resolve_sandbox_approval
+from sagents.utils.sandbox.approval import (
+    list_sandbox_approval_audit,
+    resolve_sandbox_approval,
+)
 from app.server.services.prometheus_metrics import record_sse_stream_failure
 from app.server.utils.image_size_guard import ensure_image_url_within_size_limit
 from pydantic import BaseModel
@@ -81,6 +84,20 @@ async def resolve_sandbox_approval_decision(
         command_hash_value=request.command_hash,
     )
     return {"success": status == "resolved", "status": status}
+
+
+@chat_router.get("/api/sandbox/approval/audit")
+async def get_sandbox_approval_audit(
+    session_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    return {
+        "success": True,
+        "records": list_sandbox_approval_audit(
+            session_id=session_id,
+            limit=limit,
+        ),
+    }
 
 
 def _build_current_time_with_weekday() -> str:

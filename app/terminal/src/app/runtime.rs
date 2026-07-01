@@ -66,6 +66,12 @@ impl App {
         if let Some(category) = request.category.as_ref() {
             lines.push(format!("category: {category}"));
         }
+        if let Some(approval_mode) = request.approval_mode.as_ref() {
+            lines.push(format!("approval_mode: {approval_mode}"));
+        }
+        if let Some(command_hash) = request.command_hash.as_ref() {
+            lines.push(format!("command_hash: {}", short_hash(command_hash)));
+        }
         if let Some(reason) = request.reason.as_ref() {
             lines.push(format!("reason: {reason}"));
         }
@@ -80,6 +86,29 @@ impl App {
 
     pub fn clear_pending_sandbox_approval(&mut self) {
         self.pending_sandbox_approval = None;
+    }
+
+    pub(crate) fn pending_sandbox_approval_status_lines(&self) -> Vec<String> {
+        let Some(request) = self.pending_sandbox_approval.as_ref() else {
+            return Vec::new();
+        };
+        let mut lines = vec![
+            format!("sandbox approval: pending {}", request.approval_id),
+            format!(
+                "approval command: {}",
+                truncate_for_status(&request.command, 90)
+            ),
+        ];
+        if let Some(category) = request.category.as_ref() {
+            lines.push(format!("approval category: {category}"));
+        }
+        if let Some(approval_mode) = request.approval_mode.as_ref() {
+            lines.push(format!("approval mode: {approval_mode}"));
+        }
+        if let Some(command_hash) = request.command_hash.as_ref() {
+            lines.push(format!("approval hash: {}", short_hash(command_hash)));
+        }
+        lines
     }
 
     pub fn deny_pending_sandbox_approval(&mut self) -> bool {
@@ -561,4 +590,8 @@ fn truncate_for_status(text: &str, max_chars: usize) -> String {
         .take(max_chars.saturating_sub(3))
         .collect::<String>()
         + "..."
+}
+
+fn short_hash(value: &str) -> String {
+    value.chars().take(12).collect()
 }

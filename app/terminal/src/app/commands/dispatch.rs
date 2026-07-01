@@ -522,9 +522,7 @@ impl App {
                     };
                     lines.push(format!("goal pending: {}", pending_label));
                 }
-                if let Some(request) = &self.pending_sandbox_approval {
-                    lines.push(format!("sandbox approval pending: {}", request.approval_id));
-                }
+                lines.extend(self.pending_sandbox_approval_status_lines());
                 if !self.selected_skills.is_empty() {
                     lines.push(format!("skills: {}", self.selected_skills.join(", ")));
                 }
