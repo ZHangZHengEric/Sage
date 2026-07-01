@@ -18,6 +18,8 @@ pub(crate) struct CliStreamEvent {
     pub(crate) category: Option<String>,
     pub(crate) reason: Option<String>,
     pub(crate) approval_mode: Option<String>,
+    pub(crate) decision: Option<String>,
+    pub(crate) approval_status: Option<String>,
     pub(crate) hint: Option<String>,
     pub(crate) tool_calls: Vec<CliToolCall>,
     pub(crate) metadata: Option<CliEventMetadata>,
@@ -220,6 +222,14 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
             .map(ToString::to_string),
         approval_mode: object
             .get("approval_mode")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        decision: object
+            .get("decision")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        approval_status: object
+            .get("approval_status")
             .and_then(Value::as_str)
             .map(ToString::to_string),
         hint: object
