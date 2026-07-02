@@ -33,6 +33,19 @@ from sagents.utils.repeat_pattern import (
 
 
 TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
+DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
+REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+
+
+def _get_repeat_pattern_max_hits() -> int:
+    raw_value = (os.environ.get(REPEAT_PATTERN_MAX_HITS_ENV) or "").strip()
+    if not raw_value:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    return value if value > 0 else DEFAULT_REPEAT_PATTERN_MAX_HITS
 
 
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
@@ -106,7 +119,7 @@ class SimpleAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
 
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
-        self.max_repeat_pattern_hits = 2
+        self.max_repeat_pattern_hits = _get_repeat_pattern_max_hits()
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
