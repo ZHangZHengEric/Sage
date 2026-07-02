@@ -10,7 +10,6 @@ from sagents.utils.llm_request_utils import (
     summarize_chat_completion_request,
     uses_max_completion_tokens,
 )
-from sagents.utils.prompt_caching import add_cache_control_to_messages
 
 _TEST_IMAGE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP8z0A+YKJA76jmUc2jmkc1U0EzACKcASc1hNCeAAAAAElFTkSuQmCC"
 _COLOR_KEYWORDS = ["red", "红色", "红", "赤", "绯", "朱", "丹", "绛"]
@@ -120,11 +119,9 @@ def _build_probe_messages() -> list[Dict[str, Any]]:
     system_text = (
         "You are a model capability probe running inside Sage.\n"
         "You must follow the response format strictly.\n"
-        "This request is intentionally shaped like the runtime LLM call, including cache control.\n"
+        "This request is intentionally shaped like the runtime LLM call.\n"
         "Do not explain anything outside the JSON object."
     )
-    # Make the system message long enough to exercise the same cache_control path as runtime.
-    system_text = system_text + "\n" + ("Capability probe context. " * 30)
     messages = [
         {"role": "system", "content": system_text},
         {
@@ -132,7 +129,6 @@ def _build_probe_messages() -> list[Dict[str, Any]]:
             "content": "Return a JSON object with a single key named ok whose value is true.",
         },
     ]
-    add_cache_control_to_messages(messages)
     return messages
 
 

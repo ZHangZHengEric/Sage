@@ -16,7 +16,6 @@ from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
-from sagents.utils.prompt_caching import add_cache_control_to_messages
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import (
@@ -1164,13 +1163,6 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: 注入 {len(completion_events)} 条 shell completion reminder"
                         )
 
-                # 为消息添加 prompt caching 支持（Anthropic 格式）
-                # 多段 system 时按 cache_segments 打多个断点；老路径保持单断点回退
-                if serializable_messages:
-                    add_cache_control_to_messages(
-                        serializable_messages, cache_segments=cache_segments
-                    )
-
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
@@ -1599,8 +1591,8 @@ class AgentBase(ABC):
         """构建按缓存稳定度切分的 system 文本段。
 
         返回 dict 形如 ``{"stable": str, "semi_stable": str, "volatile": str}``。
-        命名按"自上而下越来越易变"排列，便于上层在多段 system message + Anthropic
-        cache_control 多断点策略下保持高 cache 命中率：
+        命名按"自上而下越来越易变"排列，便于上层保持稳定前缀，交给供应商侧
+        被动 prompt cache 自然命中：
 
         - ``stable``：role_definition + IDENTITY/AGENT/SOUL/USER/MEMORY md（按会话生命周期基本不变）
         - ``semi_stable``：available_skills 列表 + active_skills 内容 + skills_usage_hint
@@ -1949,7 +1941,7 @@ class AgentBase(ABC):
 
         内部调用 ``_build_system_segments`` 后把三段顺序拼接成一条 system，保持
         和旧版完全一致的行为；新接入方应优先使用 ``prepare_unified_system_messages``
-        以拿到分段结构、配合多断点 prompt cache。
+        以拿到分段结构，便于观察稳定 system / volatile system 的边界。
         """
         segments = await self._build_system_segments(
             session_id=session_id,
@@ -1974,11 +1966,11 @@ class AgentBase(ABC):
         system_prefix_override: Optional[str] = None,
         include_sections: Optional[List[str]] = None,
     ) -> List[MessageChunk]:
-        """按 cache 稳定度切分的多段 system message。
+        """按稳定度切分的多段 system message。
 
         - 返回顺序固定为 ``[stable, semi_stable, volatile]``，空段会被过滤掉
-        - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于
-          ``add_cache_control_to_messages`` 在前两段末尾打 cache 断点
+        - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于观测
+          prompt 结构稳定性
         """
         segments = await self._build_system_segments(
             session_id=session_id,
