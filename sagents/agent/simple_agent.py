@@ -1098,16 +1098,10 @@ class SimpleAgent(AgentBase):
                 all_new_response_chunks.append(correction_chunk)
 
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=(
-                                "检测到任务进入重复循环，且已尝试过程内纠偏仍未跳出。"
-                                "已自动暂停，避免无效重复。请给我一个新的约束或允许我切换执行路径后继续。"
-                            ),
-                            type=MessageType.ASSISTANT_TEXT.value,
-                        )
-                    ]
+                    logger.warning(
+                        "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
+                        "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
+                    )
                     break
             else:
                 repeat_pattern_hits = 0
