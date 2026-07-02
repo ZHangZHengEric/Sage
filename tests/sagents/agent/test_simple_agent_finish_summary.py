@@ -1003,7 +1003,7 @@ def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
     assert chunks[-1].content == "已经完成。"
 
 
-def test_llm_judge_stops_after_two_plain_text_direct_responses(monkeypatch):
+def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
     direct_calls = []
@@ -1046,9 +1046,13 @@ def test_llm_judge_stops_after_two_plain_text_direct_responses(monkeypatch):
 
     chunks = asyncio.run(_collect())
 
-    assert len(direct_calls) == 2
-    assert len(judge_calls) == 1
-    assert [chunk.content for chunk in chunks] == ["纯文本回答 1", "纯文本回答 2"]
+    assert len(direct_calls) == 3
+    assert len(judge_calls) == 2
+    assert [chunk.content for chunk in chunks] == [
+        "纯文本回答 1",
+        "纯文本回答 2",
+        "纯文本回答 3",
+    ]
 
 
 def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
