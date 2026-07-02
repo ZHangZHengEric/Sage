@@ -168,6 +168,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | --- | --- | --- |
 | `SAGE_TASK_COMPLETION_MODE` | `turn_status` (`no_tool_call` in desktop) | Select how SimpleAgent decides that a turn is complete. `no_tool_call` disables `turn_status` and treats an LLM response without tool calls as complete; `turn_status` exposes the `turn_status` protocol tool and lets the model report `task_done` / `need_user_input` / `blocked` / `continue_work`; `llm_judge` disables `turn_status` and uses the legacy rule-first + LLM `task_complete_judge` check. |
 | `SAGE_RUNTIME_CONTEXT_IN_USER` | `true` | Move volatile runtime context (`system_context`, workspace files, active ToDo) out of system messages and freeze it into the latest user message inference metadata. Set `false` only for legacy behaviour where volatile context stays in system. |
+| `SAGE_REPEAT_PATTERN_MAX_HITS` | `3` | Consecutive repeat-pattern detections before SimpleAgent hard-pauses the execution loop |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | code defaults | Context budget allocation knobs |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |

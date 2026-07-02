@@ -7,7 +7,12 @@ import asyncio
 from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.agent.simple_agent import SimpleAgent, _get_system_prefix
+from sagents.agent.simple_agent import (
+    DEFAULT_REPEAT_PATTERN_MAX_HITS,
+    REPEAT_PATTERN_MAX_HITS_ENV,
+    SimpleAgent,
+    _get_system_prefix,
+)
 
 
 class _DummyModel:
@@ -17,6 +22,25 @@ class _DummyModel:
 
 def _agent():
     return SimpleAgent(model=_DummyModel(), model_config={})
+
+
+def test_repeat_pattern_max_hits_defaults_to_three(monkeypatch):
+    monkeypatch.delenv(REPEAT_PATTERN_MAX_HITS_ENV, raising=False)
+
+    assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS == 3
+
+
+def test_repeat_pattern_max_hits_uses_env(monkeypatch):
+    monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, "4")
+
+    assert _agent().max_repeat_pattern_hits == 4
+
+
+def test_repeat_pattern_max_hits_invalid_env_falls_back(monkeypatch):
+    for value in ["", "abc", "0", "-2"]:
+        monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, value)
+
+        assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS
 
 
 def _llm_chunk(*, content=None, tool_calls=None):
