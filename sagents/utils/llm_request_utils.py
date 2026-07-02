@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
+from urllib.parse import unquote, urlparse
 
 from openai import APIError
 
@@ -100,6 +102,130 @@ def get_structured_output_support(
     return None
 
 
+def get_multimodal_support(
+    client: Any = None,
+    model_config: Optional[Dict[str, Any]] = None,
+) -> Optional[bool]:
+    config_flag = _extract_bool_flag(model_config, "supports_multimodal")
+    if config_flag is not None:
+        return config_flag
+
+    client_flag = _extract_bool_flag(client, "supports_multimodal")
+    if client_flag is not None:
+        return client_flag
+
+    return None
+
+
+def _extract_image_url_part_url(item: Mapping[str, Any]) -> str:
+    image_url = item.get("image_url")
+    if isinstance(image_url, Mapping):
+        return str(image_url.get("url") or "").strip()
+    if isinstance(image_url, str):
+        return image_url.strip()
+    return str(item.get("url") or "").strip()
+
+
+def _append_text_part(content: list[Any], text: str) -> None:
+    if not text:
+        return
+    if (
+        content
+        and isinstance(content[-1], dict)
+        and content[-1].get("type") == "text"
+    ):
+        content[-1]["text"] = str(content[-1].get("text") or "") + text
+        return
+    content.append({"type": "text", "text": text})
+
+
+def _markdown_image_reference_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    name = unquote(Path(parsed.path).name) if parsed.path else ""
+    if not name or url.startswith("data:image/"):
+        name = "image"
+    escaped_name = name.replace("]", "\\]")
+    return f"![{escaped_name}]({url})"
+
+
+def _downgrade_multimodal_content_list(content: Sequence[Any]) -> tuple[list[Any], int]:
+    downgraded = 0
+    new_content: list[Any] = []
+    content_list = list(content)
+    for index, item in enumerate(content_list):
+        if not isinstance(item, Mapping):
+            new_content.append(item)
+            continue
+
+        if item.get("type") != "image_url":
+            if item.get("type") == "text":
+                _append_text_part(new_content, str(item.get("text") or ""))
+            else:
+                new_content.append(dict(item))
+            continue
+
+        url = _extract_image_url_part_url(item)
+        if url:
+            next_item = (
+                content_list[index + 1] if index + 1 < len(content_list) else None
+            )
+            next_text = (
+                str(next_item.get("text") or "")
+                if isinstance(next_item, Mapping) and next_item.get("type") == "text"
+                else ""
+            )
+            if url not in next_text:
+                _append_text_part(
+                    new_content,
+                    _markdown_image_reference_from_url(url),
+                )
+        downgraded += 1
+
+    return new_content, downgraded
+
+
+def downgrade_image_url_parts_for_text_only_model(messages: Any) -> tuple[Any, int]:
+    """
+    Remove ``image_url`` content parts before calling a model that is explicitly
+    known to be text-only. If a removed image has no adjacent markdown reference,
+    keep a markdown URL reference as plain text.
+    """
+    if not isinstance(messages, Sequence) or isinstance(
+        messages, (str, bytes, bytearray)
+    ):
+        return messages, 0
+
+    downgraded = 0
+    changed = False
+    new_messages: list[Any] = []
+    for message in messages:
+        if not isinstance(message, Mapping):
+            new_messages.append(message)
+            continue
+
+        content = message.get("content")
+        if not isinstance(content, Sequence) or isinstance(
+            content, (str, bytes, bytearray)
+        ):
+            new_messages.append(message)
+            continue
+
+        new_content, message_downgraded = _downgrade_multimodal_content_list(content)
+        if not message_downgraded:
+            new_messages.append(message)
+            continue
+
+        message_copy = dict(message)
+        message_copy["content"] = new_content if new_content else ""
+        new_messages.append(message_copy)
+        downgraded += message_downgraded
+        changed = True
+
+    if not changed:
+        return messages, 0
+    return new_messages, downgraded
+
+
 def _tool_choice_is_required(tool_choice: Any) -> bool:
     if isinstance(tool_choice, str):
         return tool_choice.strip().lower() == "required"
@@ -121,7 +247,8 @@ def _drop_reasoning_effort_when_tools_present(sanitized: Dict[str, Any]) -> None
     sanitized["extra_body"] = {k: v for k, v in eb.items() if k != "reasoning_effort"}
     logger.debug(
         "sanitize_model_request_kwargs: dropped reasoning_effort from extra_body "
-        "(tools present, chat/completions compatibility)"
+        "(tools present, chat/completions compatibility)",
+        session_id="NO_SESSION",
     )
 
 
@@ -154,7 +281,8 @@ def _drop_sampling_params_when_reasoning_effort_active(
     if dropped:
         logger.debug(
             f"sanitize_model_request_kwargs: dropped {dropped} "
-            f"(OpenAI reasoning model with reasoning_effort={effort!r})"
+            f"(OpenAI reasoning model with reasoning_effort={effort!r})",
+            session_id="NO_SESSION",
         )
 
 
@@ -432,6 +560,16 @@ async def create_chat_completion_with_fallback(
         model_config=model_config,
         model=model,
     )
+    if get_multimodal_support(client=client, model_config=model_config) is False:
+        messages, downgraded_images = downgrade_image_url_parts_for_text_only_model(
+            messages
+        )
+        if downgraded_images:
+            logger.info(
+                "模型不支持多模态，已从 LLM 请求中移除 image_url 输入: "
+                f"count={downgraded_images}, model={model}",
+                session_id="NO_SESSION",
+            )
 
     unknown_parameter_retry_count = 0
     structured_output_fallback_used = False
@@ -453,7 +591,9 @@ async def create_chat_completion_with_fallback(
                 request_kwargs = dict(request_kwargs)
                 request_kwargs.pop("response_format", None)
                 logger.warning(
-                    f"模型后端不支持 structured output，自动移除 response_format 后重试: model={model}, details={format_api_error_details(exc)}"
+                    "模型后端不支持 structured output，自动移除 response_format 后重试: "
+                    f"model={model}, details={format_api_error_details(exc)}",
+                    session_id="NO_SESSION",
                 )
                 continue
 
@@ -464,7 +604,10 @@ async def create_chat_completion_with_fallback(
                     unknown_parameter_retry_count += 1
                     request_kwargs = retry_kwargs
                     logger.warning(
-                        f"模型后端不支持请求参数，已移除后重试: model={model}, param={unknown_param}, details={format_api_error_details(exc)}"
+                        "模型后端不支持请求参数，已移除后重试: "
+                        f"model={model}, param={unknown_param}, "
+                        f"details={format_api_error_details(exc)}",
+                        session_id="NO_SESSION",
                     )
                     continue
             raise
