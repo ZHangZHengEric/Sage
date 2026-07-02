@@ -1149,9 +1149,9 @@ class SimpleAgent(AgentBase):
                     )
                 elif plain_text_direct_response:
                     consecutive_plain_text_direct_responses += 1
-                    if consecutive_plain_text_direct_responses >= 2:
+                    if consecutive_plain_text_direct_responses >= 3:
                         logger.info(
-                            "SimpleAgent: 连续两轮 direct LLM 纯文本无工具调用，终止执行"
+                            "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
                         break
                     if await self._is_task_complete(
