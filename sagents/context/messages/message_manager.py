@@ -1651,6 +1651,7 @@ class MessageManager:
         # 默认允许的消息类型
         if allowed_message_types is None:
             allowed_message_types = [
+                MessageType.ASSISTANT_TEXT.value,
                 MessageType.FINAL_ANSWER.value,
                 MessageType.DO_SUBTASK_RESULT.value,
                 MessageType.TOOL_CALL.value,
