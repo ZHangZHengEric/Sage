@@ -28,6 +28,7 @@ from common.models.conversation import Conversation, ConversationDao
 from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
 from common.services.chat_utils import get_sessions_root
+from common.utils.message_persistence import sanitize_messages_for_persistence
 
 _SESSION_PERSISTENCE_TASKS: Dict[str, asyncio.Task] = {}
 
@@ -729,9 +730,10 @@ def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> Non
         return
 
     workspace_path.mkdir(parents=True, exist_ok=True)
+    clean_messages = sanitize_messages_for_persistence(messages)
 
     with open(messages_path, "w", encoding="utf-8") as f:
-        json.dump(messages, f, ensure_ascii=False, indent=4)
+        json.dump(clean_messages, f, ensure_ascii=False, indent=4)
 
     if context_path.exists():
         try:
@@ -758,7 +760,7 @@ def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> Non
                 json.dump(context_data, f, ensure_ascii=False, indent=4)
 
     tools_usage: Dict[str, int] = {}
-    for message in messages:
+    for message in clean_messages:
         for tool_call in (message or {}).get("tool_calls", []) or []:
             tool_name = (tool_call or {}).get("function", {}).get("name")
             if tool_name:

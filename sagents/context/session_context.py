@@ -25,6 +25,7 @@ import datetime
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.common_utils import detect_machine_environment
+from common.utils.message_persistence import sanitize_messages_for_persistence
 
 _session_context_file_io_pool = ThreadPoolExecutor(
     max_workers=8, thread_name_prefix="session-context-io"
@@ -1827,7 +1828,9 @@ class SessionContext:
                     encoding="utf-8",
                 ) as f:
                     serializable_messages = make_serializable(
-                        self.message_manager.messages
+                        sanitize_messages_for_persistence(
+                            self.message_manager.messages
+                        )
                     )
                     json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
             except Exception as e:

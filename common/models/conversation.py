@@ -8,6 +8,7 @@ from sqlalchemy import JSON, String, Text, func, or_, select, update
 from sqlalchemy.orm import Mapped, load_only, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
+from common.utils.message_persistence import sanitize_messages_for_persistence
 
 
 class Conversation(Base):
@@ -96,13 +97,14 @@ class ConversationDao(BaseDao):
         title: str,
         messages: List[Dict[str, Any]],
     ) -> bool:
+        clean_messages = sanitize_messages_for_persistence(messages or [])
         conversation = Conversation(
             user_id=user_id,
             session_id=session_id,
             agent_id=agent_id,
             agent_name=agent_name,
             title=title,
-            messages=messages or [],
+            messages=clean_messages,
         )
         conversation.updated_at = get_local_now()
         return await BaseDao.save(self, conversation)
@@ -203,12 +205,13 @@ class ConversationDao(BaseDao):
     async def update_conversation_messages(
         self, session_id: str, messages: List[Dict[str, Any]]
     ) -> bool:
+        clean_messages = sanitize_messages_for_persistence(messages or [])
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
             stmt = (
                 update(Conversation)
                 .where(Conversation.session_id == session_id)
-                .values(messages=messages or [], updated_at=get_local_now())
+                .values(messages=clean_messages, updated_at=get_local_now())
             )
             result = await session.execute(stmt)
             return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
