@@ -79,6 +79,38 @@ def test_default_command_policy_does_not_allow_sensitive_followup_segment():
     assert decision.category.endswith("_approval_disabled")
 
 
+def test_default_command_policy_allows_non_forced_git_push():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git push origin feature-x"
+    )
+
+    assert decision.action == "allow"
+    assert decision.category == "default_git_remote_write"
+
+
+def test_default_command_policy_denies_forced_git_push():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git push --force origin feature-x"
+    )
+
+    assert decision.action == "deny"
+    assert decision.category == "git_remote_write_approval_disabled"
+
+
+def test_default_command_policy_allows_legacy_write_operations():
+    commands = [
+        "rm -rf tmp-output",
+        "chmod +x scripts/run.sh",
+        "pkill -f local-dev-server",
+        "echo hello > output.txt",
+        "brew install jq",
+    ]
+
+    for command in commands:
+        decision = SandboxPolicyGateway().evaluate_shell_command(command)
+        assert decision.action == "allow", command
+
+
 def test_denies_force_push_to_protected_branch():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "git push --force-with-lease origin main"
@@ -123,9 +155,10 @@ def test_untrusted_mode_prompts_for_unmatched_command():
 
 
 def test_never_mode_denies_confirmation_required_command():
-    decision = SandboxPolicyGateway(approval_mode="never").evaluate_shell_command(
-        "git push origin feature-x"
-    )
+    decision = SandboxPolicyGateway(
+        approval_mode="never",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("git push origin feature-x")
 
     assert decision.action == "deny"
     assert decision.category == "git_remote_write_approval_disabled"

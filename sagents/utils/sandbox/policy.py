@@ -161,6 +161,17 @@ DEFAULT_COMMAND_POLICY = CommandPolicyConfig(
             action="allow",
             match={
                 "pattern": (
+                    r"^git\s+push\b(?!.*(?:^|\s)(?:-f|--force(?:\b|=)|"
+                    r"--force-with-lease(?:\b|=)))"
+                )
+            },
+            category="default_git_remote_write",
+            reason="default policy allows non-forced git push",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={
+                "pattern": (
                     r"^rm\s+-[A-Za-z]*r[A-Za-z]*f?[A-Za-z]*\s+(\./)?"
                     r"(build|dist|target|node_modules|\.pytest_cache|\.mypy_cache|"
                     r"\.ruff_cache)(\s|/|$)"
@@ -168,6 +179,95 @@ DEFAULT_COMMAND_POLICY = CommandPolicyConfig(
             },
             category="default_workspace_cleanup",
             reason="default policy allows common local build/cache cleanup",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={
+                "pattern": (
+                    r"^rm\s+-[A-Za-z]*r[A-Za-z]*f?[A-Za-z]*\s+"
+                    r"(?!/|~)(?!.*(?:^|\s)(?:/|~))(?:\.{0,2}/)?[^\s]+"
+                )
+            },
+            category="default_relative_recursive_delete",
+            reason="default policy allows recursive deletion of relative paths",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["chmod"]},
+            category="default_permission_change",
+            reason="default policy allows chmod",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["chown"]},
+            category="default_permission_change",
+            reason="default policy allows chown",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["kill"]},
+            category="default_process_control",
+            reason="default policy allows process termination commands",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["killall"]},
+            category="default_process_control",
+            reason="default policy allows process termination commands",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pkill"]},
+            category="default_process_control",
+            reason="default policy allows process termination commands",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"pattern": r"^[^|;&]*[^0-9]>>?(?![&])\s*(?!/dev/(?:sd|nvme))\S+"},
+            category="default_shell_redirection",
+            reason="default policy allows ordinary stdout redirection",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["brew", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["brew", "reinstall"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["apt", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["apt-get", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["dnf", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["yum", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["apk", "add"]},
+            category="default_dependency_install",
+            reason="default policy allows package manager installation",
         ),
     )
 )
