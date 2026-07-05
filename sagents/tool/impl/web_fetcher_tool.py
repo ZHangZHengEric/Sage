@@ -10,11 +10,13 @@ Scrapling 特性：
 """
 
 import asyncio
+import json
 import os
+import re
 import aiohttp
 import aiofiles
 from typing import Dict, Any, List, Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import urljoin, urlparse, unquote
 from ..tool_base import tool
 from ..error_codes import (
     ToolErrorCode as _ToolErrorCode,
@@ -84,6 +86,28 @@ class WebFetcherTool:
             f.write(f"Content Length: {len(full_content)}\n")
             f.write("=" * 80 + "\n\n")
             f.write(full_content)
+
+    @staticmethod
+    def _content_selectors() -> List[str]:
+        return [
+            "#js_content",
+            ".rich_media_content",
+            '[data-testid="article"]',
+            ".RichContent-inner",
+            ".RichContent",
+            ".Post-RichTextContainer",
+            ".QuestionAnswer-content",
+            "article",
+            "main",
+            '[role="main"]',
+            ".content",
+            ".article-content",
+            ".post-content",
+            ".entry-content",
+            "#content",
+            ".main-content",
+            "body",
+        ]
 
     @tool(
         description_i18n={
@@ -407,46 +431,10 @@ class WebFetcherTool:
                 if not title:
                     title = page.css("#activity-name::text").get("")
 
-                # 提取正文内容
-                content_selectors = [
-                    "#js_content",
-                    ".rich_media_content",
-                    "article",
-                    "main",
-                    '[role="main"]',
-                    ".content",
-                    ".article-content",
-                    ".post-content",
-                    ".entry-content",
-                    "#content",
-                    ".main-content",
-                    "body",
-                ]
-
-                full_content = ""
-                used_selector = ""
-
-                for selector in content_selectors:
-                    elements = page.css(selector)
-                    if elements:
-                        texts = []
-                        for elem in elements:
-                            text = elem.get_all_text()
-                            if text and len(text.strip()) > 50:
-                                texts.append(text.strip())
-
-                        if texts:
-                            full_content = "\n\n".join(texts)
-                            used_selector = selector
-                            if len(full_content) > 500:
-                                break
-
-                if not full_content:
-                    full_content = page.get_all_text()
-                    used_selector = "full_page"
-
-                # 清理内容
-                full_content = self._clean_content(full_content)
+                effective_base_url = self._effective_base_url(page, url)
+                full_content, used_selector, images = self._extract_markdown_content(
+                    page, effective_base_url
+                )
 
                 # 生成文件名
                 from urllib.parse import urlparse
@@ -456,7 +444,7 @@ class WebFetcherTool:
                 safe_title = self._sanitize_filename(
                     title[:50] if title else "untitled"
                 )
-                filename = f"{domain}_{safe_title}.txt"
+                filename = f"{domain}_{safe_title}.md"
 
                 # 处理文件名冲突
                 save_path = os.path.join(save_dir, filename)
@@ -500,6 +488,8 @@ class WebFetcherTool:
                         "full_content_saved": True,
                         "save_path": save_path,
                         "filename": filename,
+                        "image_count": len(images),
+                        "images": images,
                     },
                 }
 
@@ -542,50 +532,10 @@ class WebFetcherTool:
                 if not title:
                     title = page.css("#activity-name::text").get("")
 
-                # 提取正文内容
-                # 尝试多种选择器，按优先级排序
-                content_selectors = [
-                    "#js_content",  # 微信公众号
-                    ".rich_media_content",  # 微信公众号
-                    "article",  # 标准文章标签
-                    "main",  # 主内容区
-                    '[role="main"]',
-                    ".content",  # 常见内容类名
-                    ".article-content",
-                    ".post-content",
-                    ".entry-content",
-                    "#content",
-                    ".main-content",
-                    "body",  # 回退到 body
-                ]
-
-                content = ""
-                used_selector = ""
-
-                for selector in content_selectors:
-                    elements = page.css(selector)
-                    if elements:
-                        # 使用 get_all_text() 获取元素的所有文本
-                        texts = []
-                        for elem in elements:
-                            text = elem.get_all_text()
-                            if text and len(text.strip()) > 50:  # 过滤短文本
-                                texts.append(text.strip())
-
-                        if texts:
-                            content = "\n\n".join(texts)
-                            used_selector = selector
-                            # 如果内容足够长，就使用这个选择器
-                            if len(content) > 500:
-                                break
-
-                # 如果还是没有内容，使用整个页面的文本
-                if not content:
-                    content = page.get_all_text()
-                    used_selector = "full_page"
-
-                # 清理内容
-                content = self._clean_content(content)
+                effective_base_url = self._effective_base_url(page, url)
+                content, used_selector, images = self._extract_markdown_content(
+                    page, effective_base_url
+                )
 
                 # 截断内容
                 if len(content) > max_length:
@@ -602,6 +552,8 @@ class WebFetcherTool:
                         "title": title,
                         "selector": used_selector,
                         "content_length": len(content),
+                        "image_count": len(images),
+                        "images": images,
                     },
                 }
 
@@ -663,3 +615,497 @@ class WebFetcherTool:
             cleaned_lines.pop()
 
         return "\n".join(cleaned_lines)
+
+    def _extract_markdown_content(self, page, base_url: str):
+        """Extract the main content as Markdown while keeping image references."""
+        platform_content = self._extract_platform_markdown_content(page, base_url)
+        if platform_content:
+            return platform_content
+
+        best_content = ""
+        best_selector = ""
+        best_images: List[Dict[str, str]] = []
+
+        for selector in self._content_selectors():
+            elements = page.css(selector)
+            if not elements:
+                continue
+
+            parts = []
+            images: List[Dict[str, str]] = []
+            for elem in elements:
+                markdown, elem_images = self._element_to_markdown(elem, base_url)
+                if markdown and (len(markdown.strip()) > 50 or elem_images):
+                    parts.append(markdown.strip())
+                    images.extend(elem_images)
+
+            if not parts:
+                continue
+
+            content = self._clean_content("\n\n".join(parts))
+            best_content = content
+            best_selector = selector
+            best_images = images
+
+            if len(content) > 500 or images or selector == "body":
+                break
+
+        if best_content:
+            return best_content, best_selector, self._dedupe_images(best_images)
+
+        fallback = self._clean_content(page.get_all_text())
+        return fallback, "full_page", []
+
+    def _effective_base_url(self, page, requested_url: str) -> str:
+        for attr in ("url", "real_url", "final_url"):
+            value = getattr(page, attr, None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    continue
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                return value
+        return requested_url
+
+    def _extract_platform_markdown_content(self, page, base_url: str):
+        """Extract platform-specific article/note payloads before generic HTML."""
+        parsed = urlparse(base_url)
+        page_html = self._get_page_html(page)
+
+        if "xiaohongshu.com" in parsed.netloc or "xhslink.com" in parsed.netloc:
+            return self._extract_xiaohongshu_note_markdown(
+                page_html, base_url
+            ) or self._extract_xiaohongshu_unavailable_markdown(page_html)
+
+        return None
+
+    def _get_page_html(self, page) -> str:
+        for attr in ("html", "markup", "text"):
+            value = getattr(page, attr, None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    continue
+            if isinstance(value, str) and "<" in value:
+                return value
+
+        body = page.css("body")
+        if body:
+            html_parts = [self._get_element_html(elem) for elem in body]
+            html = "\n".join(part for part in html_parts if part)
+            if html:
+                return html
+
+        rendered = str(page)
+        return rendered if "<" in rendered else ""
+
+    def _extract_xiaohongshu_note_markdown(self, html: str, base_url: str):
+        if not html:
+            return None
+
+        note = self._find_xiaohongshu_note(html, base_url)
+        if not note:
+            return None
+
+        title = note.get("title", "").strip()
+        desc = note.get("desc", "").strip()
+        images = note.get("images", [])
+
+        parts = []
+        if title:
+            parts.append(f"# {title}")
+        if desc:
+            parts.append(desc)
+
+        for index, image in enumerate(images, start=1):
+            alt = image.get("alt") or title or f"Image {index}"
+            parts.append(f"![{alt}]({image['src']})")
+
+        content = self._clean_content("\n\n".join(parts))
+        if not content:
+            return None
+
+        return content, "xiaohongshu_note_json", images
+
+    def _extract_xiaohongshu_unavailable_markdown(self, html: str):
+        if not html:
+            return None
+
+        plain_text = re.sub(r"\s+", " ", self._html_to_text(html)).strip()
+        unavailable_markers = (
+            "你访问的页面不见了",
+            "页面不见了",
+            "内容无法展示",
+            "登录后查看",
+            "验证码",
+            "安全验证",
+        )
+        has_initial_state = "__INITIAL_STATE__" in html
+        has_empty_note_state = '"noteDetailMap":{}' in html or '"noteDetailMap": {}' in html
+        if not any(marker in plain_text for marker in unavailable_markers):
+            if not (has_initial_state and has_empty_note_state):
+                return None
+
+        content = (
+            "# 小红书分享帖未返回正文\n\n"
+            "当前抓取到的是小红书的空状态、错误页或登录/安全验证页，页面 HTML 中没有可用的帖子正文和图片列表。"
+        )
+        return content, "xiaohongshu_unavailable", []
+
+    def _html_to_text(self, html: str) -> str:
+        try:
+            from bs4 import BeautifulSoup
+
+            return BeautifulSoup(html, "html.parser").get_text(" ")
+        except Exception:
+            return re.sub(r"<[^>]+>", " ", html)
+
+    def _find_xiaohongshu_note(self, html: str, base_url: str):
+        for payload in self._extract_json_payloads_from_html(html):
+            best_note = self._find_best_note_payload(payload, base_url)
+            if best_note:
+                return best_note
+
+        return None
+
+    def _extract_json_payloads_from_html(self, html: str):
+        payloads = []
+
+        for match in re.finditer(
+            r"<script[^>]*>(?P<script>.*?)</script>",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            script = match.group("script").strip()
+            if not script:
+                continue
+
+            parsed_script = self._parse_json_like_script(script)
+            if parsed_script is not None:
+                payloads.append(parsed_script)
+
+        parsed_html = self._parse_json_like_script(html)
+        if parsed_html is not None:
+            payloads.append(parsed_html)
+
+        return payloads
+
+    def _parse_json_like_script(self, text: str):
+        candidates = []
+
+        stripped = text.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            candidates.append(stripped)
+
+        for marker in ("__INITIAL_STATE__", "__NEXT_DATA__", "window.__INITIAL_STATE__"):
+            marker_index = text.find(marker)
+            if marker_index == -1:
+                continue
+            brace_index = text.find("{", marker_index)
+            if brace_index != -1:
+                candidates.append(text[brace_index:])
+
+        for candidate in candidates:
+            json_text = self._balanced_json_text(candidate)
+            if not json_text:
+                continue
+            normalized = re.sub(r"\bundefined\b", "null", json_text)
+            try:
+                return json.loads(normalized)
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _balanced_json_text(self, text: str) -> str:
+        start = text.find("{")
+        if start == -1:
+            return ""
+
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : index + 1]
+
+        return ""
+
+    def _find_best_note_payload(self, payload, base_url: str):
+        best_note = None
+        best_score = 0
+
+        for item in self._walk_json(payload):
+            note = self._normalize_xiaohongshu_note(item, base_url)
+            if not note:
+                continue
+
+            score = len(note.get("desc", "")) + len(note.get("title", "")) * 2
+            score += len(note.get("images", [])) * 100
+            if score > best_score:
+                best_score = score
+                best_note = note
+
+        return best_note
+
+    def _walk_json(self, value):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from self._walk_json(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from self._walk_json(child)
+
+    def _normalize_xiaohongshu_note(self, value: Any, base_url: str):
+        if not isinstance(value, dict):
+            return None
+
+        note = value.get("note")
+        if isinstance(note, dict):
+            nested_note = self._normalize_xiaohongshu_note(note, base_url)
+            if nested_note:
+                return nested_note
+
+        title = self._first_text_value(
+            value, ("title", "displayTitle", "display_title", "name")
+        )
+        desc = self._first_text_value(
+            value, ("desc", "description", "content", "noteText", "text")
+        )
+
+        raw_images = None
+        for key in ("imageList", "images", "image_list", "imgs", "cover", "coverList"):
+            candidate = value.get(key)
+            if isinstance(candidate, list):
+                raw_images = candidate
+                break
+            if isinstance(candidate, dict):
+                raw_images = [candidate]
+                break
+
+        images = self._extract_images_from_json(raw_images or [], base_url, title)
+        has_note_marker = any(key in value for key in ("noteId", "note_id", "noteCard"))
+        if not (has_note_marker or images) or not (title or desc or images):
+            return None
+
+        return {
+            "title": title,
+            "desc": desc,
+            "images": self._dedupe_images(images),
+        }
+
+    def _first_text_value(self, value: Dict[str, Any], keys) -> str:
+        for key in keys:
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return ""
+
+    def _extract_images_from_json(
+        self, values: List[Any], base_url: str, default_alt: str = ""
+    ) -> List[Dict[str, str]]:
+        images: List[Dict[str, str]] = []
+        for value in values:
+            image = self._extract_image_from_json(value, base_url, default_alt)
+            if image:
+                images.append(image)
+        return images
+
+    def _extract_image_from_json(
+        self, value: Any, base_url: str, default_alt: str = ""
+    ) -> Optional[Dict[str, str]]:
+        if isinstance(value, str):
+            src = value.strip()
+        elif isinstance(value, dict):
+            src = self._first_image_url_from_dict(value)
+        else:
+            return None
+
+        if not src or not self._should_keep_image_src(src):
+            return None
+
+        return {"src": urljoin(base_url, src), "alt": default_alt}
+
+    def _first_image_url_from_dict(self, value: Dict[str, Any]) -> str:
+        info_list = value.get("infoList") or value.get("info_list")
+        if isinstance(info_list, list):
+            urls = []
+            for item in info_list:
+                if not isinstance(item, dict):
+                    continue
+                url = self._first_text_value(
+                    item,
+                    ("url", "src", "originalUrl", "originUrl", "urlDefault", "urlPre"),
+                )
+                if not url:
+                    continue
+                scene = item.get("imageScene") or item.get("image_scene") or ""
+                urls.append((scene, url))
+
+            for preferred_scene in (
+                "H5_DTL",
+                "WB_DFT",
+                "CRD_WM_WEBP",
+                "H5_PRV",
+                "WB_PRV",
+            ):
+                for scene, url in urls:
+                    if scene == preferred_scene:
+                        return url
+            if urls:
+                return urls[0][1]
+
+        for key in ("urlList", "url_list", "urls"):
+            url_list = value.get(key)
+            if isinstance(url_list, list):
+                for item in url_list:
+                    if isinstance(item, str) and item.strip():
+                        return item.strip()
+                    if isinstance(item, dict):
+                        url = self._first_text_value(
+                            item,
+                            (
+                                "url",
+                                "src",
+                                "imageUrl",
+                                "image_url",
+                                "originalUrl",
+                                "originUrl",
+                                "urlDefault",
+                                "urlPre",
+                            ),
+                        )
+                        if url:
+                            return url
+
+        return self._first_text_value(
+            value,
+            (
+                "url",
+                "src",
+                "imageUrl",
+                "image_url",
+                "originalUrl",
+                "originUrl",
+                "urlDefault",
+                "urlPre",
+                "coverUrl",
+                "cover_url",
+            ),
+        )
+
+    def _should_keep_image_src(self, src: str) -> bool:
+        normalized = src.strip().lower()
+        if not normalized:
+            return False
+        return not normalized.startswith(("data:", "blob:", "javascript:"))
+
+    def _element_to_markdown(self, elem, base_url: str):
+        html = self._get_element_html(elem)
+        if not html:
+            return self._clean_content(elem.get_all_text()), []
+
+        prepared_html, images = self._prepare_html_for_markdown(html, base_url)
+        try:
+            import html2text
+
+            converter = html2text.HTML2Text()
+            converter.ignore_links = False
+            converter.ignore_images = False
+            converter.body_width = 0
+            converter.unicode_snob = True
+            markdown = converter.handle(prepared_html)
+            return self._clean_content(markdown.strip()), images
+        except Exception as e:
+            logger.warning(f"HTML 转 Markdown 失败，降级为纯文本: {e}")
+            return self._clean_content(elem.get_all_text()), images
+
+    def _get_element_html(self, elem) -> str:
+        for attr in ("html", "markup", "text"):
+            value = getattr(elem, attr, None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    continue
+            if isinstance(value, str) and "<" in value:
+                return value
+
+        rendered = str(elem)
+        return rendered if "<" in rendered else ""
+
+    def _prepare_html_for_markdown(self, html: str, base_url: str):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        images: List[Dict[str, str]] = []
+        for img in soup.find_all("img"):
+            src = self._get_image_src(img)
+            if not src or not self._should_keep_image_src(src):
+                img.decompose()
+                continue
+
+            absolute_src = urljoin(base_url, src)
+            img["src"] = absolute_src
+
+            image: Dict[str, str] = {"src": absolute_src, "alt": img.get("alt", "")}
+            title = img.get("title")
+            if title:
+                image["title"] = title
+            images.append(image)
+
+        return str(soup), images
+
+    def _get_image_src(self, img) -> str:
+        for attr in (
+            "src",
+            "data-src",
+            "data-original",
+            "data-url",
+            "data-lazy-src",
+            "data-actualsrc",
+        ):
+            value = img.get(attr)
+            if value:
+                return value.strip()
+
+        srcset = img.get("srcset") or img.get("data-srcset")
+        if srcset:
+            first_candidate = srcset.split(",", 1)[0].strip()
+            if first_candidate:
+                return first_candidate.split()[0]
+
+        return ""
+
+    def _dedupe_images(self, images: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        seen = set()
+        unique_images = []
+        for image in images:
+            src = image.get("src")
+            if not src or src in seen:
+                continue
+            seen.add(src)
+            unique_images.append(image)
+        return unique_images
