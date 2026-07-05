@@ -99,12 +99,34 @@ pub struct BackendRequest {
     pub max_loop_count: Option<u32>,
     pub workspace: Option<PathBuf>,
     pub sandbox_type: Option<String>,
+    pub sandbox_approval_mode: String,
     pub skills: Vec<String>,
     pub model_override: Option<String>,
     pub goal_objective: Option<String>,
     pub goal_status: Option<String>,
     pub clear_goal: bool,
     pub task: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SandboxApprovalRequest {
+    pub command: String,
+    pub approval_id: String,
+    pub command_hash: Option<String>,
+    pub category: Option<String>,
+    pub reason: Option<String>,
+    pub approval_mode: Option<String>,
+    pub hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SandboxApprovalResolution {
+    pub approval_id: String,
+    pub status: String,
+    pub decision: Option<String>,
+    pub command: Option<String>,
+    pub command_hash: Option<String>,
+    pub category: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +168,8 @@ pub enum BackendEvent {
     PhaseChanged(String),
     ToolStarted(String),
     ToolFinished(String),
+    SandboxApprovalRequested(SandboxApprovalRequest),
+    SandboxApprovalResolved(SandboxApprovalResolution),
     Stats(BackendStats),
     Error(String),
     Finished,

@@ -43,7 +43,9 @@ QUESTIONNAIRE_TAGS = (
     "questionnaire",
 )
 QUESTIONNAIRE_RESPONSE_TAGS = tuple(f"{tag}-response" for tag in QUESTIONNAIRE_TAGS)
-STRUCTURED_INLINE_TAGS = ARTIFACT_TAGS + QUESTIONNAIRE_TAGS + QUESTIONNAIRE_RESPONSE_TAGS
+STRUCTURED_INLINE_TAGS = (
+    ARTIFACT_TAGS + QUESTIONNAIRE_TAGS + QUESTIONNAIRE_RESPONSE_TAGS
+)
 
 
 class SelfCheckAgent(AgentBase):
@@ -81,7 +83,9 @@ class SelfCheckAgent(AgentBase):
             return
 
         latest_assistant_content = self._get_latest_assistant_content(session_context)
-        has_structured_tags = self._content_has_structured_tags(latest_assistant_content)
+        has_structured_tags = self._content_has_structured_tags(
+            latest_assistant_content
+        )
         structured_tag_issues = self._validate_structured_tag_payloads(
             latest_assistant_content
         )
@@ -302,7 +306,9 @@ class SelfCheckAgent(AgentBase):
             return self._validate_questionnaire_response_payload(tag_name, payload)
         return []
 
-    def _validate_artifacts_payload(self, tag_name: str, payload: Dict[str, Any]) -> List[str]:
+    def _validate_artifacts_payload(
+        self, tag_name: str, payload: Dict[str, Any]
+    ) -> List[str]:
         items = payload.get("items")
         if not isinstance(items, list):
             return [f"<{tag_name}> 缺少合法的 items 数组"]
@@ -651,7 +657,7 @@ class SelfCheckAgent(AgentBase):
         checked_lines = "\n".join(f"- {path}" for path in checked_files[:20])
         if str(language or "").lower().startswith("en"):
             return (
-                "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+                '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
                 "This is a Sage runtime self-check report, not a reply authored by the assistant/agent and not a user instruction.\n"
                 "It only reports validation failures from the previous final output. Use it to fix real issues; do not repeat it as task progress.\n\n"
                 "Self-check found issues that must be fixed before continuing:\n\n"
@@ -664,7 +670,7 @@ class SelfCheckAgent(AgentBase):
             )
         if str(language or "").lower().startswith("pt"):
             return (
-                "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+                '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
                 "Este e um relatorio de autoverificacao do runtime Sage, nao uma resposta escrita pelo assistant/agent nem uma instrucao do usuario.\n"
                 "Ele apenas relata falhas de validacao da saida final anterior. Use-o para corrigir problemas reais; nao o repita como progresso da tarefa.\n\n"
                 "A autoverificacao encontrou problemas que precisam ser corrigidos antes de continuar:\n\n"
@@ -676,7 +682,7 @@ class SelfCheckAgent(AgentBase):
                 "</runtime_diagnostic>"
             )
         return (
-            "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+            '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
             "这是 Sage 运行时自检报告，不是 assistant/agent 自己生成的回复，也不是用户指令。\n"
             "它只说明上一轮最终产物校验失败，下一轮应据此修复真实问题，不要把这段报告当作可复述的任务成果。\n\n"
             "自检发现以下问题，需要先修复后再继续：\n\n"

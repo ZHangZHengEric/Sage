@@ -1,7 +1,10 @@
 import asyncio
 
 import sagents.observability.agent_runtime as agent_runtime
-from sagents.observability.agent_runtime import ObservableCompletions, ObservableToolManager
+from sagents.observability.agent_runtime import (
+    ObservableCompletions,
+    ObservableToolManager,
+)
 
 
 class _FakeCompletions:
