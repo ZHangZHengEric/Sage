@@ -143,12 +143,13 @@ def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
 
     assert result["success"] is False
     assert result["error_code"] == "SAFETY_BLOCKED"
-    assert result["policy_action"] == "ask"
-    assert result["policy_category"] == "git_remote_write"
+    assert result["policy_action"] == "deny"
+    assert result["policy_category"] == "approval_channel_unavailable"
     assert result["policy_approval_mode"] == "on-request"
-    assert result["approval_id"].startswith("shapproval_")
-    assert result["approval_expires_at"].endswith("Z")
+    assert "approval_id" not in result
+    assert "approval_expires_at" not in result
     assert ExecuteCommandTool._BG_TASKS == {}
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
@@ -301,7 +302,9 @@ def test_sandbox_approval_broker_records_resolved_decision_audit():
     asyncio.run(run_flow())
 
 
-def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
+def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
+    monkeypatch,
+):
     fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
@@ -317,78 +320,23 @@ def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
     )
 
     tool = ExecuteCommandTool()
-    blocked = asyncio.run(
+    result = asyncio.run(
         tool.execute_shell_command(
             command="git push origin feature-x",
             session_id="session-1",
             block_until_ms=0,
-            sandbox_approval_mode="on-request",
-            command_policy={"rules": []},
-        )
-    )
-    approval_id = blocked["approval_id"]
-
-    started = asyncio.run(
-        tool.execute_shell_command(
-            command="git push origin feature-x",
-            session_id="session-1",
-            block_until_ms=0,
-            approval_id=approval_id,
+            approval_id="shapproval_model_supplied",
             sandbox_approval_mode="on-request",
             command_policy={"rules": []},
         )
     )
 
-    assert started["success"] is True
-    assert started["status"] == "running"
-    assert fake_sandbox.bg_calls[0]["command"] == "git push origin feature-x"
+    assert result["success"] is False
+    assert result["policy_action"] == "deny"
+    assert result["policy_category"] == "approval_channel_unavailable"
+    assert "approval_id" not in result
     assert ExecuteCommandTool._PENDING_APPROVALS == {}
-
-    reused = asyncio.run(
-        tool.execute_shell_command(
-            command="git push origin feature-x",
-            session_id="session-1",
-            block_until_ms=0,
-            approval_id=approval_id,
-            sandbox_approval_mode="on-request",
-            command_policy={"rules": []},
-        )
-    )
-    assert reused["success"] is False
-    assert reused["policy_action"] == "ask"
-    assert reused["approval_id"] != approval_id
-
-
-def test_execute_shell_command_approval_id_must_match_command(monkeypatch):
-    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
-
-    tool = ExecuteCommandTool()
-    blocked = asyncio.run(
-        tool.execute_shell_command(
-            command="git push origin feature-x",
-            session_id="session-1",
-            block_until_ms=0,
-            sandbox_approval_mode="on-request",
-            command_policy={"rules": []},
-        )
-    )
-
-    mismatch = asyncio.run(
-        tool.execute_shell_command(
-            command="git push origin other-branch",
-            session_id="session-1",
-            block_until_ms=0,
-            approval_id=blocked["approval_id"],
-            sandbox_approval_mode="on-request",
-            command_policy={"rules": []},
-        )
-    )
-
-    assert mismatch["success"] is False
-    assert mismatch["policy_action"] == "ask"
-    assert mismatch["approval_id"] != blocked["approval_id"]
+    assert fake_sandbox.bg_calls == []
 
 
 def test_execute_shell_command_passes_tool_env_to_background_runner(monkeypatch):
