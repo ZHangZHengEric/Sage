@@ -70,6 +70,15 @@ def test_default_command_policy_allows_common_dependency_install():
     assert decision.category == "default_dependency_install"
 
 
+def test_default_command_policy_does_not_allow_sensitive_followup_segment():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "python -m pip install requests; git push origin main"
+    )
+
+    assert decision.action == "deny"
+    assert decision.category.endswith("_approval_disabled")
+
+
 def test_denies_force_push_to_protected_branch():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "git push --force-with-lease origin main"

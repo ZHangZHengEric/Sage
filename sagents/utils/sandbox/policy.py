@@ -357,14 +357,16 @@ class SandboxPolicyGateway:
             )
 
         segments = [s.strip() for s in self._SEGMENT_SPLIT_RE.split(command)]
+        nonempty_segments = [segment for segment in segments if segment]
         for segment in segments:
             decision = self._evaluate_segment(segment, sandbox_mode=sandbox_mode)
             if decision.action == "deny":
                 return decision
 
-        configured_decision = self._evaluate_configured_policy(command, parts)
-        if configured_decision is not None:
-            return self._apply_approval_mode(configured_decision)
+        if len(nonempty_segments) <= 1:
+            configured_decision = self._evaluate_configured_policy(command, parts)
+            if configured_decision is not None:
+                return self._apply_approval_mode(configured_decision)
 
         for segment in segments:
             decision = self._evaluate_segment(segment, sandbox_mode=sandbox_mode)

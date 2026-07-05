@@ -15,7 +15,6 @@ Execute Command Tool
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import json as _json
 import os
 import re
@@ -264,45 +263,36 @@ class ExecuteCommandTool:
         approval_expires_at = None
         next_action = None
         if policy_decision.action == "ask":
-            approval_id = self._create_command_approval(session_id, command)
-            approval_expires_at = (
-                datetime.fromtimestamp(time.time() + self._APPROVAL_TTL_S, timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
             message = (
-                "Sandbox policy requires confirmation before running this command: "
-                f"{policy_decision.reason}"
+                "Sandbox policy requires confirmation, but no approval channel is "
+                f"available: {policy_decision.reason}"
             )
             hint = (
                 policy_decision.next_step
-                or "Ask the user for confirmation before retrying this command."
+                or "Use an approval-capable runtime before retrying this command."
             )
-            next_action = {
-                "requires_user_confirmation": True,
-                "after_user_confirms": {
-                    "tool": "execute_shell_command",
-                    "args": {
-                        "command": command,
-                        "approval_id": approval_id,
-                    },
-                },
-                "do_not": "do not retry without user confirmation",
-            }
+            policy_action = "deny"
+            policy_category = "approval_channel_unavailable"
+            policy_reason = (
+                f"{policy_decision.reason}; no approval channel is available"
+            )
         else:
             message = f"Sandbox policy denied this command: {policy_decision.reason}"
             hint = (
                 policy_decision.next_step
                 or "Use a safer, workspace-scoped command instead."
             )
+            policy_action = policy_decision.action
+            policy_category = policy_decision.category
+            policy_reason = policy_decision.reason
         return make_tool_error(
             ToolErrorCode.SAFETY_BLOCKED,
             message,
             hint=hint,
             command=command,
-            policy_action=policy_decision.action,
-            policy_category=policy_decision.category,
-            policy_reason=policy_decision.reason,
+            policy_action=policy_action,
+            policy_category=policy_category,
+            policy_reason=policy_reason,
             policy_approval_mode=policy_gateway.approval_mode,
             approval_id=approval_id,
             approval_expires_at=approval_expires_at,
