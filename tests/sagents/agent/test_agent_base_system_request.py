@@ -118,6 +118,46 @@ async def test_build_system_segments_explains_runtime_context_boundary():
 
 
 @pytest.mark.asyncio
+async def test_build_system_segments_hides_sandbox_policy_from_runtime_context(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    session_context = SimpleNamespace(
+        sandbox=None,
+        system_context={
+            "session_id": "sess",
+            "response_language": "en",
+            "sandbox_approval_mode": "never",
+            "command_policy": {
+                "rules": [
+                    {"match": {"argv_prefix": ["git", "status"]}, "action": "allow"}
+                ]
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+
+    async def fake_active_todos(session_id):
+        return []
+
+    monkeypatch.setattr(agent, "_read_active_todo_list_for_context", fake_active_todos)
+
+    segments = await agent._build_system_segments(
+        session_id="sess",
+        include_sections=["system_context"],
+    )
+
+    assert "<session_id>sess</session_id>" in segments["volatile"]
+    assert "sandbox_approval_mode" not in segments["volatile"]
+    assert "command_policy" not in segments["volatile"]
+    assert session_context.system_context["sandbox_approval_mode"] == "never"
+    assert "command_policy" in session_context.system_context
+
+
+@pytest.mark.asyncio
 async def test_build_system_segments_reads_full_user_and_memory_md(monkeypatch):
     agent = CommonAgent(model=object(), model_config={})
     user_tail = "USER_TAIL_SHOULD_SURVIVE"

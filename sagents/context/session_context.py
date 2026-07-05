@@ -1717,10 +1717,7 @@ class SessionContext:
     async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
         """异步保存单个LLM请求到文件"""
         try:
-            file_path = await asyncio.to_thread(
-                self._save_llm_request_sync, llm_request
-            )
-
+            await asyncio.to_thread(self._save_llm_request_sync, llm_request)
         except Exception as e:
             logger.error(f"SessionContext: Failed to async save LLM request: {e}")
 

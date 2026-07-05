@@ -119,7 +119,6 @@ class TaskCompletionJudgeAgent(AgentBase):
             ]
 
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
-
         logger.debug("TaskCompletionJudgeAgent: 转换XML内容为JSON格式")
         try:
             # 提取analysis

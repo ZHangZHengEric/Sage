@@ -129,11 +129,7 @@ def _extract_image_url_part_url(item: Mapping[str, Any]) -> str:
 def _append_text_part(content: list[Any], text: str) -> None:
     if not text:
         return
-    if (
-        content
-        and isinstance(content[-1], dict)
-        and content[-1].get("type") == "text"
-    ):
+    if content and isinstance(content[-1], dict) and content[-1].get("type") == "text":
         content[-1]["text"] = str(content[-1].get("text") or "") + text
         return
     content.append({"type": "text", "text": text})

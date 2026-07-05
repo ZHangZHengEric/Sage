@@ -140,9 +140,7 @@ def test_downgrade_image_url_parts_adds_markdown_for_orphan_image() -> None:
     out, count = downgrade_image_url_parts_for_text_only_model(messages)
 
     assert count == 1
-    assert out[0]["content"] == [
-        {"type": "text", "text": f"![photo.png]({image_url})"}
-    ]
+    assert out[0]["content"] == [{"type": "text", "text": f"![photo.png]({image_url})"}]
     assert "image_url" not in str(out)
 
 

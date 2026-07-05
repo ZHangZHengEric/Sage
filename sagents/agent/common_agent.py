@@ -89,7 +89,6 @@ class CommonAgent(AgentBase):
         tool_manager: Optional[ToolManager],
         session_id: str,
     ) -> AsyncGenerator[List[MessageChunk], None]:
-
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(
             messages_input
         )

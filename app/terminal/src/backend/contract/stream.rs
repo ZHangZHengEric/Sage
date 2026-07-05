@@ -12,6 +12,15 @@ pub(crate) struct CliStreamEvent {
     pub(crate) content: String,
     pub(crate) phase: Option<String>,
     pub(crate) action: Option<String>,
+    pub(crate) approval_id: Option<String>,
+    pub(crate) command: Option<String>,
+    pub(crate) command_hash: Option<String>,
+    pub(crate) category: Option<String>,
+    pub(crate) reason: Option<String>,
+    pub(crate) approval_mode: Option<String>,
+    pub(crate) decision: Option<String>,
+    pub(crate) approval_status: Option<String>,
+    pub(crate) hint: Option<String>,
     pub(crate) tool_calls: Vec<CliToolCall>,
     pub(crate) metadata: Option<CliEventMetadata>,
     pub(crate) tool_name: Option<String>,
@@ -189,6 +198,42 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
             .map(ToString::to_string),
         action: object
             .get("action")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        approval_id: object
+            .get("approval_id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        command: object
+            .get("command")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        command_hash: object
+            .get("command_hash")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        category: object
+            .get("category")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        reason: object
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        approval_mode: object
+            .get("approval_mode")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        decision: object
+            .get("decision")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        approval_status: object
+            .get("approval_status")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        hint: object
+            .get("hint")
             .and_then(Value::as_str)
             .map(ToString::to_string),
         tool_calls,

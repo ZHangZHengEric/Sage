@@ -96,6 +96,10 @@ class AgentBase(ABC):
     """
 
     RUNTIME_CONTEXT_SYSTEM_SECTIONS = {"system_context", "workspace_files"}
+    RUNTIME_CONTEXT_HIDDEN_SYSTEM_CONTEXT_KEYS = {
+        "sandbox_approval_mode",
+        "command_policy",
+    }
     FROZEN_USER_INFERENCE_METADATA_KEY = "frozen_user_inference"
     FROZEN_USER_INFERENCE_VERSION = 3
 
@@ -143,6 +147,24 @@ class AgentBase(ABC):
         return _get_live_session_context_util(
             session_id, log_prefix=self.__class__.__name__
         )
+
+    @staticmethod
+    def _timezone_from_current_time(value: Any) -> Optional[datetime.timezone]:
+        if not isinstance(value, str):
+            return None
+
+        _, _, offset = value.rpartition(" ")
+        if len(offset) != 5 or offset[0] not in "+-" or not offset[1:].isdigit():
+            return None
+
+        hours = int(offset[1:3])
+        minutes = int(offset[3:5])
+        if hours > 23 or minutes > 59:
+            return None
+
+        sign = 1 if offset[0] == "+" else -1
+        delta = datetime.timedelta(hours=hours, minutes=minutes)
+        return datetime.timezone(sign * delta)
 
     def _consume_user_injections(
         self, session_context: Optional[SessionContext]
@@ -1615,8 +1637,6 @@ class AgentBase(ABC):
         session_context = None
         if session_id:
             session_context = self._get_live_session_context(session_id)
-        # 兼容旧逻辑使用的局部变量名
-        system_prefix = ""
 
         # 1. Role Definition  → stable
         use_identity = False
@@ -1788,6 +1808,7 @@ class AgentBase(ABC):
                     "active_skill_instruction",
                     "可以访问的其他路径文件夹",
                     "external_paths",
+                    *self.RUNTIME_CONTEXT_HIDDEN_SYSTEM_CONTEXT_KEYS,
                 }
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
@@ -1921,8 +1942,6 @@ class AgentBase(ABC):
                                 f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
                             )
 
-        # 兼容已有局部变量名（避免上游 logger 行依赖）
-        system_prefix = stable_buf + semi_buf + volatile_buf
         return {
             "stable": stable_buf,
             "semi_stable": semi_buf,

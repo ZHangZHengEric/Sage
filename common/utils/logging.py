@@ -26,9 +26,7 @@ _SUPPRESSED_UVICORN_ACCESS_PATHS = {
     "/api/observability/metrics",
     "/api/stream/active_sessions",
 }
-_SUPPRESSED_UVICORN_ACCESS_PREFIXES = (
-    "/tasks/internal/",
-)
+_SUPPRESSED_UVICORN_ACCESS_PREFIXES = ("/tasks/internal/",)
 
 
 def _ensure_loguru_has_sink() -> None:

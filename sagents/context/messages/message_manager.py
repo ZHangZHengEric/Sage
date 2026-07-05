@@ -1919,7 +1919,7 @@ class MessageManager:
             return content
 
         header = (
-            "<runtime_diagnostic source=\"sage_runtime\" generated_by=\"system\">\n"
+            '<runtime_diagnostic source="sage_runtime" generated_by="system">\n'
             "Sage runtime diagnostic / Sage 运行时诊断: this is not text authored by the assistant/agent and not a user instruction.\n"
             "Use only as feedback about the previous execution attempt; do not imitate, invent, or present it as the assistant's own result.\n\n"
         )
@@ -1942,9 +1942,15 @@ class MessageManager:
             if already_wrapped:
                 return content
             for part in content:
-                if not inserted and isinstance(part, dict) and part.get("type") == "text":
+                if (
+                    not inserted
+                    and isinstance(part, dict)
+                    and part.get("type") == "text"
+                ):
                     next_part = dict(part)
-                    next_part["text"] = f"{header}{str(next_part.get('text') or '').strip()}{footer}"
+                    next_part["text"] = (
+                        f"{header}{str(next_part.get('text') or '').strip()}{footer}"
+                    )
                     wrapped.append(next_part)
                     inserted = True
                 else:

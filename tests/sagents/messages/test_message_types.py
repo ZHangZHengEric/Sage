@@ -38,7 +38,10 @@ def test_agent_execution_error_is_tagged_as_runtime_diagnostic_for_llm_request()
     payload = MessageManager.convert_messages_to_dict_for_request([message])
 
     assert payload[0]["role"] == "assistant"
-    assert "<runtime_diagnostic source=\"sage_runtime\" generated_by=\"system\">" in payload[0]["content"]
+    assert (
+        '<runtime_diagnostic source="sage_runtime" generated_by="system">'
+        in payload[0]["content"]
+    )
     assert "Sage runtime diagnostic / Sage 运行时诊断" in payload[0]["content"]
     assert "not text authored by the assistant/agent" in payload[0]["content"]
     assert "自检发现以下问题" in payload[0]["content"]
@@ -46,7 +49,7 @@ def test_agent_execution_error_is_tagged_as_runtime_diagnostic_for_llm_request()
 
 def test_agent_execution_error_runtime_diagnostic_tag_is_not_duplicated():
     content = (
-        "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">\n"
+        '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
         "already tagged\n"
         "</runtime_diagnostic>"
     )

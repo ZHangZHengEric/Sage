@@ -149,7 +149,9 @@ def test_self_check_failure_message_uses_english_runtime_diagnostic(monkeypatch)
         ["File does not exist: output.md"], ["/tmp/output.md"], language="en"
     )
 
-    assert "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">" in content
+    assert (
+        '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
+    )
     assert "not a reply authored by the assistant/agent" in content
     assert "Self-check found issues" in content
     assert "Checked files:" in content
@@ -163,7 +165,9 @@ def test_self_check_failure_message_uses_portuguese_runtime_diagnostic(monkeypat
         ["Arquivo nao existe: output.md"], ["/tmp/output.md"], language="pt"
     )
 
-    assert "<runtime_diagnostic source=\"sage_self_check\" generated_by=\"system\">" in content
+    assert (
+        '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
+    )
     assert "nao uma resposta escrita pelo assistant/agent" in content
     assert "Arquivos verificados:" in content
 
@@ -380,9 +384,7 @@ def test_artifacts_tag_http_path_is_ignored(monkeypatch, tmp_path):
 
     assert chunks == []
     assert session_context.audit_status["self_check_passed"] is True
-    assert session_context.audit_status["self_check_summary"] == (
-        "checked 0 files"
-    )
+    assert session_context.audit_status["self_check_summary"] == ("checked 0 files")
 
 
 def test_malformed_artifacts_json_triggers_execution_error(monkeypatch, tmp_path):

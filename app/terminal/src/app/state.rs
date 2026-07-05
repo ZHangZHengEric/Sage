@@ -4,8 +4,10 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats};
+use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats, SandboxApprovalRequest};
 use crate::display_policy::DisplayMode;
+
+pub(crate) const APPROVAL_HISTORY_LIMIT: usize = 20;
 
 #[derive(Debug)]
 pub enum SubmitAction {
@@ -14,6 +16,8 @@ pub enum SubmitAction {
     RunTask(String),
     Interrupt,
     RetryLastTask,
+    ApproveSandboxCommand,
+    DenySandboxCommand,
     OpenSessionPicker {
         mode: SessionPickerMode,
         limit: usize,
@@ -119,6 +123,16 @@ pub struct PendingGoalMutation {
     pub clear: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SandboxApprovalHistoryEntry {
+    pub(crate) approval_id: String,
+    pub(crate) status: String,
+    pub(crate) decision: Option<String>,
+    pub(crate) command: String,
+    pub(crate) command_hash: Option<String>,
+    pub(crate) category: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderPopupMode {
     Inspect,
@@ -161,6 +175,9 @@ pub struct App {
     pub workspace_label: String,
     pub(crate) workspace_override: Option<PathBuf>,
     pub(crate) sandbox_type: Option<String>,
+    pub(crate) sandbox_approval_mode: String,
+    pub(crate) pending_sandbox_approval: Option<SandboxApprovalRequest>,
+    pub(crate) sandbox_approval_history: Vec<SandboxApprovalHistoryEntry>,
     pub current_goal: Option<BackendGoal>,
     pub pending_goal_mutation: Option<PendingGoalMutation>,
     pub status: String,
@@ -228,6 +245,9 @@ impl App {
             workspace_label: default_workspace_label(),
             workspace_override: None,
             sandbox_type: None,
+            sandbox_approval_mode: "on-request".to_string(),
+            pending_sandbox_approval: None,
+            sandbox_approval_history: Vec::new(),
             current_goal: None,
             pending_goal_mutation: None,
             status: String::new(),
@@ -279,6 +299,8 @@ impl App {
         self.clear_live_response_state();
         self.current_goal = None;
         self.pending_goal_mutation = None;
+        self.pending_sandbox_approval = None;
+        self.sandbox_approval_history.clear();
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;

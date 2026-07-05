@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
@@ -20,7 +20,16 @@ from common.core.i18n import t
 from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
-from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
+from common.schemas.chat import (
+    ChatRequest,
+    SandboxApprovalDecisionRequest,
+    StreamRequest,
+    UserInputOptimizeRequest,
+)
+from sagents.utils.sandbox.approval import (
+    list_sandbox_approval_audit,
+    resolve_sandbox_approval,
+)
 from app.server.services.prometheus_metrics import record_sse_stream_failure
 from app.server.utils.image_size_guard import ensure_image_url_within_size_limit
 from pydantic import BaseModel
@@ -62,6 +71,33 @@ class RerunStreamRequest(BaseModel):
     available_sub_agent_ids: list[str] | None = None
     guidance_content: str | None = None
     guidance_id: str | None = None
+
+
+@chat_router.post("/api/sandbox/approval")
+async def resolve_sandbox_approval_decision(
+    request: SandboxApprovalDecisionRequest,
+):
+    status = resolve_sandbox_approval(
+        session_id=request.session_id,
+        approval_id=request.approval_id,
+        decision=request.decision,
+        command_hash_value=request.command_hash,
+    )
+    return {"success": status == "resolved", "status": status}
+
+
+@chat_router.get("/api/sandbox/approval/audit")
+async def get_sandbox_approval_audit(
+    session_id: str = Query(..., min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    return {
+        "success": True,
+        "records": list_sandbox_approval_audit(
+            session_id=session_id,
+            limit=limit,
+        ),
+    }
 
 
 def _build_current_time_with_weekday() -> str:
@@ -400,7 +436,6 @@ def validate_and_prepare_request(
     *,
     allow_pending_guidance_flush: bool = False,
 ) -> None:
-
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
         if not allow_pending_guidance_flush or not _has_pending_user_injections(

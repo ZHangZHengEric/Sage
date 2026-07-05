@@ -1,6 +1,15 @@
 import asyncio
 
 from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
+from sagents.tool.tool_progress import (
+    bind_tool_progress_context,
+    register_progress_queue,
+    unregister_progress_queue,
+)
+from sagents.utils.sandbox.approval import (
+    get_sandbox_approval_broker,
+    resolve_sandbox_approval,
+)
 from sagents.utils.sandbox.interface import CommandResult
 
 
@@ -114,6 +123,222 @@ def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
             "log_dir": "/sage-workspace/bg",
         }
     ]
+
+
+def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    tool = ExecuteCommandTool()
+    result = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "SAFETY_BLOCKED"
+    assert result["policy_action"] == "deny"
+    assert result["policy_category"] == "approval_channel_unavailable"
+    assert result["policy_approval_mode"] == "on-request"
+    assert "approval_id" not in result
+    assert "approval_expires_at" not in result
+    assert ExecuteCommandTool._BG_TASKS == {}
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
+
+
+def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    tool = ExecuteCommandTool()
+    result = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            sandbox_approval_mode="never",
+            command_policy={"rules": []},
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "SAFETY_BLOCKED"
+    assert result["policy_action"] == "deny"
+    assert result["policy_approval_mode"] == "never"
+    assert "approval_id" not in result
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
+
+
+def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
+    fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
+    fake_manager = _FakeSessionManager(fake_sandbox)
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    async def run_flow():
+        queue = asyncio.Queue()
+        register_progress_queue("session-approval", queue)
+        try:
+            tool = ExecuteCommandTool()
+            with bind_tool_progress_context("session-approval", "tool-call-1"):
+                task = asyncio.create_task(
+                    tool.execute_shell_command(
+                        command="git push origin feature-x",
+                        session_id="session-approval",
+                        block_until_ms=0,
+                        command_policy={"rules": []},
+                    )
+                )
+                event = await asyncio.wait_for(queue.get(), timeout=1)
+                assert event["type"] == "sandbox_approval_requested"
+                assert event["approval_id"].startswith("shapproval_")
+                assert event["command"] == "git push origin feature-x"
+                assert fake_sandbox.bg_calls == []
+                status = resolve_sandbox_approval(
+                    session_id="session-approval",
+                    approval_id=event["approval_id"],
+                    decision="approve",
+                    command_hash_value=event["command_hash"],
+                )
+                assert status == "resolved"
+                resolved_event = await asyncio.wait_for(queue.get(), timeout=1)
+                assert resolved_event["type"] == "sandbox_approval_resolved"
+                assert resolved_event["approval_id"] == event["approval_id"]
+                assert resolved_event["decision"] == "approve"
+                assert resolved_event["approval_status"] == "approved"
+                assert resolved_event["command_hash"] == event["command_hash"]
+                result = await asyncio.wait_for(task, timeout=1)
+                return result
+        finally:
+            unregister_progress_queue("session-approval")
+
+    result = asyncio.run(run_flow())
+
+    assert result["success"] is True
+    assert result["status"] == "running"
+    assert fake_sandbox.bg_calls[0]["command"] == "git push origin feature-x"
+
+
+def test_sandbox_approval_broker_discard_removes_pending_approval():
+    async def run_flow():
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id="session-discard",
+            command="git push origin feature-x",
+            category="git_remote_write",
+            reason="requires approval",
+            approval_mode="on-request",
+        )
+
+        broker.discard(pending.approval_id)
+
+        assert pending.future.done()
+        assert pending.future.result() == "deny"
+        audit = broker.list_audit(session_id="session-discard", limit=1)
+        assert audit[0]["approval_id"] == pending.approval_id
+        assert audit[0]["command_hash"] == pending.command_hash
+        assert audit[0]["status"] == "discarded"
+        assert audit[0]["decision"] == "deny"
+        assert audit[0]["resolved_at"] is not None
+        assert (
+            resolve_sandbox_approval(
+                session_id="session-discard",
+                approval_id=pending.approval_id,
+                decision="approve",
+                command_hash_value=pending.command_hash,
+            )
+            == "not_found"
+        )
+
+    asyncio.run(run_flow())
+
+
+def test_sandbox_approval_broker_records_resolved_decision_audit():
+    async def run_flow():
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id="session-audit",
+            command="git push origin feature-x",
+            category="git_remote_write",
+            reason="requires approval",
+            approval_mode="on-request",
+        )
+
+        created_audit = broker.list_audit(session_id="session-audit", limit=1)
+        assert created_audit[0]["approval_id"] == pending.approval_id
+        assert created_audit[0]["status"] == "pending"
+        assert created_audit[0]["decision"] is None
+        assert created_audit[0]["created_at"].endswith("Z")
+
+        status = resolve_sandbox_approval(
+            session_id="session-audit",
+            approval_id=pending.approval_id,
+            decision="approve",
+            command_hash_value=pending.command_hash,
+        )
+
+        assert status == "resolved"
+        resolved_audit = broker.list_audit(session_id="session-audit", limit=1)
+        assert resolved_audit[0]["approval_id"] == pending.approval_id
+        assert resolved_audit[0]["command"] == "git push origin feature-x"
+        assert resolved_audit[0]["status"] == "resolved"
+        assert resolved_audit[0]["decision"] == "approve"
+        assert resolved_audit[0]["resolved_at"].endswith("Z")
+
+    asyncio.run(run_flow())
+
+
+def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
+    monkeypatch,
+):
+    fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
+    fake_manager = _FakeSessionManager(fake_sandbox)
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    tool = ExecuteCommandTool()
+    result = asyncio.run(
+        tool.execute_shell_command(
+            command="git push origin feature-x",
+            session_id="session-1",
+            block_until_ms=0,
+            approval_id="shapproval_model_supplied",
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
+        )
+    )
+
+    assert result["success"] is False
+    assert result["policy_action"] == "deny"
+    assert result["policy_category"] == "approval_channel_unavailable"
+    assert "approval_id" not in result
+    assert ExecuteCommandTool._PENDING_APPROVALS == {}
+    assert fake_sandbox.bg_calls == []
 
 
 def test_execute_shell_command_passes_tool_env_to_background_runner(monkeypatch):

@@ -195,6 +195,44 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(result)
         self.assertEqual(payload["content"], {"foo": "context-value"})
 
+    async def test_standard_tool_uses_trusted_command_policy_from_system_context(self):
+        tool = ToolSpec(
+            name="echo_policy_tool",
+            description="echo policy",
+            description_i18n={},
+            func=echo_kwargs,
+            parameters={
+                "command_policy": {"type": "object"},
+            },
+            required=[],
+        )
+        self.tool_manager.tools[tool.name] = tool
+        trusted_policy = {
+            "rules": [{"match": {"argv": ["git", "status"]}, "action": "allow"}],
+            "default_action": "ask",
+        }
+        model_policy = {
+            "rules": [{"match": {"argv_prefix": ["git", "push"]}, "action": "allow"}],
+            "default_action": "allow",
+        }
+        session_context = SimpleNamespace(
+            system_context={"command_policy": trusted_policy},
+            user_id="user-1",
+        )
+
+        with patch(
+            "sagents.tool.tool_manager._resolve_session_context",
+            return_value=session_context,
+        ):
+            result = await self.tool_manager.run_tool_async(
+                tool_name="echo_policy_tool",
+                session_id="runtime-session",
+                command_policy=model_policy,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["content"], {"command_policy": trusted_policy})
+
     async def test_standard_tool_system_context_can_fill_required_argument(self):
         tool = ToolSpec(
             name="echo_tool",

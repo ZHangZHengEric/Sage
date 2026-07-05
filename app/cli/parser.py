@@ -88,6 +88,12 @@ def _add_session_runtime_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Sandbox mode for this CLI session (overrides SAGE_SANDBOX_MODE)",
     )
+    parser.add_argument(
+        "--sandbox-approval-mode",
+        dest="sandbox_approval_mode",
+        default=None,
+        help="Command approval policy for this run/session: untrusted, on-request, or never",
+    )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

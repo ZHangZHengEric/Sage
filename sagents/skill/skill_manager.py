@@ -206,9 +206,7 @@ class SkillManager:
 
                         # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
-                        self._load_skill_from_dir(
-                            skill_path, skip_if_loaded=True
-                        )
+                        self._load_skill_from_dir(skill_path, skip_if_loaded=True)
 
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")

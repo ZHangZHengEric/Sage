@@ -2,7 +2,6 @@ import asyncio
 import inspect
 from typing import Any, Dict, Optional
 from sagents.observability.manager import ObservabilityManager
-from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_schema import McpToolSpec, SageMcpToolSpec
 from sagents.context.session_context import SessionContext
 

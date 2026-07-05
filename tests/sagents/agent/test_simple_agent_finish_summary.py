@@ -1451,8 +1451,7 @@ def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
     ]
     assert all(
         not (
-            isinstance(chunk.content, str)
-            and "检测到任务进入重复循环" in chunk.content
+            isinstance(chunk.content, str) and "检测到任务进入重复循环" in chunk.content
         )
         for chunk in chunks
     )
