@@ -286,6 +286,21 @@ const currentSkills = ref([])
 const activeSkillQuery = ref(null)
 const uploadedFiles = ref([])
 
+const findUploadedFileIndex = (fileItem) => {
+  if (!fileItem) return -1
+  return uploadedFiles.value.findIndex((item) => item === fileItem || item?.id === fileItem.id)
+}
+
+const updateUploadedFile = (fileItem, updates) => {
+  const index = findUploadedFileIndex(fileItem)
+  if (index < 0) return false
+  uploadedFiles.value.splice(index, 1, {
+    ...uploadedFiles.value[index],
+    ...updates,
+  })
+  return true
+}
+
 const filteredSkills = computed(() => {
   // 获取 agent 配置的可用技能列表
   const agentAvailableSkills = props.selectedAgent?.availableSkills || []
@@ -861,27 +876,31 @@ const pasteMarkdownRemoteImagesIntoEditor = async (segments) => {
     try {
       const payload = await mirrorPromise
 
-      if (uploadedFiles.value.indexOf(fileItem) < 0) {
+      if (findUploadedFileIndex(fileItem) < 0) {
         continue
       }
 
-      fileItem.url = payload?.url || (typeof payload === 'string' ? payload : '')
+      const uploadedUrl = payload?.url || (typeof payload === 'string' ? payload : '')
       const serverFilename = (payload && typeof payload === 'object') ? payload.filename : ''
+      const updates = {
+        url: uploadedUrl,
+        uploading: false,
+      }
       if (serverFilename) {
-        fileItem.name = cleanupAttachmentName(serverFilename)
+        updates.name = cleanupAttachmentName(serverFilename)
         try {
           editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
         } catch (_) { /* noop */ }
       }
-      fileItem.uploading = false
 
       if ((payload && typeof payload === 'object') && payload.http_url) {
-        fileItem.preview = payload.http_url
-      } else if (/^https?:\/\//i.test(String(fileItem.url || ''))) {
-        fileItem.preview = fileItem.url
+        updates.preview = payload.http_url
+      } else if (/^https?:\/\//i.test(String(uploadedUrl || ''))) {
+        updates.preview = uploadedUrl
       }
+      updateUploadedFile(fileItem, updates)
     } catch (err) {
-      const index = uploadedFiles.value.indexOf(fileItem)
+      const index = findUploadedFileIndex(fileItem)
       if (index > -1) {
         uploadedFiles.value.splice(index, 1)
       }
@@ -1165,25 +1184,28 @@ const processFile = async (file) => {
     const url = typeof result === 'string' ? result : (result?.url || '')
     const serverFilename = (typeof result === 'object' && result?.filename) ? result.filename : ''
 
-    if (uploadedFiles.value.indexOf(fileItem) < 0) {
+    if (findUploadedFileIndex(fileItem) < 0) {
       if (preview) URL.revokeObjectURL(preview)
       return
     }
 
-    fileItem.url = url
+    const updates = {
+      url,
+      uploading: false,
+    }
     // 后端会追加时间戳 + 把图片压成 jpg，使用服务端文件名让 markdown alt 与真实 URL 文件名保持一致
     if (serverFilename) {
-      fileItem.name = serverFilename
+      updates.name = serverFilename
       // 同步更新已插入的 chip 显示与 dataset，保证 readText() 输出的占位符 alt 与最终 URL 文件名一致
       try {
         editorRef.value?.updateChipName?.(fileItem.id, serverFilename)
       } catch (_) { /* noop */ }
     }
-    fileItem.uploading = false
+    updateUploadedFile(fileItem, updates)
   } catch (error) {
 
     // 移除失败的文件
-    const index = uploadedFiles.value.indexOf(fileItem)
+    const index = findUploadedFileIndex(fileItem)
     if (index > -1) {
       uploadedFiles.value.splice(index, 1)
       if (preview) {

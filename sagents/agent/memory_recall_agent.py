@@ -523,22 +523,16 @@ class MemoryRecallAgent(AgentBase):
             # run_tool_async 返回的是 JSON 字符串，需要解析
             if isinstance(result_raw, str):
                 result = json.loads(result_raw)
-                logger.debug(f"MemoryRecallAgent: Parsed result from JSON: {result}")
                 # 有些工具返回 {"content": {...}} 的包装格式
                 if "content" in result:
                     content = result["content"]
-                    logger.info(
-                        f"MemoryRecallAgent: content type: {type(content)}, content: {content[:200] if isinstance(content, str) else content}"
-                    )
                     if isinstance(content, dict):
                         result = content
                     elif isinstance(content, str):
                         # content 是 JSON 字符串，需要再次解析
                         result = json.loads(content)
-                    logger.debug(f"MemoryRecallAgent: Unwrapped content: {result}")
             elif isinstance(result_raw, dict):
                 result = result_raw
-                logger.debug(f"MemoryRecallAgent: Result is dict: {result}")
             else:
                 logger.warning(f"MemoryRecallAgent: 未知的返回类型: {type(result_raw)}")
                 return []

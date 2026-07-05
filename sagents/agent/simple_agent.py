@@ -33,6 +33,19 @@ from sagents.utils.repeat_pattern import (
 
 
 TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
+DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
+REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+
+
+def _get_repeat_pattern_max_hits() -> int:
+    raw_value = (os.environ.get(REPEAT_PATTERN_MAX_HITS_ENV) or "").strip()
+    if not raw_value:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    return value if value > 0 else DEFAULT_REPEAT_PATTERN_MAX_HITS
 
 
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
@@ -106,7 +119,7 @@ class SimpleAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
 
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
-        self.max_repeat_pattern_hits = 2
+        self.max_repeat_pattern_hits = _get_repeat_pattern_max_hits()
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
@@ -1098,16 +1111,10 @@ class SimpleAgent(AgentBase):
                 all_new_response_chunks.append(correction_chunk)
 
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=(
-                                "检测到任务进入重复循环，且已尝试过程内纠偏仍未跳出。"
-                                "已自动暂停，避免无效重复。请给我一个新的约束或允许我切换执行路径后继续。"
-                            ),
-                            type=MessageType.ASSISTANT_TEXT.value,
-                        )
-                    ]
+                    logger.warning(
+                        "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
+                        "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
+                    )
                     break
             else:
                 repeat_pattern_hits = 0
@@ -1142,9 +1149,9 @@ class SimpleAgent(AgentBase):
                     )
                 elif plain_text_direct_response:
                     consecutive_plain_text_direct_responses += 1
-                    if consecutive_plain_text_direct_responses >= 2:
+                    if consecutive_plain_text_direct_responses >= 3:
                         logger.info(
-                            "SimpleAgent: 连续两轮 direct LLM 纯文本无工具调用，终止执行"
+                            "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
                         break
                     if await self._is_task_complete(
@@ -1643,9 +1650,6 @@ class SimpleAgent(AgentBase):
         Returns:
             bool: 是否应该停止执行
         """
-        if len(all_new_response_chunks) < 10:
-            logger.debug(f"SimpleAgent: 响应块: {all_new_response_chunks}")
-
         if len(all_new_response_chunks) == 0:
             logger.info("SimpleAgent: 没有更多响应块，停止执行")
             return True

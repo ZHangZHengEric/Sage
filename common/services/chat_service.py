@@ -11,6 +11,7 @@ import traceback
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 from sagents.context.session_context import get_session_run_lock
@@ -209,6 +210,83 @@ def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
         "memory_type": request.memory_type,
         "force_summary": request.force_summary,
     }
+
+
+def _extract_multimodal_image_url(item: Dict[str, Any]) -> str:
+    image_url = item.get("image_url")
+    if isinstance(image_url, dict):
+        return str(image_url.get("url") or "").strip()
+    if isinstance(image_url, str):
+        return image_url.strip()
+    return str(item.get("url") or "").strip()
+
+
+def _append_text_part(content: List[Any], text: str) -> None:
+    if not text:
+        return
+    if content and isinstance(content[-1], dict) and content[-1].get("type") == "text":
+        content[-1]["text"] = str(content[-1].get("text") or "") + text
+        return
+    content.append({"type": "text", "text": text})
+
+
+def _image_markdown_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    name = unquote(Path(parsed.path).name) if parsed.path else ""
+    if not name or url.startswith("data:image/"):
+        name = "image"
+    name = name.replace("]", "\\]")
+    return f"![{name}]({url})"
+
+
+def _downgrade_message_images_to_markdown(message: Any) -> int:
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return 0
+
+    downgraded = 0
+    new_content: List[Any] = []
+    for index, item in enumerate(content):
+        if not isinstance(item, dict):
+            new_content.append(item)
+            continue
+
+        if item.get("type") != "image_url":
+            if item.get("type") == "text":
+                _append_text_part(new_content, str(item.get("text") or ""))
+            else:
+                new_content.append(item)
+            continue
+
+        url = _extract_multimodal_image_url(item)
+        if not url:
+            downgraded += 1
+            continue
+
+        next_item = content[index + 1] if index + 1 < len(content) else None
+        next_text = (
+            str(next_item.get("text") or "")
+            if isinstance(next_item, dict) and next_item.get("type") == "text"
+            else ""
+        )
+        if url not in next_text:
+            _append_text_part(new_content, _image_markdown_from_url(url))
+        downgraded += 1
+
+    if downgraded:
+        message.content = new_content
+    return downgraded
+
+
+def enforce_multimodal_capability_guard(request: StreamRequest) -> int:
+    llm_config = request.llm_model_config or {}
+    if llm_config.get("supports_multimodal") is not False:
+        return 0
+
+    downgraded = 0
+    for message in request.messages or []:
+        downgraded += _downgrade_message_images_to_markdown(message)
+    return downgraded
 
 
 def _get_provider_api_key(provider: Any) -> Optional[str]:
@@ -891,7 +969,6 @@ async def populate_request_from_agent_config(
             )
             request.llm_model_config["fast_base_url"] = fast_provider.base_url
             request.llm_model_config["fast_model_name"] = fast_provider.model
-            logger.info(f"Fast model configured: {fast_provider.model}")
 
     if request.max_loop_count is None:
         raise SageHTTPException(
@@ -1193,6 +1270,11 @@ async def prepare_session(
     request.session_id = session_id
     _sync_sandbox_approval_mode_to_context(request)
     _sync_command_policy_to_context(request)
+    downgraded_images = enforce_multimodal_capability_guard(request)
+    if downgraded_images:
+        logger.bind(session_id=session_id).info(
+            f"模型不支持多模态，已将图片输入降级为 markdown 引用: count={downgraded_images}"
+        )
     logger.bind(session_id=session_id).info(
         f"Chat request - {json.dumps(_summarize_chat_request(request), ensure_ascii=False)}"
     )
@@ -1250,7 +1332,6 @@ async def execute_chat_session(
     )
 
     stream_counter = 0
-    last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
 
@@ -1262,14 +1343,6 @@ async def execute_chat_session(
             stream_service.process_stream(), progress_queue
         ):
             stream_counter += 1
-            current_time = time.time()
-            if stream_counter % 100 == 0:
-                time_since_last = current_time - last_activity_time
-                last_activity_time = current_time
-
-                logger.bind(session_id=session_id).info(
-                    f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
-                )
 
             if kind == "tool_progress":
                 # progress 事件不进 token usage、不进 MessageManager；直接下发

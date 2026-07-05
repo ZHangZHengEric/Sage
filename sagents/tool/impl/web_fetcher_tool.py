@@ -152,8 +152,6 @@ class WebFetcherTool:
 
         # 获取工作空间路径
         workspace_path = self._get_workspace_path(session_id)
-        logger.info(f"WebFetcher: Workspace path: {workspace_path}")
-        logger.info(f"WebFetcher: Starting to fetch {len(urls)} URL(s) with Scrapling")
 
         # 计算每个HTML页面可以返回的最大字符数
         # 总字符数 = 8000 tokens * 2.5 chars/token = 20000 字符
@@ -162,9 +160,6 @@ class WebFetcherTool:
         if html_url_count > 0:
             max_total_chars = int(self.MAX_TOTAL_TOKENS * self.CHARS_PER_TOKEN)
             chars_per_html = max_total_chars // html_url_count
-            logger.info(
-                f"WebFetcher: {html_url_count} HTML URLs, {chars_per_html} chars per URL"
-            )
         else:
             chars_per_html = max_length_per_url
 
@@ -198,7 +193,6 @@ class WebFetcherTool:
                 }
 
         # 并发处理所有URL
-        logger.info(f"WebFetcher: Concurrently processing {len(urls)} URL(s)")
         tasks = [process_single_url(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
@@ -401,19 +395,10 @@ class WebFetcherTool:
         retries: int,
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，保存完整内容到文件，返回部分内容"""
-        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
-
         last_error = None
         for attempt in range(retries + 1):
             try:
-                # 创建异步 fetcher
-                fetcher = AsyncFetcher()
-
-                # 抓取页面（始终使用隐身模式）
-                page = await asyncio.wait_for(
-                    fetcher.get(url, stealthy_headers=True, timeout=timeout),
-                    timeout=timeout + 5,
-                )
+                page = await self._fetch_html_page(url, timeout)
 
                 # 提取标题
                 title = page.css("title::text").get("")
@@ -545,20 +530,10 @@ class WebFetcherTool:
         self, url: str, max_length: int, timeout: int, retries: int
     ) -> Dict[str, Any]:
         """抓取单个HTML页面，带重试机制和严格超时控制"""
-        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
-
         last_error = None
         for attempt in range(retries + 1):
             try:
-                # 创建异步 fetcher
-                fetcher = AsyncFetcher()
-
-                # 抓取页面（始终使用隐身模式）
-                # 使用 asyncio.wait_for 包装，确保整体超时控制
-                page = await asyncio.wait_for(
-                    fetcher.get(url, stealthy_headers=True, timeout=timeout),
-                    timeout=timeout + 5,  # 给一些缓冲时间
-                )
+                page = await self._fetch_html_page(url, timeout)
 
                 # 提取标题
                 title = page.css("title::text").get("")
@@ -652,6 +627,15 @@ class WebFetcherTool:
             "content": None,
             "metadata": None,
         }
+
+    async def _fetch_html_page(self, url: str, timeout: int):
+        """Fetch an HTML page with Scrapling's class-level async fetcher API."""
+        from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
+
+        return await asyncio.wait_for(
+            AsyncFetcher.get(url, stealthy_headers=True, timeout=timeout),
+            timeout=timeout + 5,
+        )
 
     def _clean_content(self, text: str) -> str:
         """清理内容"""

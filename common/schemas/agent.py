@@ -39,6 +39,12 @@ class FileWorkspaceStatRequest(BaseModel):
     paths: List[str]
 
 
+class FileWorkspaceDownloadFromUrlRequest(BaseModel):
+    source_url: str
+    filename: str
+    target_path: str = ""
+
+
 class DeleteAgentWorkspaceRequest(BaseModel):
     agent_id: str
     user_id: str

@@ -2,8 +2,6 @@ import asyncio
 import inspect
 from typing import Any, Dict, Optional
 from sagents.observability.manager import ObservabilityManager
-from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
-from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_schema import McpToolSpec, SageMcpToolSpec
 from sagents.context.session_context import SessionContext
 
@@ -22,13 +20,35 @@ class ObservableToolManager:
 
     def __init__(
         self,
-        tool_manager: ToolManager,
+        tool_manager: Any,
         observability_manager: ObservabilityManager,
         session_id: str,
     ):
         self._tool_manager = tool_manager
         self.observability_manager = observability_manager
         self.session_id = session_id
+
+    @classmethod
+    def wrap(
+        cls,
+        tool_manager: Any,
+        observability_manager: ObservabilityManager,
+        session_id: str,
+    ) -> Any:
+        if tool_manager is None:
+            return None
+        if isinstance(tool_manager, cls):
+            if (
+                tool_manager.observability_manager is observability_manager
+                and tool_manager.session_id == session_id
+            ):
+                return tool_manager
+            return cls(
+                tool_manager._tool_manager,
+                observability_manager,
+                session_id,
+            )
+        return cls(tool_manager, observability_manager, session_id)
 
     def __getattr__(self, name):
         # Delegate all other calls to the original tool manager
@@ -149,11 +169,10 @@ class ObservableCompletions:
             llm_system = "default_endpoint"
 
         if session_id:
-            messages_for_obs = redact_base64_data_urls_in_value(messages)
             self.observability_manager.on_llm_start(
                 session_id,
                 model_name,
-                messages_for_obs,
+                messages,
                 llm_system=llm_system,
                 step_name=step_name,  # pyright: ignore[reportArgumentType]
             )
@@ -233,7 +252,7 @@ class AgentRuntime:
             # 3. Wrap Dependencies (ToolManager)
             wrapped_tm = tool_manager
             if tool_manager:
-                wrapped_tm = ObservableToolManager(
+                wrapped_tm = ObservableToolManager.wrap(
                     tool_manager,  # pyright: ignore[reportArgumentType]
                     self.observability_manager,
                     session_id,  # pyright: ignore[reportArgumentType]

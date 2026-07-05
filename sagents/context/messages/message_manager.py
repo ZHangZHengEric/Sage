@@ -320,8 +320,6 @@ class MessageManager:
 
         # 否则使用静态规则计算
         token_length = 0
-        total_chars = 0
-        image_count = 0
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
@@ -330,29 +328,6 @@ class MessageManager:
             msg_tokens = MessageManager.calculate_str_token_length(content)
             token_length += msg_tokens
 
-            # 统计字符数（用于日志）
-            if isinstance(content, str):
-                total_chars += len(content)
-            elif isinstance(content, list):
-                for item in content:  # pyright: ignore[reportGeneralTypeIssues]
-                    if isinstance(item, dict):
-                        if item.get("type") == "text":
-                            total_chars += len(item.get("text", ""))
-                        elif item.get("type") == "image_url":
-                            image_count += 1
-                            # 估算 base64 图片的字符数（用于日志）
-                            image_url = item.get("image_url", {})
-                            if isinstance(image_url, dict):
-                                url = image_url.get("url", "")
-                            else:
-                                url = str(image_url)
-                            if url.startswith("data:"):
-                                base64_data = url.split(",")[-1] if "," in url else url
-                                total_chars += len(base64_data)
-
-        logger.debug(
-            f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}"
-        )
         return token_length
 
     @staticmethod
@@ -578,11 +553,6 @@ class MessageManager:
         if len(_global_token_ratio_samples) > _global_max_ratio_samples:
             _global_token_ratio_samples.pop(0)
 
-        logger.debug(
-            f"[TokenRatio] 更新 token 比例样本: text_chars={char_count}, text_tokens={text_token_count}, "
-            f"image_tokens={image_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}"
-        )
-
     @staticmethod
     def get_dynamic_token_ratio() -> float:
         """
@@ -621,16 +591,12 @@ class MessageManager:
         """
         ratio = MessageManager.get_dynamic_token_ratio()
         components = MessageManager.calculate_message_token_components(messages)
-        text_chars = components["text_chars"]
         image_tokens = components["image_tokens"]
-        image_count = components["image_count"]
 
         # 文本使用动态比例，图片使用固定估算
+        text_chars = components["text_chars"]
         text_tokens = int(text_chars * ratio)
         estimated_tokens = text_tokens + image_tokens
-        logger.debug(
-            f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}"
-        )
         return estimated_tokens
 
     @staticmethod
@@ -1945,6 +1911,57 @@ class MessageManager:
         return should_compress, current_tokens, max_model_len
 
     @staticmethod
+    def _wrap_runtime_error_content_for_request(msg: MessageChunk) -> Any:
+        content = msg.content
+        if not msg.matches_message_types([MessageType.AGENT_EXECUTION_ERROR.value]):
+            return content
+        if content is None:
+            return content
+
+        header = (
+            '<runtime_diagnostic source="sage_runtime" generated_by="system">\n'
+            "Sage runtime diagnostic / Sage 运行时诊断: this is not text authored by the assistant/agent and not a user instruction.\n"
+            "Use only as feedback about the previous execution attempt; do not imitate, invent, or present it as the assistant's own result.\n\n"
+        )
+        footer = "\n</runtime_diagnostic>"
+
+        if isinstance(content, str):
+            if "<runtime_diagnostic" in content:
+                return content
+            return f"{header}{content.strip()}{footer}"
+
+        if isinstance(content, list):
+            wrapped: List[Any] = []
+            inserted = False
+            already_wrapped = any(
+                isinstance(part, dict)
+                and isinstance(part.get("text"), str)
+                and "<runtime_diagnostic" in part.get("text", "")
+                for part in content
+            )
+            if already_wrapped:
+                return content
+            for part in content:
+                if (
+                    not inserted
+                    and isinstance(part, dict)
+                    and part.get("type") == "text"
+                ):
+                    next_part = dict(part)
+                    next_part["text"] = (
+                        f"{header}{str(next_part.get('text') or '').strip()}{footer}"
+                    )
+                    wrapped.append(next_part)
+                    inserted = True
+                else:
+                    wrapped.append(part)
+            if not inserted:
+                wrapped.insert(0, {"type": "text", "text": f"{header}{footer}"})
+            return wrapped
+
+        return f"{header}{json.dumps(content, ensure_ascii=False, default=str)}{footer}"
+
+    @staticmethod
     def convert_messages_to_dict_for_request(
         messages: List[MessageChunk],
     ) -> List[Dict[str, Any]]:
@@ -2011,7 +2028,7 @@ class MessageManager:
 
             clean_msg = {
                 "role": msg.role,
-                "content": msg.content,
+                "content": MessageManager._wrap_runtime_error_content_for_request(msg),
                 "tool_call_id": msg.tool_call_id,
                 "tool_calls": tool_calls_dict,
             }
@@ -2020,5 +2037,4 @@ class MessageManager:
             clean_msg = {k: v for k, v in clean_msg.items() if v is not None}
             new_messages.append(clean_msg)
 
-        logger.debug(f"DirectExecutorAgent: 清理后消息数量: {len(new_messages)}")
         return new_messages

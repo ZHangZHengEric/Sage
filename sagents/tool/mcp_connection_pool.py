@@ -33,6 +33,18 @@ class McpWorkerClosedError(ConnectionError):
     """Raised when a pooled MCP worker is closed locally during replacement."""
 
 
+class McpConnectionStaleError(ConnectionError):
+    """Raised when a pooled MCP connection is stale before a request is sent."""
+
+
+class McpToolCallInFlightError(Exception):
+    """Wraps an error raised after a tool call has been sent."""
+
+    def __init__(self, original: BaseException):
+        super().__init__(str(original))
+        self.original = original
+
+
 def _env_int(name: str, default: int, minimum: int = 0) -> int:
     raw = os.environ.get(name)
     if raw is None:
@@ -136,6 +148,31 @@ def _server_params_payload(server_params: ServerParams) -> Dict[str, Any]:
     return {"protocol": type(server_params).__name__, "repr": repr(server_params)}
 
 
+def _extract_server_generation(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    payload: Optional[Dict[str, Any]] = None
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump()
+    elif isinstance(value, dict):
+        payload = value
+
+    if not isinstance(payload, dict):
+        return None
+
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    observed = metadata.get("server_generation")
+    if observed:
+        return str(observed)
+
+    return None
+
+
 def config_fingerprint(
     server_name: str,
     server_params: ServerParams,
@@ -168,7 +205,7 @@ def _is_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None)
-        if status_code in {400, 404, 409, 410}:
+        if status_code in {400, 404, 410}:
             return True
     if isinstance(exc, (ConnectionError, EOFError, TimeoutError, OSError)):
         return True
@@ -181,14 +218,10 @@ def _is_connection_error(exc: BaseException) -> bool:
     return any(
         marker in text
         for marker in (
-            "closed",
-            "broken",
-            "connection",
-            "disconnect",
             "eof",
-            "reset",
-            "stream",
-            "transport",
+            "closed resource",
+            "broken pipe",
+            "connection reset",
             "session terminated",
             "session expired",
             "session not found",
@@ -201,6 +234,7 @@ class McpPooledConnection:
         self.server_name = server_name
         self.server_params = server_params
         self.session: Optional[ClientSession] = None
+        self.server_generation: Optional[str] = None
         self.active_requests = 0
         self.last_used_at = time.monotonic()
         self.closed = False
@@ -228,10 +262,12 @@ class McpPooledConnection:
             )
 
         self.session = await self._stack.enter_async_context(ClientSession(read, write))
-        await self.session.initialize()
+        initialize_result = await self.session.initialize()
+        self.server_generation = _extract_server_generation(initialize_result)
         self.last_used_at = time.monotonic()
         logger.info(
-            f"MCP connection initialized: server={self.server_name}, protocol={protocol}"
+            f"MCP connection initialized: server={self.server_name}, "
+            f"protocol={protocol}, server_generation={self.server_generation or '-'}"
         )
         return self
 
@@ -486,6 +522,9 @@ def _is_http_worker_server_params(server_params: ServerParams) -> bool:
 
 
 class McpHttpWorkerPoolEntry:
+    HEALTH_CHECK_IDLE_SECONDS = 30.0
+    HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
+
     def __init__(
         self,
         server_name: str,
@@ -506,21 +545,62 @@ class McpHttpWorkerPoolEntry:
             _env_float("SAGE_MCP_CALL_TIMEOUT_SECONDS", 300.0, minimum=0.0),
             minimum=0.0,
         )
+        self.health_check_idle_seconds = _get_config_float(
+            self.config,
+            ["http_worker_health_check_idle_seconds", "health_check_idle_seconds"],
+            self.HEALTH_CHECK_IDLE_SECONDS,
+            minimum=0.0,
+        )
+        self.health_check_timeout_seconds = _get_config_float(
+            self.config,
+            [
+                "http_worker_health_check_timeout_seconds",
+                "health_check_timeout_seconds",
+            ],
+            self.HEALTH_CHECK_TIMEOUT_SECONDS,
+            minimum=0.0,
+        )
         self.tools_cache: Optional[List[Tool]] = None
+        self._tools_cache_observed_at: Optional[float] = None
         self.draining = False
         self._queue: asyncio.Queue = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self._closed = False
         self._current_future: Optional[asyncio.Future] = None
+        self._last_activity_at = time.monotonic()
+        self._worker_generation = 0
+        self.server_generation: Optional[str] = None
 
     @property
     def closed(self) -> bool:
         return self._closed or (self._task is not None and self._task.done())
 
+    @property
+    def worker_generation(self) -> int:
+        return self._worker_generation
+
+    @property
+    def queue_depth(self) -> int:
+        return self._queue.qsize()
+
+    @property
+    def has_fresh_tools_cache(self) -> bool:
+        if self.tools_cache is None or self._tools_cache_observed_at is None:
+            return False
+        if self.health_check_idle_seconds <= 0:
+            return False
+        if self.health_check_timeout_seconds <= 0:
+            return False
+        return (
+            time.monotonic() - self._tools_cache_observed_at
+            < self.health_check_idle_seconds
+        )
+
     async def list_tools(self) -> List[Tool]:
         tools = await self._submit("list_tools", None)
         self.tools_cache = tools
+        self._tools_cache_observed_at = time.monotonic()
         return tools
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
@@ -547,7 +627,9 @@ class McpHttpWorkerPoolEntry:
                 self._task.cancel()
                 return
             close_future = asyncio.get_running_loop().create_future()
-            await self._queue.put(("close", None, close_future))
+            await self._queue.put(
+                ("close", None, close_future, self._worker_generation)
+            )
 
         try:
             if self.drain_timeout_seconds > 0:
@@ -572,22 +654,41 @@ class McpHttpWorkerPoolEntry:
                     f"{self.server_name}"
                 )
             if self._task is None or self._task.done():
-                self._closed = False
-                self._task = asyncio.create_task(self._run())
+                self._start_worker_locked()
             future = asyncio.get_running_loop().create_future()
-            await self._queue.put((operation, payload, future))
+            await self._queue.put((operation, payload, future, self._worker_generation))
 
         return await future
 
-    async def _run(self) -> None:
+    def _start_worker_locked(self) -> None:
+        self._closed = False
+        self._worker_generation += 1
+        generation = self._worker_generation
+        self._task = asyncio.create_task(self._run(generation))
+        logger.info(
+            f"MCP {_server_protocol(self.server_params)} worker started: "
+            f"server={self.server_name}, worker_generation={generation}"
+        )
+
+    async def _run(self, worker_generation: int) -> None:
         connection = McpPooledConnection(self.server_name, self.server_params)
         current_future: Optional[asyncio.Future] = None
         close_future: Optional[asyncio.Future] = None
         worker_error: Optional[BaseException] = None
         try:
             await connection.open()
+            self._observe_server_generation(
+                connection.server_generation,
+                source=f"open worker_generation={worker_generation}",
+            )
+            self._last_activity_at = time.monotonic()
             while True:
-                operation, payload, current_future = await self._queue.get()
+                (
+                    operation,
+                    payload,
+                    current_future,
+                    request_generation,
+                ) = await self._queue.get()
                 self._current_future = current_future
                 if operation == "close":
                     close_future = current_future
@@ -596,29 +697,47 @@ class McpHttpWorkerPoolEntry:
                     break
 
                 try:
+                    if request_generation != worker_generation:
+                        raise self._worker_closed_error(
+                            worker_generation=request_generation
+                        )
+                    await self._ensure_connection_healthy(
+                        connection,
+                        force=operation == "call_tool",
+                    )
                     assert connection.session is not None
                     if operation == "list_tools":
                         response = await connection.session.list_tools()
                         result = response.tools
                         self.tools_cache = result
                     elif operation == "call_tool":
-                        call = connection.session.call_tool(
-                            payload["tool_name"],
-                            payload["arguments"],
-                        )
-                        if self.call_timeout_seconds > 0:
-                            result = await asyncio.wait_for(
-                                call,
-                                timeout=self.call_timeout_seconds,
+                        try:
+                            call = connection.session.call_tool(
+                                payload["tool_name"],
+                                payload["arguments"],
                             )
-                        else:
-                            result = await call
+                            if self.call_timeout_seconds > 0:
+                                result = await asyncio.wait_for(
+                                    call,
+                                    timeout=self.call_timeout_seconds,
+                                )
+                            else:
+                                result = await call
+                        except asyncio.TimeoutError:
+                            raise
+                        except BaseException as exc:
+                            raise McpToolCallInFlightError(exc) from exc
                     else:
                         raise RuntimeError(f"Unknown MCP worker operation: {operation}")
                 except asyncio.TimeoutError:
+                    target = (
+                        payload["tool_name"]
+                        if operation == "call_tool" and payload is not None
+                        else operation
+                    )
                     timeout_error = TimeoutError(
                         f"MCP tool call timed out after {self.call_timeout_seconds:g}s: "
-                        f"server={self.server_name}, tool={payload['tool_name']}"
+                        f"server={self.server_name}, tool={target}"
                     )
                     if not current_future.done():  # pyright: ignore[reportOptionalMemberAccess]
                         current_future.set_exception(timeout_error)  # pyright: ignore[reportOptionalMemberAccess]
@@ -630,6 +749,7 @@ class McpHttpWorkerPoolEntry:
                 else:
                     if not current_future.done():  # pyright: ignore[reportOptionalMemberAccess]
                         current_future.set_result(result)  # pyright: ignore[reportOptionalMemberAccess]
+                    self._last_activity_at = time.monotonic()
                 finally:
                     if self._current_future is current_future:
                         self._current_future = None
@@ -646,10 +766,93 @@ class McpHttpWorkerPoolEntry:
                 close_future.set_result(None)
             await self._fail_pending_requests(worker_error)
 
-    def _worker_closed_error(self) -> McpWorkerClosedError:
+    async def _ensure_connection_healthy(
+        self,
+        connection: McpPooledConnection,
+        *,
+        force: bool = False,
+    ) -> None:
+        if (
+            self.health_check_timeout_seconds <= 0
+            or self.health_check_idle_seconds < 0
+            or (
+                not force
+                and time.monotonic() - self._last_activity_at
+                < self.health_check_idle_seconds
+            )
+        ):
+            return
+        session = connection.session
+        ping = getattr(session, "send_ping", None)
+        if not callable(ping):
+            return
+        try:
+            await asyncio.wait_for(
+                self._ping_and_observe_generation(ping),
+                timeout=self.health_check_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectionError(
+                f"MCP {_server_protocol(self.server_params)} health check timed out "
+                f"after {self.health_check_timeout_seconds:g}s: "
+                f"server={self.server_name}"
+            ) from exc
+        except ConnectionError:
+            raise
+        except BaseException as exc:
+            raise ConnectionError(
+                f"MCP {_server_protocol(self.server_params)} health check failed: "
+                f"server={self.server_name}, error={exc}"
+            ) from exc
+        self._last_activity_at = time.monotonic()
+
+    async def _ping_and_observe_generation(self, ping: Any) -> None:
+        ping_result = await ping()
+        observed_generation = _extract_server_generation(ping_result)
+        changed = self._observe_server_generation(
+            observed_generation,
+            source="health_check",
+        )
+        if changed:
+            raise McpConnectionStaleError(
+                f"MCP {_server_protocol(self.server_params)} server generation "
+                f"changed before request: server={self.server_name}, "
+                f"server_generation={self.server_generation}"
+            )
+
+    def _observe_server_generation(
+        self,
+        observed_generation: Optional[str],
+        source: str,
+    ) -> bool:
+        if not observed_generation:
+            return False
+        if self.server_generation is None:
+            self.server_generation = observed_generation
+            return False
+        if observed_generation == self.server_generation:
+            return False
+
+        previous_generation = self.server_generation
+        self.server_generation = observed_generation
+        self.tools_cache = None
+        self._tools_cache_observed_at = None
+        logger.info(
+            f"MCP {_server_protocol(self.server_params)} server generation changed: "
+            f"server={self.server_name}, previous_generation={previous_generation}, "
+            f"server_generation={observed_generation}, source={source}"
+        )
+        return True
+
+    def _worker_closed_error(
+        self, worker_generation: Optional[int] = None
+    ) -> McpWorkerClosedError:
+        generation = (
+            self._worker_generation if worker_generation is None else worker_generation
+        )
         return McpWorkerClosedError(
             f"MCP {_server_protocol(self.server_params)} worker closed: "
-            f"{self.server_name}"
+            f"{self.server_name}, worker_generation={generation}"
         )
 
     def _fail_current_request(self) -> None:
@@ -660,9 +863,14 @@ class McpHttpWorkerPoolEntry:
         self, error: Optional[BaseException] = None
     ) -> None:
         while not self._queue.empty():
-            _operation, _payload, future = await self._queue.get()
+            _operation, _payload, future, request_generation = await self._queue.get()
             if not future.done():
-                future.set_exception(error or self._worker_closed_error())
+                future.set_exception(
+                    error
+                    or self._worker_closed_error(
+                        worker_generation=request_generation,
+                    )
+                )
 
 
 class McpConnectionPool:
@@ -679,7 +887,22 @@ class McpConnectionPool:
         key = server_name.strip()
         entry = self._entries.get(key)
         fingerprint = config_fingerprint(key, server_params, config)
-        if entry and entry.fingerprint == fingerprint and entry.tools_cache is not None:
+        if isinstance(entry, McpHttpWorkerPoolEntry):
+            if (
+                entry.fingerprint == fingerprint
+                and not entry.draining
+                and not entry.closed
+                and entry.has_fresh_tools_cache
+            ):
+                return entry.tools_cache
+            return None
+        if (
+            entry
+            and entry.fingerprint == fingerprint
+            and not entry.draining
+            and not getattr(entry, "closed", False)
+            and entry.tools_cache is not None
+        ):
             return entry.tools_cache
         return None
 
@@ -701,10 +924,7 @@ class McpConnectionPool:
             retry_enabled = _env_bool(
                 "SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR", True
             )
-            max_connection_retries = 1 if retry_enabled else 0
-            max_worker_replacements = 2 if retry_enabled else 0
-            connection_retries_used = 0
-            worker_replacements_used = 0
+            replacement_used = False
             while True:
                 try:
                     return await entry.list_tools()
@@ -712,12 +932,14 @@ class McpConnectionPool:
                     task = asyncio.current_task()
                     if task is not None and task.cancelling():
                         raise
-                    if connection_retries_used < max_connection_retries:
-                        connection_retries_used += 1
+                    if retry_enabled and not replacement_used:
+                        replacement_used = True
                         await self._retire_http_worker_entry(key, entry)
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} list_tools "
-                            f"cancelled by worker, retrying once: server={key}"
+                            f"cancelled by worker, replacing once: server={key}, "
+                            f"worker_generation={entry.worker_generation}, "
+                            f"queue_depth={entry.queue_depth}"
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
@@ -729,26 +951,14 @@ class McpConnectionPool:
                 except Exception as exc:
                     if not _is_connection_error(exc):
                         raise
-                    worker_closed = isinstance(exc, McpWorkerClosedError)
-                    can_retry_worker = (
-                        worker_closed
-                        and worker_replacements_used < max_worker_replacements
-                    )
-                    can_retry_connection = (
-                        not worker_closed
-                        and connection_retries_used < max_connection_retries
-                    )
-                    if can_retry_worker or can_retry_connection:
-                        if worker_closed:
-                            worker_replacements_used += 1
-                        else:
-                            connection_retries_used += 1
+                    if retry_enabled and not replacement_used:
+                        replacement_used = True
                         await self._retire_http_worker_entry(key, entry)
-                        retry_reason = "worker closed" if worker_closed else "failed"
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} list_tools "
-                            f"{retry_reason}, "
-                            f"retrying once: server={key}, error={exc}"
+                            f"failed, replacing once: server={key}, "
+                            f"worker_generation={entry.worker_generation}, "
+                            f"queue_depth={entry.queue_depth}, error={exc}"
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
@@ -810,27 +1020,29 @@ class McpConnectionPool:
                 config,
             )
             retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
-            max_connection_retries = 1 if retry_enabled else 0
-            max_worker_replacements = 2 if retry_enabled else 0
-            connection_retries_used = 0
-            worker_replacements_used = 0
+            replacement_used = False
             while True:
                 try:
                     return await entry.call_tool(tool_name, arguments)
                 except TimeoutError:
                     await self._discard_http_worker_entry(key, entry)
                     raise
+                except McpToolCallInFlightError as exc:
+                    await self._discard_http_worker_entry(key, entry)
+                    raise exc.original from exc
                 except asyncio.CancelledError:
                     task = asyncio.current_task()
                     if task is not None and task.cancelling():
                         raise
-                    if connection_retries_used < max_connection_retries:
-                        connection_retries_used += 1
+                    if retry_enabled and not replacement_used:
+                        replacement_used = True
                         await self._retire_http_worker_entry(key, entry)
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} call cancelled "
-                            f"by worker, retrying once: server={key}, "
-                            f"tool={tool_name}"
+                            f"by worker, replacing once: server={key}, "
+                            f"tool={tool_name}, "
+                            f"worker_generation={entry.worker_generation}, "
+                            f"queue_depth={entry.queue_depth}"
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
@@ -842,27 +1054,14 @@ class McpConnectionPool:
                 except Exception as exc:
                     if not _is_connection_error(exc):
                         raise
-                    worker_closed = isinstance(exc, McpWorkerClosedError)
-                    can_retry_worker = (
-                        worker_closed
-                        and worker_replacements_used < max_worker_replacements
-                    )
-                    can_retry_connection = (
-                        not worker_closed
-                        and connection_retries_used < max_connection_retries
-                    )
-                    if can_retry_worker or can_retry_connection:
-                        if worker_closed:
-                            worker_replacements_used += 1
-                        else:
-                            connection_retries_used += 1
+                    if retry_enabled and not replacement_used:
+                        replacement_used = True
                         await self._retire_http_worker_entry(key, entry)
-                        retry_reason = "worker closed" if worker_closed else "failed"
                         logger.warning(
                             f"MCP {_server_protocol(server_params)} call "
-                            f"{retry_reason}, "
-                            f"retrying once: server={key}, tool={tool_name}, "
-                            f"error={exc}"
+                            f"failed, replacing once: server={key}, tool={tool_name}, "
+                            f"worker_generation={entry.worker_generation}, "
+                            f"queue_depth={entry.queue_depth}, error={exc}"
                         )
                         entry = await self._get_or_create_http_worker_entry(
                             key,
@@ -923,9 +1122,10 @@ class McpConnectionPool:
         key: str,
         entry: McpHttpWorkerPoolEntry,
     ) -> None:
-        if self._entries.get(key) is entry:
-            await self._discard_http_worker_entry(key, entry)
-            return
+        async with self._lock:
+            current = self._entries.get(key)
+            if current is entry:
+                self._entries.pop(key, None)
         await entry.close(drain=False)
 
     async def _get_or_create_entry(

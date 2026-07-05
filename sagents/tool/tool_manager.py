@@ -44,6 +44,15 @@ def _copy_json_like(value: Any, fallback: Any) -> Any:
         return fallback
 
 
+def _decode_json_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
 def _get_display_input_schema(
     tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
 ) -> Dict[str, Any]:
@@ -662,10 +671,6 @@ class ToolManager:
 
         # 工具不存在，直接注册
         self.tools[tool_spec.name] = tool_spec
-        tool_type = type(tool_spec).__name__
-        logger.debug(
-            f"Successfully registered new tool: {tool_spec.name} ({tool_type})"
-        )
         return True
 
     async def remove_tool_by_mcp(
@@ -978,15 +983,12 @@ class ToolManager:
 
     def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
         """Get a tool by name"""
-        logger.debug(f"Getting tool by name: {name}")
         return self.tools.get(name, None)
 
     def list_tools(
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List all available tools with metadata, supports language filtering via convert_spec_to_openai_format"""
-        logger.debug(f"Listing all {len(self.tools)} tools with metadata")
-
         tools_list: List[Dict[str, Any]] = []
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(
@@ -1017,8 +1019,6 @@ class ToolManager:
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List all available tools with simplified metadata, using convert_spec_to_openai_format for i18n"""
-        logger.debug(f"Listing all {len(self.tools)} tools with simplified metadata")
-
         simplified = []
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(
@@ -1037,15 +1037,12 @@ class ToolManager:
 
     def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
         """List all available tools with name (language param accepted for API consistency)"""
-        logger.debug(f"Listing all {len(self.tools)} tools with name")
         return [tool.name for tool in self.tools.values()]
 
     def list_tools_with_type(
         self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """List tools with type/source info, descriptions and parameters localized via convert_spec_to_openai_format"""
-        logger.debug(f"Listing all {len(self.tools)} tools with type information")
-
         tools_with_type: List[Dict[str, Any]] = []
         for tool in self.tools.values():
             # 类型与来源
@@ -1201,6 +1198,161 @@ class ToolManager:
 
         return self._apply_system_context_overrides(tool, normalized, trusted_context)
 
+    def _get_tool_type(
+        self, tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]
+    ) -> str:
+        if isinstance(tool, McpToolSpec):
+            return "mcp"
+        if isinstance(tool, SageMcpToolSpec):
+            return "sage_mcp"
+        return "tool"
+
+    def _get_tool_server_name(
+        self, tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]
+    ) -> Optional[str]:
+        server_name = getattr(tool, "server_name", None)
+        return str(server_name) if server_name else None
+
+    def _record_tool_call(
+        self,
+        session_context: Optional[SessionContext],
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        arguments: Dict[str, Any],
+        started_at: float,
+        status: str,
+        response: Any = None,
+        error: Optional[str] = None,
+    ) -> None:
+        if session_context is None:
+            return
+
+        ended_at = time.time()
+        payload = {
+            "tool_name": tool.name,
+            "arguments": make_serializable(arguments),
+        }
+        server_name = self._get_tool_server_name(tool)
+        call = {
+            "tool_name": tool.name,
+            "tool_type": self._get_tool_type(tool),
+            "server_name": server_name,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_sec": max(0.0, ended_at - started_at),
+            "status": status,
+            "arguments": make_serializable(arguments),
+            "request": {
+                "tool_name": tool.name,
+                "tool_type": self._get_tool_type(tool),
+                "server_name": server_name,
+                "payload": payload,
+            },
+        }
+        if response is not None:
+            call["response"] = make_serializable(_decode_json_payload(response))
+        if error is not None:
+            call["error"] = error
+        add_mcp_call = getattr(session_context, "add_mcp_call", None)
+        if callable(add_mcp_call):
+            add_mcp_call(call)
+
+    def _get_active_request_id(
+        self, session_context: Optional[SessionContext]
+    ) -> Optional[str]:
+        if session_context is None:
+            return None
+        current_request_id = getattr(session_context, "current_request_id", None)
+        if not callable(current_request_id):
+            return None
+        return current_request_id()
+
+    def _mcp_request_logger(self, session_id: str, request_id: Optional[str]):
+        bound_context: Dict[str, Any] = {}
+        if session_id:
+            bound_context["session_id"] = session_id
+        if request_id:
+            bound_context["request_id"] = request_id
+        return logger.bind(**bound_context) if bound_context else logger
+
+    def _log_mcp_request_start(
+        self,
+        tool: McpToolSpec,
+        session_id: str,
+        request_id: Optional[str],
+    ) -> None:
+        self._mcp_request_logger(session_id, request_id).debug(
+            f"MCP request start | tool={tool.name} | server={tool.server_name}"
+        )
+
+    def _log_mcp_request_end(
+        self,
+        tool: McpToolSpec,
+        session_id: str,
+        request_id: Optional[str],
+        started_at: float,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        duration_sec = max(0.0, time.time() - started_at)
+        message = (
+            f"MCP request end | tool={tool.name} | server={tool.server_name} | "
+            f"status={status} | duration_sec={duration_sec:.3f}"
+        )
+        if error:
+            message += f" | error={error}"
+        self._mcp_request_logger(session_id, request_id).debug(message)
+
+    def _record_tool_trace_start(
+        self,
+        session_context: Optional[SessionContext],
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        request_id: Optional[str],
+        arguments: Dict[str, Any],
+        started_at: float,
+    ) -> None:
+        if session_context is None:
+            return
+        record_timing_event = getattr(session_context, "record_timing_event", None)
+        if not callable(record_timing_event):
+            return
+        record_timing_event(
+            "tool_request_start",
+            request_id=request_id,
+            tool_name=tool.name,
+            tool_type=self._get_tool_type(tool),
+            server_name=self._get_tool_server_name(tool),
+            started_at=started_at,
+            arguments=make_serializable(arguments),
+        )
+
+    def _record_tool_trace_end(
+        self,
+        session_context: Optional[SessionContext],
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        request_id: Optional[str],
+        started_at: float,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        if session_context is None:
+            return
+        ended_at = time.time()
+        fields: Dict[str, Any] = {
+            "request_id": request_id,
+            "tool_name": tool.name,
+            "tool_type": self._get_tool_type(tool),
+            "server_name": self._get_tool_server_name(tool),
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_sec": max(0.0, ended_at - started_at),
+            "status": status,
+        }
+        if error:
+            fields["error"] = error
+        record_timing_event = getattr(session_context, "record_timing_event", None)
+        if callable(record_timing_event):
+            record_timing_event("tool_request_end", **fields)
+
     async def run_tool_async(
         self,
         tool_name: str,
@@ -1210,12 +1362,6 @@ class ToolManager:
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
-        logger.debug(
-            f"[Tool Execution] START | tool={tool_name} | session={session_id or 'NO_SESSION'}"
-        )
-        logger.debug(
-            f"[Tool Execution] Arguments: {json.dumps(kwargs, ensure_ascii=False, default=str)[:500]}"
-        )
         session_context = _resolve_session_context(session_id)
         resolved_user_id = user_id or getattr(session_context, "user_id", None)
 
@@ -1228,22 +1374,51 @@ class ToolManager:
             logger.error(error_msg)
             return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
 
-        logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
-
         trusted_context = self._build_trusted_tool_context(session_context)
         kwargs = self._prepare_tool_kwargs(tool, tool_name, kwargs, trusted_context)
+        tool_started_at = time.time()
+        request_id = self._get_active_request_id(session_context)
+        self._record_tool_trace_start(
+            session_context, tool, request_id, kwargs, tool_started_at
+        )
 
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                final_result = await self._execute_mcp_tool(
-                    tool,
-                    runtime_session_id=session_id,
-                    runtime_user_id=resolved_user_id,
-                    **kwargs,
-                )
+                self._log_mcp_request_start(tool, session_id, request_id)
+                try:
+                    final_result = await self._execute_mcp_tool(
+                        tool,
+                        runtime_session_id=session_id,
+                        runtime_user_id=resolved_user_id,
+                        **kwargs,
+                    )
+                    self._log_mcp_request_end(
+                        tool, session_id, request_id, tool_started_at, "success"
+                    )
+                except asyncio.CancelledError:
+                    self._log_mcp_request_end(
+                        tool,
+                        session_id,
+                        request_id,
+                        tool_started_at,
+                        "cancelled",
+                        error="cancelled",
+                    )
+                    raise
+                except Exception as e:
+                    error_detail = _innermost_exception_message(e)
+                    self._log_mcp_request_end(
+                        tool,
+                        session_id,
+                        request_id,
+                        tool_started_at,
+                        "error",
+                        error=error_detail,
+                    )
+                    raise
             elif isinstance(tool, SageMcpToolSpec):
                 final_result = await self._execute_standard_tool_async(
                     tool, runtime_session_id=session_id, **kwargs
@@ -1258,7 +1433,7 @@ class ToolManager:
                 ]
                 if missing_params:
                     # 返回错误信息而不是 raise
-                    return json.dumps(
+                    final_result = json.dumps(
                         {
                             "success": False,
                             "error": f"缺少必填参数: {', '.join(missing_params)}",
@@ -1268,6 +1443,24 @@ class ToolManager:
                         ensure_ascii=False,
                         indent=2,
                     )
+                    self._record_tool_call(
+                        session_context,
+                        tool,
+                        kwargs,
+                        tool_started_at,
+                        "error",
+                        response=final_result,
+                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                    )
+                    self._record_tool_trace_end(
+                        session_context,
+                        tool,
+                        request_id,
+                        tool_started_at,
+                        "error",
+                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                    )
+                    return final_result
 
                 # Tools run directly, they use sandbox internally if needed
                 try:
@@ -1287,12 +1480,6 @@ class ToolManager:
                     error_msg, tool_name, "UNKNOWN_TOOL_TYPE"
                 )
 
-            # Step 4: Validate Result (for non-streaming tools)
-            execution_time = time.time() - execution_start
-            logger.info(
-                f"[Tool Execution] SUCCESS | tool={tool_name} | time={execution_time:.3f}s | result_length={len(str(final_result))}"
-            )
-
             # Validate JSON format
             is_valid, validation_msg = self._validate_json_response(
                 final_result, tool_name
@@ -1301,11 +1488,41 @@ class ToolManager:
                 logger.error(
                     f"Tool '{tool_name}' returned invalid JSON: {validation_msg}"
                 )
-                return self._format_error_response(
+                error_result = self._format_error_response(
                     f"Invalid JSON response: {validation_msg}",
                     tool_name,
                     "INVALID_JSON",
                 )
+                self._record_tool_call(
+                    session_context,
+                    tool,
+                    kwargs,
+                    tool_started_at,
+                    "error",
+                    response=error_result,
+                    error=f"Invalid JSON response: {validation_msg}",
+                )
+                self._record_tool_trace_end(
+                    session_context,
+                    tool,
+                    request_id,
+                    tool_started_at,
+                    "error",
+                    error=f"Invalid JSON response: {validation_msg}",
+                )
+                return error_result
+
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "success",
+                response=final_result,
+            )
+            self._record_tool_trace_end(
+                session_context, tool, request_id, tool_started_at, "success"
+            )
 
             # Step 5: Truncate result if too long (max 8000 tokens)
             final_result = _truncate_result(final_result, MAX_TOOL_RESULT_TOKENS)
@@ -1314,6 +1531,22 @@ class ToolManager:
 
         except asyncio.CancelledError:
             execution_time = time.time() - execution_start
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "cancelled",
+                error="cancelled",
+            )
+            self._record_tool_trace_end(
+                session_context,
+                tool,
+                request_id,
+                tool_started_at,
+                "cancelled",
+                error="cancelled",
+            )
             logger.warning(
                 f"[Tool Execution] CANCELLED | tool={tool_name} | "
                 f"session={session_id or 'NO_SESSION'} | time={execution_time:.3f}s"
@@ -1325,9 +1558,27 @@ class ToolManager:
             error_msg = (
                 f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
             )
-            return self._format_error_response(
+            error_result = self._format_error_response(
                 error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )
+            self._record_tool_call(
+                session_context,
+                tool,
+                kwargs,
+                tool_started_at,
+                "error",
+                response=error_result,
+                error=error_detail,
+            )
+            self._record_tool_trace_end(
+                session_context,
+                tool,
+                request_id,
+                tool_started_at,
+                "error",
+                error=error_detail,
+            )
+            return error_result
 
     def _normalize_kwargs_by_schema(
         self,
@@ -1485,18 +1736,10 @@ class ToolManager:
         self, tool: ToolSpec, runtime_session_id: str = "", **kwargs
     ) -> str:
         """Execute standard tool and format result (async version)"""
-        logger.debug(
-            f"[_execute_standard_tool_async] START | tool={tool.name} | session={runtime_session_id or 'NO_SESSION'}"
-        )
         execute_start = time.perf_counter()
 
         try:
             # Execute the tool function
-            logger.debug(
-                f"[_execute_standard_tool_async] Executing | tool={tool.name} | is_async={asyncio.iscoroutinefunction(tool.func)}"
-            )
-            func_start = time.perf_counter()
-
             if hasattr(tool.func, "__self__"):
                 # Bound method
                 if asyncio.iscoroutinefunction(tool.func):
@@ -1529,20 +1772,11 @@ class ToolManager:
                         # 在单独的线程中执行同步函数
                         result = await asyncio.to_thread(tool.func, **kwargs)
 
-            func_cost = time.perf_counter() - func_start
-            logger.debug(
-                f"[_execute_standard_tool_async] Function executed | tool={tool.name} | time={func_cost:.3f}s"
-            )
-
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start
             if execute_cost > 2.0:
                 logger.warning(
                     f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s"
-                )
-            else:
-                logger.debug(
-                    f"[_execute_standard_tool_async] SUCCESS | tool={tool.name} | total_time={execute_cost:.3f}s"
                 )
             return json.dumps(
                 {"content": make_serializable(result)}, ensure_ascii=False, indent=2

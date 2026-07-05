@@ -7,7 +7,12 @@ import asyncio
 from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.agent.simple_agent import SimpleAgent, _get_system_prefix
+from sagents.agent.simple_agent import (
+    DEFAULT_REPEAT_PATTERN_MAX_HITS,
+    REPEAT_PATTERN_MAX_HITS_ENV,
+    SimpleAgent,
+    _get_system_prefix,
+)
 
 
 class _DummyModel:
@@ -17,6 +22,25 @@ class _DummyModel:
 
 def _agent():
     return SimpleAgent(model=_DummyModel(), model_config={})
+
+
+def test_repeat_pattern_max_hits_defaults_to_three(monkeypatch):
+    monkeypatch.delenv(REPEAT_PATTERN_MAX_HITS_ENV, raising=False)
+
+    assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS == 3
+
+
+def test_repeat_pattern_max_hits_uses_env(monkeypatch):
+    monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, "4")
+
+    assert _agent().max_repeat_pattern_hits == 4
+
+
+def test_repeat_pattern_max_hits_invalid_env_falls_back(monkeypatch):
+    for value in ["", "abc", "0", "-2"]:
+        monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, value)
+
+        assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS
 
 
 def _llm_chunk(*, content=None, tool_calls=None):
@@ -979,7 +1003,7 @@ def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
     assert chunks[-1].content == "已经完成。"
 
 
-def test_llm_judge_stops_after_two_plain_text_direct_responses(monkeypatch):
+def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
     direct_calls = []
@@ -1022,9 +1046,13 @@ def test_llm_judge_stops_after_two_plain_text_direct_responses(monkeypatch):
 
     chunks = asyncio.run(_collect())
 
-    assert len(direct_calls) == 2
-    assert len(judge_calls) == 1
-    assert [chunk.content for chunk in chunks] == ["纯文本回答 1", "纯文本回答 2"]
+    assert len(direct_calls) == 3
+    assert len(judge_calls) == 2
+    assert [chunk.content for chunk in chunks] == [
+        "纯文本回答 1",
+        "纯文本回答 2",
+        "纯文本回答 3",
+    ]
 
 
 def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
@@ -1311,6 +1339,121 @@ def test_repeat_pattern_requests_required_escape():
             pattern={"period": 1, "cycles": 2, "span": 2},
         )
         is True
+    )
+
+
+def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    agent.max_repeat_pattern_hits = 2
+    direct_calls = []
+
+    def _same_tool_result():
+        return MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"ok": false, "reason": "same"}',
+            tool_call_id="call_same",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        )
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) <= 2:
+            yield ([_same_tool_result()], False)
+            return
+
+        assert any(
+            isinstance(chunk.content, str)
+            and chunk.content.startswith("自检：检测到执行出现重复循环模式")
+            for chunk in kwargs["messages_input"]
+        )
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="已经换路径继续。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            True,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-repeat-internal",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert [chunk.content for chunk in chunks] == [
+        '{"ok": false, "reason": "same"}',
+        '{"ok": false, "reason": "same"}',
+        "已经换路径继续。",
+    ]
+
+
+def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    agent.max_repeat_pattern_hits = 1
+    direct_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content='{"ok": false, "reason": "same"}',
+                    tool_call_id="call_same",
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-repeat-break",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert [chunk.content for chunk in chunks] == [
+        '{"ok": false, "reason": "same"}',
+        '{"ok": false, "reason": "same"}',
+    ]
+    assert all(
+        not (
+            isinstance(chunk.content, str) and "检测到任务进入重复循环" in chunk.content
+        )
+        for chunk in chunks
     )
 
 

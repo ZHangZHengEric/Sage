@@ -19,6 +19,7 @@ from common.schemas.agent import (
     AgentConfigDTO,
     AutoGenAgentRequest,
     DeleteAgentWorkspaceRequest,
+    FileWorkspaceDownloadFromUrlRequest,
     FileWorkspaceStatRequest,
     AuthorizationRequest,
     SystemPromptOptimizeRequest,
@@ -469,6 +470,43 @@ async def upload_file(
     except Exception as e:
         logger.bind(agent_id=agent_id, user_id=user_id).error(f"Upload failed: {e}")
         raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/download_from_url")
+async def download_file_from_url(
+    agent_id: str,
+    body: FileWorkspaceDownloadFromUrlRequest,
+    request: Request,
+    session_id: Optional[str] = None,
+):
+    """从 URL 下载文件到 Agent 工作空间"""
+    user_id = get_request_user_id(request)
+    role = get_request_role(request)
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        f"Download-from-url request: filename={body.filename}, target_path={body.target_path}"
+    )
+    result = await agent_service.download_url_to_server_agent_file(
+        agent_id,
+        user_id,
+        body.source_url,
+        body.filename,
+        body.target_path,
+    )
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        f"Download-from-url successful: path={result['path']}, size={result['size']}"
+    )
+    return await Response.succ(
+        message="agent.file_uploaded",
+        message_params={"filename": body.filename},
+        data=result,
+    )
 
 
 @agent_router.post("/workspace/delete")
