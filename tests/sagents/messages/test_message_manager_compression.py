@@ -111,6 +111,33 @@ class TestExtractAllContextMessages:
             for message in request_messages
         )
 
+    def test_assistant_text_stays_in_default_context(self):
+        """External plain assistant messages should remain in LLM context."""
+        mm = MessageManager(session_id="test_session_assistant_text")
+
+        messages = [
+            self.create_message(MessageRole.USER.value, "Complaint"),
+            self.create_message(
+                MessageRole.ASSISTANT.value,
+                "Please provide your name and the last four card digits",
+            ),
+            self.create_message(MessageRole.USER.value, "James, 2385"),
+        ]
+        mm.messages = messages
+
+        result = mm.extract_all_context_messages(
+            recent_turns=20, last_turn_user_only=False
+        )
+
+        assert [(message.role, message.message_type) for message in result] == [
+            (MessageRole.USER.value, MessageType.USER_INPUT.value),
+            (MessageRole.ASSISTANT.value, MessageType.ASSISTANT_TEXT.value),
+            (MessageRole.USER.value, MessageType.USER_INPUT.value),
+        ]
+        assert result[1].content == (
+            "Please provide your name and the last four card digits"
+        )
+
     def test_single_compression_tool(self):
         """Test: extract from corresponding User when single compression tool exists"""
         mm = MessageManager(session_id="test_session_2")
