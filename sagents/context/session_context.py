@@ -1,5 +1,6 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import asyncio
+import hashlib
 import time
 import threading
 import uuid
@@ -25,7 +26,10 @@ import datetime
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.common_utils import detect_machine_environment
-from common.utils.message_persistence import sanitize_messages_for_persistence
+from common.utils.message_persistence import (
+    extract_current_time_context_tag,
+    sanitize_messages_for_persistence,
+)
 
 _session_context_file_io_pool = ThreadPoolExecutor(
     max_workers=8, thread_name_prefix="session-context-io"
@@ -237,6 +241,9 @@ class SessionContext:
         self._current_request: Optional[Dict[str, Any]] = None
         self._request_lock = threading.Lock()
         self._llm_request_save_lock = threading.Lock()
+        self._runtime_context_snapshot_lock = threading.Lock()
+        self._runtime_context_snapshot_keys: set[str] = set()
+        self._runtime_context_snapshot_keys_loaded = False
         self._save_lock = threading.Lock()
         self._last_save_signature: Optional[tuple] = None
         self._last_save_time = 0.0
@@ -1147,6 +1154,78 @@ class SessionContext:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(serializable_request, f, ensure_ascii=False, indent=4)
             return file_path
+
+    def append_runtime_context_snapshot(
+        self,
+        *,
+        message_id: Optional[str],
+        runtime_context: str,
+    ) -> Optional[str]:
+        """Append one runtime-context audit snapshot outside conversation history."""
+        runtime_context = (runtime_context or "").strip()
+        if not runtime_context:
+            return None
+
+        snapshot_key = message_id or self._runtime_context_snapshot_hash(
+            runtime_context
+        )
+        with self._runtime_context_snapshot_lock:
+            self._load_runtime_context_snapshot_keys_locked()
+            if snapshot_key in self._runtime_context_snapshot_keys:
+                return None
+
+            file_path = os.path.join(
+                self.session_workspace,
+                "runtime_context_snapshots.jsonl",
+            )
+            os.makedirs(self.session_workspace, exist_ok=True)
+            snapshot = {
+                "snapshot_key": snapshot_key,
+                "session_id": self.session_id,
+                "message_id": message_id,
+                "timestamp": time.time(),
+                "current_time_context": extract_current_time_context_tag(
+                    runtime_context
+                ),
+                "runtime_context": runtime_context,
+            }
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(make_serializable(snapshot), ensure_ascii=False))
+                f.write("\n")
+            self._runtime_context_snapshot_keys.add(snapshot_key)
+            return file_path
+
+    @staticmethod
+    def _runtime_context_snapshot_hash(runtime_context: str) -> str:
+        digest = hashlib.sha256(runtime_context.encode("utf-8")).hexdigest()
+        return f"runtime:{digest}"
+
+    def _load_runtime_context_snapshot_keys_locked(self) -> None:
+        if self._runtime_context_snapshot_keys_loaded:
+            return
+        self._runtime_context_snapshot_keys_loaded = True
+        file_path = os.path.join(
+            self.session_workspace,
+            "runtime_context_snapshots.jsonl",
+        )
+        if not os.path.exists(file_path):
+            return
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        snapshot = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(snapshot, dict):
+                        continue
+                    key = snapshot.get("snapshot_key") or snapshot.get("message_id")
+                    if isinstance(key, str) and key:
+                        self._runtime_context_snapshot_keys.add(key)
+        except Exception as exc:
+            logger.warning(
+                f"SessionContext: Failed to load runtime context snapshot keys: {exc}"
+            )
 
     async def _cleanup_expired_todo_tasks(self):
         try:

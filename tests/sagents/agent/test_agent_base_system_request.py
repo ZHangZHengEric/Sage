@@ -422,7 +422,11 @@ async def test_prepare_llm_request_messages_persists_frozen_context_to_ledger_me
     view_user = MessageChunk.from_dict(ledger_user.to_dict())
     message_manager = MessageManager()
     message_manager.messages = [ledger_user]
-    session_context = SimpleNamespace(message_manager=message_manager)
+    snapshots = []
+    session_context = SimpleNamespace(
+        message_manager=message_manager,
+        append_runtime_context_snapshot=lambda **kwargs: snapshots.append(kwargs),
+    )
 
     async def fake_system_messages(**kwargs):
         return [_message(MessageRole.SYSTEM.value, "stable")]
@@ -446,6 +450,14 @@ async def test_prepare_llm_request_messages_persists_frozen_context_to_ledger_me
     assert "<todo_list>todo</todo_list>" in frozen["content"]
     assert frozen["metadata"]["inference_view_only"] is True
     assert "persist" not in frozen["metadata"]
+    assert snapshots == [
+        {
+            "message_id": ledger_user.message_id,
+            "runtime_context": (
+                "<runtime_context><system_context><todo_list>todo</todo_list></system_context></runtime_context>"
+            ),
+        }
+    ]
 
     stale_view_user = MessageChunk.from_dict(ledger_user.to_dict())
     stale_view_user.metadata = {}

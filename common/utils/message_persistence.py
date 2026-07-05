@@ -38,6 +38,11 @@ def sanitize_messages_for_persistence(messages: List[Any]) -> List[Dict[str, Any
     return [_sanitize_message_for_persistence(message) for message in messages or []]
 
 
+def extract_current_time_context_tag(content: Any) -> str | None:
+    """Extract the original ``<current_time>...</current_time>`` tag."""
+    return _extract_current_time_tag(content)
+
+
 def _sanitize_message_for_persistence(message: Any) -> Dict[str, Any]:
     if hasattr(message, "to_dict") and callable(message.to_dict):
         data = copy.deepcopy(message.to_dict())

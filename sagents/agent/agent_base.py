@@ -644,6 +644,31 @@ class AgentBase(ABC):
                 f"{self.__class__.__name__}: failed to persist frozen user inference: {exc}"
             )
 
+    def _save_runtime_context_snapshot(
+        self,
+        *,
+        session_id: str,
+        source_message: MessageChunk,
+        runtime_context: str,
+    ) -> None:
+        try:
+            session_context = self._get_live_session_context(session_id)
+            if session_context is None:
+                return
+            append_snapshot = getattr(
+                session_context, "append_runtime_context_snapshot", None
+            )
+            if not callable(append_snapshot):
+                return
+            append_snapshot(
+                message_id=source_message.message_id,
+                runtime_context=runtime_context,
+            )
+        except Exception as exc:
+            logger.debug(
+                f"{self.__class__.__name__}: failed to save runtime context snapshot: {exc}"
+            )
+
     def _find_frozen_user_inference_in_ledger(
         self, session_id: str, message: MessageChunk
     ) -> Optional[Dict[str, Any]]:
@@ -726,6 +751,11 @@ class AgentBase(ABC):
                     session_id=session_id,
                     source_message=messages[latest_user_idx],
                     frozen=frozen,
+                )
+                self._save_runtime_context_snapshot(
+                    session_id=session_id,
+                    source_message=messages[latest_user_idx],
+                    runtime_context=runtime_text,
                 )
                 injected[latest_user_idx] = latest_user
         return injected
