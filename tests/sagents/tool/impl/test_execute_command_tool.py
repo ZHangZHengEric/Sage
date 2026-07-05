@@ -164,6 +164,7 @@ def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
             session_id="session-1",
             block_until_ms=0,
             sandbox_approval_mode="never",
+            command_policy={"rules": []},
         )
     )
 
@@ -201,6 +202,7 @@ def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
                         command="git push origin feature-x",
                         session_id="session-approval",
                         block_until_ms=0,
+                        command_policy={"rules": []},
                     )
                 )
                 event = await asyncio.wait_for(queue.get(), timeout=1)
