@@ -35,6 +35,8 @@ ruff==0.15.14
 fastapi>=0.104.0
 uvicorn[standard]>=0.38.0
 pydantic>=2.5.0
+itsdangerous>=2.0.0  # Required by starlette SessionMiddleware (login/session flow)
+Authlib>=1.6.0  # OAuth2/OIDC + session auth used by app.server
 
 ##############################
 # 多模型协同（MCP + 工具）
@@ -85,6 +87,7 @@ chromadb>=0.4.22
 # 任务 / 调度
 ##############################
 croniter>=2.0.0
+APScheduler>=3.10,<4.0
 
 ##############################
 # 应用类工具
