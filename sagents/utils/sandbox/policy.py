@@ -18,7 +18,7 @@ from typing import Any, Literal, Optional
 PolicyAction = Literal["allow", "ask", "deny"]
 ApprovalMode = Literal["untrusted", "on-request", "never"]
 
-DEFAULT_APPROVAL_MODE: ApprovalMode = "on-request"
+DEFAULT_APPROVAL_MODE: ApprovalMode = "never"
 APPROVAL_MODE_ENV_VARS = ("SAGE_APPROVAL_MODE", "SAGE_SANDBOX_APPROVAL_MODE")
 SUPPORTED_APPROVAL_MODES = ("untrusted", "on-request", "never")
 
@@ -69,6 +69,108 @@ class CommandPolicyConfig:
     default_action: Optional[PolicyAction] = None
     default_category: str = "runtime_policy_default"
     default_reason: str = "no runtime command policy rule matched"
+
+
+DEFAULT_COMMAND_POLICY = CommandPolicyConfig(
+    rules=(
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["python", "-m", "pip", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows Python package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["python3", "-m", "pip", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows Python package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pip", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows Python package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pip3", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows Python package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["npm", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["npm", "i"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["npm", "add"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pnpm", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pnpm", "i"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["pnpm", "add"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["yarn", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["yarn", "add"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["bun", "install"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={"argv_prefix": ["bun", "add"]},
+            category="default_dependency_install",
+            reason="default policy allows JavaScript package installation",
+        ),
+        CommandPolicyRule(
+            action="allow",
+            match={
+                "pattern": (
+                    r"^rm\s+-[A-Za-z]*r[A-Za-z]*f?[A-Za-z]*\s+(\./)?"
+                    r"(build|dist|target|node_modules|\.pytest_cache|\.mypy_cache|"
+                    r"\.ruff_cache)(\s|/|$)"
+                )
+            },
+            category="default_workspace_cleanup",
+            reason="default policy allows common local build/cache cleanup",
+        ),
+    )
+)
 
 
 def normalize_command_policy(value: Any) -> Optional[CommandPolicyConfig]:
@@ -216,7 +318,11 @@ class SandboxPolicyGateway:
         self.approval_mode = (
             normalize_approval_mode(approval_mode) or approval_mode_from_env()
         )
-        self.command_policy = normalize_command_policy(command_policy)
+        self.command_policy = (
+            normalize_command_policy(command_policy)
+            if command_policy is not None
+            else DEFAULT_COMMAND_POLICY
+        )
 
     def evaluate_shell_command(
         self, command: str, sandbox_mode: Optional[str] = None
@@ -232,10 +338,6 @@ class SandboxPolicyGateway:
 
         lowered = command.lower()
         parts = self._parse_command(command)
-
-        configured_decision = self._evaluate_configured_policy(command, parts)
-        if configured_decision is not None:
-            return self._apply_approval_mode(configured_decision)
 
         for substring in self.DENY_SUBSTRINGS:
             if substring in lowered:
@@ -255,6 +357,15 @@ class SandboxPolicyGateway:
             )
 
         segments = [s.strip() for s in self._SEGMENT_SPLIT_RE.split(command)]
+        for segment in segments:
+            decision = self._evaluate_segment(segment, sandbox_mode=sandbox_mode)
+            if decision.action == "deny":
+                return decision
+
+        configured_decision = self._evaluate_configured_policy(command, parts)
+        if configured_decision is not None:
+            return self._apply_approval_mode(configured_decision)
+
         for segment in segments:
             decision = self._evaluate_segment(segment, sandbox_mode=sandbox_mode)
             if decision.action != "allow":

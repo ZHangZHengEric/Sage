@@ -1,8 +1,19 @@
-from sagents.utils.sandbox.policy import SandboxPolicyGateway, normalize_approval_mode
+from sagents.utils.sandbox.policy import (
+    SandboxPolicyGateway,
+    approval_mode_from_env,
+    normalize_approval_mode,
+)
 
 
 def test_normalizes_codex_approval_mode_alias():
     assert normalize_approval_mode("unless-trusted") == "untrusted"
+
+
+def test_default_approval_mode_is_never_without_env(monkeypatch):
+    monkeypatch.delenv("SAGE_APPROVAL_MODE", raising=False)
+    monkeypatch.delenv("SAGE_SANDBOX_APPROVAL_MODE", raising=False)
+
+    assert approval_mode_from_env() == "never"
 
 
 def test_allows_read_only_probe_command():
@@ -12,13 +23,23 @@ def test_allows_read_only_probe_command():
 
 
 def test_requires_confirmation_for_git_push():
-    decision = SandboxPolicyGateway().evaluate_shell_command(
-        "git push origin feature-x"
-    )
+    decision = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("git push origin feature-x")
 
     assert decision.action == "ask"
     assert decision.category == "git_remote_write"
     assert "remote repository" in decision.reason
+
+
+def test_default_never_mode_denies_git_push_without_prompt():
+    decision = SandboxPolicyGateway(
+        command_policy={"rules": []}
+    ).evaluate_shell_command("git push origin feature-x")
+
+    assert decision.action == "deny"
+    assert decision.category == "git_remote_write_approval_disabled"
 
 
 def test_denies_download_exec_pipeline():
@@ -31,12 +52,22 @@ def test_denies_download_exec_pipeline():
 
 
 def test_requires_confirmation_for_dependency_install():
+    decision = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("python -m pip install requests")
+
+    assert decision.action == "ask"
+    assert decision.category == "dependency_install"
+
+
+def test_default_command_policy_allows_common_dependency_install():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "python -m pip install requests"
     )
 
-    assert decision.action == "ask"
-    assert decision.category == "dependency_install"
+    assert decision.action == "allow"
+    assert decision.category == "default_dependency_install"
 
 
 def test_denies_force_push_to_protected_branch():
@@ -49,10 +80,20 @@ def test_denies_force_push_to_protected_branch():
 
 
 def test_requires_confirmation_for_recursive_delete():
-    decision = SandboxPolicyGateway().evaluate_shell_command("rm -rf build")
+    decision = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("rm -rf build")
 
     assert decision.action == "ask"
     assert decision.category == "filesystem_delete"
+
+
+def test_default_command_policy_allows_common_build_cleanup():
+    decision = SandboxPolicyGateway().evaluate_shell_command("rm -rf build")
+
+    assert decision.action == "allow"
+    assert decision.category == "default_workspace_cleanup"
 
 
 def test_untrusted_mode_allows_known_safe_probe():
@@ -83,6 +124,7 @@ def test_never_mode_denies_confirmation_required_command():
 
 def test_runtime_command_policy_can_override_default_rules():
     gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
         command_policy={
             "rules": [
                 {
@@ -93,7 +135,7 @@ def test_runtime_command_policy_can_override_default_rules():
                 }
             ],
             "default_action": "deny",
-        }
+        },
     )
 
     decision = gateway.evaluate_shell_command("git push origin feature-x")
@@ -104,6 +146,7 @@ def test_runtime_command_policy_can_override_default_rules():
 
 def test_runtime_command_policy_default_action_applies_when_no_rule_matches():
     gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
         command_policy={
             "rules": [
                 {
@@ -113,7 +156,7 @@ def test_runtime_command_policy_default_action_applies_when_no_rule_matches():
             ],
             "default_action": "ask",
             "default_category": "app_default_review",
-        }
+        },
     )
 
     decision = gateway.evaluate_shell_command("python scripts/build.py")

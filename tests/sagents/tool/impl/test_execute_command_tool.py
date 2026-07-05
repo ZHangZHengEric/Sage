@@ -136,6 +136,8 @@ def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
             command="git push origin feature-x",
             session_id="session-1",
             block_until_ms=0,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
 
@@ -320,6 +322,8 @@ def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
             command="git push origin feature-x",
             session_id="session-1",
             block_until_ms=0,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
     approval_id = blocked["approval_id"]
@@ -330,6 +334,8 @@ def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
             session_id="session-1",
             block_until_ms=0,
             approval_id=approval_id,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
 
@@ -344,6 +350,8 @@ def test_execute_shell_command_uses_one_shot_approval_before_spawn(monkeypatch):
             session_id="session-1",
             block_until_ms=0,
             approval_id=approval_id,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
     assert reused["success"] is False
@@ -362,6 +370,8 @@ def test_execute_shell_command_approval_id_must_match_command(monkeypatch):
             command="git push origin feature-x",
             session_id="session-1",
             block_until_ms=0,
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
 
@@ -371,6 +381,8 @@ def test_execute_shell_command_approval_id_must_match_command(monkeypatch):
             session_id="session-1",
             block_until_ms=0,
             approval_id=blocked["approval_id"],
+            sandbox_approval_mode="on-request",
+            command_policy={"rules": []},
         )
     )
 

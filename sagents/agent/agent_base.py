@@ -96,6 +96,10 @@ class AgentBase(ABC):
     """
 
     RUNTIME_CONTEXT_SYSTEM_SECTIONS = {"system_context", "workspace_files"}
+    RUNTIME_CONTEXT_HIDDEN_SYSTEM_CONTEXT_KEYS = {
+        "sandbox_approval_mode",
+        "command_policy",
+    }
     FROZEN_USER_INFERENCE_METADATA_KEY = "frozen_user_inference"
     FROZEN_USER_INFERENCE_VERSION = 3
 
@@ -1804,6 +1808,7 @@ class AgentBase(ABC):
                     "active_skill_instruction",
                     "可以访问的其他路径文件夹",
                     "external_paths",
+                    *self.RUNTIME_CONTEXT_HIDDEN_SYSTEM_CONTEXT_KEYS,
                 }
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
