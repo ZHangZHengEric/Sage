@@ -211,6 +211,7 @@ class SessionContext:
     ):
         # 运行期状态容器（与 I/O、会话生命周期绑定）
         self.llm_requests_logs: List[Dict[str, Any]] = []
+        self.mcp_calls_logs: List[Dict[str, Any]] = []
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
         self._perf_origin = time.perf_counter()
@@ -236,6 +237,8 @@ class SessionContext:
         self._current_request: Optional[Dict[str, Any]] = None
         self._request_lock = threading.Lock()
         self._llm_request_save_lock = threading.Lock()
+        self._mcp_calls_lock = threading.Lock()
+        self._mcp_calls_save_lock = threading.Lock()
         self._save_lock = threading.Lock()
         self._last_save_signature: Optional[tuple] = None
         self._last_save_time = 0.0
@@ -858,8 +861,6 @@ class SessionContext:
             use_claw_mode = self.system_context.get("use_claw_mode", use_claw_mode)
             if isinstance(use_claw_mode, str):
                 use_claw_mode = use_claw_mode.lower() == "true"
-        logger.debug(f"SessionContext: use_claw_mode: {use_claw_mode}")
-
         if not use_claw_mode:
             return
 
@@ -1011,9 +1012,6 @@ class SessionContext:
 
                     skill_tool = SkillTool()
                     self.tool_manager.register_tools_from_object(skill_tool)
-                    logger.info(
-                        "SessionContext: Automatically registered load_skill tool from SkillTool instance"
-                    )
                 except Exception as e:
                     logger.error(
                         f"SessionContext: Failed to register load_skill tool: {e}"
@@ -1146,6 +1144,35 @@ class SessionContext:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(serializable_request, f, ensure_ascii=False, indent=4)
             return file_path
+
+    def _save_mcp_calls_sync(self, request_id: str) -> str:
+        with self._mcp_calls_save_lock:
+            target_dir = os.path.join(self.session_workspace, "mcp_calls")
+            os.makedirs(target_dir, exist_ok=True)
+            file_path = os.path.join(target_dir, f"{request_id}.json")
+
+            with self._mcp_calls_lock:
+                calls = [
+                    make_serializable(call)
+                    for call in self.mcp_calls_logs
+                    if call.get("request_id") == request_id
+                ]
+
+            payload = {
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "call_count": len(calls),
+                "calls": calls,
+            }
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            return file_path
+
+    def _has_mcp_calls_for_request(self, request_id: str) -> bool:
+        with self._mcp_calls_lock:
+            return any(
+                call.get("request_id") == request_id for call in self.mcp_calls_logs
+            )
 
     async def _cleanup_expired_todo_tasks(self):
         try:
@@ -1489,9 +1516,6 @@ class SessionContext:
         的 usage / 时延累加到 ``self._current_request``，最终在 ``end_request``
         时序列化到 ``<session_workspace>/tokens_usage/<request_id>.json``。
         """
-        logger.debug(
-            f"SessionContext: Adding LLM request to session {self.session_id}, step: {request.get('step_name')}"
-        )
 
         llm_request = {
             "request": request,
@@ -1499,9 +1523,6 @@ class SessionContext:
             "timestamp": time.time(),
         }
         self.llm_requests_logs.append(llm_request)
-        logger.debug(
-            f"SessionContext: Current llm_requests_logs count for session {self.session_id}: {len(self.llm_requests_logs)}"
-        )
 
         try:
             self._accumulate_request_usage(request, response)
@@ -1510,6 +1531,42 @@ class SessionContext:
 
         # 异步保存日志，不阻塞主流程
         asyncio.create_task(self._async_save_llm_request(llm_request))
+
+    def add_mcp_call(self, call: Dict[str, Any]) -> Optional[str]:
+        """记录一次 MCP 调用，并按当前 chat request 聚合落盘。"""
+        with self._request_lock:
+            cur = self._current_request
+            if cur is None:
+                return None
+            request_id = cur["request_id"]
+            request_started_at = cur.get("started_at")
+
+        now = time.time()
+        with self._mcp_calls_lock:
+            index = sum(
+                1
+                for item in self.mcp_calls_logs
+                if item.get("request_id") == request_id
+            )
+            mcp_call = {
+                "index": index,
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "request_started_at": request_started_at,
+                "timestamp": now,
+                **call,
+            }
+            self.mcp_calls_logs.append(make_serializable(mcp_call))  # pyright: ignore[reportArgumentType]
+
+        asyncio.create_task(self._async_save_mcp_calls(request_id))
+        return request_id
+
+    def current_request_id(self) -> Optional[str]:
+        with self._request_lock:
+            cur = self._current_request
+            if cur is None:
+                return None
+            return cur.get("request_id")
 
     def start_request(self, metadata: Optional[Dict[str, Any]] = None) -> str:
         """开启一次"用户请求"窗口；返回 request_id。
@@ -1578,6 +1635,11 @@ class SessionContext:
                 f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
                 f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
             )
+            if self._has_mcp_calls_for_request(cur["request_id"]):
+                try:
+                    self._save_mcp_calls_sync(cur["request_id"])
+                except Exception as exc:
+                    logger.error(f"SessionContext: 落盘 mcp_calls 失败: {exc}")
             return file_path
         except Exception as exc:
             logger.error(f"SessionContext: 落盘 tokens_usage 失败: {exc}")
@@ -1655,13 +1717,16 @@ class SessionContext:
     async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
         """异步保存单个LLM请求到文件"""
         try:
-            file_path = await asyncio.to_thread(
-                self._save_llm_request_sync, llm_request
-            )
-
-            logger.debug(f"SessionContext: Async saved LLM request to {file_path}")
+            await asyncio.to_thread(self._save_llm_request_sync, llm_request)
         except Exception as e:
             logger.error(f"SessionContext: Failed to async save LLM request: {e}")
+
+    async def _async_save_mcp_calls(self, request_id: str):
+        """异步保存当前 request 的 MCP 调用日志到同一个文件。"""
+        try:
+            await asyncio.to_thread(self._save_mcp_calls_sync, request_id)
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to async save MCP calls: {e}")
 
     def get_tokens_usage_info(self):
         """获取tokens使用信息
@@ -1771,7 +1836,6 @@ class SessionContext:
         if models_seen:
             tokens_info["total_info"]["model"] = models_seen[0]
             tokens_info["total_info"]["models"] = models_seen
-        logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
     def save(
@@ -1870,6 +1934,12 @@ class SessionContext:
                     "system_context": make_serializable(self.system_context),
                     "audit_status": make_serializable(self.audit_status),
                     "tokens_usage_info": self.get_tokens_usage_info(),
+                    "execution_timeline_events": make_serializable(
+                        self.execution_timeline_events
+                    ),
+                    "execution_timing_summary": make_serializable(
+                        self._build_execution_timing_summary()
+                    ),
                     "context_budget_config": make_serializable(
                         self._effective_context_budget_config()
                     ),

@@ -141,6 +141,37 @@ def test_non_absolute_markdown_link_returns_guidance(monkeypatch):
     assert chunks[0].message_type == "agent_execution_error"
 
 
+def test_self_check_failure_message_uses_english_runtime_diagnostic(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = agent._format_failure_message(
+        ["File does not exist: output.md"], ["/tmp/output.md"], language="en"
+    )
+
+    assert (
+        '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
+    )
+    assert "not a reply authored by the assistant/agent" in content
+    assert "Self-check found issues" in content
+    assert "Checked files:" in content
+
+
+def test_self_check_failure_message_uses_portuguese_runtime_diagnostic(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = agent._format_failure_message(
+        ["Arquivo nao existe: output.md"], ["/tmp/output.md"], language="pt"
+    )
+
+    assert (
+        '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
+    )
+    assert "nao uma resposta escrita pelo assistant/agent" in content
+    assert "Arquivos verificados:" in content
+
+
 def test_absolute_markdown_link_checks_file_existence(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
@@ -353,9 +384,181 @@ def test_artifacts_tag_http_path_is_ignored(monkeypatch, tmp_path):
 
     assert chunks == []
     assert session_context.audit_status["self_check_passed"] is True
-    assert session_context.audit_status["self_check_summary"] == (
-        "skip: no candidate files detected"
+    assert session_context.audit_status["self_check_summary"] == ("checked 0 files")
+
+
+def test_malformed_artifacts_json_triggers_execution_error(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant",
+                    "<movo-artifacts>{bad json</movo-artifacts>",
+                ),
+            ]
+        ),
     )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "<movo-artifacts> 标签内容不是合法 JSON" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_malformed_questionnaire_json_triggers_execution_error(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请确认"),
+                _make_message(
+                    "assistant",
+                    '<sage-questionnaire>{"questions":[{"type":"single_choice"}]}</sage-questionnaire>',
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "<sage-questionnaire>" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_malformed_questionnaire_model_payload_triggers_execution_error(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    bad_payload = (
+        '<movo-questionnaire>{"title":"Choose a creative direction",'
+        '"questions":[{"type":"single_choice",'
+        '"text":"Which direction should this Greek yogurt promo take?",'
+        '"options":["Open with an ultra-close creamy spoon lift and fruit drop, '
+        'making texture and appetite the main conversion hook.",'
+        '"default":"Open with an ultra-close creamy spoon lift and fruit drop, '
+        'making texture and appetite the main conversion hook.",'
+        '"allow_other":true},'
+        '{"type":"free_text",'
+        '"text":"Tell me the target audience, must-show elements, or anything '
+        'you want adjusted before I write the plan.",'
+        '"default":""}]}</movo-questionnaire>'
+    )
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请确认"),
+                _make_message("assistant", bad_payload),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "<movo-questionnaire> 标签内容不是合法 JSON" in chunks[0].content
+    assert chunks[0].message_type == "agent_execution_error"
+
+
+def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_path):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请确认"),
+                _make_message(
+                    "assistant",
+                    '<movo-questionnaire>{"title":"确认","questions":[{"type":"single_choice","text":"画幅？","options":["9:16","16:9"]}]}</movo-questionnaire>',
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert session_context.audit_status["self_check_summary"] == "checked 0 files"
 
 
 def test_absolute_markdown_link_outside_workspace_is_execution_error(

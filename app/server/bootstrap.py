@@ -84,6 +84,12 @@ def add_doc_build_jobs():
     return _add_doc_build_jobs()
 
 
+def add_session_log_cleanup_job(sessions_root: str):
+    from .scheduler import add_session_log_cleanup_job as _add_session_log_cleanup_job
+
+    return _add_session_log_cleanup_job(sessions_root)
+
+
 async def initialize_db_connection(cfg: StartupConfig):
     try:
         db_client = await init_db_client(cfg)
@@ -311,6 +317,12 @@ async def close_observability():
 
 async def initialize_scheduler(cfg: StartupConfig):
     """初始化 scheduler（单例）"""
+    try:
+        add_session_log_cleanup_job(cfg.session_dir)
+    except Exception:
+        logger.error("LLM request 日志清理任务初始化失败")
+        raise
+
     # 3) 启动调度器（需在 DB 连接后）
     if cfg and cfg.es_url:
         try:

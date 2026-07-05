@@ -36,7 +36,6 @@ class OpenAIChat:
             fast_key = fast_api_key or api_key
             fast_url = fast_base_url or base_url
             self._fast_client = AsyncOpenAI(api_key=fast_key, base_url=fast_url)
-            logger.info(f"Fast model configured: {fast_model_name}")
 
         # 创建 SageAsyncOpenAI 实例
         self._sage_client = SageAsyncOpenAI(

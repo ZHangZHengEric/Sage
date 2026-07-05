@@ -10,7 +10,11 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
 from sagents.utils.logger import logger
-from sagents.llm.capabilities import sanitize_model_request_kwargs
+from sagents.llm.capabilities import (
+    downgrade_image_url_parts_for_text_only_model,
+    get_multimodal_support,
+    sanitize_model_request_kwargs,
+)
 
 
 class SageAsyncOpenAI:
@@ -117,11 +121,13 @@ class SageChatCompletions:
             client = self._sage._fast
             if self._sage.fast_model_name:
                 kwargs["model"] = self._sage.fast_model_name
-            logger.debug(f"Using FAST model: {self._sage.fast_model_name or 'unknown'}")
         else:
             client = self._sage._standard
             if model_type == "fast":
-                logger.debug("Fast model not configured, falling back to standard")
+                logger.debug(
+                    "Fast model not configured, falling back to standard",
+                    session_id="NO_SESSION",
+                )
 
         # 移除内部使用的参数，避免传递给 OpenAI API
         kwargs.pop("fast_api_key", None)
@@ -133,6 +139,23 @@ class SageChatCompletions:
             model_config=self._sage.model_capabilities,
             model=kwargs.get("model") if isinstance(kwargs.get("model"), str) else None,
         )
+        if (
+            get_multimodal_support(
+                client=self._sage,
+                model_config=self._sage.model_capabilities,
+            )
+            is False
+            and "messages" in kwargs
+        ):
+            kwargs["messages"], downgraded_images = (
+                downgrade_image_url_parts_for_text_only_model(kwargs["messages"])
+            )
+            if downgraded_images:
+                logger.info(
+                    "模型不支持多模态，已从 LLM 请求中移除 image_url 输入: "
+                    f"count={downgraded_images}, model={kwargs.get('model')}",
+                    session_id="NO_SESSION",
+                )
 
         # 调用底层客户端
         return client.chat.completions.create(**kwargs)

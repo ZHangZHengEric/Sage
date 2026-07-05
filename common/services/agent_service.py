@@ -8,8 +8,10 @@ import shutil
 import tempfile
 import uuid
 import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -1276,6 +1278,51 @@ async def upload_server_agent_file(
         get_server_agent_workspace_path(agent_id, user_id),
         filename,
         source_file,
+        target_path,
+    )
+
+
+async def download_url_to_server_agent_file(
+    agent_id: str,
+    user_id: str,
+    source_url: str,
+    filename: str,
+    target_path: str = "",
+) -> Dict[str, Any]:
+    parsed = urlparse((source_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise SageHTTPException(
+            status_code=400,
+            message_key="agent.workspace_invalid_source_url",
+            error_detail="Only http(s) source_url is supported",
+        )
+
+    try:
+        import httpx
+    except ImportError as exc:
+        raise SageHTTPException(
+            status_code=500,
+            message_key="agent.workspace_download_failed",
+            error_detail="httpx is required to download workspace files",
+        ) from exc
+
+    timeout = httpx.Timeout(45.0, connect=10.0)
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+        try:
+            response = await client.get(source_url)
+            response.raise_for_status()
+        except Exception as exc:
+            raise SageHTTPException(
+                status_code=502,
+                message_key="agent.workspace_download_failed",
+                error_detail=f"Failed to download source_url: {exc}",
+            ) from exc
+
+    return await upload_server_agent_file(
+        agent_id,
+        user_id,
+        filename,
+        BytesIO(response.content),
         target_path,
     )
 

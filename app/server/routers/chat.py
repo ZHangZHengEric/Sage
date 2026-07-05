@@ -425,7 +425,6 @@ async def stream_api_with_disconnect_check(
             await safe_release(lock, session_id, "流结束清理")
 
             delete_session_run_lock(session_id)
-            logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
         record_sse_stream_failure(stream_name, session_id, status)

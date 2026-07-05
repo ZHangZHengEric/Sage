@@ -16,7 +16,6 @@ from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
-from sagents.utils.prompt_caching import add_cache_control_to_messages
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import (
@@ -50,12 +49,15 @@ from sagents.utils.agent_session_helper import (
     get_live_session_context as _get_live_session_context_util,
     should_abort_due_to_session as _should_abort_due_to_session_util,
 )
+from sagents.utils.concurrency import run_with_concurrency_limit_ordered
 import traceback
 import time
 import os
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
 from openai.types.chat import chat_completion_chunk
+
+TOOL_CALL_CONCURRENCY_LIMIT = 10
 
 
 class PartialStreamConsumedError(RuntimeError):
@@ -64,6 +66,25 @@ class PartialStreamConsumedError(RuntimeError):
     def __init__(self, message: str, original_error: Exception):
         super().__init__(message)
         self.original_error = original_error
+
+
+def _model_config_log_summary(model_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(model_config, dict):
+        return {}
+    keys = (
+        "base_url",
+        "model",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "presence_penalty",
+        "max_model_len",
+        "supports_multimodal",
+        "supports_structured_output",
+        "fast_base_url",
+        "fast_model_name",
+    )
+    return {key: model_config.get(key) for key in keys if key in model_config}
 
 
 class AgentBase(ABC):
@@ -112,7 +133,7 @@ class AgentBase(ABC):
         self.max_model_input_len = min(requested_max_input, max_model_len)
 
         logger.debug(
-            f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
+            f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {_model_config_log_summary(model_config)}, 最大输入长度（安全阈值）: {self.max_model_input_len}"
         )
 
     def _get_live_session(self, session_id: Optional[str]):
@@ -988,10 +1009,6 @@ class AgentBase(ABC):
         Returns:
             Generator: 语言模型的流式响应
         """
-        logger.debug(
-            f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}"
-        )
-
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
@@ -1164,13 +1181,6 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: 注入 {len(completion_events)} 条 shell completion reminder"
                         )
 
-                # 为消息添加 prompt caching 支持（Anthropic 格式）
-                # 多段 system 时按 cache_segments 打多个断点；老路径保持单断点回退
-                if serializable_messages:
-                    add_cache_control_to_messages(
-                        serializable_messages, cache_segments=cache_segments
-                    )
-
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
@@ -1216,13 +1226,6 @@ class AgentBase(ABC):
                 serializable_messages = self._remove_content_if_tool_calls(
                     serializable_messages
                 )
-                # 提取tools 的value
-                logger_final_config = {
-                    k: v for k, v in final_config.items() if k != "tools"
-                }
-                logger.debug(
-                    f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}"
-                )
                 final_config = {k: v for k, v in final_config.items() if v is not None}
                 response_format = final_config.pop("response_format", None)
 
@@ -1263,9 +1266,6 @@ class AgentBase(ABC):
                         default_off="low",
                     )
                     extra_body["reasoning_effort"] = effort
-                    logger.debug(
-                        f"{self.__class__.__name__} | {step_name}: OpenAI推理模型，reasoning_effort={effort}"
-                    )
                 else:
                     # 其他模型使用 enable_thinking/thinking 参数
                     extra_body["chat_template_kwargs"] = {  # pyright: ignore[reportArgumentType]
@@ -1275,9 +1275,6 @@ class AgentBase(ABC):
                     extra_body["thinking"] = {  # pyright: ignore[reportArgumentType]
                         "type": "enabled" if final_enable_thinking else "disabled"
                     }
-                    logger.debug(
-                        f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}"
-                    )
 
                 stream = await create_chat_completion_with_fallback(
                     self.model,
@@ -1581,10 +1578,6 @@ class AgentBase(ABC):
                         if session_context:
                             session_context.add_llm_request(llm_request, llm_response)  # pyright: ignore[reportArgumentType]
 
-                            # 更新动态 token 比例
-                            logger.debug(
-                                f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}"
-                            )
                             if llm_response and llm_response.usage:
                                 components = (
                                     MessageManager.calculate_message_token_components(
@@ -1600,11 +1593,6 @@ class AgentBase(ABC):
                                     actual_tokens,
                                     image_token_count=image_tokens,
                                 )
-                                if input_chars > 0:
-                                    text_tokens = max(0, actual_tokens - image_tokens)
-                                    logger.debug(
-                                        f"{self.__class__.__name__}: 更新 token 比例，文本字符数={input_chars}，prompt_tokens={actual_tokens}，图片估算tokens={image_tokens}，文本比例={text_tokens / input_chars:.4f}"
-                                    )
                         else:
                             logger.warning(
                                 f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request"
@@ -1621,8 +1609,8 @@ class AgentBase(ABC):
         """构建按缓存稳定度切分的 system 文本段。
 
         返回 dict 形如 ``{"stable": str, "semi_stable": str, "volatile": str}``。
-        命名按"自上而下越来越易变"排列，便于上层在多段 system message + Anthropic
-        cache_control 多断点策略下保持高 cache 命中率：
+        命名按"自上而下越来越易变"排列，便于上层保持稳定前缀，交给供应商侧
+        被动 prompt cache 自然命中：
 
         - ``stable``：role_definition + IDENTITY/AGENT/SOUL/USER/MEMORY md（按会话生命周期基本不变）
         - ``semi_stable``：available_skills 列表 + active_skills 内容 + skills_usage_hint
@@ -1645,8 +1633,6 @@ class AgentBase(ABC):
         session_context = None
         if session_id:
             session_context = self._get_live_session_context(session_id)
-        # 兼容旧逻辑使用的局部变量名
-        system_prefix = ""
 
         # 1. Role Definition  → stable
         use_identity = False
@@ -1723,9 +1709,6 @@ class AgentBase(ABC):
             )
             session_context.system_context["current_time"] = current_time_str
             system_context_info = session_context.system_context.copy()
-            logger.debug(
-                f"{self.__class__.__name__}: 添加运行时system_context到系统消息"
-            )
             use_claw_mode = (
                 os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
             )
@@ -1733,7 +1716,6 @@ class AgentBase(ABC):
                 use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
                 if isinstance(use_claw_mode, str):
                     use_claw_mode = use_claw_mode.lower() == "true"
-            logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
             if (
                 "AGENT.MD" in include_sections
                 and use_claw_mode
@@ -1955,12 +1937,6 @@ class AgentBase(ABC):
                                 f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
                             )
 
-        # 兼容已有局部变量名（避免上游 logger 行依赖）
-        system_prefix = stable_buf + semi_buf + volatile_buf
-        logger.debug(
-            f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}"
-        )
-
         return {
             "stable": stable_buf,
             "semi_stable": semi_buf,
@@ -1979,7 +1955,7 @@ class AgentBase(ABC):
 
         内部调用 ``_build_system_segments`` 后把三段顺序拼接成一条 system，保持
         和旧版完全一致的行为；新接入方应优先使用 ``prepare_unified_system_messages``
-        以拿到分段结构、配合多断点 prompt cache。
+        以拿到分段结构，便于观察稳定 system / volatile system 的边界。
         """
         segments = await self._build_system_segments(
             session_id=session_id,
@@ -2004,11 +1980,11 @@ class AgentBase(ABC):
         system_prefix_override: Optional[str] = None,
         include_sections: Optional[List[str]] = None,
     ) -> List[MessageChunk]:
-        """按 cache 稳定度切分的多段 system message。
+        """按稳定度切分的多段 system message。
 
         - 返回顺序固定为 ``[stable, semi_stable, volatile]``，空段会被过滤掉
-        - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于
-          ``add_cache_control_to_messages`` 在前两段末尾打 cache 断点
+        - 每条 ``MessageChunk.metadata["cache_segment"]`` 标注所属段，便于观测
+          prompt 结构稳定性
         """
         segments = await self._build_system_segments(
             session_id=session_id,
@@ -2441,8 +2417,6 @@ class AgentBase(ABC):
                         yield chunk
             else:
                 # 处理非流式响应
-                logger.debug(f"{self.agent_name}: 收到非流式工具响应，正在处理")
-                logger.debug(f"{self.agent_name}: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(
                     tool_response,  # pyright: ignore[reportArgumentType]
                     tool_call["id"],  # pyright: ignore[reportArgumentType]
@@ -2497,8 +2471,6 @@ class AgentBase(ABC):
         Returns:
             List[MessageChunk]: 处理后的结果消息
         """
-        logger.debug(f"{self.agent_name}: 处理工具响应，工具调用ID: {tool_call_id}")
-
         try:
             tool_response_dict = json.loads(tool_response)
 
@@ -2556,14 +2528,14 @@ class AgentBase(ABC):
         """
         logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
 
+        executable_tool_calls: List[Dict[str, Any]] = []
+
         for tool_call_id, tool_call in tool_calls.items():
             # 增加让出主线程逻辑，防止工具循环处理导致卡死
             await asyncio.sleep(0)
 
             tool_name = tool_call["function"]["name"]
             raw_arguments = tool_call["function"]["arguments"]
-            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
-            logger.debug(f"{self.agent_name}: 参数 {raw_arguments}")
 
             # 验证工具参数是否为有效的JSON
             # 将复杂的解析逻辑放到线程池中执行
@@ -2618,13 +2590,37 @@ class AgentBase(ABC):
                 output_messages = self._create_tool_call_message(tool_call)
                 yield (output_messages, False)
 
-            # 执行工具
+            executable_tool_calls.append(tool_call)
+
+        async def collect_tool_result(
+            tool_call: Dict[str, Any],
+        ) -> List[List[MessageChunk]]:
+            tool_name = tool_call["function"]["name"]
+            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
+
+            chunks: List[List[MessageChunk]] = []
             async for message_chunk_list in self._execute_tool(
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id,
             ):
+                chunks.append(message_chunk_list)
+            return chunks
+
+        if not executable_tool_calls:
+            return
+
+        tool_results = await run_with_concurrency_limit_ordered(
+            TOOL_CALL_CONCURRENCY_LIMIT,
+            [
+                lambda tool_call=tool_call: collect_tool_result(tool_call)
+                for tool_call in executable_tool_calls
+            ],
+        )
+
+        for tool_result in tool_results:
+            for message_chunk_list in tool_result:
                 yield (message_chunk_list, False)
 
     def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:

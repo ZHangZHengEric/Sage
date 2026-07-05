@@ -1,3 +1,5 @@
+2026-06-26 文档与示例清理：移除已下线的 `SAGE_CONTINUE_ON_PROCESSING_KEYWORDS` 示例配置；将 `SAGE_AGENT_STATUS_PROTOCOL_ENABLED`、`SAGE_CONTINUE_ON_PROCESSING_KEYWORDS`、`SAGE_FORCE_TOOL_CHOICE_REQUIRED` 迁入 ENV 文档废弃章节；精简 SimpleAgent 任务完成规则相关测试。
+
 2026-05-26 部署与观测持续收敛：`deploy/compose.sh` 优化单服务/分环境启动与原生输出；Prometheus/Loki/Grafana 面板与指标多轮调整，补环境与容器维度；去除 dev/test 部署冗余依赖；修复 Fibre agent 返回 agent 名称参数；Windows desktop 构建补 ensurepip。
 
 2026-05-26 server web 渲染改造：精简文件/Markdown/高亮渲染链路，移除多类重型嵌入式文档渲染组件，调整前端依赖与 wiki nginx 配置。

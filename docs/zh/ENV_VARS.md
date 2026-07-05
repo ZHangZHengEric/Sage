@@ -178,12 +178,12 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | ---------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SAGE_TASK_COMPLETION_MODE`                    | `turn_status`（desktop 为 `no_tool_call`） | SimpleAgent 的任务完成判定模式。`no_tool_call` 不暴露 `turn_status`，当 LLM 输出不包含工具调用时判定本轮完成；`turn_status` 会暴露 `turn_status` 协议工具，由模型报告 `task_done` / `need_user_input` / `blocked` / `continue_work`；`llm_judge` 不暴露 `turn_status`，回退到旧的“规则优先 + LLM `task_complete_judge`”完成判断。 |
 | `SAGE_RUNTIME_CONTEXT_IN_USER`                 | `true`  | 将动态 runtime context（`system_context`、workspace files、活跃 ToDo）从 system message 移出，并冻结到最新 user 的 inference metadata 中。仅在兼容旧行为时设为 `false`，此时动态上下文仍进入 system。 |
+| `SAGE_REPEAT_PATTERN_MAX_HITS`                 | `3`     | SimpleAgent 连续检测到重复循环 pattern 多少次后硬暂停执行循环 |
 | `SAGE_CLI_MAX_LOOP_COUNT`                      | —       | CLI 单轮最大循环次数                                                                                                                                                                 |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | 代码默认值 | 上下文预算分配参数 |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD`        | `15`    | 可用工具数小于等于该值时跳过 LLM 工具推荐调用，直接透传所有可用工具                                                                                                                                            |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE`              | `true`  | LLM 完整产出后是否补发 tool_call chunk                                                                                                                                                |
 | `SAGE_ECHO_SHELL_OUTPUT`                       | `false` | 后台 shell 输出是否回显到主流                                                                                                                                                           |
-| `SAGE_FORCE_TOOL_CHOICE_REQUIRED`             | `false` | 已废弃的兼容开关。普通工具调用会忽略它；只有在 `SAGE_TASK_COMPLETION_MODE=turn_status` 且本次请求只暴露内部 `turn_status` 协议工具时，才可能强制 `tool_choice=required`。 |
 | `SAGE_TOOL_PROGRESS_ENABLED`                   | `true`  | 是否启用工具实时过程通道（NDJSON `type=tool_progress` 事件，仅给前端 UI，不进 MessageManager / 不喂 LLM）                                                                                          |
 | `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS`         | `50`    | 工具过程合并时间窗（毫秒）。同 `(tool_call, stream)` 维度下窗口内的多次 emit 合并成一条事件下发；设 `0` 关闭合并立即推送                                                                                          |
 | `SAGE_TOOL_PROGRESS_FLUSH_BYTES`               | `16384` | 单 stream 累计字节阈值，达到即立即 flush（防极快产生输出的命令挤爆通道）                                                                                                                       |
@@ -254,6 +254,9 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 
 | 变量 | 替代方案 / 状态 |
 | --- | --- |
+| `SAGE_AGENT_STATUS_PROTOCOL_ENABLED` | 已移除并忽略。请使用 `SAGE_TASK_COMPLETION_MODE=turn_status` / `no_tool_call` / `llm_judge`。 |
+| `SAGE_CONTINUE_ON_PROCESSING_KEYWORDS` | 已移除并忽略。SimpleAgent「处理中关键词」强制继续规则已下线。 |
+| `SAGE_FORCE_TOOL_CHOICE_REQUIRED` | 已废弃且忽略。turn_status-only 轮次的 `tool_choice=required` 由 agent 主循环内部控制；后续版本将移除代码读取。 |
 | `SAGE_COMPLETE_ON_NO_TOOL_CALL` | 已移除并忽略。请使用 `SAGE_TASK_COMPLETION_MODE=no_tool_call`。 |
 | `SAGE_SPLIT_SYSTEM` | 已废弃且忽略。system message 拆分现在固定开启。 |
 | `SAGE_STABLE_TOOLS_ORDER` | 已废弃且忽略。LLM 请求前 tools 固定按 `function.name` 排序。 |

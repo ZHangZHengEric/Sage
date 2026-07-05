@@ -91,6 +91,49 @@ def test_upload_server_agent_file_uses_user_workspace(tmp_path, monkeypatch):
     assert (workspace / "docs" / "note.txt").read_bytes() == b"note"
 
 
+def test_download_url_to_server_agent_file_uses_user_workspace(tmp_path, monkeypatch):
+    cfg = _build_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+
+    import httpx
+
+    class FakeResponse:
+        content = b"image"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url):
+            assert url == "https://cdn.example.com/photo.jpg"
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(
+        agent_service.download_url_to_server_agent_file(
+            "agent_demo",
+            "user_a",
+            "https://cdn.example.com/photo.jpg",
+            "photo.jpg",
+            "upload_files",
+        )
+    )
+
+    workspace = Path(cfg.agents_dir) / "user_a" / "agent_demo"
+    assert result["path"] == "upload_files/photo.jpg"
+    assert (workspace / "upload_files" / "photo.jpg").read_bytes() == b"image"
+
+
 def test_server_workspace_upload_route_forwards_file_and_target_path(monkeypatch):
     calls = {}
     upload = UploadFile(file=BytesIO(b"hello"), filename="hello.txt")
@@ -136,4 +179,54 @@ def test_server_workspace_upload_route_forwards_file_and_target_path(monkeypatch
         "filename": "hello.txt",
         "content": b"hello",
         "target_path": "docs",
+    }
+
+
+def test_server_workspace_download_from_url_route_forwards_request(monkeypatch):
+    calls = {}
+
+    async def fake_download_url_to_server_agent_file(
+        agent_id,
+        user_id,
+        source_url,
+        filename,
+        target_path="",
+    ):
+        calls.update(
+            {
+                "agent_id": agent_id,
+                "user_id": user_id,
+                "source_url": source_url,
+                "filename": filename,
+                "target_path": target_path,
+            }
+        )
+        return {"filename": filename, "path": "upload_files/photo.jpg", "size": 5}
+
+    monkeypatch.setattr(
+        server_agent_router.agent_service,
+        "download_url_to_server_agent_file",
+        fake_download_url_to_server_agent_file,
+    )
+
+    response = asyncio.run(
+        server_agent_router.download_file_from_url(
+            "agent_demo",
+            server_agent_router.FileWorkspaceDownloadFromUrlRequest(
+                source_url="https://cdn.example.com/photo.jpg",
+                filename="photo.jpg",
+                target_path="upload_files",
+            ),
+            _fake_request(),
+        )
+    )
+
+    assert response.message == "文件 photo.jpg 上传成功"
+    assert response.data["path"] == "upload_files/photo.jpg"  # pyright: ignore[reportOptionalSubscript]
+    assert calls == {
+        "agent_id": "agent_demo",
+        "user_id": "user_a",
+        "source_url": "https://cdn.example.com/photo.jpg",
+        "filename": "photo.jpg",
+        "target_path": "upload_files",
     }

@@ -4,6 +4,8 @@ from openai import BadRequestError
 
 from sagents.utils.llm_request_utils import (
     create_chat_completion_with_fallback,
+    downgrade_image_url_parts_for_text_only_model,
+    get_multimodal_support,
     redact_base64_data_urls_in_value,
     sanitize_model_request_kwargs,
     uses_max_completion_tokens,
@@ -87,6 +89,59 @@ def test_redact_base64_data_url_replaces_payload() -> None:
     )
     assert "xxxx" not in str(out)
     assert "base64_len=100" in out[0]["content"][1]["image_url"]["url"]
+
+
+def test_get_multimodal_support_prefers_model_config() -> None:
+    class Client:
+        supports_multimodal = True
+
+    assert (
+        get_multimodal_support(
+            client=Client(),
+            model_config={"supports_multimodal": False},
+        )
+        is False
+    )
+
+
+def test_downgrade_image_url_parts_removes_images_for_text_only_model() -> None:
+    image_url = "https://example.com/uploads/photo.png"
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "看这个："},
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": f"![photo.png]({image_url})"},
+            ],
+        }
+    ]
+
+    out, count = downgrade_image_url_parts_for_text_only_model(messages)
+
+    assert count == 1
+    assert out[0]["content"] == [
+        {"type": "text", "text": f"看这个：![photo.png]({image_url})"}
+    ]
+    assert messages[0]["content"][1]["type"] == "image_url"
+
+
+def test_downgrade_image_url_parts_adds_markdown_for_orphan_image() -> None:
+    image_url = "https://example.com/uploads/photo.png?token=1"
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ],
+        }
+    ]
+
+    out, count = downgrade_image_url_parts_for_text_only_model(messages)
+
+    assert count == 1
+    assert out[0]["content"] == [{"type": "text", "text": f"![photo.png]({image_url})"}]
+    assert "image_url" not in str(out)
 
 
 def test_sanitize_keeps_zero_sampling_values() -> None:
@@ -259,3 +314,63 @@ async def test_create_chat_completion_drops_unknown_extra_body_params() -> None:
     assert "chat_template_kwargs" not in response["kwargs"]["extra_body"]
     assert "enable_thinking" not in response["kwargs"]["extra_body"]
     assert response["kwargs"]["extra_body"]["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_removes_image_urls_when_model_is_text_only() -> (
+    None
+):
+    client = _FakeClient()
+    image_url = "https://example.com/uploads/photo.png"
+
+    response = await create_chat_completion_with_fallback(
+        client,
+        model="text-only-model",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看这个："},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": f"![photo.png]({image_url})"},
+                ],
+            }
+        ],
+        model_config={"supports_multimodal": False},
+        stream=True,
+    )
+
+    sent_messages = response["kwargs"]["messages"]
+    assert sent_messages[0]["content"] == [
+        {"type": "text", "text": f"看这个：![photo.png]({image_url})"}
+    ]
+    assert "image_url" not in str(sent_messages)
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_keeps_image_urls_when_model_supports_images() -> (
+    None
+):
+    client = _FakeClient()
+    image_part = {
+        "type": "image_url",
+        "image_url": {"url": "https://example.com/uploads/photo.png"},
+    }
+
+    response = await create_chat_completion_with_fallback(
+        client,
+        model="vision-model",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看这个："},
+                    image_part,
+                ],
+            }
+        ],
+        model_config={"supports_multimodal": True},
+        stream=True,
+    )
+
+    assert response["kwargs"]["messages"][0]["content"][1] == image_part

@@ -35,12 +35,27 @@ class FileReference:
     require_absolute: bool = True
 
 
+ARTIFACT_TAGS = ("movo-artifacts", "ling-artifacts", "sage-artifacts", "artifacts")
+QUESTIONNAIRE_TAGS = (
+    "movo-questionnaire",
+    "ling-questionnaire",
+    "sage-questionnaire",
+    "questionnaire",
+)
+QUESTIONNAIRE_RESPONSE_TAGS = tuple(f"{tag}-response" for tag in QUESTIONNAIRE_TAGS)
+STRUCTURED_INLINE_TAGS = (
+    ARTIFACT_TAGS + QUESTIONNAIRE_TAGS + QUESTIONNAIRE_RESPONSE_TAGS
+)
+
+
 class SelfCheckAgent(AgentBase):
     """
     执行后的确定性自检 Agent。
 
-    当前聚焦最终输出里引用到的结果文件是否真实存在，
-    并要求最终消息中的 Markdown 文件链接必须使用绝对路径。
+    当前聚焦：
+    1. Artifacts / Questionnaire 等特殊标签内 JSON 是否可解析且结构合法；
+    2. 最终输出里引用到的结果文件是否真实存在；
+    3. 最终消息中的 Markdown 文件链接必须使用绝对路径。
     """
 
     def __init__(
@@ -67,19 +82,31 @@ class SelfCheckAgent(AgentBase):
             self._mark_passed(session_context, summary="skip: no sandbox")
             return
 
+        latest_assistant_content = self._get_latest_assistant_content(session_context)
+        has_structured_tags = self._content_has_structured_tags(
+            latest_assistant_content
+        )
+        structured_tag_issues = self._validate_structured_tag_payloads(
+            latest_assistant_content
+        )
         referenced_file_refs = self._collect_recent_file_references(session_context)
         logger.info(
             "SelfCheckAgent: collected "
-            f"{len(referenced_file_refs)} referenced files for validation"
+            f"{len(referenced_file_refs)} referenced files for validation, "
+            f"{len(structured_tag_issues)} structured-tag issues"
         )
 
-        if not referenced_file_refs:
+        if (
+            not referenced_file_refs
+            and not structured_tag_issues
+            and not has_structured_tags
+        ):
             self._mark_passed(
                 session_context, summary="skip: no candidate files detected"
             )
             return
 
-        issues: List[str] = []
+        issues: List[str] = list(structured_tag_issues)
         checked_files: List[str] = []
 
         for file_ref in sorted(
@@ -133,7 +160,8 @@ class SelfCheckAgent(AgentBase):
             audit_status["completion_status"] = "in_progress"
             audit_status["task_completed"] = False
 
-            content = self._format_failure_message(issues, checked_files)
+            language = self._get_session_language(session_context)
+            content = self._format_failure_message(issues, checked_files, language)
             yield [
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
@@ -176,34 +204,35 @@ class SelfCheckAgent(AgentBase):
             for file_ref in self._collect_recent_file_references(session_context)
         }
 
-    def _collect_recent_file_references(
-        self, session_context: SessionContext
-    ) -> Set[FileReference]:
+    def _get_latest_assistant_content(self, session_context: SessionContext) -> str:
         messages = session_context.message_manager.messages
         if not messages:
-            return set()
+            return ""
 
         last_user_index = 0
         for i, message in enumerate(messages):
             if message.is_user_input_message():
                 last_user_index = i
 
-        referenced_file_refs: Set[FileReference] = set()
-        markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
-
-        latest_assistant_message = None
+        latest_assistant_content = ""
         for message in messages[last_user_index:]:
             if (
                 message.role == MessageRole.ASSISTANT.value
                 and isinstance(message.content, str)
                 and message.content.strip()
             ):
-                latest_assistant_message = message
+                latest_assistant_content = message.content
+        return latest_assistant_content
 
-        if latest_assistant_message is None:
-            return referenced_file_refs
+    def _collect_recent_file_references(
+        self, session_context: SessionContext
+    ) -> Set[FileReference]:
+        content = self._get_latest_assistant_content(session_context)
+        if not content:
+            return set()
 
-        content = latest_assistant_message.content
+        referenced_file_refs: Set[FileReference] = set()
+        markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
 
         for raw_path in markdown_link_pattern.findall(content):  # pyright: ignore[reportArgumentType,reportCallIssue]
             normalized_path = self._normalize_raw_file_reference(raw_path)
@@ -221,43 +250,143 @@ class SelfCheckAgent(AgentBase):
 
         return self._dedupe_referenced_file_refs(referenced_file_refs)
 
-    def _extract_artifact_paths(self, content: str) -> Set[str]:
-        artifact_paths: Set[str] = set()
-        artifact_tag_pattern = re.compile(
-            r"<(movo-artifacts|ling-artifacts|sage-artifacts|artifacts)(?:\s[^>]*)?>"
-            r"([\s\S]*?)<\\?/\1\s*>",
+    def _content_has_structured_tags(self, content: str) -> bool:
+        for _tag_name, _raw_payload in self._iter_structured_tag_matches(content):
+            return True
+        return False
+
+    def _structured_tag_pattern(self) -> re.Pattern[str]:
+        tag_names = "|".join(re.escape(tag) for tag in STRUCTURED_INLINE_TAGS)
+        return re.compile(
+            rf"<({tag_names})(?:\s[^>]*)?>([\s\S]*?)<\\?/\1\s*>",
             re.IGNORECASE,
         )
+
+    def _iter_structured_tag_matches(self, content: str):
+        if not content:
+            return
 
         candidate_contents = [content]
         unescaped_content = unescape(content)
         if unescaped_content != content:
             candidate_contents.append(unescaped_content)
 
+        pattern = self._structured_tag_pattern()
+        seen_spans: Set[tuple[int, int, str]] = set()
         for candidate_content in candidate_contents:
-            for match in artifact_tag_pattern.finditer(candidate_content):
-                payload = self._decode_json_payload(match.group(2) or "")
-                if payload is None:
+            for match in pattern.finditer(candidate_content):
+                tag_name = (match.group(1) or "").lower()
+                span_key = (match.start(), match.end(), tag_name)
+                if span_key in seen_spans:
                     continue
-                artifact_paths.update(self._find_path_fields(payload))
+                seen_spans.add(span_key)
+                yield tag_name, match.group(2) or ""
 
+    def _validate_structured_tag_payloads(self, content: str) -> List[str]:
+        issues: List[str] = []
+        for tag_name, raw_payload in self._iter_structured_tag_matches(content):
+            issues.extend(self._validate_structured_tag_payload(tag_name, raw_payload))
+        return issues
+
+    def _validate_structured_tag_payload(
+        self, tag_name: str, raw_payload: str
+    ) -> List[str]:
+        payload, error = self._parse_json_payload(raw_payload)
+        if error:
+            return [f"<{tag_name}> 标签内容不是合法 JSON: {error}"]
+
+        if not isinstance(payload, dict):
+            return [f"<{tag_name}> 标签内容必须是 JSON 对象"]
+
+        if tag_name in ARTIFACT_TAGS:
+            return self._validate_artifacts_payload(tag_name, payload)
+        if tag_name in QUESTIONNAIRE_TAGS:
+            return self._validate_questionnaire_payload(tag_name, payload)
+        if tag_name in QUESTIONNAIRE_RESPONSE_TAGS:
+            return self._validate_questionnaire_response_payload(tag_name, payload)
+        return []
+
+    def _validate_artifacts_payload(
+        self, tag_name: str, payload: Dict[str, Any]
+    ) -> List[str]:
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return [f"<{tag_name}> 缺少合法的 items 数组"]
+        if not items:
+            return [f"<{tag_name}> items 不能为空"]
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                return [f"<{tag_name}> items[{index}] 必须是对象"]
+            path = item.get("path")
+            if not isinstance(path, str) or not path.strip():
+                return [f"<{tag_name}> items[{index}] 缺少合法的 path 字段"]
+        return []
+
+    def _validate_questionnaire_payload(
+        self, tag_name: str, payload: Dict[str, Any]
+    ) -> List[str]:
+        questions = payload.get("questions")
+        if not isinstance(questions, list):
+            return [f"<{tag_name}> 缺少合法的 questions 数组"]
+        if not questions:
+            return [f"<{tag_name}> questions 不能为空"]
+        for index, question in enumerate(questions, start=1):
+            if not isinstance(question, dict):
+                return [f"<{tag_name}> questions[{index}] 必须是对象"]
+            text = question.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return [f"<{tag_name}> questions[{index}] 缺少合法的 text 字段"]
+            question_type = str(question.get("type") or "").strip().lower()
+            if question_type in {"single_choice", "multi_choice", "multiple_choice"}:
+                options = question.get("options")
+                if not isinstance(options, list) or not options:
+                    return [
+                        f"<{tag_name}> questions[{index}] 的选择题必须提供非空 options"
+                    ]
+        return []
+
+    def _validate_questionnaire_response_payload(
+        self, tag_name: str, payload: Dict[str, Any]
+    ) -> List[str]:
+        answers = payload.get("answers")
+        if not isinstance(answers, list):
+            return [f"<{tag_name}> 缺少合法的 answers 数组"]
+        return []
+
+    def _extract_artifact_paths(self, content: str) -> Set[str]:
+        artifact_paths: Set[str] = set()
+        for tag_name, raw_payload in self._iter_structured_tag_matches(content):
+            if tag_name not in ARTIFACT_TAGS:
+                continue
+            payload = self._decode_json_payload(raw_payload)
+            if payload is None:
+                continue
+            artifact_paths.update(self._find_path_fields(payload))
         return artifact_paths
 
-    def _decode_json_payload(self, raw_json: str) -> Any:
+    def _parse_json_payload(self, raw_json: str) -> tuple[Optional[Any], Optional[str]]:
         candidates = []
         text = unescape(str(raw_json or "").strip())
-        if text:
-            candidates.append(text)
-            candidates.append(text.replace(r"\/", "/"))
-            if r"\"" in text:
-                candidates.append(text.replace(r"\"", '"').replace(r"\\", "\\"))
+        if not text:
+            return None, "内容为空"
+        candidates.append(text)
+        candidates.append(text.replace(r"\/", "/"))
+        if r"\"" in text:
+            candidates.append(text.replace(r"\"", '"').replace(r"\\", "\\"))
 
+        last_error = "无法解析 JSON"
         for candidate in candidates:
             try:
-                return json.loads(candidate)
-            except Exception:
-                continue
-        return None
+                return json.loads(candidate), None
+            except json.JSONDecodeError as exc:
+                last_error = f"line {exc.lineno} column {exc.colno}: {exc.msg}"
+            except Exception as exc:
+                last_error = str(exc)
+        return None, last_error
+
+    def _decode_json_payload(self, raw_json: str) -> Any:
+        payload, _error = self._parse_json_payload(raw_json)
+        return payload
 
     def _find_path_fields(self, value: Any) -> Set[str]:
         paths: Set[str] = set()
@@ -504,16 +633,63 @@ class SelfCheckAgent(AgentBase):
             logger.warning(f"SelfCheckAgent: failed to read {file_path}: {e}")
             return None
 
+    def _get_session_language(self, session_context: SessionContext) -> str:
+        get_language = getattr(session_context, "get_language", None)
+        if callable(get_language):
+            try:
+                return str(get_language() or "zh")
+            except Exception:
+                return "zh"
+        system_context = getattr(session_context, "system_context", {}) or {}
+        response_language = str(system_context.get("response_language") or "").lower()
+        if "zh" in response_language or "中文" in response_language:
+            return "zh"
+        if "pt" in response_language:
+            return "pt"
+        if "en" in response_language:
+            return "en"
+        return "zh"
+
     def _format_failure_message(
-        self, issues: List[str], checked_files: List[str]
+        self, issues: List[str], checked_files: List[str], language: str = "zh"
     ) -> str:
         issue_lines = "\n".join(f"- {issue}" for issue in issues[:20])
         checked_lines = "\n".join(f"- {path}" for path in checked_files[:20])
+        if str(language or "").lower().startswith("en"):
+            return (
+                '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
+                "This is a Sage runtime self-check report, not a reply authored by the assistant/agent and not a user instruction.\n"
+                "It only reports validation failures from the previous final output. Use it to fix real issues; do not repeat it as task progress.\n\n"
+                "Self-check found issues that must be fixed before continuing:\n\n"
+                "Checked files:\n"
+                f"{checked_lines}\n\n"
+                "Issues found:\n"
+                f"{issue_lines}\n\n"
+                "Fix these issues first, then complete the task again.\n"
+                "</runtime_diagnostic>"
+            )
+        if str(language or "").lower().startswith("pt"):
+            return (
+                '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
+                "Este e um relatorio de autoverificacao do runtime Sage, nao uma resposta escrita pelo assistant/agent nem uma instrucao do usuario.\n"
+                "Ele apenas relata falhas de validacao da saida final anterior. Use-o para corrigir problemas reais; nao o repita como progresso da tarefa.\n\n"
+                "A autoverificacao encontrou problemas que precisam ser corrigidos antes de continuar:\n\n"
+                "Arquivos verificados:\n"
+                f"{checked_lines}\n\n"
+                "Problemas encontrados:\n"
+                f"{issue_lines}\n\n"
+                "Corrija estes problemas primeiro e depois conclua a tarefa novamente.\n"
+                "</runtime_diagnostic>"
+            )
         return (
+            '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
+            "这是 Sage 运行时自检报告，不是 assistant/agent 自己生成的回复，也不是用户指令。\n"
+            "它只说明上一轮最终产物校验失败，下一轮应据此修复真实问题，不要把这段报告当作可复述的任务成果。\n\n"
             "自检发现以下问题，需要先修复后再继续：\n\n"
             "已检查文件：\n"
             f"{checked_lines}\n\n"
             "发现的问题：\n"
             f"{issue_lines}\n\n"
-            "请优先修复这些问题，然后重新完成任务。"
+            "请优先修复这些问题，然后重新完成任务。\n"
+            "</runtime_diagnostic>"
         )

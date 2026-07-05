@@ -65,7 +65,6 @@ class SkillManager:
             self.reload()
 
     def _initialize(self, skill_dirs: List[str] = None):  # pyright: ignore[reportArgumentType]
-        logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
 
@@ -187,8 +186,6 @@ class SkillManager:
                 logger.debug("Skills cache is valid, skipping load_new_skills scan")
                 return
 
-        count = 0
-
         # Build a set of existing skill paths for fast lookup
         existing_paths = {skill.path for skill in self.skills.values()}
 
@@ -209,15 +206,10 @@ class SkillManager:
 
                         # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
-                        name = self._load_skill_from_dir(
-                            skill_path, skip_if_loaded=True
-                        )
-                        if name:
-                            count += 1
+                        self._load_skill_from_dir(skill_path, skip_if_loaded=True)
 
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
-        logger.debug(f"Total skills loaded/checked: {count}")
 
         # Mark cache as valid after successful loading (加载成功后标记缓存为有效)
         self._skills_cache_valid = True
@@ -356,7 +348,6 @@ class SkillManager:
                         file_list=file_list,
                     )
                     self.skills[name] = schema
-                    logger.debug(f"Successfully registered new skill: {name}")
                     return name
             except Exception as e:
                 logger.error(f"Failed to load skill from {skill_path}: {e}")

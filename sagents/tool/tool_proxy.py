@@ -307,9 +307,6 @@ class ToolProxy:
             if self._available_tools is not None:
                 try:
                     self._available_tools.update(registered_tool_names)
-                    logger.info(
-                        f"ToolProxy: Added {count} newly registered tools to whitelist: {registered_tool_names}"
-                    )
                 except Exception as e:
                     logger.warning(
                         f"ToolProxy: Failed to update available_tools after registration: {e}"
