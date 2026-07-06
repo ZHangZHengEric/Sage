@@ -120,6 +120,25 @@ def test_denies_force_push_to_protected_branch():
     assert decision.category == "git_force_push_protected"
 
 
+def test_git_global_options_do_not_bypass_push_review():
+    decision = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("git -C repo push origin feature-x")
+
+    assert decision.action == "ask"
+    assert decision.category == "git_remote_write"
+
+
+def test_denies_force_push_refspec_to_protected_branch():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git push --force origin HEAD:refs/heads/main"
+    )
+
+    assert decision.action == "deny"
+    assert decision.category == "git_force_push_protected"
+
+
 def test_requires_confirmation_for_recursive_delete():
     decision = SandboxPolicyGateway(
         approval_mode="on-request",
@@ -205,3 +224,122 @@ def test_runtime_command_policy_default_action_applies_when_no_rule_matches():
 
     assert decision.action == "ask"
     assert decision.category == "app_default_review"
+
+
+def test_runtime_command_policy_match_predicates_are_conjunctive():
+    gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={
+            "rules": [
+                {
+                    "match": {
+                        "argv_prefix": ["git", "push"],
+                        "pattern": r"\borigin\s+release\b",
+                    },
+                    "action": "allow",
+                    "category": "app_release_push",
+                }
+            ],
+            "default_action": "ask",
+            "default_category": "app_default_review",
+        },
+    )
+
+    feature_decision = gateway.evaluate_shell_command("git push origin feature-x")
+    release_decision = gateway.evaluate_shell_command("git push origin release")
+
+    assert feature_decision.action == "ask"
+    assert feature_decision.category == "app_default_review"
+    assert release_decision.action == "allow"
+    assert release_decision.category == "app_release_push"
+
+
+def test_runtime_command_policy_matches_git_push_remote_and_branch():
+    gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={
+            "rules": [
+                {
+                    "match": {
+                        "git": {
+                            "subcommand": "push",
+                            "remote": "origin",
+                            "branch": "feature-x",
+                            "force": False,
+                        }
+                    },
+                    "action": "allow",
+                    "category": "app_feature_push",
+                }
+            ],
+            "default_action": "ask",
+            "default_category": "app_default_review",
+        },
+    )
+
+    allowed = gateway.evaluate_shell_command("git push origin feature-x")
+    wrong_branch = gateway.evaluate_shell_command("git push origin main")
+    forced = gateway.evaluate_shell_command("git push --force origin feature-x")
+
+    assert allowed.action == "allow"
+    assert allowed.category == "app_feature_push"
+    assert wrong_branch.action == "ask"
+    assert wrong_branch.category == "app_default_review"
+    assert forced.action == "ask"
+    assert forced.category == "app_default_review"
+
+
+def test_runtime_command_policy_matches_git_push_refspec_target_branch():
+    gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={
+            "rules": [
+                {
+                    "match": {
+                        "git": {
+                            "subcommand": "push",
+                            "remote": "origin",
+                            "branch": "feature-x",
+                        }
+                    },
+                    "action": "allow",
+                    "category": "app_feature_refspec_push",
+                }
+            ],
+            "default_action": "ask",
+            "default_category": "app_default_review",
+        },
+    )
+
+    decision = gateway.evaluate_shell_command("git push origin HEAD:feature-x")
+
+    assert decision.action == "allow"
+    assert decision.category == "app_feature_refspec_push"
+
+
+def test_runtime_command_policy_git_matcher_handles_git_global_options():
+    gateway = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={
+            "rules": [
+                {
+                    "match": {
+                        "git": {
+                            "subcommand": "push",
+                            "remote": "origin",
+                            "branch": "feature-x",
+                        }
+                    },
+                    "action": "allow",
+                    "category": "app_feature_push",
+                }
+            ],
+            "default_action": "ask",
+            "default_category": "app_default_review",
+        },
+    )
+
+    decision = gateway.evaluate_shell_command("git -C repo push origin feature-x")
+
+    assert decision.action == "allow"
+    assert decision.category == "app_feature_push"
