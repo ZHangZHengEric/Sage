@@ -128,7 +128,6 @@ def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
 def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     tool = ExecuteCommandTool()
     result = asyncio.run(
@@ -149,13 +148,11 @@ def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     assert "approval_id" not in result
     assert "approval_expires_at" not in result
     assert ExecuteCommandTool._BG_TASKS == {}
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     tool = ExecuteCommandTool()
     result = asyncio.run(
@@ -173,7 +170,6 @@ def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
     assert result["policy_action"] == "deny"
     assert result["policy_approval_mode"] == "never"
     assert "approval_id" not in result
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
@@ -181,7 +177,6 @@ def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     import sagents.session_runtime
 
@@ -311,7 +306,6 @@ def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     import sagents.session_runtime
 
@@ -337,7 +331,6 @@ def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
     assert result["policy_action"] == "deny"
     assert result["policy_category"] == "approval_channel_unavailable"
     assert "approval_id" not in result
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
     assert fake_sandbox.bg_calls == []
 
 
