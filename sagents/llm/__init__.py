@@ -3,6 +3,8 @@ from .chat import OpenAIChat
 from .embedding import OpenAIEmbedding
 from .capabilities import (
     create_chat_completion_with_fallback,
+    downgrade_image_url_parts_for_text_only_model,
+    get_multimodal_support,
     get_structured_output_support,
     is_unsupported_input_format_error,
     sanitize_model_request_kwargs,
@@ -18,6 +20,8 @@ __all__ = [
     "OpenAIChat",
     "OpenAIEmbedding",
     "create_chat_completion_with_fallback",
+    "downgrade_image_url_parts_for_text_only_model",
+    "get_multimodal_support",
     "get_structured_output_support",
     "is_unsupported_input_format_error",
     "sanitize_model_request_kwargs",

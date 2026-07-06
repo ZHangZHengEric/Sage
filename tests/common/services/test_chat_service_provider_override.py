@@ -19,6 +19,79 @@ def test_chat_request_accepts_provider_id():
     assert request.fast_provider_id == "fast_provider_1"
 
 
+def test_multimodal_guard_downgrades_image_url_when_model_does_not_support_images():
+    image_url = "https://example.com/uploads/photo.png"
+    request = StreamRequest(
+        messages=[
+            Message(
+                role="user",
+                content=[
+                    {"type": "text", "text": "看这个："},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": f"![photo.png]({image_url})"},
+                ],
+            )
+        ],
+        llm_model_config={"supports_multimodal": False},
+    )
+
+    downgraded = chat_service.enforce_multimodal_capability_guard(request)
+
+    assert downgraded == 1
+    assert request.messages[0].content == [
+        {"type": "text", "text": f"看这个：![photo.png]({image_url})"}
+    ]
+
+
+def test_multimodal_guard_adds_markdown_for_orphan_image_url():
+    image_url = "https://example.com/uploads/photo.png?token=1"
+    request = StreamRequest(
+        messages=[
+            Message(
+                role="user",
+                content=[
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            )
+        ],
+        llm_model_config={"supports_multimodal": False},
+    )
+
+    downgraded = chat_service.enforce_multimodal_capability_guard(request)
+
+    assert downgraded == 1
+    assert request.messages[0].content == [
+        {"type": "text", "text": f"![photo.png]({image_url})"}
+    ]
+
+
+def test_multimodal_guard_keeps_image_url_when_model_supports_images():
+    image_part = {
+        "type": "image_url",
+        "image_url": {"url": "https://example.com/uploads/photo.png"},
+    }
+    request = StreamRequest(
+        messages=[
+            Message(
+                role="user",
+                content=[
+                    image_part,
+                    {
+                        "type": "text",
+                        "text": "![photo.png](https://example.com/uploads/photo.png)",
+                    },
+                ],
+            )
+        ],
+        llm_model_config={"supports_multimodal": True},
+    )
+
+    downgraded = chat_service.enforce_multimodal_capability_guard(request)
+
+    assert downgraded == 0
+    assert request.messages[0].content[0] == image_part
+
+
 def test_provider_override_is_trimmed_on_plain_request():
     request = ChatRequest(
         messages=[Message(role="user", content="hi")],

@@ -9,6 +9,7 @@ class Message(BaseModel):
     role: str
     type: Optional[str] = None
     message_type: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     # content 可以是字符串或列表（支持多模态，如图片+文本）
     # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
     content: Optional[Union[str, List[Dict[str, Any]]]] = None
@@ -79,6 +80,12 @@ class StreamRequest(BaseChatRequest):
     context_budget_config: Optional[Dict[str, Any]] = None
     # 额外的 mcp 配置
     extra_mcp_config: Optional[Dict[str, Dict[str, Any]]] = None
+    # Runtime command approval policy. This is run/session scoped; apps should
+    # set it on the request instead of relying on process-wide environment.
+    sandbox_approval_mode: Optional[str] = None
+    # Runtime command policy. Apps may pass per-run/session rules; sagents keeps
+    # a built-in default preset only as a fallback.
+    command_policy: Optional[Dict[str, Any]] = None
     # 内部使用：标记本次执行来源与开始时间，不参与外部序列化
     request_source: Optional[str] = Field(default=None, exclude=True)
     execution_started_at: Optional[datetime] = Field(default=None, exclude=True)
@@ -103,3 +110,10 @@ class UserInputOptimizeRequest(BaseModel):
     agent_id: Optional[str] = None
     user_id: Optional[str] = None
     language: Optional[str] = None
+
+
+class SandboxApprovalDecisionRequest(BaseModel):
+    session_id: str
+    approval_id: str
+    decision: str
+    command_hash: Optional[str] = None

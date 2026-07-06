@@ -66,6 +66,38 @@ def test_delete_pending_user_injection(tmp_path):
     assert ctx.list_user_injections() == []
 
 
+def test_enqueue_user_injection_is_idempotent_for_pending_guidance(tmp_path):
+    ctx = _make_session(tmp_path)
+
+    ctx.enqueue_user_injection("第一版", guidance_id="guidance-1")
+    ctx.enqueue_user_injection(
+        "第二版",
+        guidance_id="guidance-1",
+        extra_metadata={"ling_source": "updated"},
+    )
+
+    pending = ctx.list_user_injections()
+    assert len(pending) == 1
+    assert pending[0]["content"] == "第二版"
+    assert pending[0]["metadata"]["ling_source"] == "updated"
+
+    drained = ctx.flush_user_injections()
+    assert len(drained) == 1
+    assert drained[0].content == "第二版"
+
+
+def test_enqueue_user_injection_skips_already_flushed_guidance(tmp_path):
+    ctx = _make_session(tmp_path)
+
+    ctx.enqueue_user_injection("喝茶喝茶", guidance_id="guidance-1")
+    first_drained = ctx.flush_user_injections()
+    ctx.enqueue_user_injection("喝茶喝茶", guidance_id="guidance-1")
+
+    assert len(first_drained) == 1
+    assert ctx.list_user_injections() == []
+    assert [message.content for message in ctx.message_manager.messages] == ["喝茶喝茶"]
+
+
 def test_flush_user_injection_waits_for_open_tool_call_tail(tmp_path):
     ctx = _make_session(tmp_path)
     ctx.add_messages(

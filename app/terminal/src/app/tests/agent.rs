@@ -195,6 +195,7 @@ fn startup_options_apply_without_emitting_messages() {
         Some(DisplayMode::Verbose),
         None,
         Some("local".to_string()),
+        Some("untrusted".to_string()),
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
@@ -202,6 +203,7 @@ fn startup_options_apply_without_emitting_messages() {
     assert_eq!(app.display_mode, DisplayMode::Verbose);
     assert_eq!(app.workspace_label, "~/.sage");
     assert_eq!(app.sandbox_type.as_deref(), Some("local"));
+    assert_eq!(app.sandbox_approval_mode, "untrusted");
 }
 
 #[test]
@@ -214,6 +216,7 @@ fn startup_options_apply_explicit_workspace_override() {
         Some("multi".to_string()),
         Some(DisplayMode::Compact),
         Some(PathBuf::from("/tmp/demo-workspace")),
+        None,
         None,
     );
 
@@ -235,7 +238,15 @@ fn startup_options_apply_explicit_workspace_override() {
 fn startup_options_warn_when_coding_config_has_no_workspace() {
     let mut app = App::new();
 
-    app.apply_startup_options(None, Some(PathBuf::from("coding")), None, None, None, None);
+    app.apply_startup_options(
+        None,
+        Some(PathBuf::from("coding")),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let rendered = app
         .pending_history_lines

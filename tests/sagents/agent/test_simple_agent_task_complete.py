@@ -9,20 +9,9 @@ class DummyModel:
         yield None
 
 
-@pytest.fixture
-def disable_keywords(monkeypatch):
-    """显式跳过"处理中关键词"规则（默认是启用）。"""
-    monkeypatch.setenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", "false")
-    yield
-
-
-# ---- 规则 1 / 2 / 4：不受 env 影响，始终运行 ----
-
-
 @pytest.mark.asyncio
-async def test_must_continue_when_last_role_is_tool(monkeypatch):
-    """规则 1：tool 结果后必须继续。不受关键词开关影响。"""
-    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
+async def test_must_continue_when_last_role_is_tool():
+    """规则 1：tool 结果后必须继续。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -36,9 +25,8 @@ async def test_must_continue_when_last_role_is_tool(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_must_continue_when_last_assistant_ends_with_colon(monkeypatch):
-    """规则 4：':' 结尾必须继续。不受关键词开关影响。"""
-    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
+async def test_must_continue_when_last_assistant_ends_with_colon():
+    """规则 4：':' 结尾必须继续。"""
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -51,8 +39,7 @@ async def test_must_continue_when_last_assistant_ends_with_colon(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
-    monkeypatch.delenv("SAGE_CONTINUE_ON_PROCESSING_KEYWORDS", raising=False)
+async def test_not_must_continue_for_normal_assistant_message():
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [
         MessageChunk(
@@ -62,9 +49,6 @@ async def test_not_must_continue_for_normal_assistant_message(monkeypatch):
         ),
     ]
     assert await agent._must_continue_by_rules(messages) is False
-
-
-# ---- 关键词规则已移除：以下测试验证"中文关键词不再触发强制继续" ----
 
 
 @pytest.mark.asyncio

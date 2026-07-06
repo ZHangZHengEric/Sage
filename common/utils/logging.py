@@ -22,8 +22,11 @@ from loguru import logger
 
 _SUPPRESSED_UVICORN_ACCESS_PATHS = {
     "/api/health",
+    "/api/observability/jaeger/auth",
     "/api/observability/metrics",
+    "/api/stream/active_sessions",
 }
+_SUPPRESSED_UVICORN_ACCESS_PREFIXES = ("/tasks/internal/",)
 
 
 def _ensure_loguru_has_sink() -> None:
@@ -51,8 +54,33 @@ def _uvicorn_access_path(record: logging.LogRecord) -> str | None:
     return path.split("?", 1)[0]
 
 
+def _uvicorn_access_status(record: logging.LogRecord) -> int | None:
+    if record.name != "uvicorn.access":
+        return None
+
+    args = record.args
+    if not isinstance(args, tuple) or len(args) < 5:
+        return None
+
+    status = args[4]
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return None
+
+
 def _should_suppress_log_record(record: logging.LogRecord) -> bool:
-    return _uvicorn_access_path(record) in _SUPPRESSED_UVICORN_ACCESS_PATHS
+    path = _uvicorn_access_path(record)
+    if not path:
+        return False
+
+    if path not in _SUPPRESSED_UVICORN_ACCESS_PATHS and not any(
+        path.startswith(prefix) for prefix in _SUPPRESSED_UVICORN_ACCESS_PREFIXES
+    ):
+        return False
+
+    status = _uvicorn_access_status(record)
+    return status is None or status < 400
 
 
 class InterceptHandler(logging.Handler):
@@ -262,6 +290,8 @@ def init_logging_base(
 
     # Intercept std logging
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     # Capture FastAPI / uvicorn / sagents logs
     fastapi_loggers = [

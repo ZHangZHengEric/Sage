@@ -7,7 +7,12 @@ import asyncio
 from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.agent.simple_agent import SimpleAgent, _get_system_prefix
+from sagents.agent.simple_agent import (
+    DEFAULT_REPEAT_PATTERN_MAX_HITS,
+    REPEAT_PATTERN_MAX_HITS_ENV,
+    SimpleAgent,
+    _get_system_prefix,
+)
 
 
 class _DummyModel:
@@ -17,6 +22,25 @@ class _DummyModel:
 
 def _agent():
     return SimpleAgent(model=_DummyModel(), model_config={})
+
+
+def test_repeat_pattern_max_hits_defaults_to_three(monkeypatch):
+    monkeypatch.delenv(REPEAT_PATTERN_MAX_HITS_ENV, raising=False)
+
+    assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS == 3
+
+
+def test_repeat_pattern_max_hits_uses_env(monkeypatch):
+    monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, "4")
+
+    assert _agent().max_repeat_pattern_hits == 4
+
+
+def test_repeat_pattern_max_hits_invalid_env_falls_back(monkeypatch):
+    for value in ["", "abc", "0", "-2"]:
+        monkeypatch.setenv(REPEAT_PATTERN_MAX_HITS_ENV, value)
+
+        assert _agent().max_repeat_pattern_hits == DEFAULT_REPEAT_PATTERN_MAX_HITS
 
 
 def _llm_chunk(*, content=None, tool_calls=None):
@@ -544,19 +568,22 @@ def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatc
     assert _agent()._turn_status_enabled() is False
 
 
-def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
+def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
     monkeypatch,
 ):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
-    agent = _agent()
+    agent = SimpleAgent(
+        model=_DummyModel(),
+        model_config={},
+        system_prefix="Agent system with active_skills and workspace_files",
+    )
     captured = {}
 
     async def _never_must_continue(messages):
         return False
 
-    async def _fake_system_messages(**kwargs):
-        captured["custom_prefix"] = kwargs["custom_prefix"]
-        return [MessageChunk(role="system", content=kwargs["custom_prefix"])]
+    async def _fail_system_prompt_build(**_kwargs):
+        raise AssertionError("task complete judge should not build agent system prompt")
 
     async def _fake_llm_streaming(*args, **kwargs):
         captured["llm_messages"] = kwargs["messages"]
@@ -571,7 +598,9 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
         )
 
     monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
-    monkeypatch.setattr(agent, "prepare_unified_system_messages", _fake_system_messages)
+    monkeypatch.setattr(
+        agent, "prepare_llm_system_prompt_text", _fail_system_prompt_build
+    )
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
 
     msg_manager = SimpleNamespace(
@@ -606,8 +635,136 @@ def test_task_complete_judge_uses_composed_system_prefix_in_llm_judge_mode(
         )
         is True
     )
-    assert "turn_status" not in captured["custom_prefix"]
-    assert "找不到prompt" not in captured["llm_messages"][0]["content"]
+    prompt = captured["llm_messages"][0]["content"]
+    assert "Agent system with active_skills" not in prompt
+    assert "<active_skills>" not in prompt
+    assert "<available_skills>" not in prompt
+    assert "<system_context>" not in prompt
+    assert "<workspace_files>" not in prompt
+    assert "user: start" in prompt
+    assert "assistant: done" in prompt
+
+
+def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Update the config and verify it.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Updated the config and verified it.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is True
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "claims about executed actions are backed by execution evidence" in prompt
+    assert (
+        "Saying \"done\", \"handled\", or \"verified\" is not execution evidence"
+        in prompt
+    )
+
+
+def test_task_complete_judge_missing_evidence_reason_forces_continue(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=(
+                            '{"task_interrupted": true, '
+                            '"reason": "missing execution evidence"}'
+                        )
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Run the tests.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Tests passed.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
 
 
 def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
@@ -676,7 +833,178 @@ def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
     prompt = captured["llm_messages"][0]["content"]
     assert image_payload not in prompt
     assert "data:image/png;base64" not in prompt
-    assert "<redacted data URL; base64_len=10000>" in prompt
+    assert "[image attached]" in prompt
+
+
+def test_task_complete_judge_keeps_tool_name_and_short_result_without_arguments(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_text(**kwargs):
+        return "system prompt"
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_llm_system_prompt_text", _fake_system_text)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    long_result = "RESULT_PREVIEW " + ("x" * 900)
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Patch app.py",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "file_update",
+                        "arguments": '{"path":"/secret/app.py"}',
+                    },
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=long_result,
+            tool_call_id="call_1",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Patched app.py and verified it.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is True
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "[tools called: file_update]" in prompt
+    assert "[tool result from file_update: RESULT_PREVIEW" in prompt
+    assert "[tool result truncated, original chars:" in prompt
+    assert '{"path":"/secret/app.py"}' not in prompt
+    assert "x" * 700 not in prompt
+
+
+def test_task_complete_judge_supports_object_tool_calls(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_text(**kwargs):
+        return "system prompt"
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": false, "reason": "continue"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "prepare_llm_system_prompt_text", _fake_system_text)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    object_tool_call = SimpleNamespace(
+        id="call_obj",
+        type="function",
+        function=SimpleNamespace(
+            name="file_read",
+            arguments='{"path":"/secret/input.md"}',
+        ),
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Read the file and summarize it.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=None,
+            tool_calls=[object_tool_call],  # pyright: ignore[reportArgumentType]
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content="file content preview",
+            tool_call_id="call_obj",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "[tools called: file_read]" in prompt
+    assert "[tool result from file_read: file content preview]" in prompt
+    assert '{"path":"/secret/input.md"}' not in prompt
 
 
 def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch):
@@ -795,6 +1123,58 @@ def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
 
     assert len(judge_calls) == 1
     assert chunks[-1].content == "已经完成。"
+
+
+def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=f"纯文本回答 {len(direct_calls)}",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return False
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert len(judge_calls) == 2
+    assert [chunk.content for chunk in chunks] == [
+        "纯文本回答 1",
+        "纯文本回答 2",
+        "纯文本回答 3",
+    ]
 
 
 def test_direct_tool_call_response_records_tool_activity_state(monkeypatch):
@@ -1081,6 +1461,121 @@ def test_repeat_pattern_requests_required_escape():
             pattern={"period": 1, "cycles": 2, "span": 2},
         )
         is True
+    )
+
+
+def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    agent.max_repeat_pattern_hits = 2
+    direct_calls = []
+
+    def _same_tool_result():
+        return MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"ok": false, "reason": "same"}',
+            tool_call_id="call_same",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        )
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) <= 2:
+            yield ([_same_tool_result()], False)
+            return
+
+        assert any(
+            isinstance(chunk.content, str)
+            and chunk.content.startswith("自检：检测到执行出现重复循环模式")
+            for chunk in kwargs["messages_input"]
+        )
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="已经换路径继续。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            True,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-repeat-internal",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert [chunk.content for chunk in chunks] == [
+        '{"ok": false, "reason": "same"}',
+        '{"ok": false, "reason": "same"}',
+        "已经换路径继续。",
+    ]
+
+
+def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    agent.max_repeat_pattern_hits = 1
+    direct_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content='{"ok": false, "reason": "same"}',
+                    tool_call_id="call_same",
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-repeat-break",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert [chunk.content for chunk in chunks] == [
+        '{"ok": false, "reason": "same"}',
+        '{"ok": false, "reason": "same"}',
+    ]
+    assert all(
+        not (
+            isinstance(chunk.content, str) and "检测到任务进入重复循环" in chunk.content
+        )
+        for chunk in chunks
     )
 
 

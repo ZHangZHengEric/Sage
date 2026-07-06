@@ -32,6 +32,22 @@ from sagents.utils.repeat_pattern import (
 )
 
 
+TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
+DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
+REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+
+
+def _get_repeat_pattern_max_hits() -> int:
+    raw_value = (os.environ.get(REPEAT_PATTERN_MAX_HITS_ENV) or "").strip()
+    if not raw_value:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return DEFAULT_REPEAT_PATTERN_MAX_HITS
+    return value if value > 0 else DEFAULT_REPEAT_PATTERN_MAX_HITS
+
+
 def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
     """
     根据工具管理器中是否有 todo_write 工具来选择合适的 system prefix
@@ -103,7 +119,7 @@ class SimpleAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
 
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
-        self.max_repeat_pattern_hits = 2
+        self.max_repeat_pattern_hits = _get_repeat_pattern_max_hits()
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
@@ -342,11 +358,21 @@ class SimpleAgent(AgentBase):
             "waiting for tool call",
             "waiting for generation",
             "waiting for tool",
+            "missing execution evidence",
+            "missing tool evidence",
+            "no execution evidence",
+            "no tool result",
             "等待工具调用",
             "等待生成",
             "处理中",
+            "缺少执行证据",
+            "没有执行证据",
+            "缺少工具结果",
+            "没有工具结果",
             "aguardando chamada de ferramenta",
             "aguardando geração",
+            "sem evidência de execução",
+            "sem resultado de ferramenta",
         ]
         if any(marker in reason_text for marker in wait_tool_markers):
             return False
@@ -690,24 +716,15 @@ class SimpleAgent(AgentBase):
             messages_for_complete, budget
         )
 
-        clean_messages = MessageManager.convert_messages_to_dict_for_request(
+        judge_messages = self._format_task_complete_messages_for_prompt(
             messages_for_complete
         )
-        clean_messages = redact_base64_data_urls_in_value(clean_messages)
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
         )
-        system_prompt = await self.prepare_llm_system_prompt_text(
-            session_id=session_id,
-            custom_prefix=_get_system_prefix(
-                tool_manager, session_context.get_language()
-            ),
-            language=session_context.get_language(),
-        )
         prompt = task_complete_template.format(
-            system_prompt=system_prompt,
-            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
+            messages=judge_messages,
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
@@ -754,6 +771,110 @@ class SimpleAgent(AgentBase):
             )
             return False
 
+    @classmethod
+    def _format_task_complete_messages_for_prompt(
+        cls, messages: List[MessageChunk]
+    ) -> str:
+        lines: List[str] = []
+        tool_call_names: Dict[str, str] = {}
+
+        for msg in messages:
+            tool_names = cls._extract_tool_names_for_judge(msg)
+            if tool_names:
+                for tool_call in msg.tool_calls or []:
+                    call_id = cls._tool_call_id_for_judge(tool_call)
+                    name = cls._tool_call_name_for_judge(tool_call)
+                    if call_id and name:
+                        tool_call_names[call_id] = name
+                lines.append("assistant: [tools called: " + ", ".join(tool_names) + "]")
+                continue
+
+            if msg.role == MessageRole.TOOL.value:
+                tool_name = tool_call_names.get(
+                    msg.tool_call_id or ""
+                ) or cls._tool_result_name_for_judge(msg)
+                preview = cls._extract_text_content_for_judge(msg.get_content()).strip()
+                if len(preview) > TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS:
+                    preview = (
+                        preview[:TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS]
+                        + f"\n...[tool result truncated, original chars: {len(preview)}]"
+                    )
+                if preview:
+                    lines.append(f"tool: [tool result from {tool_name}: {preview}]")
+                else:
+                    lines.append(f"tool: [tool result from {tool_name}: empty]")
+                continue
+
+            text = cls._extract_text_content_for_judge(msg.get_content()).strip()
+            if not text:
+                continue
+            if len(text) > 2000:
+                text = text[:2000] + f"\n...[truncated, original chars: {len(text)}]"
+            lines.append(f"{msg.role}: {text}")
+
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _extract_tool_names_for_judge(msg: MessageChunk) -> List[str]:
+        tool_names: List[str] = []
+        for tool_call in msg.tool_calls or []:
+            name = SimpleAgent._tool_call_name_for_judge(tool_call)
+            if name:
+                tool_names.append(name)
+        return tool_names
+
+    @staticmethod
+    def _tool_call_id_for_judge(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            call_id = tool_call.get("id")
+        else:
+            call_id = getattr(tool_call, "id", None)
+        return call_id if isinstance(call_id, str) and call_id else None
+
+    @staticmethod
+    def _tool_call_name_for_judge(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            function = tool_call.get("function")
+            if isinstance(function, dict):
+                name = function.get("name")
+            else:
+                name = getattr(function, "name", None)
+        else:
+            function = getattr(tool_call, "function", None)
+            name = getattr(function, "name", None)
+        return name if isinstance(name, str) and name else None
+
+    @staticmethod
+    def _tool_result_name_for_judge(msg: MessageChunk) -> str:
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        tool_name = metadata.get("tool_name") or metadata.get("name")
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
+        return msg.tool_call_id or "unknown"
+
+    @staticmethod
+    def _extract_text_content_for_judge(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return redact_base64_data_urls_in_value(content)
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(redact_base64_data_urls_in_value(text))
+                elif item.get("type") == "image_url":
+                    parts.append("[image attached]")
+                else:
+                    item_type = item.get("type") or "unknown"
+                    parts.append(f"[{item_type} attachment]")
+            return "\n".join(parts)
+        return ""
+
     async def _execute_loop(
         self,
         messages_input: List[MessageChunk],
@@ -798,6 +919,7 @@ class SimpleAgent(AgentBase):
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
         force_tool_choice_auto_next = False
         turn_status_only_next = False
+        consecutive_plain_text_direct_responses = 0
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -999,16 +1121,10 @@ class SimpleAgent(AgentBase):
                 all_new_response_chunks.append(correction_chunk)
 
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=(
-                                "检测到任务进入重复循环，且已尝试过程内纠偏仍未跳出。"
-                                "已自动暂停，避免无效重复。请给我一个新的约束或允许我切换执行路径后继续。"
-                            ),
-                            type=MessageType.ASSISTANT_TEXT.value,
-                        )
-                    ]
+                    logger.warning(
+                        "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
+                        "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
+                    )
                     break
             else:
                 repeat_pattern_hits = 0
@@ -1016,6 +1132,9 @@ class SimpleAgent(AgentBase):
             had_direct_tool_activity = direct_response_state.get(
                 "had_tool_calls", False
             )
+            plain_text_direct_response = (
+                not had_direct_tool_activity
+            ) and self._has_visible_text_without_tool_calls(all_new_response_chunks)
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
@@ -1034,14 +1153,30 @@ class SimpleAgent(AgentBase):
             # 都有自己的结束信号，避免多消耗一次完成判定请求。
             if is_llm_judge_mode():
                 if had_direct_tool_activity:
+                    consecutive_plain_text_direct_responses = 0
                     logger.info(
                         "SimpleAgent: 本轮 direct LLM response 包含工具调用，跳过 task_complete_judge，继续让模型消费工具结果"
                     )
+                elif plain_text_direct_response:
+                    consecutive_plain_text_direct_responses += 1
+                    if consecutive_plain_text_direct_responses >= 3:
+                        logger.info(
+                            "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
+                        )
+                        break
+                    if await self._is_task_complete(
+                        messages_input, session_id, tool_manager, session_context
+                    ):
+                        logger.info("SimpleAgent: 任务完成，终止执行")
+                        break
                 elif await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
+                    consecutive_plain_text_direct_responses = 0
                     logger.info("SimpleAgent: 任务完成，终止执行")
                     break
+                else:
+                    consecutive_plain_text_direct_responses = 0
 
     async def _call_llm_and_process_response(
         self,
@@ -1053,7 +1188,6 @@ class SimpleAgent(AgentBase):
         force_tool_choice_auto: bool = False,
         direct_response_state: Optional[Dict[str, bool]] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
-
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
@@ -1526,9 +1660,6 @@ class SimpleAgent(AgentBase):
         Returns:
             bool: 是否应该停止执行
         """
-        if len(all_new_response_chunks) < 10:
-            logger.debug(f"SimpleAgent: 响应块: {all_new_response_chunks}")
-
         if len(all_new_response_chunks) == 0:
             logger.info("SimpleAgent: 没有更多响应块，停止执行")
             return True

@@ -2,8 +2,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from loguru import logger
-
 from common.core import config
 
 
@@ -46,11 +44,6 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
     fast_base_url = client_params.get("fast_base_url")
     fast_model_name = client_params.get("fast_model_name")
 
-    logger.info(
-        f"初始化Chat模型客户端: model={model_name}, base_url={base_url}, "
-        f"fast_model={fast_model_name if fast_model_name else '未配置'}"
-    )
-
     from sagents.llm.chat import OpenAIChat
 
     # 使用 OpenAIChat 创建客户端（支持双模型）
@@ -77,9 +70,7 @@ def create_tool_proxy(available_tools: List[str]):
     from sagents.tool.tool_proxy import ToolProxy
 
     if not available_tools:
-        logger.info("初始化工具代理：未显式提供工具白名单，默认开放全部工具")
         return ToolProxy(get_tool_manager(), None)  # pyright: ignore[reportArgumentType]
-    logger.info(f"初始化工具代理，可用工具: {available_tools}")
     return ToolProxy(get_tool_manager(), available_tools)  # pyright: ignore[reportArgumentType]
 
 
@@ -95,7 +86,6 @@ def create_skill_proxy(
         return SkillProxy(get_skill_manager(), []), None  # pyright: ignore[reportArgumentType]
 
     if _is_desktop_mode():
-        logger.info(f"初始化技能代理，可用技能: {available_skills}")
         return SkillProxy(get_skill_manager(), available_skills), None  # pyright: ignore[reportArgumentType]
 
     cfg = _get_cfg()
@@ -109,7 +99,6 @@ def create_skill_proxy(
                 skill_dirs=[agent_skills_dir], isolated=True
             )
             skill_managers.append(agent_skill_manager)
-            logger.info(f"Agent工作区技能目录已加载: {agent_skills_dir}")
 
     if user_id:
         user_skills_dir = os.path.join(cfg.user_dir, user_id, "skills")
@@ -118,17 +107,12 @@ def create_skill_proxy(
                 skill_dirs=[user_skills_dir], isolated=True
             )
             skill_managers.append(user_skill_manager)
-            logger.info(f"用户技能目录已加载: {user_skills_dir}")
 
     if os.path.exists(cfg.skill_dir):
         system_skill_manager = SkillManager(skill_dirs=[cfg.skill_dir], isolated=True)
         skill_managers.append(system_skill_manager)
-        logger.info(f"系统技能目录已加载: {cfg.skill_dir}")
 
     skill_managers.append(get_skill_manager())
-    logger.info(
-        f"初始化技能代理，可用技能: {available_skills}, 优先级层数: {len(skill_managers)}"
-    )
     return SkillProxy(skill_managers, available_skills), agent_skill_manager
 
 
