@@ -573,6 +573,32 @@ class AgentBase(ABC):
         return copied
 
     @classmethod
+    def _apply_frozen_historical_user_time_context(
+        cls,
+        message: MessageChunk,
+        frozen: Dict[str, Any],
+    ) -> MessageChunk:
+        current_time_context = cls._extract_current_time_context_tag(
+            frozen.get("content")
+        )
+        stripped = cls._strip_skill_tags_from_message(message)
+        if not current_time_context:
+            return stripped
+        runtime_context = f"<runtime_context>\n{current_time_context}\n</runtime_context>"
+        return cls._wrap_message_with_runtime_context(stripped, runtime_context)
+
+    @staticmethod
+    def _extract_current_time_context_tag(content: Any) -> Optional[str]:
+        if not isinstance(content, str):
+            return None
+        match = re.search(
+            r"<current_time\b[^>]*>.*?</current_time>",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return match.group(0).strip() if match else None
+
+    @classmethod
     def _strip_skill_tags_from_text(cls, text: str) -> str:
         cleaned = re.sub(
             r"<skill>\s*[^<]*?\s*</skill>",
@@ -682,11 +708,15 @@ class AgentBase(ABC):
         for idx, message in enumerate(injected):
             if message.role != MessageRole.USER.value:
                 continue
+            if idx == latest_user_idx:
+                continue
             frozen = self._get_frozen_user_inference(message)
             if not frozen:
                 frozen = self._find_frozen_user_inference_in_ledger(session_id, message)
             if frozen:
-                injected[idx] = self._apply_frozen_user_inference(message, frozen)
+                injected[idx] = self._apply_frozen_historical_user_time_context(
+                    message, frozen
+                )
 
         latest_user = injected[latest_user_idx]
         latest_frozen = self._get_frozen_user_inference(messages[latest_user_idx])
@@ -694,7 +724,11 @@ class AgentBase(ABC):
             latest_frozen = self._find_frozen_user_inference_in_ledger(
                 session_id, messages[latest_user_idx]
             )
-        if latest_frozen is None:
+        if latest_frozen is not None:
+            injected[latest_user_idx] = self._apply_frozen_user_inference(
+                messages[latest_user_idx], latest_frozen
+            )
+        else:
             parts: List[str] = []
             try:
                 runtime_context = await self._build_runtime_context_text(
