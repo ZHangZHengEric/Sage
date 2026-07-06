@@ -20,6 +20,7 @@ from sagents.utils.multimodal_image import (
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
+from sagents.utils.llm_request_utils import get_multimodal_support
 
 # 尝试导入 PIL，如果不可用则给出警告
 try:
@@ -40,7 +41,7 @@ class ImageUnderstandingError(Exception):
 
 
 class ImageUnderstandingTool:
-    """图片理解工具 - 分析图片内容并返回详细描述"""
+    """图片理解工具 - 将图片加入当前会话的原生多模态上下文"""
 
     def __init__(self):
         self.supported_formats = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -356,10 +357,79 @@ class ImageUnderstandingTool:
             else:
                 raise e
 
+    def _get_session(self, session_id: Optional[str]):
+        """获取当前 live Session。"""
+        from sagents.session_runtime import (
+            get_global_session_manager,
+            get_current_session_id,
+        )
+
+        current_session_id = session_id or get_current_session_id()
+        if not current_session_id:
+            raise ImageUnderstandingError("无法获取当前会话 ID")
+
+        session_manager = get_global_session_manager()
+        session = session_manager.get(current_session_id)
+        if not session:
+            raise ImageUnderstandingError(f"无法获取会话: {current_session_id}")
+        return session
+
+    def _get_session_context(self, session):
+        """从 Session 包装对象或测试替身中获取 SessionContext。"""
+        get_context = getattr(session, "get_context", None)
+        if callable(get_context):
+            ctx = get_context()
+        else:
+            ctx = getattr(session, "session_context", None)
+        if ctx is None:
+            # 兼容旧测试替身，但真实运行时应始终走 Session.get_context()。
+            if hasattr(session, "enqueue_user_injection"):
+                return session
+            raise ImageUnderstandingError("当前会话上下文未初始化")
+        return ctx
+
+    def _session_supports_multimodal(self, session) -> bool:
+        support = get_multimodal_support(
+            client=getattr(session, "model", None),
+            model_config=getattr(session, "model_config", None),
+        )
+        return support is True
+
+    async def _build_native_image_content(
+        self, image_path: str, session_id: str
+    ) -> tuple[Dict[str, Any], str]:
+        """构建注入到下一轮模型请求的 image_url content。"""
+        if image_path.startswith(("http://", "https://")):
+            return {
+                "type": "image_url",
+                "image_url": {"url": image_path},
+            }, "remote_url"
+
+        sandbox = self._get_sandbox(session_id)
+        base64_data, mime_type = await self._encode_image_to_base64(sandbox, image_path)
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
+        }, mime_type
+
+    def _build_native_prompt(self, image_path: str, prompt: Optional[str]) -> str:
+        user_prompt = (
+            prompt.strip()
+            if prompt and prompt.strip()
+            else "请观察这张图片，识别其中的文字和关键视觉信息，并结合当前对话继续完成用户任务。"
+        )
+        return (
+            "【工具注入的图片上下文】\n"
+            f"图片来源: {image_path}\n"
+            "这是用户要求你查看的图片。请把图片内容作为当前任务的上下文，"
+            "在下一步回复中直接基于图片进行理解、描述或推理。\n\n"
+            f"用户的图片处理要求: {user_prompt}"
+        )
+
     @tool(
         description_i18n={
-            "zh": "分析图片内容，返回图片的详细描述以及图片上的文字。使用当前会话的多模态大模型进行理解。",
-            "en": "Analyze image content and return detailed description and text on the image. Uses the current session's multimodal model.",
+            "zh": "将图片加入当前会话的下一轮多模态模型上下文，让 agent 原生观察图片并继续推理；不会额外发起一次模型分析请求。",
+            "en": "Attach an image to the next multimodal model turn so the agent can inspect it natively; does not make an extra model analysis call.",
         },
         param_description_i18n={
             "image_path": {
@@ -371,8 +441,8 @@ class ImageUnderstandingTool:
                 "en": "Current session ID (Required, Auto-injected)",
             },
             "prompt": {
-                "zh": "可选的自定义提示词，用于指导模型如何分析图片",
-                "en": "Optional custom prompt to guide how the model analyzes the image",
+                "zh": "可选的自定义提示词，用于指导下一轮模型如何使用这张图片",
+                "en": "Optional custom prompt to guide how the next model turn should use the image",
             },
         },
         param_schema={
@@ -383,7 +453,7 @@ class ImageUnderstandingTool:
             "session_id": {"type": "string", "description": "Session ID"},
             "prompt": {
                 "type": "string",
-                "description": "Custom prompt for image analysis",
+                "description": "Custom prompt for how the next model turn should use the image",
             },
         },
     )
@@ -391,7 +461,7 @@ class ImageUnderstandingTool:
         self, image_path: str, session_id: str, prompt: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        分析图片内容，使用当前会话的多模态大模型
+        将图片加入当前会话的下一轮多模态模型上下文。
 
         Args:
             image_path: 图片文件的虚拟路径（沙箱内路径）或 HTTP/HTTPS URL
@@ -399,85 +469,51 @@ class ImageUnderstandingTool:
             prompt: 可选的自定义提示词
 
         Returns:
-            Dict: 包含图片详细描述和文字识别结果
+            Dict: 图片上下文注入结果。真正的图片理解由下一轮 agent 模型调用完成。
         """
-        logger.info(f"🔍 开始分析图片: {image_path}")
+        logger.info(f"🔍 准备将图片加入多模态上下文: {image_path}")
 
         try:
-            # 1. 检查是否为 HTTP/HTTPS URL
-            is_url = image_path.startswith(("http://", "https://"))
-
-            # 2. 构建默认提示词
-            default_prompt = """请详细分析这张图片，并提供以下信息：
-
-1. 图片整体描述：描述图片的主要内容、场景、风格等
-2. 图片上的文字：识别并转录图片中出现的所有文字内容
-3. 细节描述：描述图片中的重要细节、物体、人物、颜色等
-
-请以结构化的方式返回分析结果。"""
-
-            user_prompt = prompt if prompt else default_prompt
-
-            # 3. 构建消息格式（OpenAI 多模态格式）
-            mime_type = "image/jpeg"  # 默认值
-            if is_url:
-                # 远程图片先下载再 base64，兼容不接受直链的多模态网关（如部分阿里云接口）
-                logger.info(f"拉取 URL 图片并转为 base64: {image_path}")
-                try:
-                    base64_data, mime_type = await self._fetch_url_image_to_base64(
-                        image_path
-                    )
-                except ImageUnderstandingError as e:
-                    return {
-                        "status": "error",
-                        "message": str(e),
-                    }
-                image_content = {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime_type};base64,{base64_data}",
-                    },
-                }
-            else:
-                # 对于沙箱内的本地图片，通过沙箱读取并转换为 base64
-                try:
-                    sandbox = self._get_sandbox(session_id)
-                    base64_data, mime_type = await self._encode_image_to_base64(
-                        sandbox, image_path
-                    )
-                    image_content = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{mime_type};base64,{base64_data}"},
-                    }
-                except ImageUnderstandingError as e:
-                    return {"status": "error", "message": str(e)}
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": user_prompt}, image_content],
-                }
-            ]
-
-            # 4. 调用 LLM 进行图片理解
-            try:
-                analysis_result = await self._call_llm_with_image(messages, session_id)
-
-                return {
-                    "status": "success",
-                    "message": "Image analysis completed",
-                    "data": {
-                        "description": analysis_result,
-                        "image_path": image_path,
-                        "mime_type": mime_type,
-                    },
-                }
-
-            except ImageUnderstandingError:
+            session = self._get_session(session_id)
+            if not self._session_supports_multimodal(session):
                 return {
                     "status": "error",
-                    "message": "The current model does not support image understanding. Use a multimodal model.",
+                    "message": "当前 agent 模型不支持图片输入，请切换到多模态模型后再分析图片。",
                 }
+
+            try:
+                image_content, image_format = await self._build_native_image_content(
+                    image_path, session_id
+                )
+            except ImageUnderstandingError as e:
+                return {"status": "error", "message": str(e)}
+
+            content = [
+                {"type": "text", "text": self._build_native_prompt(image_path, prompt)},
+                image_content,
+            ]
+            session_context = self._get_session_context(session)
+            guidance_id = session_context.enqueue_user_injection(
+                content,
+                extra_metadata={
+                    "tool_source": "analyze_image",
+                    "image_path": image_path,
+                    "image_context_mode": "native_multimodal",
+                    "hidden_from_chat": True,
+                    "sse_visible": False,
+                },
+            )
+
+            return {
+                "status": "success",
+                "message": "图片已加入下一轮多模态模型上下文，agent 将直接基于图片继续分析。",
+                "data": {
+                    "image_path": image_path,
+                    "image_format": image_format,
+                    "guidance_id": guidance_id,
+                    "mode": "native_multimodal_context",
+                },
+            }
 
         except Exception as e:
             logger.error(f"图片理解失败: {e}")

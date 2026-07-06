@@ -44,11 +44,13 @@ class CommonAgent(AgentBase):
         if self._should_abort_due_to_session(session_context):
             return
 
-        # Drain "运行期注入的引导用户消息"：写入 message_manager 后立即 yield 给 SSE，
-        # 紧接着的 extract_all_context_messages 会自然把它带进本轮 LLM 请求。
+        # Drain "运行期注入的引导用户消息"：持久注入会写入 message_manager；
+        # transient 注入只追加到本轮 LLM 请求，不 yield 给 SSE。
         injected = self._consume_user_injections(session_context)
         if injected:
-            yield injected
+            visible_injected = self._visible_user_injections(injected)
+            if visible_injected:
+                yield visible_injected
 
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(
@@ -56,6 +58,9 @@ class CommonAgent(AgentBase):
             max_length=self.max_history_context_length,  # pyright: ignore[reportCallIssue]
             last_turn_user_only=False,
         )
+        transient_injected = self._transient_user_injections(injected)
+        if transient_injected:
+            all_messages = list(all_messages) + list(transient_injected)
 
         # all_messages  = message_manager.messages
         tool_manager = session_context.tool_manager
