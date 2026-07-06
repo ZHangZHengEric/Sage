@@ -130,10 +130,10 @@ class UserMemoryManager:
             格式化的字符串，便于大模型理解和使用
         """
         if not memories:
-            return "没有找到相关记忆。"
+            return "No relevant memories found."
 
         formatted_lines = []
-        formatted_lines.append(f"找到 {len(memories)} 条相关记忆：")
+        formatted_lines.append(f"Found {len(memories)} relevant memories:")
         formatted_lines.append("")
 
         for i, memory in enumerate(memories, 1):
@@ -196,7 +196,7 @@ class UserMemoryManager:
 
         except Exception as e:
             logger.error(f"记住记忆失败: {e}")
-            return f"记住记忆失败：{str(e)}"
+            return f"Failed to remember memory: {str(e)}"
 
     async def recall(
         self,
@@ -222,7 +222,7 @@ class UserMemoryManager:
         """
         driver = self._get_active_driver()
         if not driver:
-            return "记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务"
+            return "Memory is disabled: no memory storage path or MCP memory service is available"
 
         try:
             # 通过驱动获取记忆对象列表
@@ -235,14 +235,14 @@ class UserMemoryManager:
             )
 
             if not memory_entries:
-                return f"未找到与 '{query}' 相关的记忆。"
+                return f"No memories found for '{query}'."
 
             # 格式化为大模型友好的字符串
             return self._format_memories_for_llm(memory_entries)
 
         except Exception as e:
             logger.error(f"回忆记忆失败: {e}")
-            return f"回忆记忆失败：{str(e)}"
+            return f"Failed to recall memory: {str(e)}"
 
     async def forget(
         self,
@@ -266,7 +266,7 @@ class UserMemoryManager:
         """
         driver = self._get_active_driver()
         if not driver:
-            return "记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务"
+            return "Memory is disabled: no memory storage path or MCP memory service is available"
 
         try:
             return await driver.forget(
@@ -278,7 +278,7 @@ class UserMemoryManager:
 
         except Exception as e:
             logger.error(f"忘记记忆失败: {e}")
-            return f"忘记记忆失败：{str(e)}"
+            return f"Failed to forget memory: {str(e)}"
 
     async def _fetch_single_memory_type(
         self,

@@ -45,7 +45,7 @@ class FileContentValidator:
                 "status": "skipped",
                 "validator": None,
                 "file_extension": extension,
-                "message": "该文件后缀未启用内容校验",
+                "message": "Content validation is not enabled for this file extension",
                 "warnings": [],
                 "errors": [],
             }
@@ -68,7 +68,7 @@ class FileContentValidator:
             "status": "skipped",
             "validator": validator,
             "file_extension": extension,
-            "message": "未找到匹配的校验器",
+            "message": "No matching validator was found",
             "warnings": [],
             "errors": [],
         }
@@ -136,7 +136,7 @@ class FileContentValidator:
                 "status": "skipped",
                 "validator": "yaml",
                 "file_extension": extension,
-                "message": "PyYAML 未安装，已跳过 YAML 校验",
+                "message": "PyYAML is not installed; YAML validation was skipped",
                 "warnings": [],
                 "errors": [],
             }
@@ -144,19 +144,19 @@ class FileContentValidator:
             yaml.safe_load(content)
             return FileContentValidator._success(extension, "yaml")
         except yaml.YAMLError as exc:  # type: ignore[attr-defined]
-            message = f"YAML 语法错误: {exc}"
+            message = f"YAML syntax error: {exc}"
             mark = getattr(exc, "problem_mark", None)
             if mark is not None:
                 line = getattr(mark, "line", None)
                 column = getattr(mark, "column", None)
                 if line is not None and column is not None:
                     message = (
-                        f"YAML 语法错误: {exc} (line {line + 1}, column {column + 1})"
+                        f"YAML syntax error: {exc} (line {line + 1}, column {column + 1})"
                     )
             return FileContentValidator._error(extension, "yaml", message)
         except Exception as exc:
             return FileContentValidator._error(
-                extension, "yaml", f"YAML 校验失败: {exc}"
+                extension, "yaml", f"YAML validation failed: {exc}"
             )
 
     @staticmethod
@@ -167,11 +167,11 @@ class FileContentValidator:
         except SyntaxError as exc:
             line = exc.lineno or 0
             column = exc.offset or 0
-            message = f"Python 语法错误: {exc.msg} (line {line}, column {column})"
+            message = f"Python syntax error: {exc.msg} (line {line}, column {column})"
             return FileContentValidator._error(extension, "python", message)
         except Exception as exc:
             return FileContentValidator._error(
-                extension, "python", f"Python 校验失败: {exc}"
+                extension, "python", f"Python validation failed: {exc}"
             )
 
     @staticmethod
@@ -184,7 +184,7 @@ class FileContentValidator:
                 "status": "skipped",
                 "validator": "toml",
                 "file_extension": extension,
-                "message": "tomllib 不可用，已跳过 TOML 校验",
+                "message": "tomllib is unavailable; TOML validation was skipped",
                 "warnings": [],
                 "errors": [],
             }
@@ -192,15 +192,15 @@ class FileContentValidator:
             tomllib.loads(content)
             return FileContentValidator._success(extension, "toml")
         except tomllib.TOMLDecodeError as exc:  # type: ignore[attr-defined]
-            message = f"TOML 语法错误: {exc}"
+            message = f"TOML syntax error: {exc}"
             line = getattr(exc, "lineno", None)
             column = getattr(exc, "colno", None)
             if line is not None and column is not None:
-                message = f"TOML 语法错误: {exc} (line {line}, column {column})"
+                message = f"TOML syntax error: {exc} (line {line}, column {column})"
             return FileContentValidator._error(extension, "toml", message)
         except Exception as exc:
             return FileContentValidator._error(
-                extension, "toml", f"TOML 校验失败: {exc}"
+                extension, "toml", f"TOML validation failed: {exc}"
             )
 
     @staticmethod
@@ -214,7 +214,7 @@ class FileContentValidator:
                 "status": "skipped",
                 "validator": "javascript",
                 "file_extension": extension,
-                "message": "未找到 node，已跳过 JavaScript 语法校验",
+                "message": "node was not found; JavaScript syntax validation was skipped",
                 "warnings": [],
                 "errors": [],
             }
@@ -236,11 +236,11 @@ class FileContentValidator:
                 return FileContentValidator._success(extension, "javascript")
 
             stderr = (proc.stderr or proc.stdout or "").strip()
-            message = f"JavaScript 语法错误: {stderr or 'node --check failed'}"
+            message = f"JavaScript syntax error: {stderr or 'node --check failed'}"
             return FileContentValidator._error(extension, "javascript", message)
         except Exception as exc:
             return FileContentValidator._error(
-                extension, "javascript", f"JavaScript 校验失败: {exc}"
+                extension, "javascript", f"JavaScript validation failed: {exc}"
             )
         finally:
             try:

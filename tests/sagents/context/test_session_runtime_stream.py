@@ -1,6 +1,7 @@
 import pytest
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.session_context import SessionContext
 from sagents.flow.schema import AgentFlow, AgentNode
 from sagents.session_runtime import Session, initialize_global_session_manager
 
@@ -55,3 +56,39 @@ async def test_run_stream_with_flow_fills_missing_session_id(monkeypatch, tmp_pa
 
     assert chunks[0].session_id == "child-session"
     assert chunks[1]["session_id"] == "child-session"
+
+
+@pytest.mark.parametrize(
+    ("response_language", "expected"),
+    [
+        ("zh-CN", "工作流执行失败: 请求过于频繁，请稍后再试"),
+        ("en-US", "Workflow execution failed: Too many requests. Try again later"),
+        (
+            "pt-BR",
+            "Falha ao executar o fluxo de trabalho: "
+            "Muitas solicitacoes. Tente novamente mais tarde",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_handle_workflow_error_uses_session_language_for_rate_limit(
+    tmp_path, response_language, expected
+):
+    session = Session(session_id="error-session", enable_obs=False)
+    session.session_context = SessionContext(
+        session_id="error-session",
+        user_id="user-1",
+        agent_id="agent-1",
+        session_root_space=str(tmp_path),
+        system_context={"response_language": response_language},
+    )
+
+    chunks = []
+    async for emitted in session._handle_workflow_error(
+        Exception("RateLimitError: rate_limit")
+    ):
+        chunks.extend(emitted)
+
+    assert len(chunks) == 1
+    assert chunks[0].content == expected
+    assert chunks[0].type == "final_answer"

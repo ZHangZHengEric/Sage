@@ -37,13 +37,13 @@ class FileSystemTool:
         if normalized_start > normalized_end:
             return make_tool_error(
                 ToolErrorCode.INVALID_ARGUMENT,
-                "开始行号不能大于结束行号",
+                "start_line cannot be greater than end_line",
             )
 
         if total_lines == 0:
             return make_tool_error(
                 ToolErrorCode.PRECONDITION_FAILED,
-                "文件为空，无法执行按行替换",
+                "The file is empty, so line-based replacement cannot be applied",
             )
 
         normalized_end_exclusive = normalized_end + 1
@@ -393,21 +393,21 @@ class FileSystemTool:
             logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.NOT_FOUND,
-                f"读取文件失败: {str(e)}",
+                f"Failed to read file: {str(e)}",
                 file_path=file_path,
             )
         except PermissionError as e:
             logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.PERMISSION_DENIED,
-                f"读取文件失败: {str(e)}",
+                f"Failed to read file: {str(e)}",
                 file_path=file_path,
             )
         except Exception as e:
             logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"读取文件失败: {str(e)}",
+                f"Failed to read file: {str(e)}",
                 file_path=file_path,
             )
 
@@ -522,9 +522,9 @@ class FileSystemTool:
             result: Dict[str, Any] = {
                 "status": "success",
                 "success": True,
-                "message": "文件写入成功"
+                "message": "File written successfully"
                 if validation.get("status") in {"passed", "skipped"}
-                else "文件写入成功，但校验发现问题",
+                else "File written successfully, but validation found issues",
                 "file_path": file_path,
                 "content_length": len(content),
                 "mode": mode,
@@ -538,14 +538,14 @@ class FileSystemTool:
             logger.error(f"FileSystemTool: 写入文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.PERMISSION_DENIED,
-                f"写入文件失败: {str(e)}",
+                f"Failed to write file: {str(e)}",
                 file_path=file_path,
             )
         except Exception as e:
             logger.error(f"FileSystemTool: 写入文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"写入文件失败: {str(e)}",
+                f"Failed to write file: {str(e)}",
                 file_path=file_path,
             )
 
@@ -686,7 +686,7 @@ class FileSystemTool:
                 if mode_result["status"] == "error":
                     return make_tool_error(
                         mode_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
-                        f"第 {index + 1} 个操作失败: {mode_result['message']}",
+                        f"Operation {index + 1} failed: {mode_result['message']}",
                         file_path=file_path,
                         failed_operation_index=index,
                     )
@@ -717,7 +717,7 @@ class FileSystemTool:
                 if step_result["status"] == "error":
                     return make_tool_error(
                         step_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
-                        f"第 {index + 1} 个操作失败: {step_result['message']}",
+                        f"Operation {index + 1} failed: {step_result['message']}",
                         file_path=file_path,
                         failed_operation_index=index,
                     )
@@ -733,8 +733,10 @@ class FileSystemTool:
                     return make_tool_error(
                         ToolErrorCode.NO_MATCH,
                         (
-                            f"第 {index + 1} 个操作未替换任何行（start_line={requested_start}, end_line={requested_end}）。"
-                            "当前工具使用 0-based 且 start_line/end_line 都是包含边界；请检查行号是否有效。"
+                            f"Operation {index + 1} did not replace any lines "
+                            f"(start_line={requested_start}, end_line={requested_end}). "
+                            "This tool uses 0-based inclusive start_line/end_line values; "
+                            "check whether the line numbers are valid."
                         ),
                         file_path=file_path,
                         failed_operation_index=index,
@@ -769,7 +771,7 @@ class FileSystemTool:
                             extras[key] = step_result[key]
                     return make_tool_error(
                         step_result.get("error_code", ToolErrorCode.INVALID_ARGUMENT),
-                        f"第 {index + 1} 个操作失败: {step_result['message']}",
+                        f"Operation {index + 1} failed: {step_result['message']}",
                         hint=step_result.get("hint"),
                         **extras,
                     )
@@ -788,7 +790,7 @@ class FileSystemTool:
             if total_replacements == 0 and not line_range_ops:
                 return make_tool_error(
                     ToolErrorCode.NO_MATCH,
-                    "未找到匹配项，未进行任何替换",
+                    "No matches were found, so no replacements were made",
                     file_path=file_path,
                     replacements=0,
                 )
@@ -798,9 +800,9 @@ class FileSystemTool:
                 return {
                     "status": "success",
                     "message": (
-                        "已执行按行替换，但目标区间与替换内容一致，文件无变化"
+                        "Line-based replacement ran, but the target range already matched the replacement; the file was unchanged"
                         if validation.get("status") in {"passed", "skipped"}
-                        else "已执行按行替换，但目标区间与替换内容一致，文件无变化；校验发现问题"
+                        else "Line-based replacement ran, but the target range already matched the replacement; the file was unchanged and validation found issues"
                     ),
                     "replacements": 0,
                     "operations_applied": len(operation_summaries),
@@ -824,9 +826,9 @@ class FileSystemTool:
                 "status": "success",
                 "success": True,
                 "message": (
-                    f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容"
+                    f"Successfully applied {len(operation_summaries)} update operations and made {total_replacements} replacements"
                     if validation.get("status") in {"passed", "skipped"}
-                    else f"成功执行 {len(operation_summaries)} 个更新操作，共替换 {total_replacements} 处内容；校验发现问题"
+                    else f"Successfully applied {len(operation_summaries)} update operations and made {total_replacements} replacements; validation found issues"
                 ),
                 "replacements": total_replacements,
                 "operations_applied": len(operation_summaries),
@@ -861,20 +863,20 @@ class FileSystemTool:
             logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.NOT_FOUND,
-                f"文件更新失败: {str(e)}",
+                f"Failed to update file: {str(e)}",
                 file_path=file_path,
             )
         except PermissionError as e:
             logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.PERMISSION_DENIED,
-                f"文件更新失败: {str(e)}",
+                f"Failed to update file: {str(e)}",
                 file_path=file_path,
             )
         except Exception as e:
             logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"文件更新失败: {str(e)}",
+                f"Failed to update file: {str(e)}",
                 file_path=file_path,
             )

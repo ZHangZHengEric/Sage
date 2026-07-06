@@ -133,7 +133,10 @@ class WorkflowSelectAgent(AgentBase):
             yield [
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
-                    content=f"WorkflowSelector: 无法从LLM响应中提取JSON内容，原始响应: {all_content}",
+                    content=(
+                        "WorkflowSelector: failed to extract JSON content from the "
+                        f"LLM response. Raw response: {all_content}"
+                    ),
                     message_id=str(uuid.uuid4()),
                     message_type=MessageType.GUIDE.value,
                 )

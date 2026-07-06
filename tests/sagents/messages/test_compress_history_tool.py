@@ -169,7 +169,7 @@ class TestCompressHistoryTool:
         )
 
         assert result["status"] == "success"
-        assert "没有消息需要压缩" in result["message"]
+        assert "No messages need compression" in result["message"]
         print("OK: compress_conversation_history empty messages")
 
     def test_compress_conversation_history_compresses_caller_input(self):

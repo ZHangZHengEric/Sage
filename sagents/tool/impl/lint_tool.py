@@ -291,7 +291,7 @@ class LintTool:
         except Exception as exc:
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"获取沙箱失败: {exc}",
+                f"Failed to get sandbox: {exc}",
             )
         try:
             return await self._collect_for_paths(sandbox, paths, max_diagnostics)
@@ -299,5 +299,5 @@ class LintTool:
             logger.error(f"LintTool: 运行失败: {exc}")
             return make_tool_error(
                 ToolErrorCode.INTERNAL_ERROR,
-                f"运行 lint 失败: {exc}",
+                f"Failed to run lint: {exc}",
             )

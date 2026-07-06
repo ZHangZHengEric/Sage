@@ -131,7 +131,10 @@ def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> s
     truncated = result[:max_chars]
 
     # 添加截断提示
-    truncation_notice = f"\n\n[结果已截断] 原始结果约 {estimated_tokens} tokens，超过最大限制 {max_tokens} tokens，仅显示前 {max_tokens} tokens。"
+    truncation_notice = (
+        f"\n\n[Result truncated] Original result is about {estimated_tokens} tokens, "
+        f"which exceeds the {max_tokens} token limit. Showing the first {max_tokens} tokens only."
+    )
 
     return truncated + truncation_notice
 
@@ -1436,7 +1439,7 @@ class ToolManager:
                     final_result = json.dumps(
                         {
                             "success": False,
-                            "error": f"缺少必填参数: {', '.join(missing_params)}",
+                            "error": f"Missing required parameters: {', '.join(missing_params)}",
                             "required_params": required_params,
                             "provided_params": list(kwargs.keys()),
                         },

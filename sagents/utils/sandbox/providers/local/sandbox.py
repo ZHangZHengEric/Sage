@@ -327,7 +327,7 @@ class Sandbox:
 
         # 如果没有 tool_func，返回错误
         if tool_func is None:
-            raise SandboxError("未提供 tool_func")
+            raise SandboxError("tool_func was not provided")
 
         # 检查是否是 bound method
         if hasattr(tool_func, "__self__"):

@@ -246,7 +246,7 @@ class CommonAgent(AgentBase):
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content="已经完成了满足用户的所有要求",
+                        content="All user requirements have been satisfied",
                         message_id=str(uuid.uuid4()),
                         message_type=MessageType.DO_SUBTASK_RESULT.value,
                     )
