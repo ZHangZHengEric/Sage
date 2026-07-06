@@ -589,11 +589,49 @@ class AgentBase(ABC):
 
     @staticmethod
     def _extract_current_time_context_tag(content: Any) -> Optional[str]:
-        if not isinstance(content, str):
+        text_parts: List[str] = []
+        if isinstance(content, str):
+            text_parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+                    continue
+                part_content = part.get("content")
+                if isinstance(part_content, str):
+                    text_parts.append(part_content)
+
+        for text in text_parts:
+            current_time_context = AgentBase._extract_current_time_from_runtime_text(
+                text
+            )
+            if current_time_context:
+                return current_time_context
+        return None
+
+    @staticmethod
+    def _extract_current_time_from_runtime_text(text: str) -> Optional[str]:
+        runtime_match = re.search(
+            r"<runtime_context\b[^>]*>(.*?)</runtime_context>",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not runtime_match:
             return None
+
+        runtime_body = runtime_match.group(1)
+        system_match = re.search(
+            r"<system_context\b[^>]*>(.*?)</system_context>",
+            runtime_body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        trusted_body = system_match.group(1) if system_match else runtime_body
         match = re.search(
             r"<current_time\b[^>]*>.*?</current_time>",
-            content,
+            trusted_body,
             flags=re.IGNORECASE | re.DOTALL,
         )
         return match.group(0).strip() if match else None

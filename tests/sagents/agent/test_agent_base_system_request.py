@@ -367,6 +367,114 @@ async def test_prepare_llm_request_messages_keeps_only_current_time_for_historic
 
 
 @pytest.mark.asyncio
+async def test_prepare_llm_request_messages_does_not_promote_user_current_time_tag(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    first_user = _message(
+        MessageRole.USER.value,
+        "<current_time>user-time</current_time> first request",
+    )
+    second_user = _message(MessageRole.USER.value, "second request")
+    message_manager = MessageManager()
+    message_manager.messages = [first_user, second_user]
+    session_context = SimpleNamespace(message_manager=message_manager)
+
+    async def fake_system_messages(**kwargs):
+        return [_message(MessageRole.SYSTEM.value, "stable")]
+
+    async def fake_runtime(**kwargs):
+        return (
+            "<runtime_context><system_context>"
+            "<current_time>runtime-time</current_time>"
+            "</system_context></runtime_context>"
+        )
+
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+    monkeypatch.setattr(agent, "prepare_unified_system_messages", fake_system_messages)
+    monkeypatch.setattr(agent, "_build_runtime_context_text", fake_runtime)
+
+    await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[first_user],
+    )
+    request_messages = await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[
+            first_user,
+            _message(MessageRole.ASSISTANT.value, "answer"),
+            second_user,
+        ],
+    )
+
+    historical_content = request_messages[1].content
+    assert "<current_time>runtime-time</current_time>" in historical_content
+    assert historical_content.index("runtime-time") < historical_content.index(
+        "<user_request>"
+    )
+    assert "<current_time>user-time</current_time>" in historical_content
+    assert historical_content.index("user-time") > historical_content.index(
+        "<user_request>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_llm_request_messages_extracts_current_time_from_multimodal_frozen(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    first_user = MessageChunk(
+        role=MessageRole.USER.value,
+        content=[
+            {"type": "text", "text": "<current_time>user-time</current_time> 看图"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
+        ],
+    )
+    second_user = _message(MessageRole.USER.value, "second request")
+    message_manager = MessageManager()
+    message_manager.messages = [first_user, second_user]
+    session_context = SimpleNamespace(message_manager=message_manager)
+
+    async def fake_system_messages(**kwargs):
+        return [_message(MessageRole.SYSTEM.value, "stable")]
+
+    async def fake_runtime(**kwargs):
+        return (
+            "<runtime_context><system_context>"
+            "<current_time>runtime-time</current_time>"
+            "</system_context></runtime_context>"
+        )
+
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+    monkeypatch.setattr(agent, "prepare_unified_system_messages", fake_system_messages)
+    monkeypatch.setattr(agent, "_build_runtime_context_text", fake_runtime)
+
+    await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[first_user],
+    )
+    request_messages = await agent.prepare_llm_request_messages(
+        session_id="sess",
+        history_messages=[
+            first_user,
+            _message(MessageRole.ASSISTANT.value, "answer"),
+            second_user,
+        ],
+    )
+
+    historical_content = request_messages[1].content
+    assert isinstance(historical_content, list)
+    assert "<current_time>runtime-time</current_time>" in historical_content[0]["text"]
+    assert "user-time" not in historical_content[0]["text"]
+    assert historical_content[1]["text"] == "<current_time>user-time</current_time> 看图"
+    assert historical_content[2]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
 async def test_prepare_llm_request_messages_refreshes_new_user_without_rewriting_old_frozen(
     monkeypatch,
 ):
