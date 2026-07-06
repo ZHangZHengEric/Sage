@@ -116,6 +116,7 @@ task_complete_template = {
 1. 准确识别“用户需求是否已经被充分满足”。
 2. 区分“中间过程说明/进度汇报”和“面向用户的最终交付”。
 3. 当不确定时，倾向于继续执行（即 task_interrupted = false）。
+4. 核对 Assistant 对执行动作的声明是否有对应执行证据；没有执行证据就不能视为结束。
 
 ## 需要中断执行任务（task_interrupted = true）的情况：
 - 你认为当前对话中，Assistant 已经给出了**完整、清晰的最终回答**，用户不需要再等待后续操作。
@@ -131,6 +132,7 @@ task_complete_template = {
 - 当前回复虽然说“已经完成了某个阶段”，但从整体任务看，仍然有后续要做的事情。
 - 当前回复明确承诺马上继续动作（例如“我现在将...”“Next, I will...”“Let me continue...”），且不需要用户确认。
 - 如果用户要求创建、更新、删除、保存、查询或验证某个对象，但当前只看到承诺/计划，没有看到工具调用成功或明确完成结果，必须继续。
+- 如果 Assistant 声称已经执行了读取、搜索、修改、创建、删除、保存、运行命令、测试、验证、提交、推送、发送、发布等动作，但最近执行过程没有对应成功的工具调用结果或明确验证结果，必须继续；口头说“已完成/已处理/已验证”本身不算执行证据。
 - 多步骤任务只完成了部分步骤，且没有明确等待用户选择时，必须继续。
 - 如果需要依赖外部状态或文件内容，但最近执行过程没有对应工具结果或明确验证结果，必须继续。
 
@@ -164,6 +166,7 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 1. Accurately tell whether the user's need has been fully satisfied.
 2. Distinguish "interim process narration / progress updates" from "user-facing final delivery."
 3. When uncertain, lean toward continuing (i.e. task_interrupted = false).
+4. Check whether the Assistant's claims about executed actions are backed by execution evidence; without evidence, do not end the task.
 
 ## When to interrupt (task_interrupted = true)
 - The Assistant has already given a **complete, clear final answer** in the current turn; the user need not wait for further work.
@@ -179,6 +182,7 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - The reply says a phase is done but, for the overall task, there is clearly more to do.
 - The reply explicitly commits to immediate continuation, such as "I will now...", "Next, I will...", or "Let me continue...", and does not require user confirmation.
 - If the user asked to create, update, delete, save, query, or verify an object, but the current trace only shows a promise/plan and no successful tool call or clear completed result, continue.
+- If the Assistant claims it has read, searched, modified, created, deleted, saved, run a command, tested, verified, committed, pushed, sent, published, or performed another execution action, but the recent trace has no corresponding successful tool result or explicit verification result, continue. Saying "done", "handled", or "verified" is not execution evidence by itself.
 - If only part of a multi-step task is complete and the Assistant is not explicitly waiting for the user to choose, continue.
 - If completion depends on external state or file contents but the recent trace has no corresponding tool result or explicit verification result, continue.
 
@@ -212,6 +216,7 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 1. Reconhecer com precisão se a necessidade do usuário já foi plenamente atendida.
 2. Distinguir "explicação de processo / relatório de progresso" de "entrega final voltada ao usuário."
 3. Em caso de dúvida, tenda a continuar (ou seja, task_interrupted = false).
+4. Verificar se as declarações do Assistente sobre ações executadas têm evidência de execução correspondente; sem evidência, não encerre a tarefa.
 
 ## Quando interromper (task_interrupted = true)
 - O Assistente já forneceu uma **resposta final completa e clara** no turno atual; o usuário não precisa aguardar mais ações.
@@ -227,6 +232,7 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 - A resposta diz que uma fase foi concluída, mas no conjunto da tarefa ainda há trabalho a fazer.
 - A resposta assume explicitamente continuação imediata (ex.: "Vou fazer isso agora...", "Em seguida, vou...", "Deixe-me continuar...") e não exige confirmação do usuário.
 - Se o usuário pediu para criar, atualizar, excluir, salvar, consultar ou verificar um objeto, mas o rastro atual mostra apenas promessa/plano e nenhuma chamada de ferramenta bem-sucedida ou resultado claramente concluído, continue.
+- Se o Assistente afirma que leu, pesquisou, modificou, criou, excluiu, salvou, executou um comando, testou, verificou, fez commit, fez push, enviou, publicou ou realizou outra ação de execução, mas o rastro recente não contém resultado de ferramenta bem-sucedido correspondente nem resultado de verificação explícito, continue. Dizer "feito", "tratado" ou "verificado" não é evidência de execução por si só.
 - Se apenas parte de uma tarefa de múltiplas etapas foi concluída e o Assistente não está explicitamente aguardando uma escolha do usuário, continue.
 - Se a conclusão depende de estado externo ou conteúdo de arquivo, mas o rastro recente não tem resultado de ferramenta correspondente nem verificação explícita, continue.
 

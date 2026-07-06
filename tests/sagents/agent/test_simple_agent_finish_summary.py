@@ -645,6 +645,128 @@ def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
     assert "assistant: done" in prompt
 
 
+def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": true, "reason": "done"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Update the config and verify it.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Updated the config and verified it.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is True
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert "claims about executed actions are backed by execution evidence" in prompt
+    assert (
+        "Saying \"done\", \"handled\", or \"verified\" is not execution evidence"
+        in prompt
+    )
+
+
+def test_task_complete_judge_missing_evidence_reason_forces_continue(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=(
+                            '{"task_interrupted": true, '
+                            '"reason": "missing execution evidence"}'
+                        )
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Run the tests.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Tests passed.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+
+
 def test_task_complete_judge_redacts_multimodal_image_payloads(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
