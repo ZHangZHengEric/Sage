@@ -112,7 +112,7 @@ class TaskCompletionJudgeAgent(AgentBase):
             yield [
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
-                    content=f"任务完成判断失败: {str(e)}",
+                    content=f"Task completion judgment failed: {str(e)}",
                     message_id=str(uuid.uuid4()),
                     message_type=MessageType.OBSERVATION.value,
                 )

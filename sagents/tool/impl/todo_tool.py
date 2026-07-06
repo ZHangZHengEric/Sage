@@ -497,7 +497,10 @@ class ToDoTool:
                         await self._sync_to_system_context([], session_id)
                         # 返回完整的任务列表（虽然文件已删除）
                         result = {
-                            "summary": f"所有任务已完成！任务清单已清理。\n新增: {added_count}, 更新: {updated_count}",
+                            "summary": (
+                                "All tasks are complete. The task list was cleared.\n"
+                                f"Added: {added_count}, Updated: {updated_count}"
+                            ),
                             "tasks": task_list,
                         }
                         return json.dumps(result, ensure_ascii=False, indent=2)
@@ -519,7 +522,11 @@ class ToDoTool:
 
             # 构建 JSON 返回结果（task_list 已在上面的代码中构建）
             result = {
-                "summary": f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。当前未完成任务数: {len(pending_tasks)}",
+                "summary": (
+                    "Task list updated successfully. "
+                    f"Added: {added_count}, Updated: {updated_count}. "
+                    f"Current pending task count: {len(pending_tasks)}"
+                ),
                 "tasks": task_list,
             }
             return json.dumps(result, ensure_ascii=False, indent=2)
@@ -528,7 +535,8 @@ class ToDoTool:
                 f"ToDoTool: Failed to save tasks to {file_path}", session_id=session_id
             )
             return json.dumps(
-                {"summary": "保存任务清单失败。", "tasks": []}, ensure_ascii=False
+                {"summary": "Failed to save the task list.", "tasks": []},
+                ensure_ascii=False,
             )
 
     async def clean_old_tasks(
@@ -631,15 +639,15 @@ class ToDoTool:
         ]
 
         if not unfinished:
-            return "当前没有未完成的任务。"
+            return "There are no unfinished tasks."
 
-        result = "当前未完成任务清单:\n"
+        result = "Current unfinished task list:\n"
         for t in unfinished:
             status = self._normalize_status(t.get("status"))
-            tag = "[进行中]" if status == "in_progress" else "[待办]"
+            tag = "[in progress]" if status == "in_progress" else "[todo]"
             result += f"- {tag} {t.get('content')} (ID: {t.get('id')})"
             if t.get("conclusion"):
-                result += f" [结论: {t.get('conclusion')}]"
+                result += f" [conclusion: {t.get('conclusion')}]"
             result += "\n"
 
         return result

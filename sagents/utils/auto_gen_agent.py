@@ -56,7 +56,7 @@ class AutoGenAgentFunc:
             logger.info(f"使用模型: {model}")
 
             if not llm_client:
-                raise ValueError("需要提供大模型客户端")
+                raise ValueError("A model client is required")
 
             # 获取所有可用工具信息
             available_tools = self._get_tools_info(tool_manager)
@@ -67,7 +67,7 @@ class AutoGenAgentFunc:
                 agent_description, available_tools, llm_client, model, language=language
             )
             if not basic_config:
-                raise Exception("生成基础配置失败")
+                raise Exception("Failed to generate basic configuration")
 
             # 根据tool_manager类型决定是否需要选择工具
             if isinstance(tool_manager, ToolProxy):
@@ -80,14 +80,14 @@ class AutoGenAgentFunc:
                     basic_config, available_tools, llm_client, model, language=language
                 )
                 if selected_tools is None:
-                    raise Exception("选择工具失败")
+                    raise Exception("Failed to select tools")
 
             # 生成工作流程
             workflows = await self._generate_workflows(
                 basic_config, selected_tools, llm_client, model, language=language
             )
             if workflows is None:
-                raise Exception("生成工作流程失败")
+                raise Exception("Failed to generate workflows")
 
             # 组装完整配置
             config = self._assemble_config(
@@ -187,7 +187,7 @@ class AutoGenAgentFunc:
                 required_fields = ["name", "description", "systemPrefix"]
                 for field in required_fields:
                     if field not in config:
-                        raise ValueError(f"缺少必需字段: {field}")
+                        raise ValueError(f"Missing required field: {field}")
 
                 logger.info(f"生成基础配置成功: {config['name']}")
                 return config
@@ -258,7 +258,7 @@ class AutoGenAgentFunc:
 
                 selected_tools = json.loads(json_str)
                 if not isinstance(selected_tools, list):
-                    raise ValueError("响应不是数组格式")
+                    raise ValueError("Response is not an array")
 
                 # 验证工具名称是否存在
                 available_tool_names = [tool["name"] for tool in available_tools]
@@ -331,7 +331,7 @@ class AutoGenAgentFunc:
 
                 workflows = json.loads(json_str)
                 if not isinstance(workflows, dict):
-                    raise ValueError("响应不是字典格式")
+                    raise ValueError("Response is not a dict")
 
                 logger.info(f"生成了 {len(workflows)} 个工作流程")
                 return workflows
