@@ -637,9 +637,20 @@ def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
     return []
 
 
+def _is_hidden_context_message(message: Dict[str, Any]) -> bool:
+    metadata = (message or {}).get("metadata")
+    return isinstance(metadata, dict) and (
+        metadata.get("hidden_from_chat") is True
+        or metadata.get("hide_from_chat") is True
+    )
+
+
 def _find_last_user_message_index(messages: List[Dict[str, Any]]) -> int:
     for index in range(len(messages) - 1, -1, -1):
-        if (messages[index] or {}).get("role") == "user":
+        message = messages[index] or {}
+        if _is_hidden_context_message(message):
+            continue
+        if message.get("role") == "user":
             return index
     return -1
 

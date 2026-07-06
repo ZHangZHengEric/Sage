@@ -1566,7 +1566,16 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
     messages: List[Dict[str, Any]] = []
     seen_message_keys = set()
 
+    def is_hidden_context_message(message_dict: Dict[str, Any]) -> bool:
+        metadata = message_dict.get("metadata")
+        return isinstance(metadata, dict) and (
+            metadata.get("hidden_from_chat") is True
+            or metadata.get("hide_from_chat") is True
+        )
+
     def append_message(message_dict: Dict[str, Any]):
+        if is_hidden_context_message(message_dict):
+            return
         message_key = message_dict.get("message_id") or (
             message_dict.get("role"),
             message_dict.get("tool_call_id"),
