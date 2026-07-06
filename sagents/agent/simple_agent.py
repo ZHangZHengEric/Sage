@@ -713,7 +713,9 @@ class SimpleAgent(AgentBase):
         )
         budget = min(budget_info.get("active_budget", 3000), 3000)
         messages_for_complete = MessageManager.build_token_budget_view(
-            messages_for_complete, budget
+            messages_for_complete,
+            budget,
+            protect_last_assistant_text=True,
         )
 
         judge_messages = self._format_task_complete_messages_for_prompt(
@@ -777,8 +779,16 @@ class SimpleAgent(AgentBase):
     ) -> str:
         lines: List[str] = []
         tool_call_names: Dict[str, str] = {}
+        last_assistant_text_idx: Optional[int] = None
+        for idx, msg in enumerate(messages):
+            if (
+                msg.role == MessageRole.ASSISTANT.value
+                and not msg.tool_calls
+                and msg.get_content()
+            ):
+                last_assistant_text_idx = idx
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             tool_names = cls._extract_tool_names_for_judge(msg)
             if tool_names:
                 for tool_call in msg.tool_calls or []:
@@ -808,7 +818,7 @@ class SimpleAgent(AgentBase):
             text = cls._extract_text_content_for_judge(msg.get_content()).strip()
             if not text:
                 continue
-            if len(text) > 2000:
+            if idx != last_assistant_text_idx and len(text) > 2000:
                 text = text[:2000] + f"\n...[truncated, original chars: {len(text)}]"
             lines.append(f"{msg.role}: {text}")
 

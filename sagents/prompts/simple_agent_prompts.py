@@ -123,6 +123,7 @@ task_complete_template = {
 - 如果有工具调用，其关键结果已经用自然语言解释清楚，用户可以直接根据当前回复采取行动。
 - 当前回复没有任何“接下来/然后/我将/下一步”等继续执行的暗示。
 - 当前需要用户确认、用户补充信息、或用户做选择后才能继续时，必须中断并等待用户输入。
+- 如果 Assistant 已经交付了当前阶段能完成的产物、结论或阻塞说明，并明确向用户询问缺失信息/规格/确认项，即使原始大任务还没有完全生成最终对象，也必须中断等待用户。
 - 当前回复只是提供需要用户选择或确认的可选后续动作（例如“如果你需要，下一步我可以...”“If you want, I can ... next.”），也必须中断并等待用户确认，不要当成自动继续执行。
 - 如果用户只是问候、闲聊或情绪表达，Assistant 已经自然回应且没有承诺后续动作，可以中断。
 
@@ -135,6 +136,10 @@ task_complete_template = {
 - 如果 Assistant 声称已经执行了读取、搜索、修改、创建、删除、保存、运行命令、测试、验证、提交、推送、发送、发布等动作，但最近执行过程没有对应成功的工具调用结果或明确验证结果，必须继续；口头说“已完成/已处理/已验证”本身不算执行证据。
 - 多步骤任务只完成了部分步骤，且没有明确等待用户选择时，必须继续。
 - 如果需要依赖外部状态或文件内容，但最近执行过程没有对应工具结果或明确验证结果，必须继续。
+
+## 优先级规则：
+- “需要用户确认/输入/补充规格才能继续”优先于“原始任务尚未完全完成”。
+- 如果 Assistant 的最后回复已经把已完成内容、不能继续的原因、以及需要用户回答的问题讲清楚，task_interrupted 必须是 true。
 
 ## 输出一致性规则（必须遵守）：
 1. 如果 reason 表示“等待工具调用/等待生成/处理中”，则 task_interrupted 必须是 false。
@@ -173,6 +178,7 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - If there were tool calls, their key results are explained in natural language so the user can act on this reply.
 - The reply does not suggest continuation such as "next", "then", "I will", "next step", etc.
 - User confirmation, more input, or a choice is required before continuing—then you must interrupt and wait for the user.
+- If the Assistant has delivered the current phase's artifact, conclusion, or blocker explanation and clearly asks the user for missing information, specs, or confirmation, interrupt and wait even if the original larger task has not produced the final object yet.
 - If the reply only offers an optional follow-up that depends on the user's choice or confirmation, such as "If you want, I can ... next." or "Would you like me to continue with ...?", you must interrupt and wait for user confirmation. Do not treat that as automatic continuation.
 - If the user only greeted, chatted casually, or expressed emotion, and the Assistant has naturally replied without promising follow-up work, interrupt.
 
@@ -185,6 +191,10 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - If the Assistant claims it has read, searched, modified, created, deleted, saved, run a command, tested, verified, committed, pushed, sent, published, or performed another execution action, but the recent trace has no corresponding successful tool result or explicit verification result, continue. Saying "done", "handled", or "verified" is not execution evidence by itself.
 - If only part of a multi-step task is complete and the Assistant is not explicitly waiting for the user to choose, continue.
 - If completion depends on external state or file contents but the recent trace has no corresponding tool result or explicit verification result, continue.
+
+## Priority rules
+- "Need user confirmation/input/missing specs before continuing" takes priority over "the original task is not fully finished."
+- If the Assistant's latest reply clearly states what was completed, why it cannot proceed, and what the user must answer next, task_interrupted must be true.
 
 ## Output consistency (mandatory)
 1. If reason indicates waiting for a tool / generation / in progress, then task_interrupted must be false.
