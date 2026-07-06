@@ -562,7 +562,7 @@ class FibreBackendClient:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/api/sessions/{session_id}/interrupt",
-                    json={"message": "用户请求中断"},
+                    json={"message": "User requested interruption"},
                     headers={"X-Sage-Internal-UserId": headers_user_id},
                     timeout=10,
                 ) as resp:

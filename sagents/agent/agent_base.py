@@ -409,7 +409,7 @@ class AgentBase(ABC):
             yield [
                 MessageChunk(
                     role=MessageRole.TOOL.value,
-                    content=f"压缩失败: {str(exc)}",
+                    content=f"Compression failed: {str(exc)}",
                     tool_call_id=tool_call_id,
                     type=MessageType.TOOL_CALL_RESULT.value,
                     metadata={
@@ -2581,7 +2581,7 @@ class AgentBase(ABC):
                     [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
-                            content="已经完成了满足用户的所有要求",
+                            content="All user requirements have been satisfied",
                             message_id=str(uuid.uuid4()),
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )

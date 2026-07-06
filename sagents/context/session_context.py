@@ -887,7 +887,7 @@ class SessionContext:
             str: 实际生效的 ``guidance_id``。
         """
         if not self._is_valid_user_injection_content(content):
-            raise ValueError("inject 内容不能为空")
+            raise ValueError("Injected content cannot be empty")
         gid = guidance_id or str(uuid.uuid4())
         for existing in self.pending_user_injections:
             md = existing.metadata or {}
@@ -1008,7 +1008,7 @@ class SessionContext:
         if not guidance_id:
             return False
         if not self._is_valid_user_injection_content(content):
-            raise ValueError("content 不能为空")
+            raise ValueError("content cannot be empty")
         for chunk in self.pending_user_injections:
             md = chunk.metadata or {}
             if md.get("guidance_id") == guidance_id:
@@ -1700,29 +1700,29 @@ class SessionContext:
 
     def set_status(self, status: SessionStatus, cascade: bool = True) -> None:
         raise RuntimeError(
-            f"SessionContext: set_status 已废弃，请通过 Session 操作，session_id={self.session_id}"
+            f"SessionContext: set_status is deprecated; use Session instead, session_id={self.session_id}"
         )
 
     def request_interrupt(
-        self, reason: str = "用户请求中断", cascade: bool = True
+        self, reason: str = "User requested interruption", cascade: bool = True
     ) -> None:
         raise RuntimeError(
-            f"SessionContext: request_interrupt 已废弃，请通过 Session 操作，session_id={self.session_id}"
+            f"SessionContext: request_interrupt is deprecated; use Session instead, session_id={self.session_id}"
         )
 
     def should_interrupt(self) -> bool:
         raise RuntimeError(
-            f"SessionContext: should_interrupt 已废弃，请通过 Session 操作，session_id={self.session_id}"
+            f"SessionContext: should_interrupt is deprecated; use Session instead, session_id={self.session_id}"
         )
 
     def add_child_session(self, child_session_id: str) -> None:
         raise RuntimeError(
-            f"SessionContext: add_child_session 已废弃，请通过 Session 操作，session_id={self.session_id}"
+            f"SessionContext: add_child_session is deprecated; use Session instead, session_id={self.session_id}"
         )
 
     def remove_child_session(self, child_session_id: str) -> None:
         raise RuntimeError(
-            f"SessionContext: remove_child_session 已废弃，请通过 Session 操作，session_id={self.session_id}"
+            f"SessionContext: remove_child_session is deprecated; use Session instead, session_id={self.session_id}"
         )
 
     def set_parent_session(self, parent_session_id: str) -> None:

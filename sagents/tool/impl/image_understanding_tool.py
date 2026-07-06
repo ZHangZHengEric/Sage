@@ -78,7 +78,7 @@ class ImageUnderstandingTool:
             # 检查文件是否存在
             exists = await sandbox.file_exists(image_path)
             if not exists:
-                raise ImageUnderstandingError(f"图片文件不存在: {image_path}")
+                raise ImageUnderstandingError(f"Image file does not exist: {image_path}")
 
             # 使用 base64 命令读取图片
             # macOS 的 base64 语法不同，需要使用 -i 指定输入文件
@@ -102,12 +102,12 @@ class ImageUnderstandingTool:
             if not result.success:
                 out_len = len(result.stdout) if result.stdout else 0
                 raise ImageUnderstandingError(
-                    f"读取图片命令失败: return_code={result.return_code}, stderr={result.stderr}, stdout_bytes={out_len}"
+                    f"Image read command failed: return_code={result.return_code}, stderr={result.stderr}, stdout_bytes={out_len}"
                 )
 
             if not result.stdout or not result.stdout.strip():
                 raise ImageUnderstandingError(
-                    f"读取图片命令返回空数据: return_code={result.return_code}, stderr={result.stderr}"
+                    f"Image read command returned empty data: return_code={result.return_code}, stderr={result.stderr}"
                 )
 
             return result.stdout.strip()
@@ -118,7 +118,7 @@ class ImageUnderstandingTool:
             import traceback
 
             logger.error(f"从沙箱读取图片失败: {e}\n{traceback.format_exc()}")
-            raise ImageUnderstandingError(f"从沙箱读取图片失败: {e}")
+            raise ImageUnderstandingError(f"Failed to read image from sandbox: {e}")
 
     def _resize_image_if_needed(
         self, image_data: bytes, max_resolution: int = 1536
@@ -177,7 +177,9 @@ class ImageUnderstandingTool:
                 img = Image.open(io.BytesIO(body))
                 img.load()
             except Exception as e:
-                raise ImageUnderstandingError(f"下载内容不是有效图片: {e}") from e
+                raise ImageUnderstandingError(
+                    f"Downloaded content is not a valid image: {e}"
+                ) from e
             try:
                 compressed = self._resize_image_if_needed(body, max_resolution)
                 b64 = base64.b64encode(compressed).decode("utf-8")
@@ -260,16 +262,16 @@ class ImageUnderstandingTool:
                 response.raise_for_status()
         except httpx.HTTPStatusError as e:
             raise ImageUnderstandingError(
-                f"无法下载图片: HTTP {e.response.status_code}"
+                f"Failed to download image: HTTP {e.response.status_code}"
             ) from e
         except httpx.RequestError as e:
-            raise ImageUnderstandingError(f"无法下载图片: {e}") from e
+            raise ImageUnderstandingError(f"Failed to download image: {e}") from e
 
         body = response.content
         if len(body) > max_bytes:
-            raise ImageUnderstandingError("图片过大（超过 20MB）")
+            raise ImageUnderstandingError("Image is too large (over 20MB)")
         if not body:
-            raise ImageUnderstandingError("下载的图片为空")
+            raise ImageUnderstandingError("Downloaded image is empty")
 
         mime_hint = self._mime_from_url_or_headers(
             response.headers.get("content-type"), image_url
@@ -299,21 +301,21 @@ class ImageUnderstandingTool:
         # 获取当前 session_id
         current_session_id = session_id or get_current_session_id()
         if not current_session_id:
-            raise ImageUnderstandingError("无法获取当前会话 ID")
+            raise ImageUnderstandingError("Failed to get current session ID")
 
         # 获取 session manager 和 session
         session_manager = get_global_session_manager()
         session = session_manager.get(current_session_id)
 
         if not session:
-            raise ImageUnderstandingError(f"无法获取会话: {current_session_id}")
+            raise ImageUnderstandingError(f"Failed to get session: {current_session_id}")
 
         # 获取 session 的 model 和 model_config
         model = session.model
         model_config = session.model_config.copy()
 
         if not model:
-            raise ImageUnderstandingError("会话模型未初始化")
+            raise ImageUnderstandingError("Session model is not initialized")
 
         # 移除非标准参数
         model_config.pop("max_model_len", None)
@@ -350,7 +352,7 @@ class ImageUnderstandingTool:
                     "bad request",
                 ]
             ):
-                raise ImageUnderstandingError("当前模型不支持图片理解")
+                raise ImageUnderstandingError("The current model does not support image understanding")
             else:
                 raise e
 
@@ -463,7 +465,7 @@ class ImageUnderstandingTool:
 
                 return {
                     "status": "success",
-                    "message": "图片分析完成",
+                    "message": "Image analysis completed",
                     "data": {
                         "description": analysis_result,
                         "image_path": image_path,
@@ -474,9 +476,9 @@ class ImageUnderstandingTool:
             except ImageUnderstandingError:
                 return {
                     "status": "error",
-                    "message": "当前模型不支持图片理解，请使用多模态模型（如 GPT-4V、Claude 3、Qwen-VL 等）",
+                    "message": "The current model does not support image understanding. Use a multimodal model.",
                 }
 
         except Exception as e:
             logger.error(f"图片理解失败: {e}")
-            return {"status": "error", "message": f"图片理解失败: {str(e)}"}
+            return {"status": "error", "message": f"Image understanding failed: {str(e)}"}

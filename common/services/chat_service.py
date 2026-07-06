@@ -23,6 +23,7 @@ from sagents.utils.sandbox.policy import normalize_approval_mode
 from sagents.utils.user_input_optimizer import UserInputOptimizer
 
 from common.core import config
+from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
 from common.models.agent import AgentConfigDao
 from common.models.base import get_local_now
@@ -1176,6 +1177,12 @@ class SageStreamService:
                     mount_path=sandbox_agent_workspace,
                 )
             ]
+            if self.request.system_context is None:
+                self.request.system_context = {}
+            if not self.request.system_context.get("response_language"):
+                request_locale = get_request_locale()
+                if request_locale:
+                    self.request.system_context["response_language"] = request_locale
 
             run_kwargs: Dict[str, Any] = {
                 "session_id": session_id,
