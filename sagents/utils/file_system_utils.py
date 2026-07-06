@@ -46,31 +46,31 @@ class SecurityValidator:
     def validate_path(file_path: str, allow_dangerous: bool = False) -> Dict[str, Any]:
         try:
             if ".." in file_path:
-                return {"valid": False, "error": "路径包含危险的遍历字符"}
+                return {"valid": False, "error": "Path contains dangerous traversal characters"}
 
             path = Path(file_path).resolve()
 
             if not path.is_absolute():
-                return {"valid": False, "error": "必须提供绝对路径"}
+                return {"valid": False, "error": "An absolute path is required"}
 
             path_str = str(path)
             for protected in SecurityValidator.PROTECTED_PATHS:
                 if path_str.startswith(protected):
                     return {
                         "valid": False,
-                        "error": f"禁止访问系统保护目录: {protected}",
+                        "error": f"Access to protected system directory is forbidden: {protected}",
                     }
 
             if (
                 not allow_dangerous
                 and path.suffix.lower() in SecurityValidator.DANGEROUS_EXTENSIONS
             ):
-                return {"valid": False, "error": f"危险的文件类型: {path.suffix}"}
+                return {"valid": False, "error": f"Dangerous file type: {path.suffix}"}
 
             return {"valid": True, "resolved_path": str(path)}
 
         except Exception as e:
-            return {"valid": False, "error": f"路径验证失败: {str(e)}"}
+            return {"valid": False, "error": f"Path validation failed: {str(e)}"}
 
 
 class FileMetadata:
@@ -161,18 +161,18 @@ async def file_read_core(
 
         file_info = await asyncio.to_thread(FileMetadata.get_file_info, file_path)
         if not file_info["exists"]:
-            return {"status": "error", "message": "文件不存在"}
+            return {"status": "error", "message": "File does not exist"}
 
         if not file_info["is_file"]:
-            return {"status": "error", "message": "指定路径不是文件"}
+            return {"status": "error", "message": "The specified path is not a file"}
 
         if not file_info["permissions"]["readable"]:
-            return {"status": "error", "message": "文件无读取权限"}
+            return {"status": "error", "message": "File is not readable"}
 
         if file_info["size_mb"] > max_size_mb:
             return {
                 "status": "error",
-                "message": f"文件过大: {file_info['size_mb']:.2f}MB > {max_size_mb}MB",
+                "message": f"File is too large: {file_info['size_mb']:.2f}MB > {max_size_mb}MB",
             }
 
         if encoding == "auto":
@@ -200,7 +200,7 @@ async def file_read_core(
 
         return {
             "status": "success",
-            "message": f"成功读取文件 (行 {start_line}-{end_line})",
+            "message": f"File read successfully (lines {start_line}-{end_line})",
             "content": content,
             "file_info": {
                 "path": file_path,
@@ -217,8 +217,8 @@ async def file_read_core(
     except UnicodeDecodeError as e:
         return {
             "status": "error",
-            "message": f"文件编码错误: {str(e)}，请尝试指定正确的编码",
+            "message": f"File encoding error: {str(e)}. Try specifying the correct encoding",
         }
     except Exception as e:
         logger.error(f"💥 读取文件异常 [{operation_id}] - 错误: {str(e)}")
-        return {"status": "error", "message": f"读取文件失败: {str(e)}"}
+        return {"status": "error", "message": f"Failed to read file: {str(e)}"}

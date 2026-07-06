@@ -75,7 +75,7 @@ class HostBackgroundRunner:
                 log_fh.close()
             except Exception:
                 pass
-            raise FileNotFoundError(f"workdir 不存在: {cwd}")
+            raise FileNotFoundError(f"workdir does not exist: {cwd}")
 
         try:
             if _IS_WINDOWS:

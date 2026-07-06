@@ -209,7 +209,7 @@ class TaskDecomposeAgent(AgentBase):
                         yield [
                             MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content=f"\n\n任务清单已生成：\n{chunk.content}",
+                                content=f"\n\nTask list generated:\n{chunk.content}",
                                 message_id=str(uuid.uuid4()),
                                 message_type=MessageType.TASK_DECOMPOSITION.value,
                             )

@@ -118,7 +118,7 @@ class FileValidator:
                 # URL验证逻辑
                 parsed = urllib.parse.urlparse(file_path_or_url)
                 if not parsed.netloc:
-                    return {"valid": False, "error": "无效的URL格式"}
+                    return {"valid": False, "error": "Invalid URL format"}
 
                 # 从URL获取文件扩展名
                 path = parsed.path.lower()
@@ -137,10 +137,10 @@ class FileValidator:
                         if file_extension not in FileValidator.SUPPORTED_FORMATS:
                             return {
                                 "valid": False,
-                                "error": f"不支持的文件格式: {file_extension}",
+                                "error": f"Unsupported file format: {file_extension}",
                             }
                     else:
-                        return {"valid": False, "error": "无法从URL确定文件类型"}
+                        return {"valid": False, "error": "Cannot determine file type from URL"}
 
                 return {
                     "valid": True,
@@ -155,12 +155,12 @@ class FileValidator:
 
                 # 检查文件是否存在
                 if not file_path.exists():
-                    return {"valid": False, "error": f"文件不存在: {file_path_or_url}"}
+                    return {"valid": False, "error": f"File does not exist: {file_path_or_url}"}
 
                 if not file_path.is_file():
                     return {
                         "valid": False,
-                        "error": f"路径不是文件: {file_path_or_url}",
+                        "error": f"Path is not a file: {file_path_or_url}",
                     }
 
                 # 获取文件扩展名
@@ -168,7 +168,7 @@ class FileValidator:
                 if file_extension not in FileValidator.SUPPORTED_FORMATS:
                     return {
                         "valid": False,
-                        "error": f"不支持的文件格式: {file_extension}",
+                        "error": f"Unsupported file format: {file_extension}",
                     }
 
                 # 检查文件大小
@@ -177,7 +177,7 @@ class FileValidator:
                 if file_size_mb > max_size:
                     return {
                         "valid": False,
-                        "error": f"文件过大: {file_size_mb:.1f}MB，最大允许: {max_size}MB",
+                        "error": f"File is too large: {file_size_mb:.1f}MB, maximum allowed: {max_size}MB",
                     }
 
                 return {
@@ -190,7 +190,7 @@ class FileValidator:
                 }
 
         except Exception as e:
-            return {"valid": False, "error": f"文件验证失败: {str(e)}"}
+            return {"valid": False, "error": f"File validation failed: {str(e)}"}
 
 
 class FileHandler:
@@ -244,7 +244,7 @@ class FileHandler:
                 return file_path_or_url
 
         except Exception as e:
-            raise Exception(f"文件处理失败: {str(e)}")
+            raise Exception(f"File processing failed: {str(e)}")
 
 
 class TextProcessor:
@@ -613,7 +613,9 @@ class FileParser:
                 except Exception as e:
                     print(f"Pandoc解析失败: {e}")
                     traceback.print_exc()
-                    raise FileParserError(f"不支持的文件格式或解析失败: {str(e)}")
+                    raise FileParserError(
+                        f"Unsupported file format or parsing failed: {str(e)}"
+                    )
             else:
                 # 使用智能选择的解析器
                 try:
@@ -650,7 +652,9 @@ class FileParser:
                             )
                         except Exception as pypandoc_error:
                             raise FileParserError(
-                                f"所有解析器都失败了。解析器错误: {parse_result.error}, pypandoc错误: {str(pypandoc_error)}"
+                                "All parsers failed. "
+                                f"Parser error: {parse_result.error}, "
+                                f"pypandoc error: {str(pypandoc_error)}"
                             )
 
                     extracted_text = parse_result.text

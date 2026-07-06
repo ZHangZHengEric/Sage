@@ -210,7 +210,7 @@ class QuestionnaireTool:
                 {
                     "success": True,
                     "status": "timeout",
-                    "message": "用户未在指定时间内提交，使用默认值",
+                    "message": "The user did not submit in time. Default values were used",
                     "answers": default_answers,
                     "questionnaire_kind": questionnaire_kind,
                 },
@@ -222,11 +222,11 @@ class QuestionnaireTool:
             f"QuestionnaireTool: 成功获取问卷答案. questionnaire_id={questionnaire_id}, is_auto_submit={result.get('is_auto_submit', False)}"
         )
         return json.dumps(
-            {
-                "success": True,
-                "status": "submitted",
-                "message": "用户已提交答案",
-                "answers": result.get("answers", {}),
+                {
+                    "success": True,
+                    "status": "submitted",
+                    "message": "The user submitted answers",
+                    "answers": result.get("answers", {}),
                 "questionnaire_id": result.get("questionnaire_id", questionnaire_id),
                 "submitted_at": result.get("submitted_at"),
                 "is_auto_submit": result.get("is_auto_submit", False),
@@ -239,31 +239,33 @@ class QuestionnaireTool:
     def _validate_questions(self, questions: List[Dict[str, Any]]):
         """验证问题格式"""
         if not questions:
-            raise ValueError("问题列表不能为空")
+            raise ValueError("Question list cannot be empty")
 
         for idx, q in enumerate(questions):
             if "id" not in q:
-                raise ValueError(f"第 {idx + 1} 个问题缺少 id 字段")
+                raise ValueError(f"Question {idx + 1} is missing the id field")
             if "type" not in q:
-                raise ValueError(f"第 {idx + 1} 个问题缺少 type 字段")
+                raise ValueError(f"Question {idx + 1} is missing the type field")
             if "title" not in q:
-                raise ValueError(f"第 {idx + 1} 个问题缺少 title 字段")
+                raise ValueError(f"Question {idx + 1} is missing the title field")
 
             qtype = q["type"]
             if qtype not in ["single_choice", "multiple_choice", "text"]:
-                raise ValueError(f"第 {idx + 1} 个问题类型无效: {qtype}")
+                raise ValueError(f"Question {idx + 1} has an invalid type: {qtype}")
 
             if qtype in ["single_choice", "multiple_choice"]:
                 if "options" not in q or not q["options"]:
-                    raise ValueError(f"第 {idx + 1} 个选择题缺少 options 字段")
+                    raise ValueError(
+                        f"Choice question {idx + 1} is missing the options field"
+                    )
                 for opt_idx, opt in enumerate(q["options"]):
                     if "label" not in opt:
                         raise ValueError(
-                            f"第 {idx + 1} 个问题第 {opt_idx + 1} 个选项缺少 label 字段"
+                            f"Question {idx + 1} option {opt_idx + 1} is missing the label field"
                         )
                     if "value" not in opt:
                         raise ValueError(
-                            f"第 {idx + 1} 个问题第 {opt_idx + 1} 个选项缺少 value 字段"
+                            f"Question {idx + 1} option {opt_idx + 1} is missing the value field"
                         )
 
     def _get_default_answers(self, questions: List[Dict[str, Any]]) -> Dict[str, Any]:

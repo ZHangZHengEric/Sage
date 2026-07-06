@@ -58,7 +58,7 @@ class CompressHistoryTool:
         session = get_live_session(session_id, log_prefix="CompressHistoryTool")
 
         if not session or not session.session_context:
-            raise CompressHistoryError(f"无效的 session_id={session_id}")
+            raise CompressHistoryError(f"Invalid session_id={session_id}")
 
         return session.session_context
 
@@ -99,13 +99,13 @@ class CompressHistoryTool:
         session = get_live_session(session_id, log_prefix="CompressHistoryTool")
 
         if not session:
-            raise CompressHistoryError(f"无法获取会话: {session_id}")
+            raise CompressHistoryError(f"Failed to get session: {session_id}")
 
         model = session.model
         model_config = session.model_config.copy()
 
         if not model:
-            raise CompressHistoryError("会话模型未初始化")
+            raise CompressHistoryError("Session model is not initialized")
 
         # 移除非标准参数和与显式参数冲突的参数
         model_config.pop("max_model_len", None)
@@ -203,7 +203,7 @@ class CompressHistoryTool:
 
         except Exception as e:
             logger.error(f"调用 LLM 压缩失败: {e}")
-            raise CompressHistoryError(f"LLM 压缩失败: {e}")
+            raise CompressHistoryError(f"LLM compression failed: {e}")
 
     @staticmethod
     def _bounded_list(
@@ -451,7 +451,7 @@ class CompressHistoryTool:
 
             if not to_compress:
                 content_payload = {
-                    "summary": "没有消息需要压缩",
+                    "summary": "No messages need compression",
                     "decisions": [],
                     "open_tasks": [],
                     "files_touched": [],
@@ -558,7 +558,7 @@ class CompressHistoryTool:
 
         except CompressHistoryError as e:
             logger.error(f"压缩历史消息失败: {e}")
-            return {"status": "error", "message": f"❌ 压缩失败: {str(e)}"}
+            return {"status": "error", "message": f"Compression failed: {str(e)}"}
         except Exception as e:
             logger.error(f"压缩历史消息时发生未知错误: {e}")
             import traceback
@@ -566,7 +566,7 @@ class CompressHistoryTool:
             logger.error(traceback.format_exc())
             return {
                 "status": "error",
-                "message": f"压缩失败: {str(e)}",
+                "message": f"Compression failed: {str(e)}",
                 "data": {
                     "compressed": False,
                     "summary": "",

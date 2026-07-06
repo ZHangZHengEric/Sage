@@ -91,11 +91,11 @@ class VectorMemoryDriver(IMemoryDriver):
             # 这是一个简化示例，具体取决于 VectorStore 实现细节
             await self.vector_store.add_documents(self.collection_name, [document])
 
-            return f"已记住: {memory_key}"
+            return f"Remembered: {memory_key}"
 
         except Exception as e:
             logger.error(f"VectorMemoryDriver remember failed: {e}")
-            return f"记住记忆失败: {str(e)}"
+            return f"Failed to remember memory: {str(e)}"
 
     async def recall(
         self,
@@ -192,10 +192,10 @@ class VectorMemoryDriver(IMemoryDriver):
         try:
             doc_id = f"{user_id}_{memory_key}"
             await self.vector_store.delete_documents(self.collection_name, [doc_id])
-            return f"已忘记: {memory_key}"
+            return f"Forgotten: {memory_key}"
         except Exception as e:
             logger.error(f"VectorMemoryDriver forget failed: {e}")
-            return f"忘记记忆失败: {str(e)}"
+            return f"Failed to forget memory: {str(e)}"
 
     def _chunk_to_memory_entry(self, chunk: Chunk) -> Optional[MemoryEntry]:
         """将Chunk转换为MemoryEntry"""

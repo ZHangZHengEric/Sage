@@ -1024,7 +1024,7 @@ class ExecuteCommandTool:
             logger.error(f"ExecuteCommandTool: 启动后台命令失败: {exc}")
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"启动命令失败: {exc}",
+                f"Failed to start command: {exc}",
                 command=command,
             )
 

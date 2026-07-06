@@ -82,7 +82,7 @@ class ToolMemoryDriver(IMemoryDriver):
         session_id: Optional[str] = None,
     ) -> str:
         if not self._available:
-            return "记忆功能不可用"
+            return "Memory is unavailable"
 
         try:
             return await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
@@ -96,13 +96,13 @@ class ToolMemoryDriver(IMemoryDriver):
             )
         except Exception as e:
             logger.error(f"记住记忆失败: {e}")
-            return f"记住记忆失败：{str(e)}"
+            return f"Failed to remember memory: {str(e)}"
 
     async def forget(
         self, user_id: str, memory_key: str, session_id: Optional[str] = None
     ) -> str:
         if not self._available:
-            return "记忆功能不可用"
+            return "Memory is unavailable"
 
         try:
             return await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
@@ -113,7 +113,7 @@ class ToolMemoryDriver(IMemoryDriver):
             )
         except Exception as e:
             logger.error(f"忘记记忆失败: {e}")
-            return f"忘记记忆失败：{str(e)}"
+            return f"Failed to forget memory: {str(e)}"
 
     def _convert_memories_to_entries(
         self, memories_data: List[Dict]

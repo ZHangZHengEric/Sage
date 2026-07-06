@@ -342,7 +342,7 @@ class PromptManager:
             if default is not None:
                 return default
             raise ValueError(
-                "无法自动获取调用者类名，请使用get_agent_prompt方法并手动指定agent参数"
+                "Could not infer the caller class name. Use get_agent_prompt and pass agent explicitly"
             )
 
         return self.get_prompt(key, default=default, agent=agent, language=language)
