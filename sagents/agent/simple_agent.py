@@ -358,11 +358,21 @@ class SimpleAgent(AgentBase):
             "waiting for tool call",
             "waiting for generation",
             "waiting for tool",
+            "missing execution evidence",
+            "missing tool evidence",
+            "no execution evidence",
+            "no tool result",
             "等待工具调用",
             "等待生成",
             "处理中",
+            "缺少执行证据",
+            "没有执行证据",
+            "缺少工具结果",
+            "没有工具结果",
             "aguardando chamada de ferramenta",
             "aguardando geração",
+            "sem evidência de execução",
+            "sem resultado de ferramenta",
         ]
         if any(marker in reason_text for marker in wait_tool_markers):
             return False
