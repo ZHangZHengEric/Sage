@@ -111,6 +111,26 @@ def test_default_command_policy_allows_legacy_write_operations():
         assert decision.action == "allow", command
 
 
+def test_allows_multisegment_stdout_redirection_without_prompt():
+    decision = SandboxPolicyGateway(
+        approval_mode="never",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("mkdir -p temp && printf 'hello' > temp/prompt.md")
+
+    assert decision.action == "allow"
+    assert decision.category == "shell_redirection"
+
+
+def test_stdout_redirection_to_device_still_requires_confirmation():
+    decision = SandboxPolicyGateway(
+        approval_mode="on-request",
+        command_policy={"rules": []},
+    ).evaluate_shell_command("printf hello > /dev/sdc")
+
+    assert decision.action == "ask"
+    assert decision.category == "shell_redirection"
+
+
 def test_denies_force_push_to_protected_branch():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "git push --force-with-lease origin main"
