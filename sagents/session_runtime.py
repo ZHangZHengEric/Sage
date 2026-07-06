@@ -301,21 +301,11 @@ class Session:
         if not self.session_workspace:
             return []
 
-        messages_path = os.path.join(self.session_workspace, "messages.json")
-        if not os.path.exists(messages_path):
-            self._persisted_messages = []
-            return self._persisted_messages
-
         try:
-            raw_messages = _load_json_file_sync(messages_path)
-            if isinstance(raw_messages, list):
-                self._persisted_messages = [
-                    MessageChunk.from_dict(msg)
-                    for msg in raw_messages
-                    if isinstance(msg, dict)
-                ]
-            else:
-                self._persisted_messages = []
+            self._persisted_messages = SessionContext.load_persisted_message_ledger(
+                self.session_workspace,
+                session_id=self.session_id,
+            )[0]
         except Exception as exc:
             logger.debug(
                 f"SessionRuntime: 读取 session {self.session_id} messages 失败: {exc}"
