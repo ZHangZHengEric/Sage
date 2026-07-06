@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import AsyncGenerator, List, Any, Optional
 from sagents.flow.schema import (
     FlowNode,
@@ -13,6 +14,41 @@ from sagents.flow.conditions import ConditionRegistry
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionStatus
+
+
+def _message_chunk_debug_summary(message_chunks: List[MessageChunk]) -> str:
+    if not message_chunks:
+        return "empty"
+    parts: List[str] = []
+    for chunk in message_chunks[-3:]:
+        role = getattr(chunk, "role", None)
+        message_type = getattr(chunk, "message_type", None) or getattr(
+            chunk, "type", None
+        )
+        message_id = getattr(chunk, "message_id", None)
+        content = getattr(chunk, "content", None)
+        content_len = len(content) if isinstance(content, str) else 0
+        tool_calls = getattr(chunk, "tool_calls", None) or []
+        parts.append(
+            f"{role}/{message_type}:{message_id}:"
+            f"content_len={content_len}:tool_calls={len(tool_calls)}"
+        )
+    return "; ".join(parts)
+
+
+def _message_ledger_count(ctx: Any) -> Optional[int]:
+    message_manager = getattr(ctx, "message_manager", None)
+    messages = getattr(message_manager, "messages", None)
+    if messages is None:
+        return None
+    return len(messages)
+
+
+def _message_manager_debug_id(ctx: Any) -> Optional[int]:
+    message_manager = getattr(ctx, "message_manager", None)
+    if message_manager is None:
+        return None
+    return id(message_manager)
 
 
 class _FlowExecutionTrace:
@@ -242,24 +278,49 @@ class FlowExecutor:
             # 如果有特殊配置，可能需要应用到 Agent (暂未实现完全覆盖，因 Agent 通常是单例或池化)
             # 这里直接执行
             phase_name = node.description or agent.agent_name
+            phase_started_at = time.time()
+            ledger_before = _message_ledger_count(ctx)
+            chunks_seen = 0
+            add_calls = 0
+            last_chunk_summary = "none"
 
-            async for message_chunks in self.runtime._execute_agent_phase(
-                session_id=self.session_id,
-                agent=agent,
-                phase_name=phase_name,
-                # override_config=node.override_config, # FlowNode definition does not have override_config yet
-            ):
-                if self._is_terminal_session_state(session):
-                    logger.info(
-                        f"FlowExecutor: session {self.session_id} reached terminal state "
-                        f"{session.get_status().value} while running agent '{agent_key}', stopping"
+            try:
+                async for message_chunks in self.runtime._execute_agent_phase(
+                    session_id=self.session_id,
+                    agent=agent,
+                    phase_name=phase_name,
+                    # override_config=node.override_config, # FlowNode definition does not have override_config yet
+                ):
+                    if self._is_terminal_session_state(session):
+                        logger.info(
+                            f"FlowExecutor: session {self.session_id} reached terminal state "
+                            f"{session.get_status().value} while running agent '{agent_key}', stopping"
+                        )
+                        return
+                    # 将消息添加到上下文 (这一步在 _execute_agent_phase 外部做还是内部做？)
+                    # 原逻辑是在外部做的: session_context.add_messages(message_chunks)
+                    # 所以这里我们也做
+                    ctx.add_messages(message_chunks)
+                    add_calls += 1
+                    chunks_seen += len(message_chunks or [])
+                    last_chunk_summary = _message_chunk_debug_summary(
+                        message_chunks or []
                     )
-                    return
-                # 将消息添加到上下文 (这一步在 _execute_agent_phase 外部做还是内部做？)
-                # 原逻辑是在外部做的: session_context.add_messages(message_chunks)
-                # 所以这里我们也做
-                ctx.add_messages(message_chunks)
-                yield message_chunks
+                    yield message_chunks
+            finally:
+                flush_journal = getattr(ctx, "flush_message_journal_current", None)
+                if callable(flush_journal):
+                    flush_journal(reason="agent_phase_end")
+                ledger_after = _message_ledger_count(ctx)
+                logger.info(
+                    "FlowExecutor: agent phase ledger summary "
+                    f"session_id={self.session_id} agent={agent_key} phase={phase_name} "
+                    f"ctx_id={id(ctx)} manager_id={_message_manager_debug_id(ctx)} "
+                    f"add_calls={add_calls} chunks_seen={chunks_seen} "
+                    f"ledger_before={ledger_before} ledger_after={ledger_after} "
+                    f"duration_ms={int((time.time() - phase_started_at) * 1000)} "
+                    f"last_chunks={last_chunk_summary}"
+                )
 
             if self._is_terminal_session_state(session):
                 logger.info(
