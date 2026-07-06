@@ -260,11 +260,11 @@ class SAgent:
                 ...
         """
         if not model:
-            raise ValueError("run_stream 参数 model 不能为空")
+            raise ValueError("run_stream parameter model is required")
         if not isinstance(model_config, dict) or not model_config:
-            raise ValueError("run_stream 参数 model_config 必须是非空字典")
+            raise ValueError("run_stream parameter model_config must be a non-empty dict")
         if max_loop_count is None:
-            raise ValueError("run_stream 参数 max_loop_count 不能为空")
+            raise ValueError("run_stream parameter max_loop_count is required")
 
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
@@ -281,7 +281,9 @@ class SAgent:
         if effective_sandbox_type == "local":
             # local 模式必须有 sandbox_agent_workspace
             if not sandbox_agent_workspace:
-                raise ValueError("local 沙箱模式需要提供 sandbox_agent_workspace 参数")
+                raise ValueError(
+                    "local sandbox mode requires sandbox_agent_workspace"
+                )
 
         elif effective_sandbox_type == "remote":
             # remote 模式默认使用远程工作区根目录；sandbox_id 可选，不传时由 SessionContext 回退生成
@@ -661,7 +663,9 @@ class SAgent:
     def save_session(self, session_id: str) -> bool:
         return self.session_manager.save_session(session_id)
 
-    def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
+    def interrupt_session(
+        self, session_id: str, message: str = "User requested interruption"
+    ) -> bool:
         return self.session_manager.interrupt_session(session_id, message=message)
 
     def get_tasks_status(self, session_id: str) -> Optional[Dict[str, Any]]:

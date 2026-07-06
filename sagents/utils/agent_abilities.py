@@ -69,8 +69,8 @@ def _format_name_list(
 ) -> str:
     names = [str(v) for v in (values or []) if str(v).strip()]
     if not names:
-        return f"{label}：无"
-    display = "、".join(names[:max_count])
+        return f"{label}: none"
+    display = ", ".join(names[:max_count])
     if len(names) > max_count:
         display += " 等"
     return f"{label}：{display}"
@@ -135,7 +135,7 @@ async def generate_agent_abilities_from_config(
     """
 
     if not client:
-        raise AgentAbilitiesGenerationError("模型客户端未配置")
+        raise AgentAbilitiesGenerationError("Model client is not configured")
 
     agent_name = agent_config.get("name") or agent_config.get("id") or "Sage 助手"
     agent_description = (
@@ -233,14 +233,14 @@ async def generate_agent_abilities_from_config(
         )
     except Exception as e:  # pragma: no cover - 具体异常类型由底层 SDK 决定
         logger.error(f"生成 Agent 能力列表时调用模型失败: {e}")
-        raise AgentAbilitiesGenerationError("调用模型失败，请稍后重试") from e
+        raise AgentAbilitiesGenerationError("Model call failed. Try again later") from e
 
     # 解析模型返回的 JSON
     try:
         choice = response.choices[0].message
     except Exception as e:  # pragma: no cover
         logger.error(f"解析模型返回结果失败: {e}")
-        raise AgentAbilitiesGenerationError("模型返回结果格式不正确") from e
+        raise AgentAbilitiesGenerationError("Model response format is invalid") from e
 
     data_obj: Any
     parsed = getattr(choice, "parsed", None)
@@ -265,14 +265,20 @@ async def generate_agent_abilities_from_config(
                     e, content_text[:500]
                 )
             )
-            raise AgentAbilitiesGenerationError("解析模型返回的能力列表失败") from e
+            raise AgentAbilitiesGenerationError(
+                "Failed to parse the generated ability list"
+            ) from e
 
     if not isinstance(data_obj, dict) or "items" not in data_obj:
-        raise AgentAbilitiesGenerationError("能力列表结果缺少 items 字段")
+        raise AgentAbilitiesGenerationError(
+            "Ability list result is missing the items field"
+        )
 
     items_raw = data_obj.get("items") or []
     if not isinstance(items_raw, list):
-        raise AgentAbilitiesGenerationError("能力列表 items 字段格式不正确")
+        raise AgentAbilitiesGenerationError(
+            "Ability list items field has an invalid format"
+        )
 
     results: List[Dict[str, str]] = []
     seen_ids: set[str] = set()
@@ -314,7 +320,7 @@ async def generate_agent_abilities_from_config(
             break
 
     if not results:
-        raise AgentAbilitiesGenerationError("未生成任何有效的能力项")
+        raise AgentAbilitiesGenerationError("No valid ability items were generated")
 
     if len(results) < AGENT_ABILITIES_TARGET_COUNT:
         logger.warning(

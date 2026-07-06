@@ -931,7 +931,10 @@ class SimpleAgent(AgentBase):
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？",
+                        content=(
+                            f"The agent exceeded the maximum loop count ({max_loop_count}). "
+                            "The task is paused. Do you want to continue?"
+                        ),
                         type=MessageType.ASSISTANT_TEXT.value,
                     )
                 ]

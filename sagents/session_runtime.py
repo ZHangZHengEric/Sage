@@ -48,6 +48,7 @@ from sagents.flow.schema import AgentFlow
 from sagents.flow.executor import FlowExecutor
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.message_control_flags import extract_control_flags_from_messages
+from sagents.utils.i18n import normalize_language, t
 
 
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
@@ -301,21 +302,11 @@ class Session:
         if not self.session_workspace:
             return []
 
-        messages_path = os.path.join(self.session_workspace, "messages.json")
-        if not os.path.exists(messages_path):
-            self._persisted_messages = []
-            return self._persisted_messages
-
         try:
-            raw_messages = _load_json_file_sync(messages_path)
-            if isinstance(raw_messages, list):
-                self._persisted_messages = [
-                    MessageChunk.from_dict(msg)
-                    for msg in raw_messages
-                    if isinstance(msg, dict)
-                ]
-            else:
-                self._persisted_messages = []
+            self._persisted_messages = SessionContext.load_persisted_message_ledger(
+                self.session_workspace,
+                session_id=self.session_id,
+            )[0]
         except Exception as exc:
             logger.debug(
                 f"SessionRuntime: 读取 session {self.session_id} messages 失败: {exc}"
@@ -458,7 +449,7 @@ class Session:
             return {"tasks": []}
 
     def request_interrupt(
-        self, message: str = "用户请求中断", cascade: bool = True
+        self, message: str = "User requested interruption", cascade: bool = True
     ) -> bool:
         if not self.session_context:
             return False
@@ -890,32 +881,60 @@ class Session:
         self, error: Exception
     ) -> AsyncGenerator[List[MessageChunk], None]:
         logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
-        error_message = self._extract_friendly_error_message(error)
+        language = self._resolve_workflow_error_language()
+        error_message = self._extract_friendly_error_message(error, language=language)
         yield [
             MessageChunk(
                 role="assistant",
-                content=f"工作流执行失败: {error_message}",
+                content=t(
+                    "workflow.execution_failed",
+                    language=language,
+                    params={"message": error_message},
+                ),
                 type="final_answer",
             )
         ]
 
-    def _extract_friendly_error_message(self, error: Exception) -> str:
+    def _resolve_workflow_error_language(self) -> str:
+        session_context = self.session_context
+        if session_context:
+            get_language = getattr(session_context, "get_language", None)
+            if callable(get_language):
+                try:
+                    return normalize_language(str(get_language()))
+                except Exception as e:
+                    logger.debug(f"SAgent: 获取会话语言失败: {e}")
+
+            system_context = getattr(session_context, "system_context", None)
+            if isinstance(system_context, dict):
+                for key in ("response_language", "language", "locale"):
+                    value = system_context.get(key)
+                    if value:
+                        return normalize_language(str(value))
+
+        return normalize_language(None)
+
+    def _extract_friendly_error_message(
+        self, error: Exception, language: str | None = None
+    ) -> str:
         """从异常中提取友好的错误信息"""
         error_str = str(error)
 
         # 处理数据检查失败错误（内容审核）
         if "DataInspectionFailed" in error_str or "data_inspection_failed" in error_str:
             if "inappropriate content" in error_str or "inappropriate" in error_str:
-                return "输入内容可能包含不适当的内容，请修改后重试"
-            return "内容安全检查未通过，请修改输入后重试"
+                return t(
+                    "workflow.error.data_inspection_inappropriate", language=language
+                )
+            return t("workflow.error.data_inspection_failed", language=language)
 
         # 处理速率限制错误
         if "rate_limit" in error_str.lower() or "RateLimitError" in error_str:
-            return "请求过于频繁，请稍后再试"
+            return t("workflow.error.rate_limit", language=language)
 
         # 处理配额不足错误
         if "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
-            return "API 配额不足，请检查账户余额或配额设置"
+            return t("workflow.error.quota", language=language)
 
         # 处理认证错误
         if (
@@ -923,13 +942,13 @@ class Session:
             or "unauthorized" in error_str.lower()
             or "401" in error_str
         ):
-            return "API 认证失败，请检查 API Key 是否正确"
+            return t("workflow.error.authentication", language=language)
 
         # 处理模型不存在错误
         if "model" in error_str.lower() and (
             "not found" in error_str.lower() or "does not exist" in error_str.lower()
         ):
-            return "指定的模型不存在或不可用，请检查模型配置"
+            return t("workflow.error.model_not_found", language=language)
 
         # 处理上下文长度超限
         if (
@@ -937,7 +956,7 @@ class Session:
             or "token" in error_str.lower()
             and "exceed" in error_str.lower()
         ):
-            return "输入内容过长，请缩短后重试"
+            return t("workflow.error.context_length", language=language)
 
         # 处理连接错误
         if (
@@ -945,7 +964,7 @@ class Session:
             or "timeout" in error_str.lower()
             or "network" in error_str.lower()
         ):
-            return "网络连接失败，请检查网络设置或稍后重试"
+            return t("workflow.error.connection", language=language)
 
         # 处理服务不可用
         if (
@@ -953,7 +972,7 @@ class Session:
             or "503" in error_str
             or "502" in error_str
         ):
-            return "服务暂时不可用，请稍后再试"
+            return t("workflow.error.service_unavailable", language=language)
 
         # 默认返回原始错误信息（但截断过长的）
         if len(error_str) > 200:
@@ -970,7 +989,7 @@ class Session:
                 async for message_chunks in self.run_stream_with_flow(**kwargs):
                     yield message_chunks
             else:
-                raise ValueError("SAgent: run_stream_safe 必须提供 flow 参数")
+                raise ValueError("SAgent: run_stream_safe requires a flow parameter")
         except Exception as e:
             if self.observability_manager:
                 self.observability_manager.on_chain_error(
@@ -1093,15 +1112,15 @@ class Session:
         session_manager = get_global_session_manager()
         if not session_manager:
             raise RuntimeError(
-                f"SAgent: session_manager 未初始化，session_id={session_id}"
+                f"SAgent: session_manager is not initialized, session_id={session_id}"
             )
         session = session_manager.get_live_session(session_id)
         if session is None:
-            raise RuntimeError(f"SAgent: session 未绑定，session_id={session_id}")
+            raise RuntimeError(f"SAgent: session is not bound, session_id={session_id}")
         session_context = session.get_context()
         if session_context is None:
             raise RuntimeError(
-                f"SAgent: session_context 未绑定，session_id={session_id}"
+                f"SAgent: session_context is not bound, session_id={session_id}"
             )
 
         logger.info(f"SAgent: 使用 {agent.agent_description} 智能体，{phase_name}阶段")
@@ -1126,7 +1145,7 @@ class Session:
     ) -> List[MessageChunk]:
         for msg in input_messages:
             if not isinstance(msg, (dict, MessageChunk)):
-                raise ValueError("每个消息必须是字典或MessageChunk类型")
+                raise ValueError("Each message must be a dict or MessageChunk")
         return [
             MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg
             for msg in input_messages
@@ -1429,7 +1448,9 @@ class SessionManager:
                 logger.warning(f"清理session {session_id} 日志资源时出错: {e}")
             session.close()
 
-    def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
+    def interrupt_session(
+        self, session_id: str, message: str = "User requested interruption"
+    ) -> bool:
         """请求中断指定会话，并级联到已登记的子会话。"""
         session = self.get_live_session(session_id)
         if not session:

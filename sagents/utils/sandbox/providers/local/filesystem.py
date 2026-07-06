@@ -20,7 +20,7 @@ class SandboxFileSystem:
             volume_mounts: 卷挂载配置列表，第一个作为主映射
         """
         if not volume_mounts:
-            raise ValueError("volume_mounts 不能为空")
+            raise ValueError("volume_mounts cannot be empty")
 
         self._volume_mounts = volume_mounts
 
