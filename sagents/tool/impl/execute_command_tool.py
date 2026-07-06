@@ -900,7 +900,6 @@ class ExecuteCommandTool:
                 "output_file": {"type": "string"},
                 "stdout": {"type": "string"},
                 "exit_code": {"type": "integer"},
-                "approval_id": {"type": "string"},
             },
             "required": ["success"],
         },
@@ -934,19 +933,27 @@ class ExecuteCommandTool:
             command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
         )
         if policy_decision.action != "allow":
-            if approval_id:
-                logger.info(
-                    "execute_shell_command ignored legacy approval_id argument; "
-                    "sandbox approvals must resolve through the runtime broker"
+            if policy_decision.action == "ask":
+                if approval_id:
+                    logger.info(
+                        "execute_shell_command ignored legacy approval_id argument; "
+                        "sandbox approvals must resolve through the runtime broker"
+                    )
+                approval_error = await self._await_policy_approval(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
                 )
-            approval_error = await self._await_policy_approval(
-                command=command,
-                session_id=session_id,
-                policy_decision=policy_decision,
-                policy_gateway=policy_gateway,
-            )
-            if approval_error is not None:
-                return approval_error
+                if approval_error is not None:
+                    return approval_error
+            else:
+                return self._policy_blocked_error(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
+                )
 
         sandbox = self._get_sandbox(session_id)
 
@@ -971,7 +978,7 @@ class ExecuteCommandTool:
             logger.error(f"ExecuteCommandTool: 启动后台命令失败: {exc}")
             return make_tool_error(
                 ToolErrorCode.SANDBOX_ERROR,
-                f"启动命令失败: {exc}",
+                f"Failed to start command: {exc}",
                 command=command,
             )
 

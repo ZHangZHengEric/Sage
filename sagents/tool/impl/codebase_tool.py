@@ -472,17 +472,19 @@ class CodebaseTool:
         if not isinstance(pattern, str) or not pattern:
             return make_tool_error(
                 ToolErrorCode.INVALID_ARGUMENT,
-                "pattern 必须是非空字符串",
+                "pattern must be a non-empty string",
             )
         if output_mode not in {"content", "files_with_matches", "count"}:
             return make_tool_error(
                 ToolErrorCode.INVALID_ARGUMENT,
-                "output_mode 必须是 content/files_with_matches/count 之一",
+                "output_mode must be one of content/files_with_matches/count",
             )
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"获取沙箱失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
+            )
 
         try:
             if await self._has_command(sandbox, "rg"):
@@ -510,7 +512,7 @@ class CodebaseTool:
             )
         except Exception as exc:
             logger.error(f"CodebaseTool.grep: 运行失败: {exc}")
-            return make_tool_error(ToolErrorCode.INTERNAL_ERROR, f"grep 失败: {exc}")
+            return make_tool_error(ToolErrorCode.INTERNAL_ERROR, f"grep failed: {exc}")
 
     # ==================== glob ====================
 
@@ -640,12 +642,14 @@ class CodebaseTool:
         if not isinstance(pattern, str) or not pattern:
             return make_tool_error(
                 ToolErrorCode.INVALID_ARGUMENT,
-                "pattern 必须是非空字符串",
+                "pattern must be a non-empty string",
             )
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"获取沙箱失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
+            )
 
         root = path or sandbox.workspace_path
         try:
@@ -658,7 +662,7 @@ class CodebaseTool:
         except Exception as exc:
             logger.error(f"CodebaseTool.glob: walk 失败: {exc}")
             return make_tool_error(
-                ToolErrorCode.INTERNAL_ERROR, f"glob 遍历失败: {exc}"
+                ToolErrorCode.INTERNAL_ERROR, f"glob traversal failed: {exc}"
             )
 
         norm_pattern = self._to_pure_pattern(pattern)
@@ -737,7 +741,9 @@ class CodebaseTool:
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"获取沙箱失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
+            )
 
         root = path or sandbox.workspace_path
         try:
@@ -749,7 +755,9 @@ class CodebaseTool:
             )
         except Exception as exc:
             logger.error(f"CodebaseTool.list_dir: get_file_tree 失败: {exc}")
-            return make_tool_error(ToolErrorCode.INTERNAL_ERROR, f"列目录失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.INTERNAL_ERROR, f"Failed to list directory: {exc}"
+            )
 
         return {
             "success": True,

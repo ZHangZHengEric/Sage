@@ -34,7 +34,7 @@ class VenvManager:
             system_python = get_system_python_path()
             if not system_python:
                 logger.error("[VenvManager] 无法找到系统 Python 解释器")
-                raise RuntimeError("无法找到系统 Python 解释器")
+                raise RuntimeError("System Python interpreter was not found")
 
             logger.info(f"[VenvManager] 使用 Python 解释器: {system_python}")
 

@@ -167,7 +167,9 @@ class AgentBase(ABC):
         return datetime.timezone(sign * delta)
 
     def _consume_user_injections(
-        self, session_context: Optional[SessionContext]
+        self,
+        session_context: Optional[SessionContext],
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
     ) -> List[MessageChunk]:
         """Drain SessionContext 上的 pending 引导消息。
 
@@ -178,12 +180,35 @@ class AgentBase(ABC):
         if session_context is None:
             return []
         try:
-            return session_context.flush_user_injections()
+            return session_context.flush_user_injections(
+                ledger_messages=ledger_messages
+            )
         except Exception as exc:
             logger.warning(
                 f"{self.__class__.__name__}: flush user injections 失败: {exc}"
             )
             return []
+
+    @staticmethod
+    def _visible_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
+        """Return injected messages that should be emitted to clients."""
+        return [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("sse_visible") is not False
+        ]
+
+    @staticmethod
+    def _transient_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
+        """Return injected messages that are request-only and not persisted."""
+        return [
+            chunk
+            for chunk in chunks
+            if (
+                (chunk.metadata or {}).get("persist") is False
+                or (chunk.metadata or {}).get("transient") is True
+            )
+        ]
 
     @abstractmethod
     async def run_stream(
@@ -409,7 +434,7 @@ class AgentBase(ABC):
             yield [
                 MessageChunk(
                     role=MessageRole.TOOL.value,
-                    content=f"压缩失败: {str(exc)}",
+                    content=f"Compression failed: {str(exc)}",
                     tool_call_id=tool_call_id,
                     type=MessageType.TOOL_CALL_RESULT.value,
                     metadata={
@@ -616,6 +641,72 @@ class AgentBase(ABC):
         return copied
 
     @classmethod
+    def _apply_frozen_historical_user_time_context(
+        cls,
+        message: MessageChunk,
+        frozen: Dict[str, Any],
+    ) -> MessageChunk:
+        current_time_context = cls._extract_current_time_context_tag(
+            frozen.get("content")
+        )
+        stripped = cls._strip_skill_tags_from_message(message)
+        if not current_time_context:
+            return stripped
+        runtime_context = (
+            f"<runtime_context>\n{current_time_context}\n</runtime_context>"
+        )
+        return cls._wrap_message_with_runtime_context(stripped, runtime_context)
+
+    @staticmethod
+    def _extract_current_time_context_tag(content: Any) -> Optional[str]:
+        text_parts: List[str] = []
+        if isinstance(content, str):
+            text_parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+                    continue
+                part_content = part.get("content")
+                if isinstance(part_content, str):
+                    text_parts.append(part_content)
+
+        for text in text_parts:
+            current_time_context = AgentBase._extract_current_time_from_runtime_text(
+                text
+            )
+            if current_time_context:
+                return current_time_context
+        return None
+
+    @staticmethod
+    def _extract_current_time_from_runtime_text(text: str) -> Optional[str]:
+        runtime_match = re.search(
+            r"<runtime_context\b[^>]*>(.*?)</runtime_context>",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not runtime_match:
+            return None
+
+        runtime_body = runtime_match.group(1)
+        system_match = re.search(
+            r"<system_context\b[^>]*>(.*?)</system_context>",
+            runtime_body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        trusted_body = system_match.group(1) if system_match else runtime_body
+        match = re.search(
+            r"<current_time\b[^>]*>.*?</current_time>",
+            trusted_body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return match.group(0).strip() if match else None
+
+    @classmethod
     def _strip_skill_tags_from_text(cls, text: str) -> str:
         cleaned = re.sub(
             r"<skill>\s*[^<]*?\s*</skill>",
@@ -725,11 +816,15 @@ class AgentBase(ABC):
         for idx, message in enumerate(injected):
             if message.role != MessageRole.USER.value:
                 continue
+            if idx == latest_user_idx:
+                continue
             frozen = self._get_frozen_user_inference(message)
             if not frozen:
                 frozen = self._find_frozen_user_inference_in_ledger(session_id, message)
             if frozen:
-                injected[idx] = self._apply_frozen_user_inference(message, frozen)
+                injected[idx] = self._apply_frozen_historical_user_time_context(
+                    message, frozen
+                )
 
         latest_user = injected[latest_user_idx]
         latest_frozen = self._get_frozen_user_inference(messages[latest_user_idx])
@@ -737,7 +832,11 @@ class AgentBase(ABC):
             latest_frozen = self._find_frozen_user_inference_in_ledger(
                 session_id, messages[latest_user_idx]
             )
-        if latest_frozen is None:
+        if latest_frozen is not None:
+            injected[latest_user_idx] = self._apply_frozen_user_inference(
+                messages[latest_user_idx], latest_frozen
+            )
+        else:
             parts: List[str] = []
             try:
                 runtime_context = await self._build_runtime_context_text(
@@ -2581,7 +2680,7 @@ class AgentBase(ABC):
                     [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
-                            content="已经完成了满足用户的所有要求",
+                            content="All user requirements have been satisfied",
                             message_id=str(uuid.uuid4()),
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )

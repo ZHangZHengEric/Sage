@@ -83,7 +83,9 @@ class TextParser(BaseFileParser):
             )
 
         if not skip_validation and not self.can_parse(file_path):
-            return self.create_error_result(f"不支持的文件类型: {file_path}", file_path)
+            return self.create_error_result(
+                f"Unsupported file type: {file_path}", file_path
+            )
 
         return self._do_parse(file_path)
 

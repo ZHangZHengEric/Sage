@@ -413,6 +413,32 @@ class TestMessageCompression(unittest.TestCase):
         self.assertEqual(compressed[1].content, "A" * 5000)
         self.assertEqual(compressed[2].content, "B" * 5000)
 
+    def test_token_budget_view_can_protect_last_assistant_text(self):
+        final_text = (
+            "I prepared the current phase result. "
+            + "detail " * 450
+            + "<movo-questionnaire>need specs</movo-questionnaire> "
+            + "Once you answer, I will continue."
+        )
+        messages = [
+            self.create_message(MessageRole.USER.value, "Please revise this video."),
+            self.create_message(MessageRole.TOOL.value, "T" * 5000),
+            self.create_message(MessageRole.ASSISTANT.value, final_text),
+        ]
+
+        compressed_default = MessageManager.build_token_budget_view(
+            messages,
+            budget_limit=100,
+        )
+        compressed_protected = MessageManager.build_token_budget_view(
+            messages,
+            budget_limit=100,
+            protect_last_assistant_text=True,
+        )
+
+        self.assertIn("assistant content omitted", compressed_default[-1].content)
+        self.assertEqual(compressed_protected[-1].content, final_text)
+
     def test_token_budget_view_keeps_visible_compression_pair_summary(self):
         raw = self.create_message(MessageRole.ASSISTANT.value, "raw")
         raw.message_id = "raw"

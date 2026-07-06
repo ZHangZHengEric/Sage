@@ -223,12 +223,6 @@ DEFAULT_COMMAND_POLICY = CommandPolicyConfig(
         ),
         CommandPolicyRule(
             action="allow",
-            match={"pattern": r"^[^|;&]*[^0-9]>>?(?![&])\s*(?!/dev/(?:sd|nvme))\S+"},
-            category="default_shell_redirection",
-            reason="default policy allows ordinary stdout redirection",
-        ),
-        CommandPolicyRule(
-            action="allow",
             match={"argv_prefix": ["brew", "install"]},
             category="default_dependency_install",
             reason="default policy allows package manager installation",
@@ -412,6 +406,7 @@ class SandboxPolicyGateway:
         re.IGNORECASE,
     )
     _STDOUT_REDIRECT_RE = re.compile(r"(^|[^\d])>>?(?![&])")
+    _STDOUT_REDIRECT_TARGET_RE = re.compile(r"(^|[^\d])>>?(?![&])\s*(\S+)")
     _SEGMENT_SPLIT_RE = re.compile(r"[|;&]+")
 
     def __init__(self, approval_mode: Optional[str] = None, command_policy: Any = None):
@@ -474,12 +469,18 @@ class SandboxPolicyGateway:
                 return self._apply_approval_mode(decision)
 
         if self._STDOUT_REDIRECT_RE.search(command):
+            if self._stdout_redirection_targets_allowed(command):
+                return SandboxPolicyDecision(
+                    action="allow",
+                    category="shell_redirection",
+                    reason="ordinary stdout redirection is executable in the sandbox",
+                )
             return self._apply_approval_mode(
                 SandboxPolicyDecision(
                     action="ask",
                     category="shell_redirection",
-                    reason="stdout redirection may write or replace files",
-                    next_step="Confirm the target path, or use the file editing tool for workspace files.",
+                    reason="stdout redirection target may be unsafe",
+                    next_step="Use a workspace-scoped file path for stdout redirection.",
                 )
             )
 
@@ -683,6 +684,16 @@ class SandboxPolicyGateway:
             return False
         normalized = branch.removeprefix("refs/heads/")
         return normalized in {"main", "master"}
+
+    def _stdout_redirection_targets_allowed(self, command: str) -> bool:
+        matches = list(self._STDOUT_REDIRECT_TARGET_RE.finditer(command))
+        if not matches:
+            return False
+        for match in matches:
+            target = match.group(2).strip("'\"").lower()
+            if target.startswith(("/dev/sd", "/dev/nvme")):
+                return False
+        return True
 
     @staticmethod
     def _parse_command(command: str) -> Optional[list[str]]:

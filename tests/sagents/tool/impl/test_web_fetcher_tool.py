@@ -216,7 +216,7 @@ def test_fetch_html_with_save_truncates_markdown_and_saves_full_content(
         )
     )
 
-    assert "[内容已截断，完整内容已保存到文件:" in result["content"]
+    assert "[Content truncated. Full content saved to:" in result["content"]
     assert result["metadata"]["full_content_saved"] is True
     saved_content = tmp_path.joinpath(result["metadata"]["filename"]).read_text()
     assert "![A](https://domain.test/posts/images/a.png)" in saved_content
@@ -427,6 +427,6 @@ def test_xiaohongshu_unavailable_page_does_not_fallback_to_shell_markdown(
 
     assert result["status"] == "success"
     assert result["metadata"]["selector"] == "xiaohongshu_unavailable"
-    assert "小红书分享帖未返回正文" in result["content"]
+    assert "Xiaohongshu share post did not return body content" in result["content"]
     assert "data:image" not in result["content"]
     assert result["metadata"]["image_count"] == 0

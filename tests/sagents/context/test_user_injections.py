@@ -98,6 +98,44 @@ def test_enqueue_user_injection_skips_already_flushed_guidance(tmp_path):
     assert [message.content for message in ctx.message_manager.messages] == ["喝茶喝茶"]
 
 
+def test_hidden_user_injection_is_persisted_for_model_history(tmp_path):
+    ctx = _make_session(tmp_path)
+    content = [
+        {"type": "text", "text": "工具注入的图片上下文"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}},
+    ]
+
+    ctx.enqueue_user_injection(
+        content,
+        guidance_id="image-context-1",
+        extra_metadata={"hidden_from_chat": True, "sse_visible": False},
+    )
+    drained = ctx.flush_user_injections()
+
+    assert len(drained) == 1
+    assert drained[0].content == content
+    assert len(ctx.message_manager.messages) == 1
+    stored = ctx.message_manager.messages[0]
+    assert stored.role == MessageRole.USER.value
+    assert stored.content == content
+    assert stored.metadata["hidden_from_chat"] is True  # pyright: ignore[reportOptionalSubscript]
+
+
+def test_transient_user_injection_is_not_persisted(tmp_path):
+    ctx = _make_session(tmp_path)
+
+    ctx.enqueue_user_injection(
+        "只给下一轮模型看的上下文",
+        guidance_id="transient-1",
+        extra_metadata={"transient": True, "persist": False, "sse_visible": False},
+    )
+    drained = ctx.flush_user_injections()
+
+    assert len(drained) == 1
+    assert drained[0].content == "只给下一轮模型看的上下文"
+    assert ctx.message_manager.messages == []
+
+
 def test_flush_user_injection_waits_for_open_tool_call_tail(tmp_path):
     ctx = _make_session(tmp_path)
     ctx.add_messages(
@@ -130,6 +168,48 @@ def test_flush_user_injection_waits_for_open_tool_call_tail(tmp_path):
 
     assert len(drained) == 1
     assert drained[0].metadata["guidance_id"] == "guidance-1"  # pyright: ignore[reportOptionalSubscript]
+    assert ctx.list_user_injections() == []
+
+
+def test_flush_user_injection_uses_supplied_closed_ledger(tmp_path):
+    ctx = _make_session(tmp_path)
+    assistant_tool_call = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "analyze_image", "arguments": "{}"},
+            }
+        ],
+        message_type=MessageType.TOOL_CALL.value,
+    )
+    tool_result = MessageChunk(
+        role=MessageRole.TOOL.value,
+        content='{"status":"success"}',
+        tool_call_id="call_1",
+        message_type=MessageType.TOOL_CALL_RESULT.value,
+        message_id="external-tool-result",
+    )
+    ctx.add_messages(assistant_tool_call)
+    ctx.enqueue_user_injection(
+        [{"type": "text", "text": "工具注入的图片上下文"}],
+        guidance_id="guidance-image",
+        extra_metadata={"hidden_from_chat": True, "sse_visible": False},
+    )
+
+    assert ctx.flush_user_injections() == []
+
+    drained = ctx.flush_user_injections(
+        ledger_messages=[assistant_tool_call, tool_result]
+    )
+
+    assert len(drained) == 1
+    assert drained[0].metadata["guidance_id"] == "guidance-image"  # pyright: ignore[reportOptionalSubscript]
+    assert all(
+        message.message_id != "external-tool-result"
+        for message in ctx.message_manager.messages
+    )
     assert ctx.list_user_injections() == []
 
 

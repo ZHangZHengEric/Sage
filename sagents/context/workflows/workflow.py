@@ -26,9 +26,9 @@ class WorkflowStep:
     def __post_init__(self):
         """初始化后的验证"""
         if not self.id:
-            raise ValueError("WorkflowStep: id不能为空")
+            raise ValueError("WorkflowStep: id is required")
         if not self.name:
-            raise ValueError("WorkflowStep: name不能为空")
+            raise ValueError("WorkflowStep: name is required")
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -47,7 +47,7 @@ class WorkflowStep:
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowStep":
         """从字典创建WorkflowStep实例"""
         if not isinstance(data, dict):
-            raise ValueError("WorkflowStep.from_dict: 输入数据必须是字典")
+            raise ValueError("WorkflowStep.from_dict: input data must be a dict")
 
         substeps = {}
         if "substeps" in data and data["substeps"]:
@@ -126,12 +126,12 @@ class Workflow:
     def __post_init__(self):
         """初始化后的验证"""
         if not self.name:
-            raise ValueError("Workflow: name不能为空")
+            raise ValueError("Workflow: name is required")
 
     def add_step(self, step: WorkflowStep) -> None:
         """添加步骤"""
         if not isinstance(step, WorkflowStep):
-            raise ValueError("Workflow.add_step: step必须是WorkflowStep实例")
+            raise ValueError("Workflow.add_step: step must be a WorkflowStep instance")
         self.steps[step.id] = step
         # logger.debug(f"Workflow '{self.name}': 添加步骤 '{step.id}', 步骤描述: {step.description}")
 
@@ -187,7 +187,7 @@ class Workflow:
     def from_dict(cls, data: Dict[str, Any]) -> "Workflow":
         """从字典创建Workflow实例"""
         if not isinstance(data, dict):
-            raise ValueError("Workflow.from_dict: 输入数据必须是字典")
+            raise ValueError("Workflow.from_dict: input data must be a dict")
 
         steps = {}
         if "steps" in data and data["steps"]:
@@ -219,7 +219,9 @@ class Workflow:
     ) -> "Workflow":
         """从旧格式（字符串列表）创建Workflow实例"""
         if not isinstance(steps, list):
-            raise ValueError("Workflow.from_legacy_format: steps必须是字符串列表")
+            raise ValueError(
+                "Workflow.from_legacy_format: steps must be a list of strings"
+            )
 
         workflow = cls(
             name=name, description=description, format_type=WorkflowFormat.LEGACY
@@ -260,7 +262,7 @@ class Workflow:
             return cls.from_dict(data)
         except json.JSONDecodeError as e:
             logger.error(f"Workflow.from_json: JSON解析错误: {str(e)}")
-            raise ValueError(f"无效的JSON格式: {str(e)}")
+            raise ValueError(f"Invalid JSON format: {str(e)}")
 
     def clone(self) -> "Workflow":
         """克隆工作流"""
@@ -278,28 +280,28 @@ class Workflow:
         errors = []
 
         if not self.name:
-            errors.append("工作流名称不能为空")
+            errors.append("Workflow name is required")
 
         if not self.steps:
-            errors.append("工作流必须包含至少一个步骤")
+            errors.append("Workflow must contain at least one step")
             return errors
 
         # 检查步骤ID重复
         step_ids = list(self.steps.keys())
         if len(step_ids) != len(set(step_ids)):
-            errors.append("存在重复的步骤ID")
+            errors.append("Duplicate step IDs exist")
 
         # 检查步骤order重复
         orders = [step.order for step in self.steps.values()]
         if len(orders) != len(set(orders)):
-            errors.append("存在重复的步骤顺序")
+            errors.append("Duplicate step order values exist")
 
         # 验证每个步骤
         for step_id, step in self.steps.items():
             if not step.id:
-                errors.append(f"步骤 '{step_id}' 的ID为空")
+                errors.append(f"Step '{step_id}' has an empty ID")
             if not step.name:
-                errors.append(f"步骤 '{step_id}' 的名称为空")
+                errors.append(f"Step '{step_id}' has an empty name")
 
         return errors
 

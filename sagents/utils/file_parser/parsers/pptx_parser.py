@@ -38,7 +38,9 @@ class PPTXParser(BaseFileParser):
             )
 
         if not skip_validation and not self.can_parse(file_path):
-            return self.create_error_result(f"不支持的文件类型: {file_path}", file_path)
+            return self.create_error_result(
+                f"Unsupported file type: {file_path}", file_path
+            )
 
         temp_pptx_path = None
 
@@ -52,7 +54,9 @@ class PPTXParser(BaseFileParser):
                     temp_pptx_path = self._convert_ppt_to_pptx(file_path)
                     target_path = temp_pptx_path
                 except Exception as e:
-                    return self.create_error_result(f"PPT转换失败: {str(e)}", file_path)
+                    return self.create_error_result(
+                        f"PPT conversion failed: {str(e)}", file_path
+                    )
             else:
                 target_path = file_path
 
@@ -141,7 +145,9 @@ class PPTXParser(BaseFileParser):
                 ["libreoffice", "--version"], check=True, capture_output=True
             )
         except (FileNotFoundError, subprocess.CalledProcessError):
-            raise Exception("LibreOffice未安装或不在PATH中，无法转换PPT文件")
+            raise Exception(
+                "LibreOffice is not installed or not in PATH; cannot convert PPT files"
+            )
 
         logger.info(
             f"尝试使用LibreOffice将PPT转换为PPTX: {file_path} -> {pptx_output_path}"
@@ -161,12 +167,12 @@ class PPTXParser(BaseFileParser):
 
         if result.returncode != 0:
             logger.error(f"LibreOffice转换错误: {result.stderr}")
-            raise Exception(f"LibreOffice转换失败: {result.stderr}")
+            raise Exception(f"LibreOffice conversion failed: {result.stderr}")
 
         if not os.path.exists(pptx_output_path):
             # 有时候输出文件名可能不同，尝试根据文件名猜测
             # 这里简单处理，假设如果上面的check通过，文件应该存在
-            raise Exception(f"转换后的文件未找到: {pptx_output_path}")
+            raise Exception(f"Converted file was not found: {pptx_output_path}")
 
         return pptx_output_path
 
