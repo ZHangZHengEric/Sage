@@ -118,6 +118,90 @@ async def test_build_system_segments_explains_runtime_context_boundary():
 
 
 @pytest.mark.asyncio
+async def test_build_system_segments_hides_sandbox_policy_from_runtime_context(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    session_context = SimpleNamespace(
+        sandbox=None,
+        system_context={
+            "session_id": "sess",
+            "response_language": "en",
+            "sandbox_approval_mode": "never",
+            "command_policy": {
+                "rules": [
+                    {"match": {"argv_prefix": ["git", "status"]}, "action": "allow"}
+                ]
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+
+    async def fake_active_todos(session_id):
+        return []
+
+    monkeypatch.setattr(agent, "_read_active_todo_list_for_context", fake_active_todos)
+
+    segments = await agent._build_system_segments(
+        session_id="sess",
+        include_sections=["system_context"],
+    )
+
+    assert "<session_id>sess</session_id>" in segments["volatile"]
+    assert "sandbox_approval_mode" not in segments["volatile"]
+    assert "command_policy" not in segments["volatile"]
+    assert session_context.system_context["sandbox_approval_mode"] == "never"
+    assert "command_policy" in session_context.system_context
+
+
+@pytest.mark.asyncio
+async def test_build_system_segments_reads_full_user_and_memory_md(monkeypatch):
+    agent = CommonAgent(model=object(), model_config={})
+    user_tail = "USER_TAIL_SHOULD_SURVIVE"
+    memory_tail = "MEMORY_TAIL_SHOULD_SURVIVE"
+    user_content = "U" * 360 + user_tail
+    memory_content = "M" * 620 + memory_tail
+
+    class FakeSandbox:
+        async def read_file(self, path):
+            if path.endswith("AGENT.md"):
+                return "agent rules"
+            if path.endswith("SOUL.md"):
+                return ""
+            if path.endswith("USER.md"):
+                return user_content
+            if path.endswith("MEMORY.md"):
+                return memory_content
+            if path.endswith("IDENTITY.md"):
+                return ""
+            raise FileNotFoundError(path)
+
+    session_context = SimpleNamespace(
+        sandbox=FakeSandbox(),
+        sandbox_agent_workspace="/workspace",
+        system_context={},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+
+    segments = await agent._build_system_segments(
+        session_id="sess",
+        include_sections=["AGENT.MD"],
+    )
+
+    assert user_tail in segments["stable"]
+    assert memory_tail in segments["stable"]
+    assert f"<user>\n{user_content}\n</user>" in segments["stable"]
+    assert f"<memory>\n{memory_content}\n</memory>" in segments["stable"]
+    assert f"{user_content[:300]}……" not in segments["stable"]
+    assert f"{memory_content[:500]}……" not in segments["stable"]
+
+
+@pytest.mark.asyncio
 async def test_prepare_llm_request_messages_injects_runtime_and_todo_into_latest_user(
     monkeypatch,
 ):

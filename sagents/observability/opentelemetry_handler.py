@@ -1,9 +1,10 @@
-from typing import Dict, Any, List, Union, Optional
 import contextvars
+import dataclasses
+import hashlib
 import json
 import random
-import hashlib
-import dataclasses
+from datetime import datetime
+from typing import Dict, Any, List, Union, Optional
 from opentelemetry import trace, context
 from opentelemetry.trace import Status, StatusCode
 
@@ -16,6 +17,9 @@ from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 # Each element is a tuple: (span, token)
 _span_token_stack: contextvars.ContextVar[tuple] = contextvars.ContextVar(
     "span_token_stack", default=()
+)
+_last_llm_span_context: contextvars.ContextVar[Optional[trace.SpanContext]] = (
+    contextvars.ContextVar("last_llm_span_context", default=None)
 )
 
 
@@ -68,6 +72,11 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             span.set_attribute(key, self._serialize_attribute_value(value))
         except Exception as e:
             logger.error(f"Error setting {key} attribute: {e}")
+
+    def _format_epoch_millis(self, value: Any) -> str:
+        return datetime.fromtimestamp(float(value)).strftime("%Y-%m-%d %H:%M:%S.%f")[
+            :-3
+        ]
 
     def _set_final_system_context_attribute(
         self, span: Optional[trace.Span], **kwargs: Any
@@ -183,6 +192,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             finally:
                 # Always reset the stack
                 _span_token_stack.set(())
+                _last_llm_span_context.set(None)
 
         # Start a new span. OTel will automatically pick up parent from context if it exists.
         # We don't manually generate trace_id or parent context anymore.
@@ -277,9 +287,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
         try:
-            messages_str = json.dumps(
-                redact_base64_data_urls_in_value(messages), ensure_ascii=False
-            )
+            messages_str = json.dumps(messages, ensure_ascii=False, default=str)
             span.set_attribute("llm.messages", messages_str)
         except Exception as e:
             logger.error(f"Error setting llm.messages attribute: {e}")
@@ -317,6 +325,10 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             pass
 
         span.set_status(Status(StatusCode.OK))
+        try:
+            _last_llm_span_context.set(span.get_span_context())
+        except Exception:
+            pass
         self._pop_span()
 
     def on_llm_error(self, error: Exception, **kwargs: Any) -> Any:
@@ -329,11 +341,25 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         tool_input: Union[str, Dict],
         **kwargs: Any,
     ) -> Any:
+        parent_context = None
+        parent_span_context = _last_llm_span_context.get()
+        if parent_span_context is not None:
+            parent_context = trace.set_span_in_context(
+                trace.NonRecordingSpan(parent_span_context)
+            )
         span = self.tracer.start_span(
-            name=f"工具执行:{tool_name}", kind=trace.SpanKind.INTERNAL
+            name=f"工具执行:{tool_name}",
+            context=parent_context,
+            kind=trace.SpanKind.INTERNAL,
         )
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("session_id", session_id)
+        tool_type = kwargs.get("tool_type")
+        if tool_type:
+            span.set_attribute("tool.type", str(tool_type))
+        server_name = kwargs.get("server_name")
+        if server_name:
+            span.set_attribute("mcp.server_name", str(server_name))
         try:
             if isinstance(tool_input, (dict, list)):
                 input_str = json.dumps(tool_input, ensure_ascii=False)
@@ -384,6 +410,8 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         ):
             value = kwargs.get(key)
             if value is not None:
+                if key == "start_ts":
+                    value = self._format_epoch_millis(value)
                 attrs[key] = value
 
         try:

@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -18,12 +18,21 @@ from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.services import chat_service
 from common.services import conversation_service
-from common.schemas.chat import ChatRequest, StreamRequest, UserInputOptimizeRequest
+from common.schemas.chat import (
+    ChatRequest,
+    SandboxApprovalDecisionRequest,
+    StreamRequest,
+    UserInputOptimizeRequest,
+)
 from common.core.client.chat import get_chat_client
 from pydantic import BaseModel
 
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
+from sagents.utils.sandbox.approval import (
+    list_sandbox_approval_audit,
+    resolve_sandbox_approval,
+)
 
 from ..services.browser_capability import get_browser_tool_sync_state
 from ..services.chat.stream_manager import StreamManager
@@ -61,6 +70,33 @@ class RerunStreamRequest(BaseModel):
     available_sub_agent_ids: list[str] | None = None
     guidance_content: str | None = None
     guidance_id: str | None = None
+
+
+@chat_router.post("/api/sandbox/approval")
+async def resolve_sandbox_approval_decision(
+    request: SandboxApprovalDecisionRequest,
+):
+    status = resolve_sandbox_approval(
+        session_id=request.session_id,
+        approval_id=request.approval_id,
+        decision=request.decision,
+        command_hash_value=request.command_hash,
+    )
+    return {"success": status == "resolved", "status": status}
+
+
+@chat_router.get("/api/sandbox/approval/audit")
+async def get_sandbox_approval_audit(
+    session_id: str = Query(..., min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    return {
+        "success": True,
+        "records": list_sandbox_approval_audit(
+            session_id=session_id,
+            limit=limit,
+        ),
+    }
 
 
 def _build_current_time_with_weekday() -> str:
@@ -327,7 +363,6 @@ async def stream_api_with_disconnect_check(
             await safe_release(lock, session_id, "流结束清理")
 
             delete_session_run_lock(session_id)
-            logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
@@ -535,11 +570,17 @@ async def rerun_conversation_stream(
     guidance_content = (rerun_request.guidance_content or "").strip()
     rerun_messages = []
     if guidance_content:
+        guidance_id = rerun_request.guidance_id or str(uuid.uuid4())
         rerun_messages.append(
             {
-                "message_id": rerun_request.guidance_id or str(uuid.uuid4()),
+                "message_id": guidance_id,
                 "role": "user",
                 "content": guidance_content,
+                "metadata": {
+                    "injected": True,
+                    "guidance_id": guidance_id,
+                    "source": "guidance",
+                },
             }
         )
 

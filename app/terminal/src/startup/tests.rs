@@ -383,6 +383,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
         display_mode: None,
         workspace: None,
         sandbox_type: None,
+        sandbox_approval_mode: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
@@ -391,6 +392,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
+        sandbox_approval_mode: Some("untrusted".to_string()),
     });
 
     assert_eq!(merged.agent_id.as_deref(), None);
@@ -402,6 +404,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
     assert_eq!(merged.sandbox_type.as_deref(), Some("local"));
+    assert_eq!(merged.sandbox_approval_mode.as_deref(), Some("untrusted"));
 }
 
 #[test]
@@ -413,6 +416,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
         display_mode: None,
         workspace: None,
         sandbox_type: Some("remote".to_string()),
+        sandbox_approval_mode: Some("never".to_string()),
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
@@ -421,6 +425,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
+        sandbox_approval_mode: Some("untrusted".to_string()),
     });
 
     assert_eq!(merged.agent_id.as_deref(), Some("agent_demo"));
@@ -429,6 +434,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
     assert_eq!(merged.sandbox_type.as_deref(), Some("remote"));
+    assert_eq!(merged.sandbox_approval_mode.as_deref(), Some("never"));
 }
 
 #[test]
@@ -440,6 +446,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
         display_mode: None,
         workspace: None,
         sandbox_type: None,
+        sandbox_approval_mode: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("persisted_agent".to_string()),
@@ -448,6 +455,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("passthrough".to_string()),
+        sandbox_approval_mode: Some("untrusted".to_string()),
     });
 
     assert_eq!(merged.agent_id, None);
@@ -459,6 +467,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
     assert_eq!(merged.sandbox_type.as_deref(), Some("passthrough"));
+    assert_eq!(merged.sandbox_approval_mode.as_deref(), Some("untrusted"));
 }
 
 #[test]

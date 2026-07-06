@@ -8,6 +8,7 @@
 import json
 import traceback
 import uuid
+from copy import copy
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from sagents.agent.agent_base import AgentBase
@@ -17,6 +18,9 @@ from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.prompt_manager import PromptManager
+
+
+MEMORY_RECALL_QUERY_CONTEXT_TURNS = 10
 
 
 def _ensure_search_memory_available(session_context: SessionContext) -> Any:
@@ -107,8 +111,10 @@ class MemoryRecallAgent(AgentBase):
 
         logger.info(f"MemoryRecallAgent: 开始为会话 {session_id} 召回记忆")
 
-        # 获取历史消息
-        history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+        # Memory recall only needs the conversational intent that should drive a
+        # search query. Tool call arguments/results are noisy here and can bias
+        # retrieval toward internal execution details.
+        history_messages = self._extract_query_context_messages(message_manager)
 
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
@@ -122,6 +128,91 @@ class MemoryRecallAgent(AgentBase):
             messages_input=history_messages, session_context=session_context
         ):
             yield chunks
+
+    @staticmethod
+    def _extract_query_context_messages(message_manager: Any) -> List[MessageChunk]:
+        """Build a compact query-generation view from recent conversation text."""
+
+        active_messages = MessageManager.build_inference_view(
+            message_manager.messages,
+            session_id=message_manager.session_id,
+            apply_rule_compression=False,
+        )
+
+        chats: List[List[MessageChunk]] = []
+        current_chat: List[MessageChunk] = []
+        for msg in active_messages:
+            if msg.is_user_input_message():
+                if current_chat:
+                    chats.append(current_chat)
+                current_chat = [msg]
+                continue
+
+            if MemoryRecallAgent._is_recall_assistant_context_message(msg):
+                if not current_chat:
+                    current_chat = [msg]
+                else:
+                    current_chat.append(msg)
+        if current_chat:
+            chats.append(current_chat)
+
+        compact_messages: List[MessageChunk] = []
+        for chat in chats[-MEMORY_RECALL_QUERY_CONTEXT_TURNS:]:
+            for msg in chat:
+                if not (
+                    msg.is_user_input_message()
+                    or MemoryRecallAgent._is_recall_assistant_context_message(msg)
+                ):
+                    continue
+                text_msg = MemoryRecallAgent._text_only_message(msg)
+                if text_msg is not None:
+                    compact_messages.append(text_msg)
+
+        return compact_messages
+
+    @staticmethod
+    def _is_recall_assistant_context_message(msg: MessageChunk) -> bool:
+        role = msg.role.value if isinstance(msg.role, MessageRole) else msg.role
+        if role != MessageRole.ASSISTANT.value:
+            return False
+        if msg.tool_calls:
+            return False
+        if not msg.get_content():
+            return False
+        return not msg.matches_message_types(
+            [
+                MessageType.TOOL_CALL.value,
+                MessageType.REASONING_CONTENT.value,
+                MessageType.EMPTY.value,
+            ]
+        )
+
+    @staticmethod
+    def _text_only_message(msg: MessageChunk) -> Optional[MessageChunk]:
+        text = MemoryRecallAgent._extract_text_content(msg.get_content()).strip()
+        if not text:
+            return None
+        text_msg = copy(msg)
+        text_msg.content = text
+        text_msg.tool_calls = None
+        text_msg.tool_call_id = None
+        return text_msg
+
+    @staticmethod
+    def _extract_text_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "\n".join(parts)
+        return ""
 
     async def _recall_memories_stream(
         self, messages_input: List[MessageChunk], session_context: SessionContext
@@ -248,26 +339,30 @@ class MemoryRecallAgent(AgentBase):
         memory_query_template = PromptManager().get_agent_prompt_auto(
             "memory_recall_template", language=session_context.get_language()
         )
+        memory_system_prefix = PromptManager().get_agent_prompt_auto(
+            "memory_recall_system_prefix", language=session_context.get_language()
+        )
 
         recall_messages = redact_base64_data_urls_in_value(messages)
 
         prompt = memory_query_template.format(
-            messages=json.dumps(recall_messages, ensure_ascii=False, indent=2)
+            messages=self._format_recall_messages_for_prompt(recall_messages)
         )
 
-        llm_request_messages = await self.prepare_llm_request_messages(
-            session_id=session_context.session_id,
-            language=session_context.get_language(),
-            include_sections=["role_definition", "system_context"],
-            extra_messages=[
-                MessageChunk(
-                    role=MessageRole.USER.value,
-                    content=prompt,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.GUIDE.value,
-                )
-            ],
-        )
+        llm_request_messages = [
+            MessageChunk(
+                role=MessageRole.SYSTEM.value,
+                content=memory_system_prefix,
+                message_id=str(uuid.uuid4()),
+                message_type=MessageType.SYSTEM.value,
+            ),
+            MessageChunk(
+                role=MessageRole.USER.value,
+                content=prompt,
+                message_id=str(uuid.uuid4()),
+                message_type=MessageType.GUIDE.value,
+            ),
+        ]
 
         # 调用LLM生成搜索查询
         search_query = await self._get_search_query(
@@ -280,6 +375,59 @@ class MemoryRecallAgent(AgentBase):
             return ""
 
         return search_query
+
+    @staticmethod
+    def _format_recall_messages_for_prompt(messages: List[Dict[str, Any]]) -> str:
+        lines: List[str] = []
+        latest_user_index = next(
+            (
+                idx
+                for idx in range(len(messages) - 1, -1, -1)
+                if messages[idx].get("role") == MessageRole.USER.value
+            ),
+            None,
+        )
+        for idx, msg in enumerate(messages):
+            role = str(msg.get("role") or "unknown")
+            if idx == latest_user_index:
+                role = "latest_user_request"
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False, default=str)
+            content = content.strip()
+            if not content:
+                continue
+            if len(content) > 2000:
+                content = (
+                    content[:2000] + f"\n...[truncated, original chars: {len(content)}]"
+                )
+            lines.append(f"{role}: {content}")
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _normalize_search_query(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            parts = [MemoryRecallAgent._normalize_search_query(item) for item in value]
+            return " ".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            for key in ("query", "keywords", "keyword", "text"):
+                if key in value:
+                    normalized = MemoryRecallAgent._normalize_search_query(value[key])
+                    if normalized:
+                        return normalized
+            return " ".join(
+                part
+                for part in (
+                    MemoryRecallAgent._normalize_search_query(item)
+                    for item in value.values()
+                )
+                if part
+            ).strip()
+        return str(value).strip()
 
     async def _get_search_query(
         self, llm_request_messages: List[MessageChunk], session_id: str
@@ -323,13 +471,16 @@ class MemoryRecallAgent(AgentBase):
 
             # 支持两种返回格式：字符串或包含query字段的字典
             if isinstance(result, str):
-                return result.strip()
+                return self._normalize_search_query(result)
             elif isinstance(result, dict):
                 query = result.get("query", "")
                 if query:
-                    return query.strip()
+                    return self._normalize_search_query(query)
+                return self._normalize_search_query(result)
+            elif isinstance(result, list):
+                return self._normalize_search_query(result)
 
-            return ""
+            return self._normalize_search_query(result)
         except json.JSONDecodeError:
             # 如果不是JSON，直接使用文本内容（去除markdown标记）
             clean_text = all_content.strip()
@@ -372,22 +523,16 @@ class MemoryRecallAgent(AgentBase):
             # run_tool_async 返回的是 JSON 字符串，需要解析
             if isinstance(result_raw, str):
                 result = json.loads(result_raw)
-                logger.debug(f"MemoryRecallAgent: Parsed result from JSON: {result}")
                 # 有些工具返回 {"content": {...}} 的包装格式
                 if "content" in result:
                     content = result["content"]
-                    logger.info(
-                        f"MemoryRecallAgent: content type: {type(content)}, content: {content[:200] if isinstance(content, str) else content}"
-                    )
                     if isinstance(content, dict):
                         result = content
                     elif isinstance(content, str):
                         # content 是 JSON 字符串，需要再次解析
                         result = json.loads(content)
-                    logger.debug(f"MemoryRecallAgent: Unwrapped content: {result}")
             elif isinstance(result_raw, dict):
                 result = result_raw
-                logger.debug(f"MemoryRecallAgent: Result is dict: {result}")
             else:
                 logger.warning(f"MemoryRecallAgent: 未知的返回类型: {type(result_raw)}")
                 return []

@@ -1,5 +1,9 @@
 # Change Log
 
+- **2026-07-03 14:55** 新增希腊酸奶问卷坏例回归测试，验证 SelfCheckAgent 可检出 options 内误嵌 default/allow_other 的非法 JSON。
+
+- **2026-07-03 14:50** SelfCheckAgent 为 Artifacts/Questionnaire 标签增加 JSON 语法与结构校验，失败时复用 runtime_diagnostic 重试流程，保留原有路径存在性校验。
+
 - **2026-06-23 15:21** 格式化 `session_context.py` 与 `message_sanitizer.py`，修复 CI Ruff format 检查失败。
 
 - **2026-06-23 15:11** 修复桌面端技能拖入无反应：接入 Tauri 文件拖放事件并将本地路径转换为 ZIP File 后批量导入。

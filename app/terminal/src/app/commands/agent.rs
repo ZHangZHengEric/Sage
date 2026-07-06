@@ -14,6 +14,7 @@ impl App {
         display_mode: Option<DisplayMode>,
         workspace: Option<PathBuf>,
         sandbox_type: Option<String>,
+        sandbox_approval_mode: Option<String>,
     ) {
         self.agent_config_path = agent_config;
         self.selected_agent_id = if self.agent_config_path.is_some() {
@@ -30,6 +31,9 @@ impl App {
         }
         self.set_workspace_override(workspace);
         self.sandbox_type = sandbox_type;
+        if let Some(sandbox_approval_mode) = sandbox_approval_mode {
+            self.sandbox_approval_mode = sandbox_approval_mode;
+        }
         if self
             .agent_config_path
             .as_ref()

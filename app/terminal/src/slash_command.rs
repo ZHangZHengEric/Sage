@@ -16,7 +16,7 @@ impl SlashCommandDef {
                 "Runtime"
             }
             "/skills" | "/skill" | "/config" | "/doctor" | "/providers" | "/provider" => "Setup",
-            "/interrupt" | "/retry" | "/status" => "Control",
+            "/interrupt" | "/retry" | "/approve" | "/deny" | "/status" | "/approvals" => "Control",
             _ => "Help",
         }
     }
@@ -51,6 +51,10 @@ impl SlashCommandDef {
                 "Shows the current session, runtime selection, workspace, sandbox, display mode, and goal state.",
                 "Use this when the footer is too narrow to show all active runtime context.",
             ],
+            "/approvals" => &[
+                "Shows recent sandbox approval requests and runtime decisions for this terminal session.",
+                "Use this to verify which command was approved, denied, or is still pending.",
+            ],
             "/help" => &[
                 "Open /help for the command list, or /help <command> for focused usage notes.",
             ],
@@ -63,12 +67,14 @@ impl SlashCommandDef {
             ],
             "/interrupt" => &["Stops the active backend request while keeping any partial output visible."],
             "/retry" => &["Resubmits the last task with the current runtime selections."],
+            "/approve" => &["Approves the pending sandbox command once."],
+            "/deny" => &["Denies the pending sandbox command."],
             _ => &[],
         }
     }
 }
 
-const COMMANDS: [SlashCommandDef; 24] = [
+const COMMANDS: [SlashCommandDef; 27] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -167,9 +173,9 @@ const COMMANDS: [SlashCommandDef; 24] = [
     },
     SlashCommandDef {
         command: "/sandbox",
-        description: "Show or override the current sandbox mode",
-        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox clear",
-        example: "/sandbox set local",
+        description: "Show or override sandbox type and approval mode",
+        usage: "/sandbox | /sandbox show | /sandbox set <local|remote|passthrough> | /sandbox approval set <untrusted|on-request|never> | /sandbox clear",
+        example: "/sandbox approval set untrusted",
     },
     SlashCommandDef {
         command: "/goal",
@@ -190,10 +196,28 @@ const COMMANDS: [SlashCommandDef; 24] = [
         example: "/retry",
     },
     SlashCommandDef {
+        command: "/approve",
+        description: "Approve the pending sandbox command once",
+        usage: "/approve",
+        example: "/approve",
+    },
+    SlashCommandDef {
+        command: "/deny",
+        description: "Deny the pending sandbox command",
+        usage: "/deny",
+        example: "/deny",
+    },
+    SlashCommandDef {
         command: "/status",
         description: "Show current session state",
         usage: "/status",
         example: "/status",
+    },
+    SlashCommandDef {
+        command: "/approvals",
+        description: "Show recent sandbox approvals",
+        usage: "/approvals",
+        example: "/approvals",
     },
     SlashCommandDef {
         command: "/transcript",

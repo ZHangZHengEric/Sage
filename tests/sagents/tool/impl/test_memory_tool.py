@@ -31,17 +31,28 @@ def _load_tool_manager_class():
 
 
 class _FakeMessage:
-    def __init__(self, message_id: str, role: str, content: str):
+    def __init__(self, message_id: str, role: str, content, message_type: str = "text"):
         self.message_id = message_id
         self.role = role
         self.content = content
+        self.message_type = message_type
         self.timestamp = 123
 
     def get_content(self):
         return self.content
 
     def normalized_message_type(self):
-        return "text"
+        return self.message_type
+
+    def is_user_input_message(self):
+        return self.role == "user"
+
+    def is_assistant_text_message(self):
+        return self.role == "assistant" and self.message_type in {
+            "assistant_text",
+            "final_answer",
+            "text",
+        }
 
 
 class _FakeMessageManager:
@@ -71,15 +82,18 @@ class _FakeSessionMemoryManager:
         self.grouped_calls = 0
         self.retrieve_calls = []
         self.retrieve_message_ids = []
+        self.retrieve_contents = []
 
     def retrieve_history_messages(self, messages, query, history_budget):
         self.calls += 1
         self.retrieve_message_ids.append([msg.message_id for msg in messages])
+        self.retrieve_contents.append([msg.content for msg in messages])
         return self.retrieved_messages
 
     def retrieve_group_messages_by_chat(self, messages, query, history_budget):
         self.grouped_calls += 1
         self.retrieve_message_ids.append([msg.message_id for msg in messages])
+        self.retrieve_contents.append([msg.content for msg in messages])
         return self.retrieved_messages
 
     def retrieve(
@@ -385,6 +399,46 @@ class TestMemoryTool(unittest.TestCase):
         self.assertEqual(result["query"], "provider")
         self.assertEqual(len(result["long_term_memory"]), 1)
         self.assertEqual(len(result["session_history"]), 1)
+
+    def test_session_history_search_compacts_to_text_user_and_final_assistant(self):
+        tool = self.MemoryTool()
+        history_messages = [
+            _FakeMessage(
+                "u1",
+                "user",
+                [
+                    {"type": "text", "text": "分析 provider 配置"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc123"},
+                    },
+                ],
+                "user_input",
+            ),
+            _FakeMessage("tc1", "assistant", None, "tool_call"),
+            _FakeMessage("tr1", "tool", '{"noisy":"tool result"}', "tool_call_result"),
+            _FakeMessage(
+                "a1", "assistant", "最终回答：provider 配置会被使用", "final_answer"
+            ),
+        ]
+        active_messages = [_FakeMessage("u2", "user", "继续问", "user_input")]
+        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=[])
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(active_messages, history_messages),
+            session_memory_manager=session_memory_manager,
+            agent_config={},
+        )
+
+        result = tool.session_history_retriever.search(
+            "provider", 5, "session-history-text-only", session_context
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [["u1", "a1"]])
+        self.assertEqual(
+            session_memory_manager.retrieve_contents,
+            [["分析 provider 配置", "最终回答：provider 配置会被使用"]],
+        )
 
     def test_tool_manager_run_tool_async_uses_system_context_session_id_for_search_memory(
         self,

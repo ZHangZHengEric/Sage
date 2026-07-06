@@ -11,6 +11,7 @@ import traceback
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 from sagents.context.session_context import get_session_run_lock
@@ -18,6 +19,7 @@ from sagents.sagents import SAgent
 from sagents.session_runtime import get_global_session_manager
 from sagents.tool import get_tool_manager
 from sagents.utils.lock_manager import safe_release
+from sagents.utils.sandbox.policy import normalize_approval_mode
 from sagents.utils.user_input_optimizer import UserInputOptimizer
 
 from common.core import config
@@ -59,6 +61,94 @@ def _chat_exception(message_key: str) -> SageHTTPException:
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return SageHTTPException(**kwargs)
+
+
+def _sandbox_approval_event_from_tool_result(
+    result: Dict[str, Any],
+    *,
+    session_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if result.get("type") != "tool_result":
+        return None
+
+    tool_names = set()
+    tool_name = result.get("tool_name")
+    if isinstance(tool_name, str):
+        tool_names.add(tool_name)
+    metadata = result.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("tool_name"), str):
+        tool_names.add(metadata["tool_name"])
+    for tool_call in result.get("tool_calls") or []:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function")
+        if isinstance(function, dict) and isinstance(function.get("name"), str):
+            tool_names.add(function["name"])
+
+    if "execute_shell_command" not in tool_names:
+        return None
+
+    content = result.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("error_code") != "SAFETY_BLOCKED":
+        return None
+    if payload.get("policy_action") != "ask":
+        return None
+
+    approval_id = str(payload.get("approval_id") or "").strip()
+    command = str(payload.get("command") or "").strip()
+    if not approval_id or not command:
+        return None
+
+    reason = str(payload.get("policy_reason") or "").strip()
+    return {
+        "type": "sandbox_approval_requested",
+        "role": "system",
+        "content": reason
+        or "Sandbox policy requires confirmation before running this command.",
+        "session_id": result.get("session_id") or session_id,
+        "approval_id": approval_id,
+        "command": command,
+        "category": payload.get("policy_category"),
+        "reason": reason or None,
+        "approval_mode": payload.get("policy_approval_mode"),
+        "expires_at": payload.get("approval_expires_at") or payload.get("expires_at"),
+        "hint": payload.get("hint"),
+        "tool_name": "execute_shell_command",
+    }
+
+
+def _sync_sandbox_approval_mode_to_context(request: StreamRequest) -> None:
+    mode = normalize_approval_mode(request.sandbox_approval_mode)
+    if mode is None and isinstance(request.system_context, dict):
+        mode = normalize_approval_mode(
+            request.system_context.get("sandbox_approval_mode")
+        )
+    if mode is None:
+        return
+    request.sandbox_approval_mode = mode
+    if request.system_context is None:
+        request.system_context = {}
+    request.system_context["sandbox_approval_mode"] = mode
+
+
+def _sync_command_policy_to_context(request: StreamRequest) -> None:
+    if request.command_policy is None and isinstance(request.system_context, dict):
+        raw_policy = request.system_context.get("command_policy")
+        if isinstance(raw_policy, dict):
+            request.command_policy = raw_policy
+    if request.command_policy is None:
+        return
+    if request.system_context is None:
+        request.system_context = {}
+    request.system_context["command_policy"] = request.command_policy
 
 
 def _fill_if_none(request: StreamRequest, field: str, value: Any) -> None:
@@ -120,6 +210,83 @@ def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
         "memory_type": request.memory_type,
         "force_summary": request.force_summary,
     }
+
+
+def _extract_multimodal_image_url(item: Dict[str, Any]) -> str:
+    image_url = item.get("image_url")
+    if isinstance(image_url, dict):
+        return str(image_url.get("url") or "").strip()
+    if isinstance(image_url, str):
+        return image_url.strip()
+    return str(item.get("url") or "").strip()
+
+
+def _append_text_part(content: List[Any], text: str) -> None:
+    if not text:
+        return
+    if content and isinstance(content[-1], dict) and content[-1].get("type") == "text":
+        content[-1]["text"] = str(content[-1].get("text") or "") + text
+        return
+    content.append({"type": "text", "text": text})
+
+
+def _image_markdown_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    name = unquote(Path(parsed.path).name) if parsed.path else ""
+    if not name or url.startswith("data:image/"):
+        name = "image"
+    name = name.replace("]", "\\]")
+    return f"![{name}]({url})"
+
+
+def _downgrade_message_images_to_markdown(message: Any) -> int:
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return 0
+
+    downgraded = 0
+    new_content: List[Any] = []
+    for index, item in enumerate(content):
+        if not isinstance(item, dict):
+            new_content.append(item)
+            continue
+
+        if item.get("type") != "image_url":
+            if item.get("type") == "text":
+                _append_text_part(new_content, str(item.get("text") or ""))
+            else:
+                new_content.append(item)
+            continue
+
+        url = _extract_multimodal_image_url(item)
+        if not url:
+            downgraded += 1
+            continue
+
+        next_item = content[index + 1] if index + 1 < len(content) else None
+        next_text = (
+            str(next_item.get("text") or "")
+            if isinstance(next_item, dict) and next_item.get("type") == "text"
+            else ""
+        )
+        if url not in next_text:
+            _append_text_part(new_content, _image_markdown_from_url(url))
+        downgraded += 1
+
+    if downgraded:
+        message.content = new_content
+    return downgraded
+
+
+def enforce_multimodal_capability_guard(request: StreamRequest) -> int:
+    llm_config = request.llm_model_config or {}
+    if llm_config.get("supports_multimodal") is not False:
+        return 0
+
+    downgraded = 0
+    for message in request.messages or []:
+        downgraded += _downgrade_message_images_to_markdown(message)
+    return downgraded
 
 
 def _get_provider_api_key(provider: Any) -> Optional[str]:
@@ -675,6 +842,12 @@ async def populate_request_from_agent_config(
             request.agent_mode = agent_config.get("agentMode")
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
+        if request.command_policy is None:
+            command_policy = agent_config.get("commandPolicy") or agent_config.get(
+                "command_policy"
+            )
+            if isinstance(command_policy, dict):
+                request.command_policy = command_policy
         if agent_config.get("systemContext") is not None:
             agent_system_context = agent_config.get("systemContext")
             _merge_dict(request, "system_context", agent_system_context)  # pyright: ignore[reportArgumentType]
@@ -796,7 +969,6 @@ async def populate_request_from_agent_config(
             )
             request.llm_model_config["fast_base_url"] = fast_provider.base_url
             request.llm_model_config["fast_model_name"] = fast_provider.model
-            logger.info(f"Fast model configured: {fast_provider.model}")
 
     if request.max_loop_count is None:
         raise SageHTTPException(
@@ -1071,6 +1243,12 @@ class SageStreamService:
                     else:
                         result = message.to_dict()
                     result = ContentProcessor.clean_content(result)
+                    approval_event = _sandbox_approval_event_from_tool_result(
+                        result,
+                        session_id=session_id,
+                    )
+                    if approval_event is not None:
+                        yield approval_event
                     yield result
         except Exception as e:
             logger.bind(session_id=session_id).error(
@@ -1090,6 +1268,13 @@ async def prepare_session(
 ) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
+    _sync_sandbox_approval_mode_to_context(request)
+    _sync_command_policy_to_context(request)
+    downgraded_images = enforce_multimodal_capability_guard(request)
+    if downgraded_images:
+        logger.bind(session_id=session_id).info(
+            f"模型不支持多模态，已将图片输入降级为 markdown 引用: count={downgraded_images}"
+        )
     logger.bind(session_id=session_id).info(
         f"Chat request - {json.dumps(_summarize_chat_request(request), ensure_ascii=False)}"
     )
@@ -1147,7 +1332,6 @@ async def execute_chat_session(
     )
 
     stream_counter = 0
-    last_activity_time = time.time()
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
 
@@ -1159,14 +1343,6 @@ async def execute_chat_session(
             stream_service.process_stream(), progress_queue
         ):
             stream_counter += 1
-            current_time = time.time()
-            if stream_counter % 100 == 0:
-                time_since_last = current_time - last_activity_time
-                last_activity_time = current_time
-
-                logger.bind(session_id=session_id).info(
-                    f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
-                )
 
             if kind == "tool_progress":
                 # progress 事件不进 token usage、不进 MessageManager；直接下发

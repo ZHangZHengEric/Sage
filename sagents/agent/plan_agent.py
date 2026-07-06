@@ -280,7 +280,7 @@ class PlanAgent(AgentBase):
             try:
                 from sagents.observability.agent_runtime import ObservableToolManager
 
-                return ObservableToolManager(
+                return ObservableToolManager.wrap(
                     tool_proxy,  # pyright: ignore[reportArgumentType]
                     observable_wrapper.observability_manager,
                     observable_wrapper.session_id,
