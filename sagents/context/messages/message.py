@@ -180,10 +180,10 @@ class MessageChunk:
 
         # 验证必需字段
         if role == MessageRole.TOOL.value and self.tool_call_id is None:
-            raise ValueError("tool角色的消息必须包含tool_call_id字段")
+            raise ValueError("Messages with role=tool must include tool_call_id")
 
         if self.content is None and self.tool_calls is None:
-            raise ValueError("消息必须包含content或tool_calls字段")
+            raise ValueError("Message must include content or tool_calls")
 
         if self.metadata is None:
             self.metadata = {}

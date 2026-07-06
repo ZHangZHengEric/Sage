@@ -302,7 +302,7 @@ class LocalSandboxProvider(ISandboxHandle):
     async def _ensure_venv(self):
         """确保 venv 存在"""
         if not self._venv_dir:
-            raise RuntimeError("venv 目录未初始化")
+            raise RuntimeError("venv directory is not initialized")
         if os.path.exists(self._venv_dir):
             return
 
@@ -318,7 +318,7 @@ class LocalSandboxProvider(ISandboxHandle):
             # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
             system_python = get_system_python_path()
             if not system_python:
-                raise RuntimeError("无法找到系统 Python 解释器")
+                raise RuntimeError("System Python interpreter was not found")
 
             # 使用 subprocess 调用 python -m venv 创建虚拟环境
             logger.info(
@@ -331,7 +331,9 @@ class LocalSandboxProvider(ISandboxHandle):
                 text=True,
             )
             if result.returncode != 0:
-                raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
+                raise RuntimeError(
+                    f"Failed to create virtual environment: {result.stderr}"
+                )
 
             # 确保 venv 中同时存在 python 和 python3 命令
             self._ensure_python3_link()
