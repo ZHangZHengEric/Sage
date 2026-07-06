@@ -526,31 +526,163 @@ class SandboxPolicyGateway:
     def _rule_matches(
         self, matcher: dict[str, Any], command: str, parts: Optional[list[str]]
     ) -> bool:
+        matched_any_predicate = False
+
         exact_command = _nonempty_string(matcher.get("command"))
-        if exact_command is not None and command == exact_command:
-            return True
+        if exact_command is not None:
+            matched_any_predicate = True
+            if command != exact_command:
+                return False
+
+        base = _nonempty_string(matcher.get("base"))
+        if base is not None:
+            matched_any_predicate = True
+            if parts is None or not parts or parts[0].split("/")[-1] != base:
+                return False
 
         argv = self._string_list(matcher.get("argv"))
-        if argv is not None and parts == argv:
-            return True
+        if argv is not None:
+            matched_any_predicate = True
+            if parts != argv:
+                return False
 
         argv_prefix = self._string_list(matcher.get("argv_prefix"))
-        if argv_prefix is not None and parts is not None:
-            if (
+        if argv_prefix is not None:
+            matched_any_predicate = True
+            if parts is None or not (
                 len(parts) >= len(argv_prefix)
                 and parts[: len(argv_prefix)] == argv_prefix
             ):
-                return True
+                return False
 
         pattern = _nonempty_string(matcher.get("pattern"))
         if pattern is not None:
+            matched_any_predicate = True
             try:
-                if re.search(pattern, command):
-                    return True
+                if not re.search(pattern, command):
+                    return False
             except re.error:
                 return False
 
-        return False
+        git_matcher = matcher.get("git")
+        if isinstance(git_matcher, dict):
+            matched_any_predicate = True
+            if not self._git_matcher_matches(git_matcher, parts):
+                return False
+
+        return matched_any_predicate
+
+    def _git_matcher_matches(
+        self, matcher: dict[str, Any], parts: Optional[list[str]]
+    ) -> bool:
+        info = self._git_command_info(parts)
+        if info is None:
+            return False
+
+        for key in ("subcommand", "remote", "branch", "refspec"):
+            expected = matcher.get(key)
+            if expected is None:
+                continue
+            actual = info.get(key)
+            if isinstance(expected, str):
+                if actual != expected:
+                    return False
+            elif isinstance(expected, list):
+                if actual not in {item for item in expected if isinstance(item, str)}:
+                    return False
+            else:
+                return False
+
+        for key in ("force", "protected_branch"):
+            expected = matcher.get(key)
+            if expected is None:
+                continue
+            if not isinstance(expected, bool):
+                return False
+            if info.get(key) is not expected:
+                return False
+
+        return True
+
+    @classmethod
+    def _git_command_info(cls, parts: Optional[list[str]]) -> Optional[dict[str, Any]]:
+        if not parts or parts[0].split("/")[-1].lower() != "git":
+            return None
+
+        index = 1
+        while index < len(parts):
+            token = parts[index]
+            if token == "--":
+                index += 1
+                break
+            if not token.startswith("-"):
+                break
+            index += 1
+            if token in {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}:
+                index += 1
+
+        if index >= len(parts):
+            return {"subcommand": ""}
+
+        subcommand = parts[index].lower()
+        args = parts[index + 1 :]
+        info: dict[str, Any] = {"subcommand": subcommand, "args": args}
+        if subcommand == "push":
+            info.update(cls._git_push_info(args))
+        return info
+
+    @classmethod
+    def _git_push_info(cls, args: list[str]) -> dict[str, Any]:
+        positional: list[str] = []
+        force = False
+        skip_next = False
+        options_with_values = {
+            "--repo",
+            "--receive-pack",
+            "--exec",
+            "--push-option",
+            "-o",
+        }
+        for token in args:
+            if skip_next:
+                skip_next = False
+                continue
+            lowered = token.lower()
+            if lowered in {"-f", "--force"} or lowered.startswith("--force-with-lease"):
+                force = True
+            if token.startswith("-"):
+                if token in options_with_values:
+                    skip_next = True
+                continue
+            positional.append(token)
+
+        remote = positional[0] if positional else None
+        refspec = positional[1] if len(positional) > 1 else None
+        branch = cls._git_push_branch_from_refspec(refspec)
+        return {
+            "remote": remote,
+            "refspec": refspec,
+            "branch": branch,
+            "force": force,
+            "protected_branch": cls._is_protected_git_branch(branch),
+        }
+
+    @staticmethod
+    def _git_push_branch_from_refspec(refspec: Optional[str]) -> Optional[str]:
+        if not refspec:
+            return None
+        normalized = refspec[1:] if refspec.startswith("+") else refspec
+        if ":" not in normalized:
+            return normalized
+        source, target = normalized.split(":", 1)
+        return target or source or None
+
+    @staticmethod
+    def _is_protected_git_branch(branch: Optional[str]) -> bool:
+        if branch is None:
+            return False
+        normalized = branch.removeprefix("refs/heads/")
+        return normalized in {"main", "master"}
 
     @staticmethod
     def _parse_command(command: str) -> Optional[list[str]]:
@@ -653,18 +785,14 @@ class SandboxPolicyGateway:
         return True
 
     def _evaluate_git(self, parts: list[str]) -> SandboxPolicyDecision:
-        if not parts or parts[0].split("/")[-1].lower() != "git":
+        info = self._git_command_info(parts)
+        if info is None:
             return self._allow()
-        subcommand = parts[1].lower() if len(parts) > 1 else ""
+        subcommand = str(info.get("subcommand") or "")
+        args = [p.lower() for p in info.get("args", [])]
 
         if subcommand == "push":
-            lower_parts = [p.lower() for p in parts]
-            protected = {"main", "master"}
-            forced = any(
-                p in {"-f", "--force"} or p.startswith("--force-with-lease")
-                for p in lower_parts
-            )
-            if forced and protected.intersection(lower_parts):
+            if info.get("force") is True and info.get("protected_branch") is True:
                 return SandboxPolicyDecision(
                     action="deny",
                     category="git_force_push_protected",
@@ -678,7 +806,7 @@ class SandboxPolicyGateway:
                 next_step="Confirm the remote, branch, and commit range before running git push.",
             )
 
-        if subcommand == "reset" and "--hard" in [p.lower() for p in parts[2:]]:
+        if subcommand == "reset" and "--hard" in args:
             return SandboxPolicyDecision(
                 action="ask",
                 category="git_worktree_destructive",
@@ -694,7 +822,7 @@ class SandboxPolicyGateway:
                 next_step="Run git clean -nd first, then ask for confirmation if deletion is required.",
             )
 
-        if subcommand in {"branch", "tag"} and "-d" in [p.lower() for p in parts[2:]]:
+        if subcommand in {"branch", "tag"} and "-d" in args:
             return SandboxPolicyDecision(
                 action="ask",
                 category="git_ref_delete",
