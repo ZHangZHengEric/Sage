@@ -306,7 +306,7 @@ async def test_prepare_llm_request_messages_freezes_injected_context_for_user_tu
 
 
 @pytest.mark.asyncio
-async def test_prepare_llm_request_messages_keeps_historical_user_frozen(
+async def test_prepare_llm_request_messages_keeps_only_current_time_for_historical_user(
     monkeypatch,
 ):
     agent = CommonAgent(model=object(), model_config={})
@@ -324,6 +324,7 @@ async def test_prepare_llm_request_messages_keeps_historical_user_frozen(
         calls["runtime"] += 1
         return (
             "<runtime_context><system_context>"
+            f"<current_time>time-{calls['runtime']}</current_time>"
             f"<todo_list>todo-{calls['runtime']}</todo_list>"
             "</system_context></runtime_context>"
         )
@@ -349,7 +350,12 @@ async def test_prepare_llm_request_messages_keeps_historical_user_frozen(
 
     assert calls == {"runtime": 2}
     assert "<todo_list>todo-1</todo_list>" in first_request_messages[1].content
-    assert "<todo_list>todo-1</todo_list>" in second_request_messages[1].content
+    assert "<current_time>time-1</current_time>" in second_request_messages[1].content
+    assert "<todo_list>todo-1</todo_list>" not in second_request_messages[1].content
+    assert "<user_request>\nfirst request\n</user_request>" in second_request_messages[
+        1
+    ].content
+    assert "<current_time>time-2</current_time>" in second_request_messages[3].content
     assert "<todo_list>todo-2</todo_list>" in second_request_messages[3].content
 
     first_frozen = first_user.metadata["frozen_user_inference"]
