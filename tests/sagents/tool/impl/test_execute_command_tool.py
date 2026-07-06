@@ -176,6 +176,88 @@ def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
     assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
+def test_never_mode_denies_without_emitting_approval_with_progress_queue(monkeypatch):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    async def run_flow():
+        queue = asyncio.Queue()
+        register_progress_queue("session-never", queue)
+        try:
+            tool = ExecuteCommandTool()
+            with bind_tool_progress_context("session-never", "tool-call-never"):
+                result = await asyncio.wait_for(
+                    tool.execute_shell_command(
+                        command="git push origin feature-x",
+                        session_id="session-never",
+                        block_until_ms=0,
+                        sandbox_approval_mode="never",
+                        command_policy={"rules": []},
+                    ),
+                    timeout=1,
+                )
+
+            assert result["success"] is False
+            assert result["error_code"] == "SAFETY_BLOCKED"
+            assert result["policy_action"] == "deny"
+            assert result["policy_approval_mode"] == "never"
+            assert "approval_id" not in result
+            assert queue.empty()
+            assert ExecuteCommandTool._PENDING_APPROVALS == {}
+        finally:
+            unregister_progress_queue("session-never")
+
+    asyncio.run(run_flow())
+
+
+def test_never_mode_runs_ordinary_redirection_with_progress_queue(monkeypatch):
+    fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
+    fake_manager = _FakeSessionManager(fake_sandbox)
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
+
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    async def run_flow():
+        queue = asyncio.Queue()
+        register_progress_queue("session-redirection", queue)
+        try:
+            command = "mkdir -p temp && printf 'hello' > temp/prompt.md"
+            tool = ExecuteCommandTool()
+            with bind_tool_progress_context(
+                "session-redirection",
+                "tool-call-redirection",
+            ):
+                result = await asyncio.wait_for(
+                    tool.execute_shell_command(
+                        command=command,
+                        session_id="session-redirection",
+                        block_until_ms=0,
+                        sandbox_approval_mode="never",
+                        command_policy={"rules": []},
+                    ),
+                    timeout=1,
+                )
+
+            assert result["success"] is True
+            assert result["status"] == "running"
+            assert queue.empty()
+            assert fake_sandbox.bg_calls[0]["command"] == command
+            assert ExecuteCommandTool._PENDING_APPROVALS == {}
+        finally:
+            unregister_progress_queue("session-redirection")
+
+    asyncio.run(run_flow())
+
+
 def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
     fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
     fake_manager = _FakeSessionManager(fake_sandbox)
@@ -202,6 +284,7 @@ def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
                         command="git push origin feature-x",
                         session_id="session-approval",
                         block_until_ms=0,
+                        sandbox_approval_mode="on-request",
                         command_policy={"rules": []},
                     )
                 )

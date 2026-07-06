@@ -981,25 +981,30 @@ class ExecuteCommandTool:
             command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
         )
         if policy_decision.action != "allow":
-            if (
-                policy_decision.action == "ask"
-                and self._consume_matching_command_approval(
+            if policy_decision.action == "ask":
+                if self._consume_matching_command_approval(
                     session_id, approval_id, command
-                )
-            ):
-                logger.info(
-                    "sandbox policy approval consumed: "
-                    f"approval_id={approval_id} category={policy_decision.category}"
-                )
+                ):
+                    logger.info(
+                        "sandbox policy approval consumed: "
+                        f"approval_id={approval_id} category={policy_decision.category}"
+                    )
+                else:
+                    approval_error = await self._await_policy_approval(
+                        command=command,
+                        session_id=session_id,
+                        policy_decision=policy_decision,
+                        policy_gateway=policy_gateway,
+                    )
+                    if approval_error is not None:
+                        return approval_error
             else:
-                approval_error = await self._await_policy_approval(
+                return self._policy_blocked_error(
                     command=command,
                     session_id=session_id,
                     policy_decision=policy_decision,
                     policy_gateway=policy_gateway,
                 )
-                if approval_error is not None:
-                    return approval_error
 
         sandbox = self._get_sandbox(session_id)
 
