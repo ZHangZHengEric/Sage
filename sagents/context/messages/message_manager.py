@@ -1789,6 +1789,7 @@ class MessageManager:
         messages: List[MessageChunk],
         budget_limit: int,
         recent_messages_count: int = 0,
+        protect_last_assistant_text: bool = False,
     ) -> List[MessageChunk]:
         """构造辅助 agent 使用的局部 token 压缩视图。
 
@@ -1807,6 +1808,16 @@ class MessageManager:
         )
         if last_todo_result_idx is not None:
             protected.add(last_todo_result_idx)
+        if protect_last_assistant_text:
+            for idx in range(len(working_messages) - 1, -1, -1):
+                msg = working_messages[idx]
+                if (
+                    msg.role == MessageRole.ASSISTANT.value
+                    and not msg.tool_calls
+                    and msg.get_content()
+                ):
+                    protected.add(idx)
+                    break
 
         def current_usage() -> int:
             return MessageManager.calculate_messages_token_length(working_messages)

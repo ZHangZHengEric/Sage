@@ -133,7 +133,7 @@ class SystemPromptOptimizer:
             return {
                 "success": False,
                 "error": str(e),
-                "message": "系统指令优化失败",
+                "message": "System prompt optimization failed",
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
@@ -257,7 +257,10 @@ class SystemPromptOptimizer:
                 return normalized_sections
             else:
                 logger.error("JSON解析失败，无法生成优化内容")
-                raise ValueError("JSON解析失败，可能是生成内容过长或格式不正确")
+                raise ValueError(
+                    "JSON parsing failed, possibly because the generated content "
+                    "is too long or malformed"
+                )
 
         except Exception as e:
             logger.error(f"生成优化部分时发生错误: {str(e)}")
@@ -821,11 +824,11 @@ class SystemPromptOptimizer:
                 f.write(result["optimized_prompt"])
 
             logger.info(f"优化结果已保存到: {file_path}")
-            return f"成功保存到 {file_path}"
+            return f"Saved to {file_path}"
 
         except Exception as e:
             logger.error(f"保存文件时发生错误: {str(e)}")
-            return f"保存失败: {str(e)}"
+            return f"Save failed: {str(e)}"
 
 
 if __name__ == "__main__":

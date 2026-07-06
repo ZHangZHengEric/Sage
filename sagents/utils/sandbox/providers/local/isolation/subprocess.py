@@ -221,7 +221,10 @@ def main():
                 )
                 result = {
                     "success": True,
-                    "output": f"[后台任务已启动]\\n命令: {cmd}\\n进程ID: {proc.pid}\\n日志文件: {log_file}",
+                    "output": (
+                        "[Background task started]"
+                        f"\\nCommand: {cmd}\\nProcess ID: {proc.pid}\\nLog file: {log_file}"
+                    ),
                     "process_id": f"bg_{proc.pid}",
                     "is_background": True,
                     "log_file": log_file,

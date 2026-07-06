@@ -34,7 +34,7 @@ def test_yaml_validation_reports_error_for_invalid_yaml():
 
     assert result["status"] == "error"
     assert result["passed"] is False
-    assert "YAML 语法错误" in result["message"]
+    assert "YAML syntax error" in result["message"]
 
 
 def test_python_validation_passes_for_valid_python():
@@ -54,7 +54,7 @@ def test_python_validation_reports_error_for_invalid_python():
 
     assert result["status"] == "error"
     assert result["passed"] is False
-    assert "Python 语法错误" in result["message"]
+    assert "Python syntax error" in result["message"]
 
 
 def test_toml_validation_passes_for_valid_toml():

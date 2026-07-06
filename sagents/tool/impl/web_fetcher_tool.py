@@ -225,15 +225,16 @@ class WebFetcherTool:
 
         if success_count == len(urls):
             status = "success"
-            message = f"成功处理所有 {len(urls)} 个URL"
+            message = f"Successfully processed all {len(urls)} URLs"
         elif success_count > 0:
             status = "partial"
             message = (
-                f"成功处理 {success_count}/{len(urls)} 个URL，{error_count} 个失败"
+                f"Successfully processed {success_count}/{len(urls)} URLs; "
+                f"{error_count} failed"
             )
         else:
             status = "error"
-            message = f"所有 {len(urls)} 个URL处理失败"
+            message = f"Failed to process all {len(urls)} URLs"
 
         return {
             "status": status,
@@ -355,7 +356,7 @@ class WebFetcherTool:
                     "url": url,
                     "status": "success",
                     "type": "file",
-                    "content": f"文件已下载到: {save_path}",
+                    "content": f"File downloaded to: {save_path}",
                     "metadata": {
                         "filename": filename,
                         "save_path": save_path,
@@ -378,7 +379,7 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"下载失败，重试{retries + 1}次后仍失败: {last_error}",
+            "error": f"Download failed after {retries + 1} attempts: {last_error}",
             "content": None,
             "metadata": None,
         }
@@ -470,7 +471,7 @@ class WebFetcherTool:
                 if len(full_content) > max_return_length:
                     return_content = (
                         full_content[:max_return_length]
-                        + f"\n\n[内容已截断，完整内容已保存到文件: {save_path}]"
+                        + f"\n\n[Content truncated. Full content saved to: {save_path}]"
                     )
                 else:
                     return_content = full_content
@@ -511,7 +512,7 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"重试{retries + 1}次后仍失败: {last_error}",
+            "error": f"Failed after {retries + 1} attempts: {last_error}",
             "content": None,
             "metadata": None,
         }
@@ -540,7 +541,8 @@ class WebFetcherTool:
                 # 截断内容
                 if len(content) > max_length:
                     content = (
-                        content[:max_length] + "\n\n[内容已截断，超过最大长度限制]"
+                        content[:max_length]
+                        + "\n\n[Content truncated because it exceeds the maximum length]"
                     )
 
                 return {
@@ -575,7 +577,7 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"重试{retries + 1}次后仍失败: {last_error}",
+            "error": f"Failed after {retries + 1} attempts: {last_error}",
             "content": None,
             "metadata": None,
         }
@@ -751,8 +753,9 @@ class WebFetcherTool:
                 return None
 
         content = (
-            "# 小红书分享帖未返回正文\n\n"
-            "当前抓取到的是小红书的空状态、错误页或登录/安全验证页，页面 HTML 中没有可用的帖子正文和图片列表。"
+            "# Xiaohongshu share post did not return body content\n\n"
+            "The fetched page is an empty state, error page, login page, or security verification page. "
+            "The HTML does not contain usable post text or image lists."
         )
         return content, "xiaohongshu_unavailable", []
 

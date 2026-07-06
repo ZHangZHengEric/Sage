@@ -179,7 +179,9 @@ class ISandboxHandle(ABC):
 
     async def kill_background(self, task_id: str, force: bool = False) -> bool:
         """终止后台任务；force=True 表示直接 SIGKILL/TerminateProcess。"""
-        raise NotImplementedError(f"{self.__class__.__name__} 不支持 kill_background")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support kill_background"
+        )
 
     async def cleanup_background(self, task_id: str) -> None:
         """从注册表中移除任务（关闭日志句柄等）；默认 no-op。"""

@@ -81,7 +81,7 @@ class ToolProxy:
             return
 
         if tool_name not in self._available_tools:
-            raise ValueError(f"工具 '{tool_name}' 不在可用工具列表中")
+            raise ValueError(f"Tool '{tool_name}' is not in the available tool list")
 
     def allow_tools(self, tool_names: List[str]) -> None:
         """
@@ -390,7 +390,8 @@ class ToolProxyFactory:
         """
         if tool_set_name not in self.PREDEFINED_TOOL_SETS:
             raise ValueError(
-                f"工具集 '{tool_set_name}' 不存在。可用工具集: {list(self.PREDEFINED_TOOL_SETS.keys())}"
+                f"Tool set '{tool_set_name}' does not exist. "
+                f"Available tool sets: {list(self.PREDEFINED_TOOL_SETS.keys())}"
             )
 
         tools = self.PREDEFINED_TOOL_SETS[tool_set_name]

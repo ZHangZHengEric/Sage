@@ -358,11 +358,21 @@ class SimpleAgent(AgentBase):
             "waiting for tool call",
             "waiting for generation",
             "waiting for tool",
+            "missing execution evidence",
+            "missing tool evidence",
+            "no execution evidence",
+            "no tool result",
             "等待工具调用",
             "等待生成",
             "处理中",
+            "缺少执行证据",
+            "没有执行证据",
+            "缺少工具结果",
+            "没有工具结果",
             "aguardando chamada de ferramenta",
             "aguardando geração",
+            "sem evidência de execução",
+            "sem resultado de ferramenta",
         ]
         if any(marker in reason_text for marker in wait_tool_markers):
             return False
@@ -703,7 +713,9 @@ class SimpleAgent(AgentBase):
         )
         budget = min(budget_info.get("active_budget", 3000), 3000)
         messages_for_complete = MessageManager.build_token_budget_view(
-            messages_for_complete, budget
+            messages_for_complete,
+            budget,
+            protect_last_assistant_text=True,
         )
 
         judge_messages = self._format_task_complete_messages_for_prompt(
@@ -767,8 +779,16 @@ class SimpleAgent(AgentBase):
     ) -> str:
         lines: List[str] = []
         tool_call_names: Dict[str, str] = {}
+        last_assistant_text_idx: Optional[int] = None
+        for idx, msg in enumerate(messages):
+            if (
+                msg.role == MessageRole.ASSISTANT.value
+                and not msg.tool_calls
+                and msg.get_content()
+            ):
+                last_assistant_text_idx = idx
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             tool_names = cls._extract_tool_names_for_judge(msg)
             if tool_names:
                 for tool_call in msg.tool_calls or []:
@@ -798,7 +818,7 @@ class SimpleAgent(AgentBase):
             text = cls._extract_text_content_for_judge(msg.get_content()).strip()
             if not text:
                 continue
-            if len(text) > 2000:
+            if idx != last_assistant_text_idx and len(text) > 2000:
                 text = text[:2000] + f"\n...[truncated, original chars: {len(text)}]"
             lines.append(f"{msg.role}: {text}")
 
@@ -921,20 +941,18 @@ class SimpleAgent(AgentBase):
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？",
+                        content=(
+                            f"The agent exceeded the maximum loop count ({max_loop_count}). "
+                            "The task is paused. Do you want to continue?"
+                        ),
                         type=MessageType.ASSISTANT_TEXT.value,
                     )
                 ]
                 break
 
-            # Drain "运行期注入的引导用户消息"：在本轮 LLM 请求之前消费掉。
-            # flush 已写入 message_manager；这里把它合并到 messages_input、yield 给 SSE。
-            injected = self._consume_user_injections(session_context)
-            if injected:
-                messages_input = list(messages_input) + list(injected)
-                yield injected
-
-            # 合并消息
+            # 先把上一轮 assistant/tool 结果合并进本轮请求视图。
+            # 注入消息只用这个请求视图判断 tool_call 是否闭合，避免把已落盘的
+            # tool result 再写回 session ledger 造成重复。
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
                     List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks
@@ -942,6 +960,17 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             )
             all_new_response_chunks = []
+
+            # Drain "运行期注入的引导用户消息"：在本轮 LLM 请求之前消费掉。
+            # 持久注入会写入 message_manager；transient 注入只进入本轮 LLM 请求，不 yield 给 SSE。
+            injected = self._consume_user_injections(
+                session_context, ledger_messages=messages_input
+            )
+            if injected:
+                messages_input = list(messages_input) + list(injected)
+                visible_injected = self._visible_user_injections(injected)
+                if visible_injected:
+                    yield visible_injected
 
             current_turn_status_only = turn_status_only_next
             turn_status_only_next = False
