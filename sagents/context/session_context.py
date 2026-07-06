@@ -30,6 +30,9 @@ _session_context_file_io_pool = ThreadPoolExecutor(
     max_workers=8, thread_name_prefix="session-context-io"
 )
 
+MESSAGE_JOURNAL_SCHEMA_VERSION = 1
+MESSAGE_JOURNAL_FILE = "messages.journal.jsonl"
+
 
 class SessionStatus(Enum):
     """会话状态枚举"""
@@ -240,6 +243,10 @@ class SessionContext:
         self._mcp_calls_lock = threading.Lock()
         self._mcp_calls_save_lock = threading.Lock()
         self._save_lock = threading.Lock()
+        self._message_journal_lock = threading.RLock()
+        self._message_journal_seq = 0
+        self._message_journal_active_message_id: Optional[str] = None
+        self._message_journal_flushed_signatures: Dict[str, str] = {}
         self._last_save_signature: Optional[tuple] = None
         self._last_save_time = 0.0
         self.record_timing_event(
@@ -383,6 +390,226 @@ class SessionContext:
             "flow_node_timings": flow_node_timings,
         }
 
+    @staticmethod
+    def _message_journal_path_for_workspace(session_workspace: str) -> str:
+        return os.path.join(session_workspace, MESSAGE_JOURNAL_FILE)
+
+    def _message_journal_path(self) -> str:
+        session_workspace = getattr(self, "session_workspace", None)
+        if not session_workspace:
+            return ""
+        return self._message_journal_path_for_workspace(session_workspace)
+
+    @staticmethod
+    def _upsert_persisted_message(
+        messages: List[MessageChunk],
+        message: MessageChunk,
+    ) -> List[MessageChunk]:
+        if not message.message_id:
+            return [*messages, message]
+        for idx, existing in enumerate(messages):
+            if existing.message_id == message.message_id:
+                messages[idx] = message
+                return messages
+        messages.append(message)
+        return messages
+
+    @staticmethod
+    def load_persisted_message_ledger(
+        session_workspace: str,
+        session_id: Optional[str] = None,
+    ) -> tuple[List[MessageChunk], int, int]:
+        messages: List[MessageChunk] = []
+        max_journal_seq = 0
+        journal_records = 0
+
+        messages_path = os.path.join(session_workspace, "messages.json")
+        try:
+            if os.path.exists(messages_path):
+                with open(messages_path, "r", encoding="utf-8") as f:
+                    messages_data = json.load(f)
+                if isinstance(messages_data, list):
+                    messages = [
+                        MessageChunk.from_dict(msg)
+                        for msg in messages_data
+                        if isinstance(msg, dict)
+                    ]
+        except UnicodeDecodeError:
+            logger.warning(
+                "SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages"
+            )
+            messages = []
+        except Exception as e:
+            logger.warning(f"SessionContext: Failed to load messages.json: {e}")
+            messages = []
+
+        journal_path = SessionContext._message_journal_path_for_workspace(
+            session_workspace
+        )
+        if not os.path.exists(journal_path):
+            return messages, max_journal_seq, journal_records
+
+        try:
+            with open(journal_path, "r", encoding="utf-8") as f:
+                for line_number, line in enumerate(f, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        logger.warning(
+                            "SessionContext: skipped invalid message journal record "
+                            f"session_id={session_id} line={line_number}: {exc}"
+                        )
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    if record.get("op") != "put_message":
+                        continue
+                    record_session_id = record.get("session_id")
+                    if (
+                        session_id
+                        and record_session_id
+                        and record_session_id != session_id
+                    ):
+                        continue
+                    seq = record.get("seq")
+                    if isinstance(seq, int):
+                        max_journal_seq = max(max_journal_seq, seq)
+                    message_data = record.get("message")
+                    if not isinstance(message_data, dict):
+                        continue
+                    try:
+                        message = MessageChunk.from_dict(message_data)
+                    except Exception as exc:
+                        logger.warning(
+                            "SessionContext: skipped invalid message journal message "
+                            f"session_id={session_id} line={line_number}: {exc}"
+                        )
+                        continue
+                    messages = SessionContext._upsert_persisted_message(
+                        messages, message
+                    )
+                    journal_records += 1
+        except Exception as e:
+            logger.warning(
+                f"SessionContext: Failed to replay {MESSAGE_JOURNAL_FILE}: {e}"
+            )
+
+        return messages, max_journal_seq, journal_records
+
+    def _get_message_by_id(self, message_id: Optional[str]) -> Optional[MessageChunk]:
+        if not message_id:
+            return None
+        for message in reversed(self.message_manager.messages):
+            if message.message_id == message_id:
+                return message
+        return None
+
+    def _append_message_to_journal(
+        self,
+        message_id: Optional[str],
+        *,
+        reason: str,
+    ) -> bool:
+        session_workspace = getattr(self, "session_workspace", None)
+        if not session_workspace:
+            return False
+        try:
+            os.makedirs(session_workspace, exist_ok=True)
+            with self._message_journal_lock:
+                message = self._get_message_by_id(message_id)
+                if message is None:
+                    return False
+                message_data = make_serializable(message)
+                message_signature = json.dumps(
+                    message_data,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                if (
+                    message.message_id
+                    and self._message_journal_flushed_signatures.get(
+                        message.message_id
+                    )
+                    == message_signature
+                ):
+                    return False
+                self._message_journal_seq += 1
+                record = {
+                    "schema_version": MESSAGE_JOURNAL_SCHEMA_VERSION,
+                    "op": "put_message",
+                    "session_id": self.session_id,
+                    "message_id": message.message_id,
+                    "seq": self._message_journal_seq,
+                    "timestamp": time.time(),
+                    "reason": reason,
+                    "message": message_data,
+                }
+                with open(self._message_journal_path(), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    f.flush()
+                if message.message_id:
+                    self._message_journal_flushed_signatures[
+                        message.message_id
+                    ] = message_signature
+            return True
+        except Exception as e:
+            logger.warning(
+                "SessionContext: Failed to append message journal "
+                f"session_id={self.session_id} message_id={message_id} "
+                f"reason={reason}: {e}"
+            )
+            return False
+
+    def _track_message_journal_after_add(self, message_id: Optional[str]) -> None:
+        if not message_id:
+            return
+        if self._message_journal_active_message_id is None:
+            self._message_journal_active_message_id = message_id
+            return
+        if message_id == self._message_journal_active_message_id:
+            return
+        self._append_message_to_journal(
+            self._message_journal_active_message_id,
+            reason="message_id_switch",
+        )
+        self._message_journal_active_message_id = message_id
+
+    def flush_message_journal_current(self, *, reason: str) -> None:
+        self._append_message_to_journal(
+            self._message_journal_active_message_id,
+            reason=reason,
+        )
+
+    def _clear_message_journal_after_snapshot(self) -> None:
+        journal_path = self._message_journal_path()
+        if not journal_path:
+            return
+        if not os.path.exists(journal_path):
+            return
+        try:
+            with self._message_journal_lock:
+                if os.path.exists(journal_path):
+                    open(journal_path, "w", encoding="utf-8").close()
+            logger.info(
+                f"SessionContext: cleared {MESSAGE_JOURNAL_FILE} "
+                f"session_id={self.session_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"SessionContext: Failed to clear {MESSAGE_JOURNAL_FILE} "
+                f"session_id={self.session_id}: {e}"
+            )
+
+    def _message_journal_has_records(self) -> bool:
+        try:
+            journal_path = self._message_journal_path()
+            return bool(journal_path) and os.path.getsize(journal_path) > 0
+        except OSError:
+            return False
+
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
     ) -> None:
@@ -398,6 +625,7 @@ class SessionContext:
             messages_list = messages
 
         valid_messages = []
+        rejected_session_ids: List[str] = []
         for msg in messages_list:
             msg_session_id = None
             if isinstance(msg, MessageChunk):
@@ -407,16 +635,80 @@ class SessionContext:
 
             if msg_session_id is None or msg_session_id == self.session_id:
                 valid_messages.append(msg)
+            else:
+                rejected_session_ids.append(str(msg_session_id))
 
-        for msg in valid_messages:
-            if self._get_message_role(msg) == MessageRole.USER.value:
-                self._normalize_tool_call_pairs_before_user_message()
-            if self._get_message_role(msg) == MessageRole.TOOL.value:
-                if self._replace_synthetic_tool_result(msg):
-                    self._record_message_timing(msg)
-                    continue
-            self._record_message_timing(msg)
-            self.message_manager.add_messages(msg)
+        if rejected_session_ids:
+            logger.warning(
+                "SessionContext: rejected messages with mismatched session_id "
+                f"session_id={self.session_id} ctx_id={id(self)} "
+                f"manager_id={id(self.message_manager)} input_count={len(messages_list)} "
+                f"rejected_count={len(rejected_session_ids)} "
+                f"sample_rejected_session_ids={rejected_session_ids[:3]}"
+            )
+        if messages_list and not valid_messages:
+            logger.debug(
+                "SessionContext: add_messages had no valid messages "
+                f"session_id={self.session_id} ctx_id={id(self)} "
+                f"manager_id={id(self.message_manager)} input_count={len(messages_list)}"
+            )
+
+        with self._message_journal_lock:
+            for msg in valid_messages:
+                message_role = self._get_message_role(msg)
+                message_id = self._get_message_id(msg)
+                if message_role == MessageRole.USER.value:
+                    self.flush_message_journal_current(reason="before_user_message")
+                    self._normalize_tool_call_pairs_before_user_message()
+                if message_role == MessageRole.TOOL.value:
+                    if self._replace_synthetic_tool_result(msg):
+                        self._record_message_timing(msg)
+                        if self._get_message_by_id(message_id) is not None:
+                            self._track_message_journal_after_add(message_id)
+                            self._append_message_to_journal(
+                                message_id,
+                                reason="stable_message",
+                            )
+                        continue
+                self._record_message_timing(msg)
+                self.message_manager.add_messages(msg)
+                if self._get_message_by_id(message_id) is not None:
+                    self._track_message_journal_after_add(message_id)
+                    if (
+                        message_role
+                        in {MessageRole.USER.value, MessageRole.TOOL.value}
+                        or self._is_message_final(msg)
+                    ):
+                        self._append_message_to_journal(
+                            message_id,
+                            reason="stable_message",
+                        )
+
+    @staticmethod
+    def _debug_message_snapshot(message: Union[MessageChunk, Dict[str, Any]]) -> str:
+        if isinstance(message, MessageChunk):
+            role = message.role
+            message_type = message.message_type
+            message_id = message.message_id
+            content = message.content
+            tool_calls = message.tool_calls or []
+        elif isinstance(message, dict):
+            role = message.get("role")
+            message_type = message.get("message_type") or message.get("type")
+            message_id = message.get("message_id")
+            content = message.get("content")
+            tool_calls = message.get("tool_calls") or []
+        else:
+            return type(message).__name__
+        content_len = len(content) if isinstance(content, str) else 0
+        return (
+            f"{role}/{message_type}:{message_id}:"
+            f"content_len={content_len}:tool_calls={len(tool_calls)}"
+        )
+
+    def _debug_last_message_snapshots(self, limit: int = 5) -> List[str]:
+        messages = getattr(self.message_manager, "messages", []) or []
+        return [self._debug_message_snapshot(message) for message in messages[-limit:]]
 
     @staticmethod
     def _get_message_role(
@@ -428,6 +720,25 @@ class SessionContext:
             role = message.get("role")
             return role.value if hasattr(role, "value") else role
         return None
+
+    @staticmethod
+    def _get_message_id(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> Optional[str]:
+        if isinstance(message, MessageChunk):
+            return message.message_id
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            return str(message_id) if message_id else None
+        return None
+
+    @staticmethod
+    def _is_message_final(message: Union[MessageChunk, Dict[str, Any]]) -> bool:
+        if isinstance(message, MessageChunk):
+            return bool(message.is_final)
+        if isinstance(message, dict):
+            return bool(message.get("is_final"))
+        return False
 
     @staticmethod
     def _get_tool_call_id_from_call(tool_call: Any) -> Optional[str]:
@@ -1091,27 +1402,22 @@ class SessionContext:
         """
         加载持久化的消息历史
         """
-        # 1. 尝试加载 messages.json
-        try:
-            messages_path = os.path.join(self.session_workspace, "messages.json")
-            if os.path.exists(messages_path):
-                with open(messages_path, "r", encoding="utf-8") as f:
-                    messages_data = json.load(f)
-                    if isinstance(messages_data, list):
-                        self.message_manager.messages = [
-                            MessageChunk.from_dict(msg) for msg in messages_data
-                        ]
-                        self.message_manager.refresh_compact_manifest()
-                        logger.debug(
-                            f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json"
-                        )
-                        return
-        except UnicodeDecodeError:
-            logger.warning(
-                "SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages"
-            )
-        except Exception as e:
-            logger.warning(f"SessionContext: Failed to load messages.json: {e}")
+        messages, max_journal_seq, journal_records = self.load_persisted_message_ledger(
+            self.session_workspace,
+            session_id=self.session_id,
+        )
+        self.message_manager.messages = messages
+        self.message_manager.stats["total_messages"] = len(messages)
+        self.message_manager.refresh_compact_manifest()
+        self._message_journal_seq = max_journal_seq
+        self._message_journal_active_message_id = (
+            messages[-1].message_id if messages else None
+        )
+        logger.debug(
+            "SessionContext: Loaded persisted messages "
+            f"session_id={self.session_id} messages={len(messages)} "
+            f"journal_records={journal_records}"
+        )
 
     def _prepare_llm_request_file_path(self, llm_request: Dict[str, Any]) -> str:
         llm_request_folder = os.path.join(self.session_workspace, "llm_request")
@@ -1876,26 +2182,70 @@ class SessionContext:
             if (
                 signature == self._last_save_signature
                 and now - self._last_save_time < 2.0
+                and not self._message_journal_has_records()
             ):
                 logger.debug(
                     f"SessionContext: 跳过重复保存 session_id={self.session_id}"
                 )
                 return
+            session_workspace = getattr(self, "session_workspace", None)
+            if not session_workspace:
+                logger.warning(
+                    "SessionContext: skip save because session_workspace is not set "
+                    f"session_id={self.session_id}"
+                )
+                self.record_timing_event(
+                    "session_end",
+                    status=status_value,
+                )
+                self._last_save_signature = signature
+                self._last_save_time = now
+                return
 
             # 1. 保存 messages 到 messages.json
             # 始终覆盖，保存完整历史
-            try:
-                with open(
-                    os.path.join(self.session_workspace, "messages.json"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    serializable_messages = make_serializable(
-                        self.message_manager.messages
+            messages_saved = False
+            messages_path = os.path.join(session_workspace, "messages.json")
+            messages_tmp_path = f"{messages_path}.tmp"
+            with self._message_journal_lock:
+                self.flush_message_journal_current(reason="before_session_save")
+                logger.info(
+                    "SessionContext: saving messages.json "
+                    f"session_id={self.session_id} status={status_value} "
+                    f"ctx_id={id(self)} manager_id={id(self.message_manager)} "
+                    f"message_count={len(self.message_manager.messages)} "
+                    f"llm_request_count={len(self.llm_requests_logs)} "
+                    f"last_messages={self._debug_last_message_snapshots()}"
+                )
+                try:
+                    with open(messages_tmp_path, "w", encoding="utf-8") as f:
+                        serializable_messages = make_serializable(
+                            self.message_manager.messages
+                        )
+                        json.dump(
+                            serializable_messages,
+                            f,
+                            ensure_ascii=False,
+                            indent=4,
+                        )
+                    os.replace(messages_tmp_path, messages_path)
+                    messages_saved = True
+                    logger.info(
+                        "SessionContext: saved messages.json "
+                        f"session_id={self.session_id} "
+                        f"message_count={len(self.message_manager.messages)} "
+                        f"path={messages_path}"
                     )
-                    json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                logger.error(f"SessionContext: Failed to save messages.json: {e}")
+                except Exception as e:
+                    logger.error(f"SessionContext: Failed to save messages.json: {e}")
+                    try:
+                        if os.path.exists(messages_tmp_path):
+                            os.remove(messages_tmp_path)
+                    except Exception:
+                        pass
+
+                if messages_saved:
+                    self._clear_message_journal_after_snapshot()
 
             # 2. 保存 compact_manifest.json（派生索引，仅用于审计/调试）
             try:
