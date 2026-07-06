@@ -927,11 +927,18 @@ class SessionContext:
         )
         return gid
 
-    def flush_user_injections(self) -> List[MessageChunk]:
-        """pop 全部 pending 引导消息：写入 message_manager，并返回供 yield 给 SSE 的列表。"""
+    def flush_user_injections(
+        self,
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
+    ) -> List[MessageChunk]:
+        """pop 全部 pending 引导消息，返回供下一次 LLM 请求使用的列表。
+
+        默认注入消息会写入 ``message_manager`` 并经 SSE 展示；metadata 中设置
+        ``persist=False`` 或 ``transient=True`` 的消息只进入当次 LLM 请求，不落盘。
+        """
         if not self.pending_user_injections:
             return []
-        if self._has_unclosed_tool_call_tail():
+        if self._has_unclosed_tool_call_tail(ledger_messages):
             logger.info(
                 f"SessionContext: defer user injections because tool call tail is open "
                 f"session={self.session_id} pending_total={len(self.pending_user_injections)}"
@@ -947,10 +954,19 @@ class SessionContext:
                 seen_guidance_ids.add(gid)
             drained.append(chunk)
         self.pending_user_injections = []
-        if drained:
-            self.add_messages(drained)
+        persistent_drained = [
+            chunk
+            for chunk in drained
+            if not (
+                (chunk.metadata or {}).get("persist") is False
+                or (chunk.metadata or {}).get("transient") is True
+            )
+        ]
+        if persistent_drained:
+            self.add_messages(persistent_drained)
         logger.info(
-            f"SessionContext: flush user injections session={self.session_id} count={len(drained)}"
+            f"SessionContext: flush user injections session={self.session_id} count={len(drained)} "
+            f"persistent_count={len(persistent_drained)}"
         )
         return drained
 
@@ -964,9 +980,20 @@ class SessionContext:
                 return True
         return False
 
-    def _has_unclosed_tool_call_tail(self) -> bool:
+    def _has_unclosed_tool_call_tail(
+        self,
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
+    ) -> bool:
         """Return True when the ledger currently ends inside an assistant tool_call pair."""
-        messages = getattr(self.message_manager, "messages", None) or []
+        raw_messages = (
+            ledger_messages
+            if ledger_messages is not None
+            else getattr(self.message_manager, "messages", None)
+        ) or []
+        messages = [
+            MessageChunk.from_dict(message) if isinstance(message, dict) else message
+            for message in raw_messages
+        ]
         trailing_tool_call_ids = set()
         for message in reversed(messages):
             role = message.role

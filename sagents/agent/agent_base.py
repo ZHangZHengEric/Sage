@@ -167,7 +167,9 @@ class AgentBase(ABC):
         return datetime.timezone(sign * delta)
 
     def _consume_user_injections(
-        self, session_context: Optional[SessionContext]
+        self,
+        session_context: Optional[SessionContext],
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
     ) -> List[MessageChunk]:
         """Drain SessionContext 上的 pending 引导消息。
 
@@ -178,12 +180,33 @@ class AgentBase(ABC):
         if session_context is None:
             return []
         try:
-            return session_context.flush_user_injections()
+            return session_context.flush_user_injections(ledger_messages=ledger_messages)
         except Exception as exc:
             logger.warning(
                 f"{self.__class__.__name__}: flush user injections 失败: {exc}"
             )
             return []
+
+    @staticmethod
+    def _visible_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
+        """Return injected messages that should be emitted to clients."""
+        return [
+            chunk
+            for chunk in chunks
+            if (chunk.metadata or {}).get("sse_visible") is not False
+        ]
+
+    @staticmethod
+    def _transient_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
+        """Return injected messages that are request-only and not persisted."""
+        return [
+            chunk
+            for chunk in chunks
+            if (
+                (chunk.metadata or {}).get("persist") is False
+                or (chunk.metadata or {}).get("transient") is True
+            )
+        ]
 
     @abstractmethod
     async def run_stream(

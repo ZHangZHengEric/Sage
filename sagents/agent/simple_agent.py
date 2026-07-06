@@ -950,14 +950,9 @@ class SimpleAgent(AgentBase):
                 ]
                 break
 
-            # Drain "运行期注入的引导用户消息"：在本轮 LLM 请求之前消费掉。
-            # flush 已写入 message_manager；这里把它合并到 messages_input、yield 给 SSE。
-            injected = self._consume_user_injections(session_context)
-            if injected:
-                messages_input = list(messages_input) + list(injected)
-                yield injected
-
-            # 合并消息
+            # 先把上一轮 assistant/tool 结果合并进本轮请求视图。
+            # 注入消息只用这个请求视图判断 tool_call 是否闭合，避免把已落盘的
+            # tool result 再写回 session ledger 造成重复。
             messages_input = MessageManager.merge_new_messages_to_old_messages(
                 cast(
                     List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks
@@ -965,6 +960,17 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             )
             all_new_response_chunks = []
+
+            # Drain "运行期注入的引导用户消息"：在本轮 LLM 请求之前消费掉。
+            # 持久注入会写入 message_manager；transient 注入只进入本轮 LLM 请求，不 yield 给 SSE。
+            injected = self._consume_user_injections(
+                session_context, ledger_messages=messages_input
+            )
+            if injected:
+                messages_input = list(messages_input) + list(injected)
+                visible_injected = self._visible_user_injections(injected)
+                if visible_injected:
+                    yield visible_injected
 
             current_turn_status_only = turn_status_only_next
             turn_status_only_next = False
