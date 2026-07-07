@@ -8,11 +8,38 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.sagents import _HiddenToolStreamState, _redact_hidden_tools_from_chunk
+from sagents.sagents import (
+    _HiddenToolStreamState,
+    _redact_hidden_tools_from_chunk,
+    _should_suppress_chunk_from_client_stream,
+)
 
 
 def _make_state() -> _HiddenToolStreamState:
     return _HiddenToolStreamState()
+
+
+def test_hidden_context_metadata_suppressed_from_client_stream():
+    chunk = MessageChunk(
+        role=MessageRole.USER.value,
+        content="internal context",
+        metadata={"hidden_from_chat": True, "sse_visible": False},
+    )
+
+    assert _should_suppress_chunk_from_client_stream(chunk)
+
+
+def test_self_check_runtime_diagnostic_marker_suppressed_from_client_stream():
+    chunk = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content=(
+            '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
+            "Self-check found issues\n"
+            "</runtime_diagnostic>"
+        ),
+    )
+
+    assert _should_suppress_chunk_from_client_stream(chunk)
 
 
 def _assistant_tool_call_chunk(tool_calls):

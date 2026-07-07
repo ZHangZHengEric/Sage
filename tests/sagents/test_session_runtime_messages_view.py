@@ -43,3 +43,34 @@ def test_conversation_messages_view_filters_hidden_context_messages(monkeypatch)
         "visible-user",
         "visible-assistant",
     ]
+
+
+def test_conversation_messages_view_filters_self_check_diagnostic_without_metadata(
+    monkeypatch,
+):
+    self_check_context = MessageChunk(
+        role=MessageRole.USER.value,
+        content=(
+            '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
+            "Self-check found issues\n"
+            "</runtime_diagnostic>"
+        ),
+        message_id="self-check",
+    )
+    visible_assistant = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="继续执行后的正常回复。",
+        message_id="visible-assistant",
+    )
+
+    monkeypatch.setattr(
+        session_runtime,
+        "_global_session_manager",
+        FakeSessionManager([self_check_context, visible_assistant]),
+    )
+
+    view = session_runtime.build_conversation_messages_view("sess-1")
+
+    assert [message["message_id"] for message in view["messages"]] == [
+        "visible-assistant",
+    ]
