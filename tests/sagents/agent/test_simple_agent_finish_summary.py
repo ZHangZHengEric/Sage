@@ -1378,10 +1378,212 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
 
     assert len(direct_calls) == 3
     assert len(judge_calls) == 2
+    assert [
+        call["force_tool_choice_required"] for call in direct_calls
+    ] == [False, True, True]
     assert [chunk.content for chunk in chunks] == [
         "纯文本回答 1",
         "纯文本回答 2",
         "纯文本回答 3",
+    ]
+
+
+def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) == 1:
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="纯文本回答",
+                        message_type=MessageType.ASSISTANT_TEXT.value,
+                    )
+                ],
+                False,
+            )
+            return
+        kwargs["direct_response_state"]["had_tool_calls"] = True
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content='{"ok": true}',
+                    tool_call_id="call_tool",
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return False
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[{"function": {"name": "todo_write"}}],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(max_loop_count=2),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert len(judge_calls) == 1
+    assert [
+        call["force_tool_choice_required"] for call in direct_calls
+    ] == [False, True]
+    assert [chunk.content for chunk in chunks if chunk.content] == [
+        "纯文本回答",
+        '{"ok": true}',
+        "The agent exceeded the maximum loop count (2). The task is paused. Do you want to continue?",
+    ]
+
+
+def test_llm_judge_completed_plain_text_does_not_force_required(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="已经完成。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[{"function": {"name": "todo_write"}}],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 1
+    assert len(judge_calls) == 1
+    assert direct_calls[0]["force_tool_choice_required"] is False
+    assert [chunk.content for chunk in chunks] == ["已经完成。"]
+
+
+def test_llm_judge_tool_activity_resets_required_after_plain_text(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) == 1:
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="纯文本回答",
+                        message_type=MessageType.ASSISTANT_TEXT.value,
+                    )
+                ],
+                False,
+            )
+            return
+        if len(direct_calls) == 2:
+            kwargs["direct_response_state"]["had_tool_calls"] = True
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content='{"ok": true}',
+                        tool_call_id="call_tool",
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    )
+                ],
+                False,
+            )
+            return
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="完成收尾。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_is_task_complete(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        return len(judge_calls) >= 2
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[{"function": {"name": "todo_write"}}],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert len(judge_calls) == 2
+    assert [
+        call["force_tool_choice_required"] for call in direct_calls
+    ] == [False, True, False]
+    assert [chunk.content for chunk in chunks if chunk.content] == [
+        "纯文本回答",
+        '{"ok": true}',
+        "完成收尾。",
     ]
 
 
@@ -1579,6 +1781,17 @@ def test_normal_path_omits_tool_choice_without_env_or_escape(monkeypatch):
         _agent()._resolve_tool_choice(
             tools_json=[{"function": {"name": "todo_read"}}],
             force_tool_choice_required=False,
+            force_tool_choice_auto=False,
+        )
+        is None
+    )
+
+
+def test_required_tool_choice_is_omitted_without_tools():
+    assert (
+        _agent()._resolve_tool_choice(
+            tools_json=[],
+            force_tool_choice_required=True,
             force_tool_choice_auto=False,
         )
         is None
