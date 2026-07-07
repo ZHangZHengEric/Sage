@@ -2,11 +2,13 @@ import request from '../utils/request.js'
 import { getApiPrefix } from '../config/runtime.js'
 
 export const taskAPI = {
-  getWorkspaceFiles: (agentId) => {
-    return request.post(`/api/agent/${agentId}/file_workspace`, {})
+  getWorkspaceFiles: (agentId, sessionId = null) => {
+    return request.post(`/api/agent/${agentId}/file_workspace`, {}, {
+      params: sessionId ? { session_id: sessionId } : {}
+    })
   },
 
-  downloadFile: async (agentId, filePath) => {
+  downloadFile: async (agentId, filePath, sessionId = null) => {
     if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
       const response = await fetch(filePath, {
         method: 'GET',
@@ -19,7 +21,11 @@ export const taskAPI = {
     }
 
     const apiPrefix = getApiPrefix()
-    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+    const params = new URLSearchParams({ file_path: filePath })
+    if (sessionId) {
+      params.set('session_id', sessionId)
+    }
+    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?${params.toString()}`
 
     const headers = {
       Accept: 'application/json',
@@ -53,7 +59,11 @@ export const taskAPI = {
   deleteWorkspaceFile: (agentId, sessionId, filePath) => {
     let url = ''
     if (agentId) {
-      url = `/api/agent/${agentId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
+      const params = new URLSearchParams({ file_path: filePath })
+      if (sessionId) {
+        params.set('session_id', sessionId)
+      }
+      url = `/api/agent/${agentId}/file_workspace/delete?${params.toString()}`
     } else if (sessionId) {
       url = `/api/sessions/${sessionId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
     } else {
@@ -62,13 +72,14 @@ export const taskAPI = {
     return request.delete(url)
   },
 
-  uploadWorkspaceFile: (agentId, file, targetPath = '') => {
+  uploadWorkspaceFile: (agentId, file, targetPath = '', sessionId = null) => {
     const formData = new FormData()
     formData.append('file', file)
     if (targetPath) {
       formData.append('target_path', targetPath)
     }
     return request.post(`/api/agent/${agentId}/file_workspace/upload`, formData, {
+      params: sessionId ? { session_id: sessionId } : {},
       headers: {
         'Content-Type': 'multipart/form-data'
       }

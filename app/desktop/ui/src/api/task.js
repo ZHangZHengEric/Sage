@@ -49,8 +49,10 @@ class TaskAPI {
    * @param {string} agentId - Agent ID
    * @returns {Promise<Object>}
    */
-  getWorkspaceFiles(agentId) {
-    return this.request.post(`/api/agent/${agentId}/file_workspace`, {})
+  getWorkspaceFiles(agentId, sessionId = null) {
+    return this.request.post(`/api/agent/${agentId}/file_workspace`, {}, {
+      params: sessionId ? { session_id: sessionId } : {}
+    })
   }
 
   /**
@@ -75,7 +77,7 @@ class TaskAPI {
    * @param {string} filePath - 文件路径
    * @returns {Promise<Blob>}
    */
-  async downloadFile(agentId, filePath) {
+  async downloadFile(agentId, filePath, sessionId = null) {
     // 如果是 http/https 链接，直接下载
     if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
       const response = await fetch(filePath, {
@@ -93,7 +95,11 @@ class TaskAPI {
     if (apiPrefix.endsWith('/')) {
       apiPrefix = apiPrefix.slice(0, -1)
     }
-    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+    const params = new URLSearchParams({ file_path: filePath })
+    if (sessionId) {
+      params.set('session_id', sessionId)
+    }
+    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?${params.toString()}`
 
     // 准备请求头
     const headers = {
@@ -139,7 +145,11 @@ class TaskAPI {
   deleteWorkspaceFile(agentId, sessionId, filePath) {
     let url = ''
     if (agentId) {
-      url = `/api/agent/${agentId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
+      const params = new URLSearchParams({ file_path: filePath })
+      if (sessionId) {
+        params.set('session_id', sessionId)
+      }
+      url = `/api/agent/${agentId}/file_workspace/delete?${params.toString()}`
     } else if (sessionId) {
       url = `/api/sessions/${sessionId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
     } else {
@@ -155,13 +165,14 @@ class TaskAPI {
    * @param {string} targetPath - 目标路径（可选）
    * @returns {Promise<Object>}
    */
-  uploadWorkspaceFile(agentId, file, targetPath = '') {
+  uploadWorkspaceFile(agentId, file, targetPath = '', sessionId = null) {
     const formData = new FormData()
     formData.append('file', file)
     if (targetPath) {
       formData.append('target_path', targetPath)
     }
     return this.request.post(`/api/agent/${agentId}/file_workspace/upload`, formData, {
+      params: sessionId ? { session_id: sessionId } : {},
       headers: {
         'Content-Type': 'multipart/form-data'
       }
