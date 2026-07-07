@@ -928,6 +928,7 @@ class SimpleAgent(AgentBase):
         recent_signatures: List[str] = message_manager.get_recent_loop_signatures()
         logger.debug(f"SimpleAgent: 加载历史签名 {len(recent_signatures)} 个")
         force_tool_choice_auto_next = False
+        force_tool_choice_required_next = False
         turn_status_only_next = False
         consecutive_plain_text_direct_responses = 0
         while True:
@@ -974,6 +975,8 @@ class SimpleAgent(AgentBase):
 
             current_turn_status_only = turn_status_only_next
             turn_status_only_next = False
+            current_force_tool_choice_required = force_tool_choice_required_next
+            force_tool_choice_required_next = False
             if current_turn_status_only:
                 logger.info(
                     "SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required"
@@ -1015,7 +1018,9 @@ class SimpleAgent(AgentBase):
                 tools_json=current_tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id,
-                force_tool_choice_required=current_turn_status_only,
+                force_tool_choice_required=(
+                    current_turn_status_only or current_force_tool_choice_required
+                ),
                 force_tool_choice_auto=force_tool_choice_auto_next,
                 direct_response_state=direct_response_state,
             ):
@@ -1188,6 +1193,7 @@ class SimpleAgent(AgentBase):
                     ):
                         logger.info("SimpleAgent: 任务完成，终止执行")
                         break
+                    force_tool_choice_required_next = True
                 elif await self._is_task_complete(
                     messages_input, session_id, tool_manager, session_context
                 ):
