@@ -786,7 +786,12 @@ class SandboxPolicyGateway:
             base = parts[0].split("/")[-1].lower()
             args = [p.lower() for p in parts[1:]]
             if base == "git":
-                if not args or args[0] not in self.KNOWN_SAFE_GIT_SUBCOMMANDS:
+                info = self._git_command_info(parts)
+                if (
+                    info is None
+                    or str(info.get("subcommand") or "")
+                    not in self.KNOWN_SAFE_GIT_SUBCOMMANDS
+                ):
                     return False
                 continue
             if base == "find" and not any(arg in {"-delete", "-exec"} for arg in args):

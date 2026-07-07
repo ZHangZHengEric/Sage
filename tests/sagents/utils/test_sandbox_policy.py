@@ -184,6 +184,14 @@ def test_untrusted_mode_allows_known_safe_probe():
     assert decision.action == "allow"
 
 
+def test_untrusted_mode_allows_safe_git_global_options():
+    gateway = SandboxPolicyGateway(approval_mode="untrusted")
+
+    for command in ("git -C repo status --short", "git --git-dir .git status"):
+        decision = gateway.evaluate_shell_command(command)
+        assert decision.action == "allow", command
+
+
 def test_untrusted_mode_prompts_for_unmatched_command():
     decision = SandboxPolicyGateway(approval_mode="untrusted").evaluate_shell_command(
         "python scripts/build.py"
