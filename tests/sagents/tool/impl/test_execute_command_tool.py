@@ -90,6 +90,20 @@ class _FakeBackgroundSandbox(_FakeSandbox):
         return ""
 
 
+def test_shell_tool_descriptions_do_not_expose_completion_reminder_protocol():
+    descriptions = []
+    for method_name in ("execute_shell_command", "await_shell"):
+        tool_spec = getattr(getattr(ExecuteCommandTool, method_name), "_tool_spec")
+        descriptions.extend((tool_spec.description_i18n or {}).values())
+
+    combined = "\n".join(descriptions)
+
+    assert "system_reminder" not in combined
+    assert "无需轮询" not in combined
+    assert "polling is unnecessary" not in combined
+    assert "await_shell" in combined
+
+
 def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
     fake_sandbox = _FakeBackgroundSandbox("/sage-workspace")
     fake_manager = _FakeSessionManager(fake_sandbox)
