@@ -3,7 +3,6 @@ from sagents.context.messages.message import (
     MessageRole,
     MessageType,
     is_execution_error_message_type,
-    is_sage_self_check_runtime_diagnostic_message,
 )
 from sagents.context.messages.message_manager import MessageManager
 
@@ -63,24 +62,3 @@ def test_agent_execution_error_runtime_diagnostic_tag_is_not_duplicated():
     payload = MessageManager.convert_messages_to_dict_for_request([message])
 
     assert payload[0]["content"] == content
-
-
-def test_self_check_runtime_diagnostic_helper_is_narrow():
-    content = (
-        '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
-        "Self-check found issues\n"
-        "</runtime_diagnostic>"
-    )
-    message = MessageChunk(
-        role=MessageRole.ASSISTANT.value,
-        content=content,
-        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
-    )
-    ordinary_error = MessageChunk(
-        role=MessageRole.ASSISTANT.value,
-        content="Tool was not provided.",
-        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
-    )
-
-    assert is_sage_self_check_runtime_diagnostic_message(message)
-    assert not is_sage_self_check_runtime_diagnostic_message(ordinary_error)

@@ -12,10 +12,7 @@ from sagents.flow.schema import (
 )
 from sagents.flow.conditions import ConditionRegistry
 from sagents.utils.logger import logger
-from sagents.context.messages.message import (
-    MessageChunk,
-    is_sage_self_check_runtime_diagnostic_message,
-)
+from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionStatus
 
 
@@ -310,11 +307,12 @@ class FlowExecutor:
                         message_chunks or []
                     )
                     if agent_key == "self_check" and all(
-                        is_sage_self_check_runtime_diagnostic_message(chunk)
+                        (getattr(chunk, "metadata", None) or {}).get("sse_visible")
+                        is False
                         for chunk in message_chunks or []
                     ):
                         logger.info(
-                            "FlowExecutor: suppressed self-check runtime diagnostic "
+                            "FlowExecutor: suppressed hidden self-check context "
                             f"from client stream session_id={self.session_id}"
                         )
                         continue
