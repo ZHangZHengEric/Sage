@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-07-05 14:10** 搭建云端开发环境：补齐缺失运行依赖（itsdangerous/APScheduler/Authlib），新增 AGENTS.md 记录端口 30050、DB 类型 file、LLM 配置等注意事项，验证后端/前端启动与 admin 登录通过。
+
 - **2026-07-03 14:55** 新增希腊酸奶问卷坏例回归测试，验证 SelfCheckAgent 可检出 options 内误嵌 default/allow_other 的非法 JSON。
 
 - **2026-07-03 14:50** SelfCheckAgent 为 Artifacts/Questionnaire 标签增加 JSON 语法与结构校验，失败时复用 runtime_diagnostic 重试流程，保留原有路径存在性校验。
