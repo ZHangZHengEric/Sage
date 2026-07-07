@@ -152,9 +152,12 @@ task_complete_template = {
   - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断中断执行任务。
   - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断中断执行任务。
   - 当对话过程中，需要用户的确认或者输入时，需要判断中断执行任务。
+  - 不要仅因为 Assistant 使用了“我可以开始/我可以继续/I can start/I can continue”这类陈述句就判断需要用户确认；只有它明确提出问题、选择项、确认请求，或说明缺少用户输入时，才算等待用户。
 2. 继续执行任务：
   - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断继续执行任务。
   - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断继续执行任务。因为用户看不到工具执行的结果。
+  - 如果最近用户已经明确确认开始、继续、按计划执行，Assistant 随后给出“我可以开始/我可以继续/I can start/I can continue”的状态陈述或能力说明，且没有明确向用户提问或要求选择，必须继续执行，不要把它当成新的确认请求。
+  - 如果 reason 表示“等待工具调用/等待生成/处理中”，则 task_interrupted 必须是 false。
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
@@ -175,9 +178,12 @@ reason尽可能简单，最多20个字符
   - When you believe the existing responses in the conversation have satisfied the user's request and no further responses or actions are needed.
   - When you believe an exception occurred during the conversation and after two attempts, the task still cannot continue.
   - When user confirmation or input is needed during the conversation.
+  - Do not infer that user confirmation is needed merely because the Assistant uses a declarative sentence such as "I can start", "I can continue", or "I can start that production pass now." Treat it as waiting for the user only when the Assistant clearly asks a question, presents choices, requests confirmation, or says user input is missing.
 2. Continue task execution:
   - When you believe the existing responses in the conversation have not yet satisfied the user's request, or when the user's questions or requests need to continue being executed.
   - When tool calls are completed but the results have not been described in text, continue task execution because users cannot see the tool execution results.
+  - If the recent user message already confirmed starting, continuing, or proceeding with the plan, and the Assistant then says "I can start" / "I can continue" as a status or capability statement without asking a question or requesting a choice, continue execution; do not treat it as a new confirmation request.
+  - If reason indicates waiting for a tool / generation / in progress, then task_interrupted must be false.
 
 ## User's Conversation History and Request Execution Process
 {messages}
@@ -198,9 +204,12 @@ reason should be as simple as possible, maximum 20 characters
   - Quando você acredita que as respostas existentes na conversa já satisfizeram a solicitação do usuário e não são necessárias mais respostas ou ações.
   - Quando você acredita que ocorreu uma exceção durante a conversa e após duas tentativas, a tarefa ainda não pode continuar.
   - Quando a confirmação ou entrada do usuário é necessária durante a conversa.
+  - Não infira que confirmação do usuário é necessária apenas porque o Assistente usa uma frase declarativa como "posso começar", "posso continuar" ou "posso iniciar essa passagem de produção agora." Trate como espera pelo usuário somente quando o Assistente claramente faz uma pergunta, apresenta opções, pede confirmação ou diz que falta entrada do usuário.
 2. Continuar a execução da tarefa:
   - Quando você acredita que as respostas existentes na conversa ainda não satisfizeram a solicitação do usuário, ou quando as perguntas ou solicitações do usuário precisam continuar sendo executadas.
   - Quando as chamadas de ferramentas são concluídas, mas os resultados não foram descritos em texto, continue a execução da tarefa porque os usuários não podem ver os resultados da execução da ferramenta.
+  - Se a mensagem recente do usuário já confirmou começar, continuar ou prosseguir com o plano, e o Assistente então diz "posso começar" / "posso continuar" como declaração de status ou capacidade sem fazer pergunta nem pedir escolha, continue a execução; não trate isso como novo pedido de confirmação.
+  - Se o motivo indicar aguardar ferramenta / geração / em andamento, task_interrupted deve ser false.
 
 ## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
 {messages}

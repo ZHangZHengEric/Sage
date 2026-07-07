@@ -238,6 +238,7 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 - A resposta não sugere continuação (ex.: "em seguida", "então", "vou", "próximo passo", etc.).
 - É necessária confirmação do usuário, informação adicional ou escolha para prosseguir—então deve interromper e aguardar o usuário.
 - Se a resposta apenas oferece uma continuação opcional que depende de escolha ou confirmação do usuário (ex.: "Se quiser, posso ... em seguida." ou "Gostaria que eu continuasse com ...?"), deve interromper e aguardar confirmação do usuário. Não trate isso como continuação automática.
+- Não infira que confirmação do usuário é necessária apenas porque o Assistente usa uma frase declarativa como "posso começar", "posso continuar" ou "posso iniciar essa passagem de produção agora." Trate como espera pelo usuário somente quando o Assistente claramente faz uma pergunta, apresenta opções, pede confirmação ou diz que falta entrada do usuário.
 - Se o usuário apenas cumprimentou, conversou casualmente ou expressou emoção, e o Assistente respondeu naturalmente sem prometer trabalho posterior, interrompa.
 
 ## Quando continuar (task_interrupted = false)
@@ -245,10 +246,15 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 - Ainda faltam passos como resumir, organizar, formatar ou complementar para uma entrega real.
 - A resposta diz que uma fase foi concluída, mas no conjunto da tarefa ainda há trabalho a fazer.
 - A resposta assume explicitamente continuação imediata (ex.: "Vou fazer isso agora...", "Em seguida, vou...", "Deixe-me continuar...") e não exige confirmação do usuário.
+- Se a mensagem recente do usuário já confirmou começar, continuar ou prosseguir com o plano, e o Assistente então diz "posso começar" / "posso continuar" como declaração de status ou capacidade sem fazer pergunta nem pedir escolha, continue a execução; não trate isso como novo pedido de confirmação.
 - Se o usuário pediu para criar, atualizar, excluir, salvar, consultar ou verificar um objeto, mas o rastro atual mostra apenas promessa/plano e nenhuma chamada de ferramenta bem-sucedida ou resultado claramente concluído, continue.
 - Se o Assistente afirma que leu, pesquisou, modificou, criou, excluiu, salvou, executou um comando, testou, verificou, fez commit, fez push, enviou, publicou ou realizou outra ação de execução, mas o rastro recente não contém resultado de ferramenta bem-sucedido correspondente nem resultado de verificação explícito, continue. Dizer "feito", "tratado" ou "verificado" não é evidência de execução por si só.
 - Se apenas parte de uma tarefa de múltiplas etapas foi concluída e o Assistente não está explicitamente aguardando uma escolha do usuário, continue.
 - Se a conclusão depende de estado externo ou conteúdo de arquivo, mas o rastro recente não tem resultado de ferramenta correspondente nem verificação explícita, continue.
+
+## Regras de prioridade
+- "Precisa de confirmação/entrada/especificações faltantes do usuário antes de continuar" tem prioridade sobre "a tarefa original ainda não está totalmente concluída."
+- Se a última resposta do Assistente explica claramente o que foi concluído, por que não pode prosseguir e o que o usuário precisa responder em seguida, task_interrupted deve ser true.
 
 ## Consistência da saída (obrigatório)
 1. Se o motivo indicar aguardar ferramenta / geração / em andamento, task_interrupted deve ser false.
