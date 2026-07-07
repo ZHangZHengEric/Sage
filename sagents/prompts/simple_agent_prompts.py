@@ -125,6 +125,7 @@ task_complete_template = {
 - 当前需要用户确认、用户补充信息、或用户做选择后才能继续时，必须中断并等待用户输入。
 - 如果 Assistant 已经交付了当前阶段能完成的产物、结论或阻塞说明，并明确向用户询问缺失信息/规格/确认项，即使原始大任务还没有完全生成最终对象，也必须中断等待用户。
 - 当前回复只是提供需要用户选择或确认的可选后续动作（例如“如果你需要，下一步我可以...”“If you want, I can ... next.”），也必须中断并等待用户确认，不要当成自动继续执行。
+- 不要仅因为 Assistant 使用了“我可以开始/我可以继续/I can start/I can continue”这类陈述句就判断需要用户确认；只有它明确提出问题、选择项、确认请求，或说明缺少用户输入时，才算等待用户。
 - 如果用户只是问候、闲聊或情绪表达，Assistant 已经自然回应且没有承诺后续动作，可以中断。
 
 ## 需要继续执行任务（task_interrupted = false）的情况：
@@ -132,6 +133,7 @@ task_complete_template = {
 - 你觉得还缺少总结、整理、格式化、补充说明等步骤，才能算真正给到用户交付。
 - 当前回复虽然说“已经完成了某个阶段”，但从整体任务看，仍然有后续要做的事情。
 - 当前回复明确承诺马上继续动作（例如“我现在将...”“Next, I will...”“Let me continue...”），且不需要用户确认。
+- 如果最近用户已经明确确认开始、继续、按计划执行，Assistant 随后给出“我可以开始/我可以继续/I can start/I can continue”的状态陈述或能力说明，且没有明确向用户提问或要求选择，必须继续执行，不要把它当成新的确认请求。
 - 如果用户要求创建、更新、删除、保存、查询或验证某个对象，但当前只看到承诺/计划，没有看到工具调用成功或明确完成结果，必须继续。
 - 如果 Assistant 声称已经执行了读取、搜索、修改、创建、删除、保存、运行命令、测试、验证、提交、推送、发送、发布等动作，但最近执行过程没有对应成功的工具调用结果或明确验证结果，必须继续；口头说“已完成/已处理/已验证”本身不算执行证据。
 - 多步骤任务只完成了部分步骤，且没有明确等待用户选择时，必须继续。
@@ -180,6 +182,7 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - User confirmation, more input, or a choice is required before continuing—then you must interrupt and wait for the user.
 - If the Assistant has delivered the current phase's artifact, conclusion, or blocker explanation and clearly asks the user for missing information, specs, or confirmation, interrupt and wait even if the original larger task has not produced the final object yet.
 - If the reply only offers an optional follow-up that depends on the user's choice or confirmation, such as "If you want, I can ... next." or "Would you like me to continue with ...?", you must interrupt and wait for user confirmation. Do not treat that as automatic continuation.
+- Do not infer that user confirmation is needed merely because the Assistant uses a declarative sentence such as "I can start", "I can continue", or "I can start that production pass now." Treat it as waiting for the user only when the Assistant clearly asks a question, presents choices, requests confirmation, or says user input is missing.
 - If the user only greeted, chatted casually, or expressed emotion, and the Assistant has naturally replied without promising follow-up work, interrupt.
 
 ## When to continue (task_interrupted = false)
@@ -187,6 +190,7 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - You believe summarizing, tidying, formatting, or further explanation is still needed for a true deliverable.
 - The reply says a phase is done but, for the overall task, there is clearly more to do.
 - The reply explicitly commits to immediate continuation, such as "I will now...", "Next, I will...", or "Let me continue...", and does not require user confirmation.
+- If the recent user message already confirmed starting, continuing, or proceeding with the plan, and the Assistant then says "I can start" / "I can continue" as a status or capability statement without asking a question or requesting a choice, continue execution; do not treat it as a new confirmation request.
 - If the user asked to create, update, delete, save, query, or verify an object, but the current trace only shows a promise/plan and no successful tool call or clear completed result, continue.
 - If the Assistant claims it has read, searched, modified, created, deleted, saved, run a command, tested, verified, committed, pushed, sent, published, or performed another execution action, but the recent trace has no corresponding successful tool result or explicit verification result, continue. Saying "done", "handled", or "verified" is not execution evidence by itself.
 - If only part of a multi-step task is complete and the Assistant is not explicitly waiting for the user to choose, continue.
