@@ -79,9 +79,7 @@ class ImageUnderstandingTool:
             # 检查文件是否存在
             exists = await sandbox.file_exists(image_path)
             if not exists:
-                raise ImageUnderstandingError(
-                    f"Image file does not exist: {image_path}"
-                )
+                raise ImageUnderstandingError(f"Image file does not exist: {image_path}")
 
             # 使用 base64 命令读取图片
             # macOS 的 base64 语法不同，需要使用 -i 指定输入文件
@@ -311,9 +309,7 @@ class ImageUnderstandingTool:
         session = session_manager.get(current_session_id)
 
         if not session:
-            raise ImageUnderstandingError(
-                f"Failed to get session: {current_session_id}"
-            )
+            raise ImageUnderstandingError(f"Failed to get session: {current_session_id}")
 
         # 获取 session 的 model 和 model_config
         model = session.model
@@ -357,9 +353,7 @@ class ImageUnderstandingTool:
                     "bad request",
                 ]
             ):
-                raise ImageUnderstandingError(
-                    "The current model does not support image understanding"
-                )
+                raise ImageUnderstandingError("The current model does not support image understanding")
             else:
                 raise e
 
@@ -523,7 +517,4 @@ class ImageUnderstandingTool:
 
         except Exception as e:
             logger.error(f"图片理解失败: {e}")
-            return {
-                "status": "error",
-                "message": f"Image understanding failed: {str(e)}",
-            }
+            return {"status": "error", "message": f"Image understanding failed: {str(e)}"}

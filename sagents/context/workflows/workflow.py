@@ -219,9 +219,7 @@ class Workflow:
     ) -> "Workflow":
         """从旧格式（字符串列表）创建Workflow实例"""
         if not isinstance(steps, list):
-            raise ValueError(
-                "Workflow.from_legacy_format: steps must be a list of strings"
-            )
+            raise ValueError("Workflow.from_legacy_format: steps must be a list of strings")
 
         workflow = cls(
             name=name, description=description, format_type=WorkflowFormat.LEGACY

@@ -530,7 +530,9 @@ class SessionContext:
                 )
                 if (
                     message.message_id
-                    and self._message_journal_flushed_signatures.get(message.message_id)
+                    and self._message_journal_flushed_signatures.get(
+                        message.message_id
+                    )
                     == message_signature
                 ):
                     return False
@@ -549,9 +551,9 @@ class SessionContext:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     f.flush()
                 if message.message_id:
-                    self._message_journal_flushed_signatures[message.message_id] = (
-                        message_signature
-                    )
+                    self._message_journal_flushed_signatures[
+                        message.message_id
+                    ] = message_signature
             return True
         except Exception as e:
             logger.warning(
@@ -672,10 +674,11 @@ class SessionContext:
                 self.message_manager.add_messages(msg)
                 if self._get_message_by_id(message_id) is not None:
                     self._track_message_journal_after_add(message_id)
-                    if message_role in {
-                        MessageRole.USER.value,
-                        MessageRole.TOOL.value,
-                    } or self._is_message_final(msg):
+                    if (
+                        message_role
+                        in {MessageRole.USER.value, MessageRole.TOOL.value}
+                        or self._is_message_final(msg)
+                    ):
                         self._append_message_to_journal(
                             message_id,
                             reason="stable_message",

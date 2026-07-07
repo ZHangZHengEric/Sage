@@ -78,9 +78,7 @@ class EMLParser(BaseFileParser):
             )
 
         if not skip_validation and not self.can_parse(file_path):
-            return self.create_error_result(
-                f"Unsupported file type: {file_path}", file_path
-            )
+            return self.create_error_result(f"Unsupported file type: {file_path}", file_path)
 
         try:
             # 使用参考实现的文件读取逻辑

@@ -140,10 +140,7 @@ class FileValidator:
                                 "error": f"Unsupported file format: {file_extension}",
                             }
                     else:
-                        return {
-                            "valid": False,
-                            "error": "Cannot determine file type from URL",
-                        }
+                        return {"valid": False, "error": "Cannot determine file type from URL"}
 
                 return {
                     "valid": True,
@@ -158,10 +155,7 @@ class FileValidator:
 
                 # 检查文件是否存在
                 if not file_path.exists():
-                    return {
-                        "valid": False,
-                        "error": f"File does not exist: {file_path_or_url}",
-                    }
+                    return {"valid": False, "error": f"File does not exist: {file_path_or_url}"}
 
                 if not file_path.is_file():
                     return {

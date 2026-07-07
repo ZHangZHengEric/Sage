@@ -704,8 +704,14 @@ def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
 
     prompt = captured["llm_messages"][0]["content"]
     assert "claims about executed actions are backed by execution evidence" in prompt
-    assert 'Saying "done", "handled", or "verified" is not execution evidence' in prompt
-    assert "Need user confirmation/input/missing specs before continuing" in prompt
+    assert (
+        "Saying \"done\", \"handled\", or \"verified\" is not execution evidence"
+        in prompt
+    )
+    assert (
+        "Need user confirmation/input/missing specs before continuing"
+        in prompt
+    )
 
 
 def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
@@ -725,7 +731,8 @@ def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
                 SimpleNamespace(
                     delta=SimpleNamespace(
                         content=(
-                            '{"task_interrupted": true, "reason": "need user input"}'
+                            '{"task_interrupted": true, '
+                            '"reason": "need user input"}'
                         )
                     )
                 )

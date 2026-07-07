@@ -46,10 +46,7 @@ class SecurityValidator:
     def validate_path(file_path: str, allow_dangerous: bool = False) -> Dict[str, Any]:
         try:
             if ".." in file_path:
-                return {
-                    "valid": False,
-                    "error": "Path contains dangerous traversal characters",
-                }
+                return {"valid": False, "error": "Path contains dangerous traversal characters"}
 
             path = Path(file_path).resolve()
 

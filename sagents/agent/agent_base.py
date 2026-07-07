@@ -180,9 +180,7 @@ class AgentBase(ABC):
         if session_context is None:
             return []
         try:
-            return session_context.flush_user_injections(
-                ledger_messages=ledger_messages
-            )
+            return session_context.flush_user_injections(ledger_messages=ledger_messages)
         except Exception as exc:
             logger.warning(
                 f"{self.__class__.__name__}: flush user injections 失败: {exc}"
@@ -652,9 +650,7 @@ class AgentBase(ABC):
         stripped = cls._strip_skill_tags_from_message(message)
         if not current_time_context:
             return stripped
-        runtime_context = (
-            f"<runtime_context>\n{current_time_context}\n</runtime_context>"
-        )
+        runtime_context = f"<runtime_context>\n{current_time_context}\n</runtime_context>"
         return cls._wrap_message_with_runtime_context(stripped, runtime_context)
 
     @staticmethod
