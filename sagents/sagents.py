@@ -5,7 +5,12 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncGenerator, Dict, FrozenSet, List, Optional, Tuple, Union
 
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import (
+    MessageChunk,
+    MessageRole,
+    MessageType,
+    is_sage_self_check_runtime_diagnostic_message,
+)
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.tool.impl import HIDDEN_FROM_STREAM_TOOL_NAMES
@@ -137,6 +142,16 @@ def _redact_hidden_tools_from_chunk(
         return replace(chunk, tool_calls=None)
 
     return replace(chunk, tool_calls=kept)
+
+
+def _should_suppress_chunk_from_client_stream(chunk: MessageChunk) -> bool:
+    metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+    return (
+        metadata.get("sse_visible") is False
+        or metadata.get("hidden_from_chat") is True
+        or metadata.get("hide_from_chat") is True
+        or is_sage_self_check_runtime_diagnostic_message(chunk)
+    )
 
 
 class SAgent:
@@ -430,9 +445,20 @@ class SAgent:
                             if not stat.get("tool_call_id"):
                                 stat["tool_call_id"] = message_chunk.tool_call_id
 
+                    redacted = _redact_hidden_tools_from_chunk(
+                        message_chunk, hidden_tool_state
+                    )
+                    if redacted is None:
+                        continue
+                    if _should_suppress_chunk_from_client_stream(redacted):
+                        logger.info(
+                            "SAgent: suppressed hidden runtime context chunk "
+                            f"from client stream session_id={session_id}"
+                        )
+                        continue
                     if first_show_time is None:
                         try:
-                            content = message_chunk.content
+                            content = redacted.content
                             if content and str(content).strip():
                                 first_show_time = time.time()
                                 delta_ms = int((first_show_time - start_time) * 1000)
@@ -448,11 +474,6 @@ class SAgent:
                             logger.error(
                                 f"SAgent: 统计首个content耗时出错: {e}\n{traceback.format_exc()}"
                             )
-                    redacted = _redact_hidden_tools_from_chunk(
-                        message_chunk, hidden_tool_state
-                    )
-                    if redacted is None:
-                        continue
                     if (
                         redacted.content
                         or redacted.tool_calls

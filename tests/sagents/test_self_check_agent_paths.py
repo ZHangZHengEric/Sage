@@ -27,6 +27,7 @@ def _load_self_check_agent(monkeypatch):
 
     class MessageRole:
         ASSISTANT = _EnumValue("assistant")
+        USER = _EnumValue("user")
 
     class MessageType:
         OBSERVATION = _EnumValue("observation")
@@ -86,6 +87,13 @@ def _make_message(role, content):
     )
 
 
+def _assert_hidden_self_check_message(chunk):
+    assert chunk.role == "user"
+    assert chunk.metadata["hidden_from_chat"] is True
+    assert chunk.metadata["sse_visible"] is False
+    assert chunk.metadata["runtime_diagnostic_source"] == "sage_self_check"
+
+
 def test_only_latest_assistant_message_is_checked(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
@@ -138,7 +146,7 @@ def test_non_absolute_markdown_link_returns_guidance(monkeypatch):
     assert session_context.audit_status["self_check_passed"] is False
     assert "必须使用绝对路径 Markdown 链接" in chunks[0].content
     assert "`README.md`" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_self_check_failure_message_uses_english_runtime_diagnostic(monkeypatch):
@@ -203,7 +211,7 @@ def test_absolute_markdown_link_checks_file_existence(monkeypatch):
 
     assert session_context.audit_status["self_check_passed"] is False
     assert "文件不存在: /tmp/project/README.md" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_artifacts_tag_relative_path_checks_file_existence(monkeypatch, tmp_path):
@@ -344,7 +352,7 @@ def test_artifacts_tag_missing_path_is_execution_error(monkeypatch, tmp_path):
     assert session_context.audit_status["self_check_passed"] is False
     assert session_context.audit_status["self_check_checked_files"] == [str(missing)]
     assert "文件不存在: reports/missing.pdf" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_artifacts_tag_http_path_is_ignored(monkeypatch, tmp_path):
@@ -424,7 +432,7 @@ def test_malformed_artifacts_json_triggers_execution_error(monkeypatch, tmp_path
 
     assert session_context.audit_status["self_check_passed"] is False
     assert "<movo-artifacts> 标签内容不是合法 JSON" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_malformed_questionnaire_json_triggers_execution_error(monkeypatch, tmp_path):
@@ -464,7 +472,7 @@ def test_malformed_questionnaire_json_triggers_execution_error(monkeypatch, tmp_
 
     assert session_context.audit_status["self_check_passed"] is False
     assert "<sage-questionnaire>" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_malformed_questionnaire_model_payload_triggers_execution_error(
@@ -518,7 +526,7 @@ def test_malformed_questionnaire_model_payload_triggers_execution_error(
 
     assert session_context.audit_status["self_check_passed"] is False
     assert "<movo-questionnaire> 标签内容不是合法 JSON" in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_path):
@@ -604,7 +612,7 @@ def test_absolute_markdown_link_outside_workspace_is_execution_error(
     assert session_context.audit_status["self_check_passed"] is False
     assert "文件路径超出可访问工作区" in chunks[0].content
     assert str(outside) in chunks[0].content
-    assert chunks[0].message_type == "agent_execution_error"
+    _assert_hidden_self_check_message(chunks[0])
 
 
 def test_broad_sandbox_permission_is_authoritative(monkeypatch, tmp_path):

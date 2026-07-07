@@ -12,7 +12,10 @@ from sagents.flow.schema import (
 )
 from sagents.flow.conditions import ConditionRegistry
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk
+from sagents.context.messages.message import (
+    MessageChunk,
+    is_sage_self_check_runtime_diagnostic_message,
+)
 from sagents.context.session_context import SessionStatus
 
 
@@ -306,6 +309,15 @@ class FlowExecutor:
                     last_chunk_summary = _message_chunk_debug_summary(
                         message_chunks or []
                     )
+                    if agent_key == "self_check" and all(
+                        is_sage_self_check_runtime_diagnostic_message(chunk)
+                        for chunk in message_chunks or []
+                    ):
+                        logger.info(
+                            "FlowExecutor: suppressed self-check runtime diagnostic "
+                            f"from client stream session_id={self.session_id}"
+                        )
+                        continue
                     yield message_chunks
             finally:
                 flush_journal = getattr(ctx, "flush_message_journal_current", None)

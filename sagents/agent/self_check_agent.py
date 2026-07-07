@@ -164,15 +164,17 @@ class SelfCheckAgent(AgentBase):
             content = self._format_failure_message(issues, checked_files, language)
             yield [
                 MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
+                    role=MessageRole.USER.value,
                     content=content,
                     message_id=str(uuid.uuid4()),
-                    message_type=MessageType.AGENT_EXECUTION_ERROR.value,
                     agent_name=self.agent_name,
                     metadata={
+                        "hidden_from_chat": True,
+                        "hide_from_chat": True,
+                        "sse_visible": False,
+                        "runtime_diagnostic_source": "sage_self_check",
                         "self_check_passed": False,
                         "checked_files": checked_files,
-                        "error_type": MessageType.AGENT_EXECUTION_ERROR.value,
                     },
                 )
             ]

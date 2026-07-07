@@ -101,6 +101,29 @@ def is_execution_error_message_type(message_type: Optional[str]) -> bool:
     return message_type in EXECUTION_ERROR_MESSAGE_TYPES
 
 
+def is_sage_self_check_runtime_diagnostic_content(content: Any) -> bool:
+    """Return true for internal self-check diagnostics that should stay hidden."""
+    marker = '<runtime_diagnostic source="sage_self_check"'
+    if isinstance(content, str):
+        return content.lstrip().startswith(marker)
+    if isinstance(content, list):
+        for part in content:
+            if (
+                isinstance(part, dict)
+                and part.get("type") == "text"
+                and isinstance(part.get("text"), str)
+                and part["text"].lstrip().startswith(marker)
+            ):
+                return True
+    return False
+
+
+def is_sage_self_check_runtime_diagnostic_message(message: Any) -> bool:
+    return is_sage_self_check_runtime_diagnostic_content(
+        getattr(message, "content", None)
+    )
+
+
 @dataclass
 class MessageChunk:
     """消息块结构类 - OpenAI兼容格式
