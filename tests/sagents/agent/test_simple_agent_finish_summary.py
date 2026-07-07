@@ -13,6 +13,7 @@ from sagents.agent.simple_agent import (
     SimpleAgent,
     _get_system_prefix,
 )
+from sagents.utils.prompt_manager import PromptManager
 
 
 class _DummyModel:
@@ -787,6 +788,55 @@ def test_task_complete_judge_does_not_treat_can_start_after_confirmation_as_user
         "If the recent user message already confirmed starting, continuing, "
         "or proceeding with the plan"
     ) in prompt
+
+
+def test_task_complete_judge_confirmation_rules_are_synced_across_prompt_variants():
+    prompt_manager = PromptManager()
+    expectations = [
+        (
+            "SimpleAgent",
+            "zh",
+            "不要仅因为 Assistant 使用了",
+            "如果最近用户已经明确确认开始、继续、按计划执行",
+        ),
+        (
+            "SimpleAgent",
+            "en",
+            "Do not infer that user confirmation is needed merely because",
+            "If the recent user message already confirmed starting",
+        ),
+        (
+            "SimpleAgent",
+            "pt",
+            "Não infira que confirmação do usuário é necessária apenas porque",
+            "Se a mensagem recente do usuário já confirmou começar",
+        ),
+        (
+            "SimpleReactAgent",
+            "zh",
+            "不要仅因为 Assistant 使用了",
+            "如果最近用户已经明确确认开始、继续、按计划执行",
+        ),
+        (
+            "SimpleReactAgent",
+            "en",
+            "Do not infer that user confirmation is needed merely because",
+            "If the recent user message already confirmed starting",
+        ),
+        (
+            "SimpleReactAgent",
+            "pt",
+            "Não infira que confirmação do usuário é necessária apenas porque",
+            "Se a mensagem recente do usuário já confirmou começar",
+        ),
+    ]
+
+    for agent, language, interrupt_rule, continue_rule in expectations:
+        prompt = prompt_manager.get_agent_prompt(
+            agent, "task_complete_template", language=language
+        )
+        assert interrupt_rule in prompt
+        assert continue_rule in prompt
 
 
 def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
