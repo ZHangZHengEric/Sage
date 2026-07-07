@@ -88,6 +88,15 @@ def test_default_command_policy_allows_non_forced_git_push():
     assert decision.category == "default_git_remote_write"
 
 
+def test_default_command_policy_allows_non_forced_git_push_with_global_options():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git -C repo push origin feature-x"
+    )
+
+    assert decision.action == "allow"
+    assert decision.category == "default_git_remote_write"
+
+
 def test_default_command_policy_denies_forced_git_push():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "git push --force origin feature-x"
@@ -95,6 +104,24 @@ def test_default_command_policy_denies_forced_git_push():
 
     assert decision.action == "deny"
     assert decision.category == "git_remote_write_approval_disabled"
+
+
+def test_default_command_policy_denies_forced_refspec_git_push():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git push origin +HEAD:feature-x"
+    )
+
+    assert decision.action == "deny"
+    assert decision.category == "git_remote_write_approval_disabled"
+
+
+def test_default_command_policy_denies_remote_branch_delete():
+    gateway = SandboxPolicyGateway()
+
+    for command in ("git push --delete origin feature-x", "git push origin :feature-x"):
+        decision = gateway.evaluate_shell_command(command)
+        assert decision.action == "deny", command
+        assert decision.category == "git_remote_write_approval_disabled"
 
 
 def test_default_command_policy_allows_legacy_write_operations():
@@ -153,6 +180,15 @@ def test_git_global_options_do_not_bypass_push_review():
 def test_denies_force_push_refspec_to_protected_branch():
     decision = SandboxPolicyGateway().evaluate_shell_command(
         "git push --force origin HEAD:refs/heads/main"
+    )
+
+    assert decision.action == "deny"
+    assert decision.category == "git_force_push_protected"
+
+
+def test_denies_plus_refspec_force_push_to_protected_branch():
+    decision = SandboxPolicyGateway().evaluate_shell_command(
+        "git push origin +HEAD:refs/heads/main"
     )
 
     assert decision.action == "deny"

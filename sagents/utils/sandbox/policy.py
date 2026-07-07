@@ -159,12 +159,7 @@ DEFAULT_COMMAND_POLICY = CommandPolicyConfig(
         ),
         CommandPolicyRule(
             action="allow",
-            match={
-                "pattern": (
-                    r"^git\s+push\b(?!.*(?:^|\s)(?:-f|--force(?:\b|=)|"
-                    r"--force-with-lease(?:\b|=)))"
-                )
-            },
+            match={"git": {"subcommand": "push", "force": False, "delete": False}},
             category="default_git_remote_write",
             reason="default policy allows non-forced git push",
         ),
@@ -594,7 +589,7 @@ class SandboxPolicyGateway:
             else:
                 return False
 
-        for key in ("force", "protected_branch"):
+        for key in ("force", "protected_branch", "delete"):
             expected = matcher.get(key)
             if expected is None:
                 continue
@@ -649,7 +644,17 @@ class SandboxPolicyGateway:
                 skip_next = False
                 continue
             lowered = token.lower()
-            if lowered in {"-f", "--force"} or lowered.startswith("--force-with-lease"):
+            if (
+                lowered == "-f"
+                or (
+                    lowered.startswith("-")
+                    and not lowered.startswith("--")
+                    and "f" in lowered[1:]
+                )
+                or lowered == "--force"
+                or lowered.startswith("--force=")
+                or lowered.startswith("--force-with-lease")
+            ):
                 force = True
             if token.startswith("-"):
                 if token in options_with_values:
@@ -659,12 +664,14 @@ class SandboxPolicyGateway:
 
         remote = positional[0] if positional else None
         refspec = positional[1] if len(positional) > 1 else None
+        refspec_force = bool(refspec and refspec.startswith("+"))
         branch = cls._git_push_branch_from_refspec(refspec)
         return {
             "remote": remote,
             "refspec": refspec,
             "branch": branch,
-            "force": force,
+            "force": force or refspec_force,
+            "delete": cls._is_git_push_delete(args, refspec),
             "protected_branch": cls._is_protected_git_branch(branch),
         }
 
@@ -684,6 +691,15 @@ class SandboxPolicyGateway:
             return False
         normalized = branch.removeprefix("refs/heads/")
         return normalized in {"main", "master"}
+
+    @staticmethod
+    def _is_git_push_delete(args: list[str], refspec: Optional[str]) -> bool:
+        if any(arg == "--delete" for arg in args):
+            return True
+        if refspec is None:
+            return False
+        normalized = refspec[1:] if refspec.startswith("+") else refspec
+        return normalized.startswith(":")
 
     def _stdout_redirection_targets_allowed(self, command: str) -> bool:
         matches = list(self._STDOUT_REDIRECT_TARGET_RE.finditer(command))
