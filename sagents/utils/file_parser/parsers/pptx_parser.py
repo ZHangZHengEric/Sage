@@ -38,9 +38,7 @@ class PPTXParser(BaseFileParser):
             )
 
         if not skip_validation and not self.can_parse(file_path):
-            return self.create_error_result(
-                f"Unsupported file type: {file_path}", file_path
-            )
+            return self.create_error_result(f"Unsupported file type: {file_path}", file_path)
 
         temp_pptx_path = None
 
@@ -54,9 +52,7 @@ class PPTXParser(BaseFileParser):
                     temp_pptx_path = self._convert_ppt_to_pptx(file_path)
                     target_path = temp_pptx_path
                 except Exception as e:
-                    return self.create_error_result(
-                        f"PPT conversion failed: {str(e)}", file_path
-                    )
+                    return self.create_error_result(f"PPT conversion failed: {str(e)}", file_path)
             else:
                 target_path = file_path
 
@@ -145,9 +141,7 @@ class PPTXParser(BaseFileParser):
                 ["libreoffice", "--version"], check=True, capture_output=True
             )
         except (FileNotFoundError, subprocess.CalledProcessError):
-            raise Exception(
-                "LibreOffice is not installed or not in PATH; cannot convert PPT files"
-            )
+            raise Exception("LibreOffice is not installed or not in PATH; cannot convert PPT files")
 
         logger.info(
             f"尝试使用LibreOffice将PPT转换为PPTX: {file_path} -> {pptx_output_path}"

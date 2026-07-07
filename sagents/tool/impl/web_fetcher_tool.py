@@ -745,9 +745,7 @@ class WebFetcherTool:
             "安全验证",
         )
         has_initial_state = "__INITIAL_STATE__" in html
-        has_empty_note_state = (
-            '"noteDetailMap":{}' in html or '"noteDetailMap": {}' in html
-        )
+        has_empty_note_state = '"noteDetailMap":{}' in html or '"noteDetailMap": {}' in html
         if not any(marker in plain_text for marker in unavailable_markers):
             if not (has_initial_state and has_empty_note_state):
                 return None
@@ -804,11 +802,7 @@ class WebFetcherTool:
         if stripped.startswith("{") or stripped.startswith("["):
             candidates.append(stripped)
 
-        for marker in (
-            "__INITIAL_STATE__",
-            "__NEXT_DATA__",
-            "window.__INITIAL_STATE__",
-        ):
+        for marker in ("__INITIAL_STATE__", "__NEXT_DATA__", "window.__INITIAL_STATE__"):
             marker_index = text.find(marker)
             if marker_index == -1:
                 continue

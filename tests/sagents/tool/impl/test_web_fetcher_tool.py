@@ -153,10 +153,10 @@ def test_fetch_html_with_save_outputs_markdown_images_and_metadata(
         "Example",
         {
             "article": (
-                "<article><p>Intro text long enough to pass the content filter "
+                '<article><p>Intro text long enough to pass the content filter '
                 '<a href="https://example.com/more">more</a>.</p>'
                 '<p><img src="/a.png" alt="A" title="Chart"></p>'
-                "<p>Tail text keeps the original reading order intact.</p></article>"
+                '<p>Tail text keeps the original reading order intact.</p></article>'
             )
         },
     )
@@ -182,10 +182,9 @@ def test_fetch_html_with_save_outputs_markdown_images_and_metadata(
     assert result["metadata"]["images"] == [
         {"src": "https://domain.test/a.png", "alt": "A", "title": "Chart"}
     ]
-    assert (
-        "![A](https://domain.test/a.png)"
-        in tmp_path.joinpath(result["metadata"]["filename"]).read_text()
-    )
+    assert "![A](https://domain.test/a.png)" in tmp_path.joinpath(
+        result["metadata"]["filename"]
+    ).read_text()
 
 
 def test_fetch_html_with_save_truncates_markdown_and_saves_full_content(
@@ -228,7 +227,7 @@ def test_fetch_html_without_images_returns_markdown_text(monkeypatch, tmp_path):
         "Text",
         {
             "main": (
-                "<main><p>Plain content long enough to pass the content filter "
+                '<main><p>Plain content long enough to pass the content filter '
                 '<a href="https://domain.test/ref">reference</a>.</p></main>'
             )
         },
@@ -258,7 +257,7 @@ def test_fetch_html_skips_embedded_data_images(monkeypatch, tmp_path):
         "Embedded",
         {
             "article": (
-                "<article><p>Content long enough to keep this article body.</p>"
+                '<article><p>Content long enough to keep this article body.</p>'
                 '<p><img src="data:image/png;base64,abc" alt="inline"></p>'
                 '<p><img src="/remote.png" alt="remote"></p></article>'
             )
@@ -401,7 +400,7 @@ def test_xiaohongshu_unavailable_page_does_not_fallback_to_shell_markdown(
         "小红书 - 你访问的页面不见了",
         {
             "body": (
-                "<body><h1>你访问的页面不见了</h1>"
+                '<body><h1>你访问的页面不见了</h1>'
                 '<script>window.__INITIAL_STATE__={"note":{"noteDetailMap":{}}}</script>'
                 '<div class="main-content">站点壳子 <img src="data:image/png;base64,abc"></div>'
                 "</body>"

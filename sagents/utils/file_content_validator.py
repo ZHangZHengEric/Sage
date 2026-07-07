@@ -150,7 +150,9 @@ class FileContentValidator:
                 line = getattr(mark, "line", None)
                 column = getattr(mark, "column", None)
                 if line is not None and column is not None:
-                    message = f"YAML syntax error: {exc} (line {line + 1}, column {column + 1})"
+                    message = (
+                        f"YAML syntax error: {exc} (line {line + 1}, column {column + 1})"
+                    )
             return FileContentValidator._error(extension, "yaml", message)
         except Exception as exc:
             return FileContentValidator._error(

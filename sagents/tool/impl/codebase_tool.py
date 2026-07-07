@@ -482,9 +482,7 @@ class CodebaseTool:
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(
-                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
-            )
+            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}")
 
         try:
             if await self._has_command(sandbox, "rg"):
@@ -647,9 +645,7 @@ class CodebaseTool:
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(
-                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
-            )
+            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}")
 
         root = path or sandbox.workspace_path
         try:
@@ -741,9 +737,7 @@ class CodebaseTool:
         try:
             sandbox = self._get_sandbox(session_id)
         except Exception as exc:
-            return make_tool_error(
-                ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}"
-            )
+            return make_tool_error(ToolErrorCode.SANDBOX_ERROR, f"Failed to get sandbox: {exc}")
 
         root = path or sandbox.workspace_path
         try:
@@ -755,9 +749,7 @@ class CodebaseTool:
             )
         except Exception as exc:
             logger.error(f"CodebaseTool.list_dir: get_file_tree 失败: {exc}")
-            return make_tool_error(
-                ToolErrorCode.INTERNAL_ERROR, f"Failed to list directory: {exc}"
-            )
+            return make_tool_error(ToolErrorCode.INTERNAL_ERROR, f"Failed to list directory: {exc}")
 
         return {
             "success": True,

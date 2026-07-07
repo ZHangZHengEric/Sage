@@ -43,9 +43,7 @@ class ExcelParser(BaseFileParser):
             )
 
         if not skip_validation and not self.can_parse(file_path):
-            return self.create_error_result(
-                f"Unsupported file type: {file_path}", file_path
-            )
+            return self.create_error_result(f"Unsupported file type: {file_path}", file_path)
 
         temp_xlsx_path = None
 
@@ -246,9 +244,7 @@ class ExcelParser(BaseFileParser):
                 ["libreoffice", "--version"], check=True, capture_output=True
             )
         except (FileNotFoundError, subprocess.CalledProcessError):
-            raise Exception(
-                "LibreOffice is not installed or not in PATH; cannot convert XLS files"
-            )
+            raise Exception("LibreOffice is not installed or not in PATH; cannot convert XLS files")
 
         logger.info(
             f"尝试使用LibreOffice将XLS转换为XLSX: {file_path} -> {xlsx_output_path}"

@@ -436,10 +436,9 @@ async def test_prepare_llm_request_messages_keeps_only_current_time_for_historic
     assert "<todo_list>todo-1</todo_list>" in first_request_messages[1].content
     assert "<current_time>time-1</current_time>" in second_request_messages[1].content
     assert "<todo_list>todo-1</todo_list>" not in second_request_messages[1].content
-    assert (
-        "<user_request>\nfirst request\n</user_request>"
-        in second_request_messages[1].content
-    )
+    assert "<user_request>\nfirst request\n</user_request>" in second_request_messages[
+        1
+    ].content
     assert "<current_time>time-2</current_time>" in second_request_messages[3].content
     assert "<todo_list>todo-2</todo_list>" in second_request_messages[3].content
 
@@ -555,9 +554,7 @@ async def test_prepare_llm_request_messages_extracts_current_time_from_multimoda
     assert isinstance(historical_content, list)
     assert "<current_time>runtime-time</current_time>" in historical_content[0]["text"]
     assert "user-time" not in historical_content[0]["text"]
-    assert (
-        historical_content[1]["text"] == "<current_time>user-time</current_time> 看图"
-    )
+    assert historical_content[1]["text"] == "<current_time>user-time</current_time> 看图"
     assert historical_content[2]["type"] == "image_url"
 
 

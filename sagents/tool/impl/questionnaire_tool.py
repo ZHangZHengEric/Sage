@@ -222,11 +222,11 @@ class QuestionnaireTool:
             f"QuestionnaireTool: 成功获取问卷答案. questionnaire_id={questionnaire_id}, is_auto_submit={result.get('is_auto_submit', False)}"
         )
         return json.dumps(
-            {
-                "success": True,
-                "status": "submitted",
-                "message": "The user submitted answers",
-                "answers": result.get("answers", {}),
+                {
+                    "success": True,
+                    "status": "submitted",
+                    "message": "The user submitted answers",
+                    "answers": result.get("answers", {}),
                 "questionnaire_id": result.get("questionnaire_id", questionnaire_id),
                 "submitted_at": result.get("submitted_at"),
                 "is_auto_submit": result.get("is_auto_submit", False),

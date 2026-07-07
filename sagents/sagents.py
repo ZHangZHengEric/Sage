@@ -262,9 +262,7 @@ class SAgent:
         if not model:
             raise ValueError("run_stream parameter model is required")
         if not isinstance(model_config, dict) or not model_config:
-            raise ValueError(
-                "run_stream parameter model_config must be a non-empty dict"
-            )
+            raise ValueError("run_stream parameter model_config must be a non-empty dict")
         if max_loop_count is None:
             raise ValueError("run_stream parameter max_loop_count is required")
 
@@ -283,7 +281,9 @@ class SAgent:
         if effective_sandbox_type == "local":
             # local 模式必须有 sandbox_agent_workspace
             if not sandbox_agent_workspace:
-                raise ValueError("local sandbox mode requires sandbox_agent_workspace")
+                raise ValueError(
+                    "local sandbox mode requires sandbox_agent_workspace"
+                )
 
         elif effective_sandbox_type == "remote":
             # remote 模式默认使用远程工作区根目录；sandbox_id 可选，不传时由 SessionContext 回退生成
