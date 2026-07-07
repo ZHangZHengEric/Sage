@@ -5,12 +5,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncGenerator, Dict, FrozenSet, List, Optional, Tuple, Union
 
-from sagents.context.messages.message import (
-    MessageChunk,
-    MessageRole,
-    MessageType,
-    is_sage_self_check_runtime_diagnostic_message,
-)
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.tool.impl import HIDDEN_FROM_STREAM_TOOL_NAMES
@@ -150,7 +145,6 @@ def _should_suppress_chunk_from_client_stream(chunk: MessageChunk) -> bool:
         metadata.get("sse_visible") is False
         or metadata.get("hidden_from_chat") is True
         or metadata.get("hide_from_chat") is True
-        or is_sage_self_check_runtime_diagnostic_message(chunk)
     )
 
 

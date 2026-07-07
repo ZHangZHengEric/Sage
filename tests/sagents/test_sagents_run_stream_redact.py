@@ -29,19 +29,6 @@ def test_hidden_context_metadata_suppressed_from_client_stream():
     assert _should_suppress_chunk_from_client_stream(chunk)
 
 
-def test_self_check_runtime_diagnostic_marker_suppressed_from_client_stream():
-    chunk = MessageChunk(
-        role=MessageRole.ASSISTANT.value,
-        content=(
-            '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
-            "Self-check found issues\n"
-            "</runtime_diagnostic>"
-        ),
-    )
-
-    assert _should_suppress_chunk_from_client_stream(chunk)
-
-
 def _assistant_tool_call_chunk(tool_calls):
     return MessageChunk(
         role=MessageRole.ASSISTANT.value,

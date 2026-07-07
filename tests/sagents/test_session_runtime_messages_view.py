@@ -45,7 +45,7 @@ def test_conversation_messages_view_filters_hidden_context_messages(monkeypatch)
     ]
 
 
-def test_conversation_messages_view_filters_self_check_diagnostic_without_metadata(
+def test_conversation_messages_view_filters_self_check_hidden_context(
     monkeypatch,
 ):
     self_check_context = MessageChunk(
@@ -56,6 +56,11 @@ def test_conversation_messages_view_filters_self_check_diagnostic_without_metada
             "</runtime_diagnostic>"
         ),
         message_id="self-check",
+        metadata={
+            "hidden_from_chat": True,
+            "sse_visible": False,
+            "runtime_diagnostic_source": "sage_self_check",
+        },
     )
     visible_assistant = MessageChunk(
         role=MessageRole.ASSISTANT.value,
