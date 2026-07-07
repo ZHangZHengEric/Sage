@@ -714,6 +714,81 @@ def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
     )
 
 
+def test_task_complete_judge_does_not_treat_can_start_after_confirmation_as_user_wait(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["llm_messages"] = kwargs["messages"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=(
+                            '{"task_interrupted": false, '
+                            '"reason": "continue production"}'
+                        )
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="OK 开始制作",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "Production readiness is checked. "
+                "No production clips have been generated yet. "
+                "I can start that production pass now."
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=messages,
+                session_id="s1",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+
+    prompt = captured["llm_messages"][0]["content"]
+    assert (
+        "Do not infer that user confirmation is needed merely because the "
+        "Assistant uses a declarative sentence"
+    ) in prompt
+    assert (
+        "If the recent user message already confirmed starting, continuing, "
+        "or proceeding with the plan"
+    ) in prompt
+
+
 def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
     monkeypatch,
 ):
