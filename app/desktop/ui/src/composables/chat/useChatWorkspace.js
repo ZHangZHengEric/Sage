@@ -18,7 +18,7 @@ export const useChatWorkspace = ({
     if (!agentId) return
     isWorkspaceLoading.value = true
     try {
-      const data = await taskAPI.getWorkspaceFiles(agentId)
+      const data = await taskAPI.getWorkspaceFiles(agentId, currentSessionId.value)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
@@ -36,7 +36,7 @@ export const useChatWorkspace = ({
   const handleWorkspacePanel = () => {
     showWorkspace.value = !showWorkspace.value
     if (showWorkspace.value) {
-      updateTaskAndWorkspace(currentSessionId.value)
+      updateTaskAndWorkspace()
     }
   }
 
@@ -47,7 +47,7 @@ export const useChatWorkspace = ({
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
-      const blob = await taskAPI.downloadFile(agentId, filePath)
+      const blob = await taskAPI.downloadFile(agentId, filePath, currentSessionId.value)
       // Support both Unix '/' and Windows '\' path separators
       let filename = filePath.split(/[/\\]/).pop()
       if (isDirectory && !filename.endsWith('.zip')) {
@@ -116,7 +116,7 @@ export const useChatWorkspace = ({
       const agentId = selectedAgentId.value
       // 所以删除也应该用 agentId。
       if (agentId) {
-        await taskAPI.deleteWorkspaceFile(agentId, null, filePath)
+        await taskAPI.deleteWorkspaceFile(agentId, currentSessionId.value, filePath)
         toast.success(t('common.deleteSuccess') || 'Delete successful')
         // 刷新列表
         updateTaskAndWorkspace()

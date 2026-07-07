@@ -730,7 +730,7 @@ const handleUploadFiles = async (files) => {
         ? relativePath.substring(0, relativePath.lastIndexOf('/'))
         : ''
       
-      await taskAPI.uploadWorkspaceFile(selectedAgentId.value, file, targetPath)
+      await taskAPI.uploadWorkspaceFile(selectedAgentId.value, file, targetPath, currentSessionId.value)
       uploadedCount++
     }
     
