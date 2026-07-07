@@ -869,23 +869,18 @@ class ExecuteCommandTool:
     @tool(
         description_i18n={
             "zh": (
-                "在沙箱中执行 Shell 命令；支持两段式执行。"
-                "block_until_ms=0 立即放后台并返回 task_id；>0 阻塞至命令结束或到点（默认 30000）。"
-                "若到点未结束，返回 task_id + tail_output；命令最终完成时系统会通过 "
-                "<system_reminder> 主动通知。若还有不依赖该命令结果的工作，起完命令后请先做下一步。"
-                "若当前用户请求必须等这个命令结果才能完成，必须立即调用 await_shell，"
-                "不要只回复“正在等待/稍后检查”。await_shell 请传入较大的 block_until_ms（>=60000），"
-                "必要时用 kill_shell 终止。"
+                "在沙箱中执行 Shell 命令。"
+                "block_until_ms=0 时后台运行并返回 task_id；>0 时等待完成或超时（默认 30000）。"
+                "超时未结束会返回 tail_output。"
+                "如果当前任务需要这个命令的结果，必须调用 await_shell 等结果，不要只回复等待。"
+                "如果还有别的独立工作，可以先做别的。必要时用 kill_shell 终止。"
             ),
             "en": (
-                "Execute a shell command in sandbox with two-stage support. "
-                "block_until_ms=0 backgrounds the command and returns immediately with a task_id. "
-                ">0 blocks until completion or deadline (default 30000). On deadline, returns task_id + tail_output. "
-                "Eventual completion is pushed via <system_reminder>. "
-                "If there is independent work, do that after spawning. "
-                "If the current user request depends on this command's result, you MUST call await_shell immediately; "
-                "do not merely say you are waiting or will check later. "
-                "Use await_shell with a generous block_until_ms (>=60000), or kill_shell to terminate."
+                "Execute a shell command in the sandbox. "
+                "block_until_ms=0 runs it in the background and returns a task_id; >0 waits until completion or timeout (default 30000). "
+                "If it times out, tail_output is returned. "
+                "If the current task needs the command result, call await_shell and wait for it; do not only reply that you are waiting. "
+                "If there is other independent work, do that first. Use kill_shell when needed."
             ),
         },
         param_description_i18n={
@@ -1142,22 +1137,19 @@ class ExecuteCommandTool:
     @tool(
         description_i18n={
             "zh": (
-                "拉取后台 shell 任务的增量输出；可选 pattern 命中即返回；结束时返回 exit_code 并清理注册表。"
+                "等待后台 shell 任务并读取输出；可选 pattern 命中即返回；结束时返回 exit_code 并清理。"
                 "默认 block_until_ms=600000（10 分钟）。"
-                "重要：仅在「下一步工作必须依赖此命令结果且当前没有别的事可做」时使用——"
-                "后台命令完成会通过 <system_reminder> 主动通知，无需轮询。"
-                "请按场景选择 block_until_ms："
-                "短任务 60000–120000；已知会跑数分钟 120000–300000；训练/大型构建 600000–1200000。"
-                "禁止以 < 30000 的间隔反复轮询；服务端会对小值做自适应改写。"
+                "当前任务需要命令结果时使用。"
+                "如果任务还在运行且仍需要结果，继续调用 await_shell，不要只回复等待。"
+                "短任务可用 60000–120000；几分钟任务 120000–300000；长构建或训练 600000–1200000。"
             ),
             "en": (
-                "Poll a background shell task for incremental output. "
-                "Optional pattern returns early on match. On finish returns exit_code and cleans up. "
+                "Wait for a background shell task and read output. "
+                "Optional pattern returns early on match. On finish, returns exit_code and cleans up. "
                 "Default block_until_ms=600000 (10 minutes). "
-                "IMPORTANT: only use when the next step strictly depends on this command's result AND there is nothing else productive to do — "
-                "completion will be pushed via <system_reminder>, polling is unnecessary. "
-                "Pick block_until_ms by scenario: short tasks 60000–120000; multi-minute tasks 120000–300000; long builds/training 600000–1200000. "
-                "Do not poll with < 30000ms intervals; the server will rewrite small values adaptively."
+                "Use this when the current task needs the command result. "
+                "If the task is still running and the result is still needed, call await_shell again; do not only reply that you are waiting. "
+                "Use 60000–120000 for short tasks, 120000–300000 for multi-minute tasks, and 600000–1200000 for long builds or training."
             ),
         },
         param_description_i18n={
