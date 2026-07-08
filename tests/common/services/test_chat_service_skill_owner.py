@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from common.core import config
+from common.core.context import set_request_context
 from common.schemas.chat import Message, StreamRequest
 from common.services import chat_service
 
@@ -63,6 +64,18 @@ def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(
         "user_id": "owner_user",
         "agent_workspace": str(expected_workspace),
     }
+
+
+def test_create_conversation_title_fallback_uses_request_locale():
+    set_request_context("test", None, locale="en-US")
+    try:
+        request = StreamRequest(messages=[])
+
+        title = asyncio.run(chat_service.create_conversation_title(request))
+    finally:
+        set_request_context("test-reset", None, locale=None)
+
+    assert title == "New conversation"
 
 
 def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):

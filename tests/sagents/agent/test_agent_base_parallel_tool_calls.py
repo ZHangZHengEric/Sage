@@ -59,6 +59,14 @@ def _tool_call(call_id: str):
     }
 
 
+class _FakeSessionContext:
+    def __init__(self, language: str):
+        self.language = language
+
+    def get_language(self):
+        return self.language
+
+
 @pytest.mark.asyncio
 async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypatch):
     agent = ParallelToolAgent(expected_starts=3)
@@ -115,3 +123,60 @@ async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypat
         "call_2",
         "call_3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_call_arguments_become_hidden_localized_runtime_diagnostic(
+    monkeypatch,
+):
+    agent = ParallelToolAgent(expected_starts=0)
+    monkeypatch.setattr(
+        agent,
+        "_get_live_session_context",
+        lambda session_id: _FakeSessionContext("en-US"),
+    )
+    calls = {
+        "call_bad": {
+            "id": "call_bad",
+            "type": "function",
+            "function": {
+                "name": "file_write",
+                "arguments": '{"file_path":"/tmp/demo.txt","content":"unterminated',
+            },
+        }
+    }
+
+    yielded = []
+    async for messages, is_complete in agent._handle_tool_calls(
+        tool_calls=calls,
+        tool_manager=None,
+        messages_input=[],
+        session_id="session-1",
+        emit_tool_call_message=False,
+    ):
+        assert is_complete is False
+        yielded.extend(messages)
+
+    assert len(yielded) == 1
+    message = yielded[0]
+    assert message.role == MessageRole.ASSISTANT.value
+    assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
+    assert "I tried to call tool `file_write`" in message.content
+    assert "Invalid JSON or incomplete argument structure" in message.content
+    assert "我尝试调用工具" not in message.content
+    assert message.metadata["sse_visible"] is False
+    assert message.metadata["hidden_from_chat"] is True
+    assert message.metadata["hide_from_chat"] is True
+    assert message.metadata["runtime_diagnostic_source"] == "tool_call_argument_parse"
+
+
+def test_context_over_limit_error_uses_requested_language():
+    agent = ParallelToolAgent(expected_starts=0)
+
+    message = agent._context_over_limit_error_chunk(120, 100, "en-US")
+
+    assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
+    assert (
+        "The compressed context still exceeds the model input limit" in message.content
+    )
+    assert "当前上下文" not in message.content

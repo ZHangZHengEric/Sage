@@ -19,7 +19,9 @@ from sagents.skill.skill_manager import SkillManager, get_skill_manager
 from sagents.skill.skill_schema import SkillSchema
 
 from common.core import config
+from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.services.agent_workspace import get_agent_skill_dir
 
@@ -1484,10 +1486,10 @@ async def update_skill_content(
             f.write(content)
         if _is_desktop_mode():
             if tm.reload_skill(skill_info.path):
-                return "技能更新成功"
+                return t("skill.updated", locale=get_request_locale())
             raise ValueError("Skill validation failed")
         _invalidate_server_skills_cache()
-        return "技能更新成功"
+        return t("skill.updated", locale=get_request_locale())
     except Exception as e:
         logger.error(f"Update skill content failed: {e}")
         try:
