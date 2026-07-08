@@ -1529,6 +1529,11 @@ class SimpleAgent(AgentBase):
                                 ),
                                 type=MessageType.AGENT_EXECUTION_ERROR.value,
                                 agent_name=self.agent_name,
+                                metadata={
+                                    "runtime_notice": "unavailable_tool_rejected",
+                                    "hidden_from_chat": True,
+                                    "sse_visible": False,
+                                },
                             )
                         ],
                         False,
