@@ -131,3 +131,6 @@ def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
     assert len(errors) == 1
     assert "tool_expand_tools" in errors[0].content
     assert "beta_tool" in errors[0].content
+    assert errors[0].metadata["runtime_notice"] == "unavailable_tool_rejected"
+    assert errors[0].metadata["hidden_from_chat"] is True
+    assert errors[0].metadata["sse_visible"] is False
