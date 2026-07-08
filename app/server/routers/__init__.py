@@ -16,6 +16,7 @@ def register_routes(app):
     from .kdb import kdb_router
     from .llm_provider import router as llm_provider_router
     from .mcp import mcp_router
+    from .model import model_router
     from .observability import observability_router
     from .oauth2 import oauth2_router
     from .oss import oss_router
@@ -38,6 +39,7 @@ def register_routes(app):
     app.include_router(version_router)
     app.include_router(oss_router)
     app.include_router(chat_router)
+    app.include_router(model_router)
     app.include_router(skill_router)
     app.include_router(llm_provider_router)
     app.include_router(observability_router)
