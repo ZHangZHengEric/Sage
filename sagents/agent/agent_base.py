@@ -1180,6 +1180,7 @@ class AgentBase(ABC):
         last_exception = None
         structured_output_fallback_used = False
         partial_stream_aborted = False
+        stream_succeeded = False
 
         while retry_count < max_retries:
             attempt_yielded_chunks = False
@@ -1422,6 +1423,7 @@ class AgentBase(ABC):
 
                 # 成功完成，跳出重试循环
                 all_chunks = attempt_chunks
+                stream_succeeded = True
                 break
 
             except (
@@ -1636,9 +1638,11 @@ class AgentBase(ABC):
                     )
                     raise e
             finally:
-                # 只有在成功完成或最终失败时才记录
+                # 只有在成功完成或最终失败时才记录。
+                # 重试后成功也必须落盘（stream_succeeded），不能只看 retry_count==0。
                 if (
-                    retry_count == 0
+                    stream_succeeded
+                    or partial_stream_aborted
                     or retry_count >= max_retries
                     or (
                         last_exception

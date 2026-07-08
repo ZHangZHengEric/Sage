@@ -1,6 +1,7 @@
 import pytest
 import httpx
 
+from openai import APIConnectionError
 from openai.types.chat import chat_completion_chunk
 
 from sagents.agent.agent_base import AgentBase, PartialStreamConsumedError
@@ -216,6 +217,67 @@ async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(
 
     assert client.chat.completions.calls == 2
     assert [chunk.choices[0].delta.content for chunk in chunks] == ["retry succeeded"]
+
+
+class _RecordingSessionContext:
+    def __init__(self):
+        self.llm_requests_logs = []
+
+    def add_llm_request(self, request, response):
+        self.llm_requests_logs.append({"request": request, "response": response})
+
+    @property
+    def message_manager(self):
+        return self
+
+    def update_token_ratio(self, *args, **kwargs):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_streaming_call_records_llm_request_after_connection_error_retry_success(
+    monkeypatch,
+):
+    async def fast_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("sagents.agent.agent_base.asyncio.sleep", fast_sleep)
+    client = FakeClient(
+        attempts=[
+            _attempt_raises_before_yield(
+                APIConnectionError(
+                    message="Connection error.",
+                    request=httpx.Request(
+                        "POST", "https://api.openai.com/v1/chat/completions"
+                    ),
+                )
+            ),
+            _attempt_yields(_content_chunk("retry succeeded")),
+        ]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})  # pyright: ignore[reportArgumentType]
+    session_context = _RecordingSessionContext()
+    agent._get_live_session_context = lambda session_id: session_context
+    messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
+
+    chunks = []
+    async for chunk in agent._call_llm_streaming(
+        messages,
+        session_id="sess_retry_log",
+        step_name="direct_execution",
+        enable_thinking=False,
+    ):  # pyright: ignore[reportArgumentType]
+        chunks.append(chunk)
+
+    assert client.chat.completions.calls == 2
+    assert len(session_context.llm_requests_logs) == 1
+    recorded = session_context.llm_requests_logs[0]
+    assert recorded["request"]["step_name"] == "direct_execution"
+    assert recorded["response"] is not None
+    assert (
+        recorded["response"].choices[0].message.content  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]
+        == "retry succeeded"
+    )
 
 
 @pytest.mark.asyncio
