@@ -833,7 +833,7 @@ async def edit_last_user_message(
             _extract_text_from_message_content(last_user_message.get("content"))
         )
         or conversation.title
-        or "新会话"
+        or t("conversation.new_title", locale=get_request_locale())
     )
 
     await dao.update_conversation_messages(session_id, truncated_messages)

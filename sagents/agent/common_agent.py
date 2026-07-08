@@ -237,40 +237,18 @@ class CommonAgent(AgentBase):
         Yields:
             tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
         """
-        logger.info(f"CommonAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
-        logger.info(f"CommonAgent: 工具调用: {tool_calls}")
-
-        for tool_call_id, tool_call in tool_calls.items():
-            tool_name = tool_call["function"]["name"]
-            logger.info(f"CommonAgent: 执行工具 {tool_name}")
-            logger.info(f"CommonAgent: 参数 {tool_call['function']['arguments']}")
-
-            # 检查是否为complete_task
-            if tool_name == "complete_task":
-                logger.info("CommonAgent: complete_task，停止执行")
-                yield [
-                    MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content="All user requirements have been satisfied",
-                        message_id=str(uuid.uuid4()),
-                        message_type=MessageType.DO_SUBTASK_RESULT.value,
-                    )
-                ]
+        async for messages, is_complete in super()._handle_tool_calls(
+            tool_calls=tool_calls,
+            tool_manager=tool_manager,
+            messages_input=messages_input,
+            session_id=session_id,
+            handle_complete_task=True,
+            emit_tool_call_message=emit_tool_call_message,
+            execute_concurrently=False,
+        ):
+            yield messages
+            if is_complete:
                 return
-
-            # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
-            if emit_tool_call_message:
-                output_messages = self._create_tool_call_message(tool_call)
-                yield output_messages
-
-            # 执行工具
-            async for message_chunk_list in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=messages_input,
-                session_id=session_id,
-            ):
-                yield message_chunk_list
 
     def process_tool_response(
         self, tool_response: str, tool_call_id: str
