@@ -19,6 +19,27 @@ import { getSessionMessageIndexKey } from '@/utils/sessionStreamEvents.js'
 
 // 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
 const abilityCacheByAgentGlobal = ref({})
+const SMOOTH_ASSISTANT_TEXT_INTERVAL_MS = 16
+const SMOOTH_ASSISTANT_TEXT_CHARS_PER_TICK = 3
+const NON_SMOOTH_ASSISTANT_TYPES = new Set([
+  'agent_execution_error',
+  'error',
+  'reasoning_content',
+  'task_analysis',
+  'token_usage'
+])
+
+const isSmoothableAssistantTextChunk = (message = {}) => {
+  const type = message.type || message.message_type || ''
+  return (
+    message.role === 'assistant' &&
+    typeof message.content === 'string' &&
+    message.content.length > 0 &&
+    !NON_SMOOTH_ASSISTANT_TYPES.has(type) &&
+    !(Array.isArray(message.tool_calls) && message.tool_calls.length > 0) &&
+    !isToolResultMessage(message)
+  )
+}
 
 export const useChatPage = (props) => {
   const { t, language } = useLanguage()
@@ -284,6 +305,97 @@ export const useChatPage = (props) => {
     messageIdIndexMap.value = next
   }
 
+  const smoothAssistantTextBuffers = new Map()
+  let smoothAssistantTextTimer = null
+
+  const scheduleSmoothAssistantTextFlush = () => {
+    if (smoothAssistantTextTimer !== null) return
+    smoothAssistantTextTimer = window.setTimeout(() => {
+      smoothAssistantTextTimer = null
+      flushSmoothAssistantText()
+    }, SMOOTH_ASSISTANT_TEXT_INTERVAL_MS)
+  }
+
+  const clearSmoothAssistantTextBuffers = () => {
+    if (smoothAssistantTextTimer !== null) {
+      window.clearTimeout(smoothAssistantTextTimer)
+      smoothAssistantTextTimer = null
+    }
+    smoothAssistantTextBuffers.clear()
+  }
+
+  const enqueueSmoothAssistantText = (messageIndexKey, messageData) => {
+    if (!messageIndexKey || !isSmoothableAssistantTextChunk(messageData)) return
+    const { content, ...latestPatch } = messageData
+    const state = smoothAssistantTextBuffers.get(messageIndexKey) || {
+      pending: '',
+      latestPatch: {}
+    }
+    state.pending += content
+    state.latestPatch = {
+      ...state.latestPatch,
+      ...latestPatch,
+      timestamp: messageData.timestamp || Date.now()
+    }
+    smoothAssistantTextBuffers.set(messageIndexKey, state)
+    scheduleSmoothAssistantTextFlush()
+  }
+
+  const flushSmoothAssistantText = (onlyKey = null, drain = false) => {
+    if (smoothAssistantTextTimer !== null) {
+      window.clearTimeout(smoothAssistantTextTimer)
+      smoothAssistantTextTimer = null
+    }
+
+    const keys = onlyKey ? [onlyKey] : Array.from(smoothAssistantTextBuffers.keys())
+    let hasMore = false
+    let updated = false
+
+    keys.forEach((key) => {
+      const state = smoothAssistantTextBuffers.get(key)
+      if (!state || !state.pending) {
+        smoothAssistantTextBuffers.delete(key)
+        return
+      }
+
+      const targetIndex = messageIdIndexMap.value.get(key)
+      const existing = Number.isInteger(targetIndex) ? messages.value[targetIndex] : null
+      if (!existing) {
+        smoothAssistantTextBuffers.delete(key)
+        return
+      }
+
+      const takeCount = drain
+        ? state.pending.length
+        : Math.min(SMOOTH_ASSISTANT_TEXT_CHARS_PER_TICK, state.pending.length)
+      const visibleText = state.pending.slice(0, takeCount)
+      state.pending = state.pending.slice(takeCount)
+
+      const nextMessage = {
+        ...existing,
+        ...state.latestPatch,
+        content: `${existing.content || ''}${visibleText}`,
+        timestamp: state.latestPatch.timestamp || existing.timestamp || Date.now()
+      }
+      messages.value.splice(targetIndex, 1, nextMessage)
+      updated = true
+
+      if (state.pending) {
+        smoothAssistantTextBuffers.set(key, state)
+        hasMore = true
+      } else {
+        smoothAssistantTextBuffers.delete(key)
+      }
+    })
+
+    if (updated) {
+      nextTick(() => scrollToBottom())
+    }
+    if (hasMore) {
+      scheduleSmoothAssistantTextFlush()
+    }
+  }
+
   const mergeToolCall = (existingToolCall = {}, incomingToolCall = {}) => {
     if (!incomingToolCall || typeof incomingToolCall !== 'object') return existingToolCall
     if (!existingToolCall || typeof existingToolCall !== 'object') return { ...incomingToolCall }
@@ -379,6 +491,7 @@ export const useChatPage = (props) => {
   }
 
   const clearCurrentStreamViewState = () => {
+    clearSmoothAssistantTextBuffers()
     if (abortControllerRef.value) {
       abortControllerRef.value.abort()
       abortControllerRef.value = null
@@ -471,7 +584,10 @@ export const useChatPage = (props) => {
   }
 
   const handleMessage = (messageData) => {
-    if (messageData.type === 'stream_end') return
+    if (messageData.type === 'stream_end') {
+      flushSmoothAssistantText(null, true)
+      return
+    }
     try {
       const gid = messageData?.metadata?.guidance_id
       if (gid && messageData.role === 'user') {
@@ -553,6 +669,13 @@ export const useChatPage = (props) => {
         typeof messageData.content === 'string' &&
         messageData.content.length > 0
 
+      if (shouldAppendContent && isSmoothableAssistantTextChunk(messageData)) {
+        enqueueSmoothAssistantText(messageIndexKey, messageData)
+        return
+      }
+
+      flushSmoothAssistantText(messageIndexKey, true)
+
       let nextMessage
       if (isToolResultMessage(messageData)) {
         nextMessage = {
@@ -576,8 +699,14 @@ export const useChatPage = (props) => {
       extractWorkbenchFromMessage(nextMessage)
       return
     }
+    const shouldSmoothAppended = isSmoothableAssistantTextChunk(messageData)
+    if (!shouldSmoothAppended) {
+      flushSmoothAssistantText(null, true)
+    }
+
     const appended = {
       ...messageData,
+      content: shouldSmoothAppended ? '' : messageData.content,
       timestamp: messageData.timestamp || Date.now()
     }
     messages.value.push(appended)
@@ -586,6 +715,9 @@ export const useChatPage = (props) => {
       messageIdIndexMap.value.set(appendedKey, messages.value.length - 1)
     }
     extractWorkbenchFromMessage(appended)
+    if (appendedKey && shouldSmoothAppended) {
+      enqueueSmoothAssistantText(appendedKey, messageData)
+    }
     // 不要强制重置 shouldAutoScroll，也不要强制滚动
     // 只有当 shouldAutoScroll 为 true 时（即用户在底部），scrollToBottom 才会执行滚动
     nextTick(() => scrollToBottom())
@@ -657,6 +789,7 @@ export const useChatPage = (props) => {
   }
 
   const clearMessages = () => {
+    clearSmoothAssistantTextBuffers()
     messages.value = []
     messageIdIndexMap.value = new Map()
   }
@@ -1183,6 +1316,7 @@ export const useChatPage = (props) => {
   })
 
   onUnmounted(() => {
+    clearSmoothAssistantTextBuffers()
     stopSSESync()
   })
 
