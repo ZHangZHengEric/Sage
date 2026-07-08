@@ -94,6 +94,101 @@ class TestCommonAgent:
         # assert "test_tool" in messages[0].show_content
         # assert "arg = value" in messages[0].show_content
 
+    @pytest.mark.asyncio
+    async def test_invalid_tool_call_arguments_become_hidden_runtime_diagnostic(
+        self, common_agent
+    ):
+        mock_context = MagicMock()
+        mock_context.get_language.return_value = "en"
+        calls = {
+            "call_bad": {
+                "id": "call_bad",
+                "type": "function",
+                "function": {
+                    "name": "test_tool",
+                    "arguments": '{"arg": "unterminated',
+                },
+            }
+        }
+
+        with patch.object(
+            common_agent, "_get_live_session_context", return_value=mock_context
+        ):
+            chunks = []
+            async for messages in common_agent._handle_tool_calls(
+                tool_calls=calls,
+                tool_manager=None,
+                messages_input=[],
+                session_id="test_session",
+                emit_tool_call_message=False,
+            ):
+                chunks.extend(messages)
+
+        assert len(chunks) == 1
+        message = chunks[0]
+        assert message.role == MessageRole.ASSISTANT.value
+        assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
+        assert "I tried to call tool `test_tool`" in message.content
+        assert message.metadata["sse_visible"] is False
+        assert message.metadata["hidden_from_chat"] is True
+        assert (
+            message.metadata["runtime_diagnostic_source"] == "tool_call_argument_parse"
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_tool_calls_executes_tools_sequentially(self, common_agent):
+        mock_context = MagicMock()
+        mock_context.get_language.return_value = "en"
+        events = []
+        calls = {
+            "call_1": {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "first_tool", "arguments": '{"value": 1}'},
+            },
+            "call_2": {
+                "id": "call_2",
+                "type": "function",
+                "function": {"name": "second_tool", "arguments": '{"value": 2}'},
+            },
+        }
+
+        async def fake_execute_tool(tool_call, *args, **kwargs):
+            tool_name = tool_call["function"]["name"]
+            events.append(f"start:{tool_name}")
+            await asyncio.sleep(0)
+            events.append(f"end:{tool_name}")
+            yield [
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content="{}",
+                    tool_call_id=tool_call["id"],
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                )
+            ]
+
+        with (
+            patch.object(
+                common_agent, "_get_live_session_context", return_value=mock_context
+            ),
+            patch.object(common_agent, "_execute_tool", side_effect=fake_execute_tool),
+        ):
+            async for _messages in common_agent._handle_tool_calls(
+                tool_calls=calls,
+                tool_manager=None,
+                messages_input=[],
+                session_id="test_session",
+                emit_tool_call_message=False,
+            ):
+                pass
+
+        assert events == [
+            "start:first_tool",
+            "end:first_tool",
+            "start:second_tool",
+            "end:second_tool",
+        ]
+
     def test_process_tool_response_json(self, common_agent):
         tool_call_id = "123"
         tool_response = '{"content": {"result": "success"}}'

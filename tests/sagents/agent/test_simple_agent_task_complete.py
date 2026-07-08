@@ -39,6 +39,21 @@ async def test_must_continue_when_last_assistant_ends_with_colon():
 
 
 @pytest.mark.asyncio
+async def test_must_continue_for_tool_argument_parse_runtime_diagnostic():
+    agent = SimpleAgent(model=DummyModel(), model_config={})
+    messages = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="I tried to call tool `file_write`, but its arguments could not be parsed.",
+            message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+            metadata={"runtime_diagnostic_source": "tool_call_argument_parse"},
+        ),
+    ]
+
+    assert await agent._must_continue_by_rules(messages) is True
+
+
+@pytest.mark.asyncio
 async def test_not_must_continue_for_normal_assistant_message():
     agent = SimpleAgent(model=DummyModel(), model_config={})
     messages = [

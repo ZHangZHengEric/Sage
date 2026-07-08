@@ -652,6 +652,14 @@ class SimpleAgent(AgentBase):
             return True
 
         # 规则2：最后一条消息是工具调用错误结果（如参数解析失败等）
+        if last_message.matches_message_types([MessageType.AGENT_EXECUTION_ERROR.value]):
+            metadata = last_message.metadata or {}
+            if metadata.get("runtime_diagnostic_source") == "tool_call_argument_parse":
+                logger.debug(
+                    "[SimpleAgent] must_continue 规则2命中：工具调用参数解析失败，必须继续"
+                )
+                return True
+
         if last_message.matches_message_types([MessageType.DO_SUBTASK_RESULT.value]):
             content = last_message.content or ""
             if any(mark in content for mark in ["参数解析失败", "工具调用失败"]):

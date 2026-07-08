@@ -1,18 +1,20 @@
 import pytest
 
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionStatus
 from sagents.flow.conditions import ConditionRegistry
 from sagents.flow.executor import FlowExecutor
-from sagents.flow.schema import IfNode, ParallelNode, SequenceNode, SwitchNode
+from sagents.flow.schema import AgentNode, IfNode, ParallelNode, SequenceNode, SwitchNode
 
 
 class _FakeContext:
     def __init__(self):
         self.audit_status = {"trace_enabled": True, "mode": "simple"}
         self.system_context = {}
+        self.added_messages = []
 
     def add_messages(self, _messages):
-        raise AssertionError("test flow should not execute agent nodes")
+        self.added_messages.append(_messages)
 
 
 class _FakeSession:
@@ -86,3 +88,41 @@ async def test_flow_executor_emits_one_trace_for_nested_control_flow(monkeypatch
     assert trace_messages == [
         "FlowExecutor: Trace sequence -> if(trace_enabled=True) -> switch(mode=simple) -> parallel(branches=2) -> sequence -> sequence -> parallel_done(2)"
     ]
+
+
+@pytest.mark.asyncio
+async def test_flow_executor_suppresses_hidden_chunks_for_any_agent():
+    hidden = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="hidden diagnostic",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"hidden_from_chat": True, "sse_visible": False},
+    )
+    visible = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="visible",
+        message_type=MessageType.DO_SUBTASK_RESULT.value,
+    )
+    session_manager = _FakeSessionManager()
+
+    class FakeAgent:
+        agent_name = "fake_agent"
+
+    class FakeRuntime:
+        def _get_agent(self, _agent_key):
+            return FakeAgent()
+
+        async def _execute_agent_phase(self, *args, **kwargs):
+            yield [hidden, visible]
+
+    executor = FlowExecutor(
+        tool_manager=None,
+        session_runtime=FakeRuntime(),
+        session_id="flow-session",
+        session_manager=session_manager,
+    )
+
+    chunks = [chunk async for chunk in executor.execute(AgentNode(agent_key="simple"))]
+
+    assert chunks == [[visible]]
+    assert session_manager.session.context.added_messages == [[hidden, visible]]

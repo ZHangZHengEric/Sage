@@ -25,6 +25,7 @@ from sagents.utils.user_input_optimizer import UserInputOptimizer
 from common.core import config
 from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
+from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.models.base import get_local_now
 from common.models.conversation import ConversationDao
@@ -1569,8 +1570,9 @@ def _sanitize_title_text(text: str) -> str:
 
 
 async def create_conversation_title(request: StreamRequest) -> str:
+    default_title = t("conversation.new_title", locale=get_request_locale())
     if not request.messages:
-        return "新会话"
+        return default_title
 
     if _is_desktop_mode():
         title_source = ""
@@ -1593,9 +1595,9 @@ async def create_conversation_title(request: StreamRequest) -> str:
             _sanitize_title_text(
                 _extract_text_from_content(request.messages[0].content)
             )
-            or "新会话"
+            or default_title
         )
 
     if not title_source:
-        return "新会话"
+        return default_title
     return title_source[:50] + "..." if len(title_source) > 50 else title_source
