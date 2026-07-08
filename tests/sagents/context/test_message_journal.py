@@ -63,6 +63,27 @@ def test_message_journal_writes_user_message_immediately(tmp_path):
     assert records[0]["message"]["content"] == "please do this"
 
 
+def test_hidden_runtime_notice_stays_in_internal_history(tmp_path):
+    ctx = _make_session(tmp_path)
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="Tool was not provided.",
+        message_id="notice1",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={
+            "runtime_notice": "unavailable_tool_rejected",
+            "hidden_from_chat": True,
+            "sse_visible": False,
+        },
+    )
+
+    ctx.add_messages(notice)
+
+    assert len(ctx.message_manager.messages) == 1
+    assert ctx.message_manager.messages[0].content == "Tool was not provided."
+    assert _read_journal(ctx) == []
+
+
 def test_message_journal_writes_previous_message_on_id_switch(tmp_path):
     ctx = _make_session(tmp_path)
 
