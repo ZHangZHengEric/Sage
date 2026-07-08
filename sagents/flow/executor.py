@@ -51,6 +51,25 @@ def _message_manager_debug_id(ctx: Any) -> Optional[int]:
     return id(message_manager)
 
 
+def _should_suppress_chunk_from_flow_stream(chunk: MessageChunk) -> bool:
+    metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+    return (
+        metadata.get("sse_visible") is False
+        or metadata.get("hidden_from_chat") is True
+        or metadata.get("hide_from_chat") is True
+    )
+
+
+def _visible_chunks_for_flow_stream(
+    message_chunks: List[MessageChunk],
+) -> List[MessageChunk]:
+    return [
+        chunk
+        for chunk in message_chunks
+        if not _should_suppress_chunk_from_flow_stream(chunk)
+    ]
+
+
 class _FlowExecutionTrace:
     def __init__(self) -> None:
         self.events: List[str] = []
@@ -306,17 +325,17 @@ class FlowExecutor:
                     last_chunk_summary = _message_chunk_debug_summary(
                         message_chunks or []
                     )
-                    if agent_key == "self_check" and all(
-                        (getattr(chunk, "metadata", None) or {}).get("sse_visible")
-                        is False
-                        for chunk in message_chunks or []
-                    ):
+                    visible_message_chunks = _visible_chunks_for_flow_stream(
+                        message_chunks or []
+                    )
+                    if len(visible_message_chunks) != len(message_chunks or []):
                         logger.info(
-                            "FlowExecutor: suppressed hidden self-check context "
+                            "FlowExecutor: suppressed hidden runtime context "
                             f"from client stream session_id={self.session_id}"
                         )
+                    if not visible_message_chunks:
                         continue
-                    yield message_chunks
+                    yield visible_message_chunks
             finally:
                 flush_journal = getattr(ctx, "flush_message_journal_current", None)
                 if callable(flush_journal):

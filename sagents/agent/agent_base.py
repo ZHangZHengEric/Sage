@@ -44,6 +44,7 @@ from sagents.utils.stream_merger import (
 from sagents.utils.stream_tag_parser import (
     judge_delta_content_type as _judge_delta_content_type_util,
 )
+from sagents.utils.i18n import t
 from sagents.utils.agent_session_helper import (
     get_live_session as _get_live_session_util,
     get_live_session_context as _get_live_session_context_util,
@@ -964,14 +965,26 @@ class AgentBase(ABC):
                     "build requests via prepare_llm_request_messages."
                 )
 
+    @staticmethod
+    def _language_from_session_context(
+        session_context: Optional[SessionContext],
+    ) -> Optional[str]:
+        if session_context is None:
+            return None
+        try:
+            return session_context.get_language()
+        except Exception:
+            return None
+
     def _context_over_limit_error_chunk(
-        self, current_tokens: int, limit: int
+        self, current_tokens: int, limit: int, language: Optional[str] = None
     ) -> MessageChunk:
         return MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content=(
-                f"当前上下文压缩后仍超过模型输入限制：{current_tokens} > {limit}。"
-                "请缩小当前请求范围，或允许我先整理/归档更早的执行过程后继续。"
+            content=t(
+                "runtime.context_over_limit",
+                language,
+                {"current_tokens": current_tokens, "limit": limit},
             ),
             type=MessageType.AGENT_EXECUTION_ERROR.value,
             agent_name=self.agent_name,
@@ -1025,7 +1038,9 @@ class AgentBase(ABC):
                 yield (
                     [
                         self._context_over_limit_error_chunk(
-                            current_tokens, trigger_limit
+                            current_tokens,
+                            trigger_limit,
+                            self._language_from_session_context(session_context),
                         )
                     ],
                     False,
@@ -1079,7 +1094,13 @@ class AgentBase(ABC):
         final_tokens = MessageManager.calculate_messages_token_length(final_view)
         if final_tokens > trigger_limit:
             yield (
-                [self._context_over_limit_error_chunk(final_tokens, trigger_limit)],
+                [
+                    self._context_over_limit_error_chunk(
+                        final_tokens,
+                        trigger_limit,
+                        self._language_from_session_context(session_context),
+                    )
+                ],
                 False,
             )
             return
@@ -2226,15 +2247,20 @@ class AgentBase(ABC):
                     entry["function"]["arguments"] += tool_call.function.arguments
 
     def _create_tool_call_error_message(
-        self, tool_name: str, raw_arguments: str, error_reason: str
+        self,
+        tool_name: str,
+        raw_arguments: str,
+        error_reason: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> MessageChunk:
         """
-        创建工具调用错误消息，当JSON解析失败时返回给用户
+        创建工具调用错误消息，当JSON解析失败时保留给后续 LLM 修正
 
         Args:
             tool_name: 工具名称
             raw_arguments: 原始参数字符串
             error_reason: 错误原因
+            language: 响应语言
 
         Returns:
             MessageChunk: 错误消息块
@@ -2245,53 +2271,71 @@ class AgentBase(ABC):
 
         if param_length > 2000:
             suggestions.append(
-                "• 参数内容过长（超过2000字符），建议将任务拆分为多次工具调用"
+                t("runtime.tool_call_parse.suggestion.too_long_split", language)
             )
-            suggestions.append("• 或者将大段内容保存到文件，然后传递文件路径")
+            suggestions.append(
+                t("runtime.tool_call_parse.suggestion.too_long_file", language)
+            )
 
         if "{" in raw_arguments and raw_arguments.count("{") != raw_arguments.count(
             "}"
         ):
-            suggestions.append("• JSON括号不匹配，请检查花括号是否成对闭合")
+            suggestions.append(t("runtime.tool_call_parse.suggestion.braces", language))
 
         if '"' in raw_arguments:
             quote_count = raw_arguments.count('"')
             if quote_count % 2 != 0:
-                suggestions.append("• 引号未正确闭合，请检查字符串引号是否成对")
+                suggestions.append(
+                    t("runtime.tool_call_parse.suggestion.quotes", language)
+                )
 
         if "\\" in raw_arguments:
-            suggestions.append("• 包含反斜杠字符，请确保特殊字符已正确转义")
+            suggestions.append(
+                t("runtime.tool_call_parse.suggestion.backslash", language)
+            )
 
         if not suggestions:
-            suggestions.append("• 请检查JSON格式是否正确")
-            suggestions.append("• 确保所有字符串使用双引号包裹")
-            suggestions.append("• 确保没有多余的逗号或缺少逗号")
+            suggestions.append(
+                t("runtime.tool_call_parse.suggestion.check_json", language)
+            )
+            suggestions.append(
+                t("runtime.tool_call_parse.suggestion.double_quotes", language)
+            )
+            suggestions.append(t("runtime.tool_call_parse.suggestion.commas", language))
 
         # 截断过长的参数显示
         display_args = (
             raw_arguments[:200] + "..." if len(raw_arguments) > 200 else raw_arguments
         )
+        error_reason = error_reason or t("runtime.tool_call_parse.reason", language)
 
-        content = f"""我尝试调用工具 `{tool_name}`，但参数解析失败。
+        content = f"""{t("runtime.tool_call_parse.title", language, {"tool_name": tool_name})}
 
-**错误原因**: {error_reason}
+**{t("runtime.tool_call_parse.reason_title", language)}**: {error_reason}
 
-**原始参数**:
+**{t("runtime.tool_call_parse.raw_arguments", language)}**:
 ```
 {display_args}
 ```
 
-**优化建议**:
+**{t("runtime.tool_call_parse.suggestions_title", language)}**:
 {chr(10).join(suggestions)}
 
-我需要重新优化我的工具调用方式和参数，确保工具参数格式正确。"""
+{t("runtime.tool_call_parse.next_step", language)}"""
 
         return MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content=content,
             message_id=str(uuid.uuid4()),
-            message_type=MessageType.DO_SUBTASK_RESULT.value,
+            message_type=MessageType.AGENT_EXECUTION_ERROR.value,
             agent_name=self.agent_name,
+            metadata={
+                "hidden_from_chat": True,
+                "hide_from_chat": True,
+                "sse_visible": False,
+                "runtime_diagnostic_source": "tool_call_argument_parse",
+                "tool_name": tool_name,
+            },
         )
 
     def _create_tool_call_message(
@@ -2433,6 +2477,7 @@ class AgentBase(ABC):
                 logger.debug(
                     f"{self.agent_name}: 无法通过 session_id 获取 session_context: {e}"
                 )
+        language = self._language_from_session_context(session_context)
 
         try:
             # 解析并执行工具调用
@@ -2445,7 +2490,8 @@ class AgentBase(ABC):
                 async for chunk in self._handle_tool_error(
                     tool_call["id"],
                     tool_name,
-                    Exception("工具参数格式错误: 参数必须是JSON对象"),
+                    Exception(t("runtime.tool.error.arguments_not_object", language)),
+                    language,
                 ):
                     yield chunk
                 return
@@ -2512,7 +2558,7 @@ class AgentBase(ABC):
                         f"{self.agent_name}: 处理流式工具响应时发生错误: {str(e)}"
                     )
                     async for chunk in self._handle_tool_error(
-                        tool_call["id"], tool_name, e
+                        tool_call["id"], tool_name, e, language
                     ):
                         yield chunk
             else:
@@ -2528,11 +2574,17 @@ class AgentBase(ABC):
                 f"{self.agent_name}: 执行工具 {tool_name} 时发生错误: {str(e)}"
             )
             logger.error(f"{self.agent_name}: 堆栈: {traceback.format_exc()}")
-            async for chunk in self._handle_tool_error(tool_call["id"], tool_name, e):
+            async for chunk in self._handle_tool_error(
+                tool_call["id"], tool_name, e, language
+            ):
                 yield chunk
 
     async def _handle_tool_error(
-        self, tool_call_id: str, tool_name: str, error: Exception
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        error: Exception,
+        language: Optional[str] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具执行错误
@@ -2545,7 +2597,11 @@ class AgentBase(ABC):
         Yields:
             List[MessageChunk]: 错误消息块列表
         """
-        error_message = f"工具 {tool_name} 执行失败: {str(error)}"
+        error_message = t(
+            "runtime.tool.error.execution_failed",
+            language,
+            {"tool_name": tool_name, "message": str(error)},
+        )
         logger.error(f"{self.agent_name}: {error_message}")
 
         error_chunk = MessageChunk(
@@ -2612,6 +2668,7 @@ class AgentBase(ABC):
         session_id: str,
         handle_complete_task: bool = False,
         emit_tool_call_message: bool = True,
+        execute_concurrently: bool = True,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         处理工具调用
@@ -2622,11 +2679,19 @@ class AgentBase(ABC):
             messages_input: 输入消息列表
             session_id: 会话ID
             handle_complete_task: 是否处理complete_task工具（TaskExecutorAgent需要）
+            execute_concurrently: 是否并发执行工具；关闭时按 LLM 返回顺序逐个执行
 
         Yields:
             tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
         """
         logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
+        session_context: Optional[SessionContext] = None
+        if session_id:
+            try:
+                session_context = self._get_live_session_context(session_id)
+            except Exception:
+                session_context = None
+        language = self._language_from_session_context(session_context)
 
         executable_tool_calls: List[Dict[str, Any]] = []
 
@@ -2651,15 +2716,15 @@ class AgentBase(ABC):
                 logger.error(f"{self.agent_name}: JSON解析异常: {e}")
                 is_valid_json = False
 
-            # 如果JSON解析失败，将工具调用转换为普通消息返回
+            # 如果 JSON 解析失败，保留给后续 LLM 修正，但不暴露给客户端。
             if not is_valid_json:
                 logger.warning(
-                    f"{self.agent_name}: 工具参数JSON解析失败，转换为普通消息"
+                    f"{self.agent_name}: 工具参数JSON解析失败，转换为隐藏 runtime diagnostic"
                 )
                 error_message = self._create_tool_call_error_message(
                     tool_name=tool_name,
                     raw_arguments=raw_arguments,
-                    error_reason="JSON格式无效或结构不完整",
+                    language=language,
                 )
                 yield ([error_message], False)
                 continue
@@ -2689,6 +2754,16 @@ class AgentBase(ABC):
             if emit_tool_call_message:
                 output_messages = self._create_tool_call_message(tool_call)
                 yield (output_messages, False)
+
+            if not execute_concurrently:
+                async for message_chunk_list in self._execute_tool(
+                    tool_call=tool_call,
+                    tool_manager=tool_manager,
+                    messages_input=messages_input,
+                    session_id=session_id,
+                ):
+                    yield (message_chunk_list, False)
+                continue
 
             executable_tool_calls.append(tool_call)
 
