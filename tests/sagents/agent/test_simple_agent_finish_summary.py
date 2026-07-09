@@ -11,6 +11,7 @@ from sagents.agent.simple_agent import (
     DEFAULT_REPEAT_PATTERN_MAX_HITS,
     REPEAT_PATTERN_MAX_HITS_ENV,
     SimpleAgent,
+    TaskCompleteDecision,
     _get_system_prefix,
 )
 from sagents.utils.prompt_manager import PromptManager
@@ -520,6 +521,191 @@ def test_committed_next_step_still_uses_llm_judge(monkeypatch):
         is False
     )
     assert captured["step_name"] == "task_complete_judge"
+
+
+def test_task_complete_decision_captures_continue_reason(monkeypatch):
+    agent = _agent()
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(
+            content='{"task_interrupted": false, "reason": "more clips pending"}'
+        )
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=_base_messages()
+            + [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="Progress update.",
+                    message_type=MessageType.DO_SUBTASK_RESULT.value,
+                )
+            ],
+            session_id="s-reason",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision == TaskCompleteDecision(
+        task_interrupted=False, reason="more clips pending"
+    )
+    assert agent._continuation_reason_from_decision(decision) == "more clips pending"
+    assert (
+        agent._continuation_reason_from_decision(
+            TaskCompleteDecision(task_interrupted=False, reason="   ")
+        )
+        is None
+    )
+    assert (
+        agent._continuation_reason_from_decision(
+            TaskCompleteDecision(task_interrupted=True, reason="done")
+        )
+        is None
+    )
+    assert (
+        asyncio.run(
+            agent._is_task_complete(
+                messages_input=_base_messages(),
+                session_id="s-reason",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        is False
+    )
+
+
+def test_task_complete_decision_ignores_non_string_reason(monkeypatch):
+    agent = _agent()
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(content='{"task_interrupted": false, "reason": null}')
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=_base_messages()
+            + [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="Progress update.",
+                    message_type=MessageType.DO_SUBTASK_RESULT.value,
+                )
+            ],
+            session_id="s-null-reason",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision == TaskCompleteDecision(task_interrupted=False, reason="")
+    assert agent._continuation_reason_from_decision(decision) is None
+
+
+def test_task_complete_decision_parses_string_boolean(monkeypatch):
+    agent = _agent()
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(
+            content='{"task_interrupted": "false", "reason": "more clips pending"}'
+        )
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    msg_manager = SimpleNamespace(
+        context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000}),
+    )
+    session_context = SimpleNamespace(
+        message_manager=msg_manager,
+        get_language=lambda: "en",
+    )
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=_base_messages()
+            + [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="Progress update.",
+                    message_type=MessageType.DO_SUBTASK_RESULT.value,
+                )
+            ],
+            session_id="s-string-bool",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision == TaskCompleteDecision(
+        task_interrupted=False, reason="more clips pending"
+    )
+    assert agent._parse_task_interrupted_value("true") is True
+    assert agent._parse_task_interrupted_value("false") is False
+    assert agent._parse_task_interrupted_value("yes") is False
+
+
+def test_direct_request_appends_continuation_guidance_request_only(monkeypatch):
+    agent = _agent()
+    captured = {}
+    original_messages = _base_messages()
+    prepared_messages = list(original_messages)
+    _patch_prepared_messages(monkeypatch, agent, prepared_messages)
+
+    async def _fake_prepare_llm_request_messages(**kwargs):
+        return list(kwargs["history_messages"])
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["messages"] = kwargs["messages"]
+        yield _llm_chunk(content="ok")
+
+    monkeypatch.setattr(
+        agent, "prepare_llm_request_messages", _fake_prepare_llm_request_messages
+    )
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    chunks = asyncio.run(
+        _collect_llm_response(
+            agent,
+            messages_input=original_messages,
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-guidance",
+            direct_response_state={},
+            continuation_reason="  more   <clips>   pending  ",
+        )
+    )
+
+    assert len(original_messages) == 2
+    assert len(prepared_messages) == 2
+    assert captured["messages"][:-1] == prepared_messages
+    guidance = captured["messages"][-1]
+    assert guidance.role == MessageRole.USER.value
+    assert "Continue because: more [clips] pending" in guidance.content
+    assert "Do not mention it" in guidance.content
+    assert all(
+        "runtime_continuation_guidance" not in (chunk.content or "")
+        for chunk in chunks
+    )
 
 
 class _ToolNameManager:
@@ -1253,15 +1439,17 @@ def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return True
+        return TaskCompleteDecision(task_interrupted=True)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
@@ -1280,6 +1468,98 @@ def test_llm_judge_skips_completion_check_after_direct_tool_activity(monkeypatch
     assert len(direct_calls) == 2
     assert len(judge_calls) == 1
     assert chunks[-1].content == "已经完成。"
+
+
+def test_llm_judge_continuation_guidance_is_one_shot(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        if len(direct_calls) == 1:
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content="progress update",
+                        message_type=MessageType.DO_SUBTASK_RESULT.value,
+                    )
+                ],
+                False,
+            )
+            return
+        if len(direct_calls) == 2:
+            kwargs["direct_response_state"]["had_tool_calls"] = True
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content='{"ok": true}',
+                        tool_call_id="call_tool",
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                    )
+                ],
+                False,
+            )
+            return
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="done",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_get_task_complete_decision(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        if len(judge_calls) == 1:
+            return TaskCompleteDecision(
+                task_interrupted=False,
+                reason="more clips pending",
+            )
+        return TaskCompleteDecision(
+            task_interrupted=True,
+            reason="done",
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert [call["continuation_reason"] for call in direct_calls] == [
+        None,
+        "more clips pending",
+        None,
+    ]
+    assert [chunk.content for chunk in chunks if chunk.content] == [
+        "progress update",
+        '{"ok": true}',
+        "done",
+    ]
 
 
 def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
@@ -1305,15 +1585,17 @@ def test_llm_judge_uses_direct_response_state_not_collected_chunks(monkeypatch):
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return True
+        return TaskCompleteDecision(task_interrupted=True)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
@@ -1352,15 +1634,17 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return False
+        return TaskCompleteDecision(task_interrupted=False)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
@@ -1421,15 +1705,17 @@ def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return False
+        return TaskCompleteDecision(task_interrupted=False)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
@@ -1476,15 +1762,17 @@ def test_llm_judge_completed_plain_text_does_not_force_required(monkeypatch):
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return True
+        return TaskCompleteDecision(task_interrupted=True)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
@@ -1551,15 +1839,17 @@ def test_llm_judge_tool_activity_resets_required_after_plain_text(monkeypatch):
             False,
         )
 
-    async def _fake_is_task_complete(*args, **kwargs):
+    async def _fake_get_task_complete_decision(*args, **kwargs):
         judge_calls.append((args, kwargs))
-        return len(judge_calls) >= 2
+        return TaskCompleteDecision(task_interrupted=len(judge_calls) >= 2)
 
     monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
     monkeypatch.setattr(
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
-    monkeypatch.setattr(agent, "_is_task_complete", _fake_is_task_complete)
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
 
     async def _collect():
         chunks = []
