@@ -9,13 +9,13 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from common.core.exceptions import SageHTTPException
-from common.models.agent import Agent
+from common.models.agent import Agent, AgentConfigDao
 from common.models.llm_provider import LLMProvider, LLMProviderDao
 from common.schemas.model_invocation import (
     ATTRIBUTION_METADATA_KEYS,
     DirectModelInvokeRequest,
 )
-from common.services import agent_service, token_usage_service
+from common.services import token_usage_service
 from common.services.chat_utils import create_model_client
 from sagents.llm.model_capabilities import (
     is_openai_reasoning_model,
@@ -29,6 +29,7 @@ from sagents.utils.llm_request_utils import (
 _INTERNAL_REQUEST_FIELDS = {
     "agent_id",
     "provider_id",
+    "user_id",
     "model_type",
     "task",
     "metadata",
@@ -81,53 +82,30 @@ def _strip_none_values(data: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in data.items() if value is not None}
 
 
-def _ensure_provider_access(provider: LLMProvider, user_id: str) -> None:
-    if provider.user_id and provider.user_id != user_id:
-        raise SageHTTPException(
-            status_code=403,
-            detail="Permission denied",
-            error_detail=f"provider_id={provider.id}",
-        )
-
-
-async def _get_accessible_provider(provider_id: str, user_id: str) -> LLMProvider:
-    provider = await LLMProviderDao().get_by_id(provider_id)
-    if provider is None:
-        raise SageHTTPException(
-            status_code=404,
-            detail="Provider not found",
-            error_detail=f"provider_id={provider_id}",
-        )
-    _ensure_provider_access(provider, user_id)
-    return provider
-
-
-async def _get_default_provider(user_id: str) -> LLMProvider:
-    dao = LLMProviderDao()
-    provider = await dao.get_default(user_id=user_id) if user_id else None
-    if provider is None:
-        provider = await dao.get_default(user_id="")
-    if provider is None and not user_id:
-        provider = await dao.get_default()
-    if provider is None:
-        raise SageHTTPException(status_code=404, detail="Default provider not found")
-    _ensure_provider_access(provider, user_id)
-    return provider
-
-
 async def _resolve_agent(
-    request: DirectModelInvokeRequest, user_id: str
+    request: DirectModelInvokeRequest,
 ) -> Optional[Agent]:
     if not request.agent_id:
         return None
-    return await agent_service.get_agent(request.agent_id, user_id)
+    agent = await AgentConfigDao().get_by_id(request.agent_id)
+    if not agent or not agent.config:
+        logger.warning(f"[DirectModelInvoke] Agent {request.agent_id} not found")
+        return None
+    return agent
 
 
 async def _resolve_provider(
-    request: DirectModelInvokeRequest, user_id: str, agent: Optional[Agent]
+    request: DirectModelInvokeRequest, agent: Optional[Agent]
 ) -> tuple[LLMProvider, Optional[LLMProvider]]:
     if request.provider_id:
-        return await _get_accessible_provider(request.provider_id, user_id), None
+        provider = await LLMProviderDao().get_by_id(request.provider_id)
+        if provider is None:
+            raise SageHTTPException(
+                status_code=404,
+                detail="Provider not found",
+                error_detail=f"provider_id={request.provider_id}",
+            )
+        return provider, None
 
     if agent is not None:
         provider_id = str(agent.config.get("llm_provider_id") or "").strip()
@@ -150,13 +128,27 @@ async def _resolve_provider(
         if fast_provider_id:
             fast_provider = await LLMProviderDao().get_by_id(fast_provider_id)
             if fast_provider is None:
-                logger.warning(
-                    f"[DirectModelInvoke] Agent fast provider missing: agent_id={agent.agent_id}, "
-                    f"provider_id={fast_provider_id}"
+                raise SageHTTPException(
+                    status_code=404,
+                    detail="Agent fast LLM provider not found",
+                    error_detail=(
+                        f"agent_id={agent.agent_id}, provider_id={fast_provider_id}"
+                    ),
                 )
         return provider, fast_provider
 
-    return await _get_default_provider(user_id), None
+    raise SageHTTPException(
+        status_code=400,
+        detail="Provider is required",
+        error_detail="provider_id or agent LLM provider is required",
+    )
+
+
+def _resolve_runtime_user_id(
+    request: DirectModelInvokeRequest, config_user_id: str
+) -> str:
+    body_user_id = str(request.user_id or "").strip()
+    return body_user_id or config_user_id
 
 
 def _build_model_config(
@@ -393,8 +385,9 @@ async def invoke_model(
 ) -> Dict[str, Any]:
     started_at = time.time()
     invocation_id = f"direct_model_{uuid.uuid4().hex}"
-    agent = await _resolve_agent(request, user_id)
-    provider, fast_provider = await _resolve_provider(request, user_id, agent)
+    runtime_user_id = _resolve_runtime_user_id(request, user_id)
+    agent = await _resolve_agent(request)
+    provider, fast_provider = await _resolve_provider(request, agent)
     model_config = _build_model_config(
         provider,
         fast_provider,
@@ -416,7 +409,7 @@ async def invoke_model(
     try:
         logger.info(
             "[DirectModelInvoke] invoke "
-            f"task={request.task}, user_id={user_id}, agent_id={request.agent_id}, "
+            f"task={request.task}, user_id={runtime_user_id}, agent_id={request.agent_id}, "
             f"provider_id={provider.id}, model_type={request.model_type}, model={model_name}, "
             f"metadata={_sanitize_for_log(request.metadata)}"
         )
@@ -441,7 +434,7 @@ async def invoke_model(
             task=attribution,
             model=model_name,
             invocation_id=invocation_id,
-            user_id=user_id,
+            user_id=runtime_user_id,
             agent_id=request.agent_id,
             started_at=started_at,
         )
@@ -459,8 +452,9 @@ async def stream_model(
 ) -> AsyncGenerator[str, None]:
     started_at = time.time()
     invocation_id = f"direct_model_{uuid.uuid4().hex}"
-    agent = await _resolve_agent(request, user_id)
-    provider, fast_provider = await _resolve_provider(request, user_id, agent)
+    runtime_user_id = _resolve_runtime_user_id(request, user_id)
+    agent = await _resolve_agent(request)
+    provider, fast_provider = await _resolve_provider(request, agent)
     model_config = _build_model_config(
         provider,
         fast_provider,
@@ -486,7 +480,7 @@ async def stream_model(
     try:
         logger.info(
             "[DirectModelInvoke] stream "
-            f"task={request.task}, user_id={user_id}, agent_id={request.agent_id}, "
+            f"task={request.task}, user_id={runtime_user_id}, agent_id={request.agent_id}, "
             f"provider_id={provider.id}, model_type={request.model_type}, model={model_name}, "
             f"metadata={_sanitize_for_log(request.metadata)}"
         )
@@ -513,7 +507,7 @@ async def stream_model(
             task=attribution,
             model=model_name,
             invocation_id=invocation_id,
-            user_id=user_id,
+            user_id=runtime_user_id,
             agent_id=request.agent_id,
             started_at=started_at,
         )

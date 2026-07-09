@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.core.exceptions import SageHTTPException
 from common.schemas.model_invocation import DirectModelInvokeRequest
 from common.services import model_invocation_service as service
 
@@ -137,7 +136,7 @@ async def test_provider_id_takes_priority_and_request_stays_openai_shaped(monkey
     }
     captured, fake_client = _patch_common(monkeypatch, providers)
 
-    async def fake_get_agent(agent_id, user_id):
+    async def fake_get_agent(agent_id):
         return SimpleNamespace(
             agent_id=agent_id,
             config={"llm_provider_id": "agent_provider"},
@@ -147,7 +146,11 @@ async def test_provider_id_takes_priority_and_request_stays_openai_shaped(monkey
         captured["completion_kwargs"] = kwargs
         return FakeCompletion()
 
-    monkeypatch.setattr(service.agent_service, "get_agent", fake_get_agent)
+    monkeypatch.setattr(
+        service,
+        "AgentConfigDao",
+        lambda: SimpleNamespace(get_by_id=fake_get_agent),
+    )
     monkeypatch.setattr(
         service, "create_chat_completion_with_fallback", fake_completion
     )
@@ -224,7 +227,7 @@ async def test_agent_fast_model_uses_agent_fast_provider(monkeypatch):
     }
     captured, _ = _patch_common(monkeypatch, providers)
 
-    async def fake_get_agent(agent_id, user_id):
+    async def fake_get_agent(agent_id):
         return SimpleNamespace(
             agent_id=agent_id,
             config={
@@ -237,7 +240,11 @@ async def test_agent_fast_model_uses_agent_fast_provider(monkeypatch):
         captured["completion_kwargs"] = kwargs
         return FakeCompletion()
 
-    monkeypatch.setattr(service.agent_service, "get_agent", fake_get_agent)
+    monkeypatch.setattr(
+        service,
+        "AgentConfigDao",
+        lambda: SimpleNamespace(get_by_id=fake_get_agent),
+    )
     monkeypatch.setattr(
         service, "create_chat_completion_with_fallback", fake_completion
     )
@@ -258,6 +265,97 @@ async def test_agent_fast_model_uses_agent_fast_provider(monkeypatch):
         captured["completion_kwargs"]["model_config"]["supports_structured_output"]
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_provider_is_required_without_agent_provider(monkeypatch):
+    _patch_common(monkeypatch, {"default": FakeProvider("default", model="gpt-4o")})
+
+    request = DirectModelInvokeRequest(
+        task="ling_file_semantic_classification",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    with pytest.raises(service.SageHTTPException) as ctx:
+        await service.invoke_model(request, user_id="user_1")
+
+    assert ctx.value.status_code == 400
+    assert ctx.value.detail == "Provider is required"
+
+
+@pytest.mark.asyncio
+async def test_agent_missing_fast_provider_errors_without_fallback(monkeypatch):
+    providers = {"standard": FakeProvider("standard", model="gpt-4o")}
+    _patch_common(monkeypatch, providers)
+
+    async def fake_get_agent(agent_id):
+        return SimpleNamespace(
+            agent_id=agent_id,
+            config={
+                "llm_provider_id": "standard",
+                "fast_llm_provider_id": "missing-fast",
+            },
+        )
+
+    monkeypatch.setattr(
+        service,
+        "AgentConfigDao",
+        lambda: SimpleNamespace(get_by_id=fake_get_agent),
+    )
+
+    request = DirectModelInvokeRequest(
+        agent_id="agent_1",
+        model_type="fast",
+        task="ling_file_semantic_classification",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    with pytest.raises(service.SageHTTPException) as ctx:
+        await service.invoke_model(request, user_id="user_1")
+
+    assert ctx.value.status_code == 404
+    assert ctx.value.detail == "Agent fast LLM provider not found"
+
+
+@pytest.mark.asyncio
+async def test_body_user_id_is_runtime_user_not_agent_lookup_user(monkeypatch):
+    providers = {
+        "standard": FakeProvider("standard", model="gpt-4o", user_id="sage_owner")
+    }
+    captured, _ = _patch_common(monkeypatch, providers)
+
+    async def fake_get_agent(agent_id):
+        captured["agent_lookup_agent_id"] = agent_id
+        return SimpleNamespace(
+            agent_id=agent_id,
+            config={"llm_provider_id": "standard"},
+        )
+
+    async def fake_completion(client, **kwargs):
+        captured["completion_kwargs"] = kwargs
+        return FakeCompletion()
+
+    monkeypatch.setattr(
+        service,
+        "AgentConfigDao",
+        lambda: SimpleNamespace(get_by_id=fake_get_agent),
+    )
+    monkeypatch.setattr(
+        service, "create_chat_completion_with_fallback", fake_completion
+    )
+
+    request = DirectModelInvokeRequest(
+        agent_id="agent_1",
+        user_id="ling_user",
+        task="ling_file_semantic_classification",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    await service.invoke_model(request, user_id="sage_owner")
+
+    assert captured["agent_lookup_agent_id"] == "agent_1"
+    assert captured["usage_record"]["user_id"] == "ling_user"
+    assert "user_id" not in captured["completion_kwargs"]
 
 
 @pytest.mark.asyncio
@@ -381,7 +479,7 @@ def test_metadata_log_sanitizer_redacts_sensitive_values():
 
 
 @pytest.mark.asyncio
-async def test_provider_permission_is_enforced(monkeypatch):
+async def test_provider_id_matches_chat_provider_lookup_without_owner_check(monkeypatch):
     providers = {
         "provider_1": FakeProvider(
             "provider_1",
@@ -389,14 +487,22 @@ async def test_provider_permission_is_enforced(monkeypatch):
             user_id="other_user",
         )
     }
-    _patch_common(monkeypatch, providers)
+    captured, _ = _patch_common(monkeypatch, providers)
+
+    async def fake_completion(client, **kwargs):
+        captured["completion_kwargs"] = kwargs
+        return FakeCompletion()
+
+    monkeypatch.setattr(
+        service, "create_chat_completion_with_fallback", fake_completion
+    )
     request = DirectModelInvokeRequest(
         provider_id="provider_1",
         task="summary",
         messages=[{"role": "user", "content": "hi"}],
     )
 
-    with pytest.raises(SageHTTPException) as exc_info:
-        await service.invoke_model(request, user_id="user_1")
+    result = await service.invoke_model(request, user_id="user_1")
 
-    assert exc_info.value.status_code == 403
+    assert result["provider_id"] == "provider_1"
+    assert captured["completion_kwargs"]["model"] == "gpt-4o"

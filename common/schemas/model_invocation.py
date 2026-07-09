@@ -19,6 +19,7 @@ class DirectModelInvokeRequest(BaseModel):
 
     agent_id: Optional[str] = None
     provider_id: Optional[str] = None
+    user_id: Optional[str] = None
     model_type: ModelType = "standard"
     task: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
