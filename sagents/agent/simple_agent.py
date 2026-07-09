@@ -23,6 +23,7 @@ from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 import json
 import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 import re
 import os
 from sagents.utils.repeat_pattern import (
@@ -35,6 +36,12 @@ from sagents.utils.repeat_pattern import (
 TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
 DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
 REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+
+
+@dataclass(frozen=True)
+class TaskCompleteDecision:
+    task_interrupted: bool
+    reason: str = ""
 
 
 def _get_repeat_pattern_max_hits() -> int:
@@ -399,6 +406,18 @@ class SimpleAgent(AgentBase):
 
         return task_interrupted
 
+    @staticmethod
+    def _parse_task_interrupted_value(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "true":
+                return True
+            if normalized == "false":
+                return False
+        return False
+
     def _has_recent_assistant_summary(self, messages_input: List[MessageChunk]) -> bool:
         """判断 turn_status 之前是否存在用户可见的 assistant 收口文本。
 
@@ -687,13 +706,13 @@ class SimpleAgent(AgentBase):
 
         return False
 
-    async def _is_task_complete(
+    async def _get_task_complete_decision(
         self,
         messages_input: List[MessageChunk],
         session_id: str,
         tool_manager: Optional[ToolManager],
         session_context: SessionContext,
-    ) -> bool:
+    ) -> TaskCompleteDecision:
         """判断任务是否应该中断（完成/等待用户）
 
         两层策略：
@@ -702,7 +721,7 @@ class SimpleAgent(AgentBase):
         """
         # 第一层：确定性规则
         if await self._must_continue_by_rules(messages_input):
-            return False
+            return TaskCompleteDecision(task_interrupted=False)
 
         # 第二层：LLM 综合判断
         # 只提取最后一个 user 以及之后的 messages
@@ -761,8 +780,11 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            task_interrupted = bool(result.get("task_interrupted", False))
-            reason = str(result.get("reason", ""))
+            task_interrupted = self._parse_task_interrupted_value(
+                result.get("task_interrupted", False)
+            )
+            raw_reason = result.get("reason", "")
+            reason = raw_reason if isinstance(raw_reason, str) else ""
             normalized = self._normalize_task_interrupted_decision(
                 reason, task_interrupted
             )
@@ -774,12 +796,67 @@ class SimpleAgent(AgentBase):
             logger.info(
                 f"SimpleAgent: 任务完成 LLM 判断结果: {result}, normalized={normalized}"
             )
-            return normalized
+            return TaskCompleteDecision(task_interrupted=normalized, reason=reason)
         except json.JSONDecodeError:
             logger.warning(
                 "SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行"
             )
-            return False
+            return TaskCompleteDecision(task_interrupted=False)
+
+    async def _is_task_complete(
+        self,
+        messages_input: List[MessageChunk],
+        session_id: str,
+        tool_manager: Optional[ToolManager],
+        session_context: SessionContext,
+    ) -> bool:
+        decision = await self._get_task_complete_decision(
+            messages_input, session_id, tool_manager, session_context
+        )
+        return decision.task_interrupted
+
+    @staticmethod
+    def _normalize_continuation_reason(reason: str) -> str:
+        normalized = re.sub(r"\s+", " ", str(reason or "")).strip()
+        if not normalized:
+            return ""
+        normalized = normalized[:240].replace("<", "[").replace(">", "]")
+        return normalized.strip()
+
+    @classmethod
+    def _continuation_reason_from_decision(
+        cls, decision: TaskCompleteDecision
+    ) -> Optional[str]:
+        if decision.task_interrupted:
+            return None
+        normalized_reason = cls._normalize_continuation_reason(decision.reason)
+        return normalized_reason or None
+
+    @classmethod
+    def _build_continuation_guidance_message(
+        cls, reason: str
+    ) -> Optional[MessageChunk]:
+        normalized_reason = cls._normalize_continuation_reason(reason)
+        if not normalized_reason:
+            return None
+        content = (
+            "<runtime_continuation_guidance>\n"
+            "Internal runtime note, not a user request. Do not mention it.\n"
+            f"Continue because: {normalized_reason}\n"
+            "Perform the next unfinished action. Do not repeat the last visible "
+            "update or already reported artifacts.\n"
+            "</runtime_continuation_guidance>"
+        )
+        return MessageChunk(
+            role=MessageRole.USER.value,
+            content=content,
+            type=MessageType.USER_INPUT.value,
+            message_type=MessageType.USER_INPUT.value,
+            metadata={
+                "inference_view_only": True,
+                "runtime_continuation_guidance": True,
+            },
+        )
 
     @classmethod
     def _format_task_complete_messages_for_prompt(
@@ -939,6 +1016,7 @@ class SimpleAgent(AgentBase):
         force_tool_choice_required_next = False
         turn_status_only_next = False
         consecutive_plain_text_direct_responses = 0
+        pending_continuation_reason: Optional[str] = None
         while True:
             if self._should_abort_due_to_session(session_context):
                 break
@@ -985,6 +1063,8 @@ class SimpleAgent(AgentBase):
             turn_status_only_next = False
             current_force_tool_choice_required = force_tool_choice_required_next
             force_tool_choice_required_next = False
+            current_continuation_reason = pending_continuation_reason
+            pending_continuation_reason = None
             if current_turn_status_only:
                 logger.info(
                     "SimpleAgent: 上一轮纯文本无工具调用，本轮仅开放 turn_status 并启用 tool_choice=required"
@@ -1031,6 +1111,7 @@ class SimpleAgent(AgentBase):
                 ),
                 force_tool_choice_auto=force_tool_choice_auto_next,
                 direct_response_state=direct_response_state,
+                continuation_reason=current_continuation_reason,
             ):
                 non_empty_chunks = [
                     c for c in chunks if (c.message_type != MessageType.EMPTY.value)
@@ -1196,20 +1277,27 @@ class SimpleAgent(AgentBase):
                             "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
                         break
-                    if await self._is_task_complete(
+                    decision = await self._get_task_complete_decision(
                         messages_input, session_id, tool_manager, session_context
-                    ):
+                    )
+                    if decision.task_interrupted:
                         logger.info("SimpleAgent: 任务完成，终止执行")
                         break
+                    pending_continuation_reason = (
+                        self._continuation_reason_from_decision(decision)
+                    )
                     force_tool_choice_required_next = True
-                elif await self._is_task_complete(
-                    messages_input, session_id, tool_manager, session_context
-                ):
-                    consecutive_plain_text_direct_responses = 0
-                    logger.info("SimpleAgent: 任务完成，终止执行")
-                    break
                 else:
+                    decision = await self._get_task_complete_decision(
+                        messages_input, session_id, tool_manager, session_context
+                    )
                     consecutive_plain_text_direct_responses = 0
+                    if decision.task_interrupted:
+                        logger.info("SimpleAgent: 任务完成，终止执行")
+                        break
+                    pending_continuation_reason = (
+                        self._continuation_reason_from_decision(decision)
+                    )
 
     async def _call_llm_and_process_response(
         self,
@@ -1220,6 +1308,7 @@ class SimpleAgent(AgentBase):
         force_tool_choice_required: bool = False,
         force_tool_choice_auto: bool = False,
         direct_response_state: Optional[Dict[str, bool]] = None,
+        continuation_reason: Optional[str] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
@@ -1250,6 +1339,11 @@ class SimpleAgent(AgentBase):
             custom_prefix=_get_system_prefix(tool_manager, language),
             language=language,
         )
+        continuation_guidance = self._build_continuation_guidance_message(
+            continuation_reason or ""
+        )
+        if continuation_guidance is not None:
+            prepared_messages = list(prepared_messages) + [continuation_guidance]
 
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(
             prepared_messages
