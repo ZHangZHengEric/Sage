@@ -142,7 +142,6 @@ def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
 def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     tool = ExecuteCommandTool()
     result = asyncio.run(
@@ -163,13 +162,11 @@ def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     assert "approval_id" not in result
     assert "approval_expires_at" not in result
     assert ExecuteCommandTool._BG_TASKS == {}
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     tool = ExecuteCommandTool()
     result = asyncio.run(
@@ -187,13 +184,11 @@ def test_execute_shell_command_uses_session_approval_mode(monkeypatch):
     assert result["policy_action"] == "deny"
     assert result["policy_approval_mode"] == "never"
     assert "approval_id" not in result
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
 
 
 def test_never_mode_denies_without_emitting_approval_with_progress_queue(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     async def run_flow():
         queue = asyncio.Queue()
@@ -218,7 +213,6 @@ def test_never_mode_denies_without_emitting_approval_with_progress_queue(monkeyp
             assert result["policy_approval_mode"] == "never"
             assert "approval_id" not in result
             assert queue.empty()
-            assert ExecuteCommandTool._PENDING_APPROVALS == {}
         finally:
             unregister_progress_queue("session-never")
 
@@ -230,7 +224,6 @@ def test_never_mode_runs_ordinary_redirection_with_progress_queue(monkeypatch):
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     import sagents.session_runtime
 
@@ -265,7 +258,6 @@ def test_never_mode_runs_ordinary_redirection_with_progress_queue(monkeypatch):
             assert result["status"] == "running"
             assert queue.empty()
             assert fake_sandbox.bg_calls[0]["command"] == command
-            assert ExecuteCommandTool._PENDING_APPROVALS == {}
         finally:
             unregister_progress_queue("session-redirection")
 
@@ -277,7 +269,6 @@ def test_execute_shell_command_awaits_broker_approval_before_spawn(monkeypatch):
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     import sagents.session_runtime
 
@@ -408,7 +399,6 @@ def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
     fake_manager = _FakeSessionManager(fake_sandbox)
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
-    monkeypatch.setattr(ExecuteCommandTool, "_PENDING_APPROVALS", {})
 
     import sagents.session_runtime
 
@@ -434,7 +424,6 @@ def test_execute_shell_command_rejects_model_supplied_approval_without_channel(
     assert result["policy_action"] == "deny"
     assert result["policy_category"] == "approval_channel_unavailable"
     assert "approval_id" not in result
-    assert ExecuteCommandTool._PENDING_APPROVALS == {}
     assert fake_sandbox.bg_calls == []
 
 
