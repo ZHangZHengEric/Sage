@@ -144,52 +144,10 @@ class ExecuteCommandTool:
     # 两条路径互斥：被 await_shell 消费过的不会再走 LLM flush。
     _COMPLETION_EVENTS: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
-    # session_id -> approval_id -> {command, created_at}
-    _PENDING_APPROVALS: Dict[str, Dict[str, Dict[str, Any]]] = {}
     _APPROVAL_TTL_S = 30 * 60
 
     def __init__(self):
         self.security_manager = SecurityManager()
-
-    @classmethod
-    def _gc_stale_approvals(cls) -> None:
-        now = time.time()
-        for session_id, bucket in list(cls._PENDING_APPROVALS.items()):
-            for approval_id, approval in list(bucket.items()):
-                if now - approval.get("created_at", now) > cls._APPROVAL_TTL_S:
-                    bucket.pop(approval_id, None)
-            if not bucket:
-                cls._PENDING_APPROVALS.pop(session_id, None)
-
-    @classmethod
-    def _create_command_approval(cls, session_id: str, command: str) -> str:
-        cls._gc_stale_approvals()
-        approval_id = "shapproval_" + uuid.uuid4().hex[:12]
-        cls._PENDING_APPROVALS.setdefault(session_id, {})[approval_id] = {
-            "command": command.strip(),
-            "created_at": time.time(),
-        }
-        return approval_id
-
-    @classmethod
-    def _consume_matching_command_approval(
-        cls, session_id: str, approval_id: Optional[str], command: str
-    ) -> bool:
-        if not session_id or not approval_id:
-            return False
-        cls._gc_stale_approvals()
-        bucket = cls._PENDING_APPROVALS.get(session_id)
-        if not bucket:
-            return False
-        approval = bucket.get(approval_id)
-        if not approval:
-            return False
-        if approval.get("command") != command.strip():
-            return False
-        bucket.pop(approval_id, None)
-        if not bucket:
-            cls._PENDING_APPROVALS.pop(session_id, None)
-        return True
 
     @classmethod
     def pop_completion_events(cls, session_id: str) -> List[Dict[str, Any]]:
@@ -901,10 +859,6 @@ class ExecuteCommandTool:
                 "zh": "会话ID（必填，自动注入）",
                 "en": "Session ID (Required, Auto-injected)",
             },
-            "approval_id": {
-                "zh": "可选的一次性确认ID；仅在用户确认后，用上一次 SAFETY_BLOCKED 返回的 approval_id 重试同一命令",
-                "en": "Optional one-shot approval id; after user confirmation, retry the same command with the approval_id returned by the previous SAFETY_BLOCKED result",
-            },
             "sandbox_approval_mode": {
                 "zh": "运行时审批模式（自动注入）",
                 "en": "Runtime approval mode (auto-injected)",
@@ -926,7 +880,6 @@ class ExecuteCommandTool:
                 "description": "Additional env vars as JSON object string",
             },
             "session_id": {"type": "string", "description": "Session ID"},
-            "approval_id": {"type": "string"},
             "sandbox_approval_mode": {"type": "string"},
             "command_policy": {"type": "object"},
         },
@@ -942,7 +895,6 @@ class ExecuteCommandTool:
                 "output_file": {"type": "string"},
                 "stdout": {"type": "string"},
                 "exit_code": {"type": "integer"},
-                "approval_id": {"type": "string"},
             },
             "required": ["success"],
         },
@@ -977,22 +929,19 @@ class ExecuteCommandTool:
         )
         if policy_decision.action != "allow":
             if policy_decision.action == "ask":
-                if self._consume_matching_command_approval(
-                    session_id, approval_id, command
-                ):
+                if approval_id:
                     logger.info(
-                        "sandbox policy approval consumed: "
-                        f"approval_id={approval_id} category={policy_decision.category}"
+                        "execute_shell_command ignored legacy approval_id argument; "
+                        "sandbox approvals must resolve through the runtime broker"
                     )
-                else:
-                    approval_error = await self._await_policy_approval(
-                        command=command,
-                        session_id=session_id,
-                        policy_decision=policy_decision,
-                        policy_gateway=policy_gateway,
-                    )
-                    if approval_error is not None:
-                        return approval_error
+                approval_error = await self._await_policy_approval(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
+                )
+                if approval_error is not None:
+                    return approval_error
             else:
                 return self._policy_blocked_error(
                     command=command,
