@@ -24,6 +24,15 @@ def _server_cfg(tmp_path: Path) -> config.StartupConfig:
     return cfg
 
 
+def _write_skill(root: Path, name: str) -> None:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {name} description\n---\n",
+        encoding="utf-8",
+    )
+
+
 def test_sage_stream_service_uses_caller_workspace_and_agent_owner_skills(
     tmp_path, monkeypatch
 ):
@@ -137,6 +146,75 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
 
     assert request.agent_owner_user_id == "owner_user"
     assert request.user_id == "caller_user"
+
+
+def test_populate_request_merges_only_current_user_workspace_skills(
+    tmp_path, monkeypatch
+):
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(config, "_GLOBAL_STARTUP_CONFIG", cfg, raising=False)
+    caller_skills = Path(cfg.agents_dir) / "caller_user" / "agent_1" / "skills"
+    owner_skills = Path(cfg.agents_dir) / "owner_user" / "agent_1" / "skills"
+    _write_skill(caller_skills, "caller-local-skill")
+    _write_skill(owner_skills, "owner-local-skill")
+
+    agent = SimpleNamespace(
+        name="Shared Agent",
+        user_id="owner_user",
+        config={
+            "availableSkills": [],
+            "availableTools": [],
+            "maxLoopCount": 3,
+        },
+    )
+    provider = SimpleNamespace(
+        base_url="http://model.local",
+        api_key="key",
+        model="model",
+        max_tokens=None,
+        temperature=0.3,
+        top_p=0.9,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=True,
+        supports_structured_output=False,
+    )
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+    class FakeLLMProviderDao:
+        async def get_default(self):
+            return provider
+
+    async def fake_register_extra_mcp_tools(request):
+        return None
+
+    async def fake_populate_custom_sub_agents(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(
+        chat_service, "_register_extra_mcp_tools", fake_register_extra_mcp_tools
+    )
+    monkeypatch.setattr(
+        chat_service, "_populate_custom_sub_agents", fake_populate_custom_sub_agents
+    )
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="caller_user",
+        agent_id="agent_1",
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert request.available_skills == ["caller-local-skill"]
+    assert request.available_tools is not None
+    assert "load_skill" in request.available_tools
+    assert agent.config["availableSkills"] == []
 
 
 def test_populate_request_preserves_team_manual_empty_sub_agents(tmp_path, monkeypatch):
