@@ -28,9 +28,10 @@ The script runs:
 
 If Docker Compose v2 is unavailable, the script falls back to docker-compose.
 
-For `up`, the script ensures the shared Docker network exists, starts shared
-services under the `sage_shared` compose project first, then starts the selected
-environment.
+For `up` without service targets, the script ensures the shared Docker network
+exists, starts shared services under the `sage_shared` compose project first,
+then starts the selected environment. When service targets are specified, only
+those services are started.
 
 Observability services (prometheus, cadvisor, loki, alloy, jaeger) are defined
 in deploy/docker-compose.observability.yml and are not started unless
@@ -514,6 +515,9 @@ start_observability() {
 if [ "${1:-}" = "up" ]; then
   prepare_up_args "$@"
   ACTIVE_UP_ARGS=("${UP_ARGS[@]}")
+  if [ "$UP_HAS_TARGETS" = "true" ] && ! contains_service "--no-deps" "${ACTIVE_UP_ARGS[@]}"; then
+    ACTIVE_UP_ARGS+=(--no-deps)
+  fi
 
   if [ "${#UP_OBSERVABILITY_TARGETS[@]}" -gt 0 ] && [ "$ENABLE_OBSERVABILITY" != "true" ]; then
     echo "Observability service requested without --observability: ${UP_OBSERVABILITY_TARGETS[*]}" >&2
@@ -557,13 +561,6 @@ if [ "${1:-}" = "up" ]; then
         SHARED_RUN_TARGETS+=("$service")
       done < <(configured_group_services shared "$shared_network" "${SHARED_COMPOSE_ARGS[@]}")
     fi
-
-    run_group_services shared 共享 "$shared_network" "${SHARED_RUN_TARGETS[@]}"
-  elif [ "$RUN_ENV_UP" = "true" ] || [ "$RUN_OBSERVABILITY_UP" = "true" ]; then
-    SHARED_RUN_TARGETS=()
-    while IFS= read -r service; do
-      SHARED_RUN_TARGETS+=("$service")
-    done < <(configured_group_services shared "$shared_network" "${SHARED_COMPOSE_ARGS[@]}")
 
     run_group_services shared 共享 "$shared_network" "${SHARED_RUN_TARGETS[@]}"
   fi
