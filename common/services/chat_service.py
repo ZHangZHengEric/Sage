@@ -767,6 +767,42 @@ def _strip_skill_tools_when_unavailable(request: StreamRequest) -> None:
     request.available_tools = filtered_tools
 
 
+def _load_agent_workspace_skill_names_sync(agent_skills_path: str) -> List[str]:
+    if not os.path.isdir(agent_skills_path):
+        return []
+
+    from sagents.skill.skill_manager import SkillManager
+
+    skill_manager = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
+    return sorted(skill_manager.list_skills())
+
+
+async def _merge_agent_workspace_skills(request: StreamRequest) -> None:
+    """将当前用户 Agent workspace 中的技能加入本次请求，不修改共享 Agent 配置。"""
+    if _is_desktop_mode() or not request.agent_id:
+        return
+
+    agent_skills_path = str(
+        get_agent_skill_dir(
+            request.agent_id,
+            user_id=request.user_id or "default_user",
+            app_mode="server",
+            ensure_exists=False,
+        )
+    )
+    workspace_skills = await asyncio.to_thread(
+        _load_agent_workspace_skill_names_sync,
+        agent_skills_path,
+    )
+    if not workspace_skills:
+        return
+
+    configured_skills = list(request.available_skills or [])
+    request.available_skills = list(
+        dict.fromkeys([*configured_skills, *workspace_skills])
+    )
+
+
 async def _populate_custom_sub_agents(request: StreamRequest) -> None:
     if not request.available_sub_agent_ids:
         return
@@ -990,12 +1026,11 @@ async def populate_request_from_agent_config(
     _fill_if_none(request, "available_knowledge_bases", [])
     _fill_if_none(request, "available_sub_agent_ids", [])
 
-    # 注意：此处不再每次 prompt 都同步 skills 到 workspace。
-    # skills 同步统一由"Agent 编辑页面"在 create/update agent 时触发
-    # （common/services/agent_service.py 中的 sync_selected_skills_to_workspace 调用），
-    # 运行时如沙箱里缺少某个 skill 目录，则由
-    # SandboxSkillManager.sync_from_host 按需 copy_from_host 一次性补齐，
-    # 这样避免每次会话刷新 mtime / 覆盖用户在 Agent workspace 里的手改。
+    await _merge_agent_workspace_skills(request)
+
+    # 共享配置中的 skills 由 Agent create/update 同步到 workspace；当前用户在
+    # workspace 自建的 skills 已在上方合并到本次请求。运行时只按需补齐缺失目录，
+    # 不覆盖 Agent workspace 里的已有内容。
 
     if _is_desktop_mode():
         try:
@@ -1333,12 +1368,6 @@ async def execute_chat_session(
 
     session_id = stream_service.request.session_id
     request = stream_service.request
-    original_skills = (
-        stream_service.agent_skill_manager.list_skills()
-        if stream_service.agent_skill_manager
-        else []
-    )
-
     stream_counter = 0
     token_usage_persisted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
@@ -1394,21 +1423,17 @@ async def execute_chat_session(
                 stream_service,
                 token_usage_payload=token_usage_payload,
             )
-        await _finalize_session_end(request, original_skills)
+        await _finalize_session_end(request)
 
 
 async def _finalize_session_end(
     request: StreamRequest,
-    original_skills: List[str],
 ) -> None:
     from common.services.conversation_service import (
         persist_session_state_with_cancel_protection,
     )
 
     await persist_session_state_with_cancel_protection(request.session_id)  # pyright: ignore[reportArgumentType]
-
-    if not _is_desktop_mode() and request.available_skills and request.agent_id:
-        asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
 
 
 def _extract_token_usage_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1462,60 +1487,6 @@ async def _persist_token_usage_if_available(
             f"token_usage 落库失败: {e}"
         )
         return False
-
-
-def _load_agent_workspace_skill_names_sync(agent_skills_path: str) -> set[str]:
-    actual_skills: set[str] = set()
-    if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
-        try:
-            from sagents.skill.skill_manager import SkillManager
-
-            tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
-            for skill in tm.list_skill_info():
-                actual_skills.add(skill.name)
-        except Exception as e:
-            logger.warning(f"加载Agent工作空间技能失败: {e}")
-    return actual_skills
-
-
-async def _check_and_update_agent_skills(
-    request: StreamRequest,
-    original_skills: List[str],
-) -> None:
-    try:
-        cfg = _get_cfg()
-        agent_skills_path = str(
-            get_agent_skill_dir(
-                request.agent_id,  # pyright: ignore[reportArgumentType]
-                user_id=request.user_id or "default_user",
-                app_mode=cfg.app_mode,
-                ensure_exists=False,
-            )
-        )
-
-        actual_skills = await asyncio.to_thread(
-            _load_agent_workspace_skill_names_sync,
-            agent_skills_path,
-        )
-
-        added_in_session = actual_skills - set(original_skills or [])
-        if not added_in_session:
-            return
-
-        agent_dao = AgentConfigDao()
-        agent = await agent_dao.get_by_id(request.agent_id)  # pyright: ignore[reportArgumentType]
-        if agent and agent.config:
-            current_skills = set(agent.config.get("availableSkills") or [])
-            updated_skills = current_skills | added_in_session
-            agent.config["availableSkills"] = list(updated_skills)
-            await agent_dao.save(agent)
-            logger.bind(session_id=request.session_id, agent_id=request.agent_id).info(
-                f"Agent技能列表已更新: 新增={added_in_session}, 最终={updated_skills}"
-            )
-    except Exception as e:
-        logger.bind(session_id=request.session_id).error(
-            f"检查并更新Agent技能失败: {e}"
-        )
 
 
 async def _ensure_conversation(request: StreamRequest) -> None:
