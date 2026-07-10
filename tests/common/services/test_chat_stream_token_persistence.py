@@ -134,7 +134,7 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(
         calls.append(token_usage_payload)
         return True
 
-    async def _fake_finalize(request, original_skills):
+    async def _fake_finalize(request):
         calls.append("finalize")
 
     monkeypatch.setattr(

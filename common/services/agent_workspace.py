@@ -115,13 +115,17 @@ def cleanup_unselected_skills(
     agent_id: str,
     agent_config: Dict[str, Any],
     *,
+    previous_agent_config: Optional[Dict[str, Any]] = None,
     user_id: str = "",
     app_mode: Optional[str] = None,
 ) -> List[str]:
     """
-    删除 Agent workspace 中不再被选中的 skills。
+    删除 Agent 配置中明确取消选择的受管 skills。
+
+    Agent 在 workspace 中自行创建的 skills 不属于共享 Agent 配置，不能在保存
+    配置时按 availableSkills 做全量清理。
     """
-    allowed_skills = set(
+    selected_skills = set(
         str(name).strip()
         for name in (
             agent_config.get("availableSkills")
@@ -130,8 +134,18 @@ def cleanup_unselected_skills(
         )
         if str(name).strip()
     )
-    if not allowed_skills:
-        allowed_skills = set()
+    previous_skills = set(
+        str(name).strip()
+        for name in (
+            (previous_agent_config or {}).get("availableSkills")
+            or (previous_agent_config or {}).get("available_skills")
+            or []
+        )
+        if str(name).strip()
+    )
+    deselected_skills = previous_skills - selected_skills
+    if not deselected_skills:
+        return []
 
     try:
         skill_dir = get_agent_skill_dir(
@@ -147,11 +161,17 @@ def cleanup_unselected_skills(
     if not skill_dir.exists() or not skill_dir.is_dir():
         return []
 
+    from common.services.skill_service import _find_source_skill_path
+
+    cfg = _get_cfg()
     removed_skills: List[str] = []
     for skill_path in skill_dir.iterdir():
         if not skill_path.is_dir():
             continue
-        if skill_path.name in allowed_skills:
+        if skill_path.name not in deselected_skills:
+            continue
+        if not _find_source_skill_path(skill_path.name, user_id, cfg):
+            logger.info(f"保留Agent workspace自建skill: {skill_path.name}")
             continue
         try:
             import shutil

@@ -486,6 +486,7 @@ async def update_agent(
         )
 
     normalized_config = dict(agent_config)
+    previous_config = dict(existing_config.config or {})
     agent_name = _require_agent_name(agent_name, agent_id=agent_id)
     normalized_config = _normalize_max_loop_count(normalized_config)
     normalized_config = _normalize_agent_mode(normalized_config)
@@ -518,6 +519,7 @@ async def update_agent(
             cleanup_unselected_skills,
             agent_id,
             normalized_config,
+            previous_agent_config=previous_config,
             user_id=existing_config.user_id or user_id or "",
         )
         logger.info(f"Agent {agent_id} 更新成功")
@@ -555,6 +557,7 @@ async def update_agent(
         cleanup_unselected_skills,
         agent_id,
         normalized_config,
+        previous_agent_config=previous_config,
         user_id=existing_config.user_id or user_id or "",
     )
 
