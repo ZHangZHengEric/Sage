@@ -3,7 +3,9 @@ import re
 import sys
 import types
 
-from sagents.tool.impl.web_fetcher_tool import WebFetcherTool
+import pytest
+
+from sagents.tool.impl.web_fetcher_tool import WebFetcherTool, _HttpStatusError
 
 
 class CssResult(list):
@@ -20,10 +22,12 @@ class FakeElement:
 
 
 class FakePage:
-    def __init__(self, title, selector_html, url=None):
+    def __init__(self, title, selector_html, url=None, status=200, reason="OK"):
         self.title = title
         self.selector_html = selector_html
         self.url = url
+        self.status = status
+        self.reason = reason
 
     def css(self, selector):
         if selector == "title::text":
@@ -112,7 +116,7 @@ def install_html_markdown_stubs(monkeypatch):
 
 def test_fetch_html_page_uses_async_fetcher_class_api(monkeypatch):
     calls = []
-    expected_page = object()
+    expected_page = FakePage("Example", {})
 
     class FakeAsyncFetcher:
         def __init__(self):
@@ -140,9 +144,56 @@ def test_fetch_html_page_uses_async_fetcher_class_api(monkeypatch):
             {
                 "stealthy_headers": True,
                 "timeout": 7,
+                "retries": 1,
             },
         )
     ]
+
+
+def test_fetch_html_page_rejects_non_success_http_status(monkeypatch):
+    class FakeAsyncFetcher:
+        @classmethod
+        async def get(cls, url, **kwargs):
+            return FakePage("Missing", {}, status=404, reason="Not Found")
+
+    scrapling_module = types.ModuleType("scrapling")
+    fetchers_module = types.ModuleType("scrapling.fetchers")
+    fetchers_module.AsyncFetcher = FakeAsyncFetcher
+    scrapling_module.fetchers = fetchers_module
+
+    monkeypatch.setitem(sys.modules, "scrapling", scrapling_module)
+    monkeypatch.setitem(sys.modules, "scrapling.fetchers", fetchers_module)
+
+    with pytest.raises(_HttpStatusError, match="HTTP 404 Not Found"):
+        asyncio.run(WebFetcherTool()._fetch_html_page("https://example.com/missing", 7))
+
+
+def test_fetch_html_with_save_does_not_retry_http_404(monkeypatch, tmp_path):
+    calls = 0
+
+    async def fake_fetch(url, timeout):
+        nonlocal calls
+        calls += 1
+        raise _HttpStatusError(404, "Not Found")
+
+    tool = WebFetcherTool()
+    monkeypatch.setattr(tool, "_fetch_html_page", fake_fetch)
+
+    result = asyncio.run(
+        tool._fetch_single_html_with_save(
+            "https://example.com/missing", 5000, str(tmp_path), 3, 3
+        )
+    )
+
+    assert calls == 1
+    assert result == {
+        "url": "https://example.com/missing",
+        "status": "error",
+        "error": "HTTP 404 Not Found",
+        "content": None,
+        "metadata": None,
+    }
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_fetch_html_with_save_outputs_markdown_images_and_metadata(

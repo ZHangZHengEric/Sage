@@ -39,7 +39,7 @@ deploy/compose.sh test up -d
 
 `wiki`、`rustfs`、`redis` 使用共享 compose 文件 `deploy/docker-compose.shared.yml`，不再在 `dev`、`prod`、`test` 的 compose 文件中重复定义。`prometheus`、`grafana`、`cadvisor`、`loki`、`alloy`、`jaeger` 单独放在 `deploy/docker-compose.observability.yml`。
 
-执行 `deploy/compose.sh <env> up -d` 时，脚本会先确认 `sage_shared_default` Docker 网络存在；不存在则创建。随后脚本会用 `sage_shared` compose project 启动 shared 服务，再启动当前环境服务。Shared、环境服务和观测服务都会通过 `SAGE_SHARED_NETWORK=sage_shared_default` 接入同一个网络。Shared 和观测服务固定使用 `sage-*` 容器名。
+执行 `deploy/compose.sh <env> up -d` 时，脚本会先确认 `sage_shared_default` Docker 网络存在；不存在则创建。未指定 service 时，脚本会用 `sage_shared` compose project 启动 shared 服务，再启动当前环境服务；显式指定 service 时，脚本会自动使用 `--no-deps` 只启动指定服务，不重建其他 shared、环境或观测服务。Shared、环境服务和观测服务都会通过 `SAGE_SHARED_NETWORK=sage_shared_default` 接入同一个网络。Shared 和观测服务固定使用 `sage-*` 容器名。
 
 观测服务默认不启动。需要 Prometheus、cAdvisor、Loki、Alloy、Jaeger 时，显式加 `--observability`，脚本会在 shared 网络可用后单独启动 `deploy/docker-compose.observability.yml`。Grafana 不随默认观测栈启动，需要在展示机器上显式指定 `sage-grafana`：
 

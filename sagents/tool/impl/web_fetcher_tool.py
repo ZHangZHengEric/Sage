@@ -25,6 +25,16 @@ from ..error_codes import (
 from sagents.utils.logger import logger
 
 
+class _HttpStatusError(Exception):
+    """HTTP response that must not be parsed as webpage content."""
+
+    def __init__(self, status: int, reason: str = "") -> None:
+        self.status = status
+        self.retryable = status in {408, 429} or status >= 500
+        detail = f" {reason}" if reason else ""
+        super().__init__(f"HTTP {status}{detail}")
+
+
 class WebFetcherTool:
     """基于 Scrapling 的网页抓取工具，支持网页内容提取和文件下载"""
 
@@ -124,12 +134,12 @@ class WebFetcherTool:
                 "en": "Maximum text length per URL (characters), default 8000. Only applies to HTML pages",
             },
             "timeout": {
-                "zh": "每个请求的超时时间（秒），默认60秒",
-                "en": "Timeout per request (seconds), default 60",
+                "zh": "每个请求的超时时间（秒），默认30秒",
+                "en": "Timeout per request (seconds), default 30",
             },
             "retries": {
-                "zh": "失败重试次数，默认2",
-                "en": "Number of retries on failure, default 2",
+                "zh": "失败重试次数，默认1",
+                "en": "Number of retries on failure, default 1",
             },
             "session_id": {
                 "zh": "会话ID，用于确定Agent工作空间路径，文件将保存到该工作空间",
@@ -494,6 +504,22 @@ class WebFetcherTool:
                     },
                 }
 
+            except _HttpStatusError as e:
+                last_error = str(e)
+                logger.warning(
+                    f"WebFetcher: {url} HTTP响应失败 "
+                    f"(尝试 {attempt + 1}/{retries + 1}): {last_error}"
+                )
+                if not e.retryable:
+                    return {
+                        "url": url,
+                        "status": "error",
+                        "error": last_error,
+                        "content": None,
+                        "metadata": None,
+                    }
+                if attempt < retries:
+                    await asyncio.sleep(2**attempt)
             except asyncio.TimeoutError:
                 last_error = f"请求超时（超过 {timeout} 秒）"
                 logger.warning(
@@ -559,6 +585,22 @@ class WebFetcherTool:
                     },
                 }
 
+            except _HttpStatusError as e:
+                last_error = str(e)
+                logger.warning(
+                    f"WebFetcher: {url} HTTP响应失败 "
+                    f"(尝试 {attempt + 1}/{retries + 1}): {last_error}"
+                )
+                if not e.retryable:
+                    return {
+                        "url": url,
+                        "status": "error",
+                        "error": last_error,
+                        "content": None,
+                        "metadata": None,
+                    }
+                if attempt < retries:
+                    await asyncio.sleep(2**attempt)
             except asyncio.TimeoutError:
                 last_error = f"请求超时（超过 {timeout} 秒）"
                 logger.warning(
@@ -586,10 +628,18 @@ class WebFetcherTool:
         """Fetch an HTML page with Scrapling's class-level async fetcher API."""
         from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
 
-        return await asyncio.wait_for(
-            AsyncFetcher.get(url, stealthy_headers=True, timeout=timeout),
+        page = await asyncio.wait_for(
+            AsyncFetcher.get(
+                url,
+                stealthy_headers=True,
+                timeout=timeout,
+                retries=1,
+            ),
             timeout=timeout + 5,
         )
+        if not 200 <= page.status < 300:
+            raise _HttpStatusError(page.status, page.reason)
+        return page
 
     def _clean_content(self, text: str) -> str:
         """清理内容"""
