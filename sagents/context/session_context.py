@@ -684,6 +684,106 @@ class SessionContext:
                             reason="stable_message",
                         )
 
+    def claim_llm_messages_for_request(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> List[str]:
+        """Atomically reserve pending request-scoped messages for one request.
+
+        Claims are intentionally kept in memory only. A successful provider
+        response journals the final ``consumed`` state, while a request that
+        fails before its first response releases the claim back to ``pending``.
+        This also means a process restart restores the last journaled pending
+        state instead of stranding an in-flight claim.
+        """
+
+        if not message_ids or not logical_request_id:
+            return []
+        target_ids = set(message_ids)
+        claimed_at = time.time()
+        claimed_ids: List[str] = []
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                if metadata.get("llm_state", "pending") != "pending":
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "claimed",
+                        "llm_claimed_by": logical_request_id,
+                        "llm_claimed_at": claimed_at,
+                    }
+                )
+                message.metadata = metadata
+                claimed_ids.append(message.message_id)
+
+            if claimed_ids:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+
+        if claimed_ids:
+            logger.info(
+                "SessionContext: claimed next-request messages "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={len(claimed_ids)}"
+            )
+        return claimed_ids
+
+    def release_llm_message_claims(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> int:
+        """Release claims owned by a request that produced no provider response."""
+
+        if not message_ids or not logical_request_id:
+            return 0
+        target_ids = set(message_ids)
+        released = 0
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                if metadata.get("llm_state") != "claimed":
+                    continue
+                if metadata.get("llm_claimed_by") != logical_request_id:
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "pending",
+                        "llm_claimed_by": None,
+                        "llm_claimed_at": None,
+                    }
+                )
+                message.metadata = metadata
+                released += 1
+
+            if released:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+
+        if released:
+            logger.info(
+                "SessionContext: released next-request message claims "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={released}"
+            )
+        return released
+
     def mark_llm_messages_consumed(
         self,
         message_ids: List[str],
@@ -706,13 +806,17 @@ class SessionContext:
                 if message.message_id not in target_ids:
                     continue
                 metadata = (
-                    dict(message.metadata)
-                    if isinstance(message.metadata, dict)
-                    else {}
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
                 )
                 if metadata.get("llm_scope") != "next_request":
                     continue
-                if metadata.get("llm_state", "pending") != "pending":
+                state = metadata.get("llm_state", "pending")
+                if (
+                    state == "claimed"
+                    and metadata.get("llm_claimed_by") != logical_request_id
+                ):
+                    continue
+                if state not in {"pending", "claimed"}:
                     continue
                 metadata.update(
                     {

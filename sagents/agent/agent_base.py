@@ -1283,6 +1283,7 @@ class AgentBase(ABC):
 
         while retry_count < max_retries:
             attempt_yielded_chunks = False
+            retrying_logical_request = False
             try:
                 attempt_chunks = []
                 first_token_time = None
@@ -1460,12 +1461,37 @@ class AgentBase(ABC):
                     serializable_messages
                 )
                 if request_messages_snapshot is None:
-                    pending_next_request_message_ids = [
+                    proposed_next_request_message_ids = [
                         str(msg["_sage_message_id"])
                         for msg in serializable_messages
                         if msg.get("_sage_message_id")
                         in candidate_next_request_message_ids
                     ]
+                    pending_next_request_message_ids = list(
+                        dict.fromkeys(proposed_next_request_message_ids)
+                    )
+                    if session_id and pending_next_request_message_ids:
+                        session_context = self._get_live_session_context(session_id)
+                        claim_messages = getattr(
+                            session_context,
+                            "claim_llm_messages_for_request",
+                            None,
+                        )
+                        if callable(claim_messages):
+                            pending_next_request_message_ids = list(
+                                claim_messages(
+                                    pending_next_request_message_ids,
+                                    logical_request_id,
+                                )
+                            )
+                            claimed_ids = set(pending_next_request_message_ids)
+                            serializable_messages = [
+                                msg
+                                for msg in serializable_messages
+                                if msg.get("_sage_message_id")
+                                not in candidate_next_request_message_ids
+                                or msg.get("_sage_message_id") in claimed_ids
+                            ]
                     for msg in serializable_messages:
                         msg.pop("_sage_message_id", None)
                     request_messages_snapshot = deepcopy(serializable_messages)
@@ -1581,6 +1607,7 @@ class AgentBase(ABC):
                         f"{self.__class__.__name__}: structured output not supported in this runtime shape, retrying without response_format: {e}"
                     )
                     await asyncio.sleep(0)
+                    retrying_logical_request = True
                     continue
                 retry_count += 1
                 last_exception = e
@@ -1645,6 +1672,7 @@ class AgentBase(ABC):
                         f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}"
                     )
                     await asyncio.sleep(wait_time)
+                    retrying_logical_request = True
                 elif is_token_limit_error:
                     # token 超限错误，直接抛出，由上层处理压缩逻辑
                     logger.error(
@@ -1740,6 +1768,7 @@ class AgentBase(ABC):
                         f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}"
                     )
                     await asyncio.sleep(wait_time)
+                    retrying_logical_request = True
                     continue  # 继续重试循环
                 else:
                     # 非网络错误或已达到最大重试次数
@@ -1772,6 +1801,23 @@ class AgentBase(ABC):
                     )
                     raise e
             finally:
+                if (
+                    pending_next_request_message_ids
+                    and not llm_scope_consumed
+                    and not retrying_logical_request
+                    and session_id
+                ):
+                    session_context = self._get_live_session_context(session_id)
+                    release_claims = getattr(
+                        session_context,
+                        "release_llm_message_claims",
+                        None,
+                    )
+                    if callable(release_claims):
+                        release_claims(
+                            pending_next_request_message_ids,
+                            logical_request_id,
+                        )
                 # 只有在成功完成或最终失败时才记录。
                 # 重试后成功也必须落盘（stream_succeeded），不能只看 retry_count==0。
                 if (
