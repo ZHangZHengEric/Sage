@@ -612,6 +612,12 @@ class McpHttpClientPoolEntry:
             _env_float("SAGE_MCP_CLOSE_TIMEOUT_SECONDS", 5.0, minimum=0.01),
             minimum=0.01,
         )
+        self.stall_warning_seconds = _get_config_float(
+            self.config,
+            ["stall_warning_seconds"],
+            _env_float("SAGE_MCP_STALL_WARNING_SECONDS", 120.0, minimum=0.0),
+            minimum=0.0,
+        )
         self.drain_timeout_seconds = _env_float(
             "SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS", 30.0, minimum=0.0
         )
@@ -619,6 +625,7 @@ class McpHttpClientPoolEntry:
         self.draining = False
         self._closed = False
         self._client: Optional[FastMCPClient] = None
+        self._request_clients: set[FastMCPClient] = set()
         self._active_requests = 0
         self._idle_event = asyncio.Event()
         self._idle_event.set()
@@ -661,6 +668,22 @@ class McpHttpClientPoolEntry:
             init_timeout=self.connect_timeout_seconds,
         )
 
+    async def _open_client_instance(self, client: FastMCPClient) -> None:
+        try:
+            await asyncio.wait_for(
+                client.__aenter__(),
+                timeout=self.connect_timeout_seconds,
+            )
+        except asyncio.CancelledError:
+            await self._close_client_instance(client)
+            raise
+        except BaseException as exc:
+            await self._close_client_instance(client)
+            raise McpConnectionStaleError(
+                f"FastMCP client failed to connect: "
+                f"server={self.server_name}, error={exc}"
+            ) from exc
+
     async def _checkout_client(self) -> FastMCPClient:
         async with self._lock:
             if self.draining or self._closed:
@@ -670,20 +693,7 @@ class McpHttpClientPoolEntry:
                 if client is not None:
                     await self._close_client_instance(client)
                 client = self._build_client()
-                try:
-                    await asyncio.wait_for(
-                        client.__aenter__(),
-                        timeout=self.connect_timeout_seconds,
-                    )
-                except asyncio.CancelledError:
-                    await self._close_client_instance(client)
-                    raise
-                except BaseException as exc:
-                    await self._close_client_instance(client)
-                    raise McpConnectionStaleError(
-                        f"FastMCP client failed to connect: "
-                        f"server={self.server_name}, error={exc}"
-                    ) from exc
+                await self._open_client_instance(client)
                 self._client = client
                 self._closed = False
                 logger.info(
@@ -694,8 +704,12 @@ class McpHttpClientPoolEntry:
             self._idle_event.clear()
             return client
 
-    async def _checkin_client(self) -> None:
+    async def _checkin_client(
+        self, request_client: Optional[FastMCPClient] = None
+    ) -> None:
         async with self._lock:
+            if request_client is not None:
+                self._request_clients.discard(request_client)
             self._active_requests = max(0, self._active_requests - 1)
             idle = self._active_requests == 0
             if idle:
@@ -717,15 +731,73 @@ class McpHttpClientPoolEntry:
             await self._checkin_client()
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        client = await self._checkout_client()
+        # Isolate every tool call in its own MCP session. MCP Python SDK 1.28.0
+        # and older can head-of-line block a stateful Streamable HTTP session
+        # when one per-request response stream is not consumed. Per-call sessions
+        # keep that upstream failure from trapping unrelated requests.
+        client = self._build_client()
+        started_at = time.monotonic()
+        stall_warning_task: Optional[asyncio.Task] = None
+        registered = False
         try:
-            return await client.call_tool_mcp(
+            await self._open_client_instance(client)
+            async with self._lock:
+                if self.draining or self._closed:
+                    raise McpConnectionStaleError(
+                        f"MCP client was retired before tool call: {self.server_name}"
+                    )
+                self._request_clients.add(client)
+                self._active_requests += 1
+                self._idle_event.clear()
+                registered = True
+            if self.stall_warning_seconds > 0:
+                stall_warning_task = asyncio.create_task(
+                    self._warn_if_call_stalled(client, tool_name, started_at)
+                )
+            result = await client.call_tool_mcp(
                 tool_name,
                 arguments,
                 timeout=self.call_timeout_seconds,
             )
+            logger.info(
+                f"MCP tool response received: server={self.server_name}, "
+                f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}"
+            )
+            return result
+        except asyncio.CancelledError:
+            logger.warning(
+                f"MCP tool call cancelled before response: server={self.server_name}, "
+                f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}"
+            )
+            raise
+        except Exception as exc:
+            logger.warning(
+                f"MCP tool call failed before response: server={self.server_name}, "
+                f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}, "
+                f"error_type={type(exc).__name__}, error={exc}"
+            )
+            raise
         finally:
-            await self._checkin_client()
+            if stall_warning_task is not None:
+                stall_warning_task.cancel()
+                await asyncio.gather(stall_warning_task, return_exceptions=True)
+            await self._close_client_instance(client)
+            if registered:
+                await self._checkin_client(client)
+
+    async def _warn_if_call_stalled(
+        self,
+        client: FastMCPClient,
+        tool_name: str,
+        started_at: float,
+    ) -> None:
+        await asyncio.sleep(self.stall_warning_seconds)
+        logger.warning(
+            f"MCP tool response is still pending: server={self.server_name}, "
+            f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}, "
+            f"client_connected={client.is_connected()}, "
+            f"call_timeout_seconds={self.call_timeout_seconds:g}"
+        )
 
     async def retire(self, reason: str) -> None:
         logger.info(
@@ -754,6 +826,12 @@ class McpHttpClientPoolEntry:
                     f"FastMCP client drain timed out: server={self.server_name}"
                 )
         await self._close_current_client()
+        async with self._lock:
+            request_clients = list(self._request_clients)
+        await asyncio.gather(
+            *(self._close_client_instance(client) for client in request_clients),
+            return_exceptions=True,
+        )
 
     async def _close_current_client(self) -> None:
         async with self._close_lock:

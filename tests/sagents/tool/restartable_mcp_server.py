@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from typing import Literal
 
@@ -9,6 +10,12 @@ mcp = FastMCP("restartable-test-server")
 
 @mcp.tool
 async def echo(value: str) -> str:
+    return value
+
+
+@mcp.tool
+async def delayed_echo(value: str, delay_seconds: float = 0.05) -> str:
+    await asyncio.sleep(delay_seconds)
     return value
 
 
