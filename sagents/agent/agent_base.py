@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator, Sequence, cast
 import datetime
 import json
 import uuid
 import asyncio
 import hashlib
 import re
+from copy import deepcopy
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_progress import (
@@ -208,6 +209,83 @@ class AgentBase(ABC):
                 or (chunk.metadata or {}).get("transient") is True
             )
         ]
+
+    @staticmethod
+    def _next_request_runtime_metadata(
+        **extra: Any,
+    ) -> Dict[str, Any]:
+        """Metadata for hidden audit messages consumed by one LLM request."""
+
+        return {
+            "hidden_from_chat": True,
+            "sse_visible": False,
+            "llm_scope": "next_request",
+            "llm_state": "pending",
+            "llm_consumed_by": None,
+            "llm_consumed_at": None,
+            **extra,
+        }
+
+    def _create_unavailable_tool_runtime_message(
+        self,
+        tool_names: Sequence[str],
+    ) -> MessageChunk:
+        names = sorted({name for name in tool_names if name})
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=json.dumps(
+                {
+                    "code": "tool_not_available_in_request",
+                    "tool_names": names,
+                    "next_action": {
+                        "tool": "tool_expand_tools",
+                        "arguments": {"tool_names": names},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            type=MessageType.AGENT_EXECUTION_ERROR.value,
+            agent_name=self.agent_name,
+            metadata=self._next_request_runtime_metadata(
+                runtime_notice="unavailable_tool_rejected"
+            ),
+        )
+
+    def _create_streamed_tool_rejection_results(
+        self,
+        tool_calls: Dict[str, Any],
+        *,
+        code: str,
+    ) -> List[MessageChunk]:
+        """Close provisional tool cards emitted by low-latency streaming mode."""
+
+        results: List[MessageChunk] = []
+        for fallback_id, tool_call in tool_calls.items():
+            tool_call_id = tool_call.get("id") or fallback_id
+            if not tool_call_id or str(tool_call_id).startswith("__tool_call_index_"):
+                continue
+            tool_name = (tool_call.get("function") or {}).get("name") or ""
+            results.append(
+                MessageChunk(
+                    role=MessageRole.TOOL.value,
+                    content=json.dumps(
+                        {
+                            "status": "rejected",
+                            "code": code,
+                            "tool_name": tool_name,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    tool_call_id=str(tool_call_id),
+                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                    agent_name=self.agent_name,
+                    metadata={
+                        "tool_name": tool_name,
+                        "streamed_tool_rejected": True,
+                    },
+                )
+            )
+        return results
 
     @abstractmethod
     async def run_stream(
@@ -1174,6 +1252,27 @@ class AgentBase(ABC):
         all_chunks = []
         attempt_chunks = []
 
+        logical_request_id = f"llm_{uuid.uuid4().hex}"
+        candidate_next_request_message_ids = set(
+            MessageManager.pending_next_request_message_ids(messages)
+        )
+        if messages and all(isinstance(m, MessageChunk) for m in messages):
+            messages = MessageManager.strip_rejected_tool_calls_from_llm_context(  # pyright: ignore[reportAssignmentType]
+                list(messages)  # pyright: ignore[reportArgumentType]
+            )
+            messages = MessageManager.strip_turn_status_from_llm_context(  # pyright: ignore[reportAssignmentType]
+                list(messages)  # pyright: ignore[reportArgumentType]
+            )
+        messages = MessageManager.filter_messages_for_llm_scope(messages)  # pyright: ignore[reportAssignmentType]
+        pending_next_request_message_ids: List[str] = []
+        llm_scope_consumed = False
+
+        # A logical request owns one immutable provider payload. Network retries
+        # reuse this snapshot; only the explicit structured-output fallback may
+        # change response_format while keeping the message payload unchanged.
+        request_messages_snapshot: Optional[List[Dict[str, Any]]] = None
+        response_format = final_config.pop("response_format", None)
+
         # 重试配置 - 增加重试次数以应对网络不稳定情况
         max_retries = 8
         retry_count = 0
@@ -1191,11 +1290,6 @@ class AgentBase(ABC):
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
-                # 纯 MessageChunk 列表：与 convert_messages_to_dict_for_request 一致，剔除 turn_status 协议对
-                if messages and all(isinstance(m, MessageChunk) for m in messages):
-                    messages = MessageManager.strip_turn_status_from_llm_context(  # pyright: ignore[reportAssignmentType]
-                        list(messages)  # pyright: ignore[reportArgumentType]
-                    )
                 prompt_cache_observation = self._build_prompt_cache_observation(
                     messages,
                     final_config.get("tools"),
@@ -1205,32 +1299,50 @@ class AgentBase(ABC):
                 # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
                 start_request_time = time.time()
                 first_token_time = None
-                serializable_messages = []
                 cache_segments: List[Optional[str]] = []
-
-                for msg in messages:
-                    if isinstance(msg, MessageChunk):
-                        msg_dict = msg.to_dict()
-                        msg_dict = await self._process_multimodal_content(msg_dict)
-                        serializable_messages.append(msg_dict)
-                        seg = None
-                        if isinstance(getattr(msg, "metadata", None), dict):
-                            seg = msg.metadata.get("cache_segment")  # pyright: ignore[reportOptionalMemberAccess]
-                        cache_segments.append(seg)
-                    else:
-                        msg_copy = msg.copy()
-                        msg_copy = await self._process_multimodal_content(msg_copy)
-                        serializable_messages.append(msg_copy)
-                        cache_segments.append(None)
-                # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
-                serializable_messages = [
-                    {
-                        k: v
-                        for k, v in msg.items()
-                        if k in ["role", "content", "tool_calls", "tool_call_id"]
-                    }
-                    for msg in serializable_messages
-                ]
+                if request_messages_snapshot is not None:
+                    serializable_messages = deepcopy(request_messages_snapshot)
+                else:
+                    serializable_messages = []
+                    for msg in messages:
+                        if isinstance(msg, MessageChunk):
+                            msg_dict = (
+                                MessageManager.convert_message_to_dict_for_request(msg)
+                            )
+                            if msg_dict is None:
+                                continue
+                            if msg.message_id:
+                                msg_dict["_sage_message_id"] = msg.message_id
+                            msg_dict = await self._process_multimodal_content(msg_dict)
+                            serializable_messages.append(msg_dict)
+                            seg = None
+                            if isinstance(getattr(msg, "metadata", None), dict):
+                                seg = msg.metadata.get("cache_segment")  # pyright: ignore[reportOptionalMemberAccess]
+                            cache_segments.append(seg)
+                        else:
+                            msg_copy = msg.copy()
+                            raw_message_id = MessageChunk.from_dict(msg).message_id
+                            if raw_message_id:
+                                msg_copy["_sage_message_id"] = raw_message_id
+                            msg_copy = await self._process_multimodal_content(msg_copy)
+                            serializable_messages.append(msg_copy)
+                            cache_segments.append(None)
+                    # 只保留 model.chat.completions.create 需要的 message key。
+                    serializable_messages = [
+                        {
+                            k: v
+                            for k, v in msg.items()
+                            if k
+                            in [
+                                "role",
+                                "content",
+                                "tool_calls",
+                                "tool_call_id",
+                                "_sage_message_id",
+                            ]
+                        }
+                        for msg in serializable_messages
+                    ]
 
                 # === 注入 shell completion 事件作为 <system_reminder> 消息 ===
                 # 后台 shell 命令完成后，watcher 会把事件写入 ExecuteCommandTool._COMPLETION_EVENTS。
@@ -1241,7 +1353,7 @@ class AgentBase(ABC):
                 #   3) 不污染 system prompt cache。
                 # await_shell 显式拿到 completed 时会 consume 对应 task_id 的事件，
                 # 因此被显式消费过的不会在这里重复出现。
-                if session_id:
+                if session_id and request_messages_snapshot is None:
                     try:
                         from sagents.tool.impl.execute_command_tool import (
                             ExecuteCommandTool,
@@ -1347,8 +1459,21 @@ class AgentBase(ABC):
                 serializable_messages = self._remove_content_if_tool_calls(
                     serializable_messages
                 )
+                if request_messages_snapshot is None:
+                    pending_next_request_message_ids = [
+                        str(msg["_sage_message_id"])
+                        for msg in serializable_messages
+                        if msg.get("_sage_message_id")
+                        in candidate_next_request_message_ids
+                    ]
+                    for msg in serializable_messages:
+                        msg.pop("_sage_message_id", None)
+                    request_messages_snapshot = deepcopy(serializable_messages)
+
+                # Provider clients may normalize/mutate request dictionaries, so
+                # every attempt receives a fresh copy of the frozen snapshot.
+                serializable_messages = deepcopy(request_messages_snapshot)
                 final_config = {k: v for k, v in final_config.items() if v is not None}
-                response_format = final_config.pop("response_format", None)
 
                 # 根据 enable_thinking 参数或 deep_thinking 配置决定是否启用思考模式
                 # 优先使用传入的 enable_thinking 参数
@@ -1410,6 +1535,15 @@ class AgentBase(ABC):
                 )
                 async for chunk in stream:
                     # print(chunk)
+                    if not llm_scope_consumed:
+                        if session_id and pending_next_request_message_ids:
+                            session_context = self._get_live_session_context(session_id)
+                            if session_context is not None:
+                                session_context.mark_llm_messages_consumed(
+                                    pending_next_request_message_ids,
+                                    logical_request_id,
+                                )
+                        llm_scope_consumed = True
                     # 记录首token时间
                     if first_token_time is None:
                         first_token_time = time.time()
@@ -1672,6 +1806,7 @@ class AgentBase(ABC):
                         # 让 SessionContext 的 per-request tokens 统计能拿到 model 字段。
                         model_config_for_record = {**final_config, "model": model_name}
                         llm_request = {
+                            "logical_request_id": logical_request_id,
                             "step_name": step_name,
                             "model_config": model_config_for_record,
                             "model": model_name,
@@ -2334,11 +2469,11 @@ class AgentBase(ABC):
             message_type=MessageType.AGENT_EXECUTION_ERROR.value,
             agent_name=self.agent_name,
             metadata={
-                "hidden_from_chat": True,
                 "hide_from_chat": True,
-                "sse_visible": False,
-                "runtime_diagnostic_source": "tool_call_argument_parse",
-                "tool_name": tool_name,
+                **self._next_request_runtime_metadata(
+                    runtime_diagnostic_source="tool_call_argument_parse",
+                    tool_name=tool_name,
+                ),
             },
         )
 
@@ -2730,7 +2865,15 @@ class AgentBase(ABC):
                     raw_arguments=raw_arguments,
                     language=language,
                 )
-                yield ([error_message], False)
+                rejection_results = (
+                    self._create_streamed_tool_rejection_results(
+                        {tool_call_id: tool_call},
+                        code="invalid_tool_arguments",
+                    )
+                    if not emit_tool_call_message
+                    else []
+                )
+                yield ([*rejection_results, error_message], False)
                 continue
 
             # 更新解析后的参数

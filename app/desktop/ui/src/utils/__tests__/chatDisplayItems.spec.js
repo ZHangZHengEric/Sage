@@ -41,4 +41,19 @@ describe('chatDisplayItems normalizeChatMessages', () => {
     const visibleMessage = items.find(item => item.type === 'message' && item.message?.message_id === 'a1')
     expect(visibleMessage?.message.content).toBe('Tool was not provided.')
   })
+
+  it('filters messages explicitly hidden by backend metadata', () => {
+    const source = [
+      { message_id: 'u1', role: 'user', content: 'run' },
+      {
+        message_id: 'hidden-1',
+        role: 'assistant',
+        content: 'internal correction',
+        metadata: { hidden_from_chat: true, llm_scope: 'next_request' }
+      }
+    ]
+
+    const normalized = normalizeChatMessages(source)
+    expect(normalized.map(message => message.message_id)).toEqual(['u1'])
+  })
 })

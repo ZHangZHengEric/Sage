@@ -84,6 +84,34 @@ def test_hidden_runtime_notice_stays_in_internal_history(tmp_path):
     assert _read_journal(ctx) == []
 
 
+def test_mark_next_request_message_consumed_updates_ledger_and_journal(tmp_path):
+    ctx = _make_session(tmp_path)
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="Tool was not provided.",
+        message_id="notice-once",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={
+            "runtime_notice": "unavailable_tool_rejected",
+            "hidden_from_chat": True,
+            "sse_visible": False,
+            "llm_scope": "next_request",
+            "llm_state": "pending",
+        },
+    )
+    ctx.add_messages(notice)
+
+    assert ctx.mark_llm_messages_consumed(["notice-once"], "llm-request-1") == 1
+    assert ctx.mark_llm_messages_consumed(["notice-once"], "llm-request-1") == 0
+
+    stored = ctx.message_manager.messages[0]
+    assert stored.metadata["llm_state"] == "consumed"
+    assert stored.metadata["llm_consumed_by"] == "llm-request-1"
+    records = _read_journal(ctx)
+    assert records[-1]["reason"] == "llm_scope_consumed"
+    assert records[-1]["message"]["metadata"]["llm_state"] == "consumed"
+
+
 def test_message_journal_writes_previous_message_on_id_switch(tmp_path):
     ctx = _make_session(tmp_path)
 

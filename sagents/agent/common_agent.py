@@ -3,7 +3,6 @@ import json
 import uuid
 import os
 
-from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -94,10 +93,7 @@ class CommonAgent(AgentBase):
         tool_manager: Optional[ToolManager],
         session_id: str,
     ) -> AsyncGenerator[List[MessageChunk], None]:
-        clean_message_input = MessageManager.convert_messages_to_dict_for_request(
-            messages_input
-        )
-        logger.info(f"CommonAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
+        logger.info(f"CommonAgent: 准备了 {len(messages_input)} 条消息用于LLM")
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
@@ -128,15 +124,12 @@ class CommonAgent(AgentBase):
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-                # 根据环境变量控制是否流式返回工具调用消息
-                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
                 emit_on_complete = (
                     os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
                     == "true"
                 )
                 if not emit_on_complete:
-                    # 流式返回工具调用消息，让前端先展示工具名并进入 loading。
-                    output_messages = [
+                    yield [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=chunk.choices[0].delta.tool_calls,
@@ -144,18 +137,6 @@ class CommonAgent(AgentBase):
                             message_type=MessageType.TOOL_CALL.value,
                         )
                     ]
-                    yield output_messages
-                else:
-                    # yield 一个空的消息块以避免生成器卡住
-                    output_messages = [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content="",
-                            message_id=content_response_message_id,
-                            message_type=MessageType.EMPTY.value,
-                        )
-                    ]
-                    yield output_messages
 
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
@@ -191,8 +172,40 @@ class CommonAgent(AgentBase):
                     yield output_messages
         # 处理工具调用
         if len(tool_calls) > 0:
-            # 根据环境变量控制 emit_tool_call_message
-            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
+            allowed_tool_names = {
+                (tool.get("function") or {}).get("name") or ""
+                for tool in tools_json
+            }
+            invalid_tool_names = {
+                (tool_call.get("function") or {}).get("name") or ""
+                for tool_call in tool_calls.values()
+                if ((tool_call.get("function") or {}).get("name") or "")
+                not in allowed_tool_names
+            }
+            if invalid_tool_names:
+                logger.warning(
+                    "CommonAgent: 模型返回未提供的工具 "
+                    f"{sorted(invalid_tool_names)}，拒绝执行"
+                )
+                streamed_rejections = (
+                    self._create_streamed_tool_rejection_results(
+                        tool_calls,
+                        code="tool_not_available_in_request",
+                    )
+                    if os.environ.get(
+                        "SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false"
+                    ).lower()
+                    != "true"
+                    else []
+                )
+                yield [
+                    *streamed_rejections,
+                    self._create_unavailable_tool_runtime_message(
+                        sorted(invalid_tool_names)
+                    )
+                ]
+                return
+
             emit_on_complete = (
                 os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
                 == "true"

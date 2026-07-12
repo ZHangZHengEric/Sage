@@ -113,9 +113,8 @@ class PlanAgent(AgentBase):
                 made_progress = False
                 tool_calls: Dict[str, Any] = {}
                 last_tool_call_id = ""
-                assistant_message_id = str(uuid.uuid4())
                 tool_calls_messages_id = str(uuid.uuid4())
-                content_response_message_id = str(uuid.uuid4())
+                assistant_message_id = str(uuid.uuid4())
                 assistant_content_parts: List[str] = []
 
                 async for llm_chunk in self._call_llm_streaming(
@@ -139,8 +138,6 @@ class PlanAgent(AgentBase):
                             if tool_call.id:
                                 last_tool_call_id = tool_call.id
 
-                        # 根据环境变量控制是否流式返回工具调用消息
-                        # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
                         emit_on_complete = (
                             os.environ.get(
                                 "SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false"
@@ -148,8 +145,7 @@ class PlanAgent(AgentBase):
                             == "true"
                         )
                         if not emit_on_complete:
-                            # 流式返回工具调用消息
-                            output_messages = [
+                            yield [
                                 MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
                                     tool_calls=delta.tool_calls,
@@ -158,18 +154,6 @@ class PlanAgent(AgentBase):
                                     agent_name=self.agent_name,
                                 )
                             ]
-                            yield output_messages
-                        else:
-                            # yield 一个空的消息块以避免生成器卡住
-                            output_messages = [
-                                MessageChunk(
-                                    role=MessageRole.ASSISTANT.value,
-                                    content="",
-                                    message_id=content_response_message_id,
-                                    message_type=MessageType.EMPTY.value,
-                                )
-                            ]
-                            yield output_messages
 
                     if delta.content:
                         made_progress = True
@@ -455,8 +439,6 @@ class PlanAgent(AgentBase):
         if not tool_calls:
             return
 
-        # 根据环境变量控制 emit_tool_call_message
-        # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
         emit_on_complete = (
             os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower() == "true"
         )

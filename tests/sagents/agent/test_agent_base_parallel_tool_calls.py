@@ -6,6 +6,7 @@ import pytest
 import sagents.agent.agent_base as agent_base_module
 from sagents.agent.agent_base import AgentBase, TOOL_CALL_CONCURRENCY_LIMIT
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message_manager import MessageManager
 
 
 class ParallelToolAgent(AgentBase):
@@ -157,8 +158,12 @@ async def test_invalid_tool_call_arguments_become_hidden_localized_runtime_diagn
         assert is_complete is False
         yielded.extend(messages)
 
-    assert len(yielded) == 1
-    message = yielded[0]
+    assert len(yielded) == 2
+    rejection, message = yielded
+    assert rejection.role == MessageRole.TOOL.value
+    assert rejection.tool_call_id == "call_bad"
+    assert rejection.metadata["streamed_tool_rejected"] is True
+    assert "invalid_tool_arguments" in rejection.content
     assert message.role == MessageRole.ASSISTANT.value
     assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
     assert "I tried to call tool `file_write`" in message.content
@@ -168,6 +173,20 @@ async def test_invalid_tool_call_arguments_become_hidden_localized_runtime_diagn
     assert message.metadata["hidden_from_chat"] is True
     assert message.metadata["hide_from_chat"] is True
     assert message.metadata["runtime_diagnostic_source"] == "tool_call_argument_parse"
+
+    request_messages = MessageManager.convert_messages_to_dict_for_request(
+        [
+            MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                tool_calls=[calls["call_bad"]],
+                message_type=MessageType.TOOL_CALL.value,
+            ),
+            *yielded,
+        ]
+    )
+    assert len(request_messages) == 1
+    assert request_messages[0]["role"] == MessageRole.ASSISTANT.value
+    assert "<runtime_diagnostic" in request_messages[0]["content"]
 
 
 def test_context_over_limit_error_uses_requested_language():
