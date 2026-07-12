@@ -211,13 +211,16 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_DEFAULT_ANYTOOL_TIMEOUT` | —       | AnyTool 调用超时时间           |
 | `SAGE_LS_PATH`                 | —       | `list_dir` 工具默认根（mcp 内部） |
 | `SAGE_LS_HIDDEN`               | `false` | `list_dir` 是否包含隐藏文件      |
-| `SAGE_MCP_PER_CONNECTION_CONCURRENCY` | `100` | 每个 MCP pooled connection 的最大并发调用数 |
-| `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | 每个 MCP server 的最大连接数；`0` 表示不固定限制 |
-| `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | MCP pooled session 空闲 TTL |
+| `SAGE_MCP_PER_CONNECTION_CONCURRENCY` | `100` | 每个 stdio 连接的最大并发数；HTTP/SSE 不设应用层并发上限 |
+| `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | 每个 MCP server 的 stdio 最大连接数；`0` 表示不固定限制 |
+| `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | stdio pooled session 空闲 TTL |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | MCP 连接刷新时 draining 宽限时间 |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP 工具调用超时 |
+| `SAGE_MCP_CONNECT_TIMEOUT_SECONDS` | `20` | HTTP/SSE FastMCP 建连超时 |
+| `SAGE_MCP_LIST_TOOLS_TIMEOUT_SECONDS` | `60` | HTTP/SSE `list_tools` 超时 |
+| `SAGE_MCP_CLOSE_TIMEOUT_SECONDS` | `5` | HTTP/SSE FastMCP 关闭超时 |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP 工具调用超时；默认支持 20 分钟任务 |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | MCP `list_tools` 遇到连接类错误时重试一次 |
-| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | MCP 工具调用遇到连接类错误时重试一次 |
+| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | 仅在 HTTP/SSE 工具请求发出前建连失败时重试一次 |
 
 
 ## 8. 桌面端 / 安装期
