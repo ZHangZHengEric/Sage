@@ -505,6 +505,36 @@ async def upload_file(
         raise
 
 
+@agent_router.post("/{agent_id}/file_workspace/archive/import")
+async def import_workspace_archive(
+    agent_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    target_path: str = Form(...),
+    idempotency_key: str = Form(...),
+):
+    """Validate and atomically replace one workspace subtree from a ZIP archive."""
+    user_id = get_request_user_id(request)
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        "Workspace archive import start target_path={} idempotency_key={}",
+        target_path,
+        idempotency_key,
+    )
+    result = await agent_service.import_server_agent_workspace_archive(
+        agent_id,
+        user_id,
+        file.file,
+        target_path,
+        idempotency_key,
+    )
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        "Workspace archive import succeeded target_path={} files={}",
+        target_path,
+        len(result.get("files") or []),
+    )
+    return await Response.succ(message="agent.file_uploaded", data=result)
+
+
 @agent_router.post("/{agent_id}/file_workspace/download_from_url")
 async def download_file_from_url(
     agent_id: str,
