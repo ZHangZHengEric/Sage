@@ -198,13 +198,16 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_DEFAULT_ANYTOOL_TIMEOUT` | — | AnyTool call timeout |
 | `SAGE_LS_PATH` | — | Default root for the MCP `list_dir` tool |
 | `SAGE_LS_HIDDEN` | `false` | Whether `list_dir` shows hidden files |
-| `SAGE_MCP_PER_CONNECTION_CONCURRENCY` | `100` | Max concurrent MCP calls per pooled connection |
-| `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | Max pooled MCP connections per server; `0` means no fixed cap |
-| `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | Idle TTL for MCP pooled sessions |
+| `SAGE_MCP_PER_CONNECTION_CONCURRENCY` | `100` | Max concurrent calls per stdio connection; HTTP/SSE has no application-level cap |
+| `SAGE_MCP_MAX_CONNECTIONS_PER_SERVER` | `0` | Max stdio connections per server; `0` means no fixed cap |
+| `SAGE_MCP_SESSION_IDLE_TTL_SECONDS` | `1800` | Idle TTL for stdio pooled sessions |
 | `SAGE_MCP_REFRESH_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period while draining refreshed MCP connections |
-| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `300` | MCP tool call timeout |
+| `SAGE_MCP_CONNECT_TIMEOUT_SECONDS` | `20` | HTTP/SSE FastMCP connection timeout |
+| `SAGE_MCP_LIST_TOOLS_TIMEOUT_SECONDS` | `60` | HTTP/SSE `list_tools` timeout |
+| `SAGE_MCP_CLOSE_TIMEOUT_SECONDS` | `5` | HTTP/SSE FastMCP close timeout |
+| `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP tool call timeout; supports 20-minute tasks by default |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP `list_tools` once on connection-like errors |
-| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP tool calls once on connection-like errors |
+| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry once only when HTTP/SSE connection setup fails before the tool request is sent |
 
 ## 8. Desktop & install
 
