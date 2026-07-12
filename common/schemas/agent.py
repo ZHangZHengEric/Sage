@@ -1,8 +1,8 @@
 """Agent-related DTOs shared in common."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from common.schemas.base import BaseResponse
 
@@ -43,6 +43,22 @@ class FileWorkspaceDownloadFromUrlRequest(BaseModel):
     source_url: str
     filename: str
     target_path: str = ""
+
+
+class FileWorkspaceCsvMutationOperation(BaseModel):
+    operation: Literal["append", "upsert", "delete"]
+    row_key: str
+    values: Dict[str, str] = Field(default_factory=dict)
+
+
+class FileWorkspaceCsvMutationRequest(BaseModel):
+    path: str
+    header: List[str]
+    row_key_columns: List[str]
+    sort_columns: List[str]
+    operations: List[FileWorkspaceCsvMutationOperation]
+    delete_if_empty: bool = True
+    expected_content_hash: Optional[str] = None
 
 
 class DeleteAgentWorkspaceRequest(BaseModel):
@@ -195,6 +211,8 @@ __all__ = [
     "AgentConfigDTO",
     "AutoGenAgentRequest",
     "FileWorkspaceStatRequest",
+    "FileWorkspaceCsvMutationOperation",
+    "FileWorkspaceCsvMutationRequest",
     "SystemPromptOptimizeRequest",
     "AsyncTaskResponse",
     "convert_config_to_agent",

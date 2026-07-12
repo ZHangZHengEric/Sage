@@ -19,6 +19,7 @@ from common.schemas.agent import (
     AgentConfigDTO,
     AutoGenAgentRequest,
     DeleteAgentWorkspaceRequest,
+    FileWorkspaceCsvMutationRequest,
     FileWorkspaceDownloadFromUrlRequest,
     FileWorkspaceStatRequest,
     AuthorizationRequest,
@@ -401,7 +402,10 @@ async def stat_files(
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")
 async def delete_file(
-    agent_id: str, request: Request, session_id: Optional[str] = None
+    agent_id: str,
+    request: Request,
+    session_id: Optional[str] = None,
+    missing_ok: bool = False,
 ):
     """删除指定会话的文件"""
     user_id = get_request_user_id(request)
@@ -422,12 +426,41 @@ async def delete_file(
                 agent_id,
                 user_id,
                 file_path,  # pyright: ignore[reportArgumentType]
+                missing_ok=missing_ok,
             ),
         )
         return await Response.succ(message=result["message"], data=result["data"])
     except Exception as e:
         logger.error(f"Delete failed: {e}")
         raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/csv/mutate")
+async def mutate_csv_file(
+    agent_id: str,
+    body: FileWorkspaceCsvMutationRequest,
+    request: Request,
+):
+    """Atomically apply row-level mutations to one CSV workspace partition."""
+    user_id = get_request_user_id(request)
+    result = await agent_service.mutate_server_agent_csv(
+        agent_id,
+        user_id,
+        path=body.path,
+        header=body.header,
+        row_key_columns=body.row_key_columns,
+        sort_columns=body.sort_columns,
+        operations=[item.model_dump() for item in body.operations],
+        delete_if_empty=body.delete_if_empty,
+        expected_content_hash=body.expected_content_hash,
+    )
+    logger.bind(agent_id=agent_id, user_id=user_id).info(
+        "CSV workspace mutation path={} rows={} operations={}",
+        body.path,
+        result.get("row_count"),
+        result.get("operations"),
+    )
+    return await Response.succ(message="agent.file_uploaded", data=result)
 
 
 @agent_router.post("/{agent_id}/file_workspace/upload")
