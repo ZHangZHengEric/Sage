@@ -511,10 +511,16 @@ export const useChatPage = (props) => {
 
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res) return null
-    const normalizedMessages = (res.messages || []).map(msg => ({
-      ...msg,
-      session_id: msg.session_id || msg.metadata?.session_id || sessionId
-    }))
+    const normalizedMessages = (res.messages || [])
+      .filter(msg => !(
+        msg?.metadata?.hidden_from_chat === true ||
+        msg?.metadata?.hide_from_chat === true ||
+        msg?.metadata?.sse_visible === false
+      ))
+      .map(msg => ({
+        ...msg,
+        session_id: msg.session_id || msg.metadata?.session_id || sessionId
+      }))
 
     // 加载历史消息后，检查哪些工具调用没有对应的结果
     // 这些工具调用应该被标记为未完成（因为历史会话已结束，工具没有执行完）
@@ -584,6 +590,13 @@ export const useChatPage = (props) => {
   }
 
   const handleMessage = (messageData) => {
+    if (
+      messageData?.metadata?.hidden_from_chat === true ||
+      messageData?.metadata?.hide_from_chat === true ||
+      messageData?.metadata?.sse_visible === false
+    ) {
+      return
+    }
     if (messageData.type === 'stream_end') {
       flushSmoothAssistantText(null, true)
       return

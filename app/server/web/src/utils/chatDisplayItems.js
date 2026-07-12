@@ -52,7 +52,11 @@ const hasVisibleContent = (message) => {
   return text.trim().length > 0 || images.length > 0
 }
 
-export const normalizeChatMessages = (messages = []) => messages
+export const normalizeChatMessages = (messages = []) => messages.filter(message => !(
+  message?.metadata?.hidden_from_chat === true ||
+  message?.metadata?.hide_from_chat === true ||
+  message?.metadata?.sse_visible === false
+))
 
 const createMessageItem = (message, messageIndex, renderMessages) => ({
   id: `message:${message.message_id || messageIndex}`,

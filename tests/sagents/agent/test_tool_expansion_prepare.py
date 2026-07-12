@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import asyncio
 
-from sagents.context.messages.message import MessageType
+from sagents.context.messages.message import MessageRole, MessageType
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.agent.task_executor_agent import TaskExecutorAgent
 from sagents.tool.tool_base import tool
@@ -134,3 +134,11 @@ def test_task_executor_rejects_tool_not_in_current_llm_tools(monkeypatch):
     assert errors[0].metadata["runtime_notice"] == "unavailable_tool_rejected"
     assert errors[0].metadata["hidden_from_chat"] is True
     assert errors[0].metadata["sse_visible"] is False
+    rejected_results = [
+        item
+        for item in out
+        if item.role == MessageRole.TOOL.value
+        and item.metadata.get("streamed_tool_rejected") is True
+    ]
+    assert len(rejected_results) == 1
+    assert rejected_results[0].tool_call_id == "call_1"

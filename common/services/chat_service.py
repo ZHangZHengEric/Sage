@@ -1285,6 +1285,13 @@ class SageStreamService:
                         result = message.copy()
                     else:
                         result = message.to_dict()
+                    metadata = result.get("metadata")
+                    if isinstance(metadata, dict) and (
+                        metadata.get("hidden_from_chat") is True
+                        or metadata.get("hide_from_chat") is True
+                        or metadata.get("sse_visible") is False
+                    ):
+                        continue
                     result = ContentProcessor.clean_content(result)
                     approval_event = _sandbox_approval_event_from_tool_result(
                         result,

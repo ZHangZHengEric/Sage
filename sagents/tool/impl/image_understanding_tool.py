@@ -501,6 +501,7 @@ class ImageUnderstandingTool:
                     "image_context_mode": "native_multimodal",
                     "hidden_from_chat": True,
                     "sse_visible": False,
+                    "llm_scope": "durable",
                 },
             )
 

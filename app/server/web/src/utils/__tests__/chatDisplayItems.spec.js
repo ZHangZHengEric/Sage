@@ -23,4 +23,19 @@ describe('chatDisplayItems normalizeChatMessages', () => {
     expect(normalized[0].tool_calls).toHaveLength(1)
     expect(normalized[0].tool_calls[0].function.name).toBe('file_read')
   })
+
+  it('filters messages explicitly hidden by backend metadata', () => {
+    const source = [
+      { message_id: 'u1', role: 'user', content: 'run' },
+      {
+        message_id: 'hidden-1',
+        role: 'assistant',
+        content: 'internal correction',
+        metadata: { sse_visible: false, llm_scope: 'next_request' }
+      }
+    ]
+
+    const normalized = normalizeChatMessages(source)
+    expect(normalized.map(message => message.message_id)).toEqual(['u1'])
+  })
 })
