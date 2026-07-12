@@ -124,8 +124,11 @@ class TestCommonAgent:
             ):
                 chunks.extend(messages)
 
-        assert len(chunks) == 1
-        message = chunks[0]
+        assert len(chunks) == 2
+        rejected_result, message = chunks
+        assert rejected_result.role == MessageRole.TOOL.value
+        assert rejected_result.tool_call_id == "call_bad"
+        assert rejected_result.metadata["streamed_tool_rejected"] is True
         assert message.role == MessageRole.ASSISTANT.value
         assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
         assert "I tried to call tool `test_tool`" in message.content

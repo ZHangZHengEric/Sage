@@ -86,6 +86,7 @@ def test_analyze_image_injects_remote_url_without_extra_llm_call(monkeypatch):
     assert context.pending[0]["metadata"]["tool_source"] == "analyze_image"
     assert context.pending[0]["metadata"]["hidden_from_chat"] is True
     assert context.pending[0]["metadata"]["sse_visible"] is False
+    assert context.pending[0]["metadata"]["llm_scope"] == "durable"
 
 
 def test_analyze_image_rejects_text_only_model_before_image_processing(monkeypatch):

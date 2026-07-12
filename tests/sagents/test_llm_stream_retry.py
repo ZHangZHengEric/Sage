@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 import pytest
 import httpx
 
@@ -22,9 +25,11 @@ class FakeCompletions:
     def __init__(self, attempts=None):
         self.calls = 0
         self.attempts = attempts
+        self.requests = []
 
     async def create(self, **kwargs):
         self.calls += 1
+        self.requests.append(kwargs)
         if self.attempts is not None:
             return self.attempts[self.calls - 1]()
 
@@ -72,6 +77,239 @@ class DummyObservabilityManager:
 
     def on_llm_error(self, *args, **kwargs):
         pass
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_consumes_next_request_message_after_first_chunk():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+
+    class FakeSessionContext:
+        def __init__(self):
+            self.calls = []
+
+        def mark_llm_messages_consumed(self, message_ids, logical_request_id):
+            self.calls.append((list(message_ids), logical_request_id))
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = FakeSessionContext()
+    agent._get_live_session_context = lambda session_id: context
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal retry guidance",
+        message_id="notice-once",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    chunks = []
+    async for chunk in agent._call_llm_streaming(
+        messages=[MessageChunk(role=MessageRole.USER.value, content="run"), notice],
+        session_id="sid",
+        step_name="test",
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert len(context.calls) == 1
+    assert context.calls[0][0] == ["notice-once"]
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert "<runtime_diagnostic" in sent_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_consumes_only_next_request_messages_in_final_payload():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+
+    class FakeSessionContext:
+        def __init__(self):
+            self.calls = []
+
+        def mark_llm_messages_consumed(self, message_ids, logical_request_id):
+            self.calls.append((list(message_ids), logical_request_id))
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = FakeSessionContext()
+    agent._get_live_session_context = lambda session_id: context
+    included_notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="retry with valid arguments",
+        message_id="included-notice",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+    dropped_invalid_call = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content=None,
+        tool_calls=[
+            {
+                "id": "bad-call",
+                "type": "function",
+                "function": {"name": "todo_write", "arguments": '{"tasks"'},
+            }
+        ],
+        message_id="dropped-notice",
+        message_type=MessageType.TOOL_CALL.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    async for _ in agent._call_llm_streaming(
+        messages=[
+            MessageChunk(role=MessageRole.USER.value, content="run"),
+            included_notice,
+            dropped_invalid_call,
+        ],
+        session_id="sid",
+        step_name="test",
+    ):
+        pass
+
+    assert len(context.calls) == 1
+    assert context.calls[0][0] == ["included-notice"]
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert all(message.get("tool_calls") is None for message in sent_messages)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_llm_requests_include_next_request_message_only_once():
+    class ClaimingSessionContext:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.state = "pending"
+            self.owner = None
+
+        def claim_llm_messages_for_request(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "pending":
+                    return []
+                self.state = "claimed"
+                self.owner = logical_request_id
+                return list(message_ids)
+
+        def mark_llm_messages_consumed(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "claimed" or self.owner != logical_request_id:
+                    return 0
+                self.state = "consumed"
+                return len(message_ids)
+
+        def release_llm_message_claims(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "claimed" or self.owner != logical_request_id:
+                    return 0
+                self.state = "pending"
+                self.owner = None
+                return len(message_ids)
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = ClaimingSessionContext()
+    clients = [
+        FakeClient(attempts=[_attempt_yields(_content_chunk("first"))]),
+        FakeClient(attempts=[_attempt_yields(_content_chunk("second"))]),
+    ]
+    agents = [
+        DummyAgent(model=client, model_config={"model": "gpt-test"})
+        for client in clients
+    ]
+    for agent in agents:
+        agent._get_live_session = lambda session_id: None
+        agent._get_live_session_context = lambda session_id: context
+
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal retry guidance",
+        message_id="shared-notice",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    async def collect(agent, request_notice):
+        return [
+            chunk
+            async for chunk in agent._call_llm_streaming(
+                messages=[
+                    MessageChunk(role=MessageRole.USER.value, content="run"),
+                    request_notice,
+                ],
+                session_id="sid",
+                step_name="test",
+            )
+        ]
+
+    await asyncio.gather(
+        collect(agents[0], MessageChunk.from_dict(notice.to_dict())),
+        collect(agents[1], MessageChunk.from_dict(notice.to_dict())),
+    )
+
+    provider_messages = [
+        request["messages"]
+        for client in clients
+        for request in client.chat.completions.requests
+    ]
+    diagnostic_count = sum(
+        "<runtime_diagnostic" in str(message.get("content", ""))
+        for messages in provider_messages
+        for message in messages
+    )
+    assert diagnostic_count == 1
+    assert context.state == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_llm_request_releases_claim_when_provider_never_responds():
+    class ClaimingSessionContext:
+        def __init__(self):
+            self.state = "pending"
+            self.owner = None
+
+        def claim_llm_messages_for_request(self, message_ids, logical_request_id):
+            self.state = "claimed"
+            self.owner = logical_request_id
+            return list(message_ids)
+
+        def release_llm_message_claims(self, message_ids, logical_request_id):
+            if self.state != "claimed" or self.owner != logical_request_id:
+                return 0
+            self.state = "pending"
+            self.owner = None
+            return len(message_ids)
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = ClaimingSessionContext()
+    client = FakeClient(
+        attempts=[_attempt_raises_before_yield(ValueError("provider failed"))]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    agent._get_live_session_context = lambda session_id: context
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal retry guidance",
+        message_id="release-notice",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    with pytest.raises(ValueError, match="provider failed"):
+        async for _ in agent._call_llm_streaming(
+            messages=[MessageChunk(role=MessageRole.USER.value, content="run"), notice],
+            session_id="sid",
+            step_name="test",
+        ):
+            pass
+
+    assert context.state == "pending"
 
 
 def _tool_call_chunk(call_id, arguments):
@@ -219,6 +457,42 @@ async def test_streaming_call_still_retries_if_timeout_happens_before_any_chunk(
     assert [chunk.choices[0].delta.content for chunk in chunks] == ["retry succeeded"]
 
 
+@pytest.mark.asyncio
+async def test_network_retry_reuses_frozen_provider_payload(monkeypatch):
+    async def fast_sleep(_seconds):
+        return None
+
+    process_calls = 0
+
+    async def process_once(message):
+        nonlocal process_calls
+        process_calls += 1
+        return message
+
+    monkeypatch.setattr("sagents.agent.agent_base.asyncio.sleep", fast_sleep)
+    client = FakeClient(
+        attempts=[
+            _attempt_raises_before_yield(httpx.ReadTimeout("no bytes yet")),
+            _attempt_yields(_content_chunk("retry succeeded")),
+        ]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._process_multimodal_content = process_once
+
+    async for _ in agent._call_llm_streaming(
+        [MessageChunk(role=MessageRole.USER.value, content="run")],
+        model_config_override={"response_format": {"type": "json_object"}},
+        enable_thinking=False,
+    ):
+        pass
+
+    assert client.chat.completions.calls == 2
+    first_request, retry_request = client.chat.completions.requests
+    assert first_request["messages"] == retry_request["messages"]
+    assert first_request["response_format"] == retry_request["response_format"]
+    assert process_calls == 1
+
+
 class _RecordingSessionContext:
     def __init__(self):
         self.llm_requests_logs = []
@@ -340,7 +614,8 @@ async def test_streaming_call_rejects_non_leading_system_message_chunks():
 
 
 @pytest.mark.asyncio
-async def test_simple_agent_closes_streamed_partial_tool_call_when_stream_times_out():
+async def test_simple_agent_closes_partial_tool_call_in_low_latency_mode(monkeypatch):
+    monkeypatch.setenv("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false")
     client = FakeClient()
     agent = SimpleAgent(model=client, model_config={"model": "gpt-test"})
     agent._get_live_session = lambda session_id: None
@@ -372,7 +647,7 @@ async def test_simple_agent_closes_streamed_partial_tool_call_when_stream_times_
     assert chunks[0].tool_calls[0].id == "call_partial"
     assert chunks[1].tool_call_id == "call_partial"
     assert "discarded" in chunks[1].content.lower()
-    assert chunks[-1].role == "assistant"
+    assert chunks[-1].message_type == MessageType.AGENT_EXECUTION_ERROR.value
     assert (
         len(MessageManager.convert_messages_to_dict_for_request(messages + chunks)) == 4
     )

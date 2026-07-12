@@ -172,7 +172,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | code defaults | Context budget allocation knobs |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
-| `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `true` | Re-emit tool_call chunks once the LLM stream completes |
+| `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `false` | When `false`, stream tool-call deltas for lower UI latency; when `true`, buffer a complete tool call before emitting it |
 | `SAGE_ECHO_SHELL_OUTPUT` | `false` | Echo background-shell stdout/stderr into the main stream |
 | `SAGE_TOOL_PROGRESS_ENABLED` | `true` | Enable the tool live-progress channel (NDJSON `type=tool_progress` events for the UI only; never sent to MessageManager or the LLM) |
 | `SAGE_TOOL_PROGRESS_FLUSH_INTERVAL_MS` | `50` | Coalesce window (ms). Multiple `emit_tool_progress` calls within the window for the same `(tool_call, stream)` are merged into one event. Set to `0` to disable coalescing and emit immediately |
