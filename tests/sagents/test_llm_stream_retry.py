@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 import pytest
 import httpx
 
@@ -172,6 +175,141 @@ async def test_llm_stream_consumes_only_next_request_messages_in_final_payload()
     assert context.calls[0][0] == ["included-notice"]
     sent_messages = client.chat.completions.requests[0]["messages"]
     assert all(message.get("tool_calls") is None for message in sent_messages)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_llm_requests_include_next_request_message_only_once():
+    class ClaimingSessionContext:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.state = "pending"
+            self.owner = None
+
+        def claim_llm_messages_for_request(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "pending":
+                    return []
+                self.state = "claimed"
+                self.owner = logical_request_id
+                return list(message_ids)
+
+        def mark_llm_messages_consumed(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "claimed" or self.owner != logical_request_id:
+                    return 0
+                self.state = "consumed"
+                return len(message_ids)
+
+        def release_llm_message_claims(self, message_ids, logical_request_id):
+            with self.lock:
+                if self.state != "claimed" or self.owner != logical_request_id:
+                    return 0
+                self.state = "pending"
+                self.owner = None
+                return len(message_ids)
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = ClaimingSessionContext()
+    clients = [
+        FakeClient(attempts=[_attempt_yields(_content_chunk("first"))]),
+        FakeClient(attempts=[_attempt_yields(_content_chunk("second"))]),
+    ]
+    agents = [
+        DummyAgent(model=client, model_config={"model": "gpt-test"})
+        for client in clients
+    ]
+    for agent in agents:
+        agent._get_live_session = lambda session_id: None
+        agent._get_live_session_context = lambda session_id: context
+
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal retry guidance",
+        message_id="shared-notice",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    async def collect(agent, request_notice):
+        return [
+            chunk
+            async for chunk in agent._call_llm_streaming(
+                messages=[
+                    MessageChunk(role=MessageRole.USER.value, content="run"),
+                    request_notice,
+                ],
+                session_id="sid",
+                step_name="test",
+            )
+        ]
+
+    await asyncio.gather(
+        collect(agents[0], MessageChunk.from_dict(notice.to_dict())),
+        collect(agents[1], MessageChunk.from_dict(notice.to_dict())),
+    )
+
+    provider_messages = [
+        request["messages"]
+        for client in clients
+        for request in client.chat.completions.requests
+    ]
+    diagnostic_count = sum(
+        "<runtime_diagnostic" in str(message.get("content", ""))
+        for messages in provider_messages
+        for message in messages
+    )
+    assert diagnostic_count == 1
+    assert context.state == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_llm_request_releases_claim_when_provider_never_responds():
+    class ClaimingSessionContext:
+        def __init__(self):
+            self.state = "pending"
+            self.owner = None
+
+        def claim_llm_messages_for_request(self, message_ids, logical_request_id):
+            self.state = "claimed"
+            self.owner = logical_request_id
+            return list(message_ids)
+
+        def release_llm_message_claims(self, message_ids, logical_request_id):
+            if self.state != "claimed" or self.owner != logical_request_id:
+                return 0
+            self.state = "pending"
+            self.owner = None
+            return len(message_ids)
+
+        def add_llm_request(self, request, response):
+            pass
+
+    context = ClaimingSessionContext()
+    client = FakeClient(
+        attempts=[_attempt_raises_before_yield(ValueError("provider failed"))]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    agent._get_live_session_context = lambda session_id: context
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal retry guidance",
+        message_id="release-notice",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={"llm_scope": "next_request", "llm_state": "pending"},
+    )
+
+    with pytest.raises(ValueError, match="provider failed"):
+        async for _ in agent._call_llm_streaming(
+            messages=[MessageChunk(role=MessageRole.USER.value, content="run"), notice],
+            session_id="sid",
+            step_name="test",
+        ):
+            pass
+
+    assert context.state == "pending"
 
 
 def _tool_call_chunk(call_id, arguments):

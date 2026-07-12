@@ -112,6 +112,33 @@ def test_mark_next_request_message_consumed_updates_ledger_and_journal(tmp_path)
     assert records[-1]["message"]["metadata"]["llm_state"] == "consumed"
 
 
+def test_next_request_message_claim_is_exclusive_and_releasable(tmp_path):
+    ctx = _make_session(tmp_path)
+    notice = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="Tool was not provided.",
+        message_id="notice-claim",
+        message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+        metadata={
+            "llm_scope": "next_request",
+            "llm_state": "pending",
+        },
+    )
+    ctx.add_messages(notice)
+
+    assert ctx.claim_llm_messages_for_request(["notice-claim"], "request-1") == [
+        "notice-claim"
+    ]
+    assert ctx.claim_llm_messages_for_request(["notice-claim"], "request-2") == []
+    assert ctx.release_llm_message_claims(["notice-claim"], "request-2") == 0
+    assert ctx.release_llm_message_claims(["notice-claim"], "request-1") == 1
+    assert ctx.claim_llm_messages_for_request(["notice-claim"], "request-2") == [
+        "notice-claim"
+    ]
+    assert ctx.mark_llm_messages_consumed(["notice-claim"], "request-1") == 0
+    assert ctx.mark_llm_messages_consumed(["notice-claim"], "request-2") == 1
+
+
 def test_message_journal_writes_previous_message_on_id_switch(tmp_path):
     ctx = _make_session(tmp_path)
 
