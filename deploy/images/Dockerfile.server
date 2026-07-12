@@ -77,7 +77,7 @@ RUN pip install --no-cache-dir \
 # -------------------------
 COPY requirements.txt .
 
-RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|fastmcp|nest-asyncio|undetected-playwright|chromadb|streamlit|weasyprint|pyinstaller)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
+RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|nest-asyncio|undetected-playwright|chromadb|streamlit|weasyprint|pyinstaller)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
     && pip install --no-cache-dir -r requirements.server.txt
 
 # 复制代码
