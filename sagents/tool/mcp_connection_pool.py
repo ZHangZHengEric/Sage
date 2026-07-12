@@ -4,7 +4,7 @@ import json
 import os
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union, cast
 
 try:
     from builtins import BaseExceptionGroup
@@ -12,12 +12,14 @@ except ImportError:  # pragma: no cover - Python < 3.11 compatibility
     from exceptiongroup import BaseExceptionGroup
 
 import httpx
+import anyio
 from fastmcp import Client as FastMCPClient
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from mcp import ClientSession, StdioServerParameters, Tool
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.exceptions import McpError
 
 from sagents.utils.logger import logger
 
@@ -193,11 +195,11 @@ def config_fingerprint(
 
 def _is_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, BaseExceptionGroup):
-        return True
+        return any(_is_connection_error(nested) for nested in exc.exceptions)
     if isinstance(exc, httpx.HTTPStatusError):
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None)
-        if status_code in {400, 404, 410}:
+        if status_code in {404, 410}:
             return True
     if isinstance(exc, (ConnectionError, EOFError, TimeoutError, OSError)):
         return True
@@ -223,6 +225,60 @@ def _is_connection_error(exc: BaseException) -> bool:
             "connection closed",
             "closed unexpectedly",
         )
+    )
+
+
+def _is_safe_to_retry_session_error(exc: BaseException) -> bool:
+    """Return True only when the tool request is proven not to have executed."""
+    seen: set[int] = set()
+    pending = [exc]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        if isinstance(current, httpx.HTTPStatusError):
+            response = getattr(current, "response", None)
+            if getattr(response, "status_code", None) == 404:
+                return True
+        if isinstance(current, (anyio.ClosedResourceError, httpx.ConnectError)):
+            return True
+        if isinstance(current, McpError):
+            error = current.error
+            if error.code == 32600 and error.message == "Session terminated":
+                return True
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        cause = getattr(current, "__cause__", None)
+        if cause is not None:
+            pending.append(cause)
+        context = getattr(current, "__context__", None)
+        if context is not None:
+            pending.append(context)
+    return False
+
+
+def _same_server_params(left: ServerParams, right: ServerParams) -> bool:
+    return _server_params_payload(left) == _server_params_payload(right)
+
+
+def _create_mcp_http_client(
+    headers: Optional[Dict[str, str]] = None,
+    timeout: Optional[httpx.Timeout] = None,
+    auth: Optional[httpx.Auth] = None,
+    **kwargs: Any,
+) -> httpx.AsyncClient:
+    """Create an HTTP client without an active-connection concurrency ceiling."""
+    return httpx.AsyncClient(
+        limits=httpx.Limits(
+            max_connections=None,
+            max_keepalive_connections=20,
+        ),
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        **kwargs,
     )
 
 
@@ -594,6 +650,9 @@ class McpHttpClientPoolEntry:
         transport = transport_cls(
             self.server_params.url,
             headers=headers,
+            # FastMCP passes follow_redirects although the upstream Protocol type
+            # has not yet added that keyword; the factory intentionally accepts it.
+            httpx_client_factory=cast(Any, _create_mcp_http_client),
         )
         return FastMCPClient(
             transport,
@@ -736,7 +795,13 @@ class McpConnectionPool:
         fingerprint = config_fingerprint(key, server_params, config)
         if isinstance(entry, McpHttpClientPoolEntry):
             if (
-                entry.fingerprint == fingerprint
+                (
+                    entry.fingerprint == fingerprint
+                    or (
+                        config is None
+                        and _same_server_params(entry.server_params, server_params)
+                    )
+                )
                 and not entry.draining
                 and not entry.closed
                 and entry.has_fresh_tools_cache
@@ -780,16 +845,20 @@ class McpConnectionPool:
                 except Exception as exc:
                     if not _is_connection_error(exc) or attempt + 1 >= attempts:
                         raise
-                    await self._discard_http_client_entry(key, entry)
+                    replace_entry = entry.closed or _is_safe_to_retry_session_error(exc)
+                    if replace_entry:
+                        await self._discard_http_client_entry(key, entry)
+                    retry_action = "reconnecting" if replace_entry else "retrying"
                     logger.warning(
                         f"MCP {_server_protocol(server_params)} list_tools failed, "
-                        f"reconnecting once: server={key}, error={exc}"
+                        f"{retry_action} once: server={key}, error={exc}"
                     )
-                    entry = await self._get_or_create_http_client_entry(
-                        key,
-                        server_params,  # pyright: ignore[reportArgumentType]
-                        config,
-                    )
+                    if replace_entry:
+                        entry = await self._get_or_create_http_client_entry(
+                            key,
+                            server_params,  # pyright: ignore[reportArgumentType]
+                            config,
+                        )
 
         fingerprint = config_fingerprint(key, server_params, config)
         current = self._entries.get(key)
@@ -858,8 +927,15 @@ class McpConnectionPool:
                         f"server={key}, tool={tool_name}, error={exc}"
                     )
                 except Exception as exc:
-                    if _is_connection_error(exc):
+                    safe_to_retry = _is_safe_to_retry_session_error(exc)
+                    if entry.closed or safe_to_retry:
                         await self._discard_http_client_entry(key, entry)
+                    if safe_to_retry and attempt + 1 < attempts:
+                        logger.warning(
+                            f"MCP session unavailable before tool execution; "
+                            f"reconnecting once: server={key}, tool={tool_name}"
+                        )
+                        continue
                     # The request may already have reached the MCP server. Do not
                     # retry automatically because tools may have side effects.
                     raise
@@ -879,7 +955,13 @@ class McpConnectionPool:
             if (
                 not force
                 and isinstance(current, McpHttpClientPoolEntry)
-                and current.fingerprint == fingerprint
+                and (
+                    current.fingerprint == fingerprint
+                    or (
+                        config is None
+                        and _same_server_params(current.server_params, server_params)
+                    )
+                )
                 and not current.draining
                 and not current.closed
             ):

@@ -207,7 +207,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_MCP_CLOSE_TIMEOUT_SECONDS` | `5` | HTTP/SSE FastMCP close timeout |
 | `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP tool call timeout; supports 20-minute tasks by default |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | Retry MCP `list_tools` once on connection-like errors |
-| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry once only when HTTP/SSE connection setup fails before the tool request is sent |
+| `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | Retry once only when the tool is proven not to have executed, such as connection setup failure or a rejected stale session |
 
 ## 8. Desktop & install
 
