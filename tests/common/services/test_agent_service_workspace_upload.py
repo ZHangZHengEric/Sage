@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import json
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -89,6 +92,78 @@ def test_upload_server_agent_file_uses_user_workspace(tmp_path, monkeypatch):
     workspace = Path(cfg.agents_dir) / "user_a" / "agent_demo"
     assert result["path"] == "docs/note.txt"
     assert (workspace / "docs" / "note.txt").read_bytes() == b"note"
+
+
+def _workspace_archive(files: dict[str, bytes]) -> BytesIO:
+    payload = BytesIO()
+    manifest = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": path,
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for path, content in sorted(files.items())
+        ],
+    }
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        for path, content in files.items():
+            archive.writestr(path, content)
+    payload.seek(0)
+    return payload
+
+
+def test_import_workspace_archive_atomically_replaces_target_subtree(tmp_path):
+    workspace = tmp_path / "workspace"
+    old_file = workspace / "user_health_data" / "old.csv"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("old")
+    files = {
+        "activity/README.md": b"activity",
+        "activity/steps_hourly/2026-07-12.csv": b"hour,steps\n10,100\n",
+    }
+
+    result = agent_service.import_workspace_archive(
+        workspace,
+        _workspace_archive(files),
+        "user_health_data",
+        "import-1",
+    )
+
+    assert not old_file.exists()
+    assert (workspace / "user_health_data" / "activity" / "README.md").read_bytes() == b"activity"
+    assert len(result["files"]) == 2
+    assert result["idempotency_key"] == "import-1"
+
+
+def test_import_workspace_archive_rejects_path_traversal(tmp_path):
+    content = b"escape"
+    manifest = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": "../escape.txt",
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        ],
+    }
+    payload = BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("../escape.txt", content)
+    payload.seek(0)
+
+    with pytest.raises(SageHTTPException):
+        agent_service.import_workspace_archive(
+            tmp_path / "workspace",
+            payload,
+            "user_health_data",
+            "import-unsafe",
+        )
+    assert not (tmp_path / "escape.txt").exists()
 
 
 def test_download_url_to_server_agent_file_uses_user_workspace(tmp_path, monkeypatch):

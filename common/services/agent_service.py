@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import hashlib
+import json
 import mimetypes
 import os
 import posixpath
@@ -31,6 +32,11 @@ from common.services.agent_workspace import (
 )
 from common.schemas.agent import AgentAbilityItem
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback for shared desktop code
+    fcntl = None
+
 DEFAULT_OPENCLAW_AGENT_NAME = "openclaw的小龙虾"
 DEFAULT_OPENCLAW_AGENT_DESCRIPTION = "从 OpenClaw 一键导入的智能体"
 DEFAULT_OPENCLAW_AGENT_TOOLS = [
@@ -54,6 +60,12 @@ DEFAULT_OPENCLAW_AGENT_TOOLS = [
 _WORKSPACE_FILE_HASH_ALGORITHM = "md5"
 _WORKSPACE_CSV_LOCKS: Dict[str, threading.Lock] = {}
 _WORKSPACE_CSV_LOCKS_GUARD = threading.Lock()
+_WORKSPACE_ARCHIVE_LOCKS: Dict[str, threading.Lock] = {}
+_WORKSPACE_ARCHIVE_LOCKS_GUARD = threading.Lock()
+_WORKSPACE_ARCHIVE_MAX_COMPRESSED_BYTES = 32 * 1024 * 1024
+_WORKSPACE_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+_WORKSPACE_ARCHIVE_MAX_FILE_BYTES = 16 * 1024 * 1024
+_WORKSPACE_ARCHIVE_MAX_FILES = 2048
 
 
 def generate_agent_id() -> str:
@@ -1321,6 +1333,22 @@ async def upload_server_agent_file(
     )
 
 
+async def import_server_agent_workspace_archive(
+    agent_id: str,
+    user_id: str,
+    source_file,
+    target_path: str,
+    idempotency_key: str,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        import_workspace_archive,
+        get_server_agent_workspace_path(agent_id, user_id),
+        source_file,
+        target_path,
+        idempotency_key,
+    )
+
+
 async def download_url_to_server_agent_file(
     agent_id: str,
     user_id: str,
@@ -2196,3 +2224,247 @@ def save_workspace_upload(
         "path": relative_path,
         "size": file_size,
     }
+
+
+def import_workspace_archive(
+    workspace_path: str | Path,
+    source_file,
+    target_path: str,
+    idempotency_key: str,
+) -> Dict[str, Any]:
+    """Safely replace one workspace subtree from a manifest-backed ZIP archive."""
+    normalized_target = (target_path or "").strip().strip("/")
+    if not normalized_target or not (idempotency_key or "").strip():
+        raise SageHTTPException(
+            status_code=400,
+            message_key="agent.workspace_invalid_archive",
+            error_detail="target_path and idempotency_key are required",
+        )
+    probe_path, _ = _resolve_workspace_upload_path(
+        workspace_path,
+        ".archive-import-probe",
+        normalized_target,
+    )
+    target_dir = os.path.dirname(probe_path)
+    workspace_abs = os.path.abspath(os.fspath(workspace_path))
+    os.makedirs(workspace_abs, exist_ok=True)
+    archive_path = ""
+    stage_root = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=workspace_abs,
+            prefix=".workspace-import-",
+            suffix=".zip",
+            delete=False,
+        ) as temporary:
+            archive_path = temporary.name
+            source_file.seek(0)
+            compressed_size = 0
+            archive_digest = hashlib.sha256()
+            while True:
+                chunk = source_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                compressed_size += len(chunk)
+                if compressed_size > _WORKSPACE_ARCHIVE_MAX_COMPRESSED_BYTES:
+                    raise SageHTTPException(
+                        status_code=413,
+                        message_key="agent.workspace_archive_too_large",
+                        error_detail="Compressed archive exceeds size limit",
+                    )
+                archive_digest.update(chunk)
+                temporary.write(chunk)
+
+        with zipfile.ZipFile(archive_path) as archive:
+            archive_members = archive.infolist()
+            if len({info.filename for info in archive_members}) != len(
+                archive_members
+            ):
+                raise SageHTTPException(
+                    status_code=400,
+                    detail="Duplicate ZIP member",
+                )
+            try:
+                manifest_info = archive.getinfo("manifest.json")
+                if manifest_info.file_size > 1024 * 1024:
+                    raise SageHTTPException(
+                        status_code=413,
+                        message_key="agent.workspace_archive_too_large",
+                        error_detail="Archive manifest exceeds size limit",
+                    )
+                manifest = json.loads(archive.read("manifest.json"))
+            except (KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise SageHTTPException(
+                    status_code=400,
+                    message_key="agent.workspace_invalid_archive",
+                    error_detail="Archive manifest.json is missing or invalid",
+                ) from exc
+            manifest_files = manifest.get("files") if isinstance(manifest, dict) else None
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("schema_version") != 1
+                or not isinstance(manifest_files, list)
+            ):
+                raise SageHTTPException(
+                    status_code=400,
+                    message_key="agent.workspace_invalid_archive",
+                    error_detail="Unsupported archive manifest",
+                )
+            if len(manifest_files) > _WORKSPACE_ARCHIVE_MAX_FILES:
+                raise SageHTTPException(
+                    status_code=413,
+                    message_key="agent.workspace_archive_too_large",
+                    error_detail="Archive contains too many files",
+                )
+            expected: Dict[str, Dict[str, Any]] = {}
+            for item in manifest_files:
+                if not isinstance(item, dict):
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Invalid archive manifest file entry",
+                    )
+                path = str(item.get("path") or "")
+                if (
+                    not path
+                    or "\\" in path
+                    or path.startswith("/")
+                    or posixpath.normpath(path) != path
+                    or path == "manifest.json"
+                    or any(part in {"", ".", ".."} for part in path.split("/"))
+                ):
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Invalid archive path",
+                    )
+                if path in expected:
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Duplicate archive path",
+                    )
+                expected[path] = item
+            member_list = [
+                info
+                for info in archive_members
+                if not info.is_dir() and info.filename != "manifest.json"
+            ]
+            members = {
+                info.filename: info
+                for info in member_list
+            }
+            if set(members) != set(expected):
+                raise SageHTTPException(
+                    status_code=400,
+                    message_key="agent.workspace_invalid_archive",
+                    error_detail="Archive contents do not match manifest",
+                )
+            total_size = sum(info.file_size for info in members.values())
+            if total_size > _WORKSPACE_ARCHIVE_MAX_UNCOMPRESSED_BYTES or any(
+                info.file_size > _WORKSPACE_ARCHIVE_MAX_FILE_BYTES
+                for info in members.values()
+            ):
+                raise SageHTTPException(
+                    status_code=413,
+                    message_key="agent.workspace_archive_too_large",
+                    error_detail="Uncompressed archive exceeds size limit",
+                )
+
+            stage_root = tempfile.mkdtemp(prefix=".workspace-stage-", dir=workspace_abs)
+            stage_content = os.path.join(stage_root, "content")
+            os.makedirs(stage_content, exist_ok=True)
+            imported_files = []
+            for path in sorted(expected):
+                info = members[path]
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == 0o120000:
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Archive symlinks are not allowed",
+                    )
+                destination = os.path.abspath(
+                    os.path.join(stage_content, *path.split("/"))
+                )
+                if os.path.commonpath([stage_content, destination]) != stage_content:
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Invalid archive destination",
+                    )
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                digest = hashlib.sha256()
+                size = 0
+                with archive.open(info) as source, open(destination, "wb") as output:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > _WORKSPACE_ARCHIVE_MAX_FILE_BYTES:
+                            raise SageHTTPException(
+                                status_code=413,
+                                detail="Archive file exceeds size limit",
+                            )
+                        digest.update(chunk)
+                        output.write(chunk)
+                expected_hash = str(expected[path].get("sha256") or "").lower()
+                expected_size = expected[path].get("size")
+                if digest.hexdigest() != expected_hash or size != expected_size:
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail="Archive file hash or size mismatch",
+                    )
+                imported_files.append(
+                    {
+                        "path": f"{normalized_target}/{path}",
+                        "sha256": digest.hexdigest(),
+                        "size": size,
+                    }
+                )
+
+        lock_key = os.path.normcase(os.path.abspath(target_dir))
+        with _WORKSPACE_ARCHIVE_LOCKS_GUARD:
+            lock = _WORKSPACE_ARCHIVE_LOCKS.setdefault(lock_key, threading.Lock())
+        with lock:
+            lock_path = os.path.join(workspace_abs, ".workspace-archive-import.lock")
+            with open(lock_path, "a+b") as lock_file:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    backup_dir = f"{target_dir}.archive-backup-{uuid.uuid4().hex}"
+                    os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+                    had_target = os.path.exists(target_dir)
+                    try:
+                        if had_target:
+                            os.replace(target_dir, backup_dir)
+                        os.replace(os.path.join(stage_root, "content"), target_dir)
+                    except Exception:
+                        if (
+                            had_target
+                            and os.path.exists(backup_dir)
+                            and not os.path.exists(target_dir)
+                        ):
+                            os.replace(backup_dir, target_dir)
+                        raise
+                    else:
+                        if os.path.exists(backup_dir):
+                            shutil.rmtree(backup_dir)
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+        return {
+            "target_path": normalized_target,
+            "idempotency_key": idempotency_key.strip(),
+            "archive_sha256": archive_digest.hexdigest(),
+            "files": imported_files,
+        }
+    except zipfile.BadZipFile as exc:
+        raise SageHTTPException(
+            status_code=400,
+            message_key="agent.workspace_invalid_archive",
+            error_detail="Invalid ZIP archive",
+        ) from exc
+    finally:
+        if archive_path and os.path.exists(archive_path):
+            os.remove(archive_path)
+        if stage_root and os.path.exists(stage_root):
+            shutil.rmtree(stage_root)
