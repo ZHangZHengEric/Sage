@@ -1,11 +1,21 @@
 import asyncio
+import os
+import socket
+import sys
 import unittest
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import anyio
-from mcp import StdioServerParameters
+from mcp import ErrorData, StdioServerParameters
+from mcp.shared.exceptions import McpError
 
-from sagents.tool.mcp_connection_pool import McpConnectionPool, McpPooledConnection
+from sagents.tool.mcp_connection_pool import (
+    McpConnectionPool,
+    McpPooledConnection,
+    _create_mcp_http_client,
+)
 from sagents.tool.tool_schema import SseServerParameters, StreamableHttpServerParameters
 
 
@@ -258,6 +268,16 @@ class TestMcpStdioConnectionPool(unittest.IsolatedAsyncioTestCase):
 
 
 class TestMcpHttpClientPool(unittest.IsolatedAsyncioTestCase):
+    async def test_http_transport_has_no_active_connection_limit(self):
+        client = _create_mcp_http_client()
+        try:
+            transport = cast(Any, client._transport)
+            pool = transport._pool
+            self.assertEqual(pool._max_connections, sys.maxsize)
+            self.assertEqual(pool._max_keepalive_connections, 20)
+        finally:
+            await client.aclose()
+
     async def test_one_session_runs_unlimited_concurrent_calls(self):
         pool = McpConnectionPool()
         release = asyncio.Event()
@@ -352,6 +372,7 @@ class TestMcpHttpClientPool(unittest.IsolatedAsyncioTestCase):
             async def call_tool_mcp(self, name, arguments, timeout=None):
                 type(self).calls += 1
                 if len(type(self).instances) == 1:
+                    self.closed = True
                     raise ConnectionError("connection reset")
                 return _FakeResult()
 
@@ -366,6 +387,147 @@ class TestMcpHttpClientPool(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, _FakeResult)
         self.assertEqual(len(FakeClient.instances), 2)
         self.assertEqual(FakeClient.calls, 2)
+        await pool.close_all(drain=False)
+
+    async def test_server_restart_session_terminated_reconnects_and_retries_safely(
+        self,
+    ):
+        pool = McpConnectionPool()
+
+        class FakeClient(_BaseFakeFastMCPClient):
+            instances = []
+            calls = 0
+
+            async def call_tool_mcp(self, name, arguments, timeout=None):
+                type(self).calls += 1
+                if len(type(self).instances) == 1:
+                    raise McpError(ErrorData(code=32600, message="Session terminated"))
+                return _FakeResult()
+
+        params = StreamableHttpServerParameters(url="http://mcp.example")
+        with patch("sagents.tool.mcp_connection_pool.FastMCPClient", FakeClient):
+            result = await pool.call_tool("server", params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(len(FakeClient.instances), 2)
+        self.assertEqual(FakeClient.calls, 2)
+        await pool.close_all(drain=False)
+
+    async def test_closed_local_sse_stream_reconnects_before_sending(self):
+        pool = McpConnectionPool()
+
+        class FakeClient(_BaseFakeFastMCPClient):
+            instances = []
+            calls = 0
+
+            async def call_tool_mcp(self, name, arguments, timeout=None):
+                type(self).calls += 1
+                if len(type(self).instances) == 1:
+                    raise anyio.ClosedResourceError()
+                return _FakeResult()
+
+        params = SseServerParameters(url="http://mcp.example")
+        with patch("sagents.tool.mcp_connection_pool.FastMCPClient", FakeClient):
+            result = await pool.call_tool("server", params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(len(FakeClient.instances), 2)
+        self.assertEqual(FakeClient.calls, 2)
+        await pool.close_all(drain=False)
+
+    async def test_request_timeout_does_not_cancel_other_calls(self):
+        pool = McpConnectionPool()
+        long_started = asyncio.Event()
+        release_long = asyncio.Event()
+
+        class FakeClient(_BaseFakeFastMCPClient):
+            instances = []
+
+            async def call_tool_mcp(self, name, arguments, timeout=None):
+                if arguments.get("long"):
+                    long_started.set()
+                    await release_long.wait()
+                    return _FakeResult()
+                raise asyncio.TimeoutError("request timed out")
+
+        params = StreamableHttpServerParameters(url="http://mcp.example")
+        with patch("sagents.tool.mcp_connection_pool.FastMCPClient", FakeClient):
+            long_call = asyncio.create_task(
+                pool.call_tool("server", params, "work", {"long": True})
+            )
+            await asyncio.wait_for(long_started.wait(), timeout=1)
+
+            with self.assertRaises(asyncio.TimeoutError):
+                await pool.call_tool("server", params, "work", {"long": False})
+            self.assertFalse(FakeClient.instances[0].closed)
+
+            release_long.set()
+            result = await asyncio.wait_for(long_call, timeout=1)
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(len(FakeClient.instances), 1)
+        await pool.close_all(drain=False)
+
+    async def test_list_tools_timeout_does_not_cancel_active_tool_call(self):
+        pool = McpConnectionPool()
+        long_started = asyncio.Event()
+        release_long = asyncio.Event()
+
+        class FakeClient(_BaseFakeFastMCPClient):
+            instances = []
+
+            async def list_tools(self):
+                raise asyncio.TimeoutError("list_tools timed out")
+
+            async def call_tool_mcp(self, name, arguments, timeout=None):
+                long_started.set()
+                await release_long.wait()
+                return _FakeResult()
+
+        params = StreamableHttpServerParameters(url="http://mcp.example")
+        with patch("sagents.tool.mcp_connection_pool.FastMCPClient", FakeClient):
+            long_call = asyncio.create_task(
+                pool.call_tool("server", params, "work", {})
+            )
+            await asyncio.wait_for(long_started.wait(), timeout=1)
+
+            with self.assertRaises(asyncio.TimeoutError):
+                await pool.list_tools("server", params)
+            self.assertFalse(FakeClient.instances[0].closed)
+
+            release_long.set()
+            result = await asyncio.wait_for(long_call, timeout=1)
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(len(FakeClient.instances), 1)
+        await pool.close_all(drain=False)
+
+    async def test_runtime_call_reuses_configured_registration_session(self):
+        pool = McpConnectionPool()
+
+        class FakeClient(_BaseFakeFastMCPClient):
+            instances = []
+            observed_timeout = None
+
+            async def list_tools(self):
+                return ["echo"]
+
+            async def call_tool_mcp(self, name, arguments, timeout=None):
+                type(self).observed_timeout = timeout
+                return _FakeResult()
+
+        params = StreamableHttpServerParameters(url="http://mcp.example")
+        with patch("sagents.tool.mcp_connection_pool.FastMCPClient", FakeClient):
+            await pool.list_tools(
+                "server",
+                params,
+                config={"call_timeout_seconds": 1200},
+            )
+            result = await pool.call_tool("server", params, "echo", {})
+
+        self.assertIsInstance(result, _FakeResult)
+        self.assertEqual(len(FakeClient.instances), 1)
+        self.assertEqual(FakeClient.observed_timeout, 1200)
         await pool.close_all(drain=False)
 
     async def test_broken_session_fails_all_current_calls_and_next_call_recovers(self):
@@ -383,6 +545,7 @@ class TestMcpHttpClientPool(unittest.IsolatedAsyncioTestCase):
                     if type(self).started == 20:
                         all_started.set()
                     await fail.wait()
+                    self.closed = True
                     raise ConnectionError("server session was closed")
                 return _FakeResult()
 
@@ -458,6 +621,101 @@ class TestMcpHttpClientPool(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(FakeClient.observed_timeout, 1800.0)
         await pool.close_all(drain=False)
+
+
+@unittest.skipUnless(
+    os.environ.get("SAGE_RUN_MCP_RESTART_INTEGRATION_TEST") == "1",
+    "set SAGE_RUN_MCP_RESTART_INTEGRATION_TEST=1 to run process restart test",
+)
+class TestMcpHttpServerRestartIntegration(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        self.port = sock.getsockname()[1]
+        sock.close()
+        self.server_script = Path(__file__).with_name("restartable_mcp_server.py")
+        self.transport = "http"
+        self.pool = McpConnectionPool()
+        self.params = StreamableHttpServerParameters(
+            url=f"http://127.0.0.1:{self.port}/mcp"
+        )
+        self.process = await self._start_server()
+
+    async def asyncTearDown(self):
+        await self.pool.close_all(drain=False)
+        await self._stop_server()
+
+    async def _start_server(self):
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(self.server_script),
+            str(self.port),
+            self.transport,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        for _ in range(100):
+            try:
+                _, writer = await asyncio.open_connection("127.0.0.1", self.port)
+                writer.close()
+                await writer.wait_closed()
+                return process
+            except OSError:
+                await asyncio.sleep(0.05)
+        process.terminate()
+        await process.wait()
+        self.fail("restartable MCP test server did not start")
+
+    async def _stop_server(self):
+        if self.process.returncode is not None:
+            return
+        self.process.terminate()
+        await asyncio.wait_for(self.process.wait(), timeout=5)
+
+    async def test_call_recovers_after_real_server_process_restart(self):
+        first = await self.pool.call_tool(
+            "restartable",
+            self.params,
+            "echo",
+            {"value": "before"},
+        )
+        self.assertEqual(first.content[0].text, "before")
+
+        await self._stop_server()
+        self.process = await self._start_server()
+
+        second = await self.pool.call_tool(
+            "restartable",
+            self.params,
+            "echo",
+            {"value": "after"},
+        )
+        self.assertEqual(second.content[0].text, "after")
+
+    async def test_sse_call_recovers_after_real_server_process_restart(self):
+        await self._stop_server()
+        self.transport = "sse"
+        self.params = SseServerParameters(url=f"http://127.0.0.1:{self.port}/sse")
+        self.process = await self._start_server()
+
+        first = await self.pool.call_tool(
+            "restartable-sse",
+            self.params,
+            "echo",
+            {"value": "before"},
+        )
+        self.assertEqual(first.content[0].text, "before")
+
+        await self._stop_server()
+        self.process = await self._start_server()
+
+        second = await self.pool.call_tool(
+            "restartable-sse",
+            self.params,
+            "echo",
+            {"value": "after"},
+        )
+        self.assertEqual(second.content[0].text, "after")
 
 
 if __name__ == "__main__":
