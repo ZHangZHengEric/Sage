@@ -78,7 +78,8 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 
 RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|nest-asyncio|undetected-playwright|chromadb|streamlit|weasyprint|pyinstaller)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
-    && pip install --no-cache-dir -r requirements.server.txt
+    && pip install --no-cache-dir -r requirements.server.txt \
+    && python -c "from importlib.metadata import version; import fastmcp, mcp; assert version('fastmcp') == '3.4.2'; assert version('mcp') == '1.28.1'; print('MCP dependencies verified:', version('mcp'), version('fastmcp'))"
 
 # 复制代码
 COPY . .

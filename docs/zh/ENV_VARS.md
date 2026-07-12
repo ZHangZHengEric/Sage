@@ -218,6 +218,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_MCP_CONNECT_TIMEOUT_SECONDS` | `20` | HTTP/SSE FastMCP 建连超时 |
 | `SAGE_MCP_LIST_TOOLS_TIMEOUT_SECONDS` | `60` | HTTP/SSE `list_tools` 超时 |
 | `SAGE_MCP_CLOSE_TIMEOUT_SECONDS` | `5` | HTTP/SSE FastMCP 关闭超时 |
+| `SAGE_MCP_STALL_WARNING_SECONDS` | `120` | 工具响应持续未返回时告警但不取消调用；`0` 表示关闭 |
 | `SAGE_MCP_CALL_TIMEOUT_SECONDS` | `1800` | MCP 工具调用超时；默认支持 20 分钟任务 |
 | `SAGE_MCP_LIST_TOOLS_RETRY_ON_CONNECTION_ERROR` | `true` | MCP `list_tools` 遇到连接类错误时重试一次 |
 | `SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR` | `true` | 仅在能确认工具未执行时重试一次，例如建连失败或服务拒绝旧会话 |
