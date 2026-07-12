@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import hashlib
 import mimetypes
 import os
@@ -6,9 +7,10 @@ import posixpath
 import random
 import shutil
 import tempfile
+import threading
 import uuid
 import zipfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -50,6 +52,8 @@ DEFAULT_OPENCLAW_AGENT_TOOLS = [
 ]
 
 _WORKSPACE_FILE_HASH_ALGORITHM = "md5"
+_WORKSPACE_CSV_LOCKS: Dict[str, threading.Lock] = {}
+_WORKSPACE_CSV_LOCKS_GUARD = threading.Lock()
 
 
 def generate_agent_id() -> str:
@@ -1201,11 +1205,43 @@ async def stat_server_agent_files(
     )
 
 
-async def delete_server_agent_file(agent_id: str, user_id: str, file_path: str) -> bool:
+async def delete_server_agent_file(
+    agent_id: str,
+    user_id: str,
+    file_path: str,
+    *,
+    missing_ok: bool = False,
+) -> bool:
     return await asyncio.to_thread(
         delete_workspace_entry,
         get_server_agent_workspace_path(agent_id, user_id),
         file_path,
+        missing_ok=missing_ok,
+    )
+
+
+async def mutate_server_agent_csv(
+    agent_id: str,
+    user_id: str,
+    *,
+    path: str,
+    header: List[str],
+    row_key_columns: List[str],
+    sort_columns: List[str],
+    operations: List[Dict[str, Any]],
+    delete_if_empty: bool = True,
+    expected_content_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        mutate_workspace_csv,
+        get_server_agent_workspace_path(agent_id, user_id),
+        path=path,
+        header=header,
+        row_key_columns=row_key_columns,
+        sort_columns=sort_columns,
+        operations=operations,
+        delete_if_empty=delete_if_empty,
+        expected_content_hash=expected_content_hash,
     )
 
 
@@ -1887,8 +1923,18 @@ def prepare_workspace_download(
     return full_path, os.path.basename(full_path), mime_type
 
 
-def delete_workspace_entry(workspace_path: str | Path, file_path: str) -> bool:
-    full_path = resolve_workspace_file_path(workspace_path, file_path)
+def delete_workspace_entry(
+    workspace_path: str | Path,
+    file_path: str,
+    *,
+    missing_ok: bool = False,
+) -> bool:
+    try:
+        full_path = resolve_workspace_file_path(workspace_path, file_path)
+    except SageHTTPException as exc:
+        if missing_ok and exc.message_key == "agent.workspace_file_not_found":
+            return False
+        raise
 
     try:
         if os.path.isfile(full_path):
@@ -1909,6 +1955,175 @@ def delete_workspace_entry(workspace_path: str | Path, file_path: str) -> bool:
             message_params={"message": str(e)},
             error_detail=f"Failed to delete file: {str(e)}",
         )
+
+
+def _workspace_csv_lock(file_path: str) -> threading.Lock:
+    with _WORKSPACE_CSV_LOCKS_GUARD:
+        return _WORKSPACE_CSV_LOCKS.setdefault(file_path, threading.Lock())
+
+
+def _csv_row_key(row: Dict[str, str], columns: List[str]) -> str:
+    return "\x1f".join(row.get(column, "") for column in columns)
+
+
+def _normalized_csv_bytes(header: List[str], rows: List[Dict[str, str]]) -> bytes:
+    stream = StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=header,
+        extrasaction="raise",
+        lineterminator="\n",
+        quoting=csv.QUOTE_MINIMAL,
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return stream.getvalue().encode("utf-8")
+
+
+def mutate_workspace_csv(
+    workspace_path: str | Path,
+    *,
+    path: str,
+    header: List[str],
+    row_key_columns: List[str],
+    sort_columns: List[str],
+    operations: List[Dict[str, Any]],
+    delete_if_empty: bool = True,
+    expected_content_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_path = os.fspath(path or "").strip().replace("\\", "/")
+    if (
+        not normalized_path
+        or normalized_path.startswith("/")
+        or not normalized_path.lower().endswith(".csv")
+    ):
+        raise SageHTTPException(
+            status_code=400,
+            detail="Invalid CSV workspace path",
+            error_detail="CSV path must be a relative .csv path",
+        )
+    target_path, relative_path = _resolve_workspace_upload_path(
+        workspace_path,
+        posixpath.basename(normalized_path),
+        posixpath.dirname(normalized_path),
+    )
+    if not header or len(set(header)) != len(header) or any(not item for item in header):
+        raise SageHTTPException(status_code=400, detail="Invalid CSV header")
+    if (
+        not row_key_columns
+        or any(column not in header for column in row_key_columns)
+        or any(column not in header for column in sort_columns)
+    ):
+        raise SageHTTPException(status_code=400, detail="Invalid CSV key or sort columns")
+
+    lock = _workspace_csv_lock(target_path)
+    with lock:
+        existing_bytes = b""
+        rows_by_key: Dict[str, Dict[str, str]] = {}
+        if os.path.exists(target_path):
+            if not os.path.isfile(target_path):
+                raise SageHTTPException(status_code=409, detail="CSV path is not a file")
+            try:
+                existing_bytes = Path(target_path).read_bytes()
+                text = existing_bytes.decode("utf-8")
+                reader = csv.DictReader(StringIO(text, newline=""))
+                if reader.fieldnames != header:
+                    raise SageHTTPException(status_code=409, detail="CSV header mismatch")
+                for raw_row in reader:
+                    row = {column: str(raw_row.get(column) or "") for column in header}
+                    key = _csv_row_key(row, row_key_columns)
+                    if not key or key in rows_by_key:
+                        raise SageHTTPException(status_code=409, detail="CSV contains duplicate or empty row keys")
+                    rows_by_key[key] = row
+            except UnicodeDecodeError as exc:
+                raise SageHTTPException(status_code=409, detail="CSV file is not UTF-8") from exc
+
+        actual_hash = hashlib.sha256(existing_bytes).hexdigest()
+        if expected_content_hash and expected_content_hash != actual_hash:
+            raise SageHTTPException(
+                status_code=409,
+                detail="CSV content hash conflict",
+                error_detail=f"expected={expected_content_hash} actual={actual_hash}",
+            )
+
+        stats = {"append": 0, "upsert": 0, "delete": 0, "noop": 0}
+        for operation in operations:
+            operation_name = str(operation.get("operation") or "")
+            requested_key = str(operation.get("row_key") or "")
+            if not requested_key:
+                raise SageHTTPException(status_code=400, detail="CSV row_key is required")
+            if operation_name == "delete":
+                if rows_by_key.pop(requested_key, None) is None:
+                    stats["noop"] += 1
+                else:
+                    stats["delete"] += 1
+                continue
+            if operation_name not in {"append", "upsert"}:
+                raise SageHTTPException(status_code=400, detail="Unsupported CSV operation")
+            raw_values = operation.get("values")
+            if not isinstance(raw_values, dict) or any(key not in header for key in raw_values):
+                raise SageHTTPException(status_code=400, detail="Invalid CSV row values")
+            row = {column: str(raw_values.get(column) or "") for column in header}
+            if _csv_row_key(row, row_key_columns) != requested_key:
+                raise SageHTTPException(status_code=400, detail="CSV row_key does not match row values")
+            existing = rows_by_key.get(requested_key)
+            if operation_name == "append" and existing is not None:
+                if existing == row:
+                    stats["noop"] += 1
+                    continue
+                raise SageHTTPException(status_code=409, detail="CSV append row already exists")
+            if existing == row:
+                stats["noop"] += 1
+                continue
+            rows_by_key[requested_key] = row
+            stats[operation_name] += 1
+
+        ordered_rows = sorted(
+            rows_by_key.values(),
+            key=lambda row: tuple(row.get(column, "") for column in sort_columns)
+            + (_csv_row_key(row, row_key_columns),),
+        )
+        if not ordered_rows and delete_if_empty:
+            deleted = False
+            if os.path.exists(target_path):
+                os.remove(target_path)
+                deleted = True
+            return {
+                "path": relative_path,
+                "row_count": 0,
+                "deleted": deleted,
+                "content_hash": hashlib.sha256(b"").hexdigest(),
+                "hash_algorithm": "sha256",
+                "operations": stats,
+            }
+
+        normalized_bytes = _normalized_csv_bytes(header, ordered_rows)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=os.path.dirname(target_path),
+                prefix=".csv-mutate-",
+                delete=False,
+            ) as temporary:
+                temporary.write(normalized_bytes)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temp_path = temporary.name
+            os.replace(temp_path, target_path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        return {
+            "path": relative_path,
+            "row_count": len(ordered_rows),
+            "deleted": False,
+            "content_hash": hashlib.sha256(normalized_bytes).hexdigest(),
+            "hash_algorithm": "sha256",
+            "operations": stats,
+        }
 
 
 def _resolve_workspace_upload_path(
