@@ -460,11 +460,17 @@ export const useChatPage = (props) => {
       }
     }
 
-    const normalizedMessages = (res.messages || []).map(msg => ({
-      ...msg,
-      session_id: msg.session_id || sessionId,
-      agent_id: msg.agent_id || conversationAgentId
-    }))
+    const normalizedMessages = (res.messages || [])
+      .filter(msg => !(
+        msg?.metadata?.hidden_from_chat === true ||
+        msg?.metadata?.hide_from_chat === true ||
+        msg?.metadata?.sse_visible === false
+      ))
+      .map(msg => ({
+        ...msg,
+        session_id: msg.session_id || sessionId,
+        agent_id: msg.agent_id || conversationAgentId
+      }))
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
 
@@ -493,6 +499,11 @@ export const useChatPage = (props) => {
   }
 
   const handleMessage = (messageData) => {
+    if (
+      messageData?.metadata?.hidden_from_chat === true ||
+      messageData?.metadata?.hide_from_chat === true ||
+      messageData?.metadata?.sse_visible === false
+    ) return
     if (messageData.type === 'stream_end') return
     // 注入的"引导用户消息"：后端在下一次 LLM 请求前 drain 后会以普通 user MessageChunk 回送，
     // metadata.guidance_id 用于跟前端引导区的 chip 对账消费，让 chip 自动消失。

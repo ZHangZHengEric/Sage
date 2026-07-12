@@ -1224,21 +1224,25 @@ class SimpleAgent(AgentBase):
                     f"(hit={repeat_pattern_hits}/{self.max_repeat_pattern_hits})"
                 )
 
-                # 通过过程 assistant 文本注入纠偏，而非修改 system prompt
-                correction_chunk = MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content=correction_message,
-                    type=MessageType.DO_SUBTASK_RESULT.value,
-                    agent_name=self.agent_name,
-                )
-                all_new_response_chunks.append(correction_chunk)
-
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
                     logger.warning(
                         "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
                         "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
                     )
                     break
+
+                # 记录纠偏提示，但只允许它进入紧接着的一次 LLM 请求。
+                correction_chunk = MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=correction_message,
+                    type=MessageType.AGENT_EXECUTION_ERROR.value,
+                    agent_name=self.agent_name,
+                    metadata=self._next_request_runtime_metadata(
+                        runtime_diagnostic_source="repeat_pattern_correction"
+                    ),
+                )
+                all_new_response_chunks.append(correction_chunk)
+                yield [correction_chunk]
             else:
                 repeat_pattern_hits = 0
 
@@ -1345,10 +1349,7 @@ class SimpleAgent(AgentBase):
         if continuation_guidance is not None:
             prepared_messages = list(prepared_messages) + [continuation_guidance]
 
-        clean_message_input = MessageManager.convert_messages_to_dict_for_request(
-            prepared_messages
-        )
-        logger.info(f"SimpleAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
+        logger.info(f"SimpleAgent: 准备了 {len(prepared_messages)} 条消息用于LLM")
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
@@ -1422,8 +1423,6 @@ class SimpleAgent(AgentBase):
                         if tool_call.id is not None and len(tool_call.id) > 0:
                             last_tool_call_id = tool_call.id
 
-                    # 根据环境变量控制是否流式返回工具调用消息
-                    # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
                     emit_on_complete = (
                         os.environ.get(
                             "SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false"
@@ -1432,28 +1431,18 @@ class SimpleAgent(AgentBase):
                     )
                     if not emit_on_complete:
                         emitted_tool_call_stream = True
-                        # 流式返回工具调用消息
-                        output_messages = [
-                            MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                tool_calls=chunk.choices[0].delta.tool_calls,
-                                message_id=tool_calls_messages_id,
-                                message_type=MessageType.TOOL_CALL.value,
-                                agent_name=self.agent_name,
-                            )
-                        ]
-                        yield (output_messages, False)
-                    else:
-                        # yield 一个空的消息块以避免生成器卡住
-                        output_messages = [
-                            MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content="",
-                                message_id=content_response_message_id,
-                                message_type=MessageType.EMPTY.value,
-                            )
-                        ]
-                        yield (output_messages, False)
+                        yield (
+                            [
+                                MessageChunk(
+                                    role=MessageRole.ASSISTANT.value,
+                                    tool_calls=chunk.choices[0].delta.tool_calls,
+                                    message_id=tool_calls_messages_id,
+                                    message_type=MessageType.TOOL_CALL.value,
+                                    agent_name=self.agent_name,
+                                )
+                            ],
+                            False,
+                        )
 
                 elif chunk.choices[0].delta.content:
                     if len(chunk.choices[0].delta.content) > 0:
@@ -1601,33 +1590,22 @@ class SimpleAgent(AgentBase):
                     logger.warning(
                         f"SimpleAgent: 模型返回未提供的工具 {sorted(invalid_tool_names)}，拒绝执行"
                     )
-                    unavailable_tools_label = ", ".join(
-                        sorted(name for name in invalid_tool_names if name)
-                    )
-                    live_ctx_for_rejection = self._get_live_session_context(session_id)
-                    rejection_lang = (
-                        live_ctx_for_rejection.get_language()
-                        if live_ctx_for_rejection is not None
-                        else "en"
-                    )
-                    rejection_template = PromptManager().get_agent_prompt_auto(
-                        "unavailable_tool_expansion_message",
-                        language=rejection_lang,
+                    streamed_rejections = (
+                        self._create_streamed_tool_rejection_results(
+                            tool_calls,
+                            code="tool_not_available_in_request",
+                        )
+                        if os.environ.get(
+                            "SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false"
+                        ).lower()
+                        != "true"
+                        else []
                     )
                     yield (
                         [
-                            MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content=rejection_template.format(
-                                    tools=unavailable_tools_label
-                                ),
-                                type=MessageType.AGENT_EXECUTION_ERROR.value,
-                                agent_name=self.agent_name,
-                                metadata={
-                                    "runtime_notice": "unavailable_tool_rejected",
-                                    "hidden_from_chat": True,
-                                    "sse_visible": False,
-                                },
+                            *streamed_rejections,
+                            self._create_unavailable_tool_runtime_message(
+                                sorted(invalid_tool_names)
                             )
                         ],
                         False,
@@ -1666,8 +1644,6 @@ class SimpleAgent(AgentBase):
                 turn_status_tool_ids - reject_turn_status_ids - continue_turn_status_ids
             )
 
-            # 根据环境变量控制 emit_tool_call_message
-            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
             emit_on_complete = (
                 os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
                 == "true"

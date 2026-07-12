@@ -116,12 +116,11 @@ class TaskDecomposeAgent(AgentBase):
             model_config_override["tool_choice"] = "required"  # 强制使用工具
 
         message_id = str(uuid.uuid4())
-        tool_calls_messages_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
 
         # 类似 SimpleAgent 的流式处理和工具调用逻辑
         tool_calls: Dict[str, Any] = {}
         last_tool_call_id = None
+        tool_calls_messages_id = str(uuid.uuid4())
 
         async for chunk in self._call_llm_streaming(
             messages=llm_request_message,  # pyright: ignore[reportArgumentType]
@@ -144,15 +143,12 @@ class TaskDecomposeAgent(AgentBase):
                     if tool_call.id:
                         last_tool_call_id = tool_call.id
 
-                # 根据环境变量控制是否流式返回工具调用消息
-                # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
                 emit_on_complete = (
                     os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
                     == "true"
                 )
                 if not emit_on_complete:
-                    # 流式返回工具调用消息
-                    output_messages = [
+                    yield [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=delta.tool_calls,
@@ -160,18 +156,6 @@ class TaskDecomposeAgent(AgentBase):
                             message_type=MessageType.TOOL_CALL.value,
                         )
                     ]
-                    yield output_messages
-                else:
-                    # yield 一个空的消息块以避免生成器卡住
-                    output_messages = [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content="",
-                            message_id=content_response_message_id,
-                            message_type=MessageType.EMPTY.value,
-                        )
-                    ]
-                    yield output_messages
 
             # 处理内容（如果 LLM 输出思考过程或解释）
             if delta.content:
@@ -189,8 +173,6 @@ class TaskDecomposeAgent(AgentBase):
             # 构造消息输入上下文
             messages_input = [{"role": "user", "content": prompt}]
 
-            # 根据环境变量控制 emit_tool_call_message
-            # 如果 SAGE_EMIT_TOOL_CALL_ON_COMPLETE=true，则参数完整时才返回工具调用消息
             emit_on_complete = (
                 os.environ.get("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "false").lower()
                 == "true"
@@ -205,8 +187,9 @@ class TaskDecomposeAgent(AgentBase):
                 # 处理工具结果，转换为 TASK_DECOMPOSITION 类型
                 for chunk in messages:
                     if chunk.role == MessageRole.TOOL.value:
-                        # 发送任务清单已生成的消息
+                        # 保留协议所需的真实 tool result，再发送用户可读说明。
                         yield [
+                            chunk,
                             MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
                                 content=f"\n\nTask list generated:\n{chunk.content}",

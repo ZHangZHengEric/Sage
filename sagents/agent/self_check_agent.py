@@ -17,7 +17,7 @@ try:
 except ImportError:
     import tomli as tomllib  # Python 3.10 compatibility  # pyright: ignore[reportMissingImports]
 
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
 
@@ -172,6 +172,10 @@ class SelfCheckAgent(AgentBase):
                         "hidden_from_chat": True,
                         "hide_from_chat": True,
                         "sse_visible": False,
+                        "llm_scope": "next_request",
+                        "llm_state": "pending",
+                        "llm_consumed_by": None,
+                        "llm_consumed_at": None,
                         "runtime_diagnostic_source": "sage_self_check",
                         "self_check_passed": False,
                         "checked_files": checked_files,

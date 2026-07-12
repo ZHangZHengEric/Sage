@@ -684,6 +684,64 @@ class SessionContext:
                             reason="stable_message",
                         )
 
+    def mark_llm_messages_consumed(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> int:
+        """Mark request-scoped ledger messages consumed by one logical request.
+
+        The update is idempotent. Durable messages and already-consumed messages
+        are left untouched, while changed metadata is journaled immediately so a
+        restored session will not feed the diagnostic to another request.
+        """
+
+        if not message_ids or not logical_request_id:
+            return 0
+        target_ids = set(message_ids)
+        consumed_at = time.time()
+        changed: List[MessageChunk] = []
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata)
+                    if isinstance(message.metadata, dict)
+                    else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                if metadata.get("llm_state", "pending") != "pending":
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "consumed",
+                        "llm_consumed_by": logical_request_id,
+                        "llm_consumed_at": consumed_at,
+                    }
+                )
+                message.metadata = metadata
+                changed.append(message)
+
+            if changed:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+                for message in changed:
+                    self._append_message_to_journal(
+                        message.message_id,
+                        reason="llm_scope_consumed",
+                    )
+
+        if changed:
+            logger.info(
+                "SessionContext: marked next-request messages consumed "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={len(changed)}"
+            )
+        return len(changed)
+
     @staticmethod
     def _debug_message_snapshot(message: Union[MessageChunk, Dict[str, Any]]) -> str:
         if isinstance(message, MessageChunk):

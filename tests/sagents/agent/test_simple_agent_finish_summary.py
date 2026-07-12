@@ -2231,7 +2231,22 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
     chunks = asyncio.run(_collect())
 
     assert len(direct_calls) == 3
-    assert [chunk.content for chunk in chunks] == [
+    correction_chunks = [
+        chunk
+        for chunk in chunks
+        if (chunk.metadata or {}).get("runtime_diagnostic_source")
+        == "repeat_pattern_correction"
+    ]
+    assert len(correction_chunks) == 1
+    assert correction_chunks[0].metadata["hidden_from_chat"] is True
+    assert correction_chunks[0].metadata["sse_visible"] is False
+    visible_chunks = [
+        chunk
+        for chunk in chunks
+        if (chunk.metadata or {}).get("hidden_from_chat") is not True
+        and (chunk.metadata or {}).get("sse_visible") is not False
+    ]
+    assert [chunk.content for chunk in visible_chunks] == [
         '{"ok": false, "reason": "same"}',
         '{"ok": false, "reason": "same"}',
         "已经换路径继续。",

@@ -1273,11 +1273,13 @@ class MessageManager:
     def _base_inference_view(messages: List[MessageChunk]) -> List[MessageChunk]:
         if not messages:
             return []
+        messages = MessageManager.strip_rejected_tool_calls_from_llm_context(messages)
         filtered_messages = [
             msg
             for msg in messages
             if msg.role != MessageRole.SYSTEM.value
             and not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
+            and MessageManager.should_include_in_llm(msg)
         ]
         pairs = MessageManager._expanded_compression_pairs(filtered_messages)
         covered_by_visible: set[int] = set()
@@ -1300,6 +1302,113 @@ class MessageManager:
                 continue
             out.append(msg)
         return MessageManager.strip_turn_status_from_llm_context(out)
+
+    @staticmethod
+    def strip_rejected_tool_calls_from_llm_context(
+        messages: List[MessageChunk],
+    ) -> List[MessageChunk]:
+        """Remove rejected provisional tool-call pairs from provider history.
+
+        Low-latency streaming keeps these messages in the durable ledger so the UI
+        can close its provisional tool card, but an unavailable/invalid call must
+        not be replayed to the model. A tool result cannot be sent by itself, so
+        both the rejected result and its matching assistant tool_call are removed.
+        """
+
+        rejected_ids = {
+            str(msg.tool_call_id)
+            for msg in messages
+            if msg.role == MessageRole.TOOL.value
+            and msg.tool_call_id
+            and isinstance(msg.metadata, dict)
+            and msg.metadata.get("streamed_tool_rejected") is True
+        }
+        if not rejected_ids:
+            return list(messages)
+
+        filtered: List[MessageChunk] = []
+        for msg in messages:
+            if (
+                msg.role == MessageRole.TOOL.value
+                and msg.tool_call_id
+                and str(msg.tool_call_id) in rejected_ids
+            ):
+                continue
+            if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
+                kept_tool_calls = [
+                    tool_call
+                    for tool_call in msg.tool_calls
+                    if str(MessageManager._tool_call_entry_name_and_id(tool_call)[1])
+                    not in rejected_ids
+                ]
+                if not kept_tool_calls:
+                    if MessageManager._message_has_non_empty_content(msg):
+                        filtered.append(replace(msg, tool_calls=None))
+                    continue
+                if len(kept_tool_calls) != len(msg.tool_calls):
+                    filtered.append(replace(msg, tool_calls=kept_tool_calls))
+                    continue
+            filtered.append(msg)
+        return filtered
+
+    @staticmethod
+    def should_include_in_llm(msg: MessageChunk) -> bool:
+        """Return whether a ledger message belongs in a new LLM request.
+
+        ``next_request`` runtime diagnostics remain durable audit records, but are
+        removed from inference after the first logical request consumes them.
+        Legacy hidden diagnostics predate ``llm_scope`` and have already been
+        consumed by definition, so they are excluded from future requests.
+        """
+
+        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+        scope = metadata.get("llm_scope")
+        if scope == "next_request":
+            return metadata.get("llm_state", "pending") == "pending"
+        if scope in {None, "durable"}:
+            if scope is None and (
+                metadata.get("runtime_notice") == "unavailable_tool_rejected"
+                or metadata.get("runtime_diagnostic_source")
+                == "tool_call_argument_parse"
+            ):
+                return False
+            return True
+        return True
+
+    @staticmethod
+    def pending_next_request_message_ids(
+        messages: Sequence[Union[MessageChunk, Dict[str, Any]]],
+    ) -> List[str]:
+        message_ids: List[str] = []
+        for raw_message in messages:
+            message = (
+                MessageChunk.from_dict(raw_message)
+                if isinstance(raw_message, dict)
+                else raw_message
+            )
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            if (
+                metadata.get("llm_scope") == "next_request"
+                and metadata.get("llm_state", "pending") == "pending"
+                and message.message_id
+            ):
+                message_ids.append(message.message_id)
+        return message_ids
+
+    @staticmethod
+    def filter_messages_for_llm_scope(
+        messages: Sequence[Union[MessageChunk, Dict[str, Any]]],
+    ) -> List[Union[MessageChunk, Dict[str, Any]]]:
+        filtered: List[Union[MessageChunk, Dict[str, Any]]] = []
+        for raw_message in messages:
+            message = (
+                MessageChunk.from_dict(raw_message)
+                if isinstance(raw_message, dict)
+                else raw_message
+            )
+            if MessageManager.should_include_in_llm(message):
+                filtered.append(raw_message)
+        return filtered
 
     @staticmethod
     def build_inference_view(
@@ -1991,22 +2100,38 @@ class MessageManager:
         Returns:
             字典列表
         """
+        messages = MessageManager.strip_rejected_tool_calls_from_llm_context(messages)
         messages = MessageManager.strip_turn_status_from_llm_context(messages)
+        messages = [
+            msg for msg in messages if MessageManager.should_include_in_llm(msg)
+        ]
         new_messages = []
         for msg in messages:
-            # 去掉empty消息
-            if msg.matches_message_types([MessageType.EMPTY.value]):
-                logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
-                continue
+            clean_msg = MessageManager.convert_message_to_dict_for_request(msg)
+            if clean_msg is not None:
+                new_messages.append(clean_msg)
 
-            # 转换 tool_calls 为字典列表
-            tool_calls_dict = None
-            if msg.tool_calls is not None:
-                tool_calls_dict = []
-                for tc in msg.tool_calls:
-                    if hasattr(tc, "id"):
-                        # ChoiceDeltaToolCall 对象形式
-                        tc_dict = {
+        return new_messages
+
+    @staticmethod
+    def convert_message_to_dict_for_request(
+        msg: MessageChunk,
+    ) -> Optional[Dict[str, Any]]:
+        """Convert one already-selected ledger message to the provider schema."""
+
+        if not MessageManager.should_include_in_llm(msg):
+            return None
+        if msg.matches_message_types([MessageType.EMPTY.value]):
+            logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
+            return None
+
+        tool_calls_dict = None
+        if msg.tool_calls is not None:
+            tool_calls_dict = []
+            for tc in msg.tool_calls:
+                if hasattr(tc, "id"):
+                    tool_calls_dict.append(
+                        {
                             "id": tc.id,  # pyright: ignore[reportAttributeAccessIssue]
                             "type": tc.type if hasattr(tc, "type") else "function",  # pyright: ignore[reportAttributeAccessIssue]
                             "function": {
@@ -2020,33 +2145,28 @@ class MessageManager:
                                 else None,
                             },
                         }
-                        tool_calls_dict.append(tc_dict)
-                    else:
-                        # 已经是字典形式
-                        tool_calls_dict.append(
-                            {
-                                "id": tc.get("id"),
-                                "type": tc.get("type", "function"),
-                                "function": {
-                                    "name": tc.get("function", {}).get("name")
-                                    if isinstance(tc.get("function"), dict)
-                                    else None,
-                                    "arguments": tc.get("function", {}).get("arguments")
-                                    if isinstance(tc.get("function"), dict)
-                                    else None,
-                                },
-                            }
-                        )
+                    )
+                else:
+                    function = tc.get("function", {})
+                    tool_calls_dict.append(
+                        {
+                            "id": tc.get("id"),
+                            "type": tc.get("type", "function"),
+                            "function": {
+                                "name": function.get("name")
+                                if isinstance(function, dict)
+                                else None,
+                                "arguments": function.get("arguments")
+                                if isinstance(function, dict)
+                                else None,
+                            },
+                        }
+                    )
 
-            clean_msg = {
-                "role": msg.role,
-                "content": MessageManager._wrap_runtime_error_content_for_request(msg),
-                "tool_call_id": msg.tool_call_id,
-                "tool_calls": tool_calls_dict,
-            }
-
-            # 去掉None值的键
-            clean_msg = {k: v for k, v in clean_msg.items() if v is not None}
-            new_messages.append(clean_msg)
-
-        return new_messages
+        clean_msg = {
+            "role": msg.role,
+            "content": MessageManager._wrap_runtime_error_content_for_request(msg),
+            "tool_call_id": msg.tool_call_id,
+            "tool_calls": tool_calls_dict,
+        }
+        return {key: value for key, value in clean_msg.items() if value is not None}
