@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-07-13 16:25** 修复历史压缩：reasoning 模型（如 gpt-5.4）不再传自定义 temperature，避免 400 unsupported_value。
+
 - **2026-07-08 19:30** 修复 retry 落盘测试：构造 APIConnectionError 时补全 openai SDK 要求的 httpx.Request 参数。
 
 - **2026-07-08 19:15** 修复 LLM 连接错误重试成功后未写入 llm_request 的落盘遗漏：以 stream_succeeded 标志确保重试成功也会 add_llm_request。

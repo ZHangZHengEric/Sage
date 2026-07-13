@@ -248,26 +248,15 @@ def _drop_reasoning_effort_when_tools_present(sanitized: Dict[str, Any]) -> None
     )
 
 
-def _drop_sampling_params_when_reasoning_effort_active(
+def _drop_sampling_params_for_reasoning_models(
     sanitized: Dict[str, Any],
     model: Optional[str],
 ) -> None:
     """
-    OpenAI / Azure reasoning：extra_body 中显式带上非 none 的 reasoning_effort 时，
-    自定义 temperature 等采样参数常返回 unsupported_value（仅允许默认）。
-
-    须在 ``_drop_reasoning_effort_when_tools_present`` 之后调用，以便
-    tools 存在路径已去掉 reasoning_effort 时仍保留用户配置的 temperature。
+    OpenAI / Azure reasoning（o1/o3/o4/gpt-5*）：自定义 temperature 等采样参数常返回
+    unsupported_value（仅允许默认值，如 temperature=1）。与是否带 reasoning_effort 无关。
     """
     if not model or not _is_openai_reasoning_model_name(model):
-        return
-    eb = sanitized.get("extra_body")
-    if not isinstance(eb, dict) or "reasoning_effort" not in eb:
-        return
-    effort = eb.get("reasoning_effort")
-    if effort is None:
-        return
-    if str(effort).strip().lower() in ("none", ""):
         return
     dropped = []
     for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty"):
@@ -277,7 +266,7 @@ def _drop_sampling_params_when_reasoning_effort_active(
     if dropped:
         logger.debug(
             f"sanitize_model_request_kwargs: dropped {dropped} "
-            f"(OpenAI reasoning model with reasoning_effort={effort!r})",
+            f"(OpenAI reasoning model {model!r} only supports default sampling)",
             session_id="NO_SESSION",
         )
 
@@ -301,8 +290,8 @@ def sanitize_model_request_kwargs(
     当请求携带 ``tools`` 时，从 ``extra_body`` 移除 ``reasoning_effort``，
     避免部分 OpenAI 推理模型在 chat/completions 上报错。
 
-    当仍携带非 ``none`` 的 ``extra_body.reasoning_effort`` 时，移除 ``temperature`` 等采样参数，
-    与 OpenAI/Azure reasoning 模型约束一致。
+    对 OpenAI/Azure reasoning 模型（o1/o3/o4/gpt-5*），移除 ``temperature`` 等采样参数
+    （这类模型通常只接受默认采样值）。
     """
     sanitized = dict(request_kwargs)
     for key in list(sanitized.keys()):
@@ -334,7 +323,7 @@ def sanitize_model_request_kwargs(
     if structured_support is False:
         sanitized.pop("response_format", None)
     _drop_reasoning_effort_when_tools_present(sanitized)
-    _drop_sampling_params_when_reasoning_effort_active(sanitized, resolved_model)
+    _drop_sampling_params_for_reasoning_models(sanitized, resolved_model)
     return sanitized
 
 
