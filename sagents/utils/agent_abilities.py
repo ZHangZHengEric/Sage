@@ -15,7 +15,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from .logger import logger
+from sagents.llm.model_capabilities import build_llm_extra_body
+from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 
@@ -29,21 +30,7 @@ AGENT_ABILITIES_TARGET_COUNT = 4
 
 
 def _build_no_thinking_extra_body(model: str) -> Dict[str, Any]:
-    model_name = (model or "").lower()
-    is_openai_reasoning_model = (
-        model_name.startswith("o1")
-        or model_name.startswith("o3")
-        or model_name.startswith("gpt-5")
-    )
-    if is_openai_reasoning_model:
-        return {
-            "reasoning_effort": "low",
-        }
-    return {
-        "chat_template_kwargs": {"enable_thinking": False},
-        "enable_thinking": False,
-        "thinking": {"type": "disabled"},
-    }
+    return build_llm_extra_body(model, enable_thinking=False)
 
 
 def _normalize_id(raw: str) -> str:

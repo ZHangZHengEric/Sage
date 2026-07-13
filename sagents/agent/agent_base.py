@@ -20,8 +20,7 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import (
-    is_openai_reasoning_model,
-    resolve_reasoning_effort,
+    build_llm_extra_body,
 )
 from sagents.utils.llm_request_utils import (
     format_api_error_details,
@@ -1516,37 +1515,13 @@ class AgentBase(ABC):
                     else:
                         final_enable_thinking = bool(deep_thinking)
 
-                # 构建 extra_body，根据模型类型使用不同的参数
-                # 对于 OpenAI 推理模型 (o3-mini, GPT-5.2等) 使用 reasoning_effort
-                # 对于其他模型使用 enable_thinking/thinking 参数
-                extra_body = {
-                    "_step_name": step_name  # 观察用，记录下当前是哪个步骤的调用
-                }
-
-                # 判断是否为 OpenAI / 兼容三方 reasoning 模型（白名单前缀，避免误伤 gpt-4o 等）
-                is_reasoning_model = is_openai_reasoning_model(model_name)
-
-                if is_reasoning_model:
-                    # OpenAI 推理模型使用 reasoning_effort 参数
-                    # low = 最小化推理，medium = 平衡，high = 最大化推理
-                    # 注：OpenAI Chat Completions 接口对 o-/gpt-5 系不回传 reasoning content，
-                    # 仅在 usage.reasoning_tokens 上报 token 消耗，无法通过该参数关闭。
-                    # SAGE_REASONING_EFFORT_OFF 仅在思考关闭时生效，可切换到 minimal/medium/high。
-                    effort = resolve_reasoning_effort(
-                        enable_thinking=final_enable_thinking,
-                        env_value=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
-                        default_off="low",
-                    )
-                    extra_body["reasoning_effort"] = effort
-                else:
-                    # 其他模型使用 enable_thinking/thinking 参数
-                    extra_body["chat_template_kwargs"] = {  # pyright: ignore[reportArgumentType]
-                        "enable_thinking": final_enable_thinking
-                    }
-                    extra_body["enable_thinking"] = final_enable_thinking  # pyright: ignore[reportArgumentType]
-                    extra_body["thinking"] = {  # pyright: ignore[reportArgumentType]
-                        "type": "enabled" if final_enable_thinking else "disabled"
-                    }
+                # 构建 extra_body（与压缩等旁路请求共用同一套模型分支逻辑）
+                extra_body = build_llm_extra_body(
+                    model_name,
+                    enable_thinking=final_enable_thinking,
+                    step_name=step_name,
+                    reasoning_effort_off_env=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
+                )
 
                 stream = await create_chat_completion_with_fallback(
                     self.model,
