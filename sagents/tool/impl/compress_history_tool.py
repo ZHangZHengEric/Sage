@@ -160,22 +160,25 @@ class CompressHistoryTool:
             # 构建 extra_body，禁用深度思考。不要传 top_k：OpenAI 兼容接口会拒绝该参数。
             extra_body = {"_step_name": "compress_history"}
 
-            # 判断是否为 OpenAI 推理模型
-            is_openai_reasoning_model = (
-                model_name.startswith("o3-")
-                or model_name.startswith("o1-")
-                or "gpt-5.2" in model_name.lower()
-                or "gpt-5.1" in model_name.lower()
-            )
+            from sagents.llm.model_capabilities import is_openai_reasoning_model
 
-            if is_openai_reasoning_model:
-                # OpenAI 推理模型使用 reasoning_effort=low 最小化推理
+            # 与主 Agent 一致：o1/o3/o4/gpt-5* 走 reasoning_effort，勿用窄匹配漏掉 gpt-5.4 等。
+            request_kwargs: Dict[str, Any] = {
+                "stream": True,
+                "stream_options": {"include_usage": True},
+                "max_tokens": 2000,
+                "extra_body": extra_body,
+            }
+            if is_openai_reasoning_model(model_name):
+                # OpenAI 推理模型使用 reasoning_effort=low 最小化推理；
+                # 这类模型通常不接受自定义 temperature（仅默认值）。
                 extra_body["reasoning_effort"] = "low"
             else:
                 # 其他模型使用 enable_thinking=False 禁用思考
                 extra_body["chat_template_kwargs"] = {"enable_thinking": False}
                 extra_body["enable_thinking"] = False
                 extra_body["thinking"] = {"type": "disabled"}
+                request_kwargs["temperature"] = 0.3
 
             # 流式请求 LLM：复用主 Agent 的请求清洗与兼容 fallback。
             stream = await create_chat_completion_with_fallback(
@@ -183,11 +186,7 @@ class CompressHistoryTool:
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 model_config=model_config,
-                stream=True,
-                stream_options={"include_usage": True},
-                max_tokens=2000,
-                temperature=0.3,
-                extra_body=extra_body,
+                **request_kwargs,
                 **model_config,
             )
 
