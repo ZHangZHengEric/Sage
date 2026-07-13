@@ -2,6 +2,7 @@ import unittest
 
 from sagents.llm import model_capabilities
 from sagents.llm.model_capabilities import (
+    build_llm_extra_body,
     is_openai_reasoning_model,
     resolve_reasoning_effort,
 )
@@ -93,6 +94,47 @@ class TestIsOpenAIReasoningModel(unittest.TestCase):
         ]:
             with self.subTest(model=name):
                 self.assertFalse(is_openai_reasoning_model(name))
+
+
+class TestBuildLlmExtraBody(unittest.TestCase):
+    def test_reasoning_model_sets_effort_and_step(self):
+        body = build_llm_extra_body(
+            "gpt-5.6-luna",
+            enable_thinking=False,
+            step_name="compress_history",
+        )
+        self.assertEqual(body["_step_name"], "compress_history")
+        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertNotIn("enable_thinking", body)
+
+    def test_reasoning_model_thinking_on_uses_medium(self):
+        body = build_llm_extra_body("o3-mini", enable_thinking=True)
+        self.assertEqual(body["reasoning_effort"], "medium")
+
+    def test_non_reasoning_model_sets_thinking_flags(self):
+        body = build_llm_extra_body(
+            "gpt-4o",
+            enable_thinking=False,
+            step_name="agent_step",
+        )
+        self.assertEqual(body["_step_name"], "agent_step")
+        self.assertFalse(body["enable_thinking"])
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertEqual(
+            body["chat_template_kwargs"], {"enable_thinking": False}
+        )
+        self.assertNotIn("reasoning_effort", body)
+
+    def test_extra_fields_merged(self):
+        body = build_llm_extra_body(
+            "gpt-4o",
+            enable_thinking=False,
+            step_name="capability_probe_structured_output",
+            extra={"top_k": 20},
+        )
+        self.assertEqual(body["top_k"], 20)
+        self.assertFalse(body["enable_thinking"])
+        self.assertEqual(body["_step_name"], "capability_probe_structured_output")
 
 
 class TestProbeLlmCapabilities(unittest.IsolatedAsyncioTestCase):

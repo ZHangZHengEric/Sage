@@ -6,12 +6,14 @@
 
 from typing import Dict, Any, List, Optional, Tuple
 import json
+import os
 import re
 
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.capabilities import create_chat_completion_with_fallback
+from sagents.llm.model_capabilities import build_llm_extra_body
 
 COMPACT_LIST_LIMITS = {
     "decisions": 20,
@@ -111,8 +113,7 @@ class CompressHistoryTool:
         model_config.pop("max_model_len", None)
         model_config.pop("api_key", None)
         model_config.pop("maxTokens", None)
-        model_config.pop("max_tokens", None)  # 移除可能存在的 max_tokens
-        model_config.pop("temperature", None)  # 移除可能存在的 temperature
+        model_config.pop("max_tokens", None)  # 压缩请求自行限制 max_tokens
         model_config.pop("base_url", None)
         model_name = model_config.pop("model", "gpt-3.5-turbo")
 
@@ -157,36 +158,24 @@ class CompressHistoryTool:
 - 总长度控制在 8000 字以内（非严格限制）。"""
 
         try:
-            # 构建 extra_body，禁用深度思考。不要传 top_k：OpenAI 兼容接口会拒绝该参数。
-            extra_body = {"_step_name": "compress_history"}
+            # 与主 Agent 共用同一套 extra_body / 模型分支；压缩默认关闭思考。
+            # temperature 等采样参数沿用会话 model_config，由 sanitize 按模型能力清洗。
+            extra_body = build_llm_extra_body(
+                model_name,
+                enable_thinking=False,
+                step_name="compress_history",
+                reasoning_effort_off_env=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
+            )
 
-            from sagents.llm.model_capabilities import is_openai_reasoning_model
-
-            # 与主 Agent 一致：o1/o3/o4/gpt-5* 走 reasoning_effort，勿用窄匹配漏掉 gpt-5.4 等。
-            request_kwargs: Dict[str, Any] = {
-                "stream": True,
-                "stream_options": {"include_usage": True},
-                "max_tokens": 2000,
-                "extra_body": extra_body,
-            }
-            if is_openai_reasoning_model(model_name):
-                # OpenAI 推理模型使用 reasoning_effort=low 最小化推理；
-                # 这类模型通常不接受自定义 temperature（仅默认值）。
-                extra_body["reasoning_effort"] = "low"
-            else:
-                # 其他模型使用 enable_thinking=False 禁用思考
-                extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-                extra_body["enable_thinking"] = False
-                extra_body["thinking"] = {"type": "disabled"}
-                request_kwargs["temperature"] = 0.3
-
-            # 流式请求 LLM：复用主 Agent 的请求清洗与兼容 fallback。
             stream = await create_chat_completion_with_fallback(
                 model,
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 model_config=model_config,
-                **request_kwargs,
+                stream=True,
+                stream_options={"include_usage": True},
+                max_tokens=2000,
+                extra_body=extra_body,
                 **model_config,
             )
 
