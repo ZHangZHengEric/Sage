@@ -1,5 +1,11 @@
 # Change Log
 
+- **2026-07-13 17:56** 去掉重复的 _build_probe_extra_body，能力探测直接复用 build_llm_extra_body(extra=...)。
+
+- **2026-07-13 17:10** 抽取 build_llm_extra_body，压缩/主 Agent/能力探测共用同一套 reasoning 与思考参数配置。
+
+- **2026-07-13 17:05** 压缩历史去掉写死 temperature，改跟会话 model_config；reasoning 模型仍由请求清洗去掉采样参数。
+
 - **2026-07-13 16:25** 修复历史压缩：reasoning 模型（如 gpt-5.4）不再传自定义 temperature，避免 400 unsupported_value。
 
 - **2026-07-08 19:30** 修复 retry 落盘测试：构造 APIConnectionError 时补全 openai SDK 要求的 httpx.Request 参数。

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Dict, Optional
+from typing import Any, Awaitable, Dict, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -66,9 +66,40 @@ def resolve_reasoning_effort(
     return default_off
 
 
-def _is_openai_reasoning_model(model_name: str) -> bool:
-    """旧名兼容的 thin wrapper。"""
-    return is_openai_reasoning_model(model_name)
+def build_llm_extra_body(
+    model_name: str,
+    *,
+    enable_thinking: bool = False,
+    step_name: Optional[str] = None,
+    reasoning_effort_off_env: Optional[str] = None,
+    default_off: str = "low",
+    extra: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构建与主 Agent 一致的 chat.completions ``extra_body``。
+
+    - OpenAI reasoning（o1/o3/o4/gpt-5*）：设置 ``reasoning_effort``
+    - 其他模型：设置 ``enable_thinking`` / ``thinking`` / ``chat_template_kwargs``
+    - ``extra``：调用方附加字段（如能力探测的 ``top_k``）
+    """
+    extra_body: Dict[str, Any] = {}
+    if step_name:
+        extra_body["_step_name"] = step_name
+
+    if is_openai_reasoning_model(model_name):
+        extra_body["reasoning_effort"] = resolve_reasoning_effort(
+            enable_thinking=enable_thinking,
+            env_value=reasoning_effort_off_env,
+            default_off=default_off,
+        )
+    else:
+        extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+        extra_body["enable_thinking"] = enable_thinking
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+    if extra:
+        extra_body.update(extra)
+    return extra_body
 
 
 def _build_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:
@@ -82,22 +113,6 @@ def _build_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:
         timeout=timeout,
         http_client=http_client,
     )
-
-
-def _build_probe_extra_body(model: str) -> Dict[str, Any]:
-    extra_body: Dict[str, Any] = {
-        "top_k": 20,
-        "_step_name": "capability_probe_structured_output",
-    }
-
-    if _is_openai_reasoning_model(model):
-        extra_body["reasoning_effort"] = "low"
-    else:
-        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-        extra_body["enable_thinking"] = False
-        extra_body["thinking"] = {"type": "disabled"}
-
-    return extra_body
 
 
 async def _probe_optional_capability(
@@ -235,7 +250,13 @@ async def probe_structured_output(
                 **token_kw,
                 "temperature": 0.0,
                 "stream": True,
-                "extra_body": _build_probe_extra_body(model),
+                # 探测保留历史 top_k；OpenAI 兼容路径由上层 sanitize/fallback 处理。
+                "extra_body": build_llm_extra_body(
+                    model,
+                    enable_thinking=False,
+                    step_name="capability_probe_structured_output",
+                    extra={"top_k": 20},
+                ),
             }
             logger.info(
                 f"[LLM Capability Probe] structured_output request | summary={summarize_chat_completion_request(model=model, messages=request_messages, request_kwargs=request_kwargs)}"
