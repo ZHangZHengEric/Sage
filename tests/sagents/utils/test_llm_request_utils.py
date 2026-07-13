@@ -35,7 +35,7 @@ def test_sanitize_maps_max_tokens_for_gpt5_family() -> None:
     )
     assert out["max_completion_tokens"] == 4096
     assert "max_tokens" not in out
-    assert out["temperature"] == 0.7
+    assert "temperature" not in out
 
 
 def test_sanitize_keeps_max_tokens_for_gpt4() -> None:
@@ -217,7 +217,18 @@ def test_sanitize_drops_temperature_when_reasoning_effort_active_gpt54() -> None
     assert out["extra_body"]["reasoning_effort"] == "low"
 
 
-def test_sanitize_keeps_temperature_when_reasoning_effort_none() -> None:
+def test_sanitize_drops_temperature_for_reasoning_model_without_effort() -> None:
+    """gpt-5* 即使未带 reasoning_effort，也不接受自定义 temperature。"""
+    out = sanitize_model_request_kwargs(
+        {"temperature": 0.3, "max_tokens": 2000},
+        model="gpt-5.4",
+    )
+    assert "temperature" not in out
+    assert out["max_completion_tokens"] == 2000
+    assert "max_tokens" not in out
+
+
+def test_sanitize_drops_temperature_when_reasoning_effort_none() -> None:
     out = sanitize_model_request_kwargs(
         {
             "temperature": 0.7,
@@ -225,10 +236,10 @@ def test_sanitize_keeps_temperature_when_reasoning_effort_none() -> None:
         },
         model="gpt-5.4",
     )
-    assert out["temperature"] == 0.7
+    assert "temperature" not in out
 
 
-def test_sanitize_keeps_temperature_after_tool_choice_strips_reasoning() -> None:
+def test_sanitize_drops_temperature_after_tools_strip_reasoning() -> None:
     out = sanitize_model_request_kwargs(
         {
             "tools": [
@@ -240,7 +251,7 @@ def test_sanitize_keeps_temperature_after_tool_choice_strips_reasoning() -> None
         },
         model="gpt-5.4",
     )
-    assert out["temperature"] == 0.7
+    assert "temperature" not in out
     assert "reasoning_effort" not in out["extra_body"]
 
 
