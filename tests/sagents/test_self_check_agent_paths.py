@@ -721,6 +721,50 @@ def test_markdown_code_regions_reject_local_file_links(monkeypatch):
         assert "真实文件引用不能放在反引号或代码块中" in issues[0]
 
 
+def test_markdown_indented_code_blocks_reject_local_file_links(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    samples = [
+        "    [report.md](file:///tmp/report.md)",
+        "\t[report.md](file:///tmp/report.md)",
+        ">     [report.md](file:///tmp/report.md)",
+        "结果如下：\n\n    [report.md](file:///tmp/report.md)",
+    ]
+
+    for content in samples:
+        issues = agent._validate_markdown_file_link_syntax(content)
+        assert len(issues) == 1, content
+        assert "真实文件引用不能放在反引号或代码块中" in issues[0]
+
+
+def test_indented_paragraph_continuation_keeps_file_link_clickable(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = "结果如下：\n    [report.md](file:///tmp/report.md)"
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+
+
+def test_escaped_backticks_do_not_hide_clickable_file_link(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = r"\`[report.md](file:///tmp/report.md)\`"
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message("assistant", content),
+            ]
+        )
+    )
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+    assert agent._collect_recent_referenced_files(session_context) == {
+        "/tmp/report.md"
+    }
+
+
 def test_code_file_links_are_not_collected_as_clickable_artifacts(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
