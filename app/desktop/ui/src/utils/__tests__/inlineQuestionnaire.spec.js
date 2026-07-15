@@ -118,4 +118,24 @@ describe('inlineQuestionnaire', () => {
     expect(submission.displayText).toContain('风格？：温暖、活泼')
     expect(submission.displayText).toContain('补充？：不要字幕')
   })
+
+  it('uses questionnaire-provided localized UI text for other answers', () => {
+    const questionnaire = splitInlineQuestionnaireContent(
+      '<movo-questionnaire>{"title":"Confirmacao","ui_text":{"other":"Outro","answer_title":"Respostas do questionario","question_fallback":"Pergunta","unanswered":"Nao respondido","unselected":"Nao selecionado","answer_separator":": ","list_separator":", "},"questions":[{"id":"action","type":"single_choice","text":"Como continuar?","options":[{"value":"continue","label":"Continuar"}],"allow_other":true}]}</movo-questionnaire>',
+      'portuguese'
+    )[0].payload
+    const draft = initialQuestionnaireDraft(questionnaire)
+    draft.action.value = '__questionnaire_other__'
+    draft.action.otherText = 'Usar outra estrategia'
+
+    const submission = buildQuestionnaireSubmission(questionnaire, draft)
+
+    expect(questionnaire.uiText.other).toBe('Outro')
+    expect(submission.answers[0].label).toBe('Outro')
+    expect(submission.displayText).toContain('Respostas do questionario')
+    expect(submission.displayText).toContain(
+      'Como continuar?: Outro, Usar outra estrategia'
+    )
+    expect(submission.displayText).not.toMatch(/问卷|其他|未选择/)
+  })
 })

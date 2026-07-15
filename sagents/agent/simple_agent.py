@@ -20,6 +20,7 @@ from sagents.utils.completion_mode import (
     is_turn_status_mode,
 )
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
+from sagents.utils.i18n import t
 import json
 import uuid
 from copy import deepcopy
@@ -222,19 +223,34 @@ class SimpleAgent(AgentBase):
         return False
 
     def _build_repeat_recovery_questionnaire(
-        self, *, pattern: Dict[str, int]
+        self, *, pattern: Dict[str, int], language: str = "en"
     ) -> MessageChunk:
-        title = "Execution path is repeating"
-        notice = (
-            "I detected repeated execution steps and paused to avoid continuing "
-            "without progress. Please choose how I should proceed."
-        )
-        question = (
-            "The recent execution steps are repeating. How would you like me "
-            "to proceed?"
-        )
+        title = t("runtime.repeat_recovery.title", language)
+        notice = t("runtime.repeat_recovery.notice", language)
+        question = t("runtime.repeat_recovery.question", language)
         payload = {
             "title": title,
+            "ui_text": {
+                "other": t("runtime.repeat_recovery.other", language),
+                "answer_title": t(
+                    "runtime.repeat_recovery.answer_title", language
+                ),
+                "question_fallback": t(
+                    "runtime.repeat_recovery.question_fallback", language
+                ),
+                "unanswered": t(
+                    "runtime.repeat_recovery.unanswered", language
+                ),
+                "unselected": t(
+                    "runtime.repeat_recovery.unselected", language
+                ),
+                "answer_separator": t(
+                    "runtime.repeat_recovery.answer_separator", language
+                ),
+                "list_separator": t(
+                    "runtime.repeat_recovery.list_separator", language
+                ),
+            },
             "questions": [
                 {
                     "id": REPEAT_RECOVERY_QUESTION_ID,
@@ -243,21 +259,17 @@ class SimpleAgent(AgentBase):
                     "options": [
                         {
                             "value": "continue_with_new_strategy",
-                            "label": (
-                                "Continue with a different strategy and perform "
-                                "the next unfinished action (recommended)"
+                            "label": t(
+                                "runtime.repeat_recovery.continue", language
                             ),
                         },
                         {
                             "value": "report_and_wait",
-                            "label": (
-                                "First report completed work, remaining issues, "
-                                "and blockers, then wait"
-                            ),
+                            "label": t("runtime.repeat_recovery.report", language),
                         },
                         {
                             "value": "stop_execution",
-                            "label": "Stop now and keep the work already completed",
+                            "label": t("runtime.repeat_recovery.stop", language),
                         },
                     ],
                     "default": "continue_with_new_strategy",
@@ -1347,6 +1359,7 @@ class SimpleAgent(AgentBase):
                     ):
                         questionnaire = self._build_repeat_recovery_questionnaire(
                             pattern=pattern,
+                            language=session_context.get_language(),
                         )
                         all_new_response_chunks.append(questionnaire)
                         session_context.audit_status["completion_status"] = (

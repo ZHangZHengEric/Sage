@@ -51,6 +51,25 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.tool_call_parse.suggestion.commas": ("• 确保没有多余的逗号或缺少逗号"),
         "runtime.tool.error.arguments_not_object": "工具参数格式错误: 参数必须是JSON对象",
         "runtime.tool.error.execution_failed": "工具 {tool_name} 执行失败: {message}",
+        "runtime.repeat_recovery.title": "执行路径正在重复",
+        "runtime.repeat_recovery.notice": (
+            "检测到重复执行步骤，已暂停以避免在没有进展的情况下继续。请选择后续处理方式。"
+        ),
+        "runtime.repeat_recovery.question": "最近的执行步骤正在重复。你希望我如何继续？",
+        "runtime.repeat_recovery.continue": (
+            "使用不同策略继续，并执行下一项未完成的操作（推荐）"
+        ),
+        "runtime.repeat_recovery.report": (
+            "先汇报已完成工作、剩余问题和阻塞，然后等待"
+        ),
+        "runtime.repeat_recovery.stop": "立即停止并保留已经完成的工作",
+        "runtime.repeat_recovery.other": "其他",
+        "runtime.repeat_recovery.answer_title": "问卷回答",
+        "runtime.repeat_recovery.question_fallback": "问题",
+        "runtime.repeat_recovery.unanswered": "未填写",
+        "runtime.repeat_recovery.unselected": "未选择",
+        "runtime.repeat_recovery.answer_separator": "：",
+        "runtime.repeat_recovery.list_separator": "、",
     },
     "en": {
         "workflow.execution_failed": "Workflow execution failed: {message}",
@@ -119,6 +138,32 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Tool argument format error: arguments must be a JSON object"
         ),
         "runtime.tool.error.execution_failed": "Tool {tool_name} failed: {message}",
+        "runtime.repeat_recovery.title": "Execution path is repeating",
+        "runtime.repeat_recovery.notice": (
+            "I detected repeated execution steps and paused to avoid continuing "
+            "without progress. Please choose how I should proceed."
+        ),
+        "runtime.repeat_recovery.question": (
+            "The recent execution steps are repeating. How would you like me "
+            "to proceed?"
+        ),
+        "runtime.repeat_recovery.continue": (
+            "Continue with a different strategy and perform the next unfinished "
+            "action (recommended)"
+        ),
+        "runtime.repeat_recovery.report": (
+            "First report completed work, remaining issues, and blockers, then wait"
+        ),
+        "runtime.repeat_recovery.stop": (
+            "Stop now and keep the work already completed"
+        ),
+        "runtime.repeat_recovery.other": "Other",
+        "runtime.repeat_recovery.answer_title": "Questionnaire answers",
+        "runtime.repeat_recovery.question_fallback": "Question",
+        "runtime.repeat_recovery.unanswered": "Not answered",
+        "runtime.repeat_recovery.unselected": "Not selected",
+        "runtime.repeat_recovery.answer_separator": ": ",
+        "runtime.repeat_recovery.list_separator": ", ",
     },
     "pt": {
         "workflow.execution_failed": "Falha ao executar o fluxo de trabalho: {message}",
@@ -192,6 +237,33 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Erro no formato dos argumentos da ferramenta: os argumentos devem ser um objeto JSON"
         ),
         "runtime.tool.error.execution_failed": "Ferramenta {tool_name} falhou: {message}",
+        "runtime.repeat_recovery.title": "O caminho de execucao esta se repetindo",
+        "runtime.repeat_recovery.notice": (
+            "Detectei etapas de execucao repetidas e pausei para evitar continuar "
+            "sem progresso. Escolha como devo prosseguir."
+        ),
+        "runtime.repeat_recovery.question": (
+            "As etapas recentes de execucao estao se repetindo. Como voce deseja "
+            "que eu prossiga?"
+        ),
+        "runtime.repeat_recovery.continue": (
+            "Continuar com uma estrategia diferente e executar a proxima acao "
+            "pendente (recomendado)"
+        ),
+        "runtime.repeat_recovery.report": (
+            "Primeiro relatar o trabalho concluido, os problemas restantes e os "
+            "bloqueios; depois aguardar"
+        ),
+        "runtime.repeat_recovery.stop": (
+            "Parar agora e manter o trabalho ja concluido"
+        ),
+        "runtime.repeat_recovery.other": "Outro",
+        "runtime.repeat_recovery.answer_title": "Respostas do questionario",
+        "runtime.repeat_recovery.question_fallback": "Pergunta",
+        "runtime.repeat_recovery.unanswered": "Nao respondido",
+        "runtime.repeat_recovery.unselected": "Nao selecionado",
+        "runtime.repeat_recovery.answer_separator": ": ",
+        "runtime.repeat_recovery.list_separator": ", ",
     },
 }
 

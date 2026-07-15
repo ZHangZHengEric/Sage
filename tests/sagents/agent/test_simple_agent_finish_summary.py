@@ -2312,8 +2312,8 @@ def test_repeat_pattern_break_after_tool_emits_recovery_questionnaire(monkeypatc
     questionnaire = chunks[-1]
     assert "<movo-questionnaire>" in questionnaire.content
     assert '"id": "loop_recovery_action"' in questionnaire.content
-    assert "Execution path is repeating" in questionnaire.content
-    assert "Continue with a different strategy" in questionnaire.content
+    assert "执行路径正在重复" in questionnaire.content
+    assert "使用不同策略继续" in questionnaire.content
     assert questionnaire.metadata["needs_user_input"] is True
     assert questionnaire.metadata["runtime_notice"] == (
         "repeat_pattern_questionnaire"
@@ -2336,6 +2336,27 @@ def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
     assert inference[0].content == questionnaire.content
     assert "Execution path is repeating" in inference[0].content
     assert "Continue with a different strategy" in inference[0].content
+
+
+def test_repeat_recovery_questionnaire_uses_session_language():
+    agent = _agent()
+    pattern = {"mode": "tool_call", "period": 2, "cycles": 2}
+
+    chinese = agent._build_repeat_recovery_questionnaire(
+        pattern=pattern,
+        language="zh-CN",
+    )
+    portuguese = agent._build_repeat_recovery_questionnaire(
+        pattern=pattern,
+        language="pt-BR",
+    )
+
+    assert "执行路径正在重复" in chinese.content
+    assert "先汇报已完成工作" in chinese.content
+    assert "O caminho de execucao esta se repetindo" in portuguese.content
+    assert "Continuar com uma estrategia diferente" in portuguese.content
+    assert '"other": "Outro"' in portuguese.content
+    assert '"answer_title": "Respostas do questionario"' in portuguese.content
 
 
 def test_historical_repeat_signature_requests_required_escape():

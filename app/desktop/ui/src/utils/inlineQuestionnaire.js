@@ -1,6 +1,15 @@
 const QUESTIONNAIRE_TAGS = ['movo-questionnaire', 'ling-questionnaire', 'sage-questionnaire', 'questionnaire']
 const RESPONSE_TAGS = QUESTIONNAIRE_TAGS.map((tag) => `${tag}-response`)
 const ARTIFACT_TAGS = ['movo-artifacts', 'ling-artifacts', 'sage-artifacts', 'artifacts']
+const DEFAULT_UI_TEXT = {
+  other: '其他',
+  answerTitle: '问卷回答',
+  questionFallback: '问题',
+  unanswered: '未填写',
+  unselected: '未选择',
+  answerSeparator: '：',
+  listSeparator: '、',
+}
 
 const TAG_PATTERN = new RegExp(
   `<(${[...QUESTIONNAIRE_TAGS, ...RESPONSE_TAGS, ...ARTIFACT_TAGS].join('|')})(\\s[^>]*)?>([\\s\\S]*?)<\\\\?/\\1\\s*>`,
@@ -114,12 +123,19 @@ export function parseQuestionnaire(rawJson, { attrs = {}, tag = 'questionnaire',
     id,
     tag,
     title: asString(decoded.title).trim(),
+    uiText: normalizeQuestionnaireUiText(decoded.ui_text),
     timeoutSeconds: attrTimeout || payloadTimeout || 0,
     questions,
   }
 }
 
-export function buildQuestionnaireSubmission(questionnaire, draftAnswers, status = 'submitted') {
+export function buildQuestionnaireSubmission(
+  questionnaire,
+  draftAnswers,
+  status = 'submitted',
+  uiText = questionnaire?.uiText
+) {
+  const resolvedUiText = resolveQuestionnaireUiText(uiText)
   const answers = questionnaire.questions.map((question) => {
     const draft = draftAnswers?.[question.id]
     if (question.type === 'free_text') {
@@ -133,7 +149,9 @@ export function buildQuestionnaireSubmission(questionnaire, draftAnswers, status
 
     if (question.type === 'multi_choice') {
       const values = Array.isArray(draft?.values) ? draft.values : []
-      const labels = values.map((value) => labelForValue(question, value)).filter(Boolean)
+      const labels = values
+        .map((value) => labelForValue(question, value, resolvedUiText))
+        .filter(Boolean)
       const answer = {
         question_id: question.id,
         question: question.text,
@@ -153,7 +171,7 @@ export function buildQuestionnaireSubmission(questionnaire, draftAnswers, status
       type: 'single_choice',
       answer: value,
       value,
-      label: labelForValue(question, value),
+      label: labelForValue(question, value, resolvedUiText),
     }
     if (asString(draft?.otherText).trim()) answer.other_text = asString(draft.otherText).trim()
     return answer
@@ -169,7 +187,7 @@ export function buildQuestionnaireSubmission(questionnaire, draftAnswers, status
 
   return {
     agentText: `<${responseTag}>${JSON.stringify(payload)}</${responseTag}>`,
-    displayText: displayTextForAnswers(answers),
+    displayText: displayTextForAnswers(answers, resolvedUiText),
     answers,
   }
 }
@@ -185,19 +203,24 @@ export function parseQuestionnaireResponse(rawJson, tag = 'questionnaire') {
   }
 }
 
-export function displayTextForAnswers(answers) {
-  const lines = ['问卷回答']
+export function displayTextForAnswers(answers, uiText) {
+  const resolvedUiText = resolveQuestionnaireUiText(uiText)
+  const lines = [resolvedUiText.answerTitle]
   for (const answer of answers || []) {
-    lines.push(`${answer.question || answer.question_id || '问题'}：${displayValueForAnswer(answer)}`)
+    lines.push(
+      `${answer.question || answer.question_id || resolvedUiText.questionFallback}`
+      + `${resolvedUiText.answerSeparator}${displayValueForAnswer(answer, resolvedUiText)}`
+    )
   }
   return lines.join('\n')
 }
 
-export function displayValueForAnswer(answer) {
-  if (!answer) return '未填写'
+export function displayValueForAnswer(answer, uiText) {
+  const resolvedUiText = resolveQuestionnaireUiText(uiText)
+  if (!answer) return resolvedUiText.unanswered
   if (answer.type === 'free_text') {
     const text = asString(answer.answer || answer.text).trim()
-    return text || '未填写'
+    return text || resolvedUiText.unanswered
   }
 
   const parts = []
@@ -213,7 +236,9 @@ export function displayValueForAnswer(answer) {
   }
   const otherText = asString(answer.other_text || answer.otherText).trim()
   if (otherText) parts.push(otherText)
-  return parts.length ? parts.join('、') : '未选择'
+  return parts.length
+    ? parts.join(resolvedUiText.listSeparator)
+    : resolvedUiText.unselected
 }
 
 export function initialQuestionnaireDraft(questionnaire) {
@@ -415,11 +440,40 @@ function parsePositiveInt(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
-function labelForValue(question, value) {
+function labelForValue(question, value, uiText) {
   const stringValue = asString(value).trim()
   if (!stringValue) return ''
-  if (stringValue === '__questionnaire_other__') return '其他'
+  if (stringValue === '__questionnaire_other__') return uiText.other
   return question.options.find((option) => option.value === stringValue)?.label || stringValue
+}
+
+function normalizeQuestionnaireUiText(rawUiText) {
+  if (!rawUiText || typeof rawUiText !== 'object') return {}
+  return {
+    other: asString(rawUiText.other).trim(),
+    answerTitle: asString(rawUiText.answer_title ?? rawUiText.answerTitle).trim(),
+    questionFallback: asString(
+      rawUiText.question_fallback ?? rawUiText.questionFallback
+    ).trim(),
+    unanswered: asString(rawUiText.unanswered).trim(),
+    unselected: asString(rawUiText.unselected).trim(),
+    answerSeparator: asString(
+      rawUiText.answer_separator ?? rawUiText.answerSeparator
+    ),
+    listSeparator: asString(
+      rawUiText.list_separator ?? rawUiText.listSeparator
+    ),
+  }
+}
+
+function resolveQuestionnaireUiText(rawUiText) {
+  const normalized = normalizeQuestionnaireUiText(rawUiText)
+  return Object.fromEntries(
+    Object.entries(DEFAULT_UI_TEXT).map(([key, fallback]) => [
+      key,
+      normalized[key] || fallback,
+    ])
+  )
 }
 
 function asString(value) {
