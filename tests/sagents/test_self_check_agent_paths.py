@@ -176,8 +176,10 @@ def test_self_check_failure_message_uses_english_runtime_diagnostic(monkeypatch)
     assert (
         '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
     )
-    assert "not a reply authored by the assistant/agent" in content
-    assert "Self-check found issues" in content
+    assert "not a new user request" in content
+    assert "output the complete corrected result again" in content
+    assert "Do not reply only that you are preparing to fix it" in content
+    assert "complete tag again with valid JSON" in content
     assert "Checked files:" in content
 
 
@@ -192,8 +194,26 @@ def test_self_check_failure_message_uses_portuguese_runtime_diagnostic(monkeypat
     assert (
         '<runtime_diagnostic source="sage_self_check" generated_by="system">' in content
     )
-    assert "nao uma resposta escrita pelo assistant/agent" in content
+    assert "nao uma nova solicitacao do usuario" in content
+    assert "resultado corrigido completo" in content
+    assert "Nao responda apenas que vai preparar a correcao" in content
+    assert "tag completa com JSON valido" in content
     assert "Arquivos verificados:" in content
+
+
+def test_self_check_failure_message_uses_chinese_reoutput_instruction(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = agent._format_failure_message(
+        ["问卷 JSON 非法"], [], language="zh"
+    )
+
+    assert "不是新的用户需求" in content
+    assert "重新输出修复后的完整结果" in content
+    assert "禁止只回复“准备修复”" in content
+    assert "重新输出完整标签" in content
+    assert "JSON 合法" in content
 
 
 def test_absolute_markdown_link_checks_file_existence(monkeypatch):
@@ -664,6 +684,62 @@ def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_pa
     assert chunks == []
     assert session_context.audit_status["self_check_passed"] is True
     assert session_context.audit_status["self_check_summary"] == "checked 0 files"
+
+
+def test_invalid_questionnaire_must_be_reoutput_before_requirement_clears(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    invalid_questionnaire = (
+        '<yiii-questionnaire>{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？","options":["是","否"],'
+        '"default":"是"}]}></yiii-questionnaire>'
+    )
+    valid_questionnaire = invalid_questionnaire.replace(
+        "]}>", "]}"
+    )
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(messages=[]),
+    )
+
+    async def run_with_reply(reply):
+        session_context.message_manager.messages = [
+            _make_message("user", "请确认"),
+            _make_message("assistant", reply),
+        ]
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    first_chunks = asyncio.run(run_with_reply(invalid_questionnaire))
+    assert first_chunks
+    assert session_context.audit_status[
+        "self_check_required_structured_tags"
+    ] == ["yiii-questionnaire"]
+
+    second_chunks = asyncio.run(run_with_reply("我会继续处理。"))
+    assert second_chunks
+    assert "必须在修复后的完整回复中重新输出" in second_chunks[0].content
+    assert session_context.audit_status["self_check_passed"] is False
+
+    final_chunks = asyncio.run(run_with_reply(valid_questionnaire))
+    assert final_chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert "self_check_required_structured_tags" not in session_context.audit_status
 
 
 def test_inline_code_wrapped_file_link_triggers_execution_error(monkeypatch):

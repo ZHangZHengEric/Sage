@@ -79,3 +79,45 @@ def test_conversation_messages_view_filters_self_check_hidden_context(
     assert [message["message_id"] for message in view["messages"]] == [
         "visible-assistant",
     ]
+
+
+def test_conversation_messages_view_filters_every_client_visibility_flag(
+    monkeypatch,
+):
+    raw_messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="hidden_from_chat",
+            message_id="hidden-from-chat",
+            metadata={"hidden_from_chat": True},
+        ),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="hide_from_chat",
+            message_id="hide-from-chat",
+            metadata={"hide_from_chat": True},
+        ),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="sse_visible",
+            message_id="sse-hidden",
+            metadata={"sse_visible": False},
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="visible",
+            message_id="visible",
+        ),
+    ]
+    manager = FakeSessionManager(raw_messages)
+    monkeypatch.setattr(session_runtime, "_global_session_manager", manager)
+
+    view = session_runtime.build_conversation_messages_view("sess-1")
+
+    assert [message["message_id"] for message in view["messages"]] == ["visible"]
+    assert [message.message_id for message in raw_messages] == [
+        "hidden-from-chat",
+        "hide-from-chat",
+        "sse-hidden",
+        "visible",
+    ]

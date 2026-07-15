@@ -103,6 +103,24 @@ class SelfCheckAgent(AgentBase):
         structured_tag_issues = self._validate_structured_tag_payloads(
             latest_assistant_content
         )
+        structured_tag_names = self._structured_tag_names(latest_assistant_content)
+        invalid_structured_tag_names = (
+            self._invalid_structured_tag_names(latest_assistant_content)
+        )
+        required_structured_tag_names = {
+            str(tag_name).lower()
+            for tag_name in audit_status.get(
+                "self_check_required_structured_tags", []
+            )
+            if str(tag_name).strip()
+        }
+        missing_required_structured_tags = (
+            required_structured_tag_names - structured_tag_names
+        )
+        for tag_name in sorted(missing_required_structured_tags):
+            structured_tag_issues.append(
+                f"<{tag_name}> 必须在修复后的完整回复中重新输出，不能省略"
+            )
         markdown_link_issues = self._validate_markdown_file_link_syntax(
             latest_assistant_content
         )
@@ -174,6 +192,15 @@ class SelfCheckAgent(AgentBase):
         audit_status["self_check_issues"] = issues
 
         if issues:
+            unresolved_structured_tag_names = (
+                missing_required_structured_tags | invalid_structured_tag_names
+            )
+            if unresolved_structured_tag_names:
+                audit_status["self_check_required_structured_tags"] = sorted(
+                    unresolved_structured_tag_names
+                )
+            else:
+                audit_status.pop("self_check_required_structured_tags", None)
             audit_status["self_check_passed"] = False
             # 强制下一轮重新进入执行链，而不是被上一次 completion_status 卡住。
             audit_status["completion_status"] = "in_progress"
@@ -213,6 +240,9 @@ class SelfCheckAgent(AgentBase):
         session_context.audit_status["self_check_passed"] = True
         session_context.audit_status["self_check_issues"] = []
         session_context.audit_status["self_check_summary"] = summary
+        session_context.audit_status.pop(
+            "self_check_required_structured_tags", None
+        )
         if checked_files is not None:
             session_context.audit_status["self_check_checked_files"] = checked_files
 
@@ -743,6 +773,19 @@ class SelfCheckAgent(AgentBase):
             return True
         return False
 
+    def _structured_tag_names(self, content: str) -> Set[str]:
+        return {
+            tag_name
+            for tag_name, _raw_payload in self._iter_structured_tag_matches(content)
+        }
+
+    def _invalid_structured_tag_names(self, content: str) -> Set[str]:
+        return {
+            tag_name
+            for tag_name, raw_payload in self._iter_structured_tag_matches(content)
+            if self._validate_structured_tag_payload(tag_name, raw_payload)
+        }
+
     def _structured_tag_pattern(self) -> re.Pattern[str]:
         tag_names = "|".join(re.escape(tag) for tag in STRUCTURED_INLINE_TAGS)
         return re.compile(
@@ -1192,38 +1235,41 @@ class SelfCheckAgent(AgentBase):
         if str(language or "").lower().startswith("en"):
             return (
                 '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
-                "This is a Sage runtime self-check report, not a reply authored by the assistant/agent and not a user instruction.\n"
-                "It only reports validation failures from the previous final output. Use it to fix real issues; do not repeat it as task progress.\n\n"
-                "Self-check found issues that must be fixed before continuing:\n\n"
+                "This is an internal Sage repair instruction, not a new user request.\n"
+                "The previous final response failed validation. Fix the issues below and output the complete corrected result again.\n"
+                "Do not reply only that you are preparing to fix it. If a structured tag failed, output the complete tag again with valid JSON.\n\n"
+                "Issues that must be fixed:\n\n"
                 "Checked files:\n"
                 f"{checked_lines}\n\n"
                 "Issues found:\n"
                 f"{issue_lines}\n\n"
-                "Fix these issues first, then complete the task again.\n"
+                "Fix them now and output the complete corrected result.\n"
                 "</runtime_diagnostic>"
             )
         if str(language or "").lower().startswith("pt"):
             return (
                 '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
-                "Este e um relatorio de autoverificacao do runtime Sage, nao uma resposta escrita pelo assistant/agent nem uma instrucao do usuario.\n"
-                "Ele apenas relata falhas de validacao da saida final anterior. Use-o para corrigir problemas reais; nao o repita como progresso da tarefa.\n\n"
-                "A autoverificacao encontrou problemas que precisam ser corrigidos antes de continuar:\n\n"
+                "Esta e uma instrucao interna de reparo do Sage, nao uma nova solicitacao do usuario.\n"
+                "A resposta final anterior falhou na validacao. Corrija os problemas abaixo e produza novamente o resultado corrigido completo.\n"
+                "Nao responda apenas que vai preparar a correcao. Se uma tag estruturada falhou, produza novamente a tag completa com JSON valido.\n\n"
+                "Problemas que precisam ser corrigidos:\n\n"
                 "Arquivos verificados:\n"
                 f"{checked_lines}\n\n"
                 "Problemas encontrados:\n"
                 f"{issue_lines}\n\n"
-                "Corrija estes problemas primeiro e depois conclua a tarefa novamente.\n"
+                "Corrija-os agora e produza o resultado corrigido completo.\n"
                 "</runtime_diagnostic>"
             )
         return (
             '<runtime_diagnostic source="sage_self_check" generated_by="system">\n'
-            "这是 Sage 运行时自检报告，不是 assistant/agent 自己生成的回复，也不是用户指令。\n"
-            "它只说明上一轮最终产物校验失败，下一轮应据此修复真实问题，不要把这段报告当作可复述的任务成果。\n\n"
-            "自检发现以下问题，需要先修复后再继续：\n\n"
+            "这是 Sage 内部修复指令，不是新的用户需求。\n"
+            "上一轮最终回复未通过校验。请修复以下问题，并重新输出修复后的完整结果。\n"
+            "禁止只回复“准备修复”。如果结构化标签校验失败，必须重新输出完整标签，并确保其中的 JSON 合法。\n\n"
+            "必须修复的问题：\n\n"
             "已检查文件：\n"
             f"{checked_lines}\n\n"
             "发现的问题：\n"
             f"{issue_lines}\n\n"
-            "请优先修复这些问题，然后重新完成任务。\n"
+            "请立即修复并重新输出完整结果。\n"
             "</runtime_diagnostic>"
         )
