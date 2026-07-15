@@ -10,6 +10,7 @@ from sagents.context.messages.message import (
 )
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.impl.todo_tool import ToDoTool
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
 from sagents.tool.tool_baseline import augment_with_baseline_tools
@@ -39,6 +40,7 @@ DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
 REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
 REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
 REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
+TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
 
 
 @dataclass(frozen=True)
@@ -231,49 +233,21 @@ class SimpleAgent(AgentBase):
         payload = {
             "title": title,
             "ui_text": {
-                "other": t("runtime.repeat_recovery.other", language),
-                "answer_title": t(
-                    "runtime.repeat_recovery.answer_title", language
-                ),
+                "answer_title": t("runtime.repeat_recovery.answer_title", language),
                 "question_fallback": t(
                     "runtime.repeat_recovery.question_fallback", language
                 ),
-                "unanswered": t(
-                    "runtime.repeat_recovery.unanswered", language
-                ),
-                "unselected": t(
-                    "runtime.repeat_recovery.unselected", language
-                ),
+                "unanswered": t("runtime.repeat_recovery.unanswered", language),
                 "answer_separator": t(
                     "runtime.repeat_recovery.answer_separator", language
-                ),
-                "list_separator": t(
-                    "runtime.repeat_recovery.list_separator", language
                 ),
             },
             "questions": [
                 {
                     "id": REPEAT_RECOVERY_QUESTION_ID,
-                    "type": "single_choice",
+                    "type": "free_text",
                     "text": question,
-                    "options": [
-                        {
-                            "value": "continue_with_new_strategy",
-                            "label": t(
-                                "runtime.repeat_recovery.continue", language
-                            ),
-                        },
-                        {
-                            "value": "report_and_wait",
-                            "label": t("runtime.repeat_recovery.report", language),
-                        },
-                        {
-                            "value": "stop_execution",
-                            "label": t("runtime.repeat_recovery.stop", language),
-                        },
-                    ],
-                    "default": "continue_with_new_strategy",
-                    "allow_other": True,
+                    "default": "",
                 }
             ],
         }
@@ -796,7 +770,9 @@ class SimpleAgent(AgentBase):
             return True
 
         # 规则2：最后一条消息是工具调用错误结果（如参数解析失败等）
-        if last_message.matches_message_types([MessageType.AGENT_EXECUTION_ERROR.value]):
+        if last_message.matches_message_types(
+            [MessageType.AGENT_EXECUTION_ERROR.value]
+        ):
             metadata = last_message.metadata or {}
             if metadata.get("runtime_diagnostic_source") == "tool_call_argument_parse":
                 logger.debug(
@@ -873,6 +849,11 @@ class SimpleAgent(AgentBase):
         judge_messages = self._format_task_complete_messages_for_prompt(
             messages_for_complete
         )
+        todo_plan = await self._build_task_complete_todo_plan(
+            messages_input, session_id
+        )
+        if todo_plan:
+            judge_messages = f"{todo_plan}\n\n{judge_messages}"
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
@@ -927,6 +908,101 @@ class SimpleAgent(AgentBase):
                 "SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行"
             )
             return TaskCompleteDecision(task_interrupted=False)
+
+    @staticmethod
+    def _bounded_todo_field(value: Any) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(text) <= TASK_COMPLETE_TODO_FIELD_MAX_CHARS:
+            return text
+        return text[:TASK_COMPLETE_TODO_FIELD_MAX_CHARS].rstrip() + "... [truncated]"
+
+    @staticmethod
+    def _todo_task_status(task: Dict[str, Any]) -> str:
+        status = str(task.get("status") or "").strip().lower()
+        if not status:
+            status = "completed" if task.get("completed") is True else "pending"
+        return status
+
+    @classmethod
+    def _latest_todo_tasks_from_messages(
+        cls, messages: List[MessageChunk]
+    ) -> Optional[List[Dict[str, Any]]]:
+        todo_call_ids = set()
+        for msg in messages:
+            for tool_call in msg.tool_calls or []:
+                if cls._tool_call_name_for_judge(tool_call) == "todo_write":
+                    call_id = cls._tool_call_id_for_judge(tool_call)
+                    if call_id:
+                        todo_call_ids.add(call_id)
+
+        latest_tasks: Optional[List[Dict[str, Any]]] = None
+        for msg in messages:
+            if msg.role != MessageRole.TOOL.value:
+                continue
+            is_todo_result = msg.tool_call_id in todo_call_ids
+            if not is_todo_result:
+                is_todo_result = cls._tool_result_name_for_judge(msg) == "todo_write"
+            if not is_todo_result:
+                continue
+            raw_content = msg.get_content()
+            if not isinstance(raw_content, str):
+                continue
+            try:
+                payload = json.loads(raw_content)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            tasks = payload.get("tasks") if isinstance(payload, dict) else None
+            if isinstance(tasks, list):
+                latest_tasks = [task for task in tasks if isinstance(task, dict)]
+        return latest_tasks
+
+    async def _build_task_complete_todo_plan(
+        self, messages: List[MessageChunk], session_id: str
+    ) -> str:
+        tasks = self._latest_todo_tasks_from_messages(messages)
+        source = "latest_todo_write_result"
+        if tasks is None:
+            source = "current_session_todo"
+            try:
+                tasks = await ToDoTool().read_tasks(session_id)
+            except Exception as exc:
+                logger.warning(
+                    f"SimpleAgent: task_complete_judge 读取当前 Todo 计划失败: {exc}"
+                )
+                return ""
+        if not isinstance(tasks, list) or not tasks:
+            return ""
+        if not any(self._todo_task_status(task) != "completed" for task in tasks):
+            return ""
+
+        compact_tasks = []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            item = {
+                "id": self._bounded_todo_field(task.get("id")),
+                "status": self._todo_task_status(task),
+                "content": self._bounded_todo_field(
+                    task.get("content") or task.get("name") or task.get("title")
+                ),
+            }
+            conclusion = self._bounded_todo_field(task.get("conclusion"))
+            if conclusion:
+                item["conclusion"] = conclusion
+            compact_tasks.append(item)
+
+        if not compact_tasks:
+            return ""
+        payload: Dict[str, Any] = {
+            "source": source,
+            "authoritative": True,
+            "tasks": compact_tasks,
+        }
+        return (
+            "<current_todo_plan>\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n</current_todo_plan>"
+        )
 
     async def _is_task_complete(
         self,
@@ -1354,9 +1430,7 @@ class SimpleAgent(AgentBase):
                         "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
                         "根据当前消息末尾决定是否请求用户选择恢复方式。"
                     )
-                    if self._last_meaningful_chunk_is_tool(
-                        all_new_response_chunks
-                    ):
+                    if self._last_meaningful_chunk_is_tool(all_new_response_chunks):
                         questionnaire = self._build_repeat_recovery_questionnaire(
                             pattern=pattern,
                             language=session_context.get_language(),
@@ -1746,7 +1820,7 @@ class SimpleAgent(AgentBase):
                             *streamed_rejections,
                             self._create_unavailable_tool_runtime_message(
                                 sorted(invalid_tool_names)
-                            )
+                            ),
                         ],
                         False,
                     )
