@@ -368,3 +368,23 @@ class MessageChunk:
                 pass
         logger.debug("未找到有效JSON，返回原始内容")
         return content
+
+
+def is_message_client_visible(message: Any) -> bool:
+    """Return whether a message may cross a client-facing stream boundary.
+
+    Accept both ``MessageChunk`` instances and their serialized dictionaries so
+    every stream/history adapter applies exactly the same visibility contract.
+    """
+
+    if isinstance(message, dict):
+        metadata = message.get("metadata")
+    else:
+        metadata = getattr(message, "metadata", None)
+    if not isinstance(metadata, dict):
+        return True
+    return not (
+        metadata.get("hidden_from_chat") is True
+        or metadata.get("hide_from_chat") is True
+        or metadata.get("sse_visible") is False
+    )

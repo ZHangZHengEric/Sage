@@ -27,7 +27,12 @@ from sagents.agent import (
     PlanAgent,
     SelfCheckAgent,
 )
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import (
+    MessageChunk,
+    MessageRole,
+    MessageType,
+    is_message_client_visible,
+)
 from sagents.context.session_context import (
     SessionContext,
     SessionStatus,
@@ -1567,11 +1572,7 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
     seen_message_keys = set()
 
     def is_hidden_context_message(message_dict: Dict[str, Any]) -> bool:
-        metadata = message_dict.get("metadata")
-        return isinstance(metadata, dict) and (
-            metadata.get("hidden_from_chat") is True
-            or metadata.get("hide_from_chat") is True
-        )
+        return not is_message_client_visible(message_dict)
 
     def append_message(message_dict: Dict[str, Any]):
         if is_hidden_context_message(message_dict):

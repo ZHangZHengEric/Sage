@@ -2,11 +2,128 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
 from sagents.tool import ToolManager
+
+
+def test_ordered_stream_batch_waits_until_downstream_resumes():
+    async def scenario():
+        orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+        queue = asyncio.Queue()
+        chunks = [MessageChunk(role="assistant", content="first")]
+        producer = asyncio.create_task(
+            orchestrator._queue_container_stream_batch(queue, chunks)
+        )
+
+        queued_item = await queue.get()
+        await asyncio.sleep(0)
+        assert producer.done() is False
+
+        stream = orchestrator._yield_queued_stream_item(queued_item)
+        assert await anext(stream) == chunks
+        assert producer.done() is False
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+        await asyncio.wait_for(producer, timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_ordered_stream_batch_close_cancels_waiting_producer():
+    async def scenario():
+        orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+        queue = asyncio.Queue()
+        chunks = [MessageChunk(role="assistant", content="first")]
+        producer = asyncio.create_task(
+            orchestrator._queue_container_stream_batch(queue, chunks)
+        )
+
+        queued_item = await queue.get()
+        stream = orchestrator._yield_queued_stream_item(queued_item)
+        assert await anext(stream) == chunks
+        await stream.aclose()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(producer, timeout=1)
+        assert queued_item.persisted.cancelled() is True
+
+    asyncio.run(scenario())
+
+
+def test_ordered_stream_batch_downstream_error_cancels_ack():
+    async def scenario():
+        orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+        queue = asyncio.Queue()
+        chunks = [MessageChunk(role="assistant", content="first")]
+        producer = asyncio.create_task(
+            orchestrator._queue_container_stream_batch(queue, chunks)
+        )
+
+        queued_item = await queue.get()
+        stream = orchestrator._yield_queued_stream_item(queued_item)
+        assert await anext(stream) == chunks
+        with pytest.raises(RuntimeError, match="persistence failed"):
+            await stream.athrow(RuntimeError("persistence failed"))
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(producer, timeout=1)
+        assert queued_item.persisted.cancelled() is True
+
+    asyncio.run(scenario())
+
+
+def test_ordered_stream_batch_producer_cancellation_cancels_ack():
+    async def scenario():
+        orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+        queue = asyncio.Queue()
+        producer = asyncio.create_task(
+            orchestrator._queue_container_stream_batch(
+                queue, [MessageChunk(role="assistant", content="first")]
+            )
+        )
+
+        queued_item = await queue.get()
+        producer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await producer
+        assert queued_item.persisted.cancelled() is True
+
+    asyncio.run(scenario())
+
+
+def test_ordered_stream_ack_keeps_runtime_correction_after_previous_batch():
+    async def scenario():
+        orchestrator = FibreOrchestrator.__new__(FibreOrchestrator)
+        queue = asyncio.Queue()
+        ledger = []
+        previous = MessageChunk(role="tool", content="result", tool_call_id="call-1")
+        correction = MessageChunk(
+            role="assistant",
+            content="correct the next attempt",
+            metadata={"llm_scope": "next_request", "sse_visible": False},
+        )
+
+        async def producer():
+            await orchestrator._queue_container_stream_batch(queue, [previous])
+            ledger.append(correction)
+
+        producer_task = asyncio.create_task(producer())
+        queued_item = await queue.get()
+        stream = orchestrator._yield_queued_stream_item(queued_item)
+        yielded = await anext(stream)
+        ledger.extend(yielded)
+        assert ledger == [previous]
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+        await asyncio.wait_for(producer_task, timeout=1)
+        assert ledger == [previous, correction]
+
+    asyncio.run(scenario())
 
 
 class _FakeSessionManager:

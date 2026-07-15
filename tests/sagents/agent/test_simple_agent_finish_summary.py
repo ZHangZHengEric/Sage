@@ -6,7 +6,12 @@
 import asyncio
 from types import SimpleNamespace
 
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import (
+    MessageChunk,
+    MessageRole,
+    MessageType,
+    is_message_client_visible,
+)
 from sagents.agent.simple_agent import (
     DEFAULT_REPEAT_PATTERN_MAX_HITS,
     REPEAT_PATTERN_MAX_HITS_ENV,
@@ -127,16 +132,24 @@ def _patch_tool_handler(monkeypatch, agent, seen_tool_calls):
 
 
 def _loop_session_context(max_loop_count=4):
+    stored_messages = []
     msg_manager = SimpleNamespace(
         get_recent_loop_signatures=lambda: [],
         add_loop_signature=lambda signature: None,
     )
-    return SimpleNamespace(
+    context = SimpleNamespace(
         agent_config={"max_loop_count": max_loop_count},
         audit_status={},
         message_manager=msg_manager,
         get_language=lambda: "zh",
+        stored_messages=stored_messages,
     )
+
+    def _add_messages(messages):
+        stored_messages.extend(messages if isinstance(messages, list) else [messages])
+
+    context.add_messages = _add_messages
+    return context
 
 
 def test_status_only_turn_status_response_suppresses_duplicate_text(monkeypatch):
@@ -2216,6 +2229,8 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
         agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
     )
 
+    session_context = _loop_session_context()
+
     async def _collect():
         chunks = []
         async for yielded_chunks in agent._execute_loop(
@@ -2223,8 +2238,9 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
             tools_json=[],
             tool_manager=None,
             session_id="s-repeat-internal",
-            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
         ):
+            session_context.add_messages(yielded_chunks)
             chunks.extend(yielded_chunks)
         return chunks
 
@@ -2233,19 +2249,17 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
     assert len(direct_calls) == 3
     correction_chunks = [
         chunk
-        for chunk in chunks
+        for chunk in session_context.stored_messages
         if (chunk.metadata or {}).get("runtime_diagnostic_source")
         == "repeat_pattern_correction"
     ]
     assert len(correction_chunks) == 1
     assert correction_chunks[0].metadata["hidden_from_chat"] is True
+    assert correction_chunks[0].metadata["hide_from_chat"] is True
     assert correction_chunks[0].metadata["sse_visible"] is False
-    visible_chunks = [
-        chunk
-        for chunk in chunks
-        if (chunk.metadata or {}).get("hidden_from_chat") is not True
-        and (chunk.metadata or {}).get("sse_visible") is not False
-    ]
+    assert correction_chunks[0].metadata["llm_scope"] == "next_request"
+    assert correction_chunks[0].metadata["llm_state"] == "pending"
+    visible_chunks = [chunk for chunk in chunks if is_message_client_visible(chunk)]
     assert [chunk.content for chunk in visible_chunks] == [
         '{"ok": false, "reason": "same"}',
         '{"ok": false, "reason": "same"}',

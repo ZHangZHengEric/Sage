@@ -1242,6 +1242,8 @@ class SimpleAgent(AgentBase):
                     ),
                 )
                 all_new_response_chunks.append(correction_chunk)
+                # 内部有序 batch：由 FlowExecutor 先写入 ledger，再依据 metadata
+                # 从所有客户端出口过滤。Team/Fibre 会等待该 batch 的落盘确认。
                 yield [correction_chunk]
             else:
                 repeat_pattern_hits = 0

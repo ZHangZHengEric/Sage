@@ -12,7 +12,7 @@ from sagents.flow.schema import (
 )
 from sagents.flow.conditions import ConditionRegistry
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk
+from sagents.context.messages.message import MessageChunk, is_message_client_visible
 from sagents.context.session_context import SessionStatus
 
 
@@ -51,23 +51,10 @@ def _message_manager_debug_id(ctx: Any) -> Optional[int]:
     return id(message_manager)
 
 
-def _should_suppress_chunk_from_flow_stream(chunk: MessageChunk) -> bool:
-    metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
-    return (
-        metadata.get("sse_visible") is False
-        or metadata.get("hidden_from_chat") is True
-        or metadata.get("hide_from_chat") is True
-    )
-
-
 def _visible_chunks_for_flow_stream(
     message_chunks: List[MessageChunk],
 ) -> List[MessageChunk]:
-    return [
-        chunk
-        for chunk in message_chunks
-        if not _should_suppress_chunk_from_flow_stream(chunk)
-    ]
+    return [chunk for chunk in message_chunks if is_message_client_visible(chunk)]
 
 
 class _FlowExecutionTrace:
