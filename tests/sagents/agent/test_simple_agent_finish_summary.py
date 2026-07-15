@@ -12,6 +12,7 @@ from sagents.context.messages.message import (
     MessageType,
     is_message_client_visible,
 )
+from sagents.context.messages.message_manager import MessageManager
 from sagents.agent.simple_agent import (
     DEFAULT_REPEAT_PATTERN_MAX_HITS,
     REPEAT_PATTERN_MAX_HITS_ENV,
@@ -2267,7 +2268,7 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
     ]
 
 
-def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
+def test_repeat_pattern_break_after_tool_emits_recovery_questionnaire(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
     agent = _agent()
     agent.max_repeat_pattern_hits = 1
@@ -2307,16 +2308,34 @@ def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
     chunks = asyncio.run(_collect())
 
     assert len(direct_calls) == 2
-    assert [chunk.content for chunk in chunks] == [
-        '{"ok": false, "reason": "same"}',
-        '{"ok": false, "reason": "same"}',
-    ]
-    assert all(
-        not (
-            isinstance(chunk.content, str) and "检测到任务进入重复循环" in chunk.content
-        )
-        for chunk in chunks
+    assert [chunk.role for chunk in chunks] == ["tool", "tool", "assistant"]
+    questionnaire = chunks[-1]
+    assert "<movo-questionnaire>" in questionnaire.content
+    assert '"id": "loop_recovery_action"' in questionnaire.content
+    assert "Execution path is repeating" in questionnaire.content
+    assert "Continue with a different strategy" in questionnaire.content
+    assert questionnaire.metadata["needs_user_input"] is True
+    assert questionnaire.metadata["runtime_notice"] == (
+        "repeat_pattern_questionnaire"
     )
+    assert questionnaire.metadata["stop_reason"] == "repeat_pattern"
+
+
+def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
+    questionnaire = _agent()._build_repeat_recovery_questionnaire(
+        pattern={"mode": "tool_call", "period": 2, "cycles": 2},
+    )
+
+    inference = MessageManager.build_inference_view(
+        [questionnaire],
+        apply_rule_compression=False,
+    )
+
+    assert "<movo-questionnaire>" in questionnaire.content
+    assert len(inference) == 1
+    assert inference[0].content == questionnaire.content
+    assert "Execution path is repeating" in inference[0].content
+    assert "Continue with a different strategy" in inference[0].content
 
 
 def test_historical_repeat_signature_requests_required_escape():

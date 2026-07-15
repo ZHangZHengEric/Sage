@@ -51,3 +51,14 @@ def test_simple_and_fibre_memory_recall_run_outside_self_check_retry_loop(tmp_pa
         assert "self_check" in loop_keys
         assert "memory_recall" not in loop_keys
         assert "tool_suggestion" not in loop_keys
+
+
+def test_simple_flow_does_not_run_task_summary_but_multi_still_does(tmp_path):
+    flow = SAgent(str(tmp_path), enable_obs=False)._build_default_flow(
+        agent_mode="simple",
+        max_loop_count=5,
+    )
+    switch = flow.root.steps[1]
+
+    assert "task_summary" not in _agent_keys(switch.cases["simple"])
+    assert "task_summary" in _agent_keys(switch.cases["multi"])

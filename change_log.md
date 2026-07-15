@@ -1,5 +1,9 @@
 # Change Log
 
+- **2026-07-15 16:55** 恢复问卷固定使用英文，并让原始问卷消息原样进入后续模型历史。
+
+- **2026-07-15 16:41** Simple 模式移除 final_answer；工具结果触发重复熔断时改为持久化恢复问卷。
+
 - **2026-07-13 17:56** 去掉重复的 _build_probe_extra_body，能力探测直接复用 build_llm_extra_body(extra=...)。
 
 - **2026-07-13 17:10** 抽取 build_llm_extra_body，压缩/主 Agent/能力探测共用同一套 reasoning 与思考参数配置。

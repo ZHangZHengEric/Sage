@@ -36,6 +36,8 @@ from sagents.utils.repeat_pattern import (
 TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
 DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
 REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
+REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,104 @@ class SimpleAgent(AgentBase):
         except Exception:
             return _build_self_correction_message_util(pattern)
 
+    @staticmethod
+    def _last_meaningful_chunk_is_tool(chunks: List[MessageChunk]) -> bool:
+        for chunk in reversed(chunks or []):
+            if chunk.matches_message_types(
+                [MessageType.EMPTY.value, MessageType.REASONING_CONTENT.value]
+            ):
+                continue
+            return chunk.role == MessageRole.TOOL.value
+        return False
+
+    def _build_repeat_recovery_questionnaire(
+        self, *, pattern: Dict[str, int]
+    ) -> MessageChunk:
+        title = "Execution path is repeating"
+        notice = (
+            "I detected repeated execution steps and paused to avoid continuing "
+            "without progress. Please choose how I should proceed."
+        )
+        question = (
+            "The recent execution steps are repeating. How would you like me "
+            "to proceed?"
+        )
+        payload = {
+            "title": title,
+            "questions": [
+                {
+                    "id": REPEAT_RECOVERY_QUESTION_ID,
+                    "type": "single_choice",
+                    "text": question,
+                    "options": [
+                        {
+                            "value": "continue_with_new_strategy",
+                            "label": (
+                                "Continue with a different strategy and perform "
+                                "the next unfinished action (recommended)"
+                            ),
+                        },
+                        {
+                            "value": "report_and_wait",
+                            "label": (
+                                "First report completed work, remaining issues, "
+                                "and blockers, then wait"
+                            ),
+                        },
+                        {
+                            "value": "stop_execution",
+                            "label": "Stop now and keep the work already completed",
+                        },
+                    ],
+                    "default": "continue_with_new_strategy",
+                    "allow_other": True,
+                }
+            ],
+        }
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                f"{notice}\n\n"
+                f"<movo-questionnaire>{json.dumps(payload, ensure_ascii=False)}</movo-questionnaire>"
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+            agent_name=self.agent_name,
+            metadata={
+                "runtime_generated": True,
+                "runtime_notice": REPEAT_RECOVERY_NOTICE,
+                "stop_reason": "repeat_pattern",
+                "needs_user_input": True,
+                "repeat_pattern": {
+                    key: pattern[key]
+                    for key in (
+                        "mode",
+                        "period",
+                        "cycles",
+                        "partial",
+                        "suffix_duplicate",
+                    )
+                    if key in pattern
+                },
+            },
+        )
+
+    @staticmethod
+    def _latest_user_is_repeat_recovery_response(
+        messages: List[MessageChunk],
+    ) -> bool:
+        for message in reversed(messages or []):
+            if message.role != MessageRole.USER.value:
+                continue
+            content = message.content
+            if not isinstance(content, str):
+                return False
+            return (
+                "movo-questionnaire-response" in content
+                and f'"question_id":"{REPEAT_RECOVERY_QUESTION_ID}"'
+                in re.sub(r"\s+", "", content)
+            )
+        return False
+
     async def run_stream(
         self,
         session_context: SessionContext,
@@ -222,6 +322,19 @@ class SimpleAgent(AgentBase):
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
+        if self._latest_user_is_repeat_recovery_response(
+            getattr(message_manager, "messages", [])
+        ):
+            clear_loop_signatures = getattr(
+                message_manager, "clear_loop_signatures", None
+            )
+            if callable(clear_loop_signatures):
+                clear_loop_signatures()
+            session_context.audit_status.pop("completion_status", None)
+            session_context.audit_status["repeat_recovery_started"] = True
+            logger.info(
+                "SimpleAgent: 用户已回答重复执行恢复问卷，清空旧循环签名并开始新的执行窗口"
+            )
         # 从消息管理实例中，获取满足context 长度限制的消息
         history_messages = message_manager.extract_all_context_messages(
             recent_turns=20, last_turn_user_only=False
@@ -1227,8 +1340,20 @@ class SimpleAgent(AgentBase):
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
                     logger.warning(
                         "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
-                        "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
+                        "根据当前消息末尾决定是否请求用户选择恢复方式。"
                     )
+                    if self._last_meaningful_chunk_is_tool(
+                        all_new_response_chunks
+                    ):
+                        questionnaire = self._build_repeat_recovery_questionnaire(
+                            pattern=pattern,
+                        )
+                        all_new_response_chunks.append(questionnaire)
+                        session_context.audit_status["completion_status"] = (
+                            "need_user_input"
+                        )
+                        session_context.audit_status["repeat_recovery_pending"] = True
+                        yield [questionnaire]
                     break
 
                 # 记录纠偏提示，但只允许它进入紧接着的一次 LLM 请求。
