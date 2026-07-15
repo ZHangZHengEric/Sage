@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 from sagents.context.messages.message import (
@@ -12,6 +13,7 @@ from sagents.context.messages.message import (
     MessageType,
     is_message_client_visible,
 )
+from sagents.context.messages.message_manager import MessageManager
 from sagents.agent.simple_agent import (
     DEFAULT_REPEAT_PATTERN_MAX_HITS,
     REPEAT_PATTERN_MAX_HITS_ENV,
@@ -716,8 +718,7 @@ def test_direct_request_appends_continuation_guidance_request_only(monkeypatch):
     assert "Continue because: more [clips] pending" in guidance.content
     assert "Do not mention it" in guidance.content
     assert all(
-        "runtime_continuation_guidance" not in (chunk.content or "")
-        for chunk in chunks
+        "runtime_continuation_guidance" not in (chunk.content or "") for chunk in chunks
     )
 
 
@@ -845,6 +846,193 @@ def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
     assert "assistant: done" in prompt
 
 
+def test_task_complete_judge_includes_latest_todo_plan_before_last_user(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content='{"task_interrupted": false, "reason": "todo remains"}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Build the feature",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-plan",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=(
+                '{"tasks": ['
+                '{"id": "design", "name": "Finish the design", '
+                '"completed": true}, '
+                '{"id": "architecture", "name": "Implement the high-level plan", '
+                '"status": "in_progress"}, '
+                '{"id": "verification", "name": "Run end-to-end verification", '
+                '"status": "pending"}]}'
+            ),
+            tool_call_id="todo-plan",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Continue",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="Working on it.",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="todo-judge",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is False
+    assert "<current_todo_plan>" in captured["prompt"]
+    assert '"source": "latest_todo_write_result"' in captured["prompt"]
+    assert "Finish the design" in captured["prompt"]
+    assert '"status": "completed"' in captured["prompt"]
+    assert "Implement the high-level plan" in captured["prompt"]
+    assert '"status": "in_progress"' in captured["prompt"]
+    assert "Run end-to-end verification" in captured["prompt"]
+    assert '"status": "pending"' in captured["prompt"]
+    assert "user: Build the feature" not in captured["prompt"]
+
+
+def test_task_complete_judge_does_not_revive_older_unfinished_todo_snapshot():
+    agent = _agent()
+    messages = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-active",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=(
+                '{"tasks": [{"id": "implementation", '
+                '"name": "Implement feature", "status": "in_progress"}]}'
+            ),
+            tool_call_id="todo-active",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-completed",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=(
+                '{"tasks": [{"id": "implementation", '
+                '"name": "Implement feature", "status": "completed"}]}'
+            ),
+            tool_call_id="todo-completed",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+    ]
+
+    todo_plan = asyncio.run(
+        agent._build_task_complete_todo_plan(messages, "todo-completed")
+    )
+
+    assert todo_plan == ""
+
+
+def test_task_complete_judge_keeps_every_item_in_large_active_todo_plan():
+    agent = _agent()
+    tasks = [
+        {
+            "id": f"task-{index}",
+            "name": f"Plan item {index}",
+            "status": "pending" if index == 44 else "completed",
+        }
+        for index in range(45)
+    ]
+    messages = [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-large",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=json.dumps({"tasks": tasks}),
+            tool_call_id="todo-large",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+    ]
+
+    todo_plan = asyncio.run(
+        agent._build_task_complete_todo_plan(messages, "todo-large")
+    )
+
+    assert "Plan item 0" in todo_plan
+    assert "Plan item 44" in todo_plan
+    assert '"omitted_count"' not in todo_plan
+
+
 def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
     monkeypatch,
 ):
@@ -904,14 +1092,8 @@ def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
 
     prompt = captured["llm_messages"][0]["content"]
     assert "claims about executed actions are backed by execution evidence" in prompt
-    assert (
-        "Saying \"done\", \"handled\", or \"verified\" is not execution evidence"
-        in prompt
-    )
-    assert (
-        "Need user confirmation/input/missing specs before continuing"
-        in prompt
-    )
+    assert 'Saying "done", "handled", or "verified" is not execution evidence' in prompt
+    assert "Need user confirmation/input/missing specs before continuing" in prompt
 
 
 def test_task_complete_judge_does_not_treat_can_start_after_confirmation_as_user_wait(
@@ -1055,8 +1237,7 @@ def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
                 SimpleNamespace(
                     delta=SimpleNamespace(
                         content=(
-                            '{"task_interrupted": true, '
-                            '"reason": "need user input"}'
+                            '{"task_interrupted": true, "reason": "need user input"}'
                         )
                     )
                 )
@@ -1675,9 +1856,11 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
 
     assert len(direct_calls) == 3
     assert len(judge_calls) == 2
-    assert [
-        call["force_tool_choice_required"] for call in direct_calls
-    ] == [False, True, True]
+    assert [call["force_tool_choice_required"] for call in direct_calls] == [
+        False,
+        True,
+        True,
+    ]
     assert [chunk.content for chunk in chunks] == [
         "纯文本回答 1",
         "纯文本回答 2",
@@ -1746,9 +1929,10 @@ def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
 
     assert len(direct_calls) == 2
     assert len(judge_calls) == 1
-    assert [
-        call["force_tool_choice_required"] for call in direct_calls
-    ] == [False, True]
+    assert [call["force_tool_choice_required"] for call in direct_calls] == [
+        False,
+        True,
+    ]
     assert [chunk.content for chunk in chunks if chunk.content] == [
         "纯文本回答",
         '{"ok": true}',
@@ -1880,9 +2064,11 @@ def test_llm_judge_tool_activity_resets_required_after_plain_text(monkeypatch):
 
     assert len(direct_calls) == 3
     assert len(judge_calls) == 2
-    assert [
-        call["force_tool_choice_required"] for call in direct_calls
-    ] == [False, True, False]
+    assert [call["force_tool_choice_required"] for call in direct_calls] == [
+        False,
+        True,
+        False,
+    ]
     assert [chunk.content for chunk in chunks if chunk.content] == [
         "纯文本回答",
         '{"ok": true}',
@@ -2267,7 +2453,7 @@ def test_repeat_pattern_self_correction_is_internal_context(monkeypatch):
     ]
 
 
-def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
+def test_repeat_pattern_break_after_tool_emits_recovery_questionnaire(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
     agent = _agent()
     agent.max_repeat_pattern_hits = 1
@@ -2307,16 +2493,55 @@ def test_repeat_pattern_break_does_not_emit_assistant_text(monkeypatch):
     chunks = asyncio.run(_collect())
 
     assert len(direct_calls) == 2
-    assert [chunk.content for chunk in chunks] == [
-        '{"ok": false, "reason": "same"}',
-        '{"ok": false, "reason": "same"}',
-    ]
-    assert all(
-        not (
-            isinstance(chunk.content, str) and "检测到任务进入重复循环" in chunk.content
-        )
-        for chunk in chunks
+    assert [chunk.role for chunk in chunks] == ["tool", "tool", "assistant"]
+    questionnaire = chunks[-1]
+    assert "<movo-questionnaire>" in questionnaire.content
+    assert '"id": "loop_recovery_action"' in questionnaire.content
+    assert "执行路径正在重复" in questionnaire.content
+    assert "请说明你希望我接下来如何处理" in questionnaire.content
+    assert '"type": "free_text"' in questionnaire.content
+    assert '"options"' not in questionnaire.content
+    assert questionnaire.metadata["needs_user_input"] is True
+    assert questionnaire.metadata["runtime_notice"] == ("repeat_pattern_questionnaire")
+    assert questionnaire.metadata["stop_reason"] == "repeat_pattern"
+
+
+def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
+    questionnaire = _agent()._build_repeat_recovery_questionnaire(
+        pattern={"mode": "tool_call", "period": 2, "cycles": 2},
     )
+
+    inference = MessageManager.build_inference_view(
+        [questionnaire],
+        apply_rule_compression=False,
+    )
+
+    assert "<movo-questionnaire>" in questionnaire.content
+    assert len(inference) == 1
+    assert inference[0].content == questionnaire.content
+    assert "Execution path is repeating" in inference[0].content
+    assert "Please describe how you want me to proceed" in inference[0].content
+
+
+def test_repeat_recovery_questionnaire_uses_session_language():
+    agent = _agent()
+    pattern = {"mode": "tool_call", "period": 2, "cycles": 2}
+
+    chinese = agent._build_repeat_recovery_questionnaire(
+        pattern=pattern,
+        language="zh-CN",
+    )
+    portuguese = agent._build_repeat_recovery_questionnaire(
+        pattern=pattern,
+        language="pt-BR",
+    )
+
+    assert "执行路径正在重复" in chinese.content
+    assert "补充新的策略、约束或停止要求" in chinese.content
+    assert "O caminho de execucao esta se repetindo" in portuguese.content
+    assert "Descreva como voce deseja que eu prossiga" in portuguese.content
+    assert '"type": "free_text"' in portuguese.content
+    assert '"answer_title": "Respostas do questionario"' in portuguese.content
 
 
 def test_historical_repeat_signature_requests_required_escape():

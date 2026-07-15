@@ -51,6 +51,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.tool_call_parse.suggestion.commas": ("• 确保没有多余的逗号或缺少逗号"),
         "runtime.tool.error.arguments_not_object": "工具参数格式错误: 参数必须是JSON对象",
         "runtime.tool.error.execution_failed": "工具 {tool_name} 执行失败: {message}",
+        "runtime.repeat_recovery.title": "执行路径正在重复",
+        "runtime.repeat_recovery.notice": (
+            "检测到重复执行步骤，已暂停以避免在没有进展的情况下继续。请说明后续处理要求。"
+        ),
+        "runtime.repeat_recovery.question": (
+            "请说明你希望我接下来如何处理，也可以补充新的策略、约束或停止要求。"
+        ),
+        "runtime.repeat_recovery.answer_title": "问卷回答",
+        "runtime.repeat_recovery.question_fallback": "问题",
+        "runtime.repeat_recovery.unanswered": "未填写",
+        "runtime.repeat_recovery.answer_separator": "：",
     },
     "en": {
         "workflow.execution_failed": "Workflow execution failed: {message}",
@@ -119,6 +130,19 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Tool argument format error: arguments must be a JSON object"
         ),
         "runtime.tool.error.execution_failed": "Tool {tool_name} failed: {message}",
+        "runtime.repeat_recovery.title": "Execution path is repeating",
+        "runtime.repeat_recovery.notice": (
+            "I detected repeated execution steps and paused to avoid continuing "
+            "without progress. Please tell me how I should proceed."
+        ),
+        "runtime.repeat_recovery.question": (
+            "Please describe how you want me to proceed. You may include a new "
+            "strategy, constraints, or a request to stop."
+        ),
+        "runtime.repeat_recovery.answer_title": "Questionnaire answers",
+        "runtime.repeat_recovery.question_fallback": "Question",
+        "runtime.repeat_recovery.unanswered": "Not answered",
+        "runtime.repeat_recovery.answer_separator": ": ",
     },
     "pt": {
         "workflow.execution_failed": "Falha ao executar o fluxo de trabalho: {message}",
@@ -192,6 +216,19 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Erro no formato dos argumentos da ferramenta: os argumentos devem ser um objeto JSON"
         ),
         "runtime.tool.error.execution_failed": "Ferramenta {tool_name} falhou: {message}",
+        "runtime.repeat_recovery.title": "O caminho de execucao esta se repetindo",
+        "runtime.repeat_recovery.notice": (
+            "Detectei etapas de execucao repetidas e pausei para evitar continuar "
+            "sem progresso. Diga como devo prosseguir."
+        ),
+        "runtime.repeat_recovery.question": (
+            "Descreva como voce deseja que eu prossiga. Voce pode incluir uma "
+            "nova estrategia, restricoes ou um pedido para parar."
+        ),
+        "runtime.repeat_recovery.answer_title": "Respostas do questionario",
+        "runtime.repeat_recovery.question_fallback": "Pergunta",
+        "runtime.repeat_recovery.unanswered": "Nao respondido",
+        "runtime.repeat_recovery.answer_separator": ": ",
     },
 }
 

@@ -541,10 +541,6 @@ class SAgent:
                     ),
                     false_body=AgentNode(agent_key="simple"),
                 ),
-                IfNode(
-                    condition="need_summary",
-                    true_body=AgentNode(agent_key="task_summary"),
-                ),
             ]
         )
         simple_agent_body = SequenceNode(

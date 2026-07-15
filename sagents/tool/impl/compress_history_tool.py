@@ -26,6 +26,14 @@ COMPACT_LIST_LIMITS = {
 MAX_COMPACT_COMMAND_CHARS = 1000
 TODO_WRITE_TOOL_NAME = "todo_write"
 TODO_STATE_BOUNDARY_FIELD = "todo_state_at_compaction_boundary"
+CONTEXT_RECOVERY_GUIDANCE = (
+    "The conversation context was compacted. Before continuing, treat this "
+    "summary only as reference, re-read the relevant key files, review the "
+    "important work steps recorded in this summary, and verify the latest tool "
+    "or output state required for the next unfinished action. Do not repeat "
+    "completed work or revive historical tasks unless required by the latest "
+    "user request."
+)
 
 
 class CompressHistoryError(Exception):
@@ -496,6 +504,7 @@ class CompressHistoryTool:
                     "deterministic snapshot at the compressed range boundary; "
                     "later todo_write tool results after this summary take precedence."
                 ),
+                "context_recovery_guidance": CONTEXT_RECOVERY_GUIDANCE,
                 "original_content_paths": [],
             }
             todo_state = self._should_attach_todo_state(

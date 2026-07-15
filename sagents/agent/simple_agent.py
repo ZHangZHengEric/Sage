@@ -10,6 +10,7 @@ from sagents.context.messages.message import (
 )
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.impl.todo_tool import ToDoTool
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
 from sagents.tool.tool_baseline import augment_with_baseline_tools
@@ -20,6 +21,7 @@ from sagents.utils.completion_mode import (
     is_turn_status_mode,
 )
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
+from sagents.utils.i18n import t
 import json
 import uuid
 from copy import deepcopy
@@ -36,6 +38,9 @@ from sagents.utils.repeat_pattern import (
 TASK_COMPLETE_TOOL_RESULT_PREVIEW_CHARS = 500
 DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
 REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
+REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
+REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
+TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,87 @@ class SimpleAgent(AgentBase):
         except Exception:
             return _build_self_correction_message_util(pattern)
 
+    @staticmethod
+    def _last_meaningful_chunk_is_tool(chunks: List[MessageChunk]) -> bool:
+        for chunk in reversed(chunks or []):
+            if chunk.matches_message_types(
+                [MessageType.EMPTY.value, MessageType.REASONING_CONTENT.value]
+            ):
+                continue
+            return chunk.role == MessageRole.TOOL.value
+        return False
+
+    def _build_repeat_recovery_questionnaire(
+        self, *, pattern: Dict[str, int], language: str = "en"
+    ) -> MessageChunk:
+        title = t("runtime.repeat_recovery.title", language)
+        notice = t("runtime.repeat_recovery.notice", language)
+        question = t("runtime.repeat_recovery.question", language)
+        payload = {
+            "title": title,
+            "ui_text": {
+                "answer_title": t("runtime.repeat_recovery.answer_title", language),
+                "question_fallback": t(
+                    "runtime.repeat_recovery.question_fallback", language
+                ),
+                "unanswered": t("runtime.repeat_recovery.unanswered", language),
+                "answer_separator": t(
+                    "runtime.repeat_recovery.answer_separator", language
+                ),
+            },
+            "questions": [
+                {
+                    "id": REPEAT_RECOVERY_QUESTION_ID,
+                    "type": "free_text",
+                    "text": question,
+                    "default": "",
+                }
+            ],
+        }
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                f"{notice}\n\n"
+                f"<movo-questionnaire>{json.dumps(payload, ensure_ascii=False)}</movo-questionnaire>"
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+            agent_name=self.agent_name,
+            metadata={
+                "runtime_generated": True,
+                "runtime_notice": REPEAT_RECOVERY_NOTICE,
+                "stop_reason": "repeat_pattern",
+                "needs_user_input": True,
+                "repeat_pattern": {
+                    key: pattern[key]
+                    for key in (
+                        "mode",
+                        "period",
+                        "cycles",
+                        "partial",
+                        "suffix_duplicate",
+                    )
+                    if key in pattern
+                },
+            },
+        )
+
+    @staticmethod
+    def _latest_user_is_repeat_recovery_response(
+        messages: List[MessageChunk],
+    ) -> bool:
+        for message in reversed(messages or []):
+            if message.role != MessageRole.USER.value:
+                continue
+            content = message.content
+            if not isinstance(content, str):
+                return False
+            return (
+                "movo-questionnaire-response" in content
+                and f'"question_id":"{REPEAT_RECOVERY_QUESTION_ID}"'
+                in re.sub(r"\s+", "", content)
+            )
+        return False
+
     async def run_stream(
         self,
         session_context: SessionContext,
@@ -222,6 +308,19 @@ class SimpleAgent(AgentBase):
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
+        if self._latest_user_is_repeat_recovery_response(
+            getattr(message_manager, "messages", [])
+        ):
+            clear_loop_signatures = getattr(
+                message_manager, "clear_loop_signatures", None
+            )
+            if callable(clear_loop_signatures):
+                clear_loop_signatures()
+            session_context.audit_status.pop("completion_status", None)
+            session_context.audit_status["repeat_recovery_started"] = True
+            logger.info(
+                "SimpleAgent: 用户已回答重复执行恢复问卷，清空旧循环签名并开始新的执行窗口"
+            )
         # 从消息管理实例中，获取满足context 长度限制的消息
         history_messages = message_manager.extract_all_context_messages(
             recent_turns=20, last_turn_user_only=False
@@ -671,7 +770,9 @@ class SimpleAgent(AgentBase):
             return True
 
         # 规则2：最后一条消息是工具调用错误结果（如参数解析失败等）
-        if last_message.matches_message_types([MessageType.AGENT_EXECUTION_ERROR.value]):
+        if last_message.matches_message_types(
+            [MessageType.AGENT_EXECUTION_ERROR.value]
+        ):
             metadata = last_message.metadata or {}
             if metadata.get("runtime_diagnostic_source") == "tool_call_argument_parse":
                 logger.debug(
@@ -748,6 +849,11 @@ class SimpleAgent(AgentBase):
         judge_messages = self._format_task_complete_messages_for_prompt(
             messages_for_complete
         )
+        todo_plan = await self._build_task_complete_todo_plan(
+            messages_input, session_id
+        )
+        if todo_plan:
+            judge_messages = f"{todo_plan}\n\n{judge_messages}"
 
         task_complete_template = PromptManager().get_agent_prompt_auto(
             "task_complete_template", language=session_context.get_language()
@@ -802,6 +908,101 @@ class SimpleAgent(AgentBase):
                 "SimpleAgent: 解析任务完成判断响应时JSON解码错误，默认继续执行"
             )
             return TaskCompleteDecision(task_interrupted=False)
+
+    @staticmethod
+    def _bounded_todo_field(value: Any) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(text) <= TASK_COMPLETE_TODO_FIELD_MAX_CHARS:
+            return text
+        return text[:TASK_COMPLETE_TODO_FIELD_MAX_CHARS].rstrip() + "... [truncated]"
+
+    @staticmethod
+    def _todo_task_status(task: Dict[str, Any]) -> str:
+        status = str(task.get("status") or "").strip().lower()
+        if not status:
+            status = "completed" if task.get("completed") is True else "pending"
+        return status
+
+    @classmethod
+    def _latest_todo_tasks_from_messages(
+        cls, messages: List[MessageChunk]
+    ) -> Optional[List[Dict[str, Any]]]:
+        todo_call_ids = set()
+        for msg in messages:
+            for tool_call in msg.tool_calls or []:
+                if cls._tool_call_name_for_judge(tool_call) == "todo_write":
+                    call_id = cls._tool_call_id_for_judge(tool_call)
+                    if call_id:
+                        todo_call_ids.add(call_id)
+
+        latest_tasks: Optional[List[Dict[str, Any]]] = None
+        for msg in messages:
+            if msg.role != MessageRole.TOOL.value:
+                continue
+            is_todo_result = msg.tool_call_id in todo_call_ids
+            if not is_todo_result:
+                is_todo_result = cls._tool_result_name_for_judge(msg) == "todo_write"
+            if not is_todo_result:
+                continue
+            raw_content = msg.get_content()
+            if not isinstance(raw_content, str):
+                continue
+            try:
+                payload = json.loads(raw_content)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            tasks = payload.get("tasks") if isinstance(payload, dict) else None
+            if isinstance(tasks, list):
+                latest_tasks = [task for task in tasks if isinstance(task, dict)]
+        return latest_tasks
+
+    async def _build_task_complete_todo_plan(
+        self, messages: List[MessageChunk], session_id: str
+    ) -> str:
+        tasks = self._latest_todo_tasks_from_messages(messages)
+        source = "latest_todo_write_result"
+        if tasks is None:
+            source = "current_session_todo"
+            try:
+                tasks = await ToDoTool().read_tasks(session_id)
+            except Exception as exc:
+                logger.warning(
+                    f"SimpleAgent: task_complete_judge 读取当前 Todo 计划失败: {exc}"
+                )
+                return ""
+        if not isinstance(tasks, list) or not tasks:
+            return ""
+        if not any(self._todo_task_status(task) != "completed" for task in tasks):
+            return ""
+
+        compact_tasks = []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            item = {
+                "id": self._bounded_todo_field(task.get("id")),
+                "status": self._todo_task_status(task),
+                "content": self._bounded_todo_field(
+                    task.get("content") or task.get("name") or task.get("title")
+                ),
+            }
+            conclusion = self._bounded_todo_field(task.get("conclusion"))
+            if conclusion:
+                item["conclusion"] = conclusion
+            compact_tasks.append(item)
+
+        if not compact_tasks:
+            return ""
+        payload: Dict[str, Any] = {
+            "source": source,
+            "authoritative": True,
+            "tasks": compact_tasks,
+        }
+        return (
+            "<current_todo_plan>\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n</current_todo_plan>"
+        )
 
     async def _is_task_complete(
         self,
@@ -1227,8 +1428,19 @@ class SimpleAgent(AgentBase):
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
                     logger.warning(
                         "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
-                        "纠偏提示仅作为内部上下文，不返回用户可见 assistant_text。"
+                        "根据当前消息末尾决定是否请求用户选择恢复方式。"
                     )
+                    if self._last_meaningful_chunk_is_tool(all_new_response_chunks):
+                        questionnaire = self._build_repeat_recovery_questionnaire(
+                            pattern=pattern,
+                            language=session_context.get_language(),
+                        )
+                        all_new_response_chunks.append(questionnaire)
+                        session_context.audit_status["completion_status"] = (
+                            "need_user_input"
+                        )
+                        session_context.audit_status["repeat_recovery_pending"] = True
+                        yield [questionnaire]
                     break
 
                 # 记录纠偏提示，但只允许它进入紧接着的一次 LLM 请求。
@@ -1608,7 +1820,7 @@ class SimpleAgent(AgentBase):
                             *streamed_rejections,
                             self._create_unavailable_tool_runtime_message(
                                 sorted(invalid_tool_names)
-                            )
+                            ),
                         ],
                         False,
                     )
