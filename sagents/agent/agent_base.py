@@ -14,7 +14,12 @@ from sagents.tool.tool_progress import (
     emit_tool_progress_closed as _emit_tool_progress_closed,
 )
 from sagents.context.session_context import SessionContext
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import (
+    MessageChunk,
+    MessageRole,
+    MessageType,
+    is_message_client_visible,
+)
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.sage_openai import SageAsyncOpenAI
@@ -191,11 +196,7 @@ class AgentBase(ABC):
     @staticmethod
     def _visible_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
         """Return injected messages that should be emitted to clients."""
-        return [
-            chunk
-            for chunk in chunks
-            if (chunk.metadata or {}).get("sse_visible") is not False
-        ]
+        return [chunk for chunk in chunks if is_message_client_visible(chunk)]
 
     @staticmethod
     def _transient_user_injections(chunks: List[MessageChunk]) -> List[MessageChunk]:
@@ -216,13 +217,14 @@ class AgentBase(ABC):
         """Metadata for hidden audit messages consumed by one LLM request."""
 
         return {
+            **extra,
             "hidden_from_chat": True,
+            "hide_from_chat": True,
             "sse_visible": False,
             "llm_scope": "next_request",
             "llm_state": "pending",
             "llm_consumed_by": None,
             "llm_consumed_at": None,
-            **extra,
         }
 
     def _create_unavailable_tool_runtime_message(
@@ -2489,13 +2491,10 @@ class AgentBase(ABC):
             message_id=str(uuid.uuid4()),
             message_type=MessageType.AGENT_EXECUTION_ERROR.value,
             agent_name=self.agent_name,
-            metadata={
-                "hide_from_chat": True,
-                **self._next_request_runtime_metadata(
-                    runtime_diagnostic_source="tool_call_argument_parse",
-                    tool_name=tool_name,
-                ),
-            },
+            metadata=self._next_request_runtime_metadata(
+                runtime_diagnostic_source="tool_call_argument_parse",
+                tool_name=tool_name,
+            ),
         )
 
     def _create_tool_call_message(
