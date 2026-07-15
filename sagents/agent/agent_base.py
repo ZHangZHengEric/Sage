@@ -1185,6 +1185,31 @@ class AgentBase(ABC):
             return
         yield (final_view, True)
 
+    @staticmethod
+    def _chunks_contain_tool_calls(chunks: List[Any]) -> bool:
+        for chunk in chunks:
+            choices = (
+                chunk.get("choices", [])
+                if isinstance(chunk, dict)
+                else getattr(chunk, "choices", [])
+            ) or []
+            for choice in choices:
+                if isinstance(choice, dict):
+                    finish_reason = choice.get("finish_reason")
+                    delta = choice.get("delta") or {}
+                    tool_calls = (
+                        delta.get("tool_calls")
+                        if isinstance(delta, dict)
+                        else getattr(delta, "tool_calls", None)
+                    )
+                else:
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    delta = getattr(choice, "delta", None)
+                    tool_calls = getattr(delta, "tool_calls", None)
+                if finish_reason == "tool_calls" or tool_calls:
+                    return True
+        return False
+
     async def _call_llm_streaming(
         self,
         messages: List[Union[MessageChunk, Dict[str, Any]]],
@@ -1266,7 +1291,7 @@ class AgentBase(ABC):
             )
         messages = MessageManager.filter_messages_for_llm_scope(messages)  # pyright: ignore[reportAssignmentType]
         pending_next_request_message_ids: List[str] = []
-        llm_scope_consumed = False
+        llm_scope_finalized = False
 
         # A logical request owns one immutable provider payload. Network retries
         # reuse this snapshot; only the explicit structured-output fallback may
@@ -1538,15 +1563,6 @@ class AgentBase(ABC):
                 )
                 async for chunk in stream:
                     # print(chunk)
-                    if not llm_scope_consumed:
-                        if session_id and pending_next_request_message_ids:
-                            session_context = self._get_live_session_context(session_id)
-                            if session_context is not None:
-                                session_context.mark_llm_messages_consumed(
-                                    pending_next_request_message_ids,
-                                    logical_request_id,
-                                )
-                        llm_scope_consumed = True
                     # 记录首token时间
                     if first_token_time is None:
                         first_token_time = time.time()
@@ -1560,6 +1576,28 @@ class AgentBase(ABC):
 
                 # 成功完成，跳出重试循环
                 all_chunks = attempt_chunks
+                if session_id and pending_next_request_message_ids:
+                    session_context = self._get_live_session_context(session_id)
+                    if session_context is not None:
+                        if attempt_chunks and not self._chunks_contain_tool_calls(
+                            attempt_chunks
+                        ):
+                            session_context.mark_llm_messages_consumed(
+                                pending_next_request_message_ids,
+                                logical_request_id,
+                            )
+                        else:
+                            release_claims = getattr(
+                                session_context,
+                                "release_llm_message_claims",
+                                None,
+                            )
+                            if callable(release_claims):
+                                release_claims(
+                                    pending_next_request_message_ids,
+                                    logical_request_id,
+                                )
+                    llm_scope_finalized = True
                 stream_succeeded = True
                 break
 
@@ -1780,21 +1818,28 @@ class AgentBase(ABC):
             finally:
                 if (
                     pending_next_request_message_ids
-                    and not llm_scope_consumed
+                    and not llm_scope_finalized
                     and not retrying_logical_request
                     and session_id
                 ):
                     session_context = self._get_live_session_context(session_id)
-                    release_claims = getattr(
-                        session_context,
-                        "release_llm_message_claims",
-                        None,
-                    )
-                    if callable(release_claims):
-                        release_claims(
+                    if session_context is not None and attempt_yielded_chunks:
+                        session_context.mark_llm_messages_consumed(
                             pending_next_request_message_ids,
                             logical_request_id,
                         )
+                    elif session_context is not None:
+                        release_claims = getattr(
+                            session_context,
+                            "release_llm_message_claims",
+                            None,
+                        )
+                        if callable(release_claims):
+                            release_claims(
+                                pending_next_request_message_ids,
+                                logical_request_id,
+                            )
+                    llm_scope_finalized = True
                 # 只有在成功完成或最终失败时才记录。
                 # 重试后成功也必须落盘（stream_succeeded），不能只看 retry_count==0。
                 if (
