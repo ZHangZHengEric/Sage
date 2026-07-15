@@ -1220,6 +1220,55 @@ def test_task_complete_judge_confirmation_rules_are_synced_across_prompt_variant
         assert continue_rule in prompt
 
 
+def test_task_complete_judge_pending_question_rules_are_synced_across_prompt_variants():
+    prompt_manager = PromptManager()
+    expectations = [
+        (
+            "SimpleAgent",
+            "zh",
+            "\u5fc5\u987b\u6839\u636e Assistant **\u5df2\u7ecf\u4ea4\u4ed8**\u7ed9\u7528\u6237\u7684\u53ef\u56de\u7b54\u5185\u5bb9\u5224\u65ad",
+            "\u4e0b\u9762\u8fdb\u5165\u57fa\u7840\u8981\u6c42\u786e\u8ba4\u9636\u6bb5",
+        ),
+        (
+            "SimpleAgent",
+            "en",
+            "Judge only from answerable content the Assistant has **already delivered**",
+            "Now entering requirements confirmation",
+        ),
+        (
+            "SimpleAgent",
+            "pt",
+            "Julgue apenas pelo conte\u00fado respond\u00edvel que o Assistente **j\u00e1 entregou**",
+            "Agora entrando na confirma\u00e7\u00e3o dos requisitos",
+        ),
+        (
+            "SimpleReactAgent",
+            "zh",
+            "\u5fc5\u987b\u6839\u636e Assistant **\u5df2\u7ecf\u4ea4\u4ed8**\u7ed9\u7528\u6237\u7684\u53ef\u56de\u7b54\u5185\u5bb9\u5224\u65ad",
+            "\u4e0b\u9762\u8fdb\u5165\u57fa\u7840\u8981\u6c42\u786e\u8ba4\u9636\u6bb5",
+        ),
+        (
+            "SimpleReactAgent",
+            "en",
+            "Judge only from answerable content the Assistant has **already delivered**",
+            "Now entering requirements confirmation",
+        ),
+        (
+            "SimpleReactAgent",
+            "pt",
+            "Julgue apenas pelo conte\u00fado respond\u00edvel que o Assistente **j\u00e1 entregou**",
+            "Agora entrando na confirma\u00e7\u00e3o dos requisitos",
+        ),
+    ]
+
+    for agent, language, delivered_rule, pending_example in expectations:
+        prompt = prompt_manager.get_agent_prompt(
+            agent, "task_complete_template", language=language
+        )
+        assert delivered_rule in prompt
+        assert pending_example in prompt
+
+
 def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
     monkeypatch,
 ):
