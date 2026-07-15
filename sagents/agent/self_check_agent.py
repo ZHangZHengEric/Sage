@@ -888,7 +888,7 @@ class SelfCheckAgent(AgentBase):
                     not isinstance(options, list)
                     or not options
                     or any(
-                        not isinstance(option, str) or not option.strip()
+                        not self._is_valid_questionnaire_option(option)
                         for option in options
                     )
                 ):
@@ -918,6 +918,19 @@ class SelfCheckAgent(AgentBase):
                         f"<{tag_name}> questions[{index}] 的 allow_other 必须是布尔值"
                     ]
         return []
+
+    @staticmethod
+    def _is_valid_questionnaire_option(option: Any) -> bool:
+        if isinstance(option, str):
+            return bool(option.strip())
+        if not isinstance(option, dict):
+            return False
+        value = option.get("value")
+        label = option.get("label")
+        return any(
+            isinstance(candidate, str) and bool(candidate.strip())
+            for candidate in (value, label)
+        )
 
     def _validate_questionnaire_response_payload(
         self, tag_name: str, payload: Dict[str, Any]

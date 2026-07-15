@@ -14,7 +14,7 @@
           {{ answer.question || answer.question_id }}
         </div>
         <div class="text-sm leading-6 text-muted-foreground">
-          {{ displayValueForAnswer(answer) }}
+          {{ displayValueForAnswer(answer, uiText) }}
         </div>
       </div>
     </div>
@@ -35,6 +35,11 @@ const props = defineProps({
 })
 
 const { t } = useLanguage()
+const uiText = computed(() => ({
+  unanswered: props.response.uiText?.unanswered || t('tools.questionnaire.unanswered'),
+  unselected: props.response.uiText?.unselected || t('tools.questionnaire.unselected'),
+  listSeparator: props.response.uiText?.listSeparator || t('tools.questionnaire.listSeparator'),
+}))
 
 const statusText = computed(() => (
   props.response.status === 'timeout_default'

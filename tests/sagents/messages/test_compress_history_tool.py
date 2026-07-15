@@ -121,7 +121,17 @@ class TestCompressHistoryTool:
             "start_message_id": "u1",
             "end_message_id": "a1",
         }
+        assert "context was compacted" in payload[
+            "context_recovery_guidance"
+        ].lower()
+        assert "re-read the relevant key files" in payload[
+            "context_recovery_guidance"
+        ]
+        assert "review the important work steps" in payload[
+            "context_recovery_guidance"
+        ]
         assert '"summary": "summary text"' in result["message"]
+        assert '"context_recovery_guidance"' in result["message"]
         assert "source_message_ids" not in result["message"]
         assert "source_range" not in result["message"]
 
