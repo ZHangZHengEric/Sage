@@ -212,6 +212,8 @@ class TestCliJsonContracts(unittest.TestCase):
         prompt = loaded["systemPrefix"]
         self.assertIn("AGENTS.md", prompt)
         self.assertIn("git log", prompt)
+        self.assertIn("apply_patch", loaded["availableTools"])
+        self.assertIn("prefer Sage apply_patch", prompt)
         self.assertIn("file_update", prompt)
         self.assertIn("Frontend and TUI work", prompt)
         self.assertIn("line numbers", prompt)

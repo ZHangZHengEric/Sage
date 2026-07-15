@@ -77,11 +77,21 @@ class ToolProxy:
         """
         检查工具是否可用
         """
-        if self._available_tools is None:
+        if self._is_tool_available(tool_name):
             return
+        raise ValueError(f"Tool '{tool_name}' is not in the available tool list")
 
-        if tool_name not in self._available_tools:
-            raise ValueError(f"Tool '{tool_name}' is not in the available tool list")
+    def _tool_requires_explicit_selection(self, tool_name: str) -> bool:
+        for tool_manager in self.tool_managers:
+            tool = tool_manager.get_tool(tool_name)
+            if tool is not None:
+                return bool(getattr(tool, "explicit_only", False))
+        return False
+
+    def _is_tool_available(self, tool_name: str) -> bool:
+        if self._available_tools is not None:
+            return tool_name in self._available_tools
+        return not self._tool_requires_explicit_selection(tool_name)
 
     def allow_tools(self, tool_names: List[str]) -> None:
         """
@@ -109,7 +119,7 @@ class ToolProxy:
                 name = tool["function"]["name"]
                 if not _should_expose_turn_status() and name == "turn_status":
                     continue
-                if self._available_tools is None or name in self._available_tools:
+                if self._is_tool_available(name):
                     all_tools_map[name] = tool
 
         # 与 ToolManager.get_openai_tools 保持一致：按 function.name 字典序排序，
@@ -130,10 +140,7 @@ class ToolProxy:
             for tool in tools:
                 if not _should_expose_turn_status() and tool["name"] == "turn_status":
                     continue
-                if (
-                    self._available_tools is None
-                    or tool["name"] in self._available_tools
-                ):
+                if self._is_tool_available(tool["name"]):
                     all_tools_map[tool["name"]] = tool
 
         return list(all_tools_map.values())
@@ -150,10 +157,7 @@ class ToolProxy:
             for tool in tools:
                 if not _should_expose_turn_status() and tool["name"] == "turn_status":
                     continue
-                if (
-                    self._available_tools is None
-                    or tool["name"] in self._available_tools
-                ):
+                if self._is_tool_available(tool["name"]):
                     all_tools_map[tool["name"]] = tool
 
         return list(all_tools_map.values())
@@ -167,10 +171,7 @@ class ToolProxy:
             names = tm.list_all_tools_name(lang=lang)
             if not _should_expose_turn_status():
                 names = [n for n in names if n != "turn_status"]
-            if self._available_tools is None:
-                all_names.update(names)
-            else:
-                all_names.update([n for n in names if n in self._available_tools])
+            all_names.update([name for name in names if self._is_tool_available(name)])
         return list(all_names)
 
     def list_tools_with_type(
@@ -185,10 +186,7 @@ class ToolProxy:
             for tool in tools:
                 if not _should_expose_turn_status() and tool["name"] == "turn_status":
                     continue
-                if (
-                    self._available_tools is None
-                    or tool["name"] in self._available_tools
-                ):
+                if self._is_tool_available(tool["name"]):
                     all_tools_map[tool["name"]] = tool
 
         return list(all_tools_map.values())
