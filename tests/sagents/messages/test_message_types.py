@@ -3,6 +3,7 @@ from sagents.context.messages.message import (
     MessageRole,
     MessageType,
     is_execution_error_message_type,
+    is_message_client_visible,
 )
 from sagents.context.messages.message_manager import MessageManager
 
@@ -78,6 +79,20 @@ def test_next_request_message_is_included_only_while_pending():
     message.metadata["llm_state"] = "consumed"
     consumed = MessageManager.convert_messages_to_dict_for_request([message])
     assert consumed == []
+
+
+def test_client_visibility_contract_accepts_chunks_and_serialized_messages():
+    visible = MessageChunk(role=MessageRole.ASSISTANT.value, content="visible")
+    hidden = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="internal",
+        metadata={"sse_visible": False},
+    )
+
+    assert is_message_client_visible(visible) is True
+    assert is_message_client_visible(visible.to_dict()) is True
+    assert is_message_client_visible(hidden) is False
+    assert is_message_client_visible(hidden.to_dict()) is False
 
 
 def test_hidden_durable_image_context_remains_in_llm_request():

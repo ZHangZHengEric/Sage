@@ -35,8 +35,22 @@ class FileReference:
     require_absolute: bool = True
 
 
-ARTIFACT_TAGS = ("movo-artifacts", "ling-artifacts", "sage-artifacts", "artifacts")
+@dataclass(frozen=True)
+class MarkdownFileLink:
+    markdown: str
+    target: str
+    in_code: bool = False
+
+
+ARTIFACT_TAGS = (
+    "yiii-artifacts",
+    "movo-artifacts",
+    "ling-artifacts",
+    "sage-artifacts",
+    "artifacts",
+)
 QUESTIONNAIRE_TAGS = (
+    "yiii-questionnaire",
     "movo-questionnaire",
     "ling-questionnaire",
     "sage-questionnaire",
@@ -89,16 +103,21 @@ class SelfCheckAgent(AgentBase):
         structured_tag_issues = self._validate_structured_tag_payloads(
             latest_assistant_content
         )
+        markdown_link_issues = self._validate_markdown_file_link_syntax(
+            latest_assistant_content
+        )
         referenced_file_refs = self._collect_recent_file_references(session_context)
         logger.info(
             "SelfCheckAgent: collected "
             f"{len(referenced_file_refs)} referenced files for validation, "
-            f"{len(structured_tag_issues)} structured-tag issues"
+            f"{len(structured_tag_issues)} structured-tag issues, "
+            f"{len(markdown_link_issues)} Markdown-link issues"
         )
 
         if (
             not referenced_file_refs
             and not structured_tag_issues
+            and not markdown_link_issues
             and not has_structured_tags
         ):
             self._mark_passed(
@@ -106,7 +125,7 @@ class SelfCheckAgent(AgentBase):
             )
             return
 
-        issues: List[str] = list(structured_tag_issues)
+        issues: List[str] = [*structured_tag_issues, *markdown_link_issues]
         checked_files: List[str] = []
 
         for file_ref in sorted(
@@ -169,14 +188,9 @@ class SelfCheckAgent(AgentBase):
                     message_id=str(uuid.uuid4()),
                     agent_name=self.agent_name,
                     metadata={
-                        "hidden_from_chat": True,
-                        "hide_from_chat": True,
-                        "sse_visible": False,
-                        "llm_scope": "next_request",
-                        "llm_state": "pending",
-                        "llm_consumed_by": None,
-                        "llm_consumed_at": None,
-                        "runtime_diagnostic_source": "sage_self_check",
+                        **self._next_request_runtime_metadata(
+                            runtime_diagnostic_source="sage_self_check"
+                        ),
                         "self_check_passed": False,
                         "checked_files": checked_files,
                     },
@@ -238,10 +252,11 @@ class SelfCheckAgent(AgentBase):
             return set()
 
         referenced_file_refs: Set[FileReference] = set()
-        markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
 
-        for raw_path in markdown_link_pattern.findall(content):  # pyright: ignore[reportArgumentType,reportCallIssue]
-            normalized_path = self._normalize_raw_file_reference(raw_path)
+        for link in self._iter_markdown_file_links(content):
+            if link.in_code:
+                continue
+            normalized_path = self._normalize_raw_file_reference(link.target)
             if self._looks_like_file_path(normalized_path):
                 referenced_file_refs.add(
                     FileReference(path=normalized_path, require_absolute=True)
@@ -255,6 +270,473 @@ class SelfCheckAgent(AgentBase):
                 )
 
         return self._dedupe_referenced_file_refs(referenced_file_refs)
+
+    def _validate_markdown_file_link_syntax(self, content: str) -> List[str]:
+        """Reject local file links hidden inside Markdown code regions."""
+        if not content:
+            return []
+
+        issues: List[str] = []
+        seen_markdown: Set[str] = set()
+        for link in self._iter_markdown_file_links(content):
+            normalized_target = self._normalize_raw_file_reference(link.target)
+            if (
+                not link.in_code
+                or not self._looks_like_file_path(normalized_target)
+                or link.markdown in seen_markdown
+            ):
+                continue
+            seen_markdown.add(link.markdown)
+            issues.append(
+                "真实文件引用不能放在反引号或代码块中，请移除代码标记并直接输出标准 "
+                f"Markdown 文件链接：{link.markdown}"
+            )
+        return issues
+
+    def _iter_markdown_file_links(self, content: str):
+        code_ranges = self._markdown_code_ranges(content)
+        range_index = 0
+        index = 0
+        while index < len(content or ""):
+            markdown_start = index
+            if content.startswith("![", index):
+                label_start = index + 1
+            elif content[index] == "[":
+                label_start = index
+            else:
+                index += 1
+                continue
+
+            label_end = self._find_matching_markdown_bracket(
+                content, label_start, "[", "]"
+            )
+            if label_end is None or label_end + 1 >= len(content):
+                index = label_start + 1
+                continue
+            if content[label_end + 1] != "(":
+                index = label_end + 1
+                continue
+
+            parsed = self._parse_markdown_link_destination(content, label_end + 1)
+            if parsed is None:
+                index = label_end + 1
+                continue
+            markdown_end, target = parsed
+
+            while (
+                range_index < len(code_ranges)
+                and code_ranges[range_index][1] <= markdown_start
+            ):
+                range_index += 1
+            in_code = bool(
+                range_index < len(code_ranges)
+                and code_ranges[range_index][0]
+                <= markdown_start
+                < code_ranges[range_index][1]
+            )
+            yield MarkdownFileLink(
+                markdown=content[markdown_start:markdown_end],
+                target=target,
+                in_code=in_code,
+            )
+            index = markdown_end
+
+    @staticmethod
+    def _find_matching_markdown_bracket(
+        content: str,
+        start: int,
+        opening: str,
+        closing: str,
+    ) -> Optional[int]:
+        depth = 0
+        index = start
+        while index < len(content):
+            char = content[index]
+            if char == "\\" and index + 1 < len(content):
+                index += 2
+                continue
+            if char == opening:
+                depth += 1
+            elif char == closing:
+                depth -= 1
+                if depth == 0:
+                    return index
+            index += 1
+        return None
+
+    def _parse_markdown_link_destination(
+        self, content: str, opening_paren: int
+    ) -> Optional[tuple[int, str]]:
+        """Parse one inline-link destination and return end offset plus target."""
+
+        cursor = opening_paren + 1
+        while cursor < len(content) and content[cursor].isspace():
+            cursor += 1
+        if cursor >= len(content):
+            return None
+
+        if content[cursor] == "<":
+            target_start = cursor
+            cursor += 1
+            while cursor < len(content):
+                if content[cursor] == "\\" and cursor + 1 < len(content):
+                    cursor += 2
+                    continue
+                if content[cursor] == ">":
+                    target = content[target_start : cursor + 1]
+                    return self._finish_markdown_link_destination(
+                        content, cursor + 1, target
+                    )
+                if content[cursor] in "\r\n":
+                    return None
+                cursor += 1
+            return None
+
+        target_start = cursor
+        nested_parens = 0
+        while cursor < len(content):
+            char = content[cursor]
+            if char == "\\" and cursor + 1 < len(content):
+                cursor += 2
+                continue
+            if char == "(":
+                nested_parens += 1
+                cursor += 1
+                continue
+            if char == ")":
+                if nested_parens == 0:
+                    return cursor + 1, content[target_start:cursor]
+                nested_parens -= 1
+                cursor += 1
+                continue
+            if char.isspace() and nested_parens == 0:
+                return self._finish_markdown_link_destination(
+                    content, cursor, content[target_start:cursor]
+                )
+            cursor += 1
+        return None
+
+    def _finish_markdown_link_destination(
+        self, content: str, cursor: int, target: str
+    ) -> Optional[tuple[int, str]]:
+        separator_start = cursor
+        while cursor < len(content) and content[cursor].isspace():
+            cursor += 1
+        if cursor >= len(content):
+            return None
+        if content[cursor] == ")":
+            return cursor + 1, target
+        if cursor == separator_start:
+            return None
+
+        title_opener = content[cursor]
+        title_closer = {"\"": "\"", "'": "'", "(": ")"}.get(title_opener)
+        if title_closer is None:
+            return None
+        cursor += 1
+        title_depth = 1
+        while cursor < len(content):
+            char = content[cursor]
+            if char == "\\" and cursor + 1 < len(content):
+                cursor += 2
+                continue
+            if title_opener == "(" and char == "(":
+                title_depth += 1
+            elif char == title_closer:
+                title_depth -= 1
+                if title_depth == 0:
+                    cursor += 1
+                    break
+            if char in "\r\n":
+                return None
+            cursor += 1
+        else:
+            return None
+
+        while cursor < len(content) and content[cursor].isspace():
+            cursor += 1
+        if cursor < len(content) and content[cursor] == ")":
+            return cursor + 1, target
+        return None
+
+    def _markdown_code_ranges(self, content: str) -> List[tuple[int, int]]:
+        """Return fenced-block and inline-code ranges using Markdown delimiters."""
+
+        if not content:
+            return []
+
+        fenced_ranges: List[tuple[int, int]] = []
+        open_fence: Optional[tuple[str, int, int, int, int]] = None
+        offset = 0
+        for line in content.splitlines(keepends=True):
+            body = line.rstrip("\r\n")
+            if open_fence is None:
+                opener = self._markdown_fence_opener(body)
+                if opener is not None:
+                    marker_char, marker_len, quote_depth, max_close_indent = opener
+                    open_fence = (
+                        marker_char,
+                        marker_len,
+                        offset,
+                        quote_depth,
+                        max_close_indent,
+                    )
+            else:
+                (
+                    marker_char,
+                    marker_len,
+                    start,
+                    quote_depth,
+                    max_close_indent,
+                ) = open_fence
+                if self._is_markdown_fence_closer(
+                    body,
+                    marker_char=marker_char,
+                    marker_len=marker_len,
+                    quote_depth=quote_depth,
+                    max_indent=max_close_indent,
+                ):
+                    fenced_ranges.append((start, offset + len(line)))
+                    open_fence = None
+            offset += len(line)
+        if open_fence is not None:
+            fenced_ranges.append((open_fence[2], len(content)))
+
+        indented_ranges = self._markdown_indented_code_ranges(
+            content, fenced_ranges
+        )
+        block_ranges = sorted([*fenced_ranges, *indented_ranges])
+        inline_ranges: List[tuple[int, int]] = []
+        for start, end in self._markdown_inline_blocks(content, block_ranges):
+            inline_ranges.extend(self._markdown_inline_code_ranges(content, start, end))
+
+        return sorted([*block_ranges, *inline_ranges])
+
+    @staticmethod
+    def _strip_markdown_blockquote_prefix(body: str) -> tuple[int, str]:
+        quote_depth = 0
+        remaining = body
+        while True:
+            match = re.match(r" {0,3}>[ \t]?", remaining)
+            if match is None:
+                break
+            quote_depth += 1
+            remaining = remaining[match.end() :]
+        return quote_depth, remaining
+
+    def _markdown_fence_opener(
+        self, body: str
+    ) -> Optional[tuple[str, int, int, int]]:
+        quote_depth, remaining = self._strip_markdown_blockquote_prefix(body)
+        leading_spaces = len(remaining) - len(remaining.lstrip(" "))
+        if leading_spaces > 3:
+            return None
+
+        candidate = remaining[leading_spaces:]
+        list_match = re.match(r"(?:[-+*]|\d{1,9}[.)])[ \t]+", candidate)
+        if list_match is not None:
+            content_indent = leading_spaces + list_match.end()
+            candidate = candidate[list_match.end() :]
+            max_close_indent = content_indent + 3
+        else:
+            max_close_indent = 3
+
+        marker_match = re.match(r"(`{3,}|~{3,})(.*)$", candidate)
+        if marker_match is None:
+            return None
+        marker = marker_match.group(1)
+        info = marker_match.group(2)
+        if marker.startswith("`") and "`" in info:
+            return None
+        return marker[0], len(marker), quote_depth, max_close_indent
+
+    def _is_markdown_fence_closer(
+        self,
+        body: str,
+        *,
+        marker_char: str,
+        marker_len: int,
+        quote_depth: int,
+        max_indent: int,
+    ) -> bool:
+        actual_quote_depth, remaining = self._strip_markdown_blockquote_prefix(body)
+        if actual_quote_depth != quote_depth:
+            return False
+        leading_spaces = len(remaining) - len(remaining.lstrip(" "))
+        if leading_spaces > max_indent:
+            return False
+        candidate = remaining[leading_spaces:]
+        return bool(
+            re.fullmatch(
+                rf"{re.escape(marker_char)}{{{marker_len},}}[ \t]*",
+                candidate,
+            )
+        )
+
+    def _markdown_indented_code_ranges(
+        self,
+        content: str,
+        excluded_ranges: List[tuple[int, int]],
+    ) -> List[tuple[int, int]]:
+        """Return four-column indented code blocks outside fenced blocks."""
+
+        ranges: List[tuple[int, int]] = []
+        open_start: Optional[int] = None
+        open_end: Optional[int] = None
+        open_quote_depth: Optional[int] = None
+        previous_line_blank = True
+        excluded_index = 0
+        offset = 0
+
+        for line in content.splitlines(keepends=True):
+            line_end = offset + len(line)
+            while (
+                excluded_index < len(excluded_ranges)
+                and excluded_ranges[excluded_index][1] <= offset
+            ):
+                excluded_index += 1
+            is_excluded = bool(
+                excluded_index < len(excluded_ranges)
+                and excluded_ranges[excluded_index][0] < line_end
+                and offset < excluded_ranges[excluded_index][1]
+            )
+
+            body = line.rstrip("\r\n")
+            quote_depth, remaining = self._strip_markdown_blockquote_prefix(body)
+            is_blank = not remaining.strip()
+            is_indented = (
+                not is_blank and self._markdown_indentation_width(remaining) >= 4
+            )
+
+            if is_excluded:
+                if open_start is not None and open_end is not None:
+                    ranges.append((open_start, open_end))
+                    open_start = None
+                    open_end = None
+                    open_quote_depth = None
+                # A fenced block is already a block boundary, so an indented
+                # block may begin immediately after its closing line.
+                previous_line_blank = True
+                offset = line_end
+                continue
+
+            same_container = (
+                open_quote_depth is None or quote_depth == open_quote_depth
+            )
+            if open_start is not None and (is_blank or (is_indented and same_container)):
+                open_end = line_end
+            else:
+                if open_start is not None and open_end is not None:
+                    ranges.append((open_start, open_end))
+                    open_start = None
+                    open_end = None
+                    open_quote_depth = None
+
+                if is_indented and previous_line_blank:
+                    open_start = offset
+                    open_end = line_end
+                    open_quote_depth = quote_depth
+
+            previous_line_blank = is_blank
+            offset = line_end
+
+        if open_start is not None and open_end is not None:
+            ranges.append((open_start, open_end))
+        return ranges
+
+    @staticmethod
+    def _markdown_indentation_width(text: str) -> int:
+        width = 0
+        for char in text:
+            if char == " ":
+                width += 1
+            elif char == "\t":
+                width += 4 - (width % 4)
+            else:
+                break
+        return width
+
+    @staticmethod
+    def _markdown_inline_blocks(
+        content: str, code_block_ranges: List[tuple[int, int]]
+    ) -> List[tuple[int, int]]:
+        available_ranges: List[tuple[int, int]] = []
+        cursor = 0
+        for start, end in code_block_ranges:
+            if cursor < start:
+                available_ranges.append((cursor, start))
+            cursor = max(cursor, end)
+        if cursor < len(content):
+            available_ranges.append((cursor, len(content)))
+
+        blocks: List[tuple[int, int]] = []
+        for available_start, available_end in available_ranges:
+            block_start: Optional[int] = None
+            offset = available_start
+            for line in content[available_start:available_end].splitlines(
+                keepends=True
+            ):
+                line_end = offset + len(line)
+                if line.rstrip("\r\n").strip():
+                    if block_start is None:
+                        block_start = offset
+                elif block_start is not None:
+                    blocks.append((block_start, offset))
+                    block_start = None
+                offset = line_end
+            if block_start is not None:
+                blocks.append((block_start, available_end))
+        return blocks
+
+    @staticmethod
+    def _markdown_inline_code_ranges(
+        content: str, start: int, end: int
+    ) -> List[tuple[int, int]]:
+        ranges: List[tuple[int, int]] = []
+        index = start
+        while index < end:
+            if content[index] != "`":
+                index += 1
+                continue
+            if SelfCheckAgent._is_markdown_character_escaped(content, index, start):
+                index += 1
+                continue
+            opener_end = index + 1
+            while opener_end < end and content[opener_end] == "`":
+                opener_end += 1
+            delimiter_len = opener_end - index
+            search_at = opener_end
+            closing_end: Optional[int] = None
+            while search_at < end:
+                closing_start = content.find("`", search_at, end)
+                if closing_start < 0:
+                    break
+                candidate_end = closing_start + 1
+                while (
+                    candidate_end < end and content[candidate_end] == "`"
+                ):
+                    candidate_end += 1
+                if candidate_end - closing_start == delimiter_len:
+                    closing_end = candidate_end
+                    break
+                search_at = candidate_end
+            if closing_end is None:
+                index = opener_end
+                continue
+            ranges.append((index, closing_end))
+            index = closing_end
+        return ranges
+
+    @staticmethod
+    def _is_markdown_character_escaped(
+        content: str, index: int, range_start: int = 0
+    ) -> bool:
+        backslash_count = 0
+        cursor = index - 1
+        while cursor >= range_start and content[cursor] == "\\":
+            backslash_count += 1
+            cursor -= 1
+        return backslash_count % 2 == 1
 
     def _content_has_structured_tags(self, content: str) -> bool:
         for _tag_name, _raw_payload in self._iter_structured_tag_matches(content):
@@ -331,6 +813,11 @@ class SelfCheckAgent(AgentBase):
     def _validate_questionnaire_payload(
         self, tag_name: str, payload: Dict[str, Any]
     ) -> List[str]:
+        strict_yiii = tag_name == "yiii-questionnaire"
+        if strict_yiii:
+            title = payload.get("title")
+            if not isinstance(title, str) or not title.strip():
+                return [f"<{tag_name}> 缺少合法的 title 字段"]
         questions = payload.get("questions")
         if not isinstance(questions, list):
             return [f"<{tag_name}> 缺少合法的 questions 数组"]
@@ -343,11 +830,49 @@ class SelfCheckAgent(AgentBase):
             if not isinstance(text, str) or not text.strip():
                 return [f"<{tag_name}> questions[{index}] 缺少合法的 text 字段"]
             question_type = str(question.get("type") or "").strip().lower()
+            if strict_yiii and question_type not in {
+                "single_choice",
+                "multi_choice",
+                "free_text",
+            }:
+                return [
+                    f"<{tag_name}> questions[{index}] 的 type 不受支持: "
+                    f"{question_type or '空'}"
+                ]
             if question_type in {"single_choice", "multi_choice", "multiple_choice"}:
                 options = question.get("options")
-                if not isinstance(options, list) or not options:
+                if (
+                    not isinstance(options, list)
+                    or not options
+                    or any(
+                        not isinstance(option, str) or not option.strip()
+                        for option in options
+                    )
+                ):
                     return [
                         f"<{tag_name}> questions[{index}] 的选择题必须提供非空 options"
+                    ]
+            if strict_yiii:
+                if "default" not in question:
+                    return [
+                        f"<{tag_name}> questions[{index}] 缺少 default 字段"
+                    ]
+                default = question.get("default")
+                if question_type == "multi_choice":
+                    if not isinstance(default, list) or any(
+                        not isinstance(value, str) for value in default
+                    ):
+                        return [
+                            f"<{tag_name}> questions[{index}] 的 default 必须是字符串数组"
+                        ]
+                elif not isinstance(default, str):
+                    return [
+                        f"<{tag_name}> questions[{index}] 的 default 必须是字符串"
+                    ]
+                allow_other = question.get("allow_other")
+                if allow_other is not None and not isinstance(allow_other, bool):
+                    return [
+                        f"<{tag_name}> questions[{index}] 的 allow_other 必须是布尔值"
                     ]
         return []
 
@@ -446,6 +971,9 @@ class SelfCheckAgent(AgentBase):
         path = str(raw_path or "").strip().strip("`").strip("'\"")
         if not path:
             return path
+        if path.startswith("<") and path.endswith(">"):
+            path = path[1:-1].strip()
+        path = re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])", r"\1", path)
         if path.startswith("file://"):
             path = re.sub(r"^file:///?", "/", path)
         path = unquote(path)
