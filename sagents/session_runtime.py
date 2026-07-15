@@ -850,6 +850,9 @@ class Session:
             session_context.audit_status.pop("self_check_issues", None)
             session_context.audit_status.pop("self_check_summary", None)
             session_context.audit_status.pop("self_check_checked_files", None)
+            session_context.audit_status.pop(
+                "self_check_required_structured_tags", None
+            )
 
             # 2. 准备工具白名单
             # 这里直接按显式 agent_mode 收敛可用工具，不再经过自动路由分叉

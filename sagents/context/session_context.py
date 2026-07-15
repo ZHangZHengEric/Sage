@@ -691,11 +691,11 @@ class SessionContext:
     ) -> List[str]:
         """Atomically reserve pending request-scoped messages for one request.
 
-        Claims are intentionally kept in memory only. A successful provider
-        response journals the final ``consumed`` state, while a request that
-        fails before its first response releases the claim back to ``pending``.
-        This also means a process restart restores the last journaled pending
-        state instead of stranding an in-flight claim.
+        Claims are intentionally kept in memory only. A terminal provider
+        response journals the final ``consumed`` state, while a tool-call
+        response or a request that fails before its first response releases the
+        claim back to ``pending``. This also means a process restart restores
+        the last journaled pending state instead of stranding an in-flight claim.
         """
 
         if not message_ids or not logical_request_id:
@@ -742,7 +742,7 @@ class SessionContext:
         message_ids: List[str],
         logical_request_id: str,
     ) -> int:
-        """Release claims owned by a request that produced no provider response."""
+        """Release claims when a request did not produce a terminal response."""
 
         if not message_ids or not logical_request_id:
             return 0

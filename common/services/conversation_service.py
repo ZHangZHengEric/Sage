@@ -430,43 +430,61 @@ async def get_conversation_messages(
 ) -> Dict[str, Any]:
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
-    if not conversation:
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id) if session_manager else None
+    if not session:
         raise SageHTTPException(
-            **_conversation_error_kwargs(
-                message_key="conversation.not_found",
-                message_params={"session_id": session_id},
-                error_detail=f"Conversation '{session_id}' not found",
-            )
+            **{
+                **_conversation_error_kwargs(
+                    message_key="conversation.not_found",
+                    message_params={"session_id": session_id},
+                    error_detail=f"Conversation '{session_id}' not found",
+                ),
+                "status_code": 404,
+            }
         )
-
-    stream_manager_module = (
-        "app.desktop.core.services.chat.stream_manager"
-        if _is_desktop_mode()
-        else "app.server.services.chat.stream_manager"
-    )
-    stream_manager = __import__(
-        stream_manager_module, fromlist=["StreamManager"]
-    ).StreamManager
 
     view = build_conversation_messages_view(session_id)
     messages: List[Dict[str, Any]] = []
     for message in view["messages"]:
         messages.append(ContentProcessor.clean_content(message))
 
-    next_stream_index = stream_manager.get_instance().get_history_length(session_id)
-    return {
-        "conversation_id": session_id,
-        "messages": messages,
-        "message_count": len(messages),
-        "next_stream_index": next_stream_index,
-        "conversation_info": {
+    next_stream_index = _get_stream_manager().get_history_length(session_id)
+    if conversation:
+        conversation_info = {
             "session_id": conversation.session_id,
             "agent_id": conversation.agent_id,
             "agent_name": conversation.agent_name,
             "title": conversation.title,
             "created_at": conversation.created_at,
             "updated_at": conversation.updated_at,
-        },
+        }
+    else:
+        session_context = session.get_context() if session else None
+        session_created_at = session.get_start_time() if session else None
+        agent_config = (
+            getattr(session_context, "agent_config", None) or {}
+            if session_context
+            else {}
+        )
+        conversation_info = {
+            "session_id": session_id,
+            "agent_id": str(
+                agent_config.get("agent_id")
+                or getattr(session_context, "agent_id", "")
+                or ""
+            ),
+            "agent_name": str(agent_config.get("name") or ""),
+            "title": "",
+            "created_at": session_created_at or "",
+            "updated_at": getattr(session, "end_time", None) or "",
+        }
+    return {
+        "conversation_id": session_id,
+        "messages": messages,
+        "message_count": len(messages),
+        "next_stream_index": next_stream_index,
+        "conversation_info": conversation_info,
     }
 
 
