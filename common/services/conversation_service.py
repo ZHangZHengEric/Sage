@@ -18,6 +18,7 @@ from sagents.session_runtime import (
     build_conversation_messages_view,
     get_global_session_manager,
 )
+from sagents.context.messages.message import is_message_client_visible
 
 from common.core import config
 from common.core.context import get_request_locale
@@ -638,11 +639,7 @@ def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
 
 
 def _is_hidden_context_message(message: Dict[str, Any]) -> bool:
-    metadata = (message or {}).get("metadata")
-    return isinstance(metadata, dict) and (
-        metadata.get("hidden_from_chat") is True
-        or metadata.get("hide_from_chat") is True
-    )
+    return not is_message_client_visible(message)
 
 
 def _find_last_user_message_index(messages: List[Dict[str, Any]]) -> int:

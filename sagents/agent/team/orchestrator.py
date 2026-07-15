@@ -47,7 +47,7 @@ class TeamOrchestrator(FibreOrchestrator):
         session_context: SessionContext,
         max_loop_count: int,
     ) -> AsyncGenerator[List[MessageChunk], None]:
-        output_queue: asyncio.Queue[Optional[List[Any]]] = asyncio.Queue()
+        output_queue: asyncio.Queue = asyncio.Queue()
         self.output_queue = output_queue
 
         session_context.orchestrator = self
@@ -89,7 +89,7 @@ class TeamOrchestrator(FibreOrchestrator):
                     async for chunks in container_agent.run_stream(
                         session_context=session_context,
                     ):
-                        await output_queue.put(chunks)
+                        await self._queue_container_stream_batch(output_queue, chunks)
                 except Exception as e:
                     logger.error(f"Error in team container stream: {e}", exc_info=True)
                     raise
@@ -107,17 +107,22 @@ class TeamOrchestrator(FibreOrchestrator):
                         if not producer_task.done():
                             producer_task.cancel()
                         break
-                    chunks = await output_queue.get()
-                    if chunks is None:
+                    queued_item = await output_queue.get()
+                    if queued_item is None:
                         break
                     if main_session.should_interrupt():
                         if not producer_task.done():
                             producer_task.cancel()
+                        self._finish_queued_stream_item(
+                            queued_item, cancelled=True
+                        )
                         break
-                    yield chunks
+                    async for chunks in self._yield_queued_stream_item(queued_item):
+                        yield chunks
 
-                if not producer_task.done():
-                    await producer_task
+                # Always await the producer so an exception that happened before
+                # the sentinel was consumed is observed and propagated.
+                await producer_task
 
                 if main_session.should_interrupt():
                     main_session.set_status(SessionStatus.INTERRUPTED, cascade=False)
@@ -133,6 +138,10 @@ class TeamOrchestrator(FibreOrchestrator):
                     producer_task.cancel()
                 raise
         finally:
+            if "producer_task" in locals() and not producer_task.done():
+                producer_task.cancel()
+                await asyncio.gather(producer_task, return_exceptions=True)
+            self.output_queue = None
             try:
                 if main_session and hasattr(main_session, "save_state"):
                     main_session.save_state()  # pyright: ignore[reportAttributeAccessIssue]

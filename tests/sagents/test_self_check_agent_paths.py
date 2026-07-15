@@ -63,6 +63,19 @@ def _load_self_check_agent(monkeypatch):
         def _should_abort_due_to_session(self, session_context):
             return False
 
+        @staticmethod
+        def _next_request_runtime_metadata(**extra):
+            return {
+                "hidden_from_chat": True,
+                "hide_from_chat": True,
+                "sse_visible": False,
+                "llm_scope": "next_request",
+                "llm_state": "pending",
+                "llm_consumed_by": None,
+                "llm_consumed_at": None,
+                **extra,
+            }
+
     agent_base_module.AgentBase = AgentBase  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "sagents.agent.agent_base", agent_base_module)
 
@@ -90,7 +103,10 @@ def _make_message(role, content):
 def _assert_hidden_self_check_message(chunk):
     assert chunk.role == "user"
     assert chunk.metadata["hidden_from_chat"] is True
+    assert chunk.metadata["hide_from_chat"] is True
     assert chunk.metadata["sse_visible"] is False
+    assert chunk.metadata["llm_scope"] == "next_request"
+    assert chunk.metadata["llm_state"] == "pending"
     assert chunk.metadata["runtime_diagnostic_source"] == "sage_self_check"
 
 
@@ -529,6 +545,87 @@ def test_malformed_questionnaire_model_payload_triggers_execution_error(
     _assert_hidden_self_check_message(chunks[0])
 
 
+def test_malformed_yiii_questionnaire_from_session_triggers_execution_error(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    malformed_payload = (
+        '<yiii-questionnaire>{"title":"视频Brief确认","questions":'
+        '[{"type":"single_choice","text":"执行？",'
+        '"options":["执行生成视频计划","调整视频计划"],'
+        '"default":"执行生成视频计划"}]}></yiii-questionnaire>'
+    )
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请确认"),
+                _make_message("assistant", malformed_payload),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "<yiii-questionnaire> 标签内容不是合法 JSON" in chunks[0].content
+    _assert_hidden_self_check_message(chunks[0])
+
+
+def test_valid_yiii_structured_aliases_are_accepted(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = (
+        '<yiii-artifacts>{"items":[{"path":"result.md"}]}</yiii-artifacts>'
+        '<yiii-questionnaire>{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？","options":["是","否"],'
+        '"default":"是"}]}'
+        '</yiii-questionnaire>'
+        '<yiii-questionnaire-response>{"answers":[{"value":"是"}]}'
+        '</yiii-questionnaire-response>'
+    )
+
+    assert agent._content_has_structured_tags(content) is True
+    assert agent._validate_structured_tag_payloads(content) == []
+    assert agent._extract_artifact_paths(content) == {"result.md"}
+
+
+def test_invalid_yiii_questionnaire_field_structure_is_rejected(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = (
+        '<yiii-questionnaire>{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？","options":["是","否"]}]}'
+        '</yiii-questionnaire>'
+    )
+
+    issues = agent._validate_structured_tag_payloads(content)
+
+    assert issues == [
+        "<yiii-questionnaire> questions[1] 缺少 default 字段"
+    ]
+
+
 def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_path):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
@@ -550,7 +647,7 @@ def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_pa
                 _make_message("user", "请确认"),
                 _make_message(
                     "assistant",
-                    '<movo-questionnaire>{"title":"确认","questions":[{"type":"single_choice","text":"画幅？","options":["9:16","16:9"]}]}</movo-questionnaire>',
+                    '<yiii-questionnaire>{"title":"确认","questions":[{"type":"single_choice","text":"画幅？","options":["9:16","16:9"],"default":"16:9"}]}</yiii-questionnaire>',
                 ),
             ]
         ),
@@ -567,6 +664,242 @@ def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_pa
     assert chunks == []
     assert session_context.audit_status["self_check_passed"] is True
     assert session_context.audit_status["self_check_summary"] == "checked 0 files"
+
+
+def test_inline_code_wrapped_file_link_triggers_execution_error(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path, encoding="utf-8"):
+            return ""
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant", "`[video_plan.md](file:///tmp/video_plan.md)`"
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert session_context.audit_status["self_check_passed"] is False
+    assert "真实文件引用不能放在反引号或代码块中" in chunks[0].content
+    _assert_hidden_self_check_message(chunks[0])
+
+
+def test_markdown_code_regions_reject_local_file_links(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    samples = [
+        "``[report.md](file:///tmp/report.md)``",
+        "```markdown\n[report.md](file:///tmp/report.md)\n```",
+        "~~~\n![preview](file:///tmp/preview.png)\n~~~",
+        "```\n[report.md](file:///tmp/report.md)",
+        "`[report](<file:///tmp/report with spaces.md>)`",
+    ]
+
+    for content in samples:
+        issues = agent._validate_markdown_file_link_syntax(content)
+        assert len(issues) == 1, content
+        assert "真实文件引用不能放在反引号或代码块中" in issues[0]
+
+
+def test_markdown_indented_code_blocks_reject_local_file_links(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    samples = [
+        "    [report.md](file:///tmp/report.md)",
+        "\t[report.md](file:///tmp/report.md)",
+        ">     [report.md](file:///tmp/report.md)",
+        "结果如下：\n\n    [report.md](file:///tmp/report.md)",
+    ]
+
+    for content in samples:
+        issues = agent._validate_markdown_file_link_syntax(content)
+        assert len(issues) == 1, content
+        assert "真实文件引用不能放在反引号或代码块中" in issues[0]
+
+
+def test_indented_paragraph_continuation_keeps_file_link_clickable(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = "结果如下：\n    [report.md](file:///tmp/report.md)"
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+
+
+def test_escaped_backticks_do_not_hide_clickable_file_link(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = r"\`[report.md](file:///tmp/report.md)\`"
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message("assistant", content),
+            ]
+        )
+    )
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+    assert agent._collect_recent_referenced_files(session_context) == {
+        "/tmp/report.md"
+    }
+
+
+def test_code_file_links_are_not_collected_as_clickable_artifacts(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message(
+                    "assistant",
+                    "```\n[hidden.md](file:///tmp/hidden.md)\n```\n"
+                    "[visible.md](<file:///tmp/visible%20file.md>)",
+                ),
+            ]
+        )
+    )
+
+    referenced = agent._collect_recent_referenced_files(session_context)
+
+    assert referenced == {"/tmp/visible file.md"}
+
+
+def test_balanced_parentheses_in_markdown_file_targets_are_collected(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message(
+                    "assistant",
+                    "[report](file:///tmp/report(1).md)\n"
+                    "![preview](file:///tmp/preview(2).png)",
+                ),
+            ]
+        )
+    )
+
+    referenced = agent._collect_recent_referenced_files(session_context)
+
+    assert referenced == {"/tmp/report(1).md", "/tmp/preview(2).png"}
+
+
+def test_list_fence_file_link_is_code_only(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = (
+        "- ```markdown\n"
+        "  [hidden.md](file:///tmp/hidden.md)\n"
+        "  ```"
+    )
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message("assistant", content),
+            ]
+        )
+    )
+
+    issues = agent._validate_markdown_file_link_syntax(content)
+    referenced = agent._collect_recent_referenced_files(session_context)
+
+    assert len(issues) == 1
+    assert "真实文件引用不能放在反引号或代码块中" in issues[0]
+    assert referenced == set()
+
+
+def test_inline_code_span_does_not_cross_fenced_block(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = (
+        "`unmatched literal\n"
+        "```text\n"
+        "fenced\n"
+        "```\n"
+        "[visible.md](file:///tmp/visible.md) `"
+    )
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "检查"),
+                _make_message("assistant", content),
+            ]
+        )
+    )
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+    assert agent._collect_recent_referenced_files(session_context) == {
+        "/tmp/visible.md"
+    }
+
+
+def test_non_file_links_and_plain_code_do_not_trigger_file_link_issue(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = "```markdown\n[docs](https://example.com/docs)\n```\n`plain code`"
+
+    assert agent._validate_markdown_file_link_syntax(content) == []
+
+
+def test_standard_absolute_file_link_passes_self_check(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path, encoding="utf-8"):
+            return ""
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        message_manager=SimpleNamespace(
+            messages=[
+                _make_message("user", "请生成结果"),
+                _make_message(
+                    "assistant", "[video_plan.md](file:///tmp/video_plan.md)"
+                ),
+            ]
+        ),
+    )
+
+    async def collect():
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
 
 
 def test_absolute_markdown_link_outside_workspace_is_execution_error(

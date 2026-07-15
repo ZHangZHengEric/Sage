@@ -14,6 +14,7 @@ import random
 import string
 import traceback
 import uuid
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, TYPE_CHECKING
 import copy
 
@@ -33,6 +34,17 @@ from sagents.utils.subtask_summary import summarize_subtask_history
 from sagents.utils.logger import logger
 
 StreamPayload = Union[MessageChunk, Dict[str, Any]]
+
+
+@dataclass
+class _OrderedStreamBatch:
+    """A main-container batch whose producer waits for downstream persistence."""
+
+    chunks: List[StreamPayload]
+    persisted: asyncio.Future[None]
+
+
+StreamQueueItem = Optional[Union[List[StreamPayload], _OrderedStreamBatch]]
 
 
 class FibreOrchestrator:
@@ -67,6 +79,53 @@ class FibreOrchestrator:
         self.backend_client = FibreBackendClient()
 
         self.output_queue: Optional[asyncio.Queue] = None
+
+    @staticmethod
+    async def _queue_container_stream_batch(
+        output_queue: asyncio.Queue[StreamQueueItem],
+        chunks: List[StreamPayload],
+    ) -> None:
+        """Queue a main-agent batch and wait until its consumer has persisted it."""
+
+        persisted = asyncio.get_running_loop().create_future()
+        batch = _OrderedStreamBatch(chunks=list(chunks), persisted=persisted)
+        await output_queue.put(batch)
+        try:
+            await persisted
+        except asyncio.CancelledError:
+            if not persisted.done():
+                persisted.cancel()
+            raise
+
+    @staticmethod
+    def _queued_stream_chunks(item: StreamQueueItem) -> List[StreamPayload]:
+        if isinstance(item, _OrderedStreamBatch):
+            return item.chunks
+        return item or []
+
+    @staticmethod
+    def _finish_queued_stream_item(
+        item: StreamQueueItem, *, cancelled: bool = False
+    ) -> None:
+        if not isinstance(item, _OrderedStreamBatch) or item.persisted.done():
+            return
+        if cancelled:
+            item.persisted.cancel()
+        else:
+            item.persisted.set_result(None)
+
+    async def _yield_queued_stream_item(
+        self, item: StreamQueueItem
+    ) -> AsyncGenerator[List[StreamPayload], None]:
+        """Yield one queue item and acknowledge it when downstream resumes."""
+
+        try:
+            yield self._queued_stream_chunks(item)
+        except BaseException:
+            self._finish_queued_stream_item(item, cancelled=True)
+            raise
+        else:
+            self._finish_queued_stream_item(item)
 
     @staticmethod
     def _payload_session_id(payload: StreamPayload) -> Optional[str]:
@@ -210,7 +269,7 @@ class FibreOrchestrator:
         Similar to the original run_loop but uses the new architecture.
         """
         # Initialize Output Queue for merging streams
-        output_queue: asyncio.Queue[Optional[List[StreamPayload]]] = asyncio.Queue()
+        output_queue: asyncio.Queue[StreamQueueItem] = asyncio.Queue()
         self.output_queue = output_queue
 
         # Initialize Main Session Context
@@ -461,7 +520,7 @@ class FibreOrchestrator:
                     async for chunks in container_agent.run_stream(
                         session_context=session_context,
                     ):
-                        await output_queue.put(chunks)
+                        await self._queue_container_stream_batch(output_queue, chunks)
                 except Exception as e:
                     logger.error(f"Error in container stream: {e}", exc_info=True)
                     raise
@@ -481,8 +540,8 @@ class FibreOrchestrator:
                         if not producer_task.done():
                             producer_task.cancel()
                         break
-                    chunks = await output_queue.get()
-                    if chunks is None:
+                    queued_item = await output_queue.get()
+                    if queued_item is None:
                         break
                     if main_session.should_interrupt():
                         logger.warning(
@@ -490,12 +549,16 @@ class FibreOrchestrator:
                         )
                         if not producer_task.done():
                             producer_task.cancel()
+                        self._finish_queued_stream_item(
+                            queued_item, cancelled=True
+                        )
                         break
-                    yield chunks
+                    async for chunks in self._yield_queued_stream_item(queued_item):
+                        yield chunks
 
-                # Wait for producer to finish cleanly
-                if not producer_task.done():
-                    await producer_task
+                # Always await the producer so an exception that happened before
+                # the sentinel was consumed is observed and propagated.
+                await producer_task
 
                 # 这里不要提前把 main_session 标记为 COMPLETED。
                 # Fibre 的外层 Flow 还可能继续执行 self_check / 其他后续节点，
@@ -521,6 +584,10 @@ class FibreOrchestrator:
                     producer_task.cancel()
                 raise
         finally:
+            if "producer_task" in locals() and not producer_task.done():
+                producer_task.cancel()
+                await asyncio.gather(producer_task, return_exceptions=True)
+            self.output_queue = None
             # Save session state
             try:
                 if main_session and hasattr(main_session, "save_state"):

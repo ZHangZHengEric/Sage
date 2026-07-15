@@ -68,6 +68,24 @@ class _FakeSessionContext:
         return self.language
 
 
+def test_next_request_runtime_metadata_keeps_visibility_and_lifecycle_fixed():
+    metadata = ParallelToolAgent._next_request_runtime_metadata(
+        hidden_from_chat=False,
+        hide_from_chat=False,
+        sse_visible=True,
+        llm_scope="durable",
+        llm_state="consumed",
+        runtime_notice="test_notice",
+    )
+
+    assert metadata["hidden_from_chat"] is True
+    assert metadata["hide_from_chat"] is True
+    assert metadata["sse_visible"] is False
+    assert metadata["llm_scope"] == "next_request"
+    assert metadata["llm_state"] == "pending"
+    assert metadata["runtime_notice"] == "test_notice"
+
+
 @pytest.mark.asyncio
 async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypatch):
     agent = ParallelToolAgent(expected_starts=3)
@@ -172,6 +190,8 @@ async def test_invalid_tool_call_arguments_become_hidden_localized_runtime_diagn
     assert message.metadata["sse_visible"] is False
     assert message.metadata["hidden_from_chat"] is True
     assert message.metadata["hide_from_chat"] is True
+    assert message.metadata["llm_scope"] == "next_request"
+    assert message.metadata["llm_state"] == "pending"
     assert message.metadata["runtime_diagnostic_source"] == "tool_call_argument_parse"
 
     request_messages = MessageManager.convert_messages_to_dict_for_request(
