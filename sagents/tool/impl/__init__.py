@@ -9,6 +9,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .apply_patch_tool import ApplyPatchTool
     from .codebase_tool import CodebaseTool
     from .execute_command_tool import ExecuteCommandTool
     from .file_system_tool import FileSystemTool
@@ -27,6 +28,7 @@ HIDDEN_FROM_STREAM_TOOL_NAMES = frozenset({"turn_status"})
 
 __all__ = [
     "HIDDEN_FROM_STREAM_TOOL_NAMES",
+    "ApplyPatchTool",
     "ExecuteCommandTool",
     "FileSystemTool",
     "MemoryTool",
@@ -40,6 +42,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "ApplyPatchTool": ".apply_patch_tool",
     "ExecuteCommandTool": ".execute_command_tool",
     "FileSystemTool": ".file_system_tool",
     "MemoryTool": ".memory_tool",
