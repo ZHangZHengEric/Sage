@@ -61,7 +61,7 @@
               >
                 <CircleDot v-if="singleValue === otherValue" class="h-4 w-4" />
                 <Circle v-else class="h-4 w-4" />
-                <span>其他</span>
+                <span>{{ uiText.other }}</span>
               </button>
             </div>
 
@@ -89,7 +89,7 @@
               >
                 <CheckSquare v-if="multiValues.includes(otherValue)" class="h-4 w-4" />
                 <Square v-else class="h-4 w-4" />
-                <span>其他</span>
+                <span>{{ uiText.other }}</span>
               </button>
             </div>
 
@@ -191,6 +191,15 @@ const submitted = computed(() => submittedResponse.value !== null)
 const canEdit = computed(() => props.canSubmit && !isSubmitting.value && !submitted.value)
 const currentQuestion = computed(() => props.questionnaire.questions[currentIndex.value] || null)
 const isLastQuestion = computed(() => currentIndex.value >= props.questionnaire.questions.length - 1)
+const uiText = computed(() => ({
+  other: props.questionnaire.uiText?.other || t('tools.questionnaire.other'),
+  answerTitle: props.questionnaire.uiText?.answerTitle || t('tools.questionnaire.answerTitle'),
+  questionFallback: props.questionnaire.uiText?.questionFallback || t('tools.questionnaire.questionFallback'),
+  unanswered: props.questionnaire.uiText?.unanswered || t('tools.questionnaire.unanswered'),
+  unselected: props.questionnaire.uiText?.unselected || t('tools.questionnaire.unselected'),
+  answerSeparator: props.questionnaire.uiText?.answerSeparator || t('tools.questionnaire.answerSeparator'),
+  listSeparator: props.questionnaire.uiText?.listSeparator || t('tools.questionnaire.listSeparator'),
+}))
 const progress = computed(() => {
   const count = props.questionnaire.questions.length || 1
   return Math.round(((currentIndex.value + 1) / count) * 100)
@@ -274,12 +283,18 @@ async function submit() {
   if (!props.canSubmit || isSubmitting.value || submitted.value) return
   isSubmitting.value = true
   try {
-    const submission = buildQuestionnaireSubmission(props.questionnaire, draft.value)
+    const submission = buildQuestionnaireSubmission(
+      props.questionnaire,
+      draft.value,
+      'submitted',
+      uiText.value
+    )
     submittedResponse.value = {
       tag: props.questionnaire.tag,
       questionnaireId: props.questionnaire.id,
       status: 'submitted',
       answers: submission.answers,
+      uiText: uiText.value,
     }
     emit('submit', submission)
   } finally {

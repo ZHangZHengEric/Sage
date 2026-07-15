@@ -629,6 +629,23 @@ def test_valid_yiii_structured_aliases_are_accepted(monkeypatch):
     assert agent._extract_artifact_paths(content) == {"result.md"}
 
 
+def test_movo_questionnaire_accepts_value_label_option_objects(monkeypatch):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    content = (
+        '<movo-questionnaire>{"title":"执行路径正在重复","questions":['
+        '{"id":"loop_recovery_action","type":"single_choice",'
+        '"text":"如何继续？","options":['
+        '{"value":"continue_with_new_strategy","label":"使用不同策略继续"},'
+        '{"value":"stop_execution","label":"立即停止"}],'
+        '"default":"continue_with_new_strategy","allow_other":true}]}'
+        "</movo-questionnaire>"
+    )
+
+    assert agent._validate_structured_tag_payloads(content) == []
+
+
 def test_invalid_yiii_questionnaire_field_structure_is_rejected(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
