@@ -502,11 +502,15 @@ class SelfCheckAgent(AgentBase):
         if open_fence is not None:
             fenced_ranges.append((open_fence[2], len(content)))
 
+        indented_ranges = self._markdown_indented_code_ranges(
+            content, fenced_ranges
+        )
+        block_ranges = sorted([*fenced_ranges, *indented_ranges])
         inline_ranges: List[tuple[int, int]] = []
-        for start, end in self._markdown_inline_blocks(content, fenced_ranges):
+        for start, end in self._markdown_inline_blocks(content, block_ranges):
             inline_ranges.extend(self._markdown_inline_code_ranges(content, start, end))
 
-        return sorted([*fenced_ranges, *inline_ranges])
+        return sorted([*block_ranges, *inline_ranges])
 
     @staticmethod
     def _strip_markdown_blockquote_prefix(body: str) -> tuple[int, str]:
@@ -569,13 +573,96 @@ class SelfCheckAgent(AgentBase):
             )
         )
 
+    def _markdown_indented_code_ranges(
+        self,
+        content: str,
+        excluded_ranges: List[tuple[int, int]],
+    ) -> List[tuple[int, int]]:
+        """Return four-column indented code blocks outside fenced blocks."""
+
+        ranges: List[tuple[int, int]] = []
+        open_start: Optional[int] = None
+        open_end: Optional[int] = None
+        open_quote_depth: Optional[int] = None
+        previous_line_blank = True
+        excluded_index = 0
+        offset = 0
+
+        for line in content.splitlines(keepends=True):
+            line_end = offset + len(line)
+            while (
+                excluded_index < len(excluded_ranges)
+                and excluded_ranges[excluded_index][1] <= offset
+            ):
+                excluded_index += 1
+            is_excluded = bool(
+                excluded_index < len(excluded_ranges)
+                and excluded_ranges[excluded_index][0] < line_end
+                and offset < excluded_ranges[excluded_index][1]
+            )
+
+            body = line.rstrip("\r\n")
+            quote_depth, remaining = self._strip_markdown_blockquote_prefix(body)
+            is_blank = not remaining.strip()
+            is_indented = (
+                not is_blank and self._markdown_indentation_width(remaining) >= 4
+            )
+
+            if is_excluded:
+                if open_start is not None and open_end is not None:
+                    ranges.append((open_start, open_end))
+                    open_start = None
+                    open_end = None
+                    open_quote_depth = None
+                # A fenced block is already a block boundary, so an indented
+                # block may begin immediately after its closing line.
+                previous_line_blank = True
+                offset = line_end
+                continue
+
+            same_container = (
+                open_quote_depth is None or quote_depth == open_quote_depth
+            )
+            if open_start is not None and (is_blank or (is_indented and same_container)):
+                open_end = line_end
+            else:
+                if open_start is not None and open_end is not None:
+                    ranges.append((open_start, open_end))
+                    open_start = None
+                    open_end = None
+                    open_quote_depth = None
+
+                if is_indented and previous_line_blank:
+                    open_start = offset
+                    open_end = line_end
+                    open_quote_depth = quote_depth
+
+            previous_line_blank = is_blank
+            offset = line_end
+
+        if open_start is not None and open_end is not None:
+            ranges.append((open_start, open_end))
+        return ranges
+
+    @staticmethod
+    def _markdown_indentation_width(text: str) -> int:
+        width = 0
+        for char in text:
+            if char == " ":
+                width += 1
+            elif char == "\t":
+                width += 4 - (width % 4)
+            else:
+                break
+        return width
+
     @staticmethod
     def _markdown_inline_blocks(
-        content: str, fenced_ranges: List[tuple[int, int]]
+        content: str, code_block_ranges: List[tuple[int, int]]
     ) -> List[tuple[int, int]]:
         available_ranges: List[tuple[int, int]] = []
         cursor = 0
-        for start, end in fenced_ranges:
+        for start, end in code_block_ranges:
             if cursor < start:
                 available_ranges.append((cursor, start))
             cursor = max(cursor, end)
@@ -611,6 +698,9 @@ class SelfCheckAgent(AgentBase):
             if content[index] != "`":
                 index += 1
                 continue
+            if SelfCheckAgent._is_markdown_character_escaped(content, index, start):
+                index += 1
+                continue
             opener_end = index + 1
             while opener_end < end and content[opener_end] == "`":
                 opener_end += 1
@@ -636,6 +726,17 @@ class SelfCheckAgent(AgentBase):
             ranges.append((index, closing_end))
             index = closing_end
         return ranges
+
+    @staticmethod
+    def _is_markdown_character_escaped(
+        content: str, index: int, range_start: int = 0
+    ) -> bool:
+        backslash_count = 0
+        cursor = index - 1
+        while cursor >= range_start and content[cursor] == "\\":
+            backslash_count += 1
+            cursor -= 1
+        return backslash_count % 2 == 1
 
     def _content_has_structured_tags(self, content: str) -> bool:
         for _tag_name, _raw_payload in self._iter_structured_tag_matches(content):
