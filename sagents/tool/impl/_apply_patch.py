@@ -101,13 +101,34 @@ def _normalize_patch_path(raw_path: str, line_number: int) -> str:
     return "/".join(parts)
 
 
-def _is_operation_boundary(line: str) -> bool:
-    return line == END_PATCH or line.startswith((ADD_FILE, DELETE_FILE, UPDATE_FILE))
+def _structural_line(line: str, *, allow_leading_whitespace: bool = True) -> str:
+    """Normalize whitespace only for patch grammar markers, never file content."""
+
+    return line.strip() if allow_leading_whitespace else line.rstrip()
+
+
+def _is_operation_boundary(line: str, *, allow_leading_whitespace: bool = True) -> bool:
+    structural = _structural_line(
+        line, allow_leading_whitespace=allow_leading_whitespace
+    )
+    return structural == END_PATCH or structural.startswith(
+        (ADD_FILE, DELETE_FILE, UPDATE_FILE)
+    )
+
+
+def _is_update_boundary(lines: Sequence[str], index: int) -> bool:
+    line = lines[index]
+    if _is_operation_boundary(line, allow_leading_whitespace=False):
+        return True
+    # A padded final End Patch marker is unambiguous. Inside a hunk, a leading
+    # space remains the diff prefix for literal context such as "*** End Patch".
+    return index == len(lines) - 1 and _structural_line(line) == END_PATCH
 
 
 def _parse_add_file(lines: Sequence[str], index: int) -> Tuple[PatchOperation, int]:
     line_number = index + 1
-    path = _normalize_patch_path(lines[index][len(ADD_FILE) :], line_number)
+    header = _structural_line(lines[index])
+    path = _normalize_patch_path(header[len(ADD_FILE) :], line_number)
     index += 1
     content_lines: List[str] = []
     while index < len(lines) and not _is_operation_boundary(lines[index]):
@@ -169,12 +190,16 @@ def _finish_chunk(
 
 def _parse_update_file(lines: Sequence[str], index: int) -> Tuple[PatchOperation, int]:
     line_number = index + 1
-    path = _normalize_patch_path(lines[index][len(UPDATE_FILE) :], line_number)
+    header = _structural_line(lines[index])
+    path = _normalize_patch_path(header[len(UPDATE_FILE) :], line_number)
     index += 1
 
     move_path: Optional[str] = None
-    if index < len(lines) and lines[index].startswith(MOVE_TO):
-        move_path = _normalize_patch_path(lines[index][len(MOVE_TO) :], index + 1)
+    if index < len(lines) and _structural_line(
+        lines[index], allow_leading_whitespace=False
+    ).startswith(MOVE_TO):
+        move_header = _structural_line(lines[index], allow_leading_whitespace=False)
+        move_path = _normalize_patch_path(move_header[len(MOVE_TO) :], index + 1)
         if move_path == path:
             raise PatchError(
                 "Move destination must differ from the source path",
@@ -216,15 +241,16 @@ def _parse_update_file(lines: Sequence[str], index: int) -> Tuple[PatchOperation
         lines_removed = 0
         is_end_of_file = False
 
-    while index < len(lines) and not _is_operation_boundary(lines[index]):
+    while index < len(lines) and not _is_update_boundary(lines, index):
         line = lines[index]
-        if line == "@@" or line.startswith("@@ "):
+        structural = _structural_line(line, allow_leading_whitespace=False)
+        if structural == "@@" or structural.startswith("@@ "):
             flush_chunk()
-            context = line[3:] if line.startswith("@@ ") else None
+            context = structural[3:] if structural.startswith("@@ ") else None
             chunk_line = index + 1
             index += 1
             continue
-        if line == END_OF_FILE:
+        if structural == END_OF_FILE:
             if context is None and not old_lines and not new_lines:
                 raise PatchError(
                     "End of File must follow update hunk lines",
@@ -242,7 +268,7 @@ def _parse_update_file(lines: Sequence[str], index: int) -> Tuple[PatchOperation
                     path=path,
                 )
             break
-        if line.startswith(MOVE_TO):
+        if structural.startswith(MOVE_TO):
             raise PatchError(
                 "Move to must appear before update hunks",
                 line_number=index + 1,
@@ -325,9 +351,9 @@ def parse_patch(patch: str) -> Tuple[PatchOperation, ...]:
 
     normalized = patch.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
-    if lines and lines[-1] == "":
+    while lines and not lines[-1].strip():
         lines.pop()
-    if not lines or lines[0] != BEGIN_PATCH:
+    if not lines or _structural_line(lines[0]) != BEGIN_PATCH:
         raise PatchError(
             f"The first patch line must be '{BEGIN_PATCH}'",
             line_number=1,
@@ -337,23 +363,24 @@ def parse_patch(patch: str) -> Tuple[PatchOperation, ...]:
     index = 1
     while index < len(lines):
         line = lines[index]
-        if line == END_PATCH:
+        structural = _structural_line(line)
+        if structural == END_PATCH:
             if index != len(lines) - 1:
                 raise PatchError(
                     "No content is allowed after End Patch",
                     line_number=index + 2,
                 )
             break
-        if line.startswith(ADD_FILE):
+        if structural.startswith(ADD_FILE):
             operation, index = _parse_add_file(lines, index)
-        elif line.startswith(DELETE_FILE):
+        elif structural.startswith(DELETE_FILE):
             line_number = index + 1
-            path = _normalize_patch_path(line[len(DELETE_FILE) :], line_number)
+            path = _normalize_patch_path(structural[len(DELETE_FILE) :], line_number)
             operation = PatchOperation(
                 action="delete", path=path, line_number=line_number
             )
             index += 1
-        elif line.startswith(UPDATE_FILE):
+        elif structural.startswith(UPDATE_FILE):
             operation, index = _parse_update_file(lines, index)
         else:
             raise PatchError(
