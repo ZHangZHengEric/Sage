@@ -27,7 +27,8 @@ class ToolProxy:
 
         Args:
             tool_managers: 工具管理器实例或实例列表（优先级按列表顺序递减）
-            available_tools: 可用工具名称列表（白名单）。如果不传或为None，则所有工具可用。
+            available_tools: 可用工具名称列表（白名单）。如果不传或为None，
+                则除 explicit_only 外的工具默认可用。
         """
         if isinstance(tool_managers, list):
             self.tool_managers = tool_managers

@@ -30,6 +30,7 @@ def tool(
     - return_data: 返回数据的结构描述（JSON Schema风格），如 {"type":"object","properties":{...}}
     - return_properties_i18n: 返回对象的根级 description 的多语言描述（仅根描述）
     - param_schema: 参数的详细 Schema 定义，用于覆盖自动推断的类型或提供更复杂的结构（如 array items），形如 {param_name: {"type": "array", "items": {...}}}
+    - explicit_only: 仅在 available_tools 白名单显式选择时向 Agent 暴露
     """
 
     def decorator(func):
