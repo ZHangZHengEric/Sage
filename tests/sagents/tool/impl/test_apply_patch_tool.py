@@ -204,6 +204,40 @@ def test_parse_patch_allows_blank_lines_after_end_of_file():
     assert operation.chunks[0].is_end_of_file is True
 
 
+def test_parse_patch_allows_whitespace_around_structural_markers():
+    operation = parse_patch(
+        "  *** Begin Patch  \n"
+        "  *** Update File: demo.txt  \n"
+        "@@   \n"
+        "-old\n"
+        "+new\n"
+        "  *** End Patch  \n\n"
+    )[0]
+
+    content, added, removed = apply_update_operation("old\n", operation)
+
+    assert operation.path == "demo.txt"
+    assert content == "new\n"
+    assert added == 1
+    assert removed == 1
+
+
+def test_parse_patch_preserves_literal_marker_context_lines():
+    operation = parse_patch(
+        """*** Begin Patch
+*** Update File: demo.txt
+@@
+ *** End Patch
+-old
++new
+*** End Patch"""
+    )[0]
+
+    content, _, _ = apply_update_operation("*** End Patch\nold\n", operation)
+
+    assert content == "*** End Patch\nnew\n"
+
+
 def test_move_only_operation_preserves_content_exactly():
     operation = parse_patch(
         """*** Begin Patch
@@ -223,6 +257,31 @@ def test_workspace_path_preserves_root_workspace():
     sandbox = SimpleNamespace(workspace_path="/")
 
     assert ApplyPatchTool._workspace_path(sandbox, "src/main.py") == "/src/main.py"
+
+
+def test_workspace_lock_key_uses_host_workspace_across_sessions(tmp_path):
+    first = SimpleNamespace(
+        host_workspace_path=str(tmp_path),
+        workspace_path="/workspace",
+        sandbox_id="session-a",
+    )
+    second = SimpleNamespace(
+        host_workspace_path=str(tmp_path / "."),
+        workspace_path="/workspace",
+        sandbox_id="session-b",
+    )
+    remote = SimpleNamespace(
+        host_workspace_path=None,
+        workspace_path="/workspace",
+        sandbox_id="remote-session",
+    )
+
+    assert ApplyPatchTool._workspace_lock_key(
+        first
+    ) == ApplyPatchTool._workspace_lock_key(second)
+    assert ApplyPatchTool._workspace_lock_key(
+        first
+    ) != ApplyPatchTool._workspace_lock_key(remote)
 
 
 @pytest.mark.asyncio
@@ -384,6 +443,43 @@ async def test_apply_patch_rolls_back_after_commit_failure(monkeypatch):
         "errors": [],
     }
     assert sandbox.files == {"/workspace/source.txt": "old\n"}
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_rollback_preserves_external_edits(monkeypatch):
+    sandbox = FakeSandbox({"/workspace/source.txt": "old\n"})
+    tool = ApplyPatchTool()
+    monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
+
+    async def fail_after_external_edit(active_sandbox, plan):
+        change = plan[0]
+        assert change.output_actual_path is not None
+        assert change.new_content is not None
+        await tool._write_file(
+            active_sandbox, change.output_actual_path, change.new_content
+        )
+        sandbox.files[change.output_actual_path] = "external\n"
+        raise OSError("simulated later commit failure")
+
+    monkeypatch.setattr(tool, "_commit", fail_after_external_edit)
+
+    result = await tool.apply_patch(
+        patch="""*** Begin Patch
+*** Update File: source.txt
+@@
+-old
++new
+*** End Patch""",
+        session_id="patch-external-edit",
+    )
+
+    assert result["success"] is False
+    assert result["rollback"]["succeeded"] is False
+    assert (
+        "changed outside this patch transaction"
+        in result["rollback"]["errors"][0]["error"]
+    )
+    assert sandbox.files == {"/workspace/source.txt": "external\n"}
 
 
 @pytest.mark.asyncio

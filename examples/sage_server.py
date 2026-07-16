@@ -354,11 +354,10 @@ class SageStreamService:
             sandbox_type="local",
         )
         self.tool_manager = tool_manager
-        if self.preset_available_tools:
-            if isinstance(self.tool_manager, ToolManager):
-                self.tool_manager = ToolProxy(
-                    self.tool_manager, self.preset_available_tools
-                )
+        if isinstance(self.tool_manager, ToolManager):
+            self.tool_manager = ToolProxy(
+                self.tool_manager, self.preset_available_tools or None
+            )
 
         self.skill_manager = skill_manager
 
@@ -1080,7 +1079,7 @@ async def stream_chat(request: StreamRequest):
             end_tool_proxy = time.time()
             logger.info(f"初始化工具代理耗时: {end_tool_proxy - start_tool_proxy} 秒")
         else:
-            tool_proxy = tool_manager
+            tool_proxy = ToolProxy(tool_manager, None)
 
         if request.available_skills is not None:
             logger.info(f"初始化技能代理，可用技能: {request.available_skills}")
@@ -1619,15 +1618,15 @@ async def auto_generate_agent(request: AutoGenAgentRequest):
         # 创建AutoGenAgentFunc实例
         auto_gen_agent = AutoGenAgentFunc()
 
-        # 根据是否提供工具列表决定使用ToolManager还是ToolProxy
+        # 根据是否提供工具列表决定使用显式白名单或默认工具代理
         if request.available_tools:
             logger.info(f"使用指定的工具列表: {request.available_tools}")
             # 创建ToolProxy，只包含指定的工具
             tool_proxy = ToolProxy(tool_manager, request.available_tools)
             tool_manager_or_proxy = tool_proxy
         else:
-            logger.info("使用完整的工具管理器")
-            tool_manager_or_proxy = tool_manager
+            logger.info("使用默认工具代理")
+            tool_manager_or_proxy = ToolProxy(tool_manager, None)
 
         # 生成Agent配置，使用服务器默认配置
         logger.info("开始调用AutoGenAgentFunc生成配置")

@@ -1246,12 +1246,9 @@ if __name__ == "__main__":
         tool_manager = ToolManager()
         await tool_manager._discover_mcp_tools(config["mcp_setting_path"])
         if config["available_tools"]:
-            tool_proxy = ToolProxy(  # pyright: ignore[reportCallIssue]
-                tool_manager=tool_manager,  # pyright: ignore[reportCallIssue]
-                available_tools=config["available_tools"],  # pyright: ignore[reportCallIssue]
-            )
+            tool_proxy = ToolProxy(tool_manager, config["available_tools"])
         else:
-            tool_proxy = tool_manager
+            tool_proxy = ToolProxy(tool_manager, None)
 
         # 初始化 skill manager
         skill_manager = None

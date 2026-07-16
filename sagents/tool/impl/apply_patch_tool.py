@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import posixpath
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -69,6 +70,23 @@ class ApplyPatchTool:
             return relative_path
         normalized_root = root.rstrip("/") or "/"
         return posixpath.join(normalized_root, relative_path)
+
+    @staticmethod
+    def _workspace_lock_key(sandbox: Any) -> str:
+        host_workspace = getattr(sandbox, "host_workspace_path", None)
+        if host_workspace:
+            workspace_identity = os.path.normcase(
+                os.path.realpath(
+                    os.path.abspath(os.path.expanduser(str(host_workspace)))
+                )
+            )
+            identity = f"host:{workspace_identity}"
+        else:
+            sandbox_id = str(getattr(sandbox, "sandbox_id", "") or "")
+            workspace = str(getattr(sandbox, "workspace_path", "") or "")
+            identity = f"sandbox:{sandbox_id}:{workspace}"
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return f"apply_patch:{digest}"
 
     @staticmethod
     async def _snapshot(
@@ -278,28 +296,72 @@ class ApplyPatchTool:
                     f"Source file still exists after {change.action}: {change.path}"
                 )
 
+    @staticmethod
+    def _planned_file_states(
+        plan: Sequence[PlannedChange],
+    ) -> Dict[str, FileSnapshot]:
+        states: Dict[str, FileSnapshot] = {}
+        for change in plan:
+            if change.action in {"delete", "move"}:
+                states[change.path] = FileSnapshot(
+                    relative_path=change.path,
+                    actual_path=change.actual_path,
+                    exists=False,
+                    content=None,
+                )
+            output_path = change.output_path
+            output_actual_path = change.output_actual_path
+            if (
+                output_path is not None
+                and output_actual_path is not None
+                and change.new_content is not None
+            ):
+                states[output_path] = FileSnapshot(
+                    relative_path=output_path,
+                    actual_path=output_actual_path,
+                    exists=True,
+                    content=change.new_content,
+                )
+        return states
+
+    @staticmethod
+    def _same_file_state(left: FileSnapshot, right: FileSnapshot) -> bool:
+        return left.exists == right.exists and (
+            not left.exists or left.content == right.content
+        )
+
     async def _rollback(
-        self, sandbox: Any, snapshots: Dict[str, FileSnapshot]
+        self,
+        sandbox: Any,
+        snapshots: Dict[str, FileSnapshot],
+        plan: Sequence[PlannedChange],
     ) -> Dict[str, Any]:
         errors: List[Dict[str, str]] = []
+        planned_states = self._planned_file_states(plan)
         for snapshot in reversed(list(snapshots.values())):
             try:
-                current_exists = await sandbox.file_exists(snapshot.actual_path)
+                current = await self._snapshot(
+                    sandbox, snapshot.relative_path, snapshot.actual_path
+                )
+                if self._same_file_state(current, snapshot):
+                    continue
+
+                planned = planned_states.get(snapshot.relative_path)
+                if planned is None or not self._same_file_state(current, planned):
+                    raise OSError(
+                        "Rollback skipped because the path changed outside this patch "
+                        f"transaction: {snapshot.relative_path}"
+                    )
+
                 if snapshot.exists:
                     if snapshot.content is None:
                         raise OSError(
                             f"Missing rollback snapshot content: {snapshot.relative_path}"
                         )
-                    if current_exists:
-                        current_content = await sandbox.read_file(
-                            snapshot.actual_path, encoding="utf-8"
-                        )
-                        if current_content == snapshot.content:
-                            continue
                     await self._write_file(
                         sandbox, snapshot.actual_path, snapshot.content
                     )
-                elif current_exists:
+                elif current.exists:
                     await sandbox.delete_file(snapshot.actual_path)
 
                 restored_exists = await sandbox.file_exists(snapshot.actual_path)
@@ -450,7 +512,7 @@ class ApplyPatchTool:
         except Exception as exc:
             return make_tool_error(ToolErrorCode.SANDBOX_ERROR, str(exc))
 
-        lock_key = f"apply_patch:{session_id}"
+        lock_key = self._workspace_lock_key(sandbox)
         lock = lock_manager.get_lock(lock_key)
         # Keep the keyed lock registered after release. LockManager expires idle
         # locks; deleting it here could split concurrent waiters across two locks.
@@ -465,7 +527,7 @@ class ApplyPatchTool:
                 await self._commit(sandbox, plan)
                 await self._verify_commit(sandbox, plan)
             except asyncio.CancelledError:
-                rollback = await self._rollback(sandbox, snapshots)
+                rollback = await self._rollback(sandbox, snapshots, plan)
                 if not rollback["succeeded"]:
                     logger.error(
                         "ApplyPatchTool: rollback after cancellation failed "
@@ -473,7 +535,7 @@ class ApplyPatchTool:
                     )
                 raise
             except Exception as exc:
-                rollback = await self._rollback(sandbox, snapshots)
+                rollback = await self._rollback(sandbox, snapshots, plan)
                 logger.error(
                     f"ApplyPatchTool: commit failed for session {session_id}: {exc}"
                 )
