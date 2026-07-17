@@ -1143,6 +1143,17 @@ class Session:
                 logger.info(
                     f"SAgent: {phase_name} 阶段在块处理中被中断，会话ID: {session_id}"
                 )
+                terminal_tool_chunks = [
+                    message
+                    for message in (chunk or [])
+                    if getattr(message, "role", None) == MessageRole.TOOL.value
+                    or (
+                        isinstance(message, dict)
+                        and message.get("role") == MessageRole.TOOL.value
+                    )
+                ]
+                if terminal_tool_chunks:
+                    yield terminal_tool_chunks
                 return
             yield chunk
 

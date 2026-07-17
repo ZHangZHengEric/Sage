@@ -2892,12 +2892,22 @@ class AgentBase(ABC):
         else:
             content = str(content)
 
+        status_payload = content
+        if isinstance(status_payload, str):
+            try:
+                status_payload = json.loads(status_payload)
+            except json.JSONDecodeError:
+                status_payload = None
+
+        def is_error_payload(payload: Any) -> bool:
+            return isinstance(payload, dict) and (
+                payload.get("success") is False
+                or payload.get("error") not in (None, False, "")
+                or payload.get("status") == "error"
+            )
+
         execution_status = "success"
-        if isinstance(tool_response_dict, dict) and (
-            tool_response_dict.get("success") is False
-            or tool_response_dict.get("error") not in (None, False, "")
-            or tool_response_dict.get("status") == "error"
-        ):
+        if is_error_payload(tool_response_dict) or is_error_payload(status_payload):
             execution_status = "error"
 
         return [
@@ -3099,7 +3109,7 @@ class AgentBase(ABC):
                     continue
                 if message_chunk_list:
                     yield (message_chunk_list, False)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             for task in tasks:
                 if not task.done():
                     task.cancel()

@@ -83,16 +83,23 @@ class McpProxy:
         tool: McpToolSpec,
         runtime_session_id: Optional[str] = None,
         runtime_user_id: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
         **kwargs,
     ) -> Any:
         """Run an MCP tool asynchronously"""
         try:
             if isinstance(tool.server_params, SseServerParameters):
-                return await self._execute_sse_mcp_tool(tool, **kwargs)
+                return await self._execute_sse_mcp_tool(
+                    tool, tool_call_id=tool_call_id, **kwargs
+                )
             elif isinstance(tool.server_params, StreamableHttpServerParameters):
-                return await self._execute_streamable_http_mcp_tool(tool, **kwargs)
+                return await self._execute_streamable_http_mcp_tool(
+                    tool, tool_call_id=tool_call_id, **kwargs
+                )
             elif isinstance(tool.server_params, StdioServerParameters):
-                return await self._execute_stdio_mcp_tool(tool, **kwargs)
+                return await self._execute_stdio_mcp_tool(
+                    tool, tool_call_id=tool_call_id, **kwargs
+                )
             else:
                 raise ValueError(
                     f"Unknown server params type: {type(tool.server_params)}"
@@ -100,12 +107,18 @@ class McpProxy:
         except BaseExceptionGroup as eg:
             _raise_innermost_exception(eg)
 
-    async def _call_pooled_tool(self, tool: McpToolSpec, **kwargs) -> Any:
+    async def _call_pooled_tool(
+        self,
+        tool: McpToolSpec,
+        tool_call_id: Optional[str] = None,
+        **kwargs,
+    ) -> Any:
         result = await self._pool.call_tool(
             tool.server_name,
             tool.server_params,
             tool.name,
             kwargs,
+            tool_call_id=tool_call_id,
         )
         if result.isError:
             err = cast(TextContent, result.content[0])

@@ -237,7 +237,7 @@
               :toolResult="getParsedToolResult(toolCall)" />
             <!-- Custom Tool Component -->
             <component
-              v-else-if="isCustomTool(toolCall.function?.name)"
+              v-else-if="isCustomTool(toolCall.function?.name) && !isToolCallCancelled(toolCall) && !isToolCallIncomplete(toolCall)"
               :is="getToolComponent(toolCall.function?.name)"
               :toolCall="toolCall"
               :toolResult="getParsedToolResult(toolCall)"
@@ -257,8 +257,8 @@
               :timestamp="message.timestamp"
               :isCancelled="isToolCallCancelled(toolCall)"
               :cancelledReason="isToolCallCancelled(toolCall) ? t('tools.cancelled') : ''"
-              :isIncomplete="message.incompleteToolCalls?.includes(toolCall.id)"
-              :incompleteReason="message.incompleteToolCalls?.includes(toolCall.id) ? t('tools.resultIncomplete') : ''"
+              :isIncomplete="isToolCallIncomplete(toolCall)"
+              :incompleteReason="isToolCallIncomplete(toolCall) ? t('tools.resultIncomplete') : ''"
               @click="handleToolClick($event, getParsedToolResult(toolCall), toolCall)"
             />
           </div>
@@ -660,18 +660,21 @@ const getParsedToolResult = (toolCall) => {
 
 const checkIsToolError = (result) => {
   if (!result) return false
-  const status = result.metadata?.tool_execution_status || result.status || result.content?.status
+  const status = result.metadata?.tool_execution_status
   if (status === 'cancelled') return false
-  if (status === 'error' || result.is_error || result.content?.error === true) return true
+  if (status === 'error' || result.status === 'error' || result.is_error || result.content?.status === 'error' || result.content?.error === true) return true
   if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
   return false
 }
 
 const isToolCallCancelled = (toolCall) => {
   const result = getParsedToolResult(toolCall)
-  const status = result?.metadata?.tool_execution_status || result?.status || result?.content?.status
-  return status === 'cancelled'
+  return result?.metadata?.tool_execution_status === 'cancelled'
 }
+
+const isToolCallIncomplete = (toolCall) => (
+  props.message.incompleteToolCalls?.includes(toolCall.id) === true
+)
 
 const isLatestMessage = computed(() => {
   // 如果readonly，所有消息都不是最新

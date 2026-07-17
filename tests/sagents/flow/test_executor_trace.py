@@ -126,3 +126,44 @@ async def test_flow_executor_suppresses_hidden_chunks_for_any_agent():
 
     assert chunks == [[visible]]
     assert session_manager.session.context.added_messages == [[hidden, visible]]
+
+
+@pytest.mark.asyncio
+async def test_flow_executor_persists_tool_result_when_session_turns_terminal():
+    tool_result = MessageChunk(
+        role=MessageRole.TOOL.value,
+        content='{"status":"cancelled"}',
+        tool_call_id="call_cancelled",
+        message_type=MessageType.TOOL_CALL_RESULT.value,
+        metadata={"tool_execution_status": "cancelled"},
+    )
+    late_assistant = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="must not persist after interruption",
+    )
+    session_manager = _FakeSessionManager()
+    session_manager.session.status = SessionStatus.RUNNING
+    session_manager.session.get_status = lambda: session_manager.session.status
+
+    class FakeAgent:
+        agent_name = "fake_agent"
+
+    class FakeRuntime:
+        def _get_agent(self, _agent_key):
+            return FakeAgent()
+
+        async def _execute_agent_phase(self, *args, **kwargs):
+            session_manager.session.status = SessionStatus.INTERRUPTED
+            yield [tool_result, late_assistant]
+
+    executor = FlowExecutor(
+        tool_manager=None,
+        session_runtime=FakeRuntime(),
+        session_id="flow-session",
+        session_manager=session_manager,
+    )
+
+    chunks = [chunk async for chunk in executor.execute(AgentNode(agent_key="simple"))]
+
+    assert chunks == []
+    assert session_manager.session.context.added_messages == [[tool_result]]

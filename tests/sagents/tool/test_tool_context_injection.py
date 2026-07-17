@@ -521,11 +521,13 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
                 return_value={"content": [{"text": "ok"}]},
             ) as mock_execute,
+            patch("sagents.tool.tool_manager.logger.bind") as mock_logger_bind,
         ):
             result = await self.tool_manager.run_tool_async(
                 tool_name="remote_echo",
                 session_id="real-session",
                 user_id="real-user",
+                tool_call_id="call_remote_echo",
                 foo="model-value",
             )
 
@@ -535,6 +537,7 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["foo"], "context-value")
         self.assertEqual(call_kwargs["session_id"], "context-session")
         self.assertEqual(call_kwargs["user_id"], "context-user")
+        mock_logger_bind.assert_any_call(tool_call_id="call_remote_echo")
 
     async def test_tool_proxy_applies_system_context_overrides(self):
         tool = ToolSpec(
@@ -685,6 +688,40 @@ class TestToolContextInjection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["foo"], "bar")
         self.assertEqual(call_kwargs["session_id"], "session-4")
         self.assertEqual(call_kwargs["user_id"], "user-4")
+
+    async def test_mcp_proxy_propagates_tool_call_id_to_connection_pool(self):
+        tool = McpToolSpec(
+            name="remote_echo",
+            description="echo",
+            description_i18n={},
+            func=None,
+            parameters={"foo": {"type": "string"}},
+            required=["foo"],
+            server_name="remote",
+            server_params=StreamableHttpServerParameters(url="http://example.invalid"),
+        )
+        proxy = McpProxy()
+        proxy._pool.call_tool = AsyncMock(
+            return_value=SimpleNamespace(
+                isError=False,
+                model_dump=lambda: {"content": [{"text": "ok"}]},
+            )
+        )
+
+        result = await proxy.run_mcp_tool(
+            tool,
+            tool_call_id="call-42",
+            foo="bar",
+        )
+
+        self.assertEqual(result, {"content": [{"text": "ok"}]})
+        proxy._pool.call_tool.assert_awaited_once_with(
+            "remote",
+            tool.server_params,
+            "remote_echo",
+            {"foo": "bar"},
+            tool_call_id="call-42",
+        )
 
     def test_auto_injected_params_are_hidden_from_openai_schema(self):
         tool = McpToolSpec(
