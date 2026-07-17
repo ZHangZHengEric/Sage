@@ -536,21 +536,19 @@ export const useChatPage = (props) => {
     // 检查当前会话是否还在进行中
     const isSessionRunning = activeSessions.value?.[sessionId]?.status === 'running'
 
-    // 为没有结果的工具调用添加未完成标记
-    // 只有当会话不在进行中时，才标记为已取消
+    // 会话结束后仍缺少结果，只能说明消息链路不完整，不能推断为取消。
     normalizedMessages.forEach(msg => {
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         msg.tool_calls.forEach(toolCall => {
           if (toolCall.id && !toolCallIdsWithResults.has(toolCall.id)) {
-            // 如果会话还在进行中，不标记为已取消（可能是等待中）
+            // 如果会话还在进行中，不标记为不完整（可能仍在等待结果）
             if (isSessionRunning) {
               return
             }
-            // 工具调用没有对应的结果，且会话已结束，标记为已取消
-            if (!msg.cancelledToolCalls) {
-              msg.cancelledToolCalls = []
+            if (!msg.incompleteToolCalls) {
+              msg.incompleteToolCalls = []
             }
-            msg.cancelledToolCalls.push(toolCall.id)
+            msg.incompleteToolCalls.push(toolCall.id)
           }
         })
       }
@@ -666,6 +664,13 @@ export const useChatPage = (props) => {
     // 处理工具结果消息 - 移除 pending 状态
     if (isToolResultMessage(messageData) && messageData.tool_call_id) {
       pendingToolCalls.value.delete(messageData.tool_call_id)
+      messages.value.forEach((message) => {
+        if (message.incompleteToolCalls?.includes(messageData.tool_call_id)) {
+          message.incompleteToolCalls = message.incompleteToolCalls.filter(
+            toolCallId => toolCallId !== messageData.tool_call_id
+          )
+        }
+      })
     }
     
     if (messageIndexKey && messageIdIndexMap.value.has(messageIndexKey)) {
@@ -760,17 +765,17 @@ export const useChatPage = (props) => {
     return userMessage
   }
   
-  // 清理 pending 的工具调用
+  // 清理 pending 的工具调用。缺少终态结果只标记为链路不完整。
   const clearPendingToolCalls = (reason = '会话关闭') => {
     if (pendingToolCalls.value.size > 0) {
-      // 为每个 pending 的工具调用添加取消标记
+      // 为每个 pending 的工具调用添加不完整标记
       pendingToolCalls.value.forEach((info, toolCallId) => {
         // 检查该工具调用是否已经有结果
         const hasResult = messages.value.some(m =>
           isToolResultMessage(m) &&
           m.tool_call_id === toolCallId
         )
-        // 如果已经有结果，不标记为已取消
+        // 如果已经有结果，不标记为不完整
         if (hasResult) {
           return
         }
@@ -781,8 +786,8 @@ export const useChatPage = (props) => {
         if (messageIndex !== -1) {
           const message = messages.value[messageIndex]
           // 使用 Vue 的响应式方式更新数组
-          const newCancelledList = [...(message.cancelledToolCalls || []), toolCallId]
-          message.cancelledToolCalls = newCancelledList
+          const newIncompleteList = [...(message.incompleteToolCalls || []), toolCallId]
+          message.incompleteToolCalls = newIncompleteList
         }
       })
       pendingToolCalls.value.clear()

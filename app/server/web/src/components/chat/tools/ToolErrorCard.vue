@@ -20,6 +20,8 @@ const props = defineProps({
 
 const errorMessage = computed(() => {
   if (typeof props.toolResult === 'string') return props.toolResult
-  return props.toolResult?.message || props.toolResult?.error || JSON.stringify(props.toolResult)
+  const payload = props.toolResult?.content ?? props.toolResult
+  if (typeof payload === 'string') return payload
+  return payload?.message || payload?.error || JSON.stringify(payload)
 })
 </script>

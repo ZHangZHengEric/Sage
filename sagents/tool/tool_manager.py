@@ -1223,6 +1223,7 @@ class ToolManager:
         arguments: Dict[str, Any],
         started_at: float,
         status: str,
+        tool_call_id: Optional[str] = None,
         response: Any = None,
         error: Optional[str] = None,
     ) -> None:
@@ -1236,6 +1237,7 @@ class ToolManager:
         }
         server_name = self._get_tool_server_name(tool)
         call = {
+            "tool_call_id": tool_call_id,
             "tool_name": tool.name,
             "tool_type": self._get_tool_type(tool),
             "server_name": server_name,
@@ -1269,12 +1271,19 @@ class ToolManager:
             return None
         return current_request_id()
 
-    def _mcp_request_logger(self, session_id: str, request_id: Optional[str]):
+    def _mcp_request_logger(
+        self,
+        session_id: str,
+        request_id: Optional[str],
+        tool_call_id: Optional[str] = None,
+    ):
         bound_context: Dict[str, Any] = {}
         if session_id:
             bound_context["session_id"] = session_id
         if request_id:
             bound_context["request_id"] = request_id
+        if tool_call_id:
+            bound_context["tool_call_id"] = tool_call_id
         return logger.bind(**bound_context) if bound_context else logger
 
     def _log_mcp_request_start(
@@ -1282,8 +1291,9 @@ class ToolManager:
         tool: McpToolSpec,
         session_id: str,
         request_id: Optional[str],
+        tool_call_id: Optional[str],
     ) -> None:
-        self._mcp_request_logger(session_id, request_id).debug(
+        self._mcp_request_logger(session_id, request_id, tool_call_id).debug(
             f"MCP request start | tool={tool.name} | server={tool.server_name}"
         )
 
@@ -1292,6 +1302,7 @@ class ToolManager:
         tool: McpToolSpec,
         session_id: str,
         request_id: Optional[str],
+        tool_call_id: Optional[str],
         started_at: float,
         status: str,
         error: Optional[str] = None,
@@ -1303,13 +1314,14 @@ class ToolManager:
         )
         if error:
             message += f" | error={error}"
-        self._mcp_request_logger(session_id, request_id).debug(message)
+        self._mcp_request_logger(session_id, request_id, tool_call_id).debug(message)
 
     def _record_tool_trace_start(
         self,
         session_context: Optional[SessionContext],
         tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
         request_id: Optional[str],
+        tool_call_id: Optional[str],
         arguments: Dict[str, Any],
         started_at: float,
     ) -> None:
@@ -1321,6 +1333,7 @@ class ToolManager:
         record_timing_event(
             "tool_request_start",
             request_id=request_id,
+            tool_call_id=tool_call_id,
             tool_name=tool.name,
             tool_type=self._get_tool_type(tool),
             server_name=self._get_tool_server_name(tool),
@@ -1333,6 +1346,7 @@ class ToolManager:
         session_context: Optional[SessionContext],
         tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
         request_id: Optional[str],
+        tool_call_id: Optional[str],
         started_at: float,
         status: str,
         error: Optional[str] = None,
@@ -1342,6 +1356,7 @@ class ToolManager:
         ended_at = time.time()
         fields: Dict[str, Any] = {
             "request_id": request_id,
+            "tool_call_id": tool_call_id,
             "tool_name": tool.name,
             "tool_type": self._get_tool_type(tool),
             "server_name": self._get_tool_server_name(tool),
@@ -1361,6 +1376,7 @@ class ToolManager:
         tool_name: str,
         session_id: str = "",
         user_id: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
         **kwargs,
     ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
@@ -1382,7 +1398,12 @@ class ToolManager:
         tool_started_at = time.time()
         request_id = self._get_active_request_id(session_context)
         self._record_tool_trace_start(
-            session_context, tool, request_id, kwargs, tool_started_at
+            session_context,
+            tool,
+            request_id,
+            tool_call_id,
+            kwargs,
+            tool_started_at,
         )
 
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
@@ -1390,7 +1411,9 @@ class ToolManager:
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                self._log_mcp_request_start(tool, session_id, request_id)
+                self._log_mcp_request_start(
+                    tool, session_id, request_id, tool_call_id
+                )
                 try:
                     final_result = await self._execute_mcp_tool(
                         tool,
@@ -1399,13 +1422,19 @@ class ToolManager:
                         **kwargs,
                     )
                     self._log_mcp_request_end(
-                        tool, session_id, request_id, tool_started_at, "success"
+                        tool,
+                        session_id,
+                        request_id,
+                        tool_call_id,
+                        tool_started_at,
+                        "success",
                     )
                 except asyncio.CancelledError:
                     self._log_mcp_request_end(
                         tool,
                         session_id,
                         request_id,
+                        tool_call_id,
                         tool_started_at,
                         "cancelled",
                         error="cancelled",
@@ -1417,6 +1446,7 @@ class ToolManager:
                         tool,
                         session_id,
                         request_id,
+                        tool_call_id,
                         tool_started_at,
                         "error",
                         error=error_detail,
@@ -1439,6 +1469,7 @@ class ToolManager:
                     final_result = json.dumps(
                         {
                             "success": False,
+                            "status": "error",
                             "error": f"Missing required parameters: {', '.join(missing_params)}",
                             "required_params": required_params,
                             "provided_params": list(kwargs.keys()),
@@ -1452,6 +1483,7 @@ class ToolManager:
                         kwargs,
                         tool_started_at,
                         "error",
+                        tool_call_id=tool_call_id,
                         response=final_result,
                         error=f"缺少必填参数: {', '.join(missing_params)}",
                     )
@@ -1459,6 +1491,7 @@ class ToolManager:
                         session_context,
                         tool,
                         request_id,
+                        tool_call_id,
                         tool_started_at,
                         "error",
                         error=f"缺少必填参数: {', '.join(missing_params)}",
@@ -1502,6 +1535,7 @@ class ToolManager:
                     kwargs,
                     tool_started_at,
                     "error",
+                    tool_call_id=tool_call_id,
                     response=error_result,
                     error=f"Invalid JSON response: {validation_msg}",
                 )
@@ -1509,6 +1543,7 @@ class ToolManager:
                     session_context,
                     tool,
                     request_id,
+                    tool_call_id,
                     tool_started_at,
                     "error",
                     error=f"Invalid JSON response: {validation_msg}",
@@ -1521,10 +1556,16 @@ class ToolManager:
                 kwargs,
                 tool_started_at,
                 "success",
+                tool_call_id=tool_call_id,
                 response=final_result,
             )
             self._record_tool_trace_end(
-                session_context, tool, request_id, tool_started_at, "success"
+                session_context,
+                tool,
+                request_id,
+                tool_call_id,
+                tool_started_at,
+                "success",
             )
 
             # Step 5: Truncate result if too long (max 8000 tokens)
@@ -1540,12 +1581,14 @@ class ToolManager:
                 kwargs,
                 tool_started_at,
                 "cancelled",
+                tool_call_id=tool_call_id,
                 error="cancelled",
             )
             self._record_tool_trace_end(
                 session_context,
                 tool,
                 request_id,
+                tool_call_id,
                 tool_started_at,
                 "cancelled",
                 error="cancelled",
@@ -1570,6 +1613,7 @@ class ToolManager:
                 kwargs,
                 tool_started_at,
                 "error",
+                tool_call_id=tool_call_id,
                 response=error_result,
                 error=error_detail,
             )
@@ -1577,6 +1621,7 @@ class ToolManager:
                 session_context,
                 tool,
                 request_id,
+                tool_call_id,
                 tool_started_at,
                 "error",
                 error=error_detail,
@@ -1802,6 +1847,7 @@ class ToolManager:
         """Format a consistent error response"""
         error_response = {
             "error": True,
+            "status": "error",
             "error_type": error_type,
             "message": error_msg,
             "tool_name": tool_name,
