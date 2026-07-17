@@ -3,7 +3,6 @@ from typing import AsyncGenerator, List
 
 import pytest
 
-import sagents.agent.agent_base as agent_base_module
 from sagents.agent.agent_base import AgentBase, TOOL_CALL_CONCURRENCY_LIMIT
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
@@ -87,33 +86,13 @@ def test_next_request_runtime_metadata_keeps_visibility_and_lifecycle_fixed():
 
 
 @pytest.mark.asyncio
-async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypatch):
+async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10():
     agent = ParallelToolAgent(expected_starts=3)
     calls = {
         "call_1": _tool_call("call_1"),
         "call_2": _tool_call("call_2"),
         "call_3": _tool_call("call_3"),
     }
-    seen_limits = []
-    original_runner = agent_base_module.run_with_concurrency_limit_ordered
-
-    async def run_with_limit_spy(
-        limit, coros, progress_callback=None, *, return_exceptions=False
-    ):
-        seen_limits.append(limit)
-        return await original_runner(
-            limit,
-            coros,
-            progress_callback,
-            return_exceptions=return_exceptions,
-        )
-
-    monkeypatch.setattr(
-        agent_base_module,
-        "run_with_concurrency_limit_ordered",
-        run_with_limit_spy,
-    )
-
     async def collect_results():
         results = []
         async for messages, is_complete in agent._handle_tool_calls(
@@ -131,8 +110,8 @@ async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypat
     await asyncio.wait_for(agent.started.wait(), timeout=1)
 
     assert agent.max_active_count == 3
+    assert agent.max_active_count <= TOOL_CALL_CONCURRENCY_LIMIT
     assert agent.started_tool_ids == ["call_1", "call_2", "call_3"]
-    assert seen_limits == [TOOL_CALL_CONCURRENCY_LIMIT]
 
     agent.release.set()
     results = await asyncio.wait_for(collector, timeout=1)
@@ -142,6 +121,123 @@ async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10(monkeypat
         "call_2",
         "call_3",
     ]
+
+
+class ImmediateResultAgent(ParallelToolAgent):
+    def __init__(self):
+        super().__init__(expected_starts=2)
+        self.slow_release = asyncio.Event()
+
+    async def _execute_tool(
+        self,
+        tool_call,
+        tool_manager,
+        messages_input,
+        session_id,
+        session_context=None,
+    ):
+        self.started_tool_ids.append(tool_call["id"])
+        if len(self.started_tool_ids) == self.expected_starts:
+            self.started.set()
+        if tool_call["id"] == "call_slow":
+            await self.slow_release.wait()
+        yield [
+            MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=tool_call["id"],
+                tool_call_id=tool_call["id"],
+                message_type=MessageType.TOOL_CALL_RESULT.value,
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_result_is_yielded_before_other_tools_finish():
+    agent = ImmediateResultAgent()
+    calls = {
+        "call_fast": _tool_call("call_fast"),
+        "call_slow": _tool_call("call_slow"),
+    }
+    stream = agent._handle_tool_calls(
+        tool_calls=calls,
+        tool_manager=None,
+        messages_input=[],
+        session_id="session-1",
+        emit_tool_call_message=False,
+    )
+
+    messages, is_complete = await asyncio.wait_for(anext(stream), timeout=1)
+
+    assert is_complete is False
+    assert [message.tool_call_id for message in messages] == ["call_fast"]
+    assert agent.slow_release.is_set() is False
+
+    agent.slow_release.set()
+    remaining = []
+    async for messages, _ in stream:
+        remaining.extend(messages)
+    assert [message.tool_call_id for message in remaining] == ["call_slow"]
+
+
+class _RecordingSessionContext(_FakeSessionContext):
+    def __init__(self):
+        super().__init__("zh-CN")
+        self.messages = []
+
+    def add_messages(self, messages):
+        self.messages.extend(messages)
+
+
+class _CancellingToolManager:
+    def __init__(self):
+        self.slow_started = asyncio.Event()
+        self.slow_release = asyncio.Event()
+
+    async def run_tool_async(
+        self, tool_name, session_id, user_id=None, tool_call_id=None, **kwargs
+    ):
+        if tool_call_id == "call_fast":
+            return '{"error":true,"error_type":"EXECUTION_ERROR","message":"failed"}'
+        self.slow_started.set()
+        await self.slow_release.wait()
+        return '{"ok":true}'
+
+
+@pytest.mark.asyncio
+async def test_cancellation_persists_only_the_cancelled_tool_terminal_result(monkeypatch):
+    agent = ParallelToolAgent(expected_starts=0)
+    agent._execute_tool = AgentBase._execute_tool.__get__(agent, ParallelToolAgent)
+    session_context = _RecordingSessionContext()
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda _session_id: session_context
+    )
+    tool_manager = _CancellingToolManager()
+    calls = {
+        "call_fast": _tool_call("call_fast"),
+        "call_slow": _tool_call("call_slow"),
+    }
+
+    stream = agent._handle_tool_calls(
+        tool_calls=calls,
+        tool_manager=tool_manager,
+        messages_input=[],
+        session_id="session-1",
+        emit_tool_call_message=False,
+    )
+    fast_messages, _ = await asyncio.wait_for(anext(stream), timeout=1)
+    assert fast_messages[0].metadata["tool_execution_status"] == "error"
+    await asyncio.wait_for(tool_manager.slow_started.wait(), timeout=1)
+
+    pending_next = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    pending_next.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending_next
+
+    assert len(session_context.messages) == 1
+    cancelled = session_context.messages[0]
+    assert cancelled.tool_call_id == "call_slow"
+    assert cancelled.metadata["tool_execution_status"] == "cancelled"
 
 
 @pytest.mark.asyncio

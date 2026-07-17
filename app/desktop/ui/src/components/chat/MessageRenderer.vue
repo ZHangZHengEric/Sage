@@ -273,8 +273,10 @@
               :toolCall="toolCall"
               :toolResult="getParsedToolResult(toolCall)"
               :timestamp="message.timestamp"
-              :isCancelled="message.cancelledToolCalls?.includes(toolCall.id)"
-              :cancelledReason="message.cancelledToolCalls?.includes(toolCall.id) ? '已取消' : ''"
+              :isCancelled="isToolCallCancelled(toolCall)"
+              :cancelledReason="isToolCallCancelled(toolCall) ? t('tools.cancelled') : ''"
+              :isIncomplete="message.incompleteToolCalls?.includes(toolCall.id)"
+              :incompleteReason="message.incompleteToolCalls?.includes(toolCall.id) ? t('tools.resultIncomplete') : ''"
               @click="handleToolClick($event, getParsedToolResult(toolCall), toolCall)"
             />
            </div>
@@ -707,9 +709,17 @@ const getParsedToolResult = (toolCall) => {
 
 const checkIsToolError = (result) => {
     if (!result) return false
-    if (result.is_error || result.status === 'error') return true
+    const status = result.metadata?.tool_execution_status || result.status || result.content?.status
+    if (status === 'cancelled') return false
+    if (status === 'error' || result.is_error || result.content?.error === true) return true
     if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
     return false
+}
+
+const isToolCallCancelled = (toolCall) => {
+    const result = getParsedToolResult(toolCall)
+    const status = result?.metadata?.tool_execution_status || result?.status || result?.content?.status
+    return status === 'cancelled'
 }
 
 const isLatestMessage = computed(() => {

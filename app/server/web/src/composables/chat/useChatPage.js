@@ -62,6 +62,7 @@ export const useChatPage = (props) => {
   const showAbilityButton = ref(true)
   const hasUsedAbilityEntryInSession = ref(false)
   const autoSendingGuidanceSessionId = ref(null)
+  const pendingToolCalls = ref(new Set())
 
 
   // 打开工作台（统一方法）
@@ -348,6 +349,17 @@ export const useChatPage = (props) => {
       abortControllerRef.value = null
     }
     cancelPendingStreamUiWork()
+    pendingToolCalls.value.forEach((toolCallId) => {
+      const message = messages.value.find(item =>
+        item.tool_calls?.some(toolCall => toolCall.id === toolCallId)
+      )
+      if (message) {
+        message.incompleteToolCalls = [
+          ...new Set([...(message.incompleteToolCalls || []), toolCallId])
+        ]
+      }
+    })
+    pendingToolCalls.value.clear()
     isLoading.value = false
     loadingSessionId.value = null
   }
@@ -471,6 +483,25 @@ export const useChatPage = (props) => {
         session_id: msg.session_id || sessionId,
         agent_id: msg.agent_id || conversationAgentId
       }))
+
+    const toolCallIdsWithResults = new Set(
+      normalizedMessages
+        .filter(message => isToolResultMessage(message) && message.tool_call_id)
+        .map(message => message.tool_call_id)
+    )
+    const isSessionRunning = activeSessions.value?.[sessionId]?.status === 'running'
+    if (!isSessionRunning) {
+      normalizedMessages.forEach((message) => {
+        message.tool_calls?.forEach((toolCall) => {
+          if (toolCall.id && !toolCallIdsWithResults.has(toolCall.id)) {
+            message.incompleteToolCalls = [
+              ...(message.incompleteToolCalls || []),
+              toolCall.id
+            ]
+          }
+        })
+      })
+    }
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
 
@@ -534,6 +565,20 @@ export const useChatPage = (props) => {
     }
     const messageId = messageData.message_id
     const messageIndexKey = getSessionMessageIndexKey(messageData, currentSessionId.value)
+
+    messageData.tool_calls?.forEach((toolCall) => {
+      if (toolCall.id) pendingToolCalls.value.add(toolCall.id)
+    })
+    if (isToolResultMessage(messageData) && messageData.tool_call_id) {
+      pendingToolCalls.value.delete(messageData.tool_call_id)
+      messages.value.forEach((message) => {
+        if (message.incompleteToolCalls?.includes(messageData.tool_call_id)) {
+          message.incompleteToolCalls = message.incompleteToolCalls.filter(
+            toolCallId => toolCallId !== messageData.tool_call_id
+          )
+        }
+      })
+    }
 
     if (messageIndexKey && messageIdIndexMap.value.has(messageIndexKey)) {
       const targetIndex = messageIdIndexMap.value.get(messageIndexKey)

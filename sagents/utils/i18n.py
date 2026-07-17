@@ -51,6 +51,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.tool_call_parse.suggestion.commas": ("• 确保没有多余的逗号或缺少逗号"),
         "runtime.tool.error.arguments_not_object": "工具参数格式错误: 参数必须是JSON对象",
         "runtime.tool.error.execution_failed": "工具 {tool_name} 执行失败: {message}",
+        "runtime.tool.error.execution_cancelled": "工具 {tool_name} 已取消",
         "runtime.repeat_recovery.title": "执行路径正在重复",
         "runtime.repeat_recovery.notice": (
             "检测到重复执行步骤，已暂停以避免在没有进展的情况下继续。请说明后续处理要求。"
@@ -130,6 +131,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Tool argument format error: arguments must be a JSON object"
         ),
         "runtime.tool.error.execution_failed": "Tool {tool_name} failed: {message}",
+        "runtime.tool.error.execution_cancelled": "Tool {tool_name} was cancelled",
         "runtime.repeat_recovery.title": "Execution path is repeating",
         "runtime.repeat_recovery.notice": (
             "I detected repeated execution steps and paused to avoid continuing "
@@ -216,6 +218,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Erro no formato dos argumentos da ferramenta: os argumentos devem ser um objeto JSON"
         ),
         "runtime.tool.error.execution_failed": "Ferramenta {tool_name} falhou: {message}",
+        "runtime.tool.error.execution_cancelled": (
+            "A ferramenta {tool_name} foi cancelada"
+        ),
         "runtime.repeat_recovery.title": "O caminho de execucao esta se repetindo",
         "runtime.repeat_recovery.notice": (
             "Detectei etapas de execucao repetidas e pausei para evitar continuar "

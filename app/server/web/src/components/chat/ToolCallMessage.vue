@@ -12,16 +12,20 @@
         <span class="status-icon flex items-center justify-center" :class="statusIconClass">
           <Check v-if="isCompleted" class="w-3.5 h-3.5" />
           <X v-else-if="isCancelled" class="w-3.5 h-3.5" />
+          <CircleAlert v-else-if="isIncomplete" class="w-3.5 h-3.5" />
           <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
         </span>
         <span v-if="isCancelled" class="text-sm text-muted-foreground ml-1">
           {{ cancelledReason }}
         </span>
-        <div v-if="!isCancelled" class="expand-icon text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" >
+        <span v-else-if="isIncomplete" class="text-sm text-amber-600 dark:text-amber-400 ml-1">
+          {{ incompleteReason }}
+        </span>
+        <div v-if="!isCancelled && !isIncomplete" class="expand-icon text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" >
           <ChevronRight class="w-3.5 h-3.5" />
         </div>
         <span class="text-[10px] opacity-70 font-normal text-muted-foreground/60 ml-1.5" v-if="timestamp">{{ formatTime(timestamp) }}</span>
-        <span v-if="!isCancelled" class="click-hint text-sm text-muted-foreground ml-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
+        <span v-if="!isCancelled && !isIncomplete" class="click-hint text-sm text-muted-foreground ml-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">{{ t('common.viewDetails') }}</span>
       </div>
     </div>
   </div>
@@ -32,6 +36,7 @@ import { computed } from 'vue'
 import {
   Check,
   X,
+  CircleAlert,
   Loader2,
   ChevronRight,
   Zap,
@@ -73,7 +78,15 @@ const props = defineProps({
   },
   cancelledReason: {
     type: String,
-    default: '已取消'
+    default: ''
+  },
+  isIncomplete: {
+    type: Boolean,
+    default: false
+  },
+  incompleteReason: {
+    type: String,
+    default: ''
   }
 })
 
@@ -82,11 +95,14 @@ const emit = defineEmits(['click'])
 const { t } = useLanguage()
 
 const toolName = computed(() => props.toolCall.function?.name || '')
-const isCompleted = computed(() => !!props.toolResult && !props.isCancelled)
+const isCompleted = computed(() => (
+  !!props.toolResult && !props.isCancelled && !props.isIncomplete
+))
 
 const statusIconClass = computed(() => {
   if (isCompleted.value) return 'text-green-500'
   if (props.isCancelled) return 'text-muted-foreground'
+  if (props.isIncomplete) return 'text-amber-600 dark:text-amber-400'
   return 'text-indigo-500'
 })
 

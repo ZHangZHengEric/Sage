@@ -976,6 +976,8 @@ export default {
   'tools.description': 'Description',
   'tools.enterDescription': 'Enter description (optional)',
   'tools.cancel': 'Cancel',
+  'tools.cancelled': 'Cancelled',
+  'tools.resultIncomplete': 'Result incomplete',
   'tools.add': 'Add',
   'tools.adding': 'Adding...',
   'tools.save': 'Save',

@@ -242,7 +242,10 @@ def test_builtin_tool_calls_are_saved_with_request_payload(tmp_path, monkeypatch
         )
 
         result = await manager.run_tool_async(
-            "echo_tool", session_id=ctx.session_id, value="hello"
+            "echo_tool",
+            session_id=ctx.session_id,
+            tool_call_id="call_echo_1",
+            value="hello",
         )
         assert json.loads(result)["content"] == {"echo": "hello"}
 
@@ -252,6 +255,7 @@ def test_builtin_tool_calls_are_saved_with_request_payload(tmp_path, monkeypatch
 
         assert data["call_count"] == 1
         call = data["calls"][0]
+        assert call["tool_call_id"] == "call_echo_1"
         assert call["tool_name"] == "echo_tool"
         assert call["tool_type"] == "tool"
         assert call["arguments"] == {"value": "hello"}
@@ -260,6 +264,12 @@ def test_builtin_tool_calls_are_saved_with_request_payload(tmp_path, monkeypatch
         event_types = [event["event_type"] for event in ctx.execution_timeline_events]
         assert "tool_request_start" in event_types
         assert "tool_request_end" in event_types
+        tool_events = [
+            event
+            for event in ctx.execution_timeline_events
+            if event["event_type"] in {"tool_request_start", "tool_request_end"}
+        ]
+        assert all(event["tool_call_id"] == "call_echo_1" for event in tool_events)
 
     asyncio.run(_run())
 

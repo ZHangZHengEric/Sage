@@ -1029,6 +1029,8 @@ export default {
   'tools.description': '描述',
   'tools.enterDescription': '请输入描述（可选）',
   'tools.cancel': '取消',
+  'tools.cancelled': '已取消',
+  'tools.resultIncomplete': '结果不完整',
   'tools.add': '添加',
   'tools.adding': '添加中...',
   'tools.save': '保存',

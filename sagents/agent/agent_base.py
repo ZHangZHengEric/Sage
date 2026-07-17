@@ -55,7 +55,6 @@ from sagents.utils.agent_session_helper import (
     get_live_session_context as _get_live_session_context_util,
     should_abort_due_to_session as _should_abort_due_to_session_util,
 )
-from sagents.utils.concurrency import run_with_concurrency_limit_ordered
 import traceback
 import time
 import os
@@ -2712,7 +2711,10 @@ class AgentBase(ABC):
             with _bind_tool_progress_context(session_id, tool_call["id"]):
                 try:
                     tool_response = await tool_manager.run_tool_async(
-                        tool_name, session_id=session_id, **call_kwargs
+                        tool_name,
+                        session_id=session_id,
+                        tool_call_id=tool_call["id"],
+                        **call_kwargs,
                     )
                 finally:
                     try:
@@ -2773,6 +2775,15 @@ class AgentBase(ABC):
                 )
                 yield processed_response
 
+        except asyncio.CancelledError:
+            logger.warning(
+                f"{self.agent_name}: 工具 {tool_name} 收到取消信号, "
+                f"tool_call_id={tool_call['id']}"
+            )
+            yield self._create_tool_cancelled_result(
+                tool_call["id"], tool_name, language
+            )
+            raise
         except Exception as e:
             logger.error(
                 f"{self.agent_name}: 执行工具 {tool_name} 时发生错误: {str(e)}"
@@ -2814,9 +2825,42 @@ class AgentBase(ABC):
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
+            metadata={"tool_execution_status": "error"},
         )
 
         yield [error_chunk]
+
+    def _create_tool_cancelled_result(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        language: Optional[str] = None,
+    ) -> List[MessageChunk]:
+        message = t(
+            "runtime.tool.error.execution_cancelled",
+            language,
+            {"tool_name": tool_name},
+        )
+        return [
+            MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=json.dumps(
+                    {
+                        "error": True,
+                        "error_type": "EXECUTION_CANCELLED",
+                        "message": message,
+                        "tool_name": tool_name,
+                        "status": "cancelled",
+                    },
+                    ensure_ascii=False,
+                ),
+                tool_call_id=tool_call_id,
+                message_id=str(uuid.uuid4()),
+                message_type=MessageType.TOOL_CALL_RESULT.value,
+                agent_name=self.agent_name,
+                metadata={"tool_execution_status": "cancelled"},
+            )
+        ]
 
     def process_tool_response(
         self, tool_response: str, tool_call_id: str
@@ -2831,6 +2875,7 @@ class AgentBase(ABC):
         Returns:
             List[MessageChunk]: 处理后的结果消息
         """
+        tool_response_dict: Any = None
         try:
             tool_response_dict = json.loads(tool_response)
 
@@ -2847,6 +2892,14 @@ class AgentBase(ABC):
         else:
             content = str(content)
 
+        execution_status = "success"
+        if isinstance(tool_response_dict, dict) and (
+            tool_response_dict.get("success") is False
+            or tool_response_dict.get("error") not in (None, False, "")
+            or tool_response_dict.get("status") == "error"
+        ):
+            execution_status = "error"
+
         return [
             MessageChunk(
                 role=MessageRole.TOOL.value,
@@ -2855,6 +2908,7 @@ class AgentBase(ABC):
                 message_id=str(uuid.uuid4()),
                 message_type=MessageType.TOOL_CALL_RESULT.value,
                 agent_name=self.agent_name,
+                metadata={"tool_execution_status": execution_status},
             )
         ]
 
@@ -2979,36 +3033,91 @@ class AgentBase(ABC):
 
             executable_tool_calls.append(tool_call)
 
-        async def collect_tool_result(
+        result_queue: asyncio.Queue[
+            tuple[str, int, Optional[List[MessageChunk]]]
+        ] = asyncio.Queue()
+
+        async def execute_and_publish_tool_result(
+            index: int,
             tool_call: Dict[str, Any],
-        ) -> List[List[MessageChunk]]:
+        ) -> None:
             tool_name = tool_call["function"]["name"]
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
 
-            chunks: List[List[MessageChunk]] = []
-            async for message_chunk_list in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=messages_input,
-                session_id=session_id,
-            ):
-                chunks.append(message_chunk_list)
-            return chunks
+            try:
+                async for message_chunk_list in self._execute_tool(
+                    tool_call=tool_call,
+                    tool_manager=tool_manager,
+                    messages_input=messages_input,
+                    session_id=session_id,
+                    session_context=session_context,
+                ):
+                    result_queue.put_nowait(("result", index, message_chunk_list))
+            finally:
+                result_queue.put_nowait(("done", index, None))
 
         if not executable_tool_calls:
             return
 
-        tool_results = await run_with_concurrency_limit_ordered(
-            TOOL_CALL_CONCURRENCY_LIMIT,
-            [
-                lambda tool_call=tool_call: collect_tool_result(tool_call)
-                for tool_call in executable_tool_calls
-            ],
-        )
+        semaphore = asyncio.Semaphore(TOOL_CALL_CONCURRENCY_LIMIT)
 
-        for tool_result in tool_results:
-            for message_chunk_list in tool_result:
-                yield (message_chunk_list, False)
+        async def run_with_limit(index: int, tool_call: Dict[str, Any]) -> None:
+            started = False
+            try:
+                async with semaphore:
+                    started = True
+                    await execute_and_publish_tool_result(index, tool_call)
+            except asyncio.CancelledError:
+                if not started:
+                    result_queue.put_nowait(
+                        (
+                            "result",
+                            index,
+                            self._create_tool_cancelled_result(
+                                tool_call["id"],
+                                tool_call["function"]["name"],
+                                language,
+                            ),
+                        )
+                    )
+                    result_queue.put_nowait(("done", index, None))
+                raise
+
+        tasks = [
+            asyncio.create_task(
+                run_with_limit(index, tool_call),
+                name=f"tool-call-{tool_call['id']}",
+            )
+            for index, tool_call in enumerate(executable_tool_calls)
+        ]
+        completed = 0
+        try:
+            while completed < len(tasks):
+                event, _index, message_chunk_list = await result_queue.get()
+                if event == "done":
+                    completed += 1
+                    continue
+                if message_chunk_list:
+                    yield (message_chunk_list, False)
+        except asyncio.CancelledError:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            unconsumed_messages: List[MessageChunk] = []
+            while not result_queue.empty():
+                event, _index, message_chunk_list = result_queue.get_nowait()
+                if event == "result" and message_chunk_list:
+                    unconsumed_messages.extend(message_chunk_list)
+            if session_context is not None and unconsumed_messages:
+                session_context.add_messages(unconsumed_messages)
+            raise
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:
         """
