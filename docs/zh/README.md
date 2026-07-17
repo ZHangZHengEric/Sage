@@ -76,6 +76,7 @@ ref: home
   - [Python 运行时 API](api/API_REFERENCE.md)：与 `sagents` 源码一致，主站对外 HTTP 请见上条
 - [知识库指南](KNOWLEDGE_BASE.md)：知识库模块架构、入库、检索与 Agent 接入
 - [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
+- [问卷格式](QUESTIONNAIRE_FORMATS.md)：Inline Questionnaire 的 fenced YAML、XML+JSON、自检与客户端兼容性
 - [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
 - [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置

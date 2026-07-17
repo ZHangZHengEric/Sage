@@ -76,6 +76,7 @@ Read:
   - [Python runtime API](api/API_REFERENCE.md): `SAgent` and related types aligned with `sagents/`, not the main HTTP app
 - [Knowledge Base Guide](KNOWLEDGE_BASE.md): knowledge base module architecture, ingestion, retrieval, and Agent integration
 - [Memory](memory/README.md): memory, retrieval, and memory-search workstream
+- [Questionnaire Formats](QUESTIONNAIRE_FORMATS.md): fenced YAML, XML+JSON, Self-check, and client compatibility for Inline Questionnaires
 - [Solution Playbooks](solutions/README.md): presales documents for concrete business scenarios
 - [OAuth2 Lage Integration Guide](OAUTH2_LAGE_INTEGRATION.md): restored OAuth2 integration guide from historical docs
 - [Development](DEVELOPMENT.md): contributor workflow and source locations

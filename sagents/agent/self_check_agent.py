@@ -42,6 +42,17 @@ class MarkdownFileLink:
     in_code: bool = False
 
 
+@dataclass(frozen=True)
+class QuestionnaireFence:
+    tag_name: str
+    raw_payload: str
+    start: int
+    end: int
+    opening_fence_length: int
+    closing_fence_length: Optional[int]
+    supported: bool
+
+
 ARTIFACT_TAGS = (
     "yiii-artifacts",
     "movo-artifacts",
@@ -60,14 +71,26 @@ QUESTIONNAIRE_RESPONSE_TAGS = tuple(f"{tag}-response" for tag in QUESTIONNAIRE_T
 STRUCTURED_INLINE_TAGS = (
     ARTIFACT_TAGS + QUESTIONNAIRE_TAGS + QUESTIONNAIRE_RESPONSE_TAGS
 )
-
-
+QUESTIONNAIRE_FAMILY_REQUIREMENT = "*-questionnaire"
+QUESTIONNAIRE_FENCE_START_PATTERN = re.compile(
+    r"^[ \t]{0,3}(?P<fence>`{2,})(?P<tag>"
+    r"(?:[a-z0-9][a-z0-9_-]*-)?questionnaire)[ \t]*\r?$",
+    re.IGNORECASE | re.MULTILINE,
+)
+QUESTIONNAIRE_FENCE_END_PATTERN = re.compile(
+    r"^[ \t]{0,3}(?P<fence>`{2,})[ \t]*\r?$",
+    re.MULTILINE,
+)
+NESTED_FENCE_PATTERN = re.compile(
+    r"^[ \t]{0,3}(?:`{3,}|~{3,})(?:[^\r\n]*)$",
+    re.MULTILINE,
+)
 class SelfCheckAgent(AgentBase):
     """
     执行后的确定性自检 Agent。
 
     当前聚焦：
-    1. Artifacts / Questionnaire 等特殊标签内 JSON 是否可解析且结构合法；
+    1. Artifacts / Questionnaire 等特殊协议内 JSON/YAML 是否可解析且结构合法；
     2. 最终输出里引用到的结果文件是否真实存在；
     3. 最终消息中的 Markdown 文件链接必须使用绝对路径。
     """
@@ -771,20 +794,37 @@ class SelfCheckAgent(AgentBase):
     def _content_has_structured_tags(self, content: str) -> bool:
         for _tag_name, _raw_payload in self._iter_structured_tag_matches(content):
             return True
+        if any(self._iter_questionnaire_fences(content)):
+            return True
         return False
 
     def _structured_tag_names(self, content: str) -> Set[str]:
-        return {
-            tag_name
-            for tag_name, _raw_payload in self._iter_structured_tag_matches(content)
-        }
+        tag_names: Set[str] = set()
+        for tag_name, _raw_payload in self._iter_structured_tag_matches(content):
+            tag_names.add(tag_name)
+            if tag_name in QUESTIONNAIRE_TAGS:
+                tag_names.add(QUESTIONNAIRE_FAMILY_REQUIREMENT)
+        for fence in self._iter_questionnaire_fences(content):
+            if fence.supported:
+                tag_names.add(fence.tag_name)
+            tag_names.add(QUESTIONNAIRE_FAMILY_REQUIREMENT)
+        return tag_names
 
     def _invalid_structured_tag_names(self, content: str) -> Set[str]:
-        return {
+        invalid_names = {
             tag_name
             for tag_name, raw_payload in self._iter_structured_tag_matches(content)
             if self._validate_structured_tag_payload(tag_name, raw_payload)
         }
+        for fence, issues in self._fenced_questionnaire_validation_results(content):
+            if not issues:
+                continue
+            invalid_names.add(
+                fence.tag_name
+                if fence.supported
+                else QUESTIONNAIRE_FAMILY_REQUIREMENT
+            )
+        return invalid_names
 
     def _structured_tag_pattern(self) -> re.Pattern[str]:
         tag_names = "|".join(re.escape(tag) for tag in STRUCTURED_INLINE_TAGS)
@@ -813,10 +853,93 @@ class SelfCheckAgent(AgentBase):
                 seen_spans.add(span_key)
                 yield tag_name, match.group(2) or ""
 
+    def _iter_questionnaire_fences(self, content: str):
+        if not content:
+            return
+
+        markdown_code_ranges = self._markdown_code_ranges(content)
+        cursor = 0
+        while cursor < len(content):
+            opening = QUESTIONNAIRE_FENCE_START_PATTERN.search(content, cursor)
+            if opening is None:
+                break
+            if any(
+                range_start < opening.start() < range_end
+                for range_start, range_end in markdown_code_ranges
+            ):
+                cursor = opening.end()
+                continue
+
+            payload_start = opening.end()
+            if payload_start < len(content) and content[payload_start] == "\n":
+                payload_start += 1
+
+            closing = QUESTIONNAIRE_FENCE_END_PATTERN.search(content, payload_start)
+            if closing is None:
+                end = len(content)
+                raw_payload = content[payload_start:]
+                closing_fence_length = None
+            else:
+                end = closing.end()
+                raw_payload = content[payload_start : closing.start()]
+                closing_fence_length = len(closing.group("fence"))
+
+            tag_name = str(opening.group("tag") or "").lower()
+            yield QuestionnaireFence(
+                tag_name=tag_name,
+                raw_payload=raw_payload,
+                start=opening.start(),
+                end=end,
+                opening_fence_length=len(opening.group("fence")),
+                closing_fence_length=closing_fence_length,
+                supported=tag_name in QUESTIONNAIRE_TAGS,
+            )
+
+            if closing is None:
+                break
+            cursor = end
+
+    def _fenced_questionnaire_validation_results(
+        self, content: str
+    ) -> List[tuple[QuestionnaireFence, List[str]]]:
+        fences = list(self._iter_questionnaire_fences(content))
+        results: List[tuple[QuestionnaireFence, List[str]]] = []
+        has_preface = True
+        if fences:
+            has_preface = self._has_questionnaire_preface(content[: fences[0].start])
+
+        for index, fence in enumerate(fences):
+            issues: List[str] = []
+            if index == 0 and not has_preface:
+                issues.append(
+                    f"```{fence.tag_name}``` 不能作为整条回复的唯一内容；"
+                    "问卷前必须包含非空的普通说明文字"
+                )
+            issues.extend(self._validate_fenced_questionnaire(fence))
+            results.append((fence, issues))
+        return results
+
+    def _has_questionnaire_preface(self, prefix: str) -> bool:
+        visible_prefix = self._structured_tag_pattern().sub("", prefix)
+        code_ranges = self._markdown_code_ranges(visible_prefix)
+        if code_ranges:
+            fragments: List[str] = []
+            cursor = 0
+            for start, end in code_ranges:
+                fragments.append(visible_prefix[cursor:start])
+                cursor = end
+            fragments.append(visible_prefix[cursor:])
+            visible_prefix = "".join(fragments)
+        return bool(visible_prefix.strip())
+
     def _validate_structured_tag_payloads(self, content: str) -> List[str]:
         issues: List[str] = []
         for tag_name, raw_payload in self._iter_structured_tag_matches(content):
             issues.extend(self._validate_structured_tag_payload(tag_name, raw_payload))
+        for _fence, fence_issues in self._fenced_questionnaire_validation_results(
+            content
+        ):
+            issues.extend(fence_issues)
         return issues
 
     def _validate_structured_tag_payload(
@@ -835,6 +958,149 @@ class SelfCheckAgent(AgentBase):
             return self._validate_questionnaire_payload(tag_name, payload)
         if tag_name in QUESTIONNAIRE_RESPONSE_TAGS:
             return self._validate_questionnaire_response_payload(tag_name, payload)
+        return []
+
+    def _validate_fenced_questionnaire(
+        self, fence: QuestionnaireFence
+    ) -> List[str]:
+        label = f"```{fence.tag_name}```"
+        if not fence.supported:
+            supported = ", ".join(QUESTIONNAIRE_TAGS)
+            return [
+                f"{label} 不是受支持的问卷别名；请使用以下之一: {supported}"
+            ]
+        if fence.opening_fence_length < 3:
+            return [f"{label} 的起始围栏至少需要三个反引号"]
+        if fence.closing_fence_length is None:
+            return [f"{label} 缺少独占一行的结束围栏"]
+        if fence.closing_fence_length < fence.opening_fence_length:
+            return [
+                f"{label} 的结束围栏不能短于起始围栏"
+            ]
+
+        raw_payload = str(fence.raw_payload or "")
+        payload_text = raw_payload.strip()
+        if not payload_text:
+            return [f"{label} 的 YAML 内容不能为空"]
+        if payload_text.startswith(("{", "[")):
+            return [f"{label} 必须使用块状 YAML，不能放入 JSON 载荷"]
+        if NESTED_FENCE_PATTERN.search(raw_payload):
+            return [f"{label} 内不能嵌套代码围栏"]
+        if yaml is None:
+            return [f"{label} 无法校验：当前运行环境缺少 YAML 解析器"]
+
+        try:
+            payload = yaml.safe_load(payload_text)
+        except Exception as exc:
+            return [f"{label} 不是合法 YAML: {self._format_yaml_error(exc)}"]
+
+        if not isinstance(payload, dict):
+            return [f"{label} 的 YAML 顶层必须是对象"]
+        return self._validate_strict_fenced_questionnaire_payload(
+            fence.tag_name, payload
+        )
+
+    @staticmethod
+    def _format_yaml_error(error: Exception) -> str:
+        problem = str(getattr(error, "problem", "") or "").strip()
+        mark = getattr(error, "problem_mark", None)
+        if problem and mark is not None:
+            return f"line {mark.line + 1} column {mark.column + 1}: {problem}"
+        return problem or str(error)
+
+    def _validate_strict_fenced_questionnaire_payload(
+        self, tag_name: str, payload: Dict[str, Any]
+    ) -> List[str]:
+        label = f"```{tag_name}```"
+        top_level_fields = set(payload.keys())
+        allowed_top_level_fields = {"title", "questions"}
+        unexpected_top_level_fields = sorted(
+            str(field)
+            for field in top_level_fields - allowed_top_level_fields
+        )
+        if unexpected_top_level_fields:
+            return [
+                f"{label} 顶层包含不允许的字段: "
+                f"{', '.join(unexpected_top_level_fields)}"
+            ]
+
+        title = payload.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return [f"{label} 缺少合法的 title 字段"]
+
+        questions = payload.get("questions")
+        if not isinstance(questions, list):
+            return [f"{label} 缺少合法的 questions 数组"]
+        if not questions:
+            return [f"{label} questions 不能为空"]
+
+        for index, question in enumerate(questions, start=1):
+            issue_prefix = f"{label} questions[{index}]"
+            if not isinstance(question, dict):
+                return [f"{issue_prefix} 必须是对象"]
+            if any(not isinstance(field, str) for field in question):
+                return [f"{issue_prefix} 的字段名必须是字符串"]
+
+            question_type = str(question.get("type") or "").strip().lower()
+            if question_type not in {
+                "single_choice",
+                "multi_choice",
+                "free_text",
+            }:
+                return [
+                    f"{issue_prefix} 的 type 不受支持: "
+                    f"{question_type or '空'}"
+                ]
+
+            allowed_fields = {"type", "text", "default"}
+            if question_type in {"single_choice", "multi_choice"}:
+                allowed_fields.update({"options", "allow_other"})
+            unexpected_fields = sorted(set(question) - allowed_fields)
+            if unexpected_fields:
+                return [
+                    f"{issue_prefix} 包含不允许的字段: "
+                    f"{', '.join(unexpected_fields)}"
+                ]
+
+            text = question.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return [f"{issue_prefix} 缺少合法的 text 字段"]
+            if "default" not in question:
+                return [f"{issue_prefix} 缺少 default 字段"]
+
+            if question_type in {"single_choice", "multi_choice"}:
+                options = question.get("options")
+                if (
+                    not isinstance(options, list)
+                    or not options
+                    or any(
+                        not isinstance(option, str) or not option.strip()
+                        for option in options
+                    )
+                ):
+                    return [f"{issue_prefix} 的 options 必须是非空字符串数组"]
+                allow_other = question.get("allow_other")
+                if allow_other is not None and not isinstance(allow_other, bool):
+                    return [f"{issue_prefix} 的 allow_other 必须是布尔值"]
+
+                default = question.get("default")
+                if question_type == "single_choice":
+                    if not isinstance(default, str) or default not in options:
+                        return [
+                            f"{issue_prefix} 的 default 必须等于一个 options 选项"
+                        ]
+                else:
+                    if not isinstance(default, list) or any(
+                        not isinstance(value, str) or value not in options
+                        for value in default
+                    ):
+                        return [
+                            f"{issue_prefix} 的 default 必须是 options 的字符串子集"
+                        ]
+                continue
+
+            if not isinstance(question.get("default"), str):
+                return [f"{issue_prefix} 的 default 必须是字符串"]
         return []
 
     def _validate_artifacts_payload(
