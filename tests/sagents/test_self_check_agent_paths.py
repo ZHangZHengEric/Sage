@@ -1,9 +1,21 @@
 import asyncio
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+
+
+QUESTIONNAIRE_TAGS = (
+    "yiii-questionnaire",
+    "movo-questionnaire",
+    "ling-questionnaire",
+    "sage-questionnaire",
+    "questionnaire",
+)
 
 
 def _load_self_check_agent(monkeypatch):
@@ -108,6 +120,32 @@ def _assert_hidden_self_check_message(chunk):
     assert chunk.metadata["llm_scope"] == "next_request"
     assert chunk.metadata["llm_state"] == "pending"
     assert chunk.metadata["runtime_diagnostic_source"] == "sage_self_check"
+
+
+def _valid_fenced_questionnaire(tag_name="yiii-questionnaire"):
+    return (
+        "当前事实已经整理完毕，请在问卷中提供下一步所需信息。\n\n"
+        f"```{tag_name}\n"
+        'title: "项目确认"\n'
+        "questions:\n"
+        "  - type: single_choice\n"
+        '    text: "下一步如何处理？"\n'
+        "    options:\n"
+        '      - "继续"\n'
+        '      - "调整"\n'
+        '    default: "继续"\n'
+        "    allow_other: true\n"
+        "  - type: multi_choice\n"
+        '    text: "需要调整哪些部分？"\n'
+        "    options:\n"
+        '      - "内容"\n'
+        '      - "风格"\n'
+        "    default: []\n"
+        "  - type: free_text\n"
+        '    text: "还有哪些约束？"\n'
+        '    default: ""\n'
+        "```"
+    )
 
 
 def test_only_latest_assistant_message_is_checked(monkeypatch):
@@ -757,6 +795,272 @@ def test_invalid_questionnaire_must_be_reoutput_before_requirement_clears(
     assert final_chunks == []
     assert session_context.audit_status["self_check_passed"] is True
     assert "self_check_required_structured_tags" not in session_context.audit_status
+
+
+@pytest.mark.parametrize("tag_name", QUESTIONNAIRE_TAGS)
+def test_registered_fenced_questionnaire_aliases_are_accepted(monkeypatch, tag_name):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = _valid_fenced_questionnaire(tag_name)
+
+    assert agent._content_has_structured_tags(content) is True
+    assert agent._validate_structured_tag_payloads(content) == []
+    assert tag_name in agent._structured_tag_names(content)
+
+
+@pytest.mark.parametrize("tag_name", QUESTIONNAIRE_TAGS)
+def test_registered_xml_json_questionnaire_aliases_remain_accepted(
+    monkeypatch, tag_name
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = (
+        f"<{tag_name}>"
+        '{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？",'
+        '"options":["是","否"],"default":"是"}]}'
+        f"</{tag_name}>"
+    )
+
+    assert agent._content_has_structured_tags(content) is True
+    assert agent._validate_structured_tag_payloads(content) == []
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_issue"),
+    [
+        (
+            "说明。\n\n```yiii-questionnaire\n"
+            '{"title":"确认","questions":[]}\n```',
+            "不能放入 JSON 载荷",
+        ),
+        (
+            "说明。\n\n```foo-questionnaire\n"
+            'title: "确认"\nquestions: []\n```',
+            "不是受支持的问卷别名",
+        ),
+        (
+            "```yiii-questionnaire\n"
+            'title: "确认"\nquestions:\n'
+            "  - type: free_text\n"
+            '    text: "补充？"\n'
+            '    default: ""\n```',
+            "问卷前必须包含非空的普通说明文字",
+        ),
+        (
+            "说明。\n\n```yiii-questionnaire\n"
+            'title: "确认"\nquestions:\n'
+            "  - type: free_text\n"
+            '    text: "补充？"\n'
+            '    default: ""',
+            "缺少独占一行的结束围栏",
+        ),
+        (
+            "说明。\n\n``yiii-questionnaire\n"
+            'title: "确认"\nquestions: []\n``',
+            "起始围栏至少需要三个反引号",
+        ),
+        (
+            "说明。\n\n```yiii-questionnaire\n"
+            'title: "确认"\nquestions:\n'
+            "  - type: single_choice\n"
+            '    text: "继续？"\n'
+            "    options:\n"
+            '      - "是"\n'
+            '      - "否"\n'
+            '    default: "稍后"\n```',
+            "default 必须等于一个 options 选项",
+        ),
+        (
+            "说明。\n\n```yiii-questionnaire\n"
+            'title: "确认"\nsubtitle: "不允许"\nquestions: []\n```',
+            "顶层包含不允许的字段: subtitle",
+        ),
+        (
+            "说明。\n\n```yiii-questionnaire\n"
+            'title: "确认"\nquestions:\n'
+            "  - type: free_text\n"
+            '    text: "补充？"\n'
+            '    default: ""\n'
+            "    allow_other: true\n```",
+            "包含不允许的字段: allow_other",
+        ),
+    ],
+)
+def test_invalid_fenced_questionnaire_variants_are_rejected(
+    monkeypatch, content, expected_issue
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    issues = agent._validate_structured_tag_payloads(content)
+
+    assert any(expected_issue in issue for issue in issues), issues
+
+
+def test_questionnaire_fence_shown_inside_larger_code_block_is_not_executed(
+    monkeypatch,
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    content = (
+        "下面只是格式示例。\n\n"
+        "````markdown\n"
+        "```yiii-questionnaire\n"
+        'title: "示例"\nquestions: []\n'
+        "```\n"
+        "````"
+    )
+
+    assert agent._content_has_structured_tags(content) is False
+    assert agent._validate_structured_tag_payloads(content) == []
+
+
+def test_invalid_fenced_questionnaire_can_be_repaired_with_xml_json(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(messages=[]),
+    )
+
+    async def run_with_reply(reply):
+        session_context.message_manager.messages = [
+            _make_message("user", "请确认"),
+            _make_message("assistant", reply),
+        ]
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    invalid_yaml = (
+        "说明。\n\n```yiii-questionnaire\n"
+        'title: "确认"\nquestions:\n'
+        "  - type: single_choice\n"
+        '    text: "继续？"\n'
+        "    options:\n"
+        '      - "是"\n'
+        '      - "否"\n'
+        '    default: "稍后"\n```'
+    )
+    valid_xml_json = (
+        '<yiii-questionnaire>{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？",'
+        '"options":["是","否"],"default":"是"}]}'
+        "</yiii-questionnaire>"
+    )
+
+    first_chunks = asyncio.run(run_with_reply(invalid_yaml))
+    assert first_chunks
+    assert session_context.audit_status[
+        "self_check_required_structured_tags"
+    ] == ["yiii-questionnaire"]
+
+    final_chunks = asyncio.run(run_with_reply(valid_xml_json))
+    assert final_chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+    assert "self_check_required_structured_tags" not in session_context.audit_status
+
+
+def test_unknown_fenced_alias_can_be_repaired_with_registered_alias(
+    monkeypatch, tmp_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class DummySandbox:
+        async def file_exists(self, path):
+            return True
+
+    session_context = SimpleNamespace(
+        audit_status={},
+        sandbox=DummySandbox(),
+        sandbox_agent_workspace=str(workspace),
+        system_context={"private_workspace": str(workspace)},
+        message_manager=SimpleNamespace(messages=[]),
+    )
+
+    async def run_with_reply(reply):
+        session_context.message_manager.messages = [
+            _make_message("user", "请确认"),
+            _make_message("assistant", reply),
+        ]
+        chunks = []
+        async for batch in agent.run_stream(session_context):
+            chunks.extend(batch)
+        return chunks
+
+    unknown = _valid_fenced_questionnaire("foo-questionnaire")
+    first_chunks = asyncio.run(run_with_reply(unknown))
+    assert first_chunks
+    assert session_context.audit_status[
+        "self_check_required_structured_tags"
+    ] == ["*-questionnaire"]
+
+    final_chunks = asyncio.run(
+        run_with_reply(_valid_fenced_questionnaire("sage-questionnaire"))
+    )
+    assert final_chunks == []
+    assert session_context.audit_status["self_check_passed"] is True
+
+
+@pytest.mark.parametrize(
+    "relative_doc_path",
+    [
+        "docs/zh/QUESTIONNAIRE_FORMATS.md",
+        "docs/en/QUESTIONNAIRE_FORMATS.md",
+    ],
+)
+def test_documented_questionnaire_examples_pass_self_check(
+    monkeypatch, relative_doc_path
+):
+    self_check_agent = _load_self_check_agent(monkeypatch)
+    agent = self_check_agent(model=None, model_config={})
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    document = (repo_root / relative_doc_path).read_text(encoding="utf-8")
+
+    yaml_example = re.search(
+        r"```(?P<tag>(?:yiii|movo|ling|sage)-questionnaire|questionnaire)\n"
+        r"(?P<payload>[\s\S]*?)\n```",
+        document,
+    )
+    assert yaml_example is not None
+    fenced_content = (
+        "Documented context.\n\n"
+        f"```{yaml_example.group('tag')}\n"
+        f"{yaml_example.group('payload')}\n```"
+    )
+    assert agent._validate_structured_tag_payloads(fenced_content) == []
+
+    xml_json_example = re.search(
+        r"<(?P<tag>(?:yiii|movo|ling|sage)-questionnaire|questionnaire)>"
+        r"(?P<payload>\{[\s\S]*?\})</(?P=tag)>",
+        document,
+    )
+    assert xml_json_example is not None
+    xml_json_content = (
+        f"<{xml_json_example.group('tag')}>"
+        f"{xml_json_example.group('payload')}"
+        f"</{xml_json_example.group('tag')}>"
+    )
+    assert agent._validate_structured_tag_payloads(xml_json_content) == []
 
 
 def test_inline_code_wrapped_file_link_triggers_execution_error(monkeypatch):
