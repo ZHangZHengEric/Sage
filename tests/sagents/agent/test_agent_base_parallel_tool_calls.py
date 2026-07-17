@@ -179,6 +179,17 @@ async def test_parallel_tool_result_is_yielded_before_other_tools_finish():
     assert [message.tool_call_id for message in remaining] == ["call_slow"]
 
 
+def test_nested_tool_error_payload_is_marked_as_error():
+    agent = ParallelToolAgent(expected_starts=0)
+
+    [result] = agent.process_tool_response(
+        '{"content":{"status":"error","message":"lint failed"}}',
+        "call_error",
+    )
+
+    assert result.metadata["tool_execution_status"] == "error"
+
+
 class _RecordingSessionContext(_FakeSessionContext):
     def __init__(self):
         super().__init__("zh-CN")
@@ -233,6 +244,38 @@ async def test_cancellation_persists_only_the_cancelled_tool_terminal_result(mon
     pending_next.cancel()
     with pytest.raises(asyncio.CancelledError):
         await pending_next
+
+    assert len(session_context.messages) == 1
+    cancelled = session_context.messages[0]
+    assert cancelled.tool_call_id == "call_slow"
+    assert cancelled.metadata["tool_execution_status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_stream_close_persists_cancelled_tool_terminal_result(monkeypatch):
+    agent = ParallelToolAgent(expected_starts=0)
+    agent._execute_tool = AgentBase._execute_tool.__get__(agent, ParallelToolAgent)
+    session_context = _RecordingSessionContext()
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda _session_id: session_context
+    )
+    tool_manager = _CancellingToolManager()
+    calls = {
+        "call_fast": _tool_call("call_fast"),
+        "call_slow": _tool_call("call_slow"),
+    }
+
+    stream = agent._handle_tool_calls(
+        tool_calls=calls,
+        tool_manager=tool_manager,
+        messages_input=[],
+        session_id="session-1",
+        emit_tool_call_message=False,
+    )
+    await asyncio.wait_for(anext(stream), timeout=1)
+    await asyncio.wait_for(tool_manager.slow_started.wait(), timeout=1)
+
+    await asyncio.wait_for(stream.aclose(), timeout=1)
 
     assert len(session_context.messages) == 1
     cancelled = session_context.messages[0]

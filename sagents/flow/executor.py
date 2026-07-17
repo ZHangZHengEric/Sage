@@ -298,6 +298,22 @@ class FlowExecutor:
                     # override_config=node.override_config, # FlowNode definition does not have override_config yet
                 ):
                     if self._is_terminal_session_state(session):
+                        terminal_tool_chunks = [
+                            message
+                            for message in (message_chunks or [])
+                            if getattr(message, "role", None) == "tool"
+                            or (
+                                isinstance(message, dict)
+                                and message.get("role") == "tool"
+                            )
+                        ]
+                        if terminal_tool_chunks:
+                            ctx.add_messages(terminal_tool_chunks)
+                            add_calls += 1
+                            chunks_seen += len(terminal_tool_chunks)
+                            last_chunk_summary = _message_chunk_debug_summary(
+                                terminal_tool_chunks
+                            )
                         logger.info(
                             f"FlowExecutor: session {self.session_id} reached terminal state "
                             f"{session.get_status().value} while running agent '{agent_key}', stopping"

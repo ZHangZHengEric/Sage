@@ -1411,14 +1411,13 @@ class ToolManager:
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                self._log_mcp_request_start(
-                    tool, session_id, request_id, tool_call_id
-                )
+                self._log_mcp_request_start(tool, session_id, request_id, tool_call_id)
                 try:
                     final_result = await self._execute_mcp_tool(
                         tool,
                         runtime_session_id=session_id,
                         runtime_user_id=resolved_user_id,
+                        tool_call_id=tool_call_id,
                         **kwargs,
                     )
                     self._log_mcp_request_end(
@@ -1734,18 +1733,23 @@ class ToolManager:
         tool: McpToolSpec,
         runtime_session_id: str,
         runtime_user_id: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
         **kwargs,
     ) -> str:
         """Execute MCP tool and format result"""
-        logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
+        mcp_logger = logger.bind(tool_call_id=tool_call_id) if tool_call_id else logger
+        mcp_logger.info(
+            f"Executing MCP tool: {tool.name} on server: {tool.server_name}"
+        )
         try:
             result = await self._mcp_proxy.run_mcp_tool(
                 tool,
                 runtime_session_id=runtime_session_id,
                 runtime_user_id=runtime_user_id,
+                tool_call_id=tool_call_id,
                 **kwargs,
             )
-            logger.info(f"MCP tool {tool.name} execution completed successfully")
+            mcp_logger.info(f"MCP tool {tool.name} execution completed successfully")
             # Process MCP result
             if isinstance(result, dict) and result.get("content"):
                 content = result["content"]
@@ -1767,7 +1771,7 @@ class ToolManager:
                 )
 
         except asyncio.CancelledError:
-            logger.warning(
+            mcp_logger.warning(
                 f"MCP tool execution cancelled: {tool.name} on server: "
                 f"{tool.server_name}, session={runtime_session_id or 'NO_SESSION'}"
             )
@@ -1775,9 +1779,9 @@ class ToolManager:
         except Exception as e:
             if isinstance(e, BaseExceptionGroup):
                 msg = _innermost_exception_message(e)
-                logger.error(f"MCP tool execution failed: {tool.name} - {msg}")
+                mcp_logger.error(f"MCP tool execution failed: {tool.name} - {msg}")
                 _raise_innermost_exception(e)
-            logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
+            mcp_logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 
     async def _execute_standard_tool_async(

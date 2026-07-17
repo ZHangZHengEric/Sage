@@ -431,7 +431,13 @@ class McpServerPoolEntry:
             raise last_error
         raise RuntimeError(f"MCP list_tools failed: server={self.server_name}")
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        tool_call_id: Optional[str] = None,
+    ) -> Any:
+        call_logger = logger.bind(tool_call_id=tool_call_id) if tool_call_id else logger
         retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
         last_error: Optional[BaseException] = None
         attempts = 2 if retry_enabled else 1
@@ -461,7 +467,7 @@ class McpServerPoolEntry:
                 if connection is not None and _is_connection_error(exc):
                     await self.discard_connection(connection)
                     if attempt + 1 < attempts:
-                        logger.warning(
+                        call_logger.warning(
                             f"MCP connection failed, retrying once: "
                             f"server={self.server_name}, tool={tool_name}, error={exc}"
                         )
@@ -730,7 +736,12 @@ class McpHttpClientPoolEntry:
         finally:
             await self._checkin_client()
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        tool_call_id: Optional[str] = None,
+    ) -> Any:
         # Isolate every tool call in its own MCP session. MCP Python SDK 1.28.0
         # and older can head-of-line block a stateful Streamable HTTP session
         # when one per-request response stream is not consumed. Per-call sessions
@@ -739,6 +750,7 @@ class McpHttpClientPoolEntry:
         started_at = time.monotonic()
         stall_warning_task: Optional[asyncio.Task] = None
         registered = False
+        call_logger = logger.bind(tool_call_id=tool_call_id) if tool_call_id else logger
         try:
             await self._open_client_instance(client)
             async with self._lock:
@@ -752,26 +764,31 @@ class McpHttpClientPoolEntry:
                 registered = True
             if self.stall_warning_seconds > 0:
                 stall_warning_task = asyncio.create_task(
-                    self._warn_if_call_stalled(client, tool_name, started_at)
+                    self._warn_if_call_stalled(
+                        client,
+                        tool_name,
+                        started_at,
+                        tool_call_id=tool_call_id,
+                    )
                 )
             result = await client.call_tool_mcp(
                 tool_name,
                 arguments,
                 timeout=self.call_timeout_seconds,
             )
-            logger.info(
+            call_logger.info(
                 f"MCP tool response received: server={self.server_name}, "
                 f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}"
             )
             return result
         except asyncio.CancelledError:
-            logger.warning(
+            call_logger.warning(
                 f"MCP tool call cancelled before response: server={self.server_name}, "
                 f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}"
             )
             raise
         except Exception as exc:
-            logger.warning(
+            call_logger.warning(
                 f"MCP tool call failed before response: server={self.server_name}, "
                 f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}, "
                 f"error_type={type(exc).__name__}, error={exc}"
@@ -790,9 +807,11 @@ class McpHttpClientPoolEntry:
         client: FastMCPClient,
         tool_name: str,
         started_at: float,
+        tool_call_id: Optional[str] = None,
     ) -> None:
         await asyncio.sleep(self.stall_warning_seconds)
-        logger.warning(
+        call_logger = logger.bind(tool_call_id=tool_call_id) if tool_call_id else logger
+        call_logger.warning(
             f"MCP tool response is still pending: server={self.server_name}, "
             f"tool={tool_name}, elapsed_seconds={time.monotonic() - started_at:.3f}, "
             f"client_connected={client.is_connected()}, "
@@ -981,7 +1000,9 @@ class McpConnectionPool:
         tool_name: str,
         arguments: Dict[str, Any],
         config: Optional[Dict[str, Any]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> Any:
+        call_logger = logger.bind(tool_call_id=tool_call_id) if tool_call_id else logger
         if _is_http_client_server_params(server_params):
             key = server_name.strip()
             retry_enabled = _env_bool("SAGE_MCP_CALL_RETRY_ON_CONNECTION_ERROR", True)
@@ -993,14 +1014,16 @@ class McpConnectionPool:
                     config,
                 )
                 try:
-                    return await entry.call_tool(tool_name, arguments)
+                    return await entry.call_tool(
+                        tool_name, arguments, tool_call_id=tool_call_id
+                    )
                 except asyncio.CancelledError:
                     raise
                 except McpConnectionStaleError as exc:
                     await self._discard_http_client_entry(key, entry)
                     if attempt + 1 >= attempts:
                         raise
-                    logger.warning(
+                    call_logger.warning(
                         f"FastMCP client failed before tool call, reconnecting once: "
                         f"server={key}, tool={tool_name}, error={exc}"
                     )
@@ -1009,7 +1032,7 @@ class McpConnectionPool:
                     if entry.closed or safe_to_retry:
                         await self._discard_http_client_entry(key, entry)
                     if safe_to_retry and attempt + 1 < attempts:
-                        logger.warning(
+                        call_logger.warning(
                             f"MCP session unavailable before tool execution; "
                             f"reconnecting once: server={key}, tool={tool_name}"
                         )
@@ -1018,7 +1041,7 @@ class McpConnectionPool:
                     # retry automatically because tools may have side effects.
                     raise
         entry = await self._get_or_create_entry(server_name, server_params, config)
-        return await entry.call_tool(tool_name, arguments)
+        return await entry.call_tool(tool_name, arguments, tool_call_id=tool_call_id)
 
     async def _get_or_create_http_client_entry(
         self,
