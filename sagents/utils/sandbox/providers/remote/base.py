@@ -101,6 +101,25 @@ class RemoteSandboxProvider(ISandboxHandle):
         """初始化远程沙箱"""
         pass
 
+    async def prepare_code_environment(self) -> None:
+        """确保远端沙箱及代码工作区可用。
+
+        具体远端 provider 若需安装额外运行时可覆写本方法。
+        """
+        if not self._is_initialized:
+            await self.initialize()
+        await self.ensure_directory(self.workspace_path)
+
+    async def sync_skills(self, host_skill_manager):
+        """通过远端文件接口同步宿主技能。"""
+        from sagents.skill.sandbox_skill_manager import SandboxSkillManager
+
+        manager = SandboxSkillManager(
+            self, os.path.join(self.workspace_path, "skills")
+        )
+        await manager.sync_from_host(host_skill_manager)
+        return manager
+
     @abstractmethod
     async def cleanup(self) -> None:
         """清理沙箱资源（断开连接，不删除沙箱）"""
