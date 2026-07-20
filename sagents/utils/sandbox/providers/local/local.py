@@ -422,6 +422,24 @@ class LocalSandboxProvider(ISandboxHandle):
         """初始化本地沙箱"""
         await self._ensure_initialized_async()
 
+    async def prepare_code_environment(self) -> None:
+        """准备本地代码运行时配置，venv 在首次执行代码时按需创建。
+
+        Session 初始化不能被创建 venv 和安装 uv 阻塞；``execute_command`` /
+        ``execute_python`` 会在真正需要代码环境时调用 ``_ensure_venv``。
+        """
+        await self._ensure_initialized_async()
+
+    async def sync_skills(self, host_skill_manager):
+        """同步宿主技能到本地沙箱工作区。"""
+        from sagents.skill.sandbox_skill_manager import SandboxSkillManager
+
+        manager = SandboxSkillManager(
+            self, os.path.join(self.workspace_path, "skills")
+        )
+        await manager.sync_from_host(host_skill_manager)
+        return manager
+
     async def cleanup(self) -> None:
         """清理本地沙箱资源"""
         # 本地沙箱不需要特殊清理

@@ -6,8 +6,11 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from enum import Enum
+
+if TYPE_CHECKING:
+    from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 
 
 class SandboxType(Enum):
@@ -330,6 +333,20 @@ class ISandboxHandle(ABC):
         pass
 
     # ========== 生命周期 ==========
+
+    @abstractmethod
+    async def prepare_code_environment(self) -> None:
+        """准备代码执行所需的运行时环境。
+
+        该步骤与沙箱基础资源初始化分离，可安全地重复调用。不同 provider
+        可以在这里准备 Python venv、远端解释器或其他代码运行时。
+        """
+        pass
+
+    @abstractmethod
+    async def sync_skills(self, host_skill_manager: Any) -> "SandboxSkillManager":
+        """将宿主技能同步到沙箱，并返回沙箱侧技能管理器。"""
+        pass
 
     @abstractmethod
     async def initialize(self) -> None:
