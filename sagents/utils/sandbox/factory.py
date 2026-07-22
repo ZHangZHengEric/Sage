@@ -112,7 +112,7 @@ class SandboxProviderFactory:
                 raise ValueError(
                     "sandbox_agent_workspace is required for local sandbox"
                 )
-            return provider_class(
+            provider = provider_class(
                 sandbox_id=sandbox_id,  # pyright: ignore[reportCallIssue]
                 sandbox_agent_workspace=config.sandbox_agent_workspace,  # pyright: ignore[reportCallIssue]
                 volume_mounts=config.volume_mounts,  # pyright: ignore[reportCallIssue]
@@ -142,7 +142,7 @@ class SandboxProviderFactory:
             if config.remote_provider == "opensandbox":
                 if not config.remote_server_url:
                     raise ValueError("OpenSandbox requires server_url")
-                return provider_class(
+                provider = provider_class(
                     **common_kwargs,
                     server_url=config.remote_server_url,  # pyright: ignore[reportCallIssue]
                     api_key=config.remote_api_key,  # pyright: ignore[reportCallIssue]
@@ -153,7 +153,7 @@ class SandboxProviderFactory:
                 )
 
             elif config.remote_provider == "kubernetes":
-                return provider_class(
+                provider = provider_class(
                     **common_kwargs,
                     namespace=provider_config.get("namespace", "default"),  # pyright: ignore[reportCallIssue]
                     image=config.remote_image,  # pyright: ignore[reportCallIssue]
@@ -166,7 +166,7 @@ class SandboxProviderFactory:
                 )
 
             elif config.remote_provider == "firecracker":
-                return provider_class(
+                provider = provider_class(
                     **common_kwargs,
                     microvm_config=provider_config.get("microvm_config", {}),  # pyright: ignore[reportCallIssue]
                     **{
@@ -178,7 +178,7 @@ class SandboxProviderFactory:
 
             else:
                 # 自定义提供者，传递所有配置
-                return provider_class(**common_kwargs, **provider_config)
+                provider = provider_class(**common_kwargs, **provider_config)
 
         else:  # PASSTHROUGH
             provider_class = cls._get_passthrough_provider()
@@ -186,17 +186,32 @@ class SandboxProviderFactory:
                 raise ValueError(
                     "sandbox_agent_workspace is required for passthrough sandbox"
                 )
-            return provider_class(
+            provider = provider_class(
                 sandbox_id=sandbox_id,  # pyright: ignore[reportCallIssue]
                 sandbox_agent_workspace=config.sandbox_agent_workspace,  # pyright: ignore[reportCallIssue]
                 volume_mounts=config.volume_mounts,  # pyright: ignore[reportCallIssue]
             )
+
+        if not isinstance(provider, ISandboxHandle):
+            raise TypeError(
+                f"Sandbox provider {provider.__class__.__name__} must implement "
+                "ISandboxHandle"
+            )
+
+        # 工厂返回的 handle 始终已经完成基础资源初始化。代码运行时和技能
+        # 同步是两个独立阶段，由会话初始化流程按需显式调用。
+        await provider.initialize()
+        return provider
 
     @classmethod
     def register_local_provider(
         cls, mode: SandboxType, provider_class: Type[ISandboxHandle]
     ):
         """注册本地/直通模式提供者"""
+        if not isinstance(provider_class, type) or not issubclass(
+            provider_class, ISandboxHandle
+        ):
+            raise TypeError("provider_class must inherit ISandboxHandle")
         cls._providers[mode] = provider_class
 
     @classmethod
@@ -207,4 +222,8 @@ class SandboxProviderFactory:
             name: 提供者名称，如 "opensandbox", "kubernetes"
             provider_class: 提供者类，必须继承 RemoteSandboxProvider
         """
+        if not isinstance(provider_class, type) or not issubclass(
+            provider_class, ISandboxHandle
+        ):
+            raise TypeError("provider_class must inherit ISandboxHandle")
         cls._remote_providers[name] = provider_class

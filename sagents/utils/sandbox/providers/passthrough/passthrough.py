@@ -257,8 +257,21 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     async def initialize(self) -> None:
         """初始化直通模式沙箱"""
-        # 直通模式不需要特殊初始化
-        pass
+        await self.ensure_directory(self.workspace_path)
+
+    async def prepare_code_environment(self) -> None:
+        """直通模式直接复用宿主机代码环境。"""
+        await self.ensure_directory(self.workspace_path)
+
+    async def sync_skills(self, host_skill_manager):
+        """同步宿主技能到直通沙箱工作区。"""
+        from sagents.skill.sandbox_skill_manager import SandboxSkillManager
+
+        manager = SandboxSkillManager(
+            self, os.path.join(self.workspace_path, "skills")
+        )
+        await manager.sync_from_host(host_skill_manager)
+        return manager
 
     async def cleanup(self) -> None:
         """清理直通模式沙箱资源"""

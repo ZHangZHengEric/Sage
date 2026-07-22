@@ -1492,6 +1492,9 @@ class SessionContext:
         if sandbox_mode == SandboxType.REMOTE:
             self.sandbox_agent_workspace = self.sandbox.workspace_path
 
+        # 基础沙箱由工厂初始化；代码运行时作为独立生命周期阶段准备。
+        await self.sandbox.prepare_code_environment()
+
         logger.debug(
             f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s"
         )
@@ -1538,10 +1541,9 @@ class SessionContext:
         初始化沙箱技能管理器：按宿主 SkillProxy 给出的名称，仅从沙箱内
         ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
         """
-        # 创建沙箱技能管理器
-        skills_dir = os.path.join(self.sandbox_agent_workspace, "skills")  # pyright: ignore[reportArgumentType,reportCallIssue]
-        self.sandbox_skill_manager = SandboxSkillManager(self.sandbox, skills_dir)
-        await self.sandbox_skill_manager.sync_from_host(self.skill_manager)
+        self.sandbox_skill_manager = await self.sandbox.sync_skills(
+            self.skill_manager
+        )
 
     async def _finalize_system_context(self):
         """
