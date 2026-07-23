@@ -517,6 +517,7 @@ fn retry_command_resubmits_last_task_through_backend() {
     let script_path = write_fake_backend_script(&temp_dir);
     let log_path = temp_dir.join("backend-prompts.log");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", &script_path.display().to_string());
     let _log_guard = EnvVarGuard::set("TEST_BACKEND_LOG", &log_path.display().to_string());
 
     let mut app = App::new();

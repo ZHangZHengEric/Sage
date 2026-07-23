@@ -39,6 +39,7 @@ from common.services.agent_workspace import (
     get_agent_workspace_root,
     get_agent_skill_dir,
 )
+from common.services.agent_service import delete_workspace_entry
 from common.services.chat_utils import (
     create_model_client,
     create_skill_proxy,
@@ -536,6 +537,21 @@ def _copy_sage_usage_docs_to_workspace(agent_workspace: str) -> None:
         logger.info(f"已将 sage-usage-docs 复制到 agent workspace: {target_dir}")
     except Exception as e:
         logger.warning(f"复制 sage-usage-docs 到 workspace 失败: {e}")
+
+
+def _cleanup_server_workspace_sage_docs(agent_workspace: str) -> None:
+    for directory_name in (".sage-docs", "sage_usage_docs"):
+        try:
+            delete_workspace_entry(
+                agent_workspace,
+                directory_name,
+                missing_ok=True,
+            )
+        except Exception as e:
+            logger.warning(
+                f"清理 Server Agent workspace 框架文档目录失败: "
+                f"workspace={agent_workspace}, directory={directory_name}, error={e}"
+            )
 
 
 def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
@@ -1183,7 +1199,7 @@ class SageStreamService:
             )
 
         await asyncio.to_thread(
-            _copy_sage_usage_docs_to_workspace, self.agent_workspace
+            _cleanup_server_workspace_sage_docs, self.agent_workspace
         )
 
     async def process_stream(self):
