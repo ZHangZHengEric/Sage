@@ -55,6 +55,7 @@ WHITELIST_API_PATHS = frozenset(
         "/api/observability/metrics",
         "/api/stream",
         "/api/chat",
+        "/api/sessions/{session_id}/interrupt",
         "/api/system/version/check",
         "/api/system/version/latest",
         "/api/share/conversations/{conversation_id}/messages",
