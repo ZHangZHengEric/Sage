@@ -37,6 +37,7 @@ from ...interface import (
 )
 from ...config import VolumeMount
 from ..._bg_runner import HostBackgroundRunner
+from ...environment import build_agent_environment, is_server_process
 from sagents.utils.logger import logger
 
 
@@ -257,6 +258,11 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     async def initialize(self) -> None:
         """初始化直通模式沙箱"""
+        if is_server_process():
+            raise RuntimeError(
+                "Sage Server cannot initialize passthrough sandbox mode because "
+                "it shares the credential-bearing server process boundary"
+            )
         await self.ensure_directory(self.workspace_path)
 
     async def prepare_code_environment(self) -> None:
@@ -469,7 +475,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}"
             )
 
-        merged_env = {**os.environ, **(env_vars or {})}
+        merged_env = build_agent_environment(env_vars, home_dir=cwd)
         merged_env.setdefault("npm_config_cache", npm_cache_dir)
         merged_env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
@@ -682,6 +688,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=actual_workdir,
+                env=build_agent_environment(home_dir=actual_workdir),
             )
 
             stdout, stderr = await asyncio.wait_for(
@@ -752,6 +759,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=actual_workdir,
+                env=build_agent_environment(home_dir=actual_workdir),
             )
 
             stdout, stderr = await asyncio.wait_for(

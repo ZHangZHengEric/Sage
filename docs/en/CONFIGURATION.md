@@ -167,6 +167,8 @@ These settings are consumed by the runtime outside the main server config object
 - `SAGE_USE_CLAW_MODE`
 
 Most local users can start with `SAGE_SANDBOX_MODE=local` and leave the rest at defaults.
+The multi-user server requires Linux `bwrap` for `local` mode and fails closed
+for `passthrough`; use a remote sandbox on platforms without that boundary.
 
 ## Frontend Environment
 

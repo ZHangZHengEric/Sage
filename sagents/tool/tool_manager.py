@@ -11,6 +11,7 @@ from .tool_schema import (
     StreamableHttpServerParameters,
 )
 from sagents.utils.logger import logger
+from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.serialization import make_serializable
@@ -166,6 +167,7 @@ async def _install_uvx() -> bool:
             "pip",
             "install",
             "uv",
+            env=build_agent_environment(home_dir=os.path.expanduser("~")),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -192,6 +194,7 @@ async def _install_uvx() -> bool:
                 install_cmd = "curl -LsSf https://astral.sh/uv/install.sh | sh"
                 process = await asyncio.create_subprocess_shell(
                     install_cmd,
+                    env=build_agent_environment(home_dir=os.path.expanduser("~")),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

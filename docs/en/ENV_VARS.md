@@ -122,6 +122,11 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_NODE_EXECUTABLE` / `SAGE_NPM_CLI` | — | Desktop Node/npm executable overrides |
 | `SAGE_PYTHON` | — | Python executable override used by desktop/terminal launchers |
 
+Server agent processes receive a minimal allowlisted environment rather than
+the Sage server environment. Server `local` mode requires Linux `bwrap`; use
+`remote` mode when that boundary is unavailable. Desktop keeps its existing
+single-user environment inheritance for compatibility.
+
 ### 4.1 OpenSandbox (remote)
 
 | Variable | Default | Purpose |

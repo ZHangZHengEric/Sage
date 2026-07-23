@@ -20,6 +20,7 @@
 
 import os
 import re
+import shlex
 import shutil
 import sys
 import asyncio
@@ -28,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from ..._stdout_echo import echo_chunk
 from ..._bg_runner import HostBackgroundRunner
+from ...environment import build_agent_environment, is_server_process
 from ...interface import (
     ISandboxHandle,
     SandboxType,
@@ -450,6 +452,19 @@ class LocalSandboxProvider(ISandboxHandle):
     def supports_background(self) -> bool:
         return True
 
+    def _get_server_bwrap_isolation(self):
+        if not is_server_process():
+            return None
+
+        from .isolation import BwrapIsolation
+
+        if not isinstance(self._isolation, BwrapIsolation):
+            raise RuntimeError(
+                "Sage Server local agent commands require bwrap isolation; "
+                "use SAGE_LOCAL_LINUX_ISOLATION=bwrap or a remote sandbox"
+            )
+        return self._isolation
+
     async def start_background(
         self,
         command: str,
@@ -470,6 +485,21 @@ class LocalSandboxProvider(ISandboxHandle):
             host_log_dir = self._validate_host_path_allowed(
                 host_log_dir, operation="write"
             )
+        server_isolation = self._get_server_bwrap_isolation()
+        if server_isolation is not None:
+            wrapped_command = server_isolation.build_shell_command(
+                converted,
+                cwd=host_workdir,
+                env_vars=env_vars,
+            )
+            return self._bg_runner.start(
+                wrapped_command,
+                workdir=host_workdir,
+                env_vars=env_vars,
+                log_dir=host_log_dir,
+                shell=False,
+            )
+
         return self._bg_runner.start(
             converted,
             workdir=host_workdir,
@@ -692,8 +722,8 @@ class LocalSandboxProvider(ISandboxHandle):
                 f"LocalSandboxProvider: Command path conversion: {command} -> {converted_command}"
             )
 
-        # 准备环境变量
-        env = os.environ.copy()
+        # Agent 子进程从受控环境启动，不能继承 Sage Server Secret。
+        env = build_agent_environment(env_vars, home_dir=actual_workdir)
 
         # 设置 venv 环境
         venv_python = self._get_venv_python()
@@ -761,9 +791,16 @@ class LocalSandboxProvider(ISandboxHandle):
         env.setdefault("npm_config_cache", npm_cache_dir)
         env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
-        # 添加额外环境变量
-        if env_vars:
-            env.update(env_vars)
+        try:
+            server_isolation = self._get_server_bwrap_isolation()
+        except RuntimeError as exc:
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=str(exc),
+                return_code=-1,
+                execution_time=0,
+            )
 
         # 如果有隔离层，使用隔离层执行
         if self._isolation:
@@ -772,6 +809,7 @@ class LocalSandboxProvider(ISandboxHandle):
                     "mode": "shell",
                     "command": converted_command,
                     "cwd": actual_workdir,
+                    "env_vars": env_vars or {},
                 }
                 result = await self._isolation.execute(payload, cwd=actual_workdir)
                 if isinstance(result, dict):
@@ -791,6 +829,15 @@ class LocalSandboxProvider(ISandboxHandle):
                         execution_time=0,
                     )
             except Exception as e:
+                if server_isolation is not None:
+                    logger.error(f"Server isolation execution failed closed: {e}")
+                    return CommandResult(
+                        success=False,
+                        stdout="",
+                        stderr=f"Sandbox isolation failed: {e}",
+                        return_code=-1,
+                        execution_time=0,
+                    )
                 # 隔离层执行失败，永久禁用隔离层并回退到直接执行
                 # 避免每次执行都重复尝试和报错
                 if "Operation not permitted" in str(
@@ -897,6 +944,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """执行 Python 代码（使用 venv）"""
         await self._ensure_initialized_async()
         await self._ensure_venv()
+        server_isolation = self._get_server_bwrap_isolation()
 
         # 安装依赖
         if requirements:
@@ -915,21 +963,43 @@ class LocalSandboxProvider(ISandboxHandle):
             actual_workdir, operation="read"
         )
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        temp_dir = actual_workdir if server_isolation is not None else None
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", delete=False, dir=temp_dir
+        ) as f:
             f.write(code)
             temp_file = f.name
 
         try:
             venv_python = self._get_venv_python()
             python_cmd = venv_python if venv_python else "python"
+            if server_isolation is not None:
+                result = await self.execute_command(
+                    f"{shlex.quote(python_cmd)} {shlex.quote(temp_file)}",
+                    workdir=workdir,
+                    timeout=timeout,
+                )
+                return ExecutionResult(
+                    success=result.success,
+                    output=result.stdout,
+                    error=result.stderr if not result.success else None,
+                    execution_time=result.execution_time,
+                    installed_packages=requirements or [],
+                )
 
             # 使用异步 subprocess 执行，避免阻塞
             proc = None
             try:
+                env = build_agent_environment(home_dir=actual_workdir)
+                if venv_python:
+                    env["PATH"] = (
+                        os.path.dirname(venv_python) + os.pathsep + env.get("PATH", "")
+                    )
                 proc = await asyncio.create_subprocess_exec(
                     python_cmd,
                     temp_file,
                     cwd=actual_workdir,
+                    env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -974,6 +1044,7 @@ class LocalSandboxProvider(ISandboxHandle):
     ) -> ExecutionResult:
         """执行 JavaScript 代码"""
         await self._ensure_initialized_async()
+        server_isolation = self._get_server_bwrap_isolation()
 
         # 安装依赖
         if packages:
@@ -989,18 +1060,43 @@ class LocalSandboxProvider(ISandboxHandle):
             else self.to_host_path(self._sandbox_agent_workspace)
         )
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+        temp_dir = actual_workdir if server_isolation is not None else None
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".js", delete=False, dir=temp_dir
+        ) as f:
             f.write(code)
             temp_file = f.name
 
         try:
+            if server_isolation is not None:
+                result = await self.execute_command(
+                    f"node {shlex.quote(temp_file)}",
+                    workdir=workdir,
+                    timeout=timeout,
+                )
+                return ExecutionResult(
+                    success=result.success,
+                    output=result.stdout,
+                    error=result.stderr if not result.success else None,
+                    execution_time=result.execution_time,
+                    installed_packages=packages or [],
+                )
+
             # 使用异步 subprocess 执行，避免阻塞
             proc = None
             try:
+                env = build_agent_environment(home_dir=actual_workdir)
+                bundled_node_bin = os.environ.get("SAGE_BUNDLED_NODE_BIN")
+                if bundled_node_bin and os.path.exists(bundled_node_bin):
+                    env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")
+                node_modules_dir = os.environ.get("SAGE_NODE_MODULES_DIR")
+                if node_modules_dir and os.path.exists(node_modules_dir):
+                    env["NODE_PATH"] = node_modules_dir
                 proc = await asyncio.create_subprocess_exec(
                     "node",
                     temp_file,
                     cwd=actual_workdir,
+                    env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

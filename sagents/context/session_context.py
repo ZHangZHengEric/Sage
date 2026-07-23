@@ -21,9 +21,11 @@ from sagents.utils.serialization import make_serializable
 import json
 import os
 import re
+import sys
 import datetime
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.environment import is_server_process
 from sagents.utils.common_utils import detect_machine_environment
 
 _session_context_file_io_pool = ThreadPoolExecutor(
@@ -122,6 +124,22 @@ class SessionContext:
             sandbox_mode = SandboxType.REMOTE
         else:
             sandbox_mode = SandboxType.LOCAL
+        if is_server_process():
+            if sandbox_mode == SandboxType.PASSTHROUGH:
+                raise RuntimeError(
+                    "Sage Server cannot use passthrough sandbox mode because it "
+                    "shares the credential-bearing server process boundary"
+                )
+            linux_isolation = os.environ.get(
+                "SAGE_LOCAL_LINUX_ISOLATION", "bwrap"
+            ).lower()
+            if sandbox_mode == SandboxType.LOCAL and (
+                not sys.platform.startswith("linux") or linux_isolation != "bwrap"
+            ):
+                raise RuntimeError(
+                    "Sage Server local sandbox mode requires Linux bwrap; "
+                    "configure SAGE_LOCAL_LINUX_ISOLATION=bwrap or use remote mode"
+                )
         logger.debug(f"SessionContext: sandbox_mode: {sandbox_mode.value}")
 
         # 解析工作空间路径

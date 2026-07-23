@@ -128,6 +128,10 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_NODE_EXECUTABLE` / `SAGE_NPM_CLI` | — | 桌面端 Node/npm 可执行文件覆盖 |
 | `SAGE_PYTHON`                     | —             | 桌面端 / terminal launcher 使用的 Python 可执行文件覆盖 |
 
+Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
+环境变量。Server 使用 `local` 模式时必须运行在 Linux `bwrap` 隔离中；
+无法提供该边界时应使用 `remote` 模式。Desktop 为兼容现有单用户本机工作流，
+继续保持原有环境继承行为。
 
 ### 4.1 OpenSandbox（远程）
 

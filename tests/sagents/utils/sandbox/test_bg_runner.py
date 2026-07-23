@@ -104,6 +104,44 @@ def test_log_file_lives_in_log_dir(runner):
     runner.cleanup(info["task_id"])
 
 
+def test_server_secret_is_not_inherited_but_explicit_env_is(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.delenv("SAGE_INTERNAL_DESKTOP_PROCESS", raising=False)
+    monkeypatch.setenv("SAGE_TEST_SERVER_SECRET", "must-not-leak")
+    code = (
+        "import os; "
+        'print(os.getenv(chr(83)+chr(65)+chr(71)+chr(69)+"_TEST_SERVER_SECRET", "missing")); '
+        'print(os.getenv("TASK_INPUT", "missing"))'
+    )
+
+    info = runner.start(
+        _python_q(code),
+        workdir=str(tmp_path),
+        env_vars={"TASK_INPUT": "agent-visible"},
+    )
+    task_id = info["task_id"]
+    _wait_done(runner, task_id)
+
+    assert runner.read_tail(task_id).splitlines() == ["missing", "agent-visible"]
+    runner.cleanup(task_id)
+
+
+def test_desktop_background_process_keeps_existing_environment(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("SAGE_INTERNAL_DESKTOP_PROCESS", "1")
+    monkeypatch.setenv("DESKTOP_TOOL_SETTING", "keep-me")
+    code = 'import os; print(os.getenv("DESKTOP_TOOL_SETTING", "missing"))'
+
+    info = runner.start(_python_q(code), workdir=str(tmp_path))
+    task_id = info["task_id"]
+    _wait_done(runner, task_id)
+
+    assert runner.read_tail(task_id).strip() == "keep-me"
+    runner.cleanup(task_id)
+
+
 # ---- read_tail 截断行为 + get_log_size ----
 
 
