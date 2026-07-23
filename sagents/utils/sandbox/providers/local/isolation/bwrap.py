@@ -6,6 +6,7 @@ Bubblewrap isolation strategy (Linux).
 
 import asyncio
 import os
+import shutil
 import uuid
 from typing import Dict, Any, Optional, List, Mapping
 from sagents.utils.logger import logger
@@ -17,6 +18,10 @@ from .subprocess import (
     _load_pickle_output_sync,
     _prepare_payload_files_sync,
     _remove_file_if_exists_sync,
+)
+
+_TRUSTED_BWRAP_EXECUTABLE = (
+    shutil.which("bwrap", path=os.defpath) or "/usr/bin/bwrap"
 )
 
 
@@ -50,7 +55,7 @@ class BwrapIsolation:
         actual_cwd = cwd or self.sandbox_agent_workspace
         agent_env = build_agent_environment(env_vars, home_dir=actual_cwd)
         bwrap_cmd = [
-            "bwrap",
+            _TRUSTED_BWRAP_EXECUTABLE,
             "--clearenv",
             "--unshare-pid",
             "--die-with-parent",
@@ -137,7 +142,9 @@ class BwrapIsolation:
                 run_with_streaming_stdout,
                 bwrap_cmd,
                 cwd=cwd or self.sandbox_agent_workspace,
-                env=agent_env,
+                env=build_agent_environment(
+                    home_dir=cwd or self.sandbox_agent_workspace
+                ),
                 timeout=300,
             )
 

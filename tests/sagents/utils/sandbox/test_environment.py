@@ -11,6 +11,7 @@ from sagents.utils.sandbox.environment import (
     build_agent_environment,
 )
 from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
+from sagents.utils.sandbox.providers.local.isolation import bwrap as bwrap_module
 from sagents.utils.sandbox.providers.local.isolation.bwrap import BwrapIsolation
 from sagents.utils.sandbox.providers.passthrough.passthrough import (
     PassthroughSandboxProvider,
@@ -112,15 +113,79 @@ def test_bwrap_shell_uses_clean_environment_and_pid_namespace(monkeypatch, tmp_p
     command = isolation.build_shell_command(
         "env",
         cwd=str(workspace),
-        env_vars={"TASK_INPUT": "agent-visible"},
+        env_vars={
+            "TASK_INPUT": "agent-visible",
+            "PATH": str(workspace),
+            "LD_PRELOAD": str(workspace / "attack.so"),
+        },
     )
 
+    assert os.path.isabs(command[0])
+    assert command[0].endswith("/bwrap")
     assert "--clearenv" in command
     assert "--unshare-pid" in command
     assert "must-not-leak" not in command
     assert command[-3:] == ["/bin/sh", "-c", "env"]
     task_input_index = command.index("TASK_INPUT")
     assert command[task_input_index + 1] == "agent-visible"
+
+
+async def test_bwrap_supervisor_does_not_receive_agent_environment(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(SERVER_PROCESS_MARKER, "1")
+    monkeypatch.delenv(DESKTOP_PROCESS_MARKER, raising=False)
+    workspace = tmp_path / "workspace"
+    runtime = workspace / ".sandbox"
+    workspace.mkdir()
+    runtime.mkdir()
+    isolation = BwrapIsolation(
+        venv_dir=str(workspace / ".venv"),
+        sandbox_agent_workspace=str(workspace),
+        sandbox_runtime_dir=str(runtime),
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        bwrap_module,
+        "_prepare_payload_files_sync",
+        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_load_pickle_output_sync",
+        lambda path: {"status": "success", "result": "ok"},
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_remove_file_if_exists_sync",
+        lambda path: None,
+    )
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return 0, "", ""
+
+    monkeypatch.setattr(bwrap_module, "run_with_streaming_stdout", run)
+
+    result = await isolation.execute(
+        {
+            "mode": "shell",
+            "command": "env",
+            "env_vars": {
+                "PATH": str(workspace),
+                "LD_PRELOAD": str(workspace / "attack.so"),
+            },
+        },
+        cwd=str(workspace),
+    )
+
+    assert result == "ok"
+    assert os.path.isabs(captured["command"][0])
+    assert captured["env"]["PATH"] != str(workspace)
+    assert "LD_PRELOAD" not in captured["env"]
+    assert "LD_PRELOAD" in captured["command"]
 
 
 async def test_server_rejects_passthrough_mode(monkeypatch, tmp_path):
@@ -203,6 +268,8 @@ async def test_server_local_background_command_is_wrapped_by_bwrap(
     )
 
     assert captured["shell"] is False
+    assert captured["env_vars"] is None
+    assert os.path.isabs(captured["command"][0])
     assert "--clearenv" in captured["command"]
     assert "--unshare-pid" in captured["command"]
     assert captured["command"][-3:] == ["/bin/sh", "-c", "env"]
