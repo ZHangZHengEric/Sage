@@ -334,6 +334,7 @@ def main():
 
         init_startup_config(mode="desktop")
         # Ensures CORSMiddleware uses desktop allowlist even if cfg.app_mode were mis-set.
+        os.environ.pop("SAGE_INTERNAL_SERVER_PROCESS", None)
         os.environ["SAGE_INTERNAL_DESKTOP_PROCESS"] = "1"
 
         # Get port from environment variable SAGE_PORT, or find a free one if not set

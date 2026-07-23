@@ -495,7 +495,9 @@ class LocalSandboxProvider(ISandboxHandle):
             return self._bg_runner.start(
                 wrapped_command,
                 workdir=host_workdir,
-                env_vars=env_vars,
+                # Agent extras are already encoded as inner --setenv options.
+                # Never pass them to the outer bwrap supervisor process.
+                env_vars=None,
                 log_dir=host_log_dir,
                 shell=False,
             )
