@@ -15,8 +15,11 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
     let script_path = write_fake_backend_script(&temp_dir);
     let log_path = temp_dir.join("backend-prompts.log");
+    let args_path = temp_dir.join("backend-args.log");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", &script_path.display().to_string());
     let _log_guard = EnvVarGuard::set("TEST_BACKEND_LOG", &log_path.display().to_string());
+    let _args_guard = EnvVarGuard::set("TEST_BACKEND_ARGS_LOG", &args_path.display().to_string());
 
     let request = BackendRequest {
         session_id: "local-0001".to_string(),
@@ -55,6 +58,11 @@ fn backend_handle_supports_two_round_trips_without_respawn() {
         prompts.lines().collect::<Vec<_>>(),
         vec!["first prompt", "second prompt"]
     );
+    let args = fs::read_to_string(&args_path).expect("backend args log should exist");
+    let lines = args.lines().collect::<Vec<_>>();
+    assert!(lines
+        .windows(2)
+        .any(|pair| { pair[0] == "--workspace" && pair[1] == temp_dir.display().to_string() }));
 
     handle.stop();
     let _ = wait_for_exit(&handle);
@@ -68,6 +76,7 @@ fn backend_handle_writes_sandbox_approval_decision_to_stdin() {
     let script_path = write_fake_backend_script(&temp_dir);
     let log_path = temp_dir.join("backend-prompts.log");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", &script_path.display().to_string());
     let _log_guard = EnvVarGuard::set("TEST_BACKEND_LOG", &log_path.display().to_string());
 
     let request = BackendRequest {
@@ -121,6 +130,7 @@ fn backend_handle_omits_workspace_flag_when_not_overridden() {
     let script_path = write_fake_backend_script(&temp_dir);
     let args_path = temp_dir.join("backend-args.log");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", &script_path.display().to_string());
     let _args_guard = EnvVarGuard::set("TEST_BACKEND_ARGS_LOG", &args_path.display().to_string());
 
     let request = BackendRequest {
@@ -165,6 +175,7 @@ fn backend_handle_forwards_agent_config_flag_without_agent_id() {
     let config_path = temp_dir.join("coding_config.json");
     fs::write(&config_path, "{}").expect("config file should be created");
     let _python_guard = EnvVarGuard::set("PYTHON", &script_path.display().to_string());
+    let _cli_guard = EnvVarGuard::set("SAGE_TERMINAL_CLI", &script_path.display().to_string());
     let _args_guard = EnvVarGuard::set("TEST_BACKEND_ARGS_LOG", &args_path.display().to_string());
     let _env_guard = EnvVarGuard::set("TEST_BACKEND_ENV_LOG", &env_path.display().to_string());
 
