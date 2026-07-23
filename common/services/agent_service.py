@@ -705,8 +705,8 @@ async def auto_generate_agent(
         logger.info(f"使用指定的工具列表: {available_tools}")
         tool_manager_or_proxy = ToolProxy(get_tool_manager(), available_tools)  # pyright: ignore[reportArgumentType]
     else:
-        logger.info("使用完整的工具管理器")
-        tool_manager_or_proxy = get_tool_manager()
+        logger.info("使用默认工具代理")
+        tool_manager_or_proxy = ToolProxy(get_tool_manager(), None)  # pyright: ignore[reportArgumentType]
 
     agent_config = await auto_gen_func.generate_agent_config(
         agent_description=agent_description,
