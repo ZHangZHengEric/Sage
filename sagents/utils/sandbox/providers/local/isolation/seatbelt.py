@@ -11,6 +11,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.utils.sandbox._stdout_echo import run_with_streaming_stdout
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 from .subprocess import (
@@ -186,6 +187,10 @@ class SeatbeltIsolation:
                     run_with_streaming_stdout,
                     cmd,
                     cwd=cwd or self.sandbox_dir,
+                    env=build_agent_environment(
+                        payload.get("env_vars"),
+                        home_dir=cwd or self.sandbox_dir,
+                    ),
                     timeout=300,
                 )
             except subprocess.TimeoutExpired as te:

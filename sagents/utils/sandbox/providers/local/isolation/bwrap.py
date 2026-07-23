@@ -7,9 +7,10 @@ Bubblewrap isolation strategy (Linux).
 import asyncio
 import os
 import uuid
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Mapping
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.utils.sandbox._stdout_echo import run_with_streaming_stdout
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 from .subprocess import (
@@ -40,31 +41,25 @@ class BwrapIsolation:
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
 
-    async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
-        """
-        使用 bwrap 执行 payload。
-        """
-        logger.info("[BwrapIsolation] 开始执行")
-
-        run_id = str(uuid.uuid4())
-        sandbox_dir = self.sandbox_runtime_dir
-        input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
-            _prepare_payload_files_sync,
-            sandbox_dir,
-            run_id,
-            payload,
-        )
-
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-
+    def _build_base_command(
+        self,
+        *,
+        cwd: Optional[str] = None,
+        env_vars: Optional[Mapping[str, object]] = None,
+    ) -> tuple[List[str], Dict[str, str]]:
+        actual_cwd = cwd or self.sandbox_agent_workspace
+        agent_env = build_agent_environment(env_vars, home_dir=actual_cwd)
         bwrap_cmd = [
             "bwrap",
-            "--ro-bind",
+            "--clearenv",
+            "--unshare-pid",
+            "--die-with-parent",
+            "--bind",
             self.sandbox_agent_workspace,
             self.sandbox_agent_workspace,
             "--bind",
-            sandbox_dir,
-            sandbox_dir,
+            self.sandbox_runtime_dir,
+            self.sandbox_runtime_dir,
             "--ro-bind",
             "/usr",
             "/usr",
@@ -86,12 +81,51 @@ class BwrapIsolation:
             "/proc",
             "--tmpfs",
             "/tmp",
+            "--chdir",
+            actual_cwd,
         ]
-
+        for name, value in agent_env.items():
+            bwrap_cmd.extend(["--setenv", name, value])
         for mount in self.volume_mounts:
-            if mount.mount_path != self.sandbox_agent_workspace:
-                bwrap_cmd.extend(["--ro-bind", mount.host_path, mount.mount_path])
+            if mount.mount_path == self.sandbox_agent_workspace:
+                continue
+            bind_flag = "--ro-bind" if mount.read_only else "--bind"
+            bwrap_cmd.extend([bind_flag, mount.host_path, mount.mount_path])
+        return bwrap_cmd, agent_env
 
+    def build_shell_command(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env_vars: Optional[Mapping[str, object]] = None,
+    ) -> List[str]:
+        """Build a bwrap command for an agent-controlled background shell."""
+
+        bwrap_cmd, _ = self._build_base_command(cwd=cwd, env_vars=env_vars)
+        bwrap_cmd.extend(["/bin/sh", "-c", command])
+        return bwrap_cmd
+
+    async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
+        """
+        使用 bwrap 执行 payload。
+        """
+        logger.info("[BwrapIsolation] 开始执行")
+
+        run_id = str(uuid.uuid4())
+        sandbox_dir = self.sandbox_runtime_dir
+        input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
+            _prepare_payload_files_sync,
+            sandbox_dir,
+            run_id,
+            payload,
+        )
+
+        python_bin = os.path.join(self.venv_dir, "bin", "python")
+        bwrap_cmd, agent_env = self._build_base_command(
+            cwd=cwd,
+            env_vars=payload.get("env_vars"),
+        )
         bwrap_cmd.extend([python_bin, launcher_path, input_pkl, output_pkl])
 
         logger.info(f"[BwrapIsolation] 执行命令: {' '.join(bwrap_cmd[:5])}...")
@@ -103,6 +137,7 @@ class BwrapIsolation:
                 run_with_streaming_stdout,
                 bwrap_cmd,
                 cwd=cwd or self.sandbox_agent_workspace,
+                env=agent_env,
                 timeout=300,
             )
 

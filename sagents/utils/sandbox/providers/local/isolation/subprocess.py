@@ -14,6 +14,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
 
 
@@ -433,7 +434,10 @@ class SubprocessIsolation:
         cmd = [python_bin, launcher_path, input_pkl, output_pkl]
 
         # 构建环境变量
-        env = os.environ.copy()
+        env = build_agent_environment(
+            payload.get("env_vars"),
+            home_dir=cwd or self.sandbox_agent_workspace,
+        )
 
         # 设置 PATH，优先使用 venv
         venv_bin = os.path.join(self.venv_dir, "bin")
@@ -450,9 +454,6 @@ class SubprocessIsolation:
         env["PYTHONPATH"] = (
             f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}{os.pathsep}{current_pythonpath}"
         )
-
-        # 保留原来的 HOME 目录
-        env["HOME"] = os.environ.get("HOME", "")
 
         logger.info(f"[SubprocessIsolation] 执行命令: {' '.join(cmd[:3])}...")
 
@@ -509,10 +510,10 @@ class SubprocessIsolation:
         actual_cwd = cwd or self.sandbox_agent_workspace
 
         # 构建环境变量
-        env = os.environ.copy()
+        env = build_agent_environment(home_dir=actual_cwd)
 
         # 保留原来的 HOME 目录
-        original_home = os.environ.get("HOME", "")
+        original_home = env.get("HOME", actual_cwd)
 
         process_info = await asyncio.to_thread(
             _spawn_background_process_sync,

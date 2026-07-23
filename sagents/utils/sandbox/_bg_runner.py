@@ -18,8 +18,9 @@ import os
 import subprocess
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
+from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.utils.logger import logger
 
 
@@ -53,20 +54,18 @@ class HostBackgroundRunner:
 
     def start(
         self,
-        command: str,
+        command: Union[str, Sequence[str]],
         workdir: Optional[str] = None,
         env_vars: Optional[Dict[str, str]] = None,
         log_dir: Optional[str] = None,
+        *,
+        shell: bool = True,
     ) -> Dict[str, Any]:
         task_id = _gen_task_id()
         effective_log_dir = log_dir or self._log_dir
         os.makedirs(effective_log_dir, exist_ok=True)
         log_path = os.path.join(effective_log_dir, f"{task_id}.log")
         log_fh = open(log_path, "wb")
-
-        env = os.environ.copy()
-        if env_vars:
-            env.update({str(k): str(v) for k, v in env_vars.items()})
 
         cwd = workdir or None
         if cwd and not os.path.isdir(cwd):
@@ -76,6 +75,11 @@ class HostBackgroundRunner:
             except Exception:
                 pass
             raise FileNotFoundError(f"workdir does not exist: {cwd}")
+
+        env = build_agent_environment(
+            env_vars,
+            home_dir=cwd or os.path.dirname(effective_log_dir),
+        )
 
         try:
             if _IS_WINDOWS:
@@ -88,7 +92,7 @@ class HostBackgroundRunner:
                 creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 proc = subprocess.Popen(
                     command,
-                    shell=True,
+                    shell=shell,
                     cwd=cwd,
                     env=env,
                     stdin=subprocess.DEVNULL,
@@ -100,7 +104,7 @@ class HostBackgroundRunner:
             else:
                 proc = subprocess.Popen(
                     command,
-                    shell=True,
+                    shell=shell,
                     cwd=cwd,
                     env=env,
                     stdin=subprocess.DEVNULL,

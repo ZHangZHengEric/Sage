@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 # 指定加载的 .env 文件（保持不动）
 load_dotenv(".env")
+os.environ["SAGE_INTERNAL_SERVER_PROCESS"] = "1"
 
 # Server uses common.utils.logging for file sinks; do not let sagents create
 # the framework-level logs/sage_debug.log handlers during import.
