@@ -645,6 +645,22 @@ class SessionContext:
             return False
         return msg_session_id.startswith(f"{self.session_id}_sub_")
 
+    @staticmethod
+    def _normalize_message_content_for_ledger(
+        msg: Union[MessageChunk, Dict[str, Any]],
+    ) -> None:
+        """Keep ledger content OpenAI-compatible (string | multimodal list)."""
+        if isinstance(msg, MessageChunk):
+            if isinstance(msg.content, dict):
+                msg.content = json.dumps(
+                    msg.content, ensure_ascii=False, default=str
+                )
+            return
+        if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
+            msg["content"] = json.dumps(
+                msg["content"], ensure_ascii=False, default=str
+            )
+
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
     ) -> None:
@@ -672,6 +688,7 @@ class SessionContext:
                 msg_session_id = msg.get("session_id")
 
             if self._is_acceptable_message_session_id(msg_session_id):
+                self._normalize_message_content_for_ledger(msg)
                 valid_messages.append(msg)
             else:
                 rejected_session_ids.append(str(msg_session_id))
