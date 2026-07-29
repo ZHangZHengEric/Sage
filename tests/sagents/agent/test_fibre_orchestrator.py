@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -242,6 +243,21 @@ def test_publish_child_stream_coerces_roleless_stream_end_to_message_chunk():
     assert published[0].message_type == "stream_end"
     assert published[0].content == ""
     assert published[0].metadata["raw_stream_payload"]["total_stream_count"] == 2
+
+
+def test_coerce_child_stream_stringifies_dict_content_for_role_messages():
+    chunk = FibreOrchestrator._coerce_child_stream_chunk(
+        {
+            "role": "tool",
+            "content": {"status": "success", "query": "x"},
+            "tool_call_id": "call_1",
+            "session_id": "parent_sub_0",
+        }
+    )
+
+    assert isinstance(chunk, MessageChunk)
+    assert isinstance(chunk.content, str)
+    assert json.loads(chunk.content) == {"status": "success", "query": "x"}
 
 
 class _FakeFibreSession:

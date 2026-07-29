@@ -370,14 +370,16 @@ class FibreBackendClient:
         user_id: Optional[str] = None,
         max_loop_count: Optional[int] = None,
         interrupt_event: Any = None,
+        cancel_event: Any = None,
     ) -> AsyncGenerator[List[Union[MessageChunk, Dict[str, Any]]], None]:
         """
-        流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
+        流式执行 Agent 任务，解析 NDJSON/SSE 返回结构化数据并合并 chunks
 
         后端返回的是 MessageChunk 的流，我们需要将同一 message_id 的 chunks 合并成完整消息
 
         Args:
             user_id: User ID for the request (required)
+            cancel_event: optional asyncio.Event; when set, stop reading early
 
         Yields:
             MessageChunk 对象列表（与 run_stream_with_flow 返回格式一致）
@@ -405,6 +407,35 @@ class FibreBackendClient:
 
         import aiohttp
 
+        finish_reason = "eof"
+
+        def _should_stop() -> bool:
+            if (
+                cancel_event is not None
+                and hasattr(cancel_event, "is_set")
+                and cancel_event.is_set()
+            ):
+                return True
+            if (
+                interrupt_event is not None
+                and hasattr(interrupt_event, "is_set")
+                and interrupt_event.is_set()
+            ):
+                return True
+            return False
+
+        def _parse_ndjson_line(line: str) -> Optional[Dict[str, Any]]:
+            text = line.strip()
+            if not text:
+                return None
+            if text.startswith("data:"):
+                text = text[5:].strip()
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                return None
+            return data if isinstance(data, dict) else None
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{self.base_url}/api/chat",
@@ -415,135 +446,160 @@ class FibreBackendClient:
                 logger.info(f"[Backend API] Stream chat response: status={resp.status}")
                 # 用于缓存和合并 chunks
                 pending_messages: Dict[str, Dict[str, Any]] = {}
+                # TCP chunks are not NDJSON lines; buffer until newlines.
+                text_buffer = ""
 
-                async for line in resp.content:
-                    if (
-                        interrupt_event is not None
-                        and hasattr(interrupt_event, "is_set")
-                        and interrupt_event.is_set()
-                    ):
-                        logger.info(
-                            f"[Backend API] Stream chat interrupted for session={session_id}"
-                        )
-                        break
-                    line = line.decode("utf-8").strip()
-                    if not line:
-                        continue
-
-                    # 解析 SSE 数据
-                    data = None
-                    if line.startswith("data:"):
-                        try:
-                            data = json.loads(line[5:])  # 去掉 "data:" 前缀
-                        except json.JSONDecodeError:
-                            continue
-                    else:
-                        try:
-                            data = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-
-                    if not data:
-                        continue
-
-                    data.setdefault("session_id", session_id)
-
-                    # 获取 message_id，如果没有则生成一个临时 ID
-                    message_id = (
-                        data.get("message_id")
-                        or data.get("chunk_id")
-                        or str(uuid.uuid4())
-                    )
-
-                    # 没有 role 的控制事件（如 stream_end）也要原样透传给父流。
-                    if "role" not in data:
-                        yield [data]
-                        continue
-
-                    # 检查是否是新消息
-                    if message_id not in pending_messages:
-                        # 如果是完整消息（不是 chunk），直接 yield
-                        if not data.get("is_chunk", False):
-                            chunk = MessageChunk.from_dict(data)
-                            yield [chunk]
-                            continue
-
-                        # 初始化 pending message
-                        pending_messages[message_id] = {
-                            "message_id": message_id,
-                            "role": data.get("role", "assistant"),
-                            "content": data.get("content", "") or "",
-                            "tool_calls": data.get("tool_calls", []),
-                            "type": data.get("type"),
-                            "session_id": data.get("session_id", session_id),
-                            "agent_name": data.get("agent_name"),
-                            "timestamp": data.get("timestamp"),
-                            "metadata": data.get("metadata", {}),
-                            "is_final": data.get("is_final", False),
-                        }
-                    else:
-                        # 合并到已有消息
-                        pending = pending_messages[message_id]
-
-                        # 合并 content
-                        if data.get("content"):
-                            pending["content"] = (pending["content"] or "") + data[
-                                "content"
-                            ]
-
-                        # 合并 tool_calls（流式工具调用需要合并）
-                        if data.get("tool_calls"):
-                            if not pending.get("tool_calls"):
-                                pending["tool_calls"] = data["tool_calls"]
+                try:
+                    async for raw in resp.content:
+                        if _should_stop():
+                            if (
+                                cancel_event is not None
+                                and hasattr(cancel_event, "is_set")
+                                and cancel_event.is_set()
+                            ):
+                                finish_reason = "cancelled"
+                                logger.info(
+                                    f"[Backend API] Stream chat cancelled for session={session_id}"
+                                )
                             else:
-                                # 合并 tool_calls，避免覆盖已有数据
-                                existing_calls = {
-                                    tc.get("id"): tc
-                                    for tc in pending["tool_calls"]
-                                    if tc.get("id")
+                                finish_reason = "interrupted"
+                                logger.info(
+                                    f"[Backend API] Stream chat interrupted for session={session_id}"
+                                )
+                            break
+
+                        if isinstance(raw, (bytes, bytearray)):
+                            text_buffer += raw.decode("utf-8", errors="replace")
+                        else:
+                            text_buffer += str(raw)
+
+                        while "\n" in text_buffer:
+                            line, text_buffer = text_buffer.split("\n", 1)
+                            data = _parse_ndjson_line(line)
+                            if not data:
+                                continue
+
+                            data.setdefault("session_id", session_id)
+
+                            # 获取 message_id，如果没有则生成一个临时 ID
+                            message_id = (
+                                data.get("message_id")
+                                or data.get("chunk_id")
+                                or str(uuid.uuid4())
+                            )
+
+                            # 没有 role 的控制事件（如 stream_end）也要原样透传给父流。
+                            if "role" not in data:
+                                yield [data]
+                                continue
+
+                            # 检查是否是新消息
+                            if message_id not in pending_messages:
+                                # 如果是完整消息（不是 chunk），直接 yield
+                                if not data.get("is_chunk", False):
+                                    chunk = MessageChunk.from_dict(data)
+                                    yield [chunk]
+                                    continue
+
+                                # 初始化 pending message
+                                pending_messages[message_id] = {
+                                    "message_id": message_id,
+                                    "role": data.get("role", "assistant"),
+                                    "content": data.get("content", "") or "",
+                                    "tool_calls": data.get("tool_calls", []),
+                                    "type": data.get("type"),
+                                    "session_id": data.get("session_id", session_id),
+                                    "agent_name": data.get("agent_name"),
+                                    "timestamp": data.get("timestamp"),
+                                    "metadata": data.get("metadata", {}),
+                                    "is_final": data.get("is_final", False),
                                 }
-                                for new_tc in data["tool_calls"]:
-                                    tc_id = new_tc.get("id")
-                                    if tc_id and tc_id in existing_calls:
-                                        # 合并到现有的 tool_call
-                                        existing_tc = existing_calls[tc_id]
-                                        if new_tc.get("function"):
-                                            if not existing_tc.get("function"):
-                                                existing_tc["function"] = {}
-                                            # 合并 function 字段
-                                            for key, value in new_tc[
-                                                "function"
-                                            ].items():
-                                                if key == "arguments" and existing_tc[
-                                                    "function"
-                                                ].get(key):
-                                                    # 追加 arguments
-                                                    existing_tc["function"][key] += (
-                                                        value
-                                                    )
-                                                else:
-                                                    existing_tc["function"][key] = value
+                            else:
+                                # 合并到已有消息
+                                pending = pending_messages[message_id]
+
+                                # 合并 content
+                                if data.get("content"):
+                                    pending["content"] = (
+                                        pending["content"] or ""
+                                    ) + data["content"]
+
+                                # 合并 tool_calls（流式工具调用需要合并）
+                                if data.get("tool_calls"):
+                                    if not pending.get("tool_calls"):
+                                        pending["tool_calls"] = data["tool_calls"]
                                     else:
-                                        # 新的 tool_call
-                                        pending["tool_calls"].append(new_tc)
+                                        # 合并 tool_calls，避免覆盖已有数据
+                                        existing_calls = {
+                                            tc.get("id"): tc
+                                            for tc in pending["tool_calls"]
+                                            if tc.get("id")
+                                        }
+                                        for new_tc in data["tool_calls"]:
+                                            tc_id = new_tc.get("id")
+                                            if tc_id and tc_id in existing_calls:
+                                                # 合并到现有的 tool_call
+                                                existing_tc = existing_calls[tc_id]
+                                                if new_tc.get("function"):
+                                                    if not existing_tc.get("function"):
+                                                        existing_tc["function"] = {}
+                                                    # 合并 function 字段
+                                                    for key, value in new_tc[
+                                                        "function"
+                                                    ].items():
+                                                        if (
+                                                            key == "arguments"
+                                                            and existing_tc[
+                                                                "function"
+                                                            ].get(key)
+                                                        ):
+                                                            # 追加 arguments
+                                                            existing_tc["function"][
+                                                                key
+                                                            ] += value
+                                                        else:
+                                                            existing_tc["function"][
+                                                                key
+                                                            ] = value
+                                            else:
+                                                # 新的 tool_call
+                                                pending["tool_calls"].append(new_tc)
 
-                        # 更新其他字段
-                        if data.get("type"):
-                            pending["type"] = data["type"]
-                        if data.get("is_final"):
-                            pending["is_final"] = True
+                                # 更新其他字段
+                                if data.get("type"):
+                                    pending["type"] = data["type"]
+                                if data.get("is_final"):
+                                    pending["is_final"] = True
 
-                    # 检查是否是最终消息
-                    if data.get("is_final", False) or not data.get("is_chunk", False):
-                        if message_id in pending_messages:
-                            msg_data = pending_messages.pop(message_id)
-                            chunk = MessageChunk.from_dict(msg_data)
-                            yield [chunk]
+                            # 检查是否是最终消息
+                            if data.get("is_final", False) or not data.get(
+                                "is_chunk", False
+                            ):
+                                if message_id in pending_messages:
+                                    msg_data = pending_messages.pop(message_id)
+                                    chunk = MessageChunk.from_dict(msg_data)
+                                    yield [chunk]
 
-                # 流结束，yield 所有剩余的 pending messages
-                for message in pending_messages.values():
-                    chunk = MessageChunk.from_dict(message)
-                    yield [chunk]
+                    # Flush a trailing line that never received a newline.
+                    if text_buffer.strip() and not _should_stop():
+                        data = _parse_ndjson_line(text_buffer)
+                        text_buffer = ""
+                        if data:
+                            data.setdefault("session_id", session_id)
+                            if "role" not in data:
+                                yield [data]
+                            elif not data.get("is_chunk", False):
+                                yield [MessageChunk.from_dict(data)]
+
+                    # 流结束，yield 所有剩余的 pending messages
+                    for message in pending_messages.values():
+                        chunk = MessageChunk.from_dict(message)
+                        yield [chunk]
+                finally:
+                    logger.info(
+                        f"[Backend API] Stream chat finished session={session_id} "
+                        f"reason={finish_reason}"
+                    )
 
     async def interrupt_session(
         self, session_id: str, user_id: Optional[str] = None
