@@ -628,11 +628,31 @@ class SessionContext:
         except OSError:
             return False
 
+    def _is_acceptable_message_session_id(
+        self, msg_session_id: Optional[str]
+    ) -> bool:
+        """Return True if message may enter this session's ledger.
+
+        Accepts:
+        - ``None`` (untagged chunks)
+        - exact match with this session
+        - delegated child sessions allocated as ``{parent}_sub_{n}``
+          (including nested ``{parent}_sub_{n}_sub_{m}`` descendants)
+        """
+        if msg_session_id is None or msg_session_id == self.session_id:
+            return True
+        if not isinstance(msg_session_id, str) or not self.session_id:
+            return False
+        return msg_session_id.startswith(f"{self.session_id}_sub_")
+
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
     ) -> None:
         """
         Add messages to the message manager with session_id validation.
+
+        Parent Team/Fibre sessions may also accept streamed chunks from their
+        own ``*_sub_*`` child sessions (published via orchestrator output_queue).
 
         Args:
             messages: A message chunk or a list of message chunks/dicts.
@@ -651,7 +671,7 @@ class SessionContext:
             elif isinstance(msg, dict):
                 msg_session_id = msg.get("session_id")
 
-            if msg_session_id is None or msg_session_id == self.session_id:
+            if self._is_acceptable_message_session_id(msg_session_id):
                 valid_messages.append(msg)
             else:
                 rejected_session_ids.append(str(msg_session_id))
