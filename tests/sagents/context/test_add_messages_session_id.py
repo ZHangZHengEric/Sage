@@ -38,13 +38,13 @@ def test_add_messages_accepts_own_and_untagged(tmp_path):
     assert "own" in contents
 
 
-def test_add_messages_accepts_direct_and_nested_sub_sessions(tmp_path):
+def test_add_messages_rejects_direct_and_nested_sub_sessions(tmp_path):
     ctx = _make_session(tmp_path)
     child = f"{ctx.session_id}_sub_0"
     nested = f"{ctx.session_id}_sub_0_sub_1"
 
-    assert ctx._is_acceptable_message_session_id(child)
-    assert ctx._is_acceptable_message_session_id(nested)
+    assert not ctx._is_acceptable_message_session_id(child)
+    assert not ctx._is_acceptable_message_session_id(nested)
 
     ctx.add_messages(
         [
@@ -54,8 +54,7 @@ def test_add_messages_accepts_direct_and_nested_sub_sessions(tmp_path):
     )
 
     contents = [m.content for m in ctx.message_manager.messages]
-    assert "child-progress" in contents
-    assert "nested-progress" in contents
+    assert contents == []
 
 
 def test_add_messages_rejects_unrelated_session_ids(tmp_path):
