@@ -2032,8 +2032,24 @@ class MessageManager:
         return should_compress, current_tokens, max_model_len
 
     @staticmethod
+    def normalize_content_for_provider(content: Any) -> Any:
+        """Coerce message content to OpenAI-compatible string | multimodal list.
+
+        Bare dict objects are rejected by OpenAI-compatible gateways with 400
+        ``Invalid type for 'messages[N].content'``. Historical ledgers may still
+        contain tool results persisted as dicts after display-side JSON parsing.
+        """
+        if content is None or isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return content
+        if isinstance(content, dict):
+            return json.dumps(content, ensure_ascii=False, default=str)
+        return str(content)
+
+    @staticmethod
     def _wrap_runtime_error_content_for_request(msg: MessageChunk) -> Any:
-        content = msg.content
+        content = MessageManager.normalize_content_for_provider(msg.content)
         if not msg.matches_message_types([MessageType.AGENT_EXECUTION_ERROR.value]):
             return content
         if content is None:

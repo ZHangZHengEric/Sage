@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
@@ -9,8 +10,18 @@ from sagents.context.messages.message import MessageChunk
 
 
 class _FakeContent:
-    def __init__(self, lines):
-        self._lines = [line.encode("utf-8") for line in lines]
+    def __init__(self, chunks):
+        # Accept either NDJSON text lines or raw byte chunks.
+        encoded = []
+        for chunk in chunks:
+            if isinstance(chunk, (bytes, bytearray)):
+                encoded.append(bytes(chunk))
+            else:
+                text = str(chunk)
+                if not text.endswith("\n"):
+                    text += "\n"
+                encoded.append(text.encode("utf-8"))
+        self._lines = encoded
 
     def __aiter__(self):
         self._iter = iter(self._lines)
@@ -135,3 +146,113 @@ async def test_backend_client_backfills_session_id_for_complete_role_messages(
 
     assert all(isinstance(item, MessageChunk) for item in received)
     assert [item.session_id for item in received] == ["child", "child"]
+
+
+@pytest.mark.asyncio
+async def test_backend_client_reassembles_ndjson_split_across_tcp_chunks(monkeypatch):
+    payload = {
+        "role": "assistant",
+        "type": "assistant_text",
+        "content": "reassembled",
+        "message_id": "m-split",
+        "session_id": "child",
+    }
+    raw = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    chunks = [raw[:17], raw[17:40], raw[40:]]
+    assert b"".join(chunks) == raw
+
+    monkeypatch.setitem(
+        sys.modules,
+        "aiohttp",
+        SimpleNamespace(ClientSession=lambda: _FakeClientSession(chunks)),
+    )
+
+    client = FibreBackendClient()
+    client.base_url = "http://localhost:1"
+    client._available = True
+
+    received = []
+    async for batch in client.stream_chat(
+        agent_id="agent",
+        messages=[{"role": "user", "content": "hi"}],
+        session_id="child",
+        max_loop_count=3,
+    ):
+        received.extend(batch)
+
+    assert len(received) == 1
+    assert isinstance(received[0], MessageChunk)
+    assert received[0].content == "reassembled"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_stops_when_cancel_event_set(monkeypatch):
+    lines = [
+        json.dumps(
+            {
+                "role": "assistant",
+                "type": "assistant_text",
+                "content": "one",
+                "message_id": "m1",
+            }
+        ),
+        json.dumps(
+            {
+                "role": "assistant",
+                "type": "assistant_text",
+                "content": "two",
+                "message_id": "m2",
+            }
+        ),
+    ]
+
+    class _CancelAwareContent(_FakeContent):
+        def __init__(self, chunks, cancel_event):
+            super().__init__(chunks)
+            self._cancel_event = cancel_event
+            self._index = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._index >= len(self._lines):
+                raise StopAsyncIteration
+            if self._index == 1:
+                self._cancel_event.set()
+            item = self._lines[self._index]
+            self._index += 1
+            await asyncio.sleep(0)
+            return item
+
+    cancel_event = asyncio.Event()
+
+    class _CancelSession(_FakeClientSession):
+        def post(self, *args, **kwargs):
+            response = _FakeResponse(self._lines)
+            response.content = _CancelAwareContent(self._lines, cancel_event)
+            return response
+
+    monkeypatch.setitem(
+        sys.modules,
+        "aiohttp",
+        SimpleNamespace(ClientSession=lambda: _CancelSession(lines)),
+    )
+
+    client = FibreBackendClient()
+    client.base_url = "http://localhost:1"
+    client._available = True
+
+    received = []
+    async for batch in client.stream_chat(
+        agent_id="agent",
+        messages=[{"role": "user", "content": "hi"}],
+        session_id="child",
+        max_loop_count=3,
+        cancel_event=cancel_event,
+    ):
+        received.extend(batch)
+
+    assert [item.content for item in received if isinstance(item, MessageChunk)] == [
+        "one"
+    ]
