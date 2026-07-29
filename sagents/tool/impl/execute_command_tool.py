@@ -142,7 +142,7 @@ class ExecuteCommandTool:
     #   1) await_shell 返回 completed 时 consume_completion_event 显式消费；
     #   2) _call_llm_streaming 在每次 LLM 请求前 pop_completion_events 全部 flush 注入。
     # 两条路径互斥：被 await_shell 消费过的不会再走 LLM flush。
-    _COMPLETION_EVENTS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    _COMPLETION_EVENTS: Dict[object, Dict[str, Dict[str, Any]]] = {}
 
     _APPROVAL_TTL_S = 30 * 60
 
@@ -158,7 +158,10 @@ class ExecuteCommandTool:
         """
         if not session_id:
             return []
-        bucket = cls._COMPLETION_EVENTS.pop(session_id, None)
+        bucket = cls._COMPLETION_EVENTS.pop(
+            cls._completion_bucket_key(session_id),
+            None,
+        )
         if not bucket:
             return []
         return list(bucket.values())
@@ -173,12 +176,13 @@ class ExecuteCommandTool:
         """
         if not session_id or not task_id:
             return None
-        bucket = cls._COMPLETION_EVENTS.get(session_id)
+        bucket_key = cls._completion_bucket_key(session_id)
+        bucket = cls._COMPLETION_EVENTS.get(bucket_key)
         if not bucket:
             return None
         ev = bucket.pop(task_id, None)
         if not bucket:
-            cls._COMPLETION_EVENTS.pop(session_id, None)
+            cls._COMPLETION_EVENTS.pop(bucket_key, None)
         return ev
 
     @classmethod
@@ -193,13 +197,28 @@ class ExecuteCommandTool:
     ) -> None:
         if not session_id or not task_id:
             return
-        cls._COMPLETION_EVENTS.setdefault(session_id, {})[task_id] = {
+        cls._COMPLETION_EVENTS.setdefault(
+            cls._completion_bucket_key(session_id), {}
+        )[task_id] = {
             "task_id": task_id,
             "command": command,
             "exit_code": exit_code,
             "elapsed_ms": elapsed_ms,
             "tail": tail,
         }
+
+    @staticmethod
+    def _completion_bucket_key(
+        session_id: str,
+        runtime_owner_id: Optional[str] = None,
+    ) -> object:
+        if runtime_owner_id is None:
+            from sagents.session_runtime import get_current_runtime_owner_id
+
+            runtime_owner_id = get_current_runtime_owner_id()
+        if runtime_owner_id is None:
+            return session_id
+        return ("runtime-owner", runtime_owner_id, session_id)
 
     def _get_sandbox(self, session_id: str):
         return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
@@ -511,11 +530,15 @@ class ExecuteCommandTool:
                     f"GC: sandbox.cleanup_background({tid}) 失败（忽略）: {exc}"
                 )
             # 同步清理 _COMPLETION_EVENTS
-            bucket = self.__class__._COMPLETION_EVENTS.get(sid)
+            bucket_key = self._completion_bucket_key(
+                sid,
+                info.get("runtime_owner_id"),
+            )
+            bucket = self.__class__._COMPLETION_EVENTS.get(bucket_key)
             if bucket:
                 bucket.pop(tid, None)
                 if not bucket:
-                    self.__class__._COMPLETION_EVENTS.pop(sid, None)
+                    self.__class__._COMPLETION_EVENTS.pop(bucket_key, None)
 
     async def _spawn_background(
         self,
@@ -537,6 +560,9 @@ class ExecuteCommandTool:
         effective_env_vars = (
             resolver(env_vars) if resolver is not None else dict(env_vars or {})
         )
+        from sagents.session_runtime import get_current_runtime_owner_id
+
+        runtime_owner_id = get_current_runtime_owner_id()
         # === 1) 原生路径（跨平台） ===
         if self._sandbox_supports_native_bg(sandbox):
             log_dir = self._get_agent_workspace_log_dir(
@@ -552,6 +578,7 @@ class ExecuteCommandTool:
             task_info = {
                 "task_id": task_id,
                 "session_id": session_id,
+                "runtime_owner_id": runtime_owner_id,
                 "sandbox": sandbox,
                 "pid": info.get("pid"),
                 "log_path": info.get("log_path"),
@@ -608,6 +635,7 @@ class ExecuteCommandTool:
         task_info = {
             "task_id": task_id,
             "session_id": session_id,
+            "runtime_owner_id": runtime_owner_id,
             "sandbox": sandbox,
             "pid": pid,
             "log_path": log_path,
@@ -1093,13 +1121,22 @@ class ExecuteCommandTool:
                 pass
 
     @classmethod
-    async def cleanup_session_background_tasks(cls, session_id: str) -> None:
+    async def cleanup_session_background_tasks(
+        cls,
+        session_id: str,
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ) -> None:
         """Force-stop only background tasks owned by one runtime session."""
 
         targets = [
             (task_id, info)
             for task_id, info in list(cls._BG_TASKS.items())
             if info.get("session_id") == session_id
+            and (
+                runtime_owner_id is None
+                or info.get("runtime_owner_id") == runtime_owner_id
+            )
         ]
         for task_id, info in targets:
             sandbox = info.get("sandbox")
@@ -1122,6 +1159,10 @@ class ExecuteCommandTool:
                 )
             finally:
                 cls._BG_TASKS.pop(task_id, None)
+        cls._COMPLETION_EVENTS.pop(
+            cls._completion_bucket_key(session_id, runtime_owner_id),
+            None,
+        )
 
     @tool(
         description_i18n={

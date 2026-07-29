@@ -45,3 +45,27 @@ async def test_child_session_inherits_parent_runtime_environment(monkeypatch, tm
 
     assert context.runtime_env_vars == {"TOKEN": "parent"}
     assert context.runtime_resource_registrar is registrar
+
+
+@pytest.mark.asyncio
+async def test_runtime_env_refresh_disposes_previous_untracked_sandbox(tmp_path):
+    calls = []
+
+    class Sandbox:
+        async def kill(self):
+            calls.append("kill")
+
+    sandbox = Sandbox()
+    session = Session("session", enable_obs=False)
+    session.session_context = SimpleNamespace(sandbox=sandbox)
+
+    session.configure_runtime(
+        session_root_space=str(tmp_path),
+        sandbox_agent_workspace=str(tmp_path),
+        runtime_env_vars={"TOKEN": "new"},
+        runtime_env_refresh=True,
+    )
+    await session._dispose_stale_runtime_sandbox()
+
+    assert calls == ["kill"]
+    assert session.session_context.sandbox is None

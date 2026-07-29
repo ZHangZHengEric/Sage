@@ -393,7 +393,6 @@ async def _cleanup_runtime_resources(
     related_session_ids: Sequence[str],
     resources: Sequence[Any],
 ) -> None:
-    del owner_id
     from sagents.session_runtime import get_global_session_manager
     from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
 
@@ -401,7 +400,8 @@ async def _cleanup_runtime_resources(
     for related_session_id in related_session_ids:
         try:
             await ExecuteCommandTool.cleanup_session_background_tasks(
-                related_session_id
+                related_session_id,
+                runtime_owner_id=owner_id,
             )
         except BaseException as exc:
             errors.append(exc)
@@ -418,7 +418,10 @@ async def _cleanup_runtime_resources(
     manager = get_global_session_manager()
     for related_session_id in related_session_ids:
         try:
-            session = manager.get_live_session(related_session_id)
+            session = manager.get_live_session(
+                related_session_id,
+                runtime_owner_id=owner_id,
+            )
             context = getattr(session, "session_context", None)
             if context is not None:
                 if context.sandbox in resources:

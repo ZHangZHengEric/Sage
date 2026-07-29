@@ -398,11 +398,13 @@ async def test_cleanup_attempts_every_resource_and_clears_all_runtime_copies(
     session = Session()
 
     class Manager:
-        def get_live_session(self, session_id):
+        def get_live_session(self, session_id, *, runtime_owner_id=None):
             assert session_id == "session"
+            assert runtime_owner_id == "user"
             return session
 
-    async def cleanup_background_tasks(session_id):
+    async def cleanup_background_tasks(session_id, *, runtime_owner_id=None):
+        assert runtime_owner_id == "user"
         calls.append(f"background:{session_id}")
 
     monkeypatch.setattr(

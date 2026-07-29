@@ -24,7 +24,11 @@ from sagents.flow.schema import (
     SwitchNode,
     LoopNode,
 )
-from sagents.session_runtime import get_global_session_manager
+from sagents.session_runtime import (
+    get_global_session_manager,
+    reset_current_runtime_owner,
+    set_current_runtime_owner,
+)
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.observability.prometheus_handler import record_agent_first_token
 
@@ -193,6 +197,7 @@ class SAgent:
         runtime_env_vars: Optional[Dict[str, str]] = None,
         runtime_resource_registrar: Optional[Any] = None,
         runtime_env_refresh: bool = False,
+        runtime_env_owner_id: Optional[str] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         """执行流式对话会话
 
@@ -332,7 +337,9 @@ class SAgent:
                 msg["session_id"] = session_id
 
         session = self.session_manager.get_or_create(
-            session_id, sandbox_type=effective_sandbox_type
+            session_id,
+            sandbox_type=effective_sandbox_type,
+            runtime_owner_id=runtime_env_owner_id,
         )
         session.configure_runtime(
             model=model,
@@ -367,6 +374,7 @@ class SAgent:
         # 这里维护流局部状态，覆盖流式 delta 续片仅含 id/index、甚至全部缺失的兼容场景；
         # 落盘 / LLM 上下文剔除分别由 session.run_stream_safe / strip_turn_status_from_llm_context 负责。
         hidden_tool_state = _HiddenToolStreamState()
+        runtime_owner_token = set_current_runtime_owner(runtime_env_owner_id)
         try:
             async for message_chunks in session.run_stream_safe(
                 input_messages=input_messages,
@@ -485,7 +493,11 @@ class SAgent:
         finally:
             total_ms = int((time.time() - start_time) * 1000)
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
-            self.session_manager.close_session(session_id)
+            self.session_manager.close_session(
+                session_id,
+                runtime_owner_id=runtime_env_owner_id,
+            )
+            reset_current_runtime_owner(runtime_owner_token)
 
     def _build_default_flow(
         self, agent_mode: Optional[str], max_loop_count: int

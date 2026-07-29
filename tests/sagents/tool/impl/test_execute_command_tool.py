@@ -573,6 +573,103 @@ def test_background_shell_logs_under_agent_workspace(monkeypatch, tmp_path):
     assert fake_sandbox.bg_calls[0]["log_dir"] == expected_log_dir
 
 
+def test_runtime_env_cleanup_only_kills_matching_owner_background_tasks(
+    monkeypatch,
+):
+    calls = []
+
+    class Sandbox:
+        async def kill_background(self, task_id, force):
+            calls.append(("kill", task_id, force))
+
+        async def cleanup_background(self, task_id):
+            calls.append(("cleanup", task_id))
+
+    sandbox_a = Sandbox()
+    sandbox_b = Sandbox()
+    monkeypatch.setattr(
+        ExecuteCommandTool,
+        "_BG_TASKS",
+        {
+            "task-a": {
+                "session_id": "shared-session",
+                "runtime_owner_id": "owner-a",
+                "sandbox": sandbox_a,
+                "mode": "native",
+            },
+            "task-b": {
+                "session_id": "shared-session",
+                "runtime_owner_id": "owner-b",
+                "sandbox": sandbox_b,
+                "mode": "native",
+            },
+        },
+    )
+
+    asyncio.run(
+        ExecuteCommandTool.cleanup_session_background_tasks(
+            "shared-session",
+            runtime_owner_id="owner-a",
+        )
+    )
+
+    assert calls == [
+        ("kill", "task-a", True),
+        ("cleanup", "task-a"),
+    ]
+    assert "task-a" not in ExecuteCommandTool._BG_TASKS
+    assert "task-b" in ExecuteCommandTool._BG_TASKS
+
+
+def test_background_completion_events_are_isolated_by_runtime_owner(monkeypatch):
+    from sagents.session_runtime import (
+        reset_current_runtime_owner,
+        set_current_runtime_owner,
+    )
+
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+
+    token_a = set_current_runtime_owner("owner-a")
+    try:
+        ExecuteCommandTool._emit_completion_event(
+            "shared-session",
+            "same-task",
+            "command-a",
+            0,
+            10,
+            "a",
+        )
+    finally:
+        reset_current_runtime_owner(token_a)
+
+    token_b = set_current_runtime_owner("owner-b")
+    try:
+        ExecuteCommandTool._emit_completion_event(
+            "shared-session",
+            "same-task",
+            "command-b",
+            0,
+            20,
+            "b",
+        )
+        owner_b_events = ExecuteCommandTool.pop_completion_events(
+            "shared-session"
+        )
+    finally:
+        reset_current_runtime_owner(token_b)
+
+    token_a = set_current_runtime_owner("owner-a")
+    try:
+        owner_a_events = ExecuteCommandTool.pop_completion_events(
+            "shared-session"
+        )
+    finally:
+        reset_current_runtime_owner(token_a)
+
+    assert [event["command"] for event in owner_a_events] == ["command-a"]
+    assert [event["command"] for event in owner_b_events] == ["command-b"]
+
+
 def test_background_shell_passes_virtual_workspace_log_dir_to_provider(
     monkeypatch, tmp_path
 ):

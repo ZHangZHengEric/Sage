@@ -130,6 +130,20 @@ def test_stream_request_provider_override_is_preserved():
     assert request.fast_provider_id == "fast_provider_1"
 
 
+def test_authenticated_identity_overrides_body_user_id():
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="body-user",
+    )
+    http_request = SimpleNamespace(
+        state=SimpleNamespace(user_claims={"userid": "authenticated-user"})
+    )
+
+    chat_router.validate_and_prepare_request(request, http_request)
+
+    assert request.user_id == "authenticated-user"
+
+
 def test_chat_endpoint_preserves_provider_override(monkeypatch):
     captured = {}
 
@@ -329,6 +343,37 @@ def test_external_runtime_env_validation_does_not_echo_secret_value():
         asyncio.run(chat_router.stream_chat(request, http_request))
 
     assert secret_value not in str(exc_info.value)
+
+
+def test_external_runtime_env_is_validated_before_request_side_effects(monkeypatch):
+    calls = []
+
+    async def fake_guard(request):
+        calls.append("guard")
+
+    async def fake_populate(request, require_agent_id):
+        calls.append("populate")
+
+    monkeypatch.setattr(chat_router, "_guard_request_multimodal_images", fake_guard)
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "populate_request_from_agent_config",
+        fake_populate,
+    )
+
+    request = chat_router.ApiChatRequest(
+        messages=[Message(role="user", content="hi")],
+        agent_id="agent",
+        env_vars={"PATH": "must-not-be-used"},
+    )
+    http_request = SimpleNamespace(
+        state=SimpleNamespace(user_claims={"userid": "authenticated-user"})
+    )
+
+    with pytest.raises(Exception):
+        asyncio.run(chat_router.chat(request, http_request))
+
+    assert calls == []
 
 
 def test_external_runtime_env_requires_authenticated_owner():

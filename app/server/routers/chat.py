@@ -497,10 +497,11 @@ def validate_and_prepare_request(
             "允许空 messages 请求消费 pending guidance"
         )
 
-    # 注入当前用户ID（如果未指定）
+    # Protected Server routes always use the authenticated identity. A body
+    # user_id is client-controlled metadata and must not select tenant runtime.
     claims = getattr(http_request.state, "user_claims", {}) or {}
     req_user_id = claims.get("userid")
-    if not request.user_id:
+    if req_user_id:
         request.user_id = req_user_id
 
     provider_id = (request.provider_id or "").strip()
@@ -534,6 +535,10 @@ async def chat(request: ApiChatRequest, http_request: Request):
         http_request,
         allow_pending_guidance_flush=True,
     )
+    runtime_env_update = _runtime_env_update(getattr(request, "env_vars", None))
+    runtime_env_owner_id = _runtime_env_owner_id(
+        http_request, runtime_env_update
+    )
     await _guard_request_multimodal_images(request)
 
     # 构建 StreamRequest
@@ -553,10 +558,6 @@ async def chat(request: ApiChatRequest, http_request: Request):
         require_agent_id=True,
     )
 
-    runtime_env_update = _runtime_env_update(getattr(request, "env_vars", None))
-    runtime_env_owner_id = _runtime_env_owner_id(
-        http_request, runtime_env_update
-    )
     stream_service, lock = await chat_service.prepare_session(
         inner_request,
         runtime_env_owner_id=runtime_env_owner_id,
@@ -583,16 +584,16 @@ async def chat(request: ApiChatRequest, http_request: Request):
 async def stream_chat(request: ApiStreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
-    await _guard_request_multimodal_images(request)
     runtime_env_update = _runtime_env_update(request.env_vars)
+    runtime_env_owner_id = _runtime_env_owner_id(
+        http_request, runtime_env_update
+    )
+    await _guard_request_multimodal_images(request)
     inner_request = _internal_stream_request(request)
     chat_service.mark_request_execution(inner_request, request_source="api/stream")
     await chat_service.populate_request_from_agent_config(
         inner_request,
         require_agent_id=False,
-    )
-    runtime_env_owner_id = _runtime_env_owner_id(
-        http_request, runtime_env_update
     )
     stream_service, lock = await chat_service.prepare_session(
         inner_request,

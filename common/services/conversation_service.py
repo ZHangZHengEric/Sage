@@ -522,9 +522,10 @@ async def delete_conversation(
             )
         )
     runtime_env_store = get_runtime_env_store()
-    if conversation.user_id:
+    runtime_env_owner_id = user_id or conversation.user_id
+    if runtime_env_owner_id:
         await runtime_env_store.clear_session(
-            conversation.user_id, conversation_id
+            runtime_env_owner_id, conversation_id
         )
     else:
         await runtime_env_store.clear_session_for_any_owner(conversation_id)

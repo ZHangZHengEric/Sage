@@ -1275,6 +1275,7 @@ class SageStreamService:
                 "runtime_env_vars": self.runtime_env_vars,
                 "runtime_resource_registrar": self.register_runtime_resource,
                 "runtime_env_refresh": self.runtime_env_refresh,
+                "runtime_env_owner_id": self.runtime_env_owner_id,
             }
 
             if _is_desktop_mode():
@@ -1422,7 +1423,10 @@ async def prepare_session(
     runtime_env_store: Optional[RuntimeEnvStore] = None
     runtime_env_reserved = False
     if lock.locked():
-        session = get_global_session_manager().get_live_session(session_id)
+        session = get_global_session_manager().get_live_session(
+            session_id,
+            runtime_owner_id=runtime_env_owner_id,
+        )
         if not session or not session.is_interrupted():
             raise _chat_exception("chat.session_running")
 

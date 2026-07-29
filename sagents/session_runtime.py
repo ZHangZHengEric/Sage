@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -59,6 +60,9 @@ from sagents.utils.i18n import normalize_language, t
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "session_id", default=None
 )
+_runtime_owner_id_var: contextvars.ContextVar[Optional[str]] = (
+    contextvars.ContextVar("runtime_owner_id", default=None)
+)
 
 
 def _load_json_file_sync(file_path: str) -> Optional[Any]:
@@ -77,6 +81,22 @@ def session_scope(session_id: Optional[str]):
 
 def get_current_session_id() -> Optional[str]:
     return _session_id_var.get()
+
+
+def get_current_runtime_owner_id() -> Optional[str]:
+    return _runtime_owner_id_var.get()
+
+
+def set_current_runtime_owner(
+    owner_id: Optional[str],
+) -> contextvars.Token[Optional[str]]:
+    return _runtime_owner_id_var.set(owner_id)
+
+
+def reset_current_runtime_owner(
+    token: contextvars.Token[Optional[str]],
+) -> None:
+    _runtime_owner_id_var.reset(token)
 
 
 def get_session_run_lock(session_id: str):
@@ -151,6 +171,7 @@ class Session:
         self.sandbox_id: Optional[str] = None  # 远程沙箱 ID
         self.runtime_env_vars: Dict[str, str] = {}
         self.runtime_resource_registrar: Optional[Any] = None
+        self._stale_runtime_sandbox: Optional[Any] = None
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
         self._persisted_snapshot: Optional[Dict[str, Any]] = None
@@ -514,7 +535,10 @@ class Session:
         self.volume_mounts = volume_mounts or []
         self.sandbox_id = sandbox_id
         if runtime_env_refresh and self.session_context is not None:
-            self.session_context.sandbox = None
+            current_sandbox = self.session_context.sandbox
+            if current_sandbox is not None:
+                self._stale_runtime_sandbox = current_sandbox
+                self.session_context.sandbox = None
         self.runtime_env_vars = dict(runtime_env_vars or {})
         self.runtime_resource_registrar = runtime_resource_registrar
 
@@ -599,6 +623,7 @@ class Session:
         skill_manager: Optional[Union[SkillManager, SkillProxy]],
         parent_session_id: Optional[str] = None,
     ) -> SessionContext:
+        await self._dispose_stale_runtime_sandbox()
         if not parent_session_id and system_context:
             parent_session_id = system_context.get("parent_session_id")
             if parent_session_id:
@@ -700,6 +725,19 @@ class Session:
                     f"messages before merging new input, session_id={session_id}"
                 )
         return self.session_context
+
+    async def _dispose_stale_runtime_sandbox(self) -> None:
+        sandbox = self._stale_runtime_sandbox
+        if sandbox is None:
+            return
+        cleanup = getattr(sandbox, "kill", None) or getattr(
+            sandbox, "cleanup", None
+        )
+        if cleanup is not None:
+            result = cleanup()
+            if inspect.isawaitable(result):
+                await result
+        self._stale_runtime_sandbox = None
 
     def _get_agent(self, agent_key: str) -> AgentBase:
         if agent_key in self._agents:
@@ -1306,7 +1344,7 @@ class SessionManager:
     def __init__(self, session_root_space: str, enable_obs: bool = True):
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
-        self._sessions: Dict[str, Session] = {}
+        self._sessions: Dict[object, Session] = {}
 
         from sagents.session_registry import SessionRegistry
 
@@ -1415,6 +1453,8 @@ class SessionManager:
         session_id: str,
         sandbox_type: str = "local",
         session_space: Optional[str] = None,
+        *,
+        runtime_owner_id: Optional[str] = None,
     ) -> Session:
         """
         获取或创建 Session
@@ -1427,16 +1467,17 @@ class SessionManager:
         Returns:
             Session 实例
         """
-        if session_id not in self._sessions:
-            self._sessions[session_id] = Session(
+        cache_key = self._runtime_cache_key(session_id, runtime_owner_id)
+        if cache_key not in self._sessions:
+            self._sessions[cache_key] = Session(
                 session_id=session_id,
                 enable_obs=self.enable_obs,
                 sandbox_type=sandbox_type,
             )
         else:
-            self._sessions[session_id].sandbox_type = sandbox_type
+            self._sessions[cache_key].sandbox_type = sandbox_type
 
-        return self._sessions[session_id]
+        return self._sessions[cache_key]
 
     def get(self, session_id: str) -> Optional[Session]:
         """
@@ -1448,7 +1489,8 @@ class SessionManager:
         Returns:
             Session 实例，找不到则返回 None
         """
-        session = self._sessions.get(session_id)
+        cache_key = self._runtime_cache_key(session_id)
+        session = self._sessions.get(cache_key)
         if session:
             return session
 
@@ -1460,13 +1502,20 @@ class SessionManager:
         session.set_workspace(workspace)
         loaded = session.load_persisted_state(workspace)
         if not loaded and not session.has_context() and not session.get_messages():
-            self._sessions.pop(session_id, None)
+            self._sessions.pop(cache_key, None)
             return None
         return session
 
-    def get_live_session(self, session_id: str) -> Optional[Session]:
+    def get_live_session(
+        self,
+        session_id: str,
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ) -> Optional[Session]:
         """仅获取内存中的活 session，不做磁盘恢复。"""
-        return self._sessions.get(session_id)
+        return self._sessions.get(
+            self._runtime_cache_key(session_id, runtime_owner_id)
+        )
 
     def _get_live_session(self, session_id: str) -> Optional[Session]:
         """兼容旧内部调用，优先使用 get_live_session。"""
@@ -1486,9 +1535,17 @@ class SessionManager:
         if session:
             session.clear_context()
 
-    def close_session(self, session_id: str):
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ):
         """关闭 Session"""
-        session = self._sessions.pop(session_id, None)
+        session = self._sessions.pop(
+            self._runtime_cache_key(session_id, runtime_owner_id),
+            None,
+        )
         if session:
             try:
                 logger.cleanup_session_logger(session_id)
@@ -1521,13 +1578,27 @@ class SessionManager:
         """列出活跃的根会话（子会话在运行期保留于内存，但不对外展示）"""
         return [
             {
-                "session_id": sid,
+                "session_id": sess.session_id,
                 "status": sess.get_status().value,
                 "start_time": sess.get_start_time(),
             }
-            for sid, sess in self._sessions.items()
-            if sess.has_context() and not self._is_sub_session(sid)
+            for sess in self._sessions.values()
+            if sess.has_context() and not self._is_sub_session(sess.session_id)
         ]
+
+    @staticmethod
+    def _runtime_cache_key(
+        session_id: str,
+        runtime_owner_id: Optional[str] = None,
+    ) -> object:
+        owner_id = (
+            runtime_owner_id
+            if runtime_owner_id is not None
+            else _runtime_owner_id_var.get()
+        )
+        if owner_id is None:
+            return session_id
+        return ("runtime-owner", str(owner_id), session_id)
 
     def get_session_messages(self, session_id: str) -> List[MessageChunk]:
         """
