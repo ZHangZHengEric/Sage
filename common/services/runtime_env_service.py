@@ -127,7 +127,17 @@ class RuntimeEnvStore:
                 await task
             except asyncio.CancelledError:
                 pass
-        await self.clear_all()
+        for _ in range(3):
+            await self.clear_all()
+            async with self._lock:
+                remaining = len(self._entries)
+            if not remaining:
+                break
+        if remaining:
+            logger.warning(
+                f"Runtime env shutdown left {remaining} resource set(s) for "
+                "process-exit cleanup"
+            )
 
     async def reserve_run(self, owner_id: str, session_id: str) -> None:
         key = self._key(owner_id, session_id)
@@ -217,14 +227,36 @@ class RuntimeEnvStore:
         resource_session_id: str | None = None,
     ) -> None:
         key = self._key(owner_id, session_id)
+        reject_registration = False
+        related_session_ids: tuple[str, ...] = ()
         async with self._lock:
             entry = self._entries.get(key)
-            if entry is None or not entry.env_vars:
-                return
-            if all(existing is not resource for existing in entry.resources):
-                entry.resources.append(resource)
-            if resource_session_id:
-                entry.related_session_ids.add(str(resource_session_id))
+            if entry is None or entry.revoking or not entry.env_vars:
+                reject_registration = True
+                related_session_ids = tuple(
+                    sorted(
+                        {
+                            session_id,
+                            *([str(resource_session_id)] if resource_session_id else []),
+                        }
+                    )
+                )
+            else:
+                if all(existing is not resource for existing in entry.resources):
+                    entry.resources.append(resource)
+                if resource_session_id:
+                    entry.related_session_ids.add(str(resource_session_id))
+
+        if reject_registration:
+            await self._cleanup(
+                owner_id,
+                session_id,
+                related_session_ids,
+                (resource,),
+            )
+            raise RuntimeEnvRevokingError(
+                "runtime environment no longer accepts resources"
+            )
 
     async def get_snapshot(self, owner_id: str, session_id: str) -> dict[str, str]:
         key = self._key(owner_id, session_id)
@@ -365,21 +397,44 @@ async def _cleanup_runtime_resources(
     from sagents.session_runtime import get_global_session_manager
     from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
 
+    errors: list[BaseException] = []
     for related_session_id in related_session_ids:
-        await ExecuteCommandTool.cleanup_session_background_tasks(related_session_id)
+        try:
+            await ExecuteCommandTool.cleanup_session_background_tasks(
+                related_session_id
+            )
+        except BaseException as exc:
+            errors.append(exc)
     for resource in resources:
         cleanup = getattr(resource, "kill", None) or getattr(resource, "cleanup", None)
         if cleanup is None:
             continue
-        result = cleanup()
-        if inspect.isawaitable(result):
-            await result
+        try:
+            result = cleanup()
+            if inspect.isawaitable(result):
+                await result
+        except BaseException as exc:
+            errors.append(exc)
     manager = get_global_session_manager()
     for related_session_id in related_session_ids:
-        session = manager.get_live_session(related_session_id)
-        context = getattr(session, "session_context", None)
-        if context is not None and context.sandbox in resources:
-            context.sandbox = None
+        try:
+            session = manager.get_live_session(related_session_id)
+            context = getattr(session, "session_context", None)
+            if context is not None:
+                if context.sandbox in resources:
+                    context.sandbox = None
+                context.runtime_env_vars = {}
+                context.runtime_resource_registrar = None
+            if session is not None:
+                session.runtime_env_vars = {}
+                session.runtime_resource_registrar = None
+        except BaseException as exc:
+            errors.append(exc)
+
+    if errors:
+        raise RuntimeError(
+            f"{len(errors)} runtime resource cleanup operation(s) failed"
+        ) from errors[0]
 
 
 _runtime_env_store = RuntimeEnvStore(cleanup=_cleanup_runtime_resources)

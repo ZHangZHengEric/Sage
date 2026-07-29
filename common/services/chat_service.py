@@ -1130,6 +1130,7 @@ class SageStreamService:
         self.runtime_env_store = runtime_env_store
         self.runtime_env_refresh = runtime_env_refresh
         self._runtime_env_run_finished = False
+        self._runtime_env_finish_task: Optional[asyncio.Task[None]] = None
 
         self.runtime_user_id = self.request.user_id or "default_user"
         # Server runtime workspaces are caller-scoped ("who uses it, owns the run files"),
@@ -1372,16 +1373,29 @@ class SageStreamService:
     async def finish_runtime_env_run(self) -> None:
         if self._runtime_env_run_finished:
             return
-        self._runtime_env_run_finished = True
-        if (
+        if not (
             self.runtime_env_store
             and self.runtime_env_owner_id
             and self.request.session_id
         ):
-            await self.runtime_env_store.finish_run(
-                self.runtime_env_owner_id,
-                self.request.session_id,
+            self._runtime_env_run_finished = True
+            return
+        if self._runtime_env_finish_task is None:
+            self._runtime_env_finish_task = asyncio.create_task(
+                self.runtime_env_store.finish_run(
+                    self.runtime_env_owner_id,
+                    self.request.session_id,
+                ),
+                name=f"finish-runtime-env-{self.request.session_id}",
             )
+        try:
+            await asyncio.shield(self._runtime_env_finish_task)
+        except asyncio.CancelledError:
+            logger.bind(session_id=self.request.session_id).warning(
+                "Runtime env lease finalization continues after request cancellation"
+            )
+            raise
+        self._runtime_env_run_finished = True
 
 
 async def prepare_session(
@@ -1425,12 +1439,6 @@ async def prepare_session(
             logger.bind(session_id=session_id).warning(
                 f"Session lock wait slow: {lock_wait_cost:.3f}s"
             )
-    except asyncio.TimeoutError:
-        if runtime_env_reserved and runtime_env_store:
-            await runtime_env_store.finish_run(runtime_env_owner_id, session_id)  # pyright: ignore[reportArgumentType]
-        raise _chat_exception("chat.session_cleanup")
-
-    try:
         runtime_env_vars: Dict[str, str] = {}
         if runtime_env_reserved and runtime_env_store:
             runtime_env_vars = await runtime_env_store.resolve_for_run(
@@ -1447,15 +1455,29 @@ async def prepare_session(
         )
         await stream_service.initialize_workspace_assets()
         return stream_service, lock  # pyright: ignore[reportReturnType]
-    except Exception as e:
+    except BaseException as e:
         if runtime_env_reserved and runtime_env_store:
-            await runtime_env_store.finish_run(runtime_env_owner_id, session_id)  # pyright: ignore[reportArgumentType]
+            finish_task = asyncio.create_task(
+                runtime_env_store.finish_run(
+                    runtime_env_owner_id,  # pyright: ignore[reportArgumentType]
+                    session_id,
+                ),
+                name=f"finish-runtime-env-prepare-{session_id}",
+            )
+            try:
+                await asyncio.shield(finish_task)
+            except asyncio.CancelledError:
+                logger.bind(session_id=session_id).warning(
+                    "Runtime env lease finalization continues after prepare cancellation"
+                )
         if acquired:
             await safe_release(
                 lock,
                 session_id,
                 f"prepare_session 构造失败，保留原始异常: {type(e).__name__}",
             )
+        if isinstance(e, asyncio.TimeoutError):
+            raise _chat_exception("chat.session_cleanup") from e
         raise
 
 
