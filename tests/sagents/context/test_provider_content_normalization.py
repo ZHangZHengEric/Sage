@@ -41,7 +41,7 @@ def test_add_messages_normalizes_dict_tool_content_into_ledger(tmp_path):
             content={"status": "success", "summary": "done"},
             tool_call_id="call_1",
             message_type=MessageType.TOOL_CALL_RESULT.value,
-            session_id=f"{ctx.session_id}_sub_0",
+            session_id=ctx.session_id,
         )
     )
 

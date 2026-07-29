@@ -631,19 +631,15 @@ class SessionContext:
     def _is_acceptable_message_session_id(
         self, msg_session_id: Optional[str]
     ) -> bool:
-        """Return True if message may enter this session's ledger.
+        """Return True if message may enter this session's inference ledger.
 
-        Accepts:
-        - ``None`` (untagged chunks)
-        - exact match with this session
-        - delegated child sessions allocated as ``{parent}_sub_{n}``
-          (including nested ``{parent}_sub_{n}_sub_{m}`` descendants)
+        Accepts only untagged chunks (``None``) or an exact match with this
+        session. Delegated child ``{parent}_sub_{n}`` traffic must stay in the
+        child session ledger; parents receive only the final delegate tool
+        result. Client-visible child progress is streamed by FlowExecutor
+        without calling ``add_messages``.
         """
-        if msg_session_id is None or msg_session_id == self.session_id:
-            return True
-        if not isinstance(msg_session_id, str) or not self.session_id:
-            return False
-        return msg_session_id.startswith(f"{self.session_id}_sub_")
+        return msg_session_id is None or msg_session_id == self.session_id
 
     @staticmethod
     def _normalize_message_content_for_ledger(
@@ -666,9 +662,6 @@ class SessionContext:
     ) -> None:
         """
         Add messages to the message manager with session_id validation.
-
-        Parent Team/Fibre sessions may also accept streamed chunks from their
-        own ``*_sub_*`` child sessions (published via orchestrator output_queue).
 
         Args:
             messages: A message chunk or a list of message chunks/dicts.
