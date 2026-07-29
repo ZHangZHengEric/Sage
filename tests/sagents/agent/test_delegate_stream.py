@@ -98,7 +98,7 @@ async def test_consume_completes_on_stream_end_without_waiting_for_eof():
         timeout=2.0,
     )
     assert result.reason == "stream_end"
-    assert len(result.chunk_batches) == 2
+    assert result.batch_count == 2
 
 
 def test_load_child_history_fallback_from_messages_json(tmp_path, monkeypatch):

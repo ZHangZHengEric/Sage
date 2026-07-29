@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Union
 
 from sagents.context.messages.message import MessageChunk
@@ -47,17 +47,10 @@ DEFAULT_WATCH_POLL_SECONDS = 0.5
 class ChildStreamResult:
     """Outcome of consuming a backend child chat stream."""
 
-    chunk_batches: List[List[StreamPayload]] = field(default_factory=list)
+    batch_count: int = 0
     reason: str = "eof"
     child_status: Optional[str] = None
     error: Optional[str] = None
-
-    @property
-    def all_chunks(self) -> List[StreamPayload]:
-        flat: List[StreamPayload] = []
-        for batch in self.chunk_batches:
-            flat.extend(batch)
-        return flat
 
 
 def _payload_type(payload: StreamPayload) -> Optional[str]:
@@ -326,7 +319,7 @@ async def consume_backend_child_stream(
             kind, payload = await event_queue.get()
             if kind == "chunks":
                 batch: List[StreamPayload] = payload
-                result.chunk_batches.append(batch)
+                result.batch_count += 1
                 if on_chunks is not None:
                     await on_chunks(batch)
                 continue
@@ -347,6 +340,6 @@ async def consume_backend_child_stream(
     logger.info(
         "[DelegateStream] finished "
         f"session_id={session_id} reason={result.reason} "
-        f"child_status={result.child_status} batches={len(result.chunk_batches)}"
+        f"child_status={result.child_status} batches={result.batch_count}"
     )
     return result
