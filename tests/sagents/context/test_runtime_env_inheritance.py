@@ -69,3 +69,29 @@ async def test_runtime_env_refresh_disposes_previous_untracked_sandbox(tmp_path)
 
     assert calls == ["kill"]
     assert session.session_context.sandbox is None
+
+
+@pytest.mark.asyncio
+async def test_failed_runtime_resource_registration_kills_new_sandbox():
+    calls = []
+
+    class Sandbox:
+        async def kill(self):
+            calls.append("kill")
+
+    async def reject_registration(resource, session_id):
+        assert session_id == "session"
+        assert resource is sandbox
+        raise RuntimeError("revoking")
+
+    sandbox = Sandbox()
+    context = SessionContext.__new__(SessionContext)
+    context.session_id = "session"
+    context.sandbox = sandbox
+    context.runtime_resource_registrar = reject_registration
+
+    with pytest.raises(RuntimeError, match="revoking"):
+        await context._register_runtime_resource(sandbox)
+
+    assert calls == ["kill"]
+    assert context.sandbox is None

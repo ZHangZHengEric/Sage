@@ -51,3 +51,20 @@ def test_closing_one_runtime_owner_does_not_close_other_owner(tmp_path):
         "shared-session", runtime_owner_id="owner-b"
     ) is owner_b
     assert owner_a is not owner_b
+
+
+def test_unscoped_runtime_lookup_returns_only_unambiguous_owner(tmp_path):
+    manager = SessionManager(str(tmp_path), enable_obs=False)
+    owner_a = manager.get_or_create(
+        "shared-session",
+        runtime_owner_id="owner-a",
+    )
+
+    assert manager.get_live_session("shared-session") is owner_a
+
+    manager.get_or_create(
+        "shared-session",
+        runtime_owner_id="owner-b",
+    )
+
+    assert manager.get_live_session("shared-session") is None

@@ -368,6 +368,42 @@ async def test_prepare_session_releases_runtime_env_lease_when_cancelled(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_prepare_session_only_maps_lock_timeout_to_cleanup_error(monkeypatch):
+    calls = []
+
+    class FakeStore:
+        async def reserve_run(self, owner_id, session_id):
+            calls.append("reserve")
+
+        async def resolve_for_run(self, owner_id, session_id, update):
+            raise asyncio.TimeoutError("provider initialization timeout")
+
+        async def finish_run(self, owner_id, session_id):
+            calls.append("finish")
+
+    monkeypatch.setattr(
+        chat_service, "get_runtime_env_store", lambda: FakeStore()
+    )
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        session_id="provider-timeout",
+        user_id="user",
+    )
+
+    with pytest.raises(
+        asyncio.TimeoutError,
+        match="provider initialization timeout",
+    ):
+        await chat_service.prepare_session(
+            request,
+            runtime_env_owner_id="user",
+            runtime_env_update={"TOKEN": "value"},
+        )
+
+    assert calls == ["reserve", "finish"]
+
+
+@pytest.mark.asyncio
 async def test_cleanup_attempts_every_resource_and_clears_all_runtime_copies(
     monkeypatch,
 ):

@@ -1490,7 +1490,7 @@ class SessionManager:
             Session 实例，找不到则返回 None
         """
         cache_key = self._runtime_cache_key(session_id)
-        session = self._sessions.get(cache_key)
+        session = self.get_live_session(session_id)
         if session:
             return session
 
@@ -1513,9 +1513,19 @@ class SessionManager:
         runtime_owner_id: Optional[str] = None,
     ) -> Optional[Session]:
         """仅获取内存中的活 session，不做磁盘恢复。"""
-        return self._sessions.get(
+        session = self._sessions.get(
             self._runtime_cache_key(session_id, runtime_owner_id)
         )
+        if session is not None:
+            return session
+        if runtime_owner_id is not None or _runtime_owner_id_var.get() is not None:
+            return None
+        matches = [
+            candidate
+            for candidate in self._sessions.values()
+            if candidate.session_id == session_id
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     def _get_live_session(self, session_id: str) -> Optional[Session]:
         """兼容旧内部调用，优先使用 get_live_session。"""

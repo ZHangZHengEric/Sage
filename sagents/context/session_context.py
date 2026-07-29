@@ -1,5 +1,6 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import asyncio
+import inspect
 import time
 import threading
 import uuid
@@ -1524,10 +1525,7 @@ class SessionContext:
             )
 
         self.sandbox = await SandboxProviderFactory.create(config)
-        if self.runtime_resource_registrar is not None:
-            result = self.runtime_resource_registrar(self.sandbox, self.session_id)
-            if asyncio.iscoroutine(result):
-                await result
+        await self._register_runtime_resource(self.sandbox)
         if sandbox_mode == SandboxType.REMOTE:
             self.sandbox_agent_workspace = self.sandbox.workspace_path
 
@@ -1537,6 +1535,32 @@ class SessionContext:
         logger.debug(
             f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s"
         )
+
+    async def _register_runtime_resource(self, resource: Any) -> None:
+        if self.runtime_resource_registrar is None:
+            return
+        try:
+            result = self.runtime_resource_registrar(resource, self.session_id)
+            if inspect.isawaitable(result):
+                await result
+        except BaseException:
+            cleanup = getattr(resource, "kill", None) or getattr(
+                resource, "cleanup", None
+            )
+            try:
+                if cleanup is not None:
+                    cleanup_result = cleanup()
+                    if inspect.isawaitable(cleanup_result):
+                        await cleanup_result
+            except BaseException as cleanup_error:
+                logger.warning(
+                    "SessionContext: failed to clean rejected runtime resource: "
+                    f"{type(cleanup_error).__name__}"
+                )
+            finally:
+                if self.sandbox is resource:
+                    self.sandbox = None
+            raise
 
     async def _register_and_prepare_skills(self):
         """

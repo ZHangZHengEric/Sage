@@ -1422,6 +1422,7 @@ async def prepare_session(
     acquired = False
     runtime_env_store: Optional[RuntimeEnvStore] = None
     runtime_env_reserved = False
+    lock_wait_timed_out = False
     if lock.locked():
         session = get_global_session_manager().get_live_session(
             session_id,
@@ -1436,7 +1437,11 @@ async def prepare_session(
             await runtime_env_store.reserve_run(runtime_env_owner_id, session_id)
             runtime_env_reserved = True
         lock_wait_start = time.perf_counter()
-        await asyncio.wait_for(lock.acquire(), timeout=10)
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=10)
+        except asyncio.TimeoutError:
+            lock_wait_timed_out = True
+            raise
         acquired = True
         lock_wait_cost = time.perf_counter() - lock_wait_start
         if lock_wait_cost > 0.2:
@@ -1480,7 +1485,7 @@ async def prepare_session(
                 session_id,
                 f"prepare_session 构造失败，保留原始异常: {type(e).__name__}",
             )
-        if isinstance(e, asyncio.TimeoutError):
+        if lock_wait_timed_out:
             raise _chat_exception("chat.session_cleanup") from e
         raise
 
