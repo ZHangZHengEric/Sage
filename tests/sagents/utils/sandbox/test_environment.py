@@ -4,7 +4,10 @@ import os
 
 import pytest
 
-from sagents.context.session_context import SessionContext
+from sagents.context.session_context import (
+    SessionContext,
+    build_session_scoped_sandbox_id,
+)
 from sagents.utils.sandbox.environment import (
     DESKTOP_PROCESS_MARKER,
     SERVER_PROCESS_MARKER,
@@ -16,6 +19,7 @@ from sagents.utils.sandbox.providers.local.isolation.bwrap import BwrapIsolation
 from sagents.utils.sandbox.providers.passthrough.passthrough import (
     PassthroughSandboxProvider,
 )
+from sagents.utils.sandbox.interface import SandboxType
 
 
 def test_server_agent_environment_uses_allowlist(tmp_path):
@@ -46,6 +50,17 @@ def test_explicit_tool_environment_is_forwarded(tmp_path):
 
     assert env["TASK_INPUT"] == "agent-visible"
     assert "SAGE_SESSION_SECRET" not in env
+
+
+def test_session_scoped_sandbox_ids_are_stable_and_isolated():
+    first = build_session_scoped_sandbox_id("user", "session-a")
+    same = build_session_scoped_sandbox_id("user", "session-a")
+    other = build_session_scoped_sandbox_id("user", "session-b")
+
+    assert first == same
+    assert first != other
+    assert "user" not in first
+    assert "session-a" not in first
 
 
 def test_desktop_process_preserves_existing_environment():
@@ -228,6 +243,68 @@ async def test_desktop_passthrough_provider_still_initializes(monkeypatch, tmp_p
     assert provider.workspace_path == str(tmp_path)
 
 
+async def test_passthrough_runtime_env_overrides_tool_env(monkeypatch, tmp_path):
+    monkeypatch.delenv(SERVER_PROCESS_MARKER, raising=False)
+    monkeypatch.setenv(DESKTOP_PROCESS_MARKER, "1")
+    provider = PassthroughSandboxProvider(
+        sandbox_id="sandbox",
+        sandbox_agent_workspace=str(tmp_path),
+    )
+    provider.set_runtime_env_vars({"RUNTIME_TOKEN": "api-owned"})
+
+    result = await provider.execute_command(
+        "python -c 'import os; print(os.environ[\"RUNTIME_TOKEN\"])'",
+        env_vars={"RUNTIME_TOKEN": "tool-owned"},
+    )
+
+    assert result.success is True
+    assert result.stdout.strip() == "api-owned"
+
+
+async def test_session_context_passes_runtime_env_to_scoped_sandbox(
+    monkeypatch, tmp_path
+):
+    captured = {}
+
+    class FakeSandbox:
+        workspace_path = str(tmp_path)
+
+        async def prepare_code_environment(self):
+            return None
+
+    sandbox = FakeSandbox()
+
+    async def create(config):
+        captured["config"] = config
+        return sandbox
+
+    async def register(resource, session_id):
+        captured["registered"] = (resource, session_id)
+
+    monkeypatch.setattr(
+        "sagents.context.session_context.SandboxProviderFactory.create", create
+    )
+    context = SessionContext(
+        session_id="session-a",
+        user_id="user",
+        agent_id="agent",
+        session_root_space=str(tmp_path),
+        sandbox_agent_workspace=str(tmp_path),
+        runtime_env_vars={"RUNTIME_TOKEN": "api-owned"},
+        runtime_resource_registrar=register,
+    )
+
+    await context._init_sandbox_and_file_system(SandboxType.LOCAL)
+
+    assert captured["config"].runtime_env_vars == {
+        "RUNTIME_TOKEN": "api-owned"
+    }
+    assert captured["config"].sandbox_id == build_session_scoped_sandbox_id(
+        "user", "session-a"
+    )
+    assert captured["registered"] == (sandbox, "session-a")
+
+
 async def test_server_local_background_command_is_wrapped_by_bwrap(
     monkeypatch, tmp_path
 ):
@@ -260,11 +337,12 @@ async def test_server_local_background_command_is_wrapped_by_bwrap(
 
     monkeypatch.setattr(provider, "_ensure_initialized_async", initialized)
     monkeypatch.setattr(provider._bg_runner, "start", start)
+    provider.set_runtime_env_vars({"TASK_INPUT": "api-owned"})
 
     await provider.start_background(
         "env",
         workdir=str(workspace),
-        env_vars={"TASK_INPUT": "agent-visible"},
+        env_vars={"TASK_INPUT": "tool-owned"},
     )
 
     assert captured["shell"] is False
@@ -273,3 +351,5 @@ async def test_server_local_background_command_is_wrapped_by_bwrap(
     assert "--clearenv" in captured["command"]
     assert "--unshare-pid" in captured["command"]
     assert captured["command"][-3:] == ["/bin/sh", "-c", "env"]
+    task_input_index = captured["command"].index("TASK_INPUT")
+    assert captured["command"][task_input_index + 1] == "api-owned"

@@ -29,6 +29,7 @@ from common.models.conversation import Conversation, ConversationDao
 from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
 from common.services.chat_utils import get_sessions_root
+from common.services.runtime_env_service import get_runtime_env_store
 
 _SESSION_PERSISTENCE_TASKS: Dict[str, asyncio.Task] = {}
 
@@ -520,6 +521,13 @@ async def delete_conversation(
                 error_detail=f"Failed to delete conversation '{conversation_id}'",
             )
         )
+    runtime_env_store = get_runtime_env_store()
+    if conversation.user_id:
+        await runtime_env_store.clear_session(
+            conversation.user_id, conversation_id
+        )
+    else:
+        await runtime_env_store.clear_session_for_any_owner(conversation_id)
     logger.bind(session_id=conversation_id).info("会话删除成功")
     return conversation_id
 

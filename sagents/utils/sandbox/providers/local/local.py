@@ -473,6 +473,7 @@ class LocalSandboxProvider(ISandboxHandle):
         log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._ensure_initialized_async()
+        env_vars = self.resolve_runtime_env_vars(env_vars)
         converted = self._convert_paths_in_command(command)
         host_workdir = (
             self.to_host_path(workdir)
@@ -706,6 +707,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """执行 shell 命令（使用 venv 环境）"""
         await self._ensure_initialized_async()
         await self._ensure_venv()
+        env_vars = self.resolve_runtime_env_vars(env_vars)
 
         # 转换工作目录
         actual_workdir = (
@@ -734,11 +736,11 @@ class LocalSandboxProvider(ISandboxHandle):
             env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
 
         # 配置 npm 使用国内镜像源
-        env["NPM_CONFIG_REGISTRY"] = "https://registry.npmmirror.com"
+        env.setdefault("NPM_CONFIG_REGISTRY", "https://registry.npmmirror.com")
 
         # 配置 pip 使用阿里镜像源
-        env["PIP_INDEX_URL"] = "https://mirrors.aliyun.com/pypi/simple/"
-        env["PIP_TRUSTED_HOST"] = "mirrors.aliyun.com"
+        env.setdefault("PIP_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
+        env.setdefault("PIP_TRUSTED_HOST", "mirrors.aliyun.com")
 
         # 配置 Sage 打包的 Node.js 运行时（优先使用）
         bundled_node_bin = os.environ.get("SAGE_BUNDLED_NODE_BIN")
@@ -992,7 +994,9 @@ class LocalSandboxProvider(ISandboxHandle):
             # 使用异步 subprocess 执行，避免阻塞
             proc = None
             try:
-                env = build_agent_environment(home_dir=actual_workdir)
+                env = build_agent_environment(
+                    self.resolve_runtime_env_vars(), home_dir=actual_workdir
+                )
                 if venv_python:
                     env["PATH"] = (
                         os.path.dirname(venv_python) + os.pathsep + env.get("PATH", "")
@@ -1087,7 +1091,9 @@ class LocalSandboxProvider(ISandboxHandle):
             # 使用异步 subprocess 执行，避免阻塞
             proc = None
             try:
-                env = build_agent_environment(home_dir=actual_workdir)
+                env = build_agent_environment(
+                    self.resolve_runtime_env_vars(), home_dir=actual_workdir
+                )
                 bundled_node_bin = os.environ.get("SAGE_BUNDLED_NODE_BIN")
                 if bundled_node_bin and os.path.exists(bundled_node_bin):
                     env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")

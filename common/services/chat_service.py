@@ -47,6 +47,11 @@ from common.services.chat_utils import (
     get_sessions_root,
 )
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
+from common.services.runtime_env_service import (
+    RUNTIME_ENV_UNSET,
+    RuntimeEnvStore,
+    get_runtime_env_store,
+)
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -1109,9 +1114,22 @@ async def populate_request_from_agent_config(
 
 
 class SageStreamService:
-    def __init__(self, request: StreamRequest):
+    def __init__(
+        self,
+        request: StreamRequest,
+        *,
+        runtime_env_owner_id: Optional[str] = None,
+        runtime_env_vars: Optional[Dict[str, str]] = None,
+        runtime_env_store: Optional[RuntimeEnvStore] = None,
+        runtime_env_refresh: bool = False,
+    ):
         self.request = request
         self.cfg = _get_cfg()
+        self.runtime_env_owner_id = runtime_env_owner_id
+        self.runtime_env_vars = dict(runtime_env_vars or {})
+        self.runtime_env_store = runtime_env_store
+        self.runtime_env_refresh = runtime_env_refresh
+        self._runtime_env_run_finished = False
 
         self.runtime_user_id = self.request.user_id or "default_user"
         # Server runtime workspaces are caller-scoped ("who uses it, owns the run files"),
@@ -1253,6 +1271,9 @@ class SageStreamService:
                 "system_context": self.request.system_context,
                 "available_workflows": self.request.available_workflows,
                 "context_budget_config": self.request.context_budget_config,
+                "runtime_env_vars": self.runtime_env_vars,
+                "runtime_resource_registrar": self.register_runtime_resource,
+                "runtime_env_refresh": self.runtime_env_refresh,
             }
 
             if _is_desktop_mode():
@@ -1313,20 +1334,61 @@ class SageStreamService:
                         yield approval_event
                     yield result
         except Exception as e:
-            logger.bind(session_id=session_id).error(
-                f"❌ 流式处理异常: {traceback.format_exc()}"
-            )
+            if self.runtime_env_vars:
+                logger.bind(session_id=session_id).error(
+                    f"❌ 流式处理异常: {type(e).__name__}"
+                )
+                error_content = "处理失败"
+            else:
+                logger.bind(session_id=session_id).error(
+                    f"❌ 流式处理异常: {traceback.format_exc()}"
+                )
+                error_content = f"处理失败: {str(e)}"
             yield {
                 "type": "error",
-                "content": f"处理失败: {str(e)}",
+                "content": error_content,
                 "role": "assistant",
                 "message_id": str(uuid.uuid4()),
                 "session_id": session_id,
             }
 
+    async def register_runtime_resource(
+        self, resource: Any, resource_session_id: Optional[str] = None
+    ) -> None:
+        if (
+            not self.runtime_env_store
+            or not self.runtime_env_owner_id
+            or not self.runtime_env_vars
+            or not self.request.session_id
+        ):
+            return
+        await self.runtime_env_store.register_resource(
+            self.runtime_env_owner_id,
+            self.request.session_id,
+            resource,
+            resource_session_id=resource_session_id,
+        )
+
+    async def finish_runtime_env_run(self) -> None:
+        if self._runtime_env_run_finished:
+            return
+        self._runtime_env_run_finished = True
+        if (
+            self.runtime_env_store
+            and self.runtime_env_owner_id
+            and self.request.session_id
+        ):
+            await self.runtime_env_store.finish_run(
+                self.runtime_env_owner_id,
+                self.request.session_id,
+            )
+
 
 async def prepare_session(
     request: StreamRequest,
+    *,
+    runtime_env_owner_id: Optional[str] = None,
+    runtime_env_update: object = RUNTIME_ENV_UNSET,
 ) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
@@ -1343,12 +1405,18 @@ async def prepare_session(
 
     lock = get_session_run_lock(session_id)
     acquired = False
+    runtime_env_store: Optional[RuntimeEnvStore] = None
+    runtime_env_reserved = False
     if lock.locked():
         session = get_global_session_manager().get_live_session(session_id)
         if not session or not session.is_interrupted():
             raise _chat_exception("chat.session_running")
 
     try:
+        if runtime_env_owner_id:
+            runtime_env_store = get_runtime_env_store()
+            await runtime_env_store.reserve_run(runtime_env_owner_id, session_id)
+            runtime_env_reserved = True
         lock_wait_start = time.perf_counter()
         await asyncio.wait_for(lock.acquire(), timeout=10)
         acquired = True
@@ -1358,13 +1426,30 @@ async def prepare_session(
                 f"Session lock wait slow: {lock_wait_cost:.3f}s"
             )
     except asyncio.TimeoutError:
+        if runtime_env_reserved and runtime_env_store:
+            await runtime_env_store.finish_run(runtime_env_owner_id, session_id)  # pyright: ignore[reportArgumentType]
         raise _chat_exception("chat.session_cleanup")
 
     try:
-        stream_service = SageStreamService(request)
+        runtime_env_vars: Dict[str, str] = {}
+        if runtime_env_reserved and runtime_env_store:
+            runtime_env_vars = await runtime_env_store.resolve_for_run(
+                runtime_env_owner_id,  # pyright: ignore[reportArgumentType]
+                session_id,
+                runtime_env_update,
+            )
+        stream_service = SageStreamService(
+            request,
+            runtime_env_owner_id=runtime_env_owner_id,
+            runtime_env_vars=runtime_env_vars,
+            runtime_env_store=runtime_env_store,
+            runtime_env_refresh=runtime_env_update is not RUNTIME_ENV_UNSET,
+        )
         await stream_service.initialize_workspace_assets()
         return stream_service, lock  # pyright: ignore[reportReturnType]
     except Exception as e:
+        if runtime_env_reserved and runtime_env_store:
+            await runtime_env_store.finish_run(runtime_env_owner_id, session_id)  # pyright: ignore[reportArgumentType]
         if acquired:
             await safe_release(
                 lock,
@@ -1442,7 +1527,14 @@ async def execute_chat_session(
                 stream_service,
                 token_usage_payload=token_usage_payload,
             )
-        await _finalize_session_end(request)
+        try:
+            await _finalize_session_end(request)
+        finally:
+            finish_runtime_env_run = getattr(
+                stream_service, "finish_runtime_env_run", None
+            )
+            if finish_runtime_env_run is not None:
+                await finish_runtime_env_run()
 
 
 async def _finalize_session_end(

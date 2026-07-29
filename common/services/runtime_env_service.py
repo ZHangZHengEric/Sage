@@ -78,7 +78,7 @@ def validate_runtime_env_vars(value: Mapping[str, object]) -> dict[str, str]:
     return result
 
 
-RuntimeCleanup = Callable[[str, str, Sequence[Any]], Awaitable[None]]
+RuntimeCleanup = Callable[[str, str, Sequence[str], Sequence[Any]], Awaitable[None]]
 
 
 @dataclass
@@ -89,6 +89,7 @@ class _RuntimeEnvEntry:
     version: int = 0
     revoking: bool = False
     resources: list[Any] = field(default_factory=list)
+    related_session_ids: set[str] = field(default_factory=set)
 
 
 class RuntimeEnvStore:
@@ -146,6 +147,8 @@ class RuntimeEnvStore:
         update: object = RUNTIME_ENV_UNSET,
     ) -> dict[str, str]:
         key = self._key(owner_id, session_id)
+        resources: tuple[Any, ...] = ()
+        related_session_ids: tuple[str, ...] = ()
         async with self._lock:
             entry = self._entries.get(key)
             if entry is None or entry.active_runs <= 0:
@@ -153,8 +156,36 @@ class RuntimeEnvStore:
             if entry.revoking:
                 raise RuntimeEnvRevokingError("runtime environment is being revoked")
             if update is not RUNTIME_ENV_UNSET:
-                entry.env_vars = dict(update)  # type: ignore[arg-type]
+                resources = tuple(entry.resources)
+                related_session_ids = tuple(
+                    sorted(entry.related_session_ids.union({session_id}))
+                )
+                if resources:
+                    entry.revoking = True
                 entry.version += 1
+            else:
+                return dict(entry.env_vars)
+
+        if resources:
+            try:
+                await self._cleanup(
+                    owner_id, session_id, related_session_ids, resources
+                )
+            except Exception:
+                async with self._lock:
+                    current = self._entries.get(key)
+                    if current is not None:
+                        current.revoking = False
+                raise
+
+        async with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                raise RuntimeError("runtime environment run was removed")
+            entry.resources.clear()
+            entry.related_session_ids.clear()
+            entry.env_vars = dict(update)  # type: ignore[arg-type]
+            entry.revoking = False
             return dict(entry.env_vars)
 
     async def finish_run(self, owner_id: str, session_id: str) -> None:
@@ -178,7 +209,12 @@ class RuntimeEnvStore:
             self._wake.set()
 
     async def register_resource(
-        self, owner_id: str, session_id: str, resource: Any
+        self,
+        owner_id: str,
+        session_id: str,
+        resource: Any,
+        *,
+        resource_session_id: str | None = None,
     ) -> None:
         key = self._key(owner_id, session_id)
         async with self._lock:
@@ -187,6 +223,8 @@ class RuntimeEnvStore:
                 return
             if all(existing is not resource for existing in entry.resources):
                 entry.resources.append(resource)
+            if resource_session_id:
+                entry.related_session_ids.add(str(resource_session_id))
 
     async def get_snapshot(self, owner_id: str, session_id: str) -> dict[str, str]:
         key = self._key(owner_id, session_id)
@@ -248,10 +286,15 @@ class RuntimeEnvStore:
             entry.version += 1
             version = entry.version
             resources = tuple(entry.resources)
+            related_session_ids = tuple(
+                sorted(entry.related_session_ids.union({key[1]}))
+            )
 
         owner_id, session_id = key
         try:
-            await self._cleanup(owner_id, session_id, resources)
+            await self._cleanup(
+                owner_id, session_id, related_session_ids, resources
+            )
         except Exception as exc:
             logger.bind(session_id=session_id).warning(
                 f"Runtime env cleanup failed; retry scheduled: {type(exc).__name__}"
@@ -278,8 +321,8 @@ class RuntimeEnvStore:
 
     async def _reaper_loop(self) -> None:
         while True:
-            delay = await self._next_delay()
             self._wake.clear()
+            delay = await self._next_delay()
             if delay is None:
                 await self._wake.wait()
                 continue
@@ -313,12 +356,17 @@ class RuntimeEnvStore:
 
 
 async def _cleanup_runtime_resources(
-    owner_id: str, session_id: str, resources: Sequence[Any]
+    owner_id: str,
+    session_id: str,
+    related_session_ids: Sequence[str],
+    resources: Sequence[Any],
 ) -> None:
     del owner_id
+    from sagents.session_runtime import get_global_session_manager
     from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
 
-    await ExecuteCommandTool.cleanup_session_background_tasks(session_id)
+    for related_session_id in related_session_ids:
+        await ExecuteCommandTool.cleanup_session_background_tasks(related_session_id)
     for resource in resources:
         cleanup = getattr(resource, "kill", None) or getattr(resource, "cleanup", None)
         if cleanup is None:
@@ -326,6 +374,12 @@ async def _cleanup_runtime_resources(
         result = cleanup()
         if inspect.isawaitable(result):
             await result
+    manager = get_global_session_manager()
+    for related_session_id in related_session_ids:
+        session = manager.get_live_session(related_session_id)
+        context = getattr(session, "session_context", None)
+        if context is not None and context.sandbox in resources:
+            context.sandbox = None
 
 
 _runtime_env_store = RuntimeEnvStore(cleanup=_cleanup_runtime_resources)

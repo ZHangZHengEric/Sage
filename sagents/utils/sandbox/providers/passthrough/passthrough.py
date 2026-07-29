@@ -296,6 +296,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         env_vars: Optional[Dict[str, str]] = None,
         log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
+        env_vars = self.resolve_runtime_env_vars(env_vars)
         # 路径转换 + workdir 落到宿主机
         converted = self._convert_paths_in_command(command)
         host_workdir = (
@@ -475,7 +476,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 f"PassthroughSandboxProvider: Failed to create npm cache dir {npm_cache_dir}: {e}"
             )
 
-        merged_env = build_agent_environment(env_vars, home_dir=cwd)
+        merged_env = build_agent_environment(
+            self.resolve_runtime_env_vars(env_vars), home_dir=cwd
+        )
         merged_env.setdefault("npm_config_cache", npm_cache_dir)
         merged_env.setdefault("NPM_CONFIG_CACHE", npm_cache_dir)
 
@@ -688,7 +691,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=actual_workdir,
-                env=build_agent_environment(home_dir=actual_workdir),
+                env=build_agent_environment(
+                    self.resolve_runtime_env_vars(), home_dir=actual_workdir
+                ),
             )
 
             stdout, stderr = await asyncio.wait_for(
@@ -759,7 +764,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=actual_workdir,
-                env=build_agent_environment(home_dir=actual_workdir),
+                env=build_agent_environment(
+                    self.resolve_runtime_env_vars(), home_dir=actual_workdir
+                ),
             )
 
             stdout, stderr = await asyncio.wait_for(

@@ -66,6 +66,7 @@ class SandboxConfig:
     # volume_mounts: 额外的目录挂载（宿主机路径 -> 沙箱内路径，可选）
     sandbox_agent_workspace: Optional[str] = None  # 沙箱内虚拟工作区路径
     volume_mounts: List[VolumeMount] = field(default_factory=list)  # 额外卷挂载
+    runtime_env_vars: Dict[str, str] = field(default_factory=dict)
 
     # ===== 本地沙箱配置 =====
     cpu_time_limit: int = 300

@@ -25,9 +25,13 @@ def test_factory_initializes_provider_before_returning(monkeypatch, tmp_path):
                 sandbox_id="test-sandbox",
                 mode=SandboxType.PASSTHROUGH,
                 sandbox_agent_workspace=str(tmp_path),
+                runtime_env_vars={"API_TOKEN": "api-owned"},
             )
         )
     )
 
     assert isinstance(provider, FakeProvider)
     assert calls == ["initialize"]
+    assert provider.resolve_runtime_env_vars({"API_TOKEN": "tool-owned"}) == {
+        "API_TOKEN": "api-owned"
+    }

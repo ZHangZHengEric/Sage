@@ -61,6 +61,18 @@ class ISandboxHandle(ABC):
     这是工具层看到的唯一接口，无论底层是本地还是远程沙箱
     """
 
+    def set_runtime_env_vars(self, env_vars: Optional[Dict[str, str]]) -> None:
+        """Set the immutable API-owned environment snapshot for this sandbox."""
+        self._runtime_env_vars = dict(env_vars or {})
+
+    def resolve_runtime_env_vars(
+        self, env_vars: Optional[Dict[str, str]] = None
+    ) -> Dict[str, str]:
+        """Merge tool-provided env with the API snapshot; API values win."""
+        merged = dict(env_vars or {})
+        merged.update(getattr(self, "_runtime_env_vars", {}))
+        return merged
+
     @property
     @abstractmethod
     def sandbox_type(self) -> SandboxType:

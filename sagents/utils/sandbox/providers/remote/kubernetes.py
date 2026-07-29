@@ -5,6 +5,7 @@ Kubernetes 远程沙箱实现
 """
 
 from datetime import timedelta
+import shlex
 from typing import Any, Dict, List, Optional
 
 from .base import RemoteSandboxProvider
@@ -143,7 +144,17 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
 
         from kubernetes import stream  # pyright: ignore[reportAttributeAccessIssue]
 
-        exec_command = ["/bin/sh", "-c", command]
+        effective_command = command
+        if workdir:
+            effective_command = f"cd {shlex.quote(workdir)} && {command}"
+        resolved_env = self.resolve_runtime_env_vars(env_vars)
+        exec_command = [
+            "/usr/bin/env",
+            *(f"{name}={value}" for name, value in resolved_env.items()),
+            "/bin/sh",
+            "-c",
+            effective_command,
+        ]
 
         resp = stream.stream(
             self._k8s_client.connect_get_namespaced_pod_exec,  # pyright: ignore[reportOptionalMemberAccess]

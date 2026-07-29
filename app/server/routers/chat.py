@@ -20,6 +20,11 @@ from common.core.i18n import t
 from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
+from common.services.runtime_env_service import (
+    RUNTIME_ENV_UNSET,
+    RuntimeEnvValidationError,
+    validate_runtime_env_vars,
+)
 from common.schemas.chat import (
     ChatRequest,
     SandboxApprovalDecisionRequest,
@@ -32,7 +37,7 @@ from sagents.utils.sandbox.approval import (
 )
 from app.server.services.prometheus_metrics import record_sse_stream_failure
 from app.server.utils.image_size_guard import ensure_image_url_within_size_limit
-from pydantic import BaseModel
+from pydantic import BaseModel, SkipValidation
 
 from ..services.chat.stream_manager import StreamManager
 
@@ -71,6 +76,52 @@ class RerunStreamRequest(BaseModel):
     available_sub_agent_ids: list[str] | None = None
     guidance_content: str | None = None
     guidance_id: str | None = None
+
+
+class ApiChatRequest(ChatRequest):
+    """External agent chat contract; env_vars is stripped before internal use."""
+
+    env_vars: SkipValidation[dict[str, str]] | None = None
+
+
+class ApiStreamRequest(StreamRequest):
+    """External direct stream contract; env_vars is stripped before internal use."""
+
+    env_vars: SkipValidation[dict[str, str]] | None = None
+
+
+def _runtime_env_update(
+    env_vars: object,
+) -> object:
+    if env_vars is None:
+        return RUNTIME_ENV_UNSET
+    try:
+        return validate_runtime_env_vars(env_vars)
+    except RuntimeEnvValidationError as exc:
+        raise SageHTTPException(
+            status_code=422,
+            detail="Invalid env_vars",
+            error_detail="Runtime environment validation failed",
+        ) from exc
+
+
+def _internal_stream_request(request: ApiStreamRequest) -> StreamRequest:
+    return StreamRequest.model_validate(request.model_dump(exclude={"env_vars"}))
+
+
+def _runtime_env_owner_id(
+    http_request: Request, runtime_env_update: object
+) -> str | None:
+    owner_id = get_request_user_id(http_request).strip()
+    if owner_id:
+        return owner_id
+    if runtime_env_update is not RUNTIME_ENV_UNSET:
+        raise SageHTTPException(
+            status_code=401,
+            detail="Authentication required for env_vars",
+            error_detail="Runtime environment requires an authenticated user",
+        )
+    return None
 
 
 @chat_router.post("/api/sandbox/approval")
@@ -476,7 +527,7 @@ def _has_pending_user_injections(session_id: str | None) -> bool:
 
 
 @chat_router.post("/api/chat")
-async def chat(request: ChatRequest, http_request: Request):
+async def chat(request: ApiChatRequest, http_request: Request):
     """流式聊天接口"""
     validate_and_prepare_request(
         request,
@@ -502,7 +553,15 @@ async def chat(request: ChatRequest, http_request: Request):
         require_agent_id=True,
     )
 
-    stream_service, lock = await chat_service.prepare_session(inner_request)
+    runtime_env_update = _runtime_env_update(getattr(request, "env_vars", None))
+    runtime_env_owner_id = _runtime_env_owner_id(
+        http_request, runtime_env_update
+    )
+    stream_service, lock = await chat_service.prepare_session(
+        inner_request,
+        runtime_env_owner_id=runtime_env_owner_id,
+        runtime_env_update=runtime_env_update,
+    )
     session_id = inner_request.session_id
     return StreamingResponse(
         stream_api_with_disconnect_check(
@@ -521,17 +580,26 @@ async def chat(request: ChatRequest, http_request: Request):
 
 
 @chat_router.post("/api/stream")
-async def stream_chat(request: StreamRequest, http_request: Request):
+async def stream_chat(request: ApiStreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
     await _guard_request_multimodal_images(request)
-    chat_service.mark_request_execution(request, request_source="api/stream")
+    runtime_env_update = _runtime_env_update(request.env_vars)
+    inner_request = _internal_stream_request(request)
+    chat_service.mark_request_execution(inner_request, request_source="api/stream")
     await chat_service.populate_request_from_agent_config(
-        request,
+        inner_request,
         require_agent_id=False,
     )
-    stream_service, lock = await chat_service.prepare_session(request)
-    session_id = request.session_id
+    runtime_env_owner_id = _runtime_env_owner_id(
+        http_request, runtime_env_update
+    )
+    stream_service, lock = await chat_service.prepare_session(
+        inner_request,
+        runtime_env_owner_id=runtime_env_owner_id,
+        runtime_env_update=runtime_env_update,
+    )
+    session_id = inner_request.session_id
 
     return StreamingResponse(
         stream_api_with_disconnect_check(

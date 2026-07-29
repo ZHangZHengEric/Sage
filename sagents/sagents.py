@@ -190,6 +190,9 @@ class SAgent:
         context_budget_config: Optional[Dict[str, Any]] = None,
         custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
         custom_flow: Optional[AgentFlow] = None,
+        runtime_env_vars: Optional[Dict[str, str]] = None,
+        runtime_resource_registrar: Optional[Any] = None,
+        runtime_env_refresh: bool = False,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         """执行流式对话会话
 
@@ -340,6 +343,9 @@ class SAgent:
             volume_mounts=volume_mounts,
             sandbox_id=sandbox_id,
             agent_id=agent_id,
+            runtime_env_vars=runtime_env_vars,
+            runtime_resource_registrar=runtime_resource_registrar,
+            runtime_env_refresh=runtime_env_refresh,
         )
 
         if session.observability_manager:

@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import datetime
+import hashlib
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.sandbox.environment import is_server_process
@@ -34,6 +35,11 @@ _session_context_file_io_pool = ThreadPoolExecutor(
 
 MESSAGE_JOURNAL_SCHEMA_VERSION = 1
 MESSAGE_JOURNAL_FILE = "messages.journal.jsonl"
+
+
+def build_session_scoped_sandbox_id(user_id: str, session_id: str) -> str:
+    identity = f"{user_id}\0{session_id}".encode("utf-8")
+    return f"sage-session-{hashlib.sha256(identity).hexdigest()[:32]}"
 
 
 class SessionStatus(Enum):
@@ -61,6 +67,8 @@ class SessionContext:
         tool_manager: Optional[Any] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         parent_session_id: Optional[str] = None,
+        runtime_env_vars: Optional[Dict[str, str]] = None,
+        runtime_resource_registrar: Optional[Any] = None,
     ):
         # 基础身份与外部依赖
         self.session_id = session_id
@@ -87,6 +95,8 @@ class SessionContext:
         self.skill_manager = skill_manager
         self.sandbox_skill_manager: Optional[SandboxSkillManager] = None
         self.parent_session_id = parent_session_id
+        self.runtime_env_vars = dict(runtime_env_vars or {})
+        self.runtime_resource_registrar = runtime_resource_registrar
         self._init_runtime_state(context_budget_config=context_budget_config)
         # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
         self._session_root_space = session_root_space
@@ -1453,15 +1463,21 @@ class SessionContext:
         )
         t0 = time.time()
 
+        scoped_sandbox_id = (
+            self.sandbox_id
+            or build_session_scoped_sandbox_id(self.user_id, self.session_id)
+        )
+
         if sandbox_mode == SandboxType.REMOTE:
             if not self.sandbox_agent_workspace:
                 self.sandbox_agent_workspace = "/sage-workspace"
             # 远程沙箱配置
             config = SandboxConfig(
-                sandbox_id=self.sandbox_id or self.user_id or self.session_id,
+                sandbox_id=scoped_sandbox_id,
                 mode=sandbox_mode,
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 volume_mounts=self.volume_mounts,  # 远程沙箱可能支持的挂载
+                runtime_env_vars=self.runtime_env_vars,
                 # 远程沙箱特定的配置
                 remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
                 remote_server_url=os.environ.get("OPENSANDBOX_URL"),
@@ -1489,10 +1505,11 @@ class SessionContext:
                 )
 
             config = SandboxConfig(
-                sandbox_id=self.user_id or self.session_id,
+                sandbox_id=scoped_sandbox_id,
                 mode=sandbox_mode,
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 volume_mounts=volume_mounts,  # 传递所有卷挂载配置
+                runtime_env_vars=self.runtime_env_vars,
                 # 本地沙箱特定的配置
                 cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
                 memory_limit_mb=int(
@@ -1507,6 +1524,10 @@ class SessionContext:
             )
 
         self.sandbox = await SandboxProviderFactory.create(config)
+        if self.runtime_resource_registrar is not None:
+            result = self.runtime_resource_registrar(self.sandbox, self.session_id)
+            if asyncio.iscoroutine(result):
+                await result
         if sandbox_mode == SandboxType.REMOTE:
             self.sandbox_agent_workspace = self.sandbox.workspace_path
 

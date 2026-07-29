@@ -163,7 +163,9 @@ class OpenSandboxProvider(RemoteSandboxProvider):
 
         async with self._sdk:  # pyright: ignore[reportOptionalContextManager]
             execution = await self._sdk.commands.run(  # pyright: ignore[reportOptionalMemberAccess]
-                effective_command, timeout=timeout, env=env_vars or {}
+                effective_command,
+                timeout=timeout,
+                env=self.resolve_runtime_env_vars(env_vars),
             )
 
             return CommandResult(
@@ -184,6 +186,34 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         """在远程沙箱执行 Python 代码"""
         if not self._is_initialized:
             await self.initialize()
+
+        if getattr(self, "_runtime_env_vars", None):
+            if requirements:
+                install = await self.execute_command(
+                    f"python -m pip install {' '.join(map(shlex.quote, requirements))}",
+                    workdir=workdir,
+                    timeout=300,
+                )
+                if not install.success:
+                    return ExecutionResult(
+                        success=False,
+                        output=install.stdout,
+                        error=install.stderr,
+                        execution_time=install.execution_time,
+                        installed_packages=[],
+                    )
+            result = await self.execute_command(
+                f"python -c {shlex.quote(code)}",
+                workdir=workdir,
+                timeout=timeout,
+            )
+            return ExecutionResult(
+                success=result.success,
+                output=result.stdout,
+                error=result.stderr if not result.success else None,
+                execution_time=result.execution_time,
+                installed_packages=requirements or [],
+            )
 
         if workdir:
             code = self._inject_workdir(code, workdir)

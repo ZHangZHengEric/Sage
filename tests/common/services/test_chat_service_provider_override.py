@@ -1,10 +1,13 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from common.core import config
 from app.server.routers import chat as chat_router
 from common.schemas.chat import ChatRequest, Message, StreamRequest
 from common.services import chat_service
+from common.services.runtime_env_service import RUNTIME_ENV_UNSET
 
 
 def test_chat_request_accepts_provider_id():
@@ -134,7 +137,8 @@ def test_chat_endpoint_preserves_provider_override(monkeypatch):
         captured["request"] = request
         captured["require_agent_id"] = require_agent_id
 
-    async def fake_prepare_session(request):
+    async def fake_prepare_session(request, **kwargs):
+        captured["prepare_kwargs"] = kwargs
         return object(), asyncio.Lock()
 
     async def fake_execute_chat_session(stream_service):
@@ -188,6 +192,157 @@ def test_chat_endpoint_preserves_provider_override(monkeypatch):
     assert inner_request.provider_id == "provider_1"
     assert inner_request.fast_provider_id == "fast_provider_1"
     assert captured["require_agent_id"] is True
+
+
+def test_external_chat_endpoint_strips_and_forwards_runtime_env(monkeypatch):
+    captured = {}
+
+    async def fake_populate_request_from_agent_config(request, require_agent_id):
+        captured["request"] = request
+
+    async def fake_prepare_session(request, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return object(), asyncio.Lock()
+
+    async def fake_execute_chat_session(stream_service):
+        if False:
+            yield ""
+
+    async def fake_guard_request_multimodal_images(request):
+        return None
+
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "mark_request_execution",
+        lambda request, request_source: None,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "populate_request_from_agent_config",
+        fake_populate_request_from_agent_config,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "prepare_session",
+        fake_prepare_session,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "execute_chat_session",
+        fake_execute_chat_session,
+    )
+    monkeypatch.setattr(
+        chat_router,
+        "_guard_request_multimodal_images",
+        fake_guard_request_multimodal_images,
+    )
+
+    request = chat_router.ApiChatRequest(
+        messages=[Message(role="user", content="hi")],
+        agent_id="agent_1",
+        env_vars={"THIRD_PARTY_API_KEY": "secret-value"},
+    )
+    http_request = SimpleNamespace(
+        state=SimpleNamespace(user_claims={"userid": "authenticated-user"})
+    )
+
+    asyncio.run(chat_router.chat(request, http_request))
+
+    assert not hasattr(captured["request"], "env_vars")
+    assert captured["prepare_kwargs"] == {
+        "runtime_env_owner_id": "authenticated-user",
+        "runtime_env_update": {"THIRD_PARTY_API_KEY": "secret-value"},
+    }
+
+
+def test_external_stream_omitted_runtime_env_reuses_store_without_exposing_field(
+    monkeypatch,
+):
+    captured = {}
+
+    async def fake_populate_request_from_agent_config(request, require_agent_id):
+        captured["request"] = request
+
+    async def fake_prepare_session(request, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return object(), asyncio.Lock()
+
+    async def fake_execute_chat_session(stream_service):
+        if False:
+            yield ""
+
+    async def fake_guard_request_multimodal_images(request):
+        return None
+
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "mark_request_execution",
+        lambda request, request_source: None,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "populate_request_from_agent_config",
+        fake_populate_request_from_agent_config,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "prepare_session",
+        fake_prepare_session,
+    )
+    monkeypatch.setattr(
+        chat_router.chat_service,
+        "execute_chat_session",
+        fake_execute_chat_session,
+    )
+    monkeypatch.setattr(
+        chat_router,
+        "_guard_request_multimodal_images",
+        fake_guard_request_multimodal_images,
+    )
+
+    request = chat_router.ApiStreamRequest(
+        messages=[Message(role="user", content="hi")],
+        session_id="session",
+    )
+    http_request = SimpleNamespace(
+        state=SimpleNamespace(user_claims={"userid": "authenticated-user"})
+    )
+
+    asyncio.run(chat_router.stream_chat(request, http_request))
+
+    assert not hasattr(captured["request"], "env_vars")
+    assert captured["prepare_kwargs"]["runtime_env_owner_id"] == "authenticated-user"
+    assert captured["prepare_kwargs"]["runtime_env_update"] is RUNTIME_ENV_UNSET
+
+
+def test_external_runtime_env_validation_does_not_echo_secret_value():
+    secret_value = "must-never-appear-in-error"
+    request = chat_router.ApiStreamRequest(
+        messages=[Message(role="user", content="hi")],
+        env_vars={"PATH": secret_value},
+    )
+    http_request = SimpleNamespace(
+        state=SimpleNamespace(user_claims={"userid": "authenticated-user"})
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(chat_router.stream_chat(request, http_request))
+
+    assert secret_value not in str(exc_info.value)
+
+
+def test_external_runtime_env_requires_authenticated_owner():
+    request = chat_router.ApiStreamRequest(
+        messages=[Message(role="user", content="hi")],
+        env_vars={"TOKEN": "secret"},
+    )
+    http_request = SimpleNamespace(state=SimpleNamespace(user_claims={}))
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(chat_router.stream_chat(request, http_request))
+
+    assert getattr(exc_info.value, "status_code", None) == 401
+    assert "secret" not in str(exc_info.value)
 
 
 def test_explicit_provider_override_takes_priority(monkeypatch):

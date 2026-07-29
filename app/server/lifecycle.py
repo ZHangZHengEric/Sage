@@ -18,6 +18,10 @@ from .bootstrap import (
     validate_and_disable_mcp_servers,
 )
 from common.core.config import StartupConfig
+from common.services.runtime_env_service import (
+    shutdown_runtime_env_service,
+    start_runtime_env_service,
+)
 from common.utils.async_utils import create_safe_task
 
 
@@ -46,6 +50,7 @@ async def initialize_system(cfg: StartupConfig):
 
     """初始化全局 SessionManager"""
     await _require_initialized("session manager", initialize_session_manager(cfg))
+    await start_runtime_env_service()
 
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)
@@ -99,6 +104,7 @@ async def _start_task_scheduler():
 async def cleanup_system():
     logger.info("Sage正在清理资源...")
     await shutdown_scheduler()
+    await shutdown_runtime_env_service()
     # 关闭 观测链路上报 (需在 DB 关闭前)
     await close_observability()
     # 关闭第三方客户端

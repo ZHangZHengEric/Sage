@@ -149,6 +149,8 @@ class Session:
         self.sandbox_agent_workspace: Optional[str] = None  # Agent 私有工作空间
         self.volume_mounts: Optional[List[VolumeMount]] = None  # 卷挂载配置
         self.sandbox_id: Optional[str] = None  # 远程沙箱 ID
+        self.runtime_env_vars: Dict[str, str] = {}
+        self.runtime_resource_registrar: Optional[Any] = None
         self.observability_manager: Optional[ObservabilityManager] = None
         self._runtime_signature: Optional[tuple] = None
         self._persisted_snapshot: Optional[Dict[str, Any]] = None
@@ -482,6 +484,9 @@ class Session:
         volume_mounts: Optional[List[VolumeMount]] = None,
         sandbox_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        runtime_env_vars: Optional[Dict[str, str]] = None,
+        runtime_resource_registrar: Optional[Any] = None,
+        runtime_env_refresh: bool = False,
     ):
         if session_space is not None:
             session_root_space = session_space
@@ -494,6 +499,7 @@ class Session:
             str(volume_mounts or []),
             str(sandbox_id or ""),
             str(agent_id or ""),
+            bool(runtime_env_vars),
         )
         if self._runtime_signature != runtime_signature:
             self._agents = {}
@@ -507,6 +513,10 @@ class Session:
         self.sandbox_agent_workspace = sandbox_agent_workspace
         self.volume_mounts = volume_mounts or []
         self.sandbox_id = sandbox_id
+        if runtime_env_refresh and self.session_context is not None:
+            self.session_context.sandbox = None
+        self.runtime_env_vars = dict(runtime_env_vars or {})
+        self.runtime_resource_registrar = runtime_resource_registrar
 
         logger.debug(
             f"SessionRuntime: configure_runtime "
@@ -596,12 +606,29 @@ class Session:
                     f"SessionRuntime: 从 system_context 中提取 parent_session_id={parent_session_id}"
                 )
 
+        if parent_session_id and not self.runtime_env_vars:
+            parent_session = get_global_session_manager().get_live_session(
+                parent_session_id
+            )
+            parent_context = getattr(parent_session, "session_context", None)
+            if parent_context is not None:
+                self.runtime_env_vars = dict(
+                    getattr(parent_context, "runtime_env_vars", {})
+                )
+                self.runtime_resource_registrar = getattr(
+                    parent_context, "runtime_resource_registrar", None
+                )
+
         context_budget_config = _context_budget_config_from_model(
             context_budget_config, self.model_config
         )
 
         if self.session_context:
             self._cache_session_workspace(session_id, self.session_context)
+            self.session_context.runtime_env_vars = dict(self.runtime_env_vars)
+            self.session_context.runtime_resource_registrar = (
+                self.runtime_resource_registrar
+            )
             self.session_context.update_context_budget_config(context_budget_config)
             if tool_manager:
                 self.session_context.tool_manager = tool_manager
@@ -656,6 +683,8 @@ class Session:
             tool_manager=tool_manager,
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
+            runtime_env_vars=self.runtime_env_vars,
+            runtime_resource_registrar=self.runtime_resource_registrar,
         )
 
         # 异步初始化 SessionContext

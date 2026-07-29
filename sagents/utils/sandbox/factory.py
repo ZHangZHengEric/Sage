@@ -198,6 +198,7 @@ class SandboxProviderFactory:
                 "ISandboxHandle"
             )
 
+        provider.set_runtime_env_vars(config.runtime_env_vars)
         # 工厂返回的 handle 始终已经完成基础资源初始化。代码运行时和技能
         # 同步是两个独立阶段，由会话初始化流程按需显式调用。
         await provider.initialize()

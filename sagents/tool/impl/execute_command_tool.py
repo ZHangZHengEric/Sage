@@ -533,6 +533,10 @@ class ExecuteCommandTool:
 
         返回 task_info（含 task_id / pid / log_path / mode）。
         """
+        resolver = getattr(sandbox, "resolve_runtime_env_vars", None)
+        effective_env_vars = (
+            resolver(env_vars) if resolver is not None else dict(env_vars or {})
+        )
         # === 1) 原生路径（跨平台） ===
         if self._sandbox_supports_native_bg(sandbox):
             log_dir = self._get_agent_workspace_log_dir(
@@ -541,7 +545,7 @@ class ExecuteCommandTool:
             info = await sandbox.start_background(
                 command,
                 workdir=workdir,
-                env_vars=env_vars,
+                env_vars=effective_env_vars or None,
                 log_dir=log_dir,
             )
             task_id = info["task_id"]
@@ -570,10 +574,11 @@ class ExecuteCommandTool:
         exit_path = f"{bg_dir_path}/{task_id}.exit"
 
         env_prefix = ""
-        if env_vars:
+        if effective_env_vars:
             env_prefix = (
                 " ".join(
-                    f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env_vars.items()
+                    f"{shlex.quote(k)}={shlex.quote(v)}"
+                    for k, v in effective_env_vars.items()
                 )
                 + " "
             )

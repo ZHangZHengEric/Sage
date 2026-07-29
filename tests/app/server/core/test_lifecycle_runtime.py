@@ -87,6 +87,44 @@ def test_initialize_system_fails_when_required_initializer_returns_none(monkeypa
     monkeypatch.setattr(lifecycle, "initialize_skill_manager", _ok)
     monkeypatch.setattr(lifecycle, "initialize_session_manager", _ok)
     monkeypatch.setattr(lifecycle, "initialize_scheduler", _ok)
+    monkeypatch.setattr(lifecycle, "start_runtime_env_service", _ok)
 
     with pytest.raises(RuntimeError, match="tool manager"):
         asyncio.run(lifecycle.initialize_system(StartupConfig()))
+
+
+def test_runtime_env_service_follows_server_lifecycle(monkeypatch):
+    lifecycle = _reload_module("app.server.lifecycle")
+    calls = []
+
+    async def _ok(*args, **kwargs):
+        return object()
+
+    async def _start():
+        calls.append("start")
+
+    async def _stop():
+        calls.append("stop")
+
+    for name in (
+        "initialize_db_connection",
+        "initialize_observability",
+        "initialize_global_clients",
+        "initialize_tool_manager",
+        "initialize_skill_manager",
+        "initialize_session_manager",
+        "initialize_scheduler",
+        "shutdown_scheduler",
+        "close_observability",
+        "shutdown_clients",
+        "close_skill_manager",
+        "close_tool_manager",
+    ):
+        monkeypatch.setattr(lifecycle, name, _ok)
+    monkeypatch.setattr(lifecycle, "start_runtime_env_service", _start)
+    monkeypatch.setattr(lifecycle, "shutdown_runtime_env_service", _stop)
+
+    asyncio.run(lifecycle.initialize_system(StartupConfig()))
+    asyncio.run(lifecycle.cleanup_system())
+
+    assert calls == ["start", "stop"]
