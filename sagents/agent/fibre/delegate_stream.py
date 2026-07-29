@@ -5,7 +5,10 @@ body forever. Same-process nested calls can leave the parent stuck even after
 the child session is already terminal. This helper finishes on the first of:
 
 1. child stream ``stream_end``
-2. child session terminal status (completed / error / interrupted)
+2. child session terminal status (completed / error / interrupted), but only
+   after this round has been observed as active — so a reused ``*_sub_*``
+   session that is still ``completed`` from a prior turn is not treated as
+   "already done" before the new run starts
 3. parent interrupt / cancel
 4. HTTP EOF (normal path)
 
@@ -40,7 +43,31 @@ TERMINAL_STATUS_VALUES = frozenset(
     }
 )
 
+ACTIVE_STATUS_VALUES = frozenset(
+    {
+        SessionStatus.RUNNING.value,
+        "running",
+    }
+)
+
 DEFAULT_WATCH_POLL_SECONDS = 0.5
+
+
+def _normalize_status(status: Optional[str]) -> Optional[str]:
+    if status is None:
+        return None
+    value = str(status).strip().lower()
+    return value or None
+
+
+def is_terminal_status(status: Optional[str]) -> bool:
+    normalized = _normalize_status(status)
+    return bool(normalized and normalized in TERMINAL_STATUS_VALUES)
+
+
+def is_active_status(status: Optional[str]) -> bool:
+    normalized = _normalize_status(status)
+    return bool(normalized and normalized in ACTIVE_STATUS_VALUES)
 
 
 @dataclass
@@ -213,8 +240,13 @@ def merge_history_with_fallback(
         return streamed
     if not streamed:
         return fallback
+    # A reused completed child session keeps a long prior ledger on disk. Never
+    # replace a shorter new-turn stream with that whole history unless the disk
+    # text clearly continues the streamed prefix (true truncation).
     if prefer_fallback_if_longer and len(fallback) > len(streamed):
-        return fallback
+        sample = streamed if len(streamed) <= 240 else streamed[:240]
+        if sample and sample in fallback:
+            return fallback
     return streamed
 
 
@@ -235,14 +267,16 @@ async def consume_backend_child_stream(
 ) -> ChildStreamResult:
     """Consume a backend child stream until a non-EOF completion signal wins.
 
-    Waits as long as the child is still running. Completes as soon as the child
-    reaches a terminal status, ``stream_end`` arrives, HTTP EOF, or interrupt.
+    Waits as long as the child is still running. Completes as soon as this
+    round's child reaches a terminal status (after activity), ``stream_end``
+    arrives, HTTP EOF, or interrupt.
 
     Returns collected chunk batches and a reason. Callers must still summarize
     and return a tool string so ``tool_call_result`` is always written.
     """
 
     cancel_event = asyncio.Event()
+    round_active = asyncio.Event()
     event_queue: asyncio.Queue = asyncio.Queue()
     result = ChildStreamResult()
 
@@ -258,6 +292,8 @@ async def consume_backend_child_stream(
                 interrupt_event=interrupt_event,
                 cancel_event=cancel_event,
             ):
+                # Chunks prove this HTTP round started — ignore stale completed.
+                round_active.set()
                 await event_queue.put(("chunks", list(chunks)))
                 if batch_has_stream_end(chunks):
                     await event_queue.put(("done", "stream_end"))
@@ -271,6 +307,8 @@ async def consume_backend_child_stream(
 
     async def _watcher() -> None:
         observed_status: Optional[str] = None
+        started_terminal = False
+        saw_baseline = False
         try:
             while not cancel_event.is_set():
                 if should_interrupt and should_interrupt():
@@ -289,15 +327,32 @@ async def consume_backend_child_stream(
                 )
                 if status:
                     observed_status = status
-                if status and status in TERMINAL_STATUS_VALUES:
-                    result.child_status = status
-                    logger.info(
-                        "[DelegateStream] child session terminal "
-                        f"session_id={session_id} status={status}; "
-                        "completing without waiting for HTTP EOF"
-                    )
-                    await event_queue.put(("done", "child_terminal"))
-                    return
+                    if not saw_baseline:
+                        saw_baseline = True
+                        started_terminal = is_terminal_status(status)
+                    if is_active_status(status) or (
+                        status and not is_terminal_status(status)
+                    ):
+                        round_active.set()
+
+                if is_terminal_status(status):
+                    # Reused completed child: wait until this round is active
+                    # (RUNNING / stream chunks) before accepting terminal again.
+                    if started_terminal and not round_active.is_set():
+                        logger.debug(
+                            "[DelegateStream] ignoring stale terminal status "
+                            f"session_id={session_id} status={status}; "
+                            "waiting for this round to become active"
+                        )
+                    else:
+                        result.child_status = status
+                        logger.info(
+                            "[DelegateStream] child session terminal "
+                            f"session_id={session_id} status={status}; "
+                            "completing without waiting for HTTP EOF"
+                        )
+                        await event_queue.put(("done", "child_terminal"))
+                        return
                 await asyncio.sleep(watch_poll_seconds)
         except asyncio.CancelledError:
             raise

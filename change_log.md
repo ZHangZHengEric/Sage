@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-07-29 18:40** 复用已 completed 的 `*_sub_*` 时，watcher 须等本轮 RUNNING/出流后再认终态；磁盘 fallback 不再用整段旧历史盖住新一轮短流。
+
 - **2026-07-29 17:43** 委派流结果仅记录 batch 数量，不再无界保留完整子流 payload。
 
 - **2026-07-29 17:05** 修正委派推流落账：父 ledger 拒收 `*_sub_*`；FlowExecutor 子进度只 SSE yield、不 add_messages，避免破坏父 tool 配对。
