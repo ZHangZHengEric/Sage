@@ -670,6 +670,39 @@ def test_background_completion_events_are_isolated_by_runtime_owner(monkeypatch)
     assert [event["command"] for event in owner_b_events] == ["command-b"]
 
 
+def test_remote_background_fallback_keeps_runtime_env_out_of_command_text():
+    class RemoteSandbox(_FakeSandbox):
+        def supports_background(self):
+            return False
+
+        def resolve_runtime_env_vars(self, env_vars=None):
+            resolved = dict(env_vars or {})
+            resolved["API_SECRET"] = "very-secret-value"
+            return resolved
+
+    sandbox = RemoteSandbox()
+    tool = ExecuteCommandTool()
+
+    task_info = asyncio.run(
+        tool._spawn_background(
+            sandbox,
+            "printenv API_SECRET",
+            "/sage-workspace",
+            {"TOOL_VALUE": "tool-value"},
+            session_id="session",
+        )
+    )
+
+    assert task_info["mode"] == "shell"
+    assert len(sandbox.calls) == 1
+    assert "very-secret-value" not in sandbox.calls[0]["command"]
+    assert "API_SECRET=" not in sandbox.calls[0]["command"]
+    assert sandbox.calls[0]["env_vars"] == {
+        "TOOL_VALUE": "tool-value",
+        "API_SECRET": "very-secret-value",
+    }
+
+
 def test_background_shell_passes_virtual_workspace_log_dir_to_provider(
     monkeypatch, tmp_path
 ):

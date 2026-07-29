@@ -51,6 +51,8 @@ def _write_host_file_bytes_sync(host_path: str, data: bytes) -> None:
 class OpenSandboxProvider(RemoteSandboxProvider):
     """OpenSandbox 远程沙箱实现"""
 
+    _REMOTE_IDS: Dict[str, str] = {}
+
     def __init__(
         self,
         sandbox_id: str,
@@ -77,6 +79,13 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         self.persistent = persistent
         self.sandbox_ttl = sandbox_ttl
         self._sdk = None
+        self._logical_sandbox_id = sandbox_id
+        self._remote_sandbox_id: Optional[str] = None
+
+    @property
+    def remote_sandbox_id(self) -> Optional[str]:
+        """Physical ID allocated by OpenSandbox; never used as tenant identity."""
+        return self._remote_sandbox_id
 
     async def initialize(self) -> None:
         """初始化 OpenSandbox 远程沙箱"""
@@ -112,21 +121,38 @@ class OpenSandboxProvider(RemoteSandboxProvider):
                 )
             )
 
-        # 如果持久化且已有沙箱ID，尝试连接已有沙箱
-        if self.persistent and self._sandbox_id:
+        remote_id = self._REMOTE_IDS.get(self._logical_sandbox_id)
+        if remote_id is None and not self._logical_sandbox_id.startswith(
+            "sage-session-"
+        ):
+            remote_id = self._logical_sandbox_id
+
+        # Logical session digests are labels, not SDK object IDs. Reconnect only
+        # with a physical ID returned by the SDK (or an explicitly supplied
+        # non-session ID for backwards compatibility).
+        if self.persistent and remote_id:
             try:
                 self._sdk = await OSSandbox.get(
-                    self._sandbox_id,
+                    remote_id,
                     server_url=self.server_url,
                     api_key=self.api_key,
                 )
-                logger.info(f"OpenSandboxProvider: 复用已有沙箱 {self._sandbox_id}")
+                self._remote_sandbox_id = str(
+                    getattr(self._sdk, "id", remote_id)
+                )
+                self._REMOTE_IDS[self._logical_sandbox_id] = (
+                    self._remote_sandbox_id
+                )
+                logger.info(
+                    f"OpenSandboxProvider: 复用已有沙箱 {self._remote_sandbox_id}"
+                )
                 self._is_initialized = True
                 return
             except Exception as e:
                 logger.warning(
-                    f"OpenSandboxProvider: 无法复用沙箱 {self._sandbox_id}, 创建新沙箱: {e}"
+                    f"OpenSandboxProvider: 无法复用沙箱 {remote_id}, 创建新沙箱: {e}"
                 )
+                self._REMOTE_IDS.pop(self._logical_sandbox_id, None)
 
         # 创建新沙箱
         self._sdk = await OSSandbox.create(
@@ -135,15 +161,21 @@ class OpenSandboxProvider(RemoteSandboxProvider):
             timeout=self.timeout,
             mounts=mounts if mounts else None,
             labels={
-                "sandbox_id": self._sandbox_id,
+                "sandbox_id": self._logical_sandbox_id,
                 "persistent": str(self.persistent),
             }
-            if self._sandbox_id
+            if self._logical_sandbox_id
             else None,
         )
 
+        self._remote_sandbox_id = str(
+            getattr(self._sdk, "id", self._logical_sandbox_id)
+        )
+        self._REMOTE_IDS[self._logical_sandbox_id] = self._remote_sandbox_id
         self._is_initialized = True
-        logger.info(f"OpenSandboxProvider: 沙箱初始化完成 {self._sandbox_id}")
+        logger.info(
+            f"OpenSandboxProvider: 沙箱初始化完成 {self._remote_sandbox_id}"
+        )
 
     async def execute_command(
         self,
@@ -514,15 +546,22 @@ class OpenSandboxProvider(RemoteSandboxProvider):
                 # 可以在这里调用API更新沙箱TTL
             else:
                 # 非持久化沙箱：删除
-                logger.info(f"OpenSandboxProvider: 删除沙箱 {self._sandbox_id}")
+                logger.info(
+                    f"OpenSandboxProvider: 删除沙箱 {self._remote_sandbox_id}"
+                )
                 await self._sdk.kill()
+                self._REMOTE_IDS.pop(self._logical_sandbox_id, None)
             self._sdk = None
             self._is_initialized = False
 
     async def kill(self) -> None:
         """强制删除沙箱"""
         if self._sdk:
-            logger.info(f"OpenSandboxProvider: 强制删除沙箱 {self._sandbox_id}")
+            logger.info(
+                f"OpenSandboxProvider: 强制删除沙箱 {self._remote_sandbox_id}"
+            )
             await self._sdk.kill()
             self._sdk = None
             self._is_initialized = False
+        self._REMOTE_IDS.pop(self._logical_sandbox_id, None)
+        self._remote_sandbox_id = None

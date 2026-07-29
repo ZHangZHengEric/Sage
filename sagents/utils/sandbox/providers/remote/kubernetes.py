@@ -4,6 +4,9 @@ Kubernetes 远程沙箱实现
 通过创建 K8s Pod 实现沙箱隔离
 """
 
+import asyncio
+import json
+import time
 from datetime import timedelta
 import shlex
 from typing import Any, Dict, List, Optional
@@ -16,6 +19,14 @@ from sagents.utils.logger import logger
 
 class KubernetesSandboxProvider(RemoteSandboxProvider):
     """Kubernetes 远程沙箱实现"""
+
+    _STDIN_ENV_RUNNER = (
+        "import json,os,sys;"
+        "payload=json.loads(sys.stdin.readline());"
+        "os.environ.update({str(k):str(v) for k,v in payload['env'].items()});"
+        "command=payload['command'];"
+        "os.execve('/bin/sh',['/bin/sh','-c',command],os.environ)"
+    )
 
     def __init__(
         self,
@@ -148,31 +159,51 @@ class KubernetesSandboxProvider(RemoteSandboxProvider):
         if workdir:
             effective_command = f"cd {shlex.quote(workdir)} && {command}"
         resolved_env = self.resolve_runtime_env_vars(env_vars)
-        exec_command = [
-            "/usr/bin/env",
-            *(f"{name}={value}" for name, value in resolved_env.items()),
-            "/bin/sh",
-            "-c",
-            effective_command,
-        ]
-
-        resp = stream.stream(
-            self._k8s_client.connect_get_namespaced_pod_exec,  # pyright: ignore[reportOptionalMemberAccess]
-            self._pod_name,
-            self.namespace,
-            command=exec_command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
+        payload = json.dumps(
+            {"env": resolved_env, "command": effective_command},
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
+        exec_command = ["python3", "-c", self._STDIN_ENV_RUNNER]
+
+        def run_exec():
+            response = stream.stream(
+                self._k8s_client.connect_get_namespaced_pod_exec,  # pyright: ignore[reportOptionalMemberAccess]
+                self._pod_name,
+                self.namespace,
+                command=exec_command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+            )
+            try:
+                response.write_stdin(payload + "\n")
+                deadline = time.monotonic() + timeout
+                while response.is_open():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        response.close()
+                        return "", "command timed out", 124
+                    response.update(timeout=min(1.0, remaining))
+                stdout = response.read_stdout()
+                stderr = response.read_stderr()
+                return_code = getattr(response, "returncode", 0)
+                return stdout, stderr, int(return_code or 0)
+            finally:
+                if response.is_open():
+                    response.close()
+
+        started_at = time.monotonic()
+        stdout, stderr, return_code = await asyncio.to_thread(run_exec)
 
         return CommandResult(
-            success=True,  # 简化处理
-            stdout=resp,
-            stderr="",
-            return_code=0,
-            execution_time=0,
+            success=return_code == 0,
+            stdout=stdout,
+            stderr=stderr,
+            return_code=return_code,
+            execution_time=time.monotonic() - started_at,
         )
 
     async def execute_python(

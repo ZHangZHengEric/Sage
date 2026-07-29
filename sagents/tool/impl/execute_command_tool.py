@@ -426,10 +426,18 @@ class ExecuteCommandTool:
         return None
 
     async def _shell(
-        self, sandbox: Any, cmd: str, timeout: int = 10
+        self,
+        sandbox: Any,
+        cmd: str,
+        timeout: int = 10,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> Tuple[int, str, str]:
         try:
-            r = await sandbox.execute_command(command=cmd, timeout=timeout)
+            r = await sandbox.execute_command(
+                command=cmd,
+                timeout=timeout,
+                env_vars=env_vars,
+            )
             return (
                 int(getattr(r, "return_code", -1) or 0),
                 getattr(r, "stdout", "") or "",
@@ -600,16 +608,6 @@ class ExecuteCommandTool:
         log_path = f"{bg_dir_path}/{task_id}.log"
         exit_path = f"{bg_dir_path}/{task_id}.exit"
 
-        env_prefix = ""
-        if effective_env_vars:
-            env_prefix = (
-                " ".join(
-                    f"{shlex.quote(k)}={shlex.quote(v)}"
-                    for k, v in effective_env_vars.items()
-                )
-                + " "
-            )
-
         cd_prefix = f"cd {shlex.quote(workdir)} && " if workdir else ""
         bg_dir = shlex.quote(bg_dir_path)
         log_q = shlex.quote(log_path)
@@ -622,10 +620,15 @@ class ExecuteCommandTool:
         )
         wrapped = (
             f"mkdir -p {bg_dir} && "
-            f"({cd_prefix}{env_prefix}({runner}) > {log_q} 2>&1; echo $? > {exit_q}) "
+            f"({cd_prefix}({runner}) > {log_q} 2>&1; echo $? > {exit_q}) "
             f"</dev/null & echo $!"
         )
-        rc, out, err = await self._shell(sandbox, wrapped, timeout=10)
+        rc, out, err = await self._shell(
+            sandbox,
+            wrapped,
+            timeout=10,
+            env_vars=effective_env_vars or None,
+        )
         pid = None
         if rc == 0:
             try:
