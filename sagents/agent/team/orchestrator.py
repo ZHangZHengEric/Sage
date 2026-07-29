@@ -7,6 +7,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.backend_client import FibreBackendClient
+from sagents.agent.fibre.delegate_stream import (
+    consume_backend_child_stream,
+    merge_history_with_fallback,
+)
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.agent.team.tools import TeamTools
@@ -382,7 +386,27 @@ class TeamOrchestrator(FibreOrchestrator):
 
         try:
             all_content_chunks: List[MessageChunk] = []
-            async for chunks in self.backend_client.stream_chat(
+            interrupted = False
+
+            async def _on_chunks(chunks):
+                nonlocal interrupted
+                if parent_session and parent_session.should_interrupt():
+                    interrupted = True
+                    await self.backend_client.interrupt_session(
+                        session_id, user_id=user_id
+                    )
+                    return
+                await self._publish_child_stream_chunks(chunks)
+                all_content_chunks.extend(
+                    self._summary_content_chunks(
+                        chunks,
+                        session_id,
+                        require_content=True,
+                    )
+                )
+
+            stream_result = await consume_backend_child_stream(
+                backend_client=self.backend_client,
                 agent_id=agent_id,
                 messages=messages,
                 session_id=session_id,
@@ -394,28 +418,41 @@ class TeamOrchestrator(FibreOrchestrator):
                 interrupt_event=parent_session.interrupt_event
                 if parent_session
                 else None,
-            ):
-                if parent_session and parent_session.should_interrupt():
-                    await self.backend_client.interrupt_session(
-                        session_id, user_id=user_id
-                    )
-                    break
-                await self._publish_child_stream_chunks(chunks)
-                all_content_chunks.extend(
-                    self._summary_content_chunks(
-                        chunks,
-                        session_id,
-                        require_content=True,
-                    )
-                )
+                parent_session_id=caller_session_id,
+                on_chunks=_on_chunks,
+                should_interrupt=(
+                    (lambda: parent_session.should_interrupt())
+                    if parent_session
+                    else None
+                ),
+            )
 
-            if parent_session and parent_session.should_interrupt():
+            if (
+                interrupted
+                or stream_result.reason == "interrupted"
+                or (parent_session and parent_session.should_interrupt())
+            ):
                 return f"SubSessionID: {session_id}\nInterrupted by parent session"
 
             accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
                 all_content_chunks, []
             )
             history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+            # Child may have finished while HTTP body never EOF'd; prefer disk.
+            if stream_result.reason in {"child_terminal", "cancelled"} or not (
+                history_str or ""
+            ).strip():
+                history_str = merge_history_with_fallback(
+                    history_str,
+                    session_id,
+                    parent_session_id=caller_session_id,
+                )
+            logger.info(
+                "[DelegateTask Backend/Team] "
+                f"session={session_id} reason={stream_result.reason} "
+                f"child_status={stream_result.child_status} "
+                f"history_chars={len(history_str or '')}"
+            )
             return await summarize_subtask_history(
                 agent=self.agent,
                 session_id=session_id,

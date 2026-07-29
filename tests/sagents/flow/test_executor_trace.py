@@ -129,6 +129,47 @@ async def test_flow_executor_suppresses_hidden_chunks_for_any_agent():
 
 
 @pytest.mark.asyncio
+async def test_flow_executor_streams_child_chunks_without_parent_ledger():
+    parent_id = "flow-session"
+    child_progress = MessageChunk(
+        role=MessageRole.ASSISTANT.value,
+        content="child working",
+        message_type=MessageType.DO_SUBTASK_RESULT.value,
+        session_id=f"{parent_id}_sub_0",
+    )
+    parent_tool_result = MessageChunk(
+        role=MessageRole.TOOL.value,
+        content="delegate summary",
+        tool_call_id="call_delegate",
+        message_type=MessageType.TOOL_CALL_RESULT.value,
+        session_id=parent_id,
+    )
+    session_manager = _FakeSessionManager()
+
+    class FakeAgent:
+        agent_name = "fake_agent"
+
+    class FakeRuntime:
+        def _get_agent(self, _agent_key):
+            return FakeAgent()
+
+        async def _execute_agent_phase(self, *args, **kwargs):
+            yield [child_progress, parent_tool_result]
+
+    executor = FlowExecutor(
+        tool_manager=None,
+        session_runtime=FakeRuntime(),
+        session_id=parent_id,
+        session_manager=session_manager,
+    )
+
+    chunks = [chunk async for chunk in executor.execute(AgentNode(agent_key="simple"))]
+
+    assert chunks == [[child_progress, parent_tool_result]]
+    assert session_manager.session.context.added_messages == [[parent_tool_result]]
+
+
+@pytest.mark.asyncio
 async def test_flow_executor_persists_tool_result_when_session_turns_terminal():
     tool_result = MessageChunk(
         role=MessageRole.TOOL.value,
