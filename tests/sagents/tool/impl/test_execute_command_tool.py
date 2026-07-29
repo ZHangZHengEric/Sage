@@ -139,6 +139,48 @@ def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):
     ]
 
 
+def test_cleanup_session_background_tasks_only_kills_target_session(monkeypatch):
+    sandbox_a = _FakeBackgroundSandbox("/sage-workspace/a")
+    sandbox_b = _FakeBackgroundSandbox("/sage-workspace/b")
+    sandbox_a.killed = []
+    sandbox_b.killed = []
+
+    async def kill_a(task_id, force=False):
+        sandbox_a.killed.append((task_id, force))
+        return True
+
+    async def kill_b(task_id, force=False):
+        sandbox_b.killed.append((task_id, force))
+        return True
+
+    sandbox_a.kill_background = kill_a
+    sandbox_b.kill_background = kill_b
+    monkeypatch.setattr(
+        ExecuteCommandTool,
+        "_BG_TASKS",
+        {
+            "task-a": {
+                "task_id": "task-a",
+                "session_id": "session-a",
+                "sandbox": sandbox_a,
+                "mode": "native",
+            },
+            "task-b": {
+                "task_id": "task-b",
+                "session_id": "session-b",
+                "sandbox": sandbox_b,
+                "mode": "native",
+            },
+        },
+    )
+
+    asyncio.run(ExecuteCommandTool.cleanup_session_background_tasks("session-a"))
+
+    assert sandbox_a.killed == [("task-a", True)]
+    assert sandbox_b.killed == []
+    assert set(ExecuteCommandTool._BG_TASKS) == {"task-b"}
+
+
 def test_execute_shell_command_blocks_policy_ask_before_spawn(monkeypatch):
     monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
     monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})

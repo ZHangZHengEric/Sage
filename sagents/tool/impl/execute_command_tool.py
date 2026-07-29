@@ -547,6 +547,8 @@ class ExecuteCommandTool:
             task_id = info["task_id"]
             task_info = {
                 "task_id": task_id,
+                "session_id": session_id,
+                "sandbox": sandbox,
                 "pid": info.get("pid"),
                 "log_path": info.get("log_path"),
                 "exit_path": None,
@@ -600,6 +602,8 @@ class ExecuteCommandTool:
                 pid = None
         task_info = {
             "task_id": task_id,
+            "session_id": session_id,
+            "sandbox": sandbox,
             "pid": pid,
             "log_path": log_path,
             "exit_path": exit_path,
@@ -1082,6 +1086,37 @@ class ExecuteCommandTool:
                 await sandbox.cleanup_background(task_id)
             except Exception:
                 pass
+
+    @classmethod
+    async def cleanup_session_background_tasks(cls, session_id: str) -> None:
+        """Force-stop only background tasks owned by one runtime session."""
+
+        targets = [
+            (task_id, info)
+            for task_id, info in list(cls._BG_TASKS.items())
+            if info.get("session_id") == session_id
+        ]
+        for task_id, info in targets:
+            sandbox = info.get("sandbox")
+            try:
+                if sandbox is None:
+                    continue
+                if info.get("mode") == "native":
+                    await sandbox.kill_background(task_id, force=True)
+                    await sandbox.cleanup_background(task_id)
+                    continue
+                pid = info.get("pid")
+                if pid:
+                    await sandbox.execute_command(
+                        f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null",
+                        timeout=5,
+                    )
+            except Exception as exc:
+                logger.bind(session_id=session_id).warning(
+                    f"Failed to clean background task {task_id}: {type(exc).__name__}"
+                )
+            finally:
+                cls._BG_TASKS.pop(task_id, None)
 
     @tool(
         description_i18n={
