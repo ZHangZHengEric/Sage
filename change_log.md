@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-07-29 17:43** 委派流结果仅记录 batch 数量，不再无界保留完整子流 payload。
+
 - **2026-07-29 17:05** 修正委派推流落账：父 ledger 拒收 `*_sub_*`；FlowExecutor 子进度只 SSE yield、不 add_messages，避免破坏父 tool 配对。
 
 - **2026-07-29 11:35** 去掉委派收尾时间超时；子未终态前一直等，仅靠终态/stream_end/EOF 完成交接。
