@@ -117,9 +117,7 @@ class TeamOrchestrator(FibreOrchestrator):
                     if main_session.should_interrupt():
                         if not producer_task.done():
                             producer_task.cancel()
-                        self._finish_queued_stream_item(
-                            queued_item, cancelled=True
-                        )
+                        self._finish_queued_stream_item(queued_item, cancelled=True)
                         break
                     async for chunks in self._yield_queued_stream_item(queued_item):
                         yield chunks
@@ -439,13 +437,15 @@ class TeamOrchestrator(FibreOrchestrator):
             )
             history_str = MessageManager.convert_messages_to_str(accumulated_messages)
             # Child may have finished while HTTP body never EOF'd; prefer disk.
-            if stream_result.reason in {"child_terminal", "cancelled"} or not (
-                history_str or ""
-            ).strip():
+            if (
+                stream_result.reason in {"child_terminal", "cancelled"}
+                or not (history_str or "").strip()
+            ):
                 history_str = merge_history_with_fallback(
                     history_str,
                     session_id,
                     parent_session_id=caller_session_id,
+                    round_id=stream_result.round_id,
                 )
             logger.info(
                 "[DelegateTask Backend/Team] "

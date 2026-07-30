@@ -1,8 +1,6 @@
 # Change Log
 
-- **2026-07-29 19:05** MemoryIndex 构建耗时门槛由 4s 放宽到 10s，避免 CI 偶发抖动误杀（本地/检索本身仍很快）。
-
-- **2026-07-29 18:40** 复用已 completed 的 `*_sub_*` 时，watcher 须等本轮 RUNNING/出流后再认终态；磁盘 fallback 不再用整段旧历史盖住新一轮短流。
+- **2026-07-29 18:40** 复用已 completed 的 `*_sub_*` 时，watcher 仅在观察到本轮 RUNNING、新 request ID 或新持久化 revision 后接受终态；磁盘 fallback 通过本轮唯一标记隔离旧历史。
 
 - **2026-07-29 17:43** 委派流结果仅记录 batch 数量，不再无界保留完整子流 payload。
 

@@ -4,6 +4,7 @@ import json
 import pytest
 
 from sagents.agent.fibre.delegate_stream import (
+    ChildSessionObservation,
     consume_backend_child_stream,
     load_child_history_fallback,
     merge_history_with_fallback,
@@ -16,8 +17,10 @@ class _HangingBackendClient:
 
     def __init__(self):
         self.was_cancelled = False
+        self.messages = None
 
     async def stream_chat(self, **kwargs):
+        self.messages = kwargs.get("messages")
         yield [
             MessageChunk(
                 role="assistant",
@@ -70,10 +73,20 @@ async def test_consume_completes_when_child_terminal_even_without_http_eof(
 ):
     client = _HangingBackendClient()
     published = []
+    observations = iter(
+        [
+            ChildSessionObservation(status="completed", persisted_revision="old"),
+            ChildSessionObservation(status="running", request_id="req-new"),
+            ChildSessionObservation(status="completed", request_id="req-new"),
+        ]
+    )
 
     monkeypatch.setattr(
-        "sagents.agent.fibre.delegate_stream.read_child_session_status",
-        lambda session_id, parent_session_id=None: "completed",
+        "sagents.agent.fibre.delegate_stream.read_child_session_observation",
+        lambda session_id, parent_session_id=None: next(
+            observations,
+            ChildSessionObservation(status="completed", request_id="req-new"),
+        ),
     )
 
     async def on_chunks(chunks):
@@ -95,6 +108,7 @@ async def test_consume_completes_when_child_terminal_even_without_http_eof(
     assert any(
         isinstance(c, MessageChunk) and c.content == "child working" for c in published
     )
+    assert client.messages[0]["metadata"]["delegate_round_id"] == result.round_id
     assert client.was_cancelled
 
 
@@ -106,8 +120,10 @@ async def test_stale_completed_status_does_not_finish_before_round_is_active(
 
     client = _SilentHangingBackendClient()
     monkeypatch.setattr(
-        "sagents.agent.fibre.delegate_stream.read_child_session_status",
-        lambda session_id, parent_session_id=None: "completed",
+        "sagents.agent.fibre.delegate_stream.read_child_session_observation",
+        lambda session_id, parent_session_id=None: ChildSessionObservation(
+            status="completed", persisted_revision="old"
+        ),
     )
 
     with pytest.raises(asyncio.TimeoutError):
@@ -126,15 +142,93 @@ async def test_stale_completed_status_does_not_finish_before_round_is_active(
 
 
 @pytest.mark.asyncio
+async def test_stale_completed_status_is_not_unlocked_by_stream_chunks(monkeypatch):
+    client = _HangingBackendClient()
+    monkeypatch.setattr(
+        "sagents.agent.fibre.delegate_stream.read_child_session_observation",
+        lambda session_id, parent_session_id=None: ChildSessionObservation(
+            status="completed", persisted_revision="old"
+        ),
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            consume_backend_child_stream(
+                backend_client=client,
+                agent_id="interaction-agent",
+                messages=[{"role": "user", "content": "redo interaction"}],
+                session_id="parent_sub_2_sub_3",
+                parent_session_id="parent_sub_2",
+                max_loop_count=3,
+                watch_poll_seconds=0.01,
+            ),
+            timeout=0.15,
+        )
+
+
+@pytest.mark.asyncio
+async def test_new_persisted_revision_accepts_fast_terminal_without_running(
+    monkeypatch,
+):
+    client = _SilentHangingBackendClient()
+    observations = iter(
+        [
+            ChildSessionObservation(status="completed", persisted_revision="old"),
+            ChildSessionObservation(status="completed", persisted_revision="new"),
+        ]
+    )
+    monkeypatch.setattr(
+        "sagents.agent.fibre.delegate_stream.read_child_session_observation",
+        lambda session_id, parent_session_id=None: next(
+            observations,
+            ChildSessionObservation(status="completed", persisted_revision="new"),
+        ),
+    )
+
+    result = await asyncio.wait_for(
+        consume_backend_child_stream(
+            backend_client=client,
+            agent_id="interaction-agent",
+            messages=[{"role": "user", "content": "fast redo"}],
+            session_id="parent_sub_2_sub_3",
+            parent_session_id="parent_sub_2",
+            max_loop_count=3,
+            watch_poll_seconds=0.01,
+        ),
+        timeout=1.0,
+    )
+
+    assert result.reason == "child_terminal"
+    assert result.child_status == "completed"
+    assert client.was_cancelled
+
+
+@pytest.mark.asyncio
 async def test_reused_completed_session_waits_for_running_then_terminal(
     monkeypatch,
 ):
     client = _HangingBackendClient()
-    statuses = iter(["completed", "completed", "running", "completed"])
+    observations = iter(
+        [
+            ChildSessionObservation(status="completed", persisted_revision="old"),
+            ChildSessionObservation(status="completed", persisted_revision="old"),
+            ChildSessionObservation(status="running", request_id="req-new"),
+            ChildSessionObservation(status="completed", request_id="req-new"),
+        ]
+    )
+    observed_statuses = []
+
+    def read_observation(session_id, parent_session_id=None):
+        observation = next(
+            observations,
+            ChildSessionObservation(status="completed", request_id="req-new"),
+        )
+        observed_statuses.append(observation.status)
+        return observation
 
     monkeypatch.setattr(
-        "sagents.agent.fibre.delegate_stream.read_child_session_status",
-        lambda session_id, parent_session_id=None: next(statuses, "completed"),
+        "sagents.agent.fibre.delegate_stream.read_child_session_observation",
+        read_observation,
     )
 
     result = await asyncio.wait_for(
@@ -151,6 +245,7 @@ async def test_reused_completed_session_waits_for_running_then_terminal(
     )
     assert result.reason == "child_terminal"
     assert result.child_status == "completed"
+    assert "running" in observed_statuses
     assert client.was_cancelled
 
 
@@ -179,10 +274,19 @@ def test_load_child_history_fallback_from_messages_json(tmp_path, monkeypatch):
     messages = [
         {
             "role": "assistant",
-            "content": "final child answer",
+            "content": "old turn answer",
             "type": "do_subtask_result",
             "session_id": session_id,
-        }
+            "message_id": "old-message",
+        },
+        {
+            "role": "assistant",
+            "content": "new turn summary",
+            "type": "do_subtask_result",
+            "session_id": session_id,
+            "message_id": "new-message",
+            "metadata": {"delegate_round_id": "round-new"},
+        },
     ]
     (workspace / "messages.json").write_text(
         json.dumps(messages, ensure_ascii=False), encoding="utf-8"
@@ -194,9 +298,11 @@ def test_load_child_history_fallback_from_messages_json(tmp_path, monkeypatch):
     )
 
     history = load_child_history_fallback(session_id, parent_session_id="parent")
-    assert "final child answer" in history
+    assert "old turn answer" in history
+    assert "new turn summary" in history
 
-    # Unrelated shorter stream must not be replaced by the whole prior ledger.
+    # Without a pre-round checkpoint, a non-empty stream must never be replaced
+    # by an ambiguous full ledger.
     merged_new_turn = merge_history_with_fallback(
         "new turn summary",
         session_id,
@@ -204,10 +310,22 @@ def test_load_child_history_fallback_from_messages_json(tmp_path, monkeypatch):
     )
     assert merged_new_turn == "new turn summary"
 
-    # Truncated stream that is a prefix of disk history may use the longer disk.
-    merged_truncated = merge_history_with_fallback(
-        "final child",
+    # With a pre-round checkpoint, fallback may recover the current round only.
+    merged_current_round = merge_history_with_fallback(
+        "new turn summary",
         session_id,
         parent_session_id="parent",
+        round_id="round-new",
     )
-    assert "final child answer" in merged_truncated
+    assert "old turn answer" not in merged_current_round
+    assert "new turn summary" in merged_current_round
+
+    # A truncated current-round stream may use the longer scoped fallback.
+    merged_truncated = merge_history_with_fallback(
+        "new turn",
+        session_id,
+        parent_session_id="parent",
+        round_id="round-new",
+    )
+    assert "old turn answer" not in merged_truncated
+    assert "new turn summary" in merged_truncated
