@@ -6,7 +6,7 @@ Agent指令管理模块
 提供多语言和按agent分类的指令管理功能
 """
 
-# 显式导入所有子模块，确保 PyInstaller 能打包它们
+# 显式导入所有子模块，确保提示词注册完整。
 from . import agent_base_prompts
 from . import common_util_prompts
 from . import fibre_agent_prompts

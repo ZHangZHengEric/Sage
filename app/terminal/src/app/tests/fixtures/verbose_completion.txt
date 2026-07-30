@@ -1,9 +1,0 @@
-• Process
-  │ tools
-  │ step 1  completed search_memory • 20ms
-  │ step 2  completed turn_status • 600ms
-  │ step 3  completed search_memory • 20ms
-  │ step 4  completed turn_status • 600ms
-  │ step 5  completed execute_shell_command • 60ms
-  │ phases • ToolSuggestionAgent 500ms • MemoryRecallAgent 500ms • SimpleAgent 700ms
-  │ completed • total 1.2s • ttft 180ms • tokens 30

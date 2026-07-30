@@ -1,2 +1,0 @@
-• Process
-  │ completed • total 1.2s • ttft 180ms

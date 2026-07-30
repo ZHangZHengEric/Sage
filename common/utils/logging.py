@@ -1,6 +1,6 @@
-"""Shared logging configuration using loguru.
+"""Server logging configuration using loguru.
 
-Both server and desktop use this module by providing:
+Callers provide:
 - log_name / log_level / log_path
 - a get_request_id() callable (or None)
 - whether to use SafeStdout for stdout sink
@@ -190,7 +190,7 @@ def init_logging_base(
     get_request_id: Optional[Callable[[], Optional[str]]] = None,
     use_safe_stdout: bool = False,
 ) -> None:
-    """Initialize loguru logging shared by server and desktop.
+    """Initialize the server's loguru logging.
 
     - log_name: base name for log files
     - log_level: minimum level for stdout

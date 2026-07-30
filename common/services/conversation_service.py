@@ -1,6 +1,4 @@
-"""
-Conversation shared service-layer entry points for server and desktop routers.
-"""
+"""Conversation service-layer entry points for the Server API."""
 
 import asyncio
 import hashlib
@@ -41,10 +39,6 @@ def _get_cfg() -> config.StartupConfig:
     return cfg
 
 
-def _is_desktop_mode() -> bool:
-    return _get_cfg().app_mode == "desktop"
-
-
 def _conversation_error_kwargs(
     detail: str = "",
     error_detail: str = "",
@@ -59,8 +53,6 @@ def _conversation_error_kwargs(
         kwargs["message_key"] = message_key
     if message_params:
         kwargs["message_params"] = message_params
-    if _is_desktop_mode():
-        kwargs["status_code"] = 500
     return kwargs
 
 
@@ -74,12 +66,6 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
         return None
 
     trace_id = _build_session_trace_id(session_id)
-    if _is_desktop_mode():
-        base = (cfg.trace_jaeger_public_url or "").rstrip("/")
-        if not base:
-            return None
-        return f"{base}/trace/{trace_id}"
-
     return f"/jaeger/trace/{trace_id}"
 
 
@@ -220,44 +206,14 @@ async def interrupt_session(
 
     await persist_session_state_with_cancel_protection(session_id)
 
-    stream_managers = []
-    try:
-        if _is_desktop_mode():
-            from app.desktop.core.services.chat.stream_manager import (
-                StreamManager as DesktopStreamManager,
-            )
-
-            stream_managers.append(DesktopStreamManager.get_instance())
-    except Exception as e:
-        logger.bind(session_id=session_id).debug(f"无法加载 desktop StreamManager: {e}")
-
     try:
         from common.services.chat_stream_manager import (
             StreamManager as CommonStreamManager,
         )
 
-        stream_managers.append(CommonStreamManager.get_instance())
+        await CommonStreamManager.get_instance().stop_session(session_id)
     except Exception as e:
-        logger.bind(session_id=session_id).debug(f"无法加载 common StreamManager: {e}")
-
-    for manager in stream_managers:
-        try:
-            await manager.stop_session(session_id)
-        except Exception as e:
-            logger.bind(session_id=session_id).warning(f"停止流式会话失败: {e}")
-
-    if _is_desktop_mode():
-        from common.models.questionnaire import QuestionnaireDao
-
-        try:
-            await QuestionnaireDao().expire_pending_session(session_id)
-            await QuestionnaireDao().expire_pending_sessions_by_prefix(
-                f"{session_id}__questionnaire__"
-            )
-        except Exception as e:
-            logger.bind(session_id=session_id).warning(
-                f"中断会话时更新问卷状态失败: {e}"
-            )
+        logger.bind(session_id=session_id).warning(f"停止流式会话失败: {e}")
 
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
@@ -337,10 +293,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
             )
         )
 
-    if _is_desktop_mode():
-        tasks_status: Dict[str, Any] = {}
-    else:
-        tasks_status = await asyncio.to_thread(session.get_tasks_status)
+    tasks_status = await asyncio.to_thread(session.get_tasks_status)
 
     logger.bind(session_id=session_id).info(
         f"获取任务数量：{len(tasks_status.get('tasks', []))}"
@@ -639,14 +592,9 @@ async def update_server_conversation_title(
 
 
 def _get_stream_manager():
-    stream_manager_module = (
-        "app.desktop.core.services.chat.stream_manager"
-        if _is_desktop_mode()
-        else "app.server.services.chat.stream_manager"
-    )
-    return __import__(
-        stream_manager_module, fromlist=["StreamManager"]
-    ).StreamManager.get_instance()
+    from app.server.services.chat.stream_manager import StreamManager
+
+    return StreamManager.get_instance()
 
 
 def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:

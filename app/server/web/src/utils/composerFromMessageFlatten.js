@@ -64,7 +64,7 @@ const pickImageUrlFromPart = (item) => {
  *
  * remoteImage.url 一般为 http(s)（剪切板导出为 markdown 图片行）。
  *
- * image_url block 常与紧随其后的 markdown ![](同 url) 重复，按存盘结构与 desktop/web 对齐做去重。
+ * image_url block 常与紧随其后的 markdown ![](同 url) 重复，按存盘结构做去重。
  */
 export function flattenMessageForComposerRebuild (content) {
   content = normalizeMessageContentForComposer(content)

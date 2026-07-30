@@ -1,8 +1,8 @@
 <template>
   <div class="app flex h-screen overflow-hidden bg-background text-foreground">
-    <!-- Desktop Sidebar -->
+    <!-- Wide-screen sidebar -->
     <Sidebar 
-      v-if="showDesktopSidebar"
+      v-if="showSidebar"
       class="hidden lg:flex shrink-0" 
       :expanded-width="sidebarExpandedWidth"
       :is-resizing="isSidebarResizing"
@@ -11,7 +11,7 @@
     />
 
     <div
-      v-if="showDesktopSidebar && !isSidebarCollapsed"
+      v-if="showSidebar && !isSidebarCollapsed"
       class="hidden lg:block relative w-0 shrink-0"
     >
       <div
@@ -73,7 +73,7 @@ const route = useRoute()
 const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
 const isLoginPage = computed(() => route.name === 'Login')
 const hideShell = computed(() => isSharedPage.value || isLoginPage.value)
-const showDesktopSidebar = computed(() => !hideShell.value)
+const showSidebar = computed(() => !hideShell.value)
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'sage.web.sidebar.expandedWidth'
 const SIDEBAR_MIN_WIDTH = 220

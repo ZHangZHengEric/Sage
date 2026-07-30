@@ -317,7 +317,7 @@ class LocalSandboxProvider(ISandboxHandle):
 
             os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
 
-            # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+            # 使用当前 Server Runtime 的 Python 解释器。
             system_python = get_system_python_path()
             if not system_python:
                 raise RuntimeError("System Python interpreter was not found")

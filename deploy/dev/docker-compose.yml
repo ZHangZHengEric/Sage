@@ -1,14 +1,10 @@
-x-sage-observability-labels: &sage-observability-labels
-  com.sage.environment: ${SAGE_OBSERVABILITY_ENV:-${SAGE_ENV:-development}}
-
 services:
-  sage-server-dev:
-    restart: always
+  sage-server:
+    restart: unless-stopped
     build:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server
-    image: sage-server-dev:v1.0
-    container_name: sage-server-dev
+    image: sage-server-dev:${SAGE_IMAGE_TAG:-latest}
     volumes:
       - ${SAGE_ROOT}/sage-server/sessions:/app/sessions
       - ${SAGE_ROOT}/sage-server/agents:/app/agents
@@ -22,68 +18,30 @@ services:
       - ${SAGE_COMPOSE_ENV_FILE:-.env}
     environment:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
-      SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL:-http://sage-jaeger:4317}
-      SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
-      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-DEBUG}
       SAGE_SESSION_DIR: /app/sessions
+      SAGE_AGENTS_DIR: /app/agents
+      SAGE_LOGS_DIR_PATH: /app/logs
+      SAGE_SKILL_WORKSPACE: /app/skills
+      SAGE_USER_DIR: /app/users
+      SAGE_DB_FILE: /app/data/sage.db
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
-    labels: *sage-observability-labels
     cap_add:
       - SYS_ADMIN
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
-    mem_limit: 16g
-    cpus: 4.0
-    networks:
-      default:
-        aliases:
-          - sage-server
-      shared: {}
 
-  sage-web-dev:
-    restart: always
+  sage-web:
+    restart: unless-stopped
     build:
       context: ../..
       dockerfile: deploy/images/Dockerfile.web
       args:
         NGINX_CONF: deploy/dev/nginx/nginx.conf
-        VITE_SAGE_GRAFANA_URL: ${SAGE_GRAFANA_PUBLIC_URL:-http://127.0.0.1:30093}
-    image: sage-web-dev:v1.0
-    container_name: sage-web-dev
+    image: sage-web-dev:${SAGE_IMAGE_TAG:-latest}
+    depends_on:
+      - sage-server
     ports:
       - ${SAGE_WEB_PORT:-30151}:80
     environment:
-      TZ: 'Asia/Shanghai'
-    labels: *sage-observability-labels
-    mem_limit: 512m
-    cpus: 0.5
-    networks:
-      default: {}
-      shared: {}
-
-  sage-mysql-dev:
-    restart: always
-    image: docker.m.daocloud.io/mysql:8.4
-    container_name: sage-mysql-dev
-    ports:
-      - ${SAGE_MYSQL_PUBLISHED_PORT:-30152}:3306
-    environment:
-      TZ: 'Asia/Shanghai'
-      MYSQL_ROOT_PASSWORD: ${SAGE_MYSQL_PASSWORD}
-      MYSQL_ROOT_HOST: '%'
-    labels: *sage-observability-labels
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - ${SAGE_ROOT}/mysql/data:/var/lib/mysql
-      - ${SAGE_ROOT}/mysql/conf:/etc/mysql/conf.d
-    mem_limit: 1g
-    cpus: 1.0
-
-networks:
-  shared:
-    name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
-    external: true
+      TZ: Asia/Shanghai

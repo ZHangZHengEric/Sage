@@ -1,4 +1,4 @@
-"""LLMProvider ORM + DAO (shared by server and desktop)."""
+"""LLMProvider ORM and DAO."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional

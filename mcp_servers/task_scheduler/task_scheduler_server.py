@@ -79,7 +79,7 @@ def _get_api_base_url() -> str:
     Since this MCP server runs in the same container as the main server,
     we use localhost with the port from environment or default.
     """
-    # Try to get port from environment variable or use default 8080 (desktop app port)
+    # Try to get port from environment variable or use the server default.
     port = os.getenv("SAGE_PORT", "8080")
     return f"http://localhost:{port}"
 
@@ -95,7 +95,7 @@ def _resolve_tool_user_id(user_id: Optional[str] = None) -> str:
     Priority:
     1. Explicit user_id injected from session context
     2. Task-specific override env
-    3. Desktop/server default user envs
+    3. Server default user envs
     4. Generic default_user fallback
     """
     if user_id:
@@ -1390,7 +1390,7 @@ async def update_task(
                 )
                 return "Error: No fields to update."
 
-            # Ensure the tool edits the same user-visible task scope as the desktop UI.
+            # Ensure the tool edits the same user-visible task scope as the Web UI.
             task = await _request_json(
                 "GET",
                 f"/tasks/recurring/{raw_id}",
@@ -1447,7 +1447,7 @@ async def update_task(
                 )
                 return "Error: No fields to update."
 
-            # Ensure the tool edits the same user-visible task scope as the desktop UI.
+            # Ensure the tool edits the same user-visible task scope as the Web UI.
             task = await _request_json(
                 "GET",
                 f"/tasks/one-time/{raw_id}",

@@ -16,11 +16,11 @@ class Message(BaseModel):
 
 
 class BaseChatRequest(BaseModel):
-    """基础聊天请求，包含公共字段（server/desktop 共享）"""
+    """基础聊天请求。"""
 
     messages: List[Message]
     session_id: Optional[str] = None
-    # server 有 user_id，desktop 目前没有；这里以 server 为准，并设为可选
+    # user_id 由认证上下文补充，保持可选以兼容内部调用。
     user_id: Optional[str] = None
     system_context: Optional[Dict[str, Any]] = None
     provider_id: Optional[str] = None
@@ -39,7 +39,7 @@ class BaseChatRequest(BaseModel):
 
 
 class CustomSubAgentConfig(BaseModel):
-    # desktop 的版本有 agent_id，server 的版本没有；这里取并集
+    # 可选 Agent 选择。
     agent_id: Optional[str] = None
     name: str
     system_prompt: Optional[str] = None
@@ -52,7 +52,7 @@ class CustomSubAgentConfig(BaseModel):
 
 
 class StreamRequest(BaseChatRequest):
-    """流式请求，包含所有流式控制参数（server/desktop 共享）"""
+    """包含流式控制参数的聊天请求。"""
 
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
@@ -74,7 +74,7 @@ class StreamRequest(BaseChatRequest):
     available_knowledge_bases: Optional[List[str]] = None
     available_sub_agent_ids: Optional[List[str]] = None
     force_summary: Optional[bool] = False
-    # server/desktop 都有 memory_type，server 命名为 canonical
+    # 服务端使用 canonical 的 memory_type 命名。
     memory_type: Optional[str] = "session"
     custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
     context_budget_config: Optional[Dict[str, Any]] = None

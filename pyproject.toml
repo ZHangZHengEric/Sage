@@ -18,7 +18,6 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  "gradio>=4.0.0",
   "openai>=1.0.0",
   "requests>=2.31.0",
   "python-dotenv>=1.0.0",
@@ -58,29 +57,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/ZHangZHengEric/Sage"
 
-[project.scripts]
-sage = "app.cli.main:main"
-
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["sagents*", "common*", "app*"]
-exclude = ["tests*", "app.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
-
-[tool.setuptools.data-files]
-"share/sage/docs/en" = ["docs/en/*.md"]
-"share/sage/docs/zh" = ["docs/zh/*.md"]
-
-[tool.setuptools.package-data]
-"app.terminal" = [
-  "bin/*/run-sage-terminal.sh",
-  "bin/*/run-sage-terminal.cmd",
-  "bin/*/sage-terminal",
-  "bin/*/sage-terminal.exe",
-  "bin/run-sage-terminal.sh",
-  "bin/run-sage-terminal.cmd",
-  "bin/sage-terminal",
-  "bin/sage-terminal.exe",
-  "scripts/run-sage-terminal.sh",
-]
+exclude = ["tests*", "app.skills*", "logs*"]

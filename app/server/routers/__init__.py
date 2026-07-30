@@ -25,7 +25,6 @@ def register_routes(app):
     from .task import task_router
     from .tool import tool_router
     from .user import user_router
-    from .version import version_router as version_router
 
     app.include_router(mcp_router)
     app.include_router(auth_router)
@@ -36,7 +35,6 @@ def register_routes(app):
     app.include_router(user_router)
     app.include_router(system_router)
     app.include_router(task_router)
-    app.include_router(version_router)
     app.include_router(oss_router)
     app.include_router(chat_router)
     app.include_router(model_router)

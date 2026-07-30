@@ -1,8 +1,6 @@
 import time
 from typing import Any, Dict, Optional
 
-from common.models.agent import AgentConfigDao
-from common.models.llm_provider import LLMProviderDao
 from common.models.system import SystemInfoDao
 from common.services import conversation_service
 from common.services.oauth.upstream import get_auth_public_config
@@ -10,9 +8,7 @@ from common.services.oauth.upstream import get_auth_public_config
 
 async def get_system_info_data(
     *,
-    user_id: Optional[str] = None,
     include_auth_config: bool = False,
-    include_desktop_flags: bool = False,
 ) -> Dict[str, Any]:
     sys_dao = SystemInfoDao()
     allow_reg = await sys_dao.get_by_key("allow_registration")
@@ -22,18 +18,6 @@ async def get_system_info_data(
 
     if include_auth_config:
         data.update(get_auth_public_config())
-
-    if include_desktop_flags:
-        llm_dao = LLMProviderDao()
-        agent_dao = AgentConfigDao()
-        providers = await llm_dao.get_list(user_id=user_id)
-        agents = await agent_dao.get_list(user_id=user_id)
-        data.update(
-            {
-                "has_model_provider": len(providers) > 0,
-                "has_agent": len(agents) > 0,
-            }
-        )
 
     return data
 

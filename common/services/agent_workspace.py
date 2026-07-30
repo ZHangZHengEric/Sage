@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,16 +25,11 @@ def get_agent_workspace_root(
     cfg = _get_cfg()
     mode = app_mode or cfg.app_mode
 
-    if mode == "desktop":
-        agents_root = os.environ.get("SAGE_AGENTS_PATH")
-        if agents_root:
-            root = Path(agents_root) / agent_id
-        else:
-            root = Path.home() / ".sage" / "agents" / agent_id
-    else:
-        if not user_id:
-            raise ValueError("user_id is required in server mode")
-        root = Path(cfg.agents_dir) / user_id / agent_id
+    if mode != "server":
+        raise ValueError(f"Unsupported app mode: {mode}")
+    if not user_id:
+        raise ValueError("user_id is required in server mode")
+    root = Path(cfg.agents_dir) / user_id / agent_id
 
     if ensure_exists:
         root.mkdir(parents=True, exist_ok=True)
@@ -73,7 +67,7 @@ async def sync_selected_skills_to_workspace(
     """
     将 Agent 配置里选中的 skills 同步到 Agent workspace。
 
-    逻辑对 desktop / server 保持一致，只由 workspace 路径解析决定落点。
+    目标目录始终按 Server 的 user_id/agent_id 边界解析。
     """
     selected_skills = [
         str(name).strip()

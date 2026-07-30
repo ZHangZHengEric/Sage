@@ -1,4 +1,4 @@
-"""Task / RecurringTask ORM + DAO shared by desktop and server."""
+"""Task and RecurringTask ORM and DAO."""
 
 import time
 from datetime import datetime

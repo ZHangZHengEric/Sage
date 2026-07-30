@@ -507,7 +507,7 @@ const handleImageClick = (url) => {
 }
 
 // 统一渲染策略：把 multimodal content 中的所有 text part 拼接后交给 MarkdownRenderer，
-// 它已经能渲染 http/https 图片（server-web）以及本地路径（desktop 通过 readFile）。
+// 它已经能渲染 server-web 返回的 http/https 图片。
 // 只有"没在文本里出现 markdown 引用"的孤立 image_url 才走兜底网格。
 const orphanImageUrls = computed(() => {
   const items = getRenderableContentItems(props.message?.content)

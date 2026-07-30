@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 from starlette.requests import Request
 
-from app.desktop.core.routers import agent as desktop_agent_router
 from app.server.routers import agent as server_agent_router
 from common.core.exceptions import SageHTTPException
 from common.schemas.agent import FileWorkspaceStatRequest
@@ -298,32 +297,6 @@ def test_server_workspace_route_passes_listing_depth_params(monkeypatch):
     }
 
 
-def test_desktop_workspace_route_passes_listing_depth_params(monkeypatch):
-    calls = {}
-
-    async def fake_get_desktop_file_workspace(agent_id, *, path=None, max_depth=None):
-        calls.update({"agent_id": agent_id, "path": path, "max_depth": max_depth})
-        return {"agent_id": agent_id, "files": [], "message": "ok"}
-
-    monkeypatch.setattr(
-        desktop_agent_router.agent_service,
-        "get_desktop_file_workspace",
-        fake_get_desktop_file_workspace,
-    )
-
-    response = asyncio.run(
-        desktop_agent_router.get_workspace(
-            "agent_demo",
-            _fake_request(),
-            path="dir_a",
-            max_depth=0,
-        )
-    )
-
-    assert response.message == "ok"
-    assert calls == {"agent_id": "agent_demo", "path": "dir_a", "max_depth": 0}
-
-
 def test_server_workspace_stat_route_passes_user_and_paths(monkeypatch):
     calls = {}
 
@@ -359,36 +332,6 @@ def test_server_workspace_stat_route_passes_user_and_paths(monkeypatch):
     assert calls == {
         "agent_id": "agent_demo",
         "user_id": "user_a",
-        "paths": ["root.txt"],
-        "session_id": "session_demo",
-    }
-
-
-def test_desktop_workspace_stat_route_passes_paths(monkeypatch):
-    calls = {}
-
-    async def fake_stat_desktop_agent_files(agent_id, paths, *, session_id=None):
-        calls.update({"agent_id": agent_id, "paths": paths, "session_id": session_id})
-        return {"files": [{"path": "root.txt", "exists": True}]}
-
-    monkeypatch.setattr(
-        desktop_agent_router.agent_service,
-        "stat_desktop_agent_files",
-        fake_stat_desktop_agent_files,
-    )
-
-    response = asyncio.run(
-        desktop_agent_router.stat_files(
-            "agent_demo",
-            FileWorkspaceStatRequest(paths=["root.txt"]),
-            _fake_request(),
-            session_id="session_demo",
-        )
-    )
-
-    assert response.data == {"files": [{"path": "root.txt", "exists": True}]}
-    assert calls == {
-        "agent_id": "agent_demo",
         "paths": ["root.txt"],
         "session_id": "session_demo",
     }

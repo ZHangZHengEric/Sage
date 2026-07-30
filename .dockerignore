@@ -49,24 +49,6 @@ pnpm-debug.log*
 .npm
 
 # =========================
-# Rust
-# =========================
-target
-**/target
-
-# =========================
-# Tauri / Desktop
-# =========================
-.nuitka_cache/
-*.build/
-*.dist/
-*.onefile-build/
-
-app/desktop/build/
-app/desktop/dist/
-app/desktop/tauri/sidecar/
-
-# =========================
 # IDE
 # =========================
 .vscode
@@ -120,8 +102,4 @@ agent_workspace/
 # =========================
 data/
 
-# =========================
-# Binary / Release
-# =========================
-release_notes/
 sidecar

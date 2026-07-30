@@ -5,7 +5,7 @@
 - 一个兼容 OpenAI Async 客户端的 chat.completions 接口
 - 模型名称字符串
 
-用于 server 和 desktop 两端的 service 调用.
+用于 Server service 调用。
 """
 
 from __future__ import annotations

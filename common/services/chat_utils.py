@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from common.core import config
@@ -10,10 +9,6 @@ def _get_cfg() -> config.StartupConfig:
     if not cfg:
         raise RuntimeError("Startup config not initialized")
     return cfg
-
-
-def _is_desktop_mode() -> bool:
-    return _get_cfg().app_mode == "desktop"
 
 
 def _get_first_api_key(api_key: Any) -> Any:
@@ -85,9 +80,6 @@ def create_skill_proxy(
     if not available_skills:
         return SkillProxy(get_skill_manager(), []), None  # pyright: ignore[reportArgumentType]
 
-    if _is_desktop_mode():
-        return SkillProxy(get_skill_manager(), available_skills), None  # pyright: ignore[reportArgumentType]
-
     cfg = _get_cfg()
     skill_managers = []
     agent_skill_manager = None
@@ -117,8 +109,4 @@ def create_skill_proxy(
 
 
 def get_sessions_root() -> str:
-    if _is_desktop_mode():
-        if os.environ.get("SAGE_SESSIONS_PATH"):
-            return str(Path(os.environ.get("SAGE_SESSIONS_PATH")))  # pyright: ignore[reportArgumentType]
-        return str(Path.home() / ".sage" / "sessions")
     return _get_cfg().session_dir

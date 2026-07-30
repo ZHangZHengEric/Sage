@@ -85,18 +85,6 @@ class SystemInfoResponse(BaseModel):
     has_agent: bool
 
 
-class TauriPlatform(BaseModel):
-    signature: str
-    url: str
-
-
-class TauriUpdateResponse(BaseModel):
-    version: str
-    notes: str
-    pub_date: str
-    platforms: Dict[str, TauriPlatform]
-
-
 class AgentUsageStatsRequest(BaseModel):
     days: int
     agent_id: Optional[str] = None
@@ -379,7 +367,7 @@ class KdbDocTaskRedoRequest(BaseModel):
     task_id: str
 
 
-# ===== Task (desktop) Schemas =====
+# ===== Task Schemas =====
 
 
 class RecurringTaskBase(BaseModel):
@@ -482,8 +470,6 @@ __all__ = [
     # System
     "SystemSettingsRequest",
     "SystemInfoResponse",
-    "TauriPlatform",
-    "TauriUpdateResponse",
     "AgentUsageStatsRequest",
     "AgentUsageStatsResponse",
     "TokenUsageStatsRequest",
@@ -525,7 +511,7 @@ __all__ = [
     "KdbDocAddByFilesResponse",
     "KdbDocTaskProcessResponse",
     "KdbDocTaskRedoRequest",
-    # Task (desktop)
+    # Task
     "RecurringTaskBase",
     "RecurringTaskCreate",
     "OneTimeTaskCreate",

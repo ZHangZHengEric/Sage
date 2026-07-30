@@ -119,24 +119,6 @@ async def build_upload_skills_response(
     }
 
 
-async def build_import_skill_paths_response(
-    *,
-    paths: List[str],
-    user_id: str,
-    role: str = "user",
-    include_user_id: bool = False,
-) -> Dict[str, Any]:
-    data = await skill_service.import_desktop_skills_by_paths(paths, user_id, role)
-    if include_user_id:
-        data["user_id"] = user_id
-    return {
-        "message": (
-            f"导入完成：成功 {data['success_count']} 个，失败 {data['failed_count']} 个"
-        ),
-        "data": data,
-    }
-
-
 async def build_import_skill_url_response(
     *,
     url: str,

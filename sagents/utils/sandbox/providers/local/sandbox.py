@@ -188,7 +188,7 @@ class Sandbox:
                     logger.info(f"后台创建虚拟环境: {self.venv_dir}")
                     os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
-                    # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+                    # 使用当前 Server Runtime 的 Python 解释器。
                     system_python = get_system_python_path()
                     if not system_python:
                         logger.error("无法找到系统 Python 解释器")
@@ -299,7 +299,7 @@ class Sandbox:
 
             if os.path.exists(venv_python):
                 return venv_python
-        # 没有沙箱时，使用 get_system_python_path 处理 PyInstaller 打包环境
+        # 没有沙箱时使用当前 Server Runtime 的 Python 解释器。
         return get_system_python_path()
 
     def get_cwd(self) -> str:

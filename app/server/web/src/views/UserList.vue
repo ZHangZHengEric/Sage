@@ -16,7 +16,7 @@
             <Loader2 class="h-8 w-8 animate-spin text-primary" />
         </div>
         <div v-else class="flex-1 overflow-auto min-h-0">
-          <!-- Desktop View -->
+          <!-- Wide-screen view -->
           <div class="hidden md:block">
             <Table>
               <TableHeader>

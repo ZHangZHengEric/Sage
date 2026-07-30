@@ -7,29 +7,6 @@ from ..tool_base import tool
 from sagents.utils.logger import logger
 
 
-class DesktopBackendClient:
-    """Desktop 模式下使用的本地 HTTP 客户端"""
-
-    def __init__(self):
-        import os
-
-        # 使用 SAGE_PORT 环境变量（后端启动时设置），默认 8000
-        port = os.environ.get("SAGE_PORT", "8000")
-        self.base_url = f"http://127.0.0.1:{port}"
-
-    async def get(self, path: str):
-        import httpx
-
-        async with httpx.AsyncClient() as client:
-            return await client.get(f"{self.base_url}{path}")
-
-    async def post(self, path: str, json: dict = None):  # pyright: ignore[reportArgumentType]
-        import httpx
-
-        async with httpx.AsyncClient() as client:
-            return await client.post(f"{self.base_url}{path}", json=json)
-
-
 class QuestionnaireTool:
     """问卷工具 - 向用户展示问卷表单并收集答案"""
 
@@ -43,14 +20,9 @@ class QuestionnaireTool:
             session_manager = get_global_session_manager()
             session = session_manager.get(runtime_session_id)
             if session and session.session_context:
-                # 检查是否有 backend_client（server 模式）
-                backend_client = getattr(
+                return getattr(
                     session.session_context, "backend_client", None
                 )
-                if backend_client:
-                    return backend_client
-                # desktop 模式：使用本地 HTTP 客户端
-                return DesktopBackendClient()
         except Exception as e:
             logger.warning(f"获取 backend_client 失败: {e}")
         return None

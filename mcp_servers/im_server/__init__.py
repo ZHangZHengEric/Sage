@@ -1,1 +1,0 @@
-"""IM Server MCP Module."""

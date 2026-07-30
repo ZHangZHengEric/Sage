@@ -172,35 +172,6 @@
       </div>
     </ScrollArea>
 
-    <div class="relative z-10 px-2.5 pb-2">
-      <div v-if="isCollapsed" class="group/item relative flex justify-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          :title="t('sidebar.downloadClient')"
-          :class="[
-            'h-9 w-9 rounded-[14px] transition-all duration-200',
-            isCurrentService('Download', true) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
-          ]"
-          @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
-        >
-          <Download class="h-4 w-4" />
-        </Button>
-      </div>
-      <Button
-        v-else
-        variant="ghost"
-        class="mb-0.5 h-9.5 w-full justify-start rounded-[16px] px-2.5 font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
-        :class="cn(
-          isCurrentService('Download', true) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
-        )"
-        @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
-      >
-        <Download class="mr-2 h-4 w-4" />
-        <span class="flex-1 text-left truncate">{{ t('sidebar.downloadClient') }}</span>
-      </Button>
-    </div>
-
     <div class="relative z-10 border-t border-white/10 px-3 pb-3 pt-2.5 dark:border-white/10">
       <div class="flex items-center gap-2.5" :class="isCollapsed ? 'justify-center' : ''">
         <div class="flex items-center gap-3 overflow-hidden">
@@ -327,9 +298,7 @@ import {
   Check,
   LoaderCircle,
   CircleCheckBig,
-  CircleX,
-  Activity,
-  Download
+  CircleX
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { useThemeStore } from '../stores/theme.js'
@@ -368,7 +337,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/utils/cn'
-import { getAssetUrl, getGrafanaUrl } from '@/config/runtime.js'
+import { getAssetUrl } from '@/config/runtime.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -394,8 +363,6 @@ const logoUrl = computed(() => {
   const logoName = themeStore.isDark ? 'sage_logo.svg' : 'sage_logo_white.svg'
   return getAssetUrl(logoName)
 })
-const grafanaUrl = getGrafanaUrl()
-
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
 watch(
@@ -540,17 +507,8 @@ const predefinedServices = computed(() => {
       nameKey: 'sidebar.systemManagement',
       children: [
         { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
-        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true },
-        { id: 'svc_version_list', nameKey: 'system.versionManagement', url: 'VersionList', isInternal: true }
+        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
       ]
-    })
-
-    services.push({
-      id: 'svc_grafana',
-      key: 'grafana',
-      nameKey: 'sidebar.grafana',
-      url: grafanaUrl,
-      isInternal: false
     })
   }
 
@@ -577,9 +535,7 @@ const getCategoryIcon = (key) => {
     knowledge_base: Book,
     history: Clock,
     api_reference: Code,
-    system_management: Settings,
-    grafana: Activity,
-    download_client: Download
+    system_management: Settings
   }
   return map[key] || LayoutGrid
 }
@@ -630,11 +586,6 @@ const handleMenuClick = (url, name, isInternal, query = {}) => {
         name: url,
         query: { ...route.query, refresh: Date.now() }
       })
-      return
-    }
-
-    if (url === 'Download') {
-      router.push({ name: 'Download' })
       return
     }
 

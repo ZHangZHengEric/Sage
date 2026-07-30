@@ -5,16 +5,10 @@
   "typeCheckingMode": "basic",
   "include": [
     "app/__init__.py",
-    "app/cli",
-    "app/desktop/core",
-    "app/desktop/entry.py",
-    "app/desktop/scripts",
     "app/server",
     "app/skills",
     "common",
     "conftest.py",
-    "docs/scripts",
-    "examples",
     "mcp_servers",
     "sagents",
     "scripts",
@@ -30,14 +24,7 @@
     ".conda",
     ".git",
     ".claude",
-    "app/desktop/build",
-    "app/desktop/tauri",
-    "app/desktop/ui",
     "app/server/web",
-    "app/terminal",
-    "app/wiki",
-    "assets",
-    "deploy",
-    "release_notes"
+    "deploy"
   ]
 }

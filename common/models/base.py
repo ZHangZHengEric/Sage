@@ -1,4 +1,4 @@
-"""SQLAlchemy 基础设施（共享给 server 和 desktop）"""
+"""SQLAlchemy 基础设施。"""
 
 from __future__ import annotations
 

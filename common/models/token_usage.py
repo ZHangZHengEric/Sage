@@ -1,4 +1,4 @@
-"""Token usage ORM + DAO (shared by server and desktop)."""
+"""Token usage ORM and DAO."""
 
 from __future__ import annotations
 

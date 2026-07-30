@@ -4,7 +4,6 @@ import json
 import os
 import random
 import re
-import shutil
 import string
 import time
 import traceback
@@ -30,7 +29,6 @@ from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.models.base import get_local_now
 from common.models.conversation import ConversationDao
-from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
@@ -44,7 +42,6 @@ from common.services.chat_utils import (
     create_model_client,
     create_skill_proxy,
     create_tool_proxy,
-    get_sessions_root,
 )
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
 from common.services.runtime_env_service import (
@@ -61,15 +58,8 @@ def _get_cfg() -> config.StartupConfig:
     return cfg
 
 
-def _is_desktop_mode() -> bool:
-    return _get_cfg().app_mode == "desktop"
-
-
 def _chat_exception(message_key: str) -> SageHTTPException:
-    kwargs: Dict[str, Any] = {"message_key": message_key}
-    if _is_desktop_mode():
-        kwargs["status_code"] = 500
-    return SageHTTPException(**kwargs)
+    return SageHTTPException(message_key=message_key)
 
 
 def _sandbox_approval_event_from_tool_result(
@@ -299,9 +289,6 @@ def enforce_multimodal_capability_guard(request: StreamRequest) -> int:
 
 
 def _get_provider_api_key(provider: Any) -> Optional[str]:
-    if _is_desktop_mode():
-        api_keys = getattr(provider, "api_keys", None) or []
-        return ",".join(api_keys) if api_keys else None
     return getattr(provider, "api_key", None)
 
 
@@ -366,7 +353,7 @@ async def optimize_user_input(
 ) -> Dict[str, Any]:
     logger.info("开始优化用户输入")
     optimizer = UserInputOptimizer()
-    max_attempts = 3 if _is_desktop_mode() else 1
+    max_attempts = 1
     result: Dict[str, Any] = {}
 
     for attempt in range(max_attempts):
@@ -387,19 +374,7 @@ async def optimize_user_input(
             logger.info(f"用户输入优化成功，attempt={attempt + 1}")
             return result
 
-        error_message = (result or {}).get("error_message", "") or ""
-        is_invalid_api_key = (
-            "INVALID_API_KEY" in error_message
-            or "AuthenticationError" == (result or {}).get("error_type")
-        )
-        if not (
-            _is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1
-        ):
-            break
-
-        logger.warning(
-            f"用户输入优化命中无效 API Key，准备重试下一组客户端，attempt={attempt + 1}/{max_attempts}"
-        )
+        break
 
     optimized_input = (result or {}).get("optimized_input", "").strip()
     if not optimized_input:
@@ -426,7 +401,7 @@ async def optimize_user_input_stream(
 ) -> AsyncGenerator[Dict[str, Any], None]:
     logger.info("开始流式优化用户输入")
     optimizer = UserInputOptimizer()
-    max_attempts = 3 if _is_desktop_mode() else 1
+    max_attempts = 1
     fallback_result: Dict[str, Any] | None = None
     overall_start = time.perf_counter()
 
@@ -482,16 +457,6 @@ async def optimize_user_input_stream(
         except Exception as exc:
             error_message = str(exc)
             error_type = type(exc).__name__
-            is_invalid_api_key = (
-                "INVALID_API_KEY" in error_message
-                or error_type == "AuthenticationError"
-            )
-            if _is_desktop_mode() and is_invalid_api_key and attempt < max_attempts - 1:
-                logger.warning(
-                    f"流式优化用户输入命中无效 API Key，准备重试下一组客户端，attempt={attempt + 1}/{max_attempts}"
-                )
-                continue
-
             logger.error(f"流式优化用户输入失败: {exc}")
             logger.error(traceback.format_exc())
             fallback_result = optimizer._fallback_result(
@@ -521,29 +486,6 @@ def _build_context_budget_config(request: StreamRequest) -> Dict[str, Any]:
     }
 
 
-def _copy_sage_usage_docs_to_workspace(agent_workspace: str) -> None:
-    try:
-        sage_docs_source = Path.home() / ".sage" / "sage-usage-docs"
-        if not sage_docs_source.exists():
-            logger.debug(f"sage-usage-docs 目录不存在: {sage_docs_source}")
-            return
-
-        target_dir = Path(agent_workspace) / ".sage-docs"
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        if target_dir.exists() and any(target_dir.iterdir()):
-            source_files = list(sage_docs_source.rglob("*"))
-            target_files = list(target_dir.rglob("*"))
-            if len(source_files) <= len(target_files):
-                logger.debug(f"sage-usage-docs 已存在于 workspace: {target_dir}")
-                return
-
-        shutil.copytree(sage_docs_source, target_dir, dirs_exist_ok=True)
-        logger.info(f"已将 sage-usage-docs 复制到 agent workspace: {target_dir}")
-    except Exception as e:
-        logger.warning(f"复制 sage-usage-docs 到 workspace 失败: {e}")
-
-
 def _cleanup_server_workspace_sage_docs(agent_workspace: str) -> None:
     for directory_name in (".sage-docs", "sage_usage_docs"):
         try:
@@ -557,146 +499,6 @@ def _cleanup_server_workspace_sage_docs(agent_workspace: str) -> None:
                 f"清理 Server Agent workspace 框架文档目录失败: "
                 f"workspace={agent_workspace}, directory={directory_name}, error={e}"
             )
-
-
-def _copy_docs_to_agent_workspace(agent_workspace: str) -> None:
-    """
-    将项目文档复制到 sage_usage_docs 下的 code_docs 文件夹中
-    支持从源码目录、PyInstaller 打包目录、pip install 或 data_files 安装位置中查找 docs
-
-    Args:
-        agent_workspace: Agent 工作空间路径
-    """
-    try:
-        docs_dir = None
-
-        # 尝试从多个位置查找 docs 目录
-        # 1. 源码目录（开发环境）
-        project_root = Path(__file__).parent.parent.parent.parent
-        possible_docs = project_root / "docs"
-        if possible_docs.exists() and possible_docs.is_dir():
-            docs_dir = possible_docs
-            logger.debug(f"从源码目录找到 docs: {docs_dir}")
-
-        # 2. PyInstaller 打包后的 _internal 目录（Desktop 生产环境）
-        if docs_dir is None:
-            # PyInstaller 运行时，sys._MEIPASS 指向临时解压目录
-            import sys
-
-            meipass_dir = getattr(sys, "_MEIPASS", None)
-            if meipass_dir:
-                possible_docs = Path(meipass_dir) / "docs"
-                if possible_docs.exists() and possible_docs.is_dir():
-                    docs_dir = possible_docs
-                    logger.debug(f"从 PyInstaller 目录找到 docs: {docs_dir}")
-
-        # 3. 包安装目录（pip install 生产环境 - 旧方式）
-        if docs_dir is None:
-            import sagents
-
-            package_dir = Path(sagents.__file__).parent.parent
-            possible_docs = package_dir / "docs"
-            if possible_docs.exists() and possible_docs.is_dir():
-                docs_dir = possible_docs
-                logger.debug(f"从包目录找到 docs: {docs_dir}")
-
-        # 4. data_files 安装位置（pip install 生产环境 - 新方式）
-        # data_files 会安装到 sys.prefix/share/sage/docs 或 /usr/local/share/sage/docs
-        if docs_dir is None:
-            import sys
-
-            possible_paths = [
-                Path(sys.prefix) / "share" / "sage" / "docs",
-                Path("/usr") / "local" / "share" / "sage" / "docs",
-                Path("/usr") / "share" / "sage" / "docs",
-            ]
-            for possible_docs in possible_paths:
-                if possible_docs.exists() and possible_docs.is_dir():
-                    docs_dir = possible_docs
-                    logger.debug(f"从 data_files 目录找到 docs: {docs_dir}")
-                    break
-
-        # 5. 系统 site-packages 目录
-        if docs_dir is None:
-            import site
-
-            for site_dir in site.getsitepackages():
-                possible_docs = Path(site_dir) / "docs"
-                if possible_docs.exists() and possible_docs.is_dir():
-                    docs_dir = possible_docs
-                    logger.debug(f"从 site-packages 找到 docs: {docs_dir}")
-                    break
-
-        if docs_dir is None:
-            logger.debug("未找到 docs 目录")
-            return
-
-        # 目标目录：workspace/sage_usage_docs/code_docs
-        target_docs_dir = Path(agent_workspace) / "sage_usage_docs" / "code_docs"
-
-        # 只复制 en 和 zh 目录下的 markdown 文件
-        for lang in ["en", "zh"]:
-            lang_dir = docs_dir / lang
-            if lang_dir.exists() and lang_dir.is_dir():
-                target_lang_dir = target_docs_dir / lang
-                target_lang_dir.mkdir(parents=True, exist_ok=True)
-
-                # 复制所有 .md 文件
-                for md_file in lang_dir.glob("*.md"):
-                    target_file = target_lang_dir / md_file.name
-                    shutil.copy2(md_file, target_file)
-                    logger.debug(f"复制文档: {md_file.name} -> {target_file}")
-
-        logger.info(f"Docs 文档已复制到: {target_docs_dir}")
-    except Exception as e:
-        logger.warning(f"复制 Docs 文档失败: {e}")
-
-
-def _copy_sage_usage_docs_to_agent_workspace_sync(
-    agent_id: str,
-    agent_workspace_base: str,
-) -> None:
-    try:
-        sage_docs_source = Path.home() / ".sage" / "sage-usage-docs"
-        if not sage_docs_source.exists():
-            logger.debug(f"sage-usage-docs 目录不存在: {sage_docs_source}")
-            return
-
-        agent_workspace = Path(agent_workspace_base) / agent_id
-        target_dir = agent_workspace / "sage_usage_docs"
-
-        need_copy = False
-        if not target_dir.exists():
-            need_copy = True
-            logger.info(f"sage_usage_docs 不存在，需要复制到: {target_dir}")
-        else:
-            source_files = list(sage_docs_source.rglob("*.md"))
-            target_files = list(target_dir.rglob("*.md"))
-            if len(source_files) > len(target_files):
-                need_copy = True
-                logger.info(
-                    f"sage_usage_docs 文件数量不匹配，需要更新: {len(source_files)} vs {len(target_files)}"
-                )
-
-        if need_copy:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(sage_docs_source, target_dir, dirs_exist_ok=True)
-            logger.info(f"已将 sage-usage-docs 复制到 agent workspace: {target_dir}")
-        else:
-            logger.debug(f"sage_usage_docs 已存在于 agent workspace: {target_dir}")
-    except Exception as e:
-        logger.warning(f"复制 sage-usage-docs 到 agent workspace 失败: {e}")
-
-
-async def _copy_sage_usage_docs_to_agent_workspace(
-    agent_id: str,
-    agent_workspace_base: str,
-) -> None:
-    await asyncio.to_thread(
-        _copy_sage_usage_docs_to_agent_workspace_sync,
-        agent_id,
-        agent_workspace_base,
-    )
 
 
 async def _register_extra_mcp_tools(request: StreamRequest) -> None:
@@ -752,24 +554,15 @@ def _inject_skill_tools(request: StreamRequest) -> None:
         setattr(request, "available_skills", current_skills)
 
     current_tools = request.available_tools or []
-    if _is_desktop_mode():
-        need_tools = [
-            "load_skill",
-            "execute_python_code",
-            "execute_shell_command",
-            "file_write",
-            "file_update",
-        ]
-    else:
-        need_tools = [
-            "file_read",
-            "execute_python_code",
-            "execute_javascript_code",
-            "execute_shell_command",
-            "file_write",
-            "file_update",
-            "load_skill",
-        ]
+    need_tools = [
+        "file_read",
+        "execute_python_code",
+        "execute_javascript_code",
+        "execute_shell_command",
+        "file_write",
+        "file_update",
+        "load_skill",
+    ]
 
     for tool in need_tools:
         if tool not in current_tools:
@@ -801,7 +594,7 @@ def _load_agent_workspace_skill_names_sync(agent_skills_path: str) -> List[str]:
 
 async def _merge_agent_workspace_skills(request: StreamRequest) -> None:
     """将当前用户 Agent workspace 中的技能加入本次请求，不修改共享 Agent 配置。"""
-    if _is_desktop_mode() or not request.agent_id:
+    if not request.agent_id:
         return
 
     agent_skills_path = str(
@@ -879,8 +672,7 @@ async def populate_request_from_agent_config(
             agent = None
         else:
             request.agent_name = agent.name or "Sage Assistant"
-            if not _is_desktop_mode():
-                request.agent_owner_user_id = agent.user_id or request.user_id
+            request.agent_owner_user_id = agent.user_id or request.user_id
 
     agent_config = agent.config if agent and agent.config else None
 
@@ -1054,42 +846,16 @@ async def populate_request_from_agent_config(
     # workspace 自建的 skills 已在上方合并到本次请求。运行时只按需补齐缺失目录，
     # 不覆盖 Agent workspace 里的已有内容。
 
-    if _is_desktop_mode():
-        try:
-            all_im_configs = await IMChannelConfigDao().get_all_configs()
-            im_enabled = any(
-                config.get("enabled", False) for config in all_im_configs.values()
-            )
-            if im_enabled and "send_message_through_im" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
-                request.available_tools = list(request.available_tools) + [  # pyright: ignore[reportArgumentType]
-                    "send_message_through_im"
-                ]
-                logger.info(
-                    "[Chat] Added send_message_through_im tool (IM provider enabled)"
-                )
-        except Exception as e:
-            logger.warning(f"[Chat] Failed to check IM config: {e}")
-    else:
-        _merge_dict(
-            request,
-            "system_context",
-            {"本次会话用户id": request.user_id or "default_user"},
-        )
+    _merge_dict(
+        request,
+        "system_context",
+        {"本次会话用户id": request.user_id or "default_user"},
+    )
 
     if request.agent_id and agent:
         _merge_dict(request, "system_context", {"当前AgentId": request.agent_id})
-        if _is_desktop_mode():
-            sage_home = os.path.join(Path.home(), ".sage")
-            agent_workspace = os.path.join(sage_home, "agents", request.agent_id)
-            # 复制 sage-usage-docs
-            await _copy_sage_usage_docs_to_agent_workspace(
-                request.agent_id,
-                os.path.join(sage_home, "agents"),
-            )
-            # 复制项目 docs 到 agent workspace
-            await asyncio.to_thread(_copy_docs_to_agent_workspace, agent_workspace)
 
-    if not _is_desktop_mode() and request.available_knowledge_bases:
+    if request.available_knowledge_bases:
         kdb_dao = KdbDao()
         kdbs, _ = await kdb_dao.get_kdbs_paginated(
             kdb_ids=request.available_knowledge_bases,
@@ -1142,27 +908,16 @@ class SageStreamService:
             random.choices(string.ascii_letters, k=8)
         )
 
-        if _is_desktop_mode():
-            self.sessions_root = Path(get_sessions_root())
-            self.sessions_root.mkdir(parents=True, exist_ok=True)
-            self._workspace_existed = True
-            self.agent_workspace_root = get_agent_workspace_root(
-                self.runtime_agent_id,
-                app_mode="desktop",
-                ensure_exists=True,
-            )
-            self.agent_workspace = str(self.agent_workspace_root)
-        else:
-            workspace_root = get_agent_workspace_root(
-                self.runtime_agent_id,
-                user_id=self.runtime_user_id,
-                app_mode="server",
-                ensure_exists=False,
-            )
-            self._workspace_existed = workspace_root.exists()
-            workspace_root.mkdir(parents=True, exist_ok=True)
-            self.agent_workspace_root = workspace_root
-            self.agent_workspace = str(self.agent_workspace_root)
+        workspace_root = get_agent_workspace_root(
+            self.runtime_agent_id,
+            user_id=self.runtime_user_id,
+            app_mode="server",
+            ensure_exists=False,
+        )
+        self._workspace_existed = workspace_root.exists()
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        self.agent_workspace_root = workspace_root
+        self.agent_workspace = str(self.agent_workspace_root)
 
         self.tool_manager = create_tool_proxy(request.available_tools)  # pyright: ignore[reportArgumentType]
         if isinstance(request.system_context, dict) and request.system_context.get(
@@ -1191,22 +946,12 @@ class SageStreamService:
             agent_workspace=self.agent_workspace,
         )
         self.model_client = create_model_client(request.llm_model_config)  # pyright: ignore[reportArgumentType]
-        if _is_desktop_mode():
-            self.sage_engine = SAgent(
-                session_root_space=str(self.sessions_root),
-                enable_obs=True,
-                sandbox_type="local",
-            )
-        else:
-            self.sage_engine = SAgent(
-                session_root_space=self.cfg.session_dir,
-                enable_obs=self.cfg.trace_jaeger_endpoint is not None,
-            )
+        self.sage_engine = SAgent(
+            session_root_space=self.cfg.session_dir,
+            enable_obs=self.cfg.trace_jaeger_endpoint is not None,
+        )
 
     async def initialize_workspace_assets(self) -> None:
-        if _is_desktop_mode():
-            return
-
         if (not self._workspace_existed) and self.request.agent_id:
             inherit_service = importlib.import_module(
                 "app.server.services.agent_inherit"
@@ -1278,42 +1023,17 @@ class SageStreamService:
                 "runtime_env_owner_id": self.runtime_env_owner_id,
             }
 
-            if _is_desktop_mode():
-                run_kwargs.update(
-                    {
-                        "user_id": "default_user",
-                        "more_suggest": self.request.more_suggest,
-                        "force_summary": self.request.force_summary,
-                        "custom_sub_agents": [
-                            {
-                                "agent_id": agent.agent_id,
-                                "name": agent.name,
-                                "description": agent.description,
-                                "system_prompt": agent.system_prompt,
-                                "available_tools": agent.available_tools,
-                                "available_skills": agent.available_skills,
-                                "available_workflows": agent.available_workflows,
-                                "system_context": agent.system_context,
-                                "agent_mode": agent.agent_mode,
-                            }
-                            for agent in (self.request.custom_sub_agents or [])
-                        ]
-                        if self.request.custom_sub_agents
-                        else None,
-                    }
-                )
-            else:
-                run_kwargs.update(
-                    {
-                        "user_id": self.request.user_id,
-                        "custom_sub_agents": [
-                            agent.model_dump()
-                            for agent in (self.request.custom_sub_agents or [])
-                        ]
-                        if self.request.custom_sub_agents
-                        else None,
-                    }
-                )
+            run_kwargs.update(
+                {
+                    "user_id": self.request.user_id,
+                    "custom_sub_agents": [
+                        agent.model_dump()
+                        for agent in (self.request.custom_sub_agents or [])
+                    ]
+                    if self.request.custom_sub_agents
+                    else None,
+                }
+            )
 
             stream_result = self.sage_engine.run_stream(**run_kwargs)
 
@@ -1687,29 +1407,10 @@ async def create_conversation_title(request: StreamRequest) -> str:
     if not request.messages:
         return default_title
 
-    if _is_desktop_mode():
-        title_source = ""
-        for message in request.messages:
-            if getattr(message, "role", "") != "user":
-                continue
-            candidate = _sanitize_title_text(
-                _extract_text_from_content(getattr(message, "content", ""))
-            )
-            if candidate:
-                title_source = candidate
-                break
-
-        if not title_source:
-            title_source = _sanitize_title_text(
-                _extract_text_from_content(getattr(request.messages[0], "content", ""))
-            )
-    else:
-        title_source = (
-            _sanitize_title_text(
-                _extract_text_from_content(request.messages[0].content)
-            )
-            or default_title
-        )
+    title_source = (
+        _sanitize_title_text(_extract_text_from_content(request.messages[0].content))
+        or default_title
+    )
 
     if not title_source:
         return default_title

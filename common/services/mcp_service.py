@@ -85,14 +85,6 @@ def _build_server_config(
         if api_key and api_key.strip():
             server_config["api_key"] = api_key
 
-        if _get_cfg().app_mode == "desktop":
-            if command and command.strip():
-                server_config["command"] = command
-            if args:
-                server_config["args"] = args
-            if env:
-                server_config["env"] = env
-
     if kind == "anytool":
         server_config["tools"] = normalize_anytool_tools(tools or [])
         if simulator:
@@ -217,7 +209,7 @@ async def add_mcp_server(
     existing_server = await dao.get_by_name(target_name)
     if existing_server and kind != "anytool":
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_exists",
             message_params={"server_name": target_name},
             error_detail="MCP服务器名称已存在",
@@ -315,15 +307,14 @@ async def update_mcp_server(
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_not_found",
             message_params={"server_name": server_name},
             error_detail="MCP服务器不存在",
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
@@ -469,15 +460,14 @@ async def remove_mcp_server(
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_not_found",
             message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
@@ -517,15 +507,14 @@ async def preview_mcp_server(
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_not_found",
             message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(
@@ -624,8 +613,7 @@ async def upsert_anytool_tool(
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id not in {"", user_id or ""}
     ):
         raise SageHTTPException(
@@ -740,8 +728,7 @@ async def delete_anytool_tool(
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id not in {"", user_id or ""}
     ):
         raise SageHTTPException(
@@ -830,7 +817,7 @@ async def toggle_mcp_server(
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_not_found",
             message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
@@ -842,23 +829,20 @@ async def toggle_mcp_server(
     server_config["disabled"] = new_disabled
     await dao.save_mcp_server(server_name, server_config, user_id=user_id)
 
-    if _get_cfg().app_mode == "desktop":
-        await reload_all_mcp_tools()
+    if new_disabled:
+        await tm.remove_tool_by_mcp(server_name)  # pyright: ignore[reportOptionalMemberAccess]
     else:
-        if new_disabled:
-            await tm.remove_tool_by_mcp(server_name)  # pyright: ignore[reportOptionalMemberAccess]
-        else:
-            success = await tm.register_mcp_server(  # pyright: ignore[reportOptionalMemberAccess]
-                server_name,
-                _build_runtime_server_config(server_config, existing_server.user_id),
-                force=True,
+        success = await tm.register_mcp_server(  # pyright: ignore[reportOptionalMemberAccess]
+            server_name,
+            _build_runtime_server_config(server_config, existing_server.user_id),
+            force=True,
+        )
+        if not success:
+            raise SageHTTPException(
+                message_key="mcp.server_enable_failed",
+                message_params={"server_name": server_name},
+                error_detail="工具管理器注册失败",
             )
-            if not success:
-                raise SageHTTPException(
-                    message_key="mcp.server_enable_failed",
-                    message_params={"server_name": server_name},
-                    error_detail="工具管理器注册失败",
-                )
 
     return new_disabled, "禁用" if new_disabled else "启用"
 
@@ -873,15 +857,14 @@ async def refresh_mcp_server(
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=500 if _get_cfg().app_mode == "desktop" else 400,
+            status_code=400,
             message_key="mcp.server_not_found",
             message_params={"server_name": server_name},
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
     if (
-        _get_cfg().app_mode == "server"
-        and role != "admin"
+        role != "admin"
         and existing_server.user_id != (user_id or "")
     ):
         raise SageHTTPException(

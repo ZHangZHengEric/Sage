@@ -1,4 +1,4 @@
-"""Agent ORM + DAO (shared by server and desktop)."""
+"""Agent ORM and DAO."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -49,17 +49,10 @@ class Agent(Base):
 
 
 class AgentConfigDao(BaseDao):
-    """Agent 配置数据访问对象（共享 DAO）。"""
+    """Agent 配置数据访问对象。"""
 
     async def get_by_name_and_user(self, name: str, user_id: str) -> Optional["Agent"]:
         where = [Agent.name == name, Agent.user_id == user_id]
-        return await BaseDao.get_first(
-            self, Agent, where=where, order_by=Agent.created_at
-        )
-
-    async def get_by_name(self, name: str) -> Optional["Agent"]:
-        """Desktop 端使用的按名称查询（无 user_id 限制）。"""
-        where = [Agent.name == name]
         return await BaseDao.get_first(
             self, Agent, where=where, order_by=Agent.created_at
         )

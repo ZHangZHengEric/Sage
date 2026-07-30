@@ -1,4 +1,4 @@
-"""Conversation ORM + DAO (shared by server and desktop)."""
+"""Conversation ORM and DAO."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -235,21 +235,3 @@ class ConversationDao(BaseDao):
             )
             result = await session.execute(stmt)
             return bool(result.rowcount)  # pyright: ignore[reportAttributeAccessIssue]
-
-    # Desktop 端兼容方法：不带 user_id 的分页查询（保持原签名）
-    async def get_conversations_paginated_desktop(
-        self,
-        page: int = 1,
-        page_size: int = 10,
-        search: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        sort_by: str = "date",
-    ) -> tuple[List[Conversation], int]:
-        return await self.get_conversations_paginated(
-            page=page,
-            page_size=page_size,
-            user_id=None,
-            search=search,
-            agent_id=agent_id,
-            sort_by=sort_by,
-        )

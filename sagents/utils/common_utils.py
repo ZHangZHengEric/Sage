@@ -3,89 +3,14 @@ import ast
 import os
 import platform
 import sys
-import shutil
 import hashlib
 from contextlib import contextmanager
 from typing import Any, Dict, List, Union, Optional
 
 
-def is_pyinstaller_frozen() -> bool:
-    """
-    检测当前是否在 PyInstaller 打包环境中运行。
-
-    Returns:
-        bool: 如果是 PyInstaller 打包环境返回 True，否则返回 False
-    """
-    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
-
-
 def get_system_python_path() -> Optional[str]:
-    """
-    获取系统 Python 解释器路径。
-
-    在 PyInstaller 打包环境中，sys.executable 指向打包后的二进制文件，
-    而不是 Python 解释器。此函数会尝试找到真正的 Python 解释器。
-
-    Returns:
-        str: Python 解释器路径，如果找不到则返回 None
-    """
-    # 如果在打包环境中，需要找到真正的 Python
-    if is_pyinstaller_frozen():
-        # 尝试常见的 Python 路径
-        possible_paths = []
-
-        if sys.platform == "win32":
-            # Windows 常见路径
-            user_profile = os.environ.get("USERPROFILE", "")
-            possible_paths = [
-                os.path.join(
-                    user_profile, r"miniconda3\envs\sage-desktop-env\python.exe"
-                ),
-                os.path.join(
-                    user_profile, r"anaconda3\envs\sage-desktop-env\python.exe"
-                ),
-                r"C:\ProgramData\miniconda3\envs\sage-desktop-env\python.exe",
-                r"C:\ProgramData\anaconda3\envs\sage-desktop-env\python.exe",
-                r"C:\Python311\python.exe",
-                r"C:\Python310\python.exe",
-                r"C:\Python39\python.exe",
-            ]
-            # 尝试 py launcher
-            py_launcher = shutil.which("py")
-            if py_launcher:
-                possible_paths.insert(0, py_launcher)
-        else:
-            # macOS/Linux 常见路径
-            home_dir = os.environ.get("HOME", "")
-            possible_paths = [
-                os.path.join(home_dir, ".conda/envs/sage-desktop-env/bin/python"),
-                os.path.join(
-                    home_dir, "opt/anaconda3/envs/sage-desktop-env/bin/python"
-                ),
-                os.path.join(home_dir, "anaconda3/envs/sage-desktop-env/bin/python"),
-                os.path.join(home_dir, "miniconda3/envs/sage-desktop-env/bin/python"),
-                "/opt/anaconda3/envs/sage-desktop-env/bin/python",
-                "/opt/miniconda3/envs/sage-desktop-env/bin/python",
-                "/usr/local/bin/python3",
-                "/usr/bin/python3",
-                "/opt/homebrew/bin/python3",
-            ]
-
-        # 检查这些路径是否存在
-        for path in possible_paths:
-            if path and os.path.isfile(path) and os.access(path, os.X_OK):
-                return path
-
-        # 尝试使用 which 查找
-        for cmd in ["python3", "python"]:
-            path = shutil.which(cmd)
-            if path:
-                return path
-
-        return None
-    else:
-        # 非打包环境，直接使用 sys.executable
-        return sys.executable
+    """返回当前 Server Runtime 使用的 Python 解释器。"""
+    return sys.executable
 
 
 def detect_machine_environment(
@@ -152,7 +77,7 @@ def resolve_sandbox_runtime_dir(workspace_path: Optional[str]) -> Optional[str]:
 
     优先级：
     1) SAGE_SANDBOX_RUNTIME_DIR（固定目录）
-    2) 共享环境模式（desktop 常见）：~/.sage/.sandbox_runtime/<workspace-hash>
+    2) 共享环境模式：~/.sage/.sandbox_runtime/<workspace-hash>
     3) 默认：<workspace>/.sandbox
     """
     forced_dir = os.environ.get("SAGE_SANDBOX_RUNTIME_DIR")

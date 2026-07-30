@@ -1,10 +1,8 @@
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.cli.services import runtime as cli_runtime
-from common.services import chat_service, chat_utils
+from common.services import chat_service
 
 
 def _server_stream_service(
@@ -32,7 +30,6 @@ def test_server_new_workspace_does_not_create_sage_docs_and_repeats_cleanly(
             "kept", encoding="utf-8"
         )
 
-    monkeypatch.setattr(chat_service, "_is_desktop_mode", lambda: False)
     monkeypatch.setattr(
         chat_service.importlib,
         "import_module",
@@ -40,14 +37,6 @@ def test_server_new_workspace_does_not_create_sage_docs_and_repeats_cleanly(
             copy_agent_inherit_to_workspace=copy_inherit
         ),
     )
-    monkeypatch.setattr(
-        chat_service,
-        "_copy_sage_usage_docs_to_workspace",
-        lambda _workspace: (_ for _ in ()).throw(
-            AssertionError("Server must not copy .sage-docs")
-        ),
-    )
-
     asyncio.run(service.initialize_workspace_assets())
     asyncio.run(service.initialize_workspace_assets())
 
@@ -74,8 +63,6 @@ def test_server_existing_workspace_cleans_exact_historical_directories(
     nested_docs.mkdir(parents=True)
     (nested_docs / "user-guide.md").write_text("keep", encoding="utf-8")
     service = _server_stream_service(workspace, workspace_existed=True)
-
-    monkeypatch.setattr(chat_service, "_is_desktop_mode", lambda: False)
 
     asyncio.run(service.initialize_workspace_assets())
     asyncio.run(service.initialize_workspace_assets())
@@ -104,67 +91,3 @@ def test_server_workspace_cleanup_failure_warns_and_continues(monkeypatch):
     assert calls == [(".sage-docs", True), ("sage_usage_docs", True)]
     assert len(warnings) == 2
     assert all("read-only" in warning for warning in warnings)
-
-
-def test_desktop_sage_usage_docs_copy_remains_unchanged(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    source = home / ".sage" / "sage-usage-docs"
-    source.mkdir(parents=True)
-    (source / "guide.md").write_text("desktop docs", encoding="utf-8")
-    agents_root = tmp_path / "desktop_agents"
-    monkeypatch.setenv("HOME", str(home))
-
-    chat_service._copy_sage_usage_docs_to_agent_workspace_sync(
-        "agent_desktop",
-        str(agents_root),
-    )
-
-    copied = agents_root / "agent_desktop" / "sage_usage_docs" / "guide.md"
-    assert copied.read_text(encoding="utf-8") == "desktop docs"
-
-
-def test_cli_and_tui_stream_workspace_still_copy_sage_docs(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    source = home / ".sage" / "sage-usage-docs"
-    source.mkdir(parents=True)
-    (source / "guide.md").write_text("cli docs", encoding="utf-8")
-    workspace = tmp_path / "cli_workspace"
-    monkeypatch.setenv("HOME", str(home))
-
-    request = SimpleNamespace(
-        sandbox_approval_mode=None,
-        system_context={},
-        available_skills=[],
-        user_id="cli_user",
-    )
-    stream_service = SimpleNamespace(agent_workspace="unused")
-
-    async def populate_request(_request, *, require_agent_id):
-        assert require_agent_id is False
-
-    async def prepare_session(_request):
-        return stream_service, None
-
-    async def execute_chat_session(_stream_service):
-        yield json.dumps({"type": "done"})
-
-    monkeypatch.setattr(
-        chat_service, "populate_request_from_agent_config", populate_request
-    )
-    monkeypatch.setattr(chat_service, "prepare_session", prepare_session)
-    monkeypatch.setattr(chat_service, "execute_chat_session", execute_chat_session)
-    monkeypatch.setattr(
-        chat_utils, "create_skill_proxy", lambda *args, **kwargs: (object(), None)
-    )
-
-    async def collect_events():
-        return [
-            event
-            async for event in cli_runtime.run_request_stream(
-                request, workspace=str(workspace)
-            )
-        ]
-
-    assert asyncio.run(collect_events()) == [{"type": "done"}]
-    copied = workspace / ".sage-docs" / "guide.md"
-    assert copied.read_text(encoding="utf-8") == "cli docs"

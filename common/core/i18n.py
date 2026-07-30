@@ -339,7 +339,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         "skill.zip_only": "仅支持 ZIP 文件",
         "skill.import_failed": "导入失败: {message}",
         "skill.import_system_admin_required": "权限不足：只有管理员可以导入系统技能",
-        "skill.desktop_path_import_required": "仅桌面端支持路径导入",
     },
     "en-US": {
         "common.success": "success",
@@ -671,7 +670,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         "skill.zip_only": "Only ZIP files are supported",
         "skill.import_failed": "Import failed: {message}",
         "skill.import_system_admin_required": "Permission denied: only administrators can import system skills",
-        "skill.desktop_path_import_required": "Path import is only supported in desktop mode",
     },
 }
 

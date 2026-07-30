@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 from loguru import logger
 
 from common.core import config
-from common.core.client.chat import get_chat_client
 from common.core.context import get_request_locale
 from common.core.exceptions import SageHTTPException
 from common.core.i18n import t
@@ -34,28 +33,8 @@ from common.schemas.agent import AgentAbilityItem
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows fallback for shared desktop code
+except ImportError:  # pragma: no cover - Windows fallback
     fcntl = None
-
-DEFAULT_OPENCLAW_AGENT_NAME = "openclaw的小龙虾"
-DEFAULT_OPENCLAW_AGENT_DESCRIPTION = "从 OpenClaw 一键导入的智能体"
-DEFAULT_OPENCLAW_AGENT_TOOLS = [
-    "todo_write",
-    "todo_read",
-    "execute_shell_command",
-    "file_read",
-    "file_write",
-    "file_update",
-    "load_skill",
-    "add_task",
-    "delete_task",
-    "complete_task",
-    "enable_task",
-    "get_task_details",
-    "fetch_webpages",
-    "search_web_page",
-    "search_image_from_web",
-]
 
 _WORKSPACE_FILE_HASH_ALGORITHM = "md5"
 _WORKSPACE_CSV_LOCKS: Dict[str, threading.Lock] = {}
@@ -74,7 +53,7 @@ def generate_agent_id() -> str:
 
 
 def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
-    """根据 Agent 配置强制添加必要的工具（server / desktop 共享逻辑）。"""
+    """根据 Agent 配置强制添加必要的工具。"""
     available_tools = agent_config.get("available_tools", []) or agent_config.get(
         "availableTools", []
     )
@@ -125,7 +104,7 @@ def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
-    """验证并过滤掉不可用的工具（server / desktop 共享逻辑）。"""
+    """验证并过滤掉不可用的工具。"""
     from sagents.tool.tool_manager import get_tool_manager
 
     tm = get_tool_manager()
@@ -324,37 +303,13 @@ async def _create_server_model_client_for_user(user_id: str) -> Tuple[Any, str]:
     ), provider.model
 
 
-def _create_desktop_model_client(cfg: config.StartupConfig) -> Tuple[Any, str]:
-    try:
-        return get_chat_client(), cfg.default_llm_model_name
-    except Exception:
-        if not cfg.default_llm_api_key:
-            raise
-
-    model_name = cfg.default_llm_model_name
-    return _create_model_client(
-        {
-            "api_key": cfg.default_llm_api_key,
-            "base_url": cfg.default_llm_api_base_url,
-            "model": model_name,
-        },
-        randomize_keys=True,
-    ), model_name
-
-
 async def _resolve_model_client(user_id: str = "") -> Tuple[Any, str]:
-    cfg = _get_cfg()
-    if cfg.app_mode == "server":
-        return await _create_server_model_client_for_user(user_id)
-    return _create_desktop_model_client(cfg)
+    return await _create_server_model_client_for_user(user_id)
 
 
 async def list_agents(user_id: Optional[str] = None) -> List[Agent]:
     dao = AgentConfigDao()
-    cfg = _get_cfg()
-    if cfg.app_mode == "server":
-        return await dao.get_list_with_auth(user_id)
-    return await dao.get_list(user_id)
+    return await dao.get_list_with_auth(user_id)
 
 
 async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
@@ -368,8 +323,7 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
             error_detail=f"Agent '{agent_id}' 不存在",
         )
 
-    cfg = _get_cfg()
-    if cfg.app_mode == "server" and user_id and existing.user_id != user_id:
+    if user_id and existing.user_id != user_id:
         authorized_users = await dao.get_authorized_users(agent_id)
         if user_id not in authorized_users:
             raise SageHTTPException(
@@ -385,58 +339,11 @@ async def create_agent(
     agent_config: Dict[str, Any],
     user_id: str = "",
 ) -> Agent:
-    cfg = _get_cfg()
     dao = AgentConfigDao()
     normalized_config = dict(agent_config)
     agent_name = _require_agent_name(agent_name)
     normalized_config = _normalize_max_loop_count(normalized_config)
     normalized_config = _normalize_agent_mode(normalized_config)
-
-    if cfg.app_mode == "desktop":
-        agent_id = normalized_config.pop("id", None) or generate_agent_id()
-        is_default = normalized_config.pop("is_default", False)
-
-        logger.info(
-            f"开始创建Agent: {agent_id}, is_default={is_default}, type={type(is_default)}"
-        )
-        normalized_config = enforce_required_tools(normalized_config)
-        normalized_config = validate_and_filter_tools(normalized_config)
-
-        existing_config = await dao.get_by_name_and_user(agent_name, user_id)
-        if existing_config:
-            raise SageHTTPException(
-                status_code=500,
-                message_key="agent.exists",
-                message_params={"agent_name": agent_name},
-                error_detail=f"Agent '{agent_name}' 已存在",
-            )
-
-        existing_default = await dao.get_default()
-        if is_default and existing_default:
-            logger.warning(
-                f"已存在默认 Agent '{existing_default.agent_id}'，新 Agent 不设为默认"
-            )
-            is_default = False
-        elif not existing_default:
-            logger.info("没有默认 Agent，自动将新 Agent 设为默认")
-            is_default = True
-
-        orm_obj = Agent(
-            agent_id=agent_id,
-            name=agent_name,
-            config=normalized_config,
-            user_id=user_id,
-            is_default=is_default,
-        )
-        await dao.save(orm_obj)
-        await sync_selected_skills_to_workspace(
-            agent_id,
-            normalized_config,
-            user_id=user_id,
-            role="user",
-        )
-        logger.info(f"Agent {agent_id} 创建成功, is_default={is_default}")
-        return orm_obj
 
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
@@ -491,7 +398,6 @@ async def update_agent(
     role: str = "user",
 ) -> Agent:
     logger.info(f"开始更新Agent: {agent_id}")
-    cfg = _get_cfg()
     dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
@@ -506,40 +412,6 @@ async def update_agent(
     agent_name = _require_agent_name(agent_name, agent_id=agent_id)
     normalized_config = _normalize_max_loop_count(normalized_config)
     normalized_config = _normalize_agent_mode(normalized_config)
-
-    if cfg.app_mode == "desktop":
-        if user_id and existing_config.user_id and existing_config.user_id != user_id:
-            raise SageHTTPException(
-                message_key="agent.update_forbidden",
-                error_detail="forbidden",
-            )
-        normalized_config = enforce_required_tools(normalized_config)
-        normalized_config = validate_and_filter_tools(normalized_config)
-        is_default = normalized_config.get("is_default", existing_config.is_default)
-        orm_obj = Agent(
-            agent_id=agent_id,
-            name=agent_name,
-            config=normalized_config,
-            user_id=existing_config.user_id,
-            is_default=is_default,
-            created_at=existing_config.created_at,
-        )
-        await dao.save(orm_obj)
-        await sync_selected_skills_to_workspace(
-            agent_id,
-            normalized_config,
-            user_id=existing_config.user_id or user_id or "",
-            role=role,
-        )
-        await asyncio.to_thread(
-            cleanup_unselected_skills,
-            agent_id,
-            normalized_config,
-            previous_agent_config=previous_config,
-            user_id=existing_config.user_id or user_id or "",
-        )
-        logger.info(f"Agent {agent_id} 更新成功")
-        return orm_obj
 
     normalized_config = enforce_required_tools(normalized_config)
     if (
@@ -608,25 +480,7 @@ def _remove_agent_workspace_directory(
 
 
 def delete_agent_workspace_on_host(agent_id: str, user_id: str = "") -> Dict[str, Any]:
-    """
-    删除当前 app_mode 下 Agent 在宿主机上的工作区目录。
-
-    本地/直通沙箱直接使用该路径；远程沙箱若通过 workspace_mount 将宿主机目录绑定到容器，
-    删除宿主机目录即可同步清理挂载内容。未镜像到本机路径的纯远端数据不在此处理。
-    """
-    cfg = _get_cfg()
-    if cfg.app_mode == "desktop":
-        workspace_path = Path(
-            get_agent_workspace_root(
-                agent_id,
-                app_mode="desktop",
-                ensure_exists=False,
-            )
-        )
-        return _remove_agent_workspace_directory(
-            workspace_path, agent_id, user_id or ""
-        )
-
+    """删除 Server Agent 在宿主机上的用户工作区目录。"""
     uid = (user_id or "").strip()
     if not uid:
         logger.warning(
@@ -655,7 +509,6 @@ async def delete_agent(
     role: str = "user",
 ) -> Agent:
     logger.info(f"开始删除Agent: {agent_id}")
-    cfg = _get_cfg()
     dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
@@ -666,8 +519,7 @@ async def delete_agent(
         )
 
     if (
-        cfg.app_mode in {"server", "desktop"}
-        and role != "admin"
+        role != "admin"
         and user_id
         and existing_config.user_id
         and existing_config.user_id != user_id
@@ -762,107 +614,6 @@ async def optimize_system_prompt(
     return result
 
 
-def _get_sage_home() -> Path:
-    sage_home = Path.home() / ".sage"
-    sage_home.mkdir(parents=True, exist_ok=True)
-    return sage_home
-
-
-async def _resolve_default_llm_provider_id(user_id: str = "") -> str:
-    provider_dao = LLMProviderDao()
-    default_provider = await provider_dao.get_default(user_id=user_id or None)
-    if default_provider:
-        return default_provider.id
-
-    providers = await provider_dao.get_list(user_id=user_id or None)
-    if providers:
-        return providers[0].id
-
-    raise SageHTTPException(
-        status_code=500,
-        message_key="agent.no_provider_configured",
-        error_detail="No LLM provider configured",
-    )
-
-
-def _build_openclaw_agent_config(
-    llm_provider_id: str,
-    available_skills: List[str],
-) -> Dict[str, Any]:
-    return {
-        "name": DEFAULT_OPENCLAW_AGENT_NAME,
-        "description": DEFAULT_OPENCLAW_AGENT_DESCRIPTION,
-        "maxLoopCount": 100,
-        "memoryType": "session",
-        "agentMode": "fibre",
-        "availableTools": DEFAULT_OPENCLAW_AGENT_TOOLS.copy(),
-        "availableSkills": list(available_skills),
-        "systemPrefix": "",
-        "llm_provider_id": llm_provider_id,
-    }
-
-
-def _is_valid_skill_dir(path: Path) -> bool:
-    if not path.is_dir():
-        return False
-
-    try:
-        for child in path.iterdir():
-            if child.is_file() and child.name.lower() == "skill.md":
-                return True
-    except Exception as e:
-        logger.warning(f"读取 skill 目录失败 {path}: {e}")
-    return False
-
-
-def _detect_openclaw_skill_dirs(openclaw_home: Path) -> List[Path]:
-    candidates = [
-        openclaw_home / "skills",
-        openclaw_home / "workspace" / "skills",
-        openclaw_home / "users" / "openclaw" / "skills",
-        openclaw_home / "users" / "default" / "skills",
-        openclaw_home / "agents" / "main" / "skills",
-        Path.home() / "skills",
-    ]
-
-    discovered: List[Path] = []
-    seen = set()
-
-    def _register(path: Path) -> None:
-        normalized = str(path.resolve()) if path.exists() else str(path)
-        if normalized in seen:
-            return
-        seen.add(normalized)
-        discovered.append(path)
-
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_dir():
-            _register(candidate)
-
-    try:
-        for path in openclaw_home.rglob("skills"):
-            if path.is_dir():
-                _register(path)
-    except Exception as e:
-        logger.warning(f"扫描 OpenClaw skills 目录失败: {e}")
-
-    return discovered
-
-
-def _collect_openclaw_skill_sources(skill_dirs: List[Path]) -> Dict[str, Path]:
-    skill_sources: Dict[str, Path] = {}
-
-    for skill_dir in skill_dirs:
-        try:
-            for child in skill_dir.iterdir():
-                if _is_valid_skill_dir(child):
-                    skill_sources.setdefault(child.name, child)
-        except Exception as e:
-            logger.warning(f"读取 OpenClaw skills 根目录失败 {skill_dir}: {e}")
-
-    return skill_sources
-
-
 def _copy_directory_contents(
     source_dir: Path,
     target_dir: Path,
@@ -891,125 +642,6 @@ def _copy_directory_contents(
             shutil.copy2(child, target_path)
 
 
-def _copy_docs_to_workspace(agent_workspace: Path) -> None:
-    """
-    将项目文档复制到 Agent 工作空间中
-
-    Args:
-        agent_workspace: Agent 工作空间路径
-    """
-    # 获取项目根目录（假设当前文件在 common/services/ 下）
-    project_root = Path(__file__).parent.parent.parent.parent
-    docs_dir = project_root / "docs"
-
-    if not docs_dir.exists() or not docs_dir.is_dir():
-        logger.warning(f"Docs 目录不存在: {docs_dir}")
-        return
-
-    # 目标目录：workspace/docs
-    target_docs_dir = agent_workspace / "docs"
-
-    try:
-        # 只复制 en 和 zh 目录下的 markdown 文件
-        for lang in ["en", "zh"]:
-            lang_dir = docs_dir / lang
-            if lang_dir.exists() and lang_dir.is_dir():
-                target_lang_dir = target_docs_dir / lang
-                target_lang_dir.mkdir(parents=True, exist_ok=True)
-
-                # 复制所有 .md 文件
-                for md_file in lang_dir.glob("*.md"):
-                    target_file = target_lang_dir / md_file.name
-                    shutil.copy2(md_file, target_file)
-                    logger.debug(f"复制文档: {md_file.name} -> {target_file}")
-
-        logger.info(f"Docs 文档已复制到 Agent 工作空间: {target_docs_dir}")
-    except Exception as e:
-        logger.warning(f"复制 Docs 文档失败: {e}")
-
-
-def _link_openclaw_skills(
-    agent_workspace: Path, skill_sources: Dict[str, Path]
-) -> List[str]:
-    if not skill_sources:
-        return []
-
-    target_root = agent_workspace / "skills"
-    target_root.mkdir(parents=True, exist_ok=True)
-
-    linked_skills: List[str] = []
-    for skill_name, source_path in skill_sources.items():
-        target_path = target_root / skill_name
-        if target_path.exists() or target_path.is_symlink():
-            linked_skills.append(skill_name)
-            continue
-
-        try:
-            target_path.symlink_to(source_path.resolve())
-        except OSError:
-            shutil.copytree(source_path, target_path, dirs_exist_ok=True)
-        linked_skills.append(skill_name)
-
-    return linked_skills
-
-
-def _sync_agent_skills_to_global(agent_workspace: Path) -> List[str]:
-    agent_skills_dir = agent_workspace / "skills"
-    if not agent_skills_dir.exists() or not agent_skills_dir.is_dir():
-        return []
-
-    sage_skills_dir = _get_sage_home() / "skills"
-    sage_skills_dir.mkdir(parents=True, exist_ok=True)
-
-    synced_skills: List[str] = []
-    for skill_path in agent_skills_dir.iterdir():
-        if not _is_valid_skill_dir(skill_path):
-            continue
-
-        target_path = sage_skills_dir / skill_path.name
-        if target_path.exists() and not target_path.is_dir():
-            target_path.unlink()
-
-        shutil.copytree(skill_path, target_path, dirs_exist_ok=True)
-        synced_skills.append(skill_path.name)
-
-    try:
-        from sagents.skill import get_skill_manager
-
-        tm = get_skill_manager()
-        if tm:
-            tm.reload()
-    except Exception as e:
-        logger.warning(f"刷新全局技能管理器失败: {e}")
-
-    return synced_skills
-
-
-def _load_openclaw_skill_sources_sync(
-    openclaw_home: Path,
-) -> Tuple[List[Path], Dict[str, Path], List[str]]:
-    skill_dirs = _detect_openclaw_skill_dirs(openclaw_home)
-    skill_sources = _collect_openclaw_skill_sources(skill_dirs)
-    available_skills = sorted(skill_sources.keys())
-    return skill_dirs, skill_sources, available_skills
-
-
-def _import_openclaw_workspace_assets_sync(
-    openclaw_workspace: Path,
-    agent_workspace: Path,
-    skill_dirs: List[Path],
-    skill_sources: Dict[str, Path],
-) -> Tuple[List[str], List[str]]:
-    exclude_names = (
-        {"skills"} if (openclaw_workspace / "skills") in skill_dirs else set()
-    )
-    _copy_directory_contents(openclaw_workspace, agent_workspace, exclude_names)
-
-    linked_skills = _link_openclaw_skills(agent_workspace, skill_sources)
-    synced_skills = _sync_agent_skills_to_global(agent_workspace)
-    return linked_skills, synced_skills
-
-
 def _cleanup_agent_workspace_skills(
     agent_id: str,
     agent_config: Dict[str, Any],
@@ -1021,96 +653,6 @@ def _cleanup_agent_workspace_skills(
         user_id=user_id,
         app_mode=_get_cfg().app_mode,
     )
-
-
-# 保留旧函数名以兼容现有代码
-_cleanup_desktop_agent_workspace_skills = _cleanup_agent_workspace_skills
-
-
-async def import_openclaw_agent(user_id: str = "") -> Dict[str, Any]:
-    openclaw_home = Path.home() / ".openclaw"
-    openclaw_workspace = openclaw_home / "workspace"
-
-    if not openclaw_home.exists():
-        raise SageHTTPException(
-            status_code=500,
-            message_key="agent.openclaw_data_missing",
-            error_detail=str(openclaw_home),
-        )
-
-    if not openclaw_workspace.exists() or not openclaw_workspace.is_dir():
-        raise SageHTTPException(
-            status_code=500,
-            message_key="agent.openclaw_workspace_missing",
-            error_detail=str(openclaw_workspace),
-        )
-
-    llm_provider_id = await _resolve_default_llm_provider_id(user_id=user_id)
-    skill_dirs, skill_sources, available_skills = await asyncio.to_thread(
-        _load_openclaw_skill_sources_sync,
-        openclaw_home,
-    )
-
-    agent_config = _build_openclaw_agent_config(
-        llm_provider_id=llm_provider_id,
-        available_skills=available_skills,
-    )
-
-    created_agent: Optional[Agent] = None
-    agent_workspace: Optional[Path] = None
-
-    try:
-        created_agent = await create_agent(
-            DEFAULT_OPENCLAW_AGENT_NAME, agent_config, user_id=user_id
-        )
-
-        agent_workspace = get_agent_workspace_root(
-            created_agent.agent_id,
-            app_mode="desktop",
-            ensure_exists=True,
-        )
-        linked_skills, synced_skills = await asyncio.to_thread(
-            _import_openclaw_workspace_assets_sync,
-            openclaw_workspace,
-            agent_workspace,
-            skill_dirs,
-            skill_sources,
-        )
-
-        logger.info(
-            f"OpenClaw 导入完成: agent_id={created_agent.agent_id}, "
-            f"workspace={openclaw_workspace}, skills={linked_skills}"
-        )
-
-        return {
-            "agent_id": created_agent.agent_id,
-            "agent_name": created_agent.name,
-            "workspace_source": str(openclaw_workspace),
-            "skill_source_dirs": [str(path) for path in skill_dirs],
-            "linked_skills": linked_skills,
-            "linked_skill_count": len(linked_skills),
-            "synced_skill_count": len(synced_skills),
-        }
-    except Exception as e:
-        if agent_workspace and agent_workspace.exists():
-            await asyncio.to_thread(shutil.rmtree, agent_workspace, ignore_errors=True)
-
-        if created_agent:
-            try:
-                await AgentConfigDao().delete_by_id(created_agent.agent_id)
-            except Exception as cleanup_error:
-                logger.warning(f"清理导入失败的 Agent 记录时出错: {cleanup_error}")
-
-        if isinstance(e, SageHTTPException):
-            raise
-
-        logger.exception("导入 OpenClaw Agent 失败")
-        raise SageHTTPException(
-            status_code=500,
-            message_key="agent.openclaw_import_failed",
-            message_params={"message": str(e)},
-            error_detail=str(e),
-        )
 
 
 async def get_agent_authorized_users(
@@ -1159,14 +701,6 @@ def get_server_agent_workspace_path(agent_id: str, user_id: str) -> str:
             app_mode="server",
             ensure_exists=False,
         )
-    )
-
-
-def get_desktop_agent_workspace_path(agent_id: str) -> Path:
-    return get_agent_workspace_root(
-        agent_id,
-        app_mode="desktop",
-        ensure_exists=False,
     )
 
 
@@ -1267,56 +801,6 @@ async def delete_server_agent_workspace(agent_id: str, user_id: str) -> Dict[str
     )
 
 
-async def get_desktop_file_workspace(
-    agent_id: str,
-    *,
-    path: Optional[str] = None,
-    max_depth: Optional[int] = None,
-) -> Dict[str, Any]:
-    return await asyncio.to_thread(
-        list_workspace_files,
-        get_desktop_agent_workspace_path(agent_id),
-        agent_id,
-        path,
-        max_depth,
-    )
-
-
-async def download_desktop_agent_file(
-    agent_id: str, file_path: str
-) -> Tuple[str, str, str]:
-    return await asyncio.to_thread(
-        prepare_workspace_download,
-        get_desktop_agent_workspace_path(agent_id),
-        file_path,
-    )
-
-
-async def stat_desktop_agent_files(
-    agent_id: str,
-    paths: List[str],
-    *,
-    session_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    sandbox_result = await _stat_live_session_sandbox_files(session_id, paths)
-    if sandbox_result is not None:
-        return sandbox_result
-
-    return await asyncio.to_thread(
-        stat_workspace_files,
-        get_desktop_agent_workspace_path(agent_id),
-        paths,
-    )
-
-
-async def delete_desktop_agent_file(agent_id: str, file_path: str) -> bool:
-    return await asyncio.to_thread(
-        delete_workspace_entry,
-        get_desktop_agent_workspace_path(agent_id),
-        file_path,
-    )
-
-
 async def upload_server_agent_file(
     agent_id: str,
     user_id: str,
@@ -1394,21 +878,6 @@ async def download_url_to_server_agent_file(
     )
 
 
-async def upload_desktop_agent_file(
-    agent_id: str,
-    filename: str,
-    source_file,
-    target_path: str = "",
-) -> Dict[str, Any]:
-    return await asyncio.to_thread(
-        save_workspace_upload,
-        get_desktop_agent_workspace_path(agent_id),
-        filename,
-        source_file,
-        target_path,
-    )
-
-
 async def generate_agent_abilities(
     agent_id: str,
     session_id: Optional[str] = None,
@@ -1421,7 +890,7 @@ async def generate_agent_abilities(
     from common.services.chat_utils import create_model_client
     from common.services.skill_service import list_skills_for_agent
 
-    logger.info(f"开始为 Desktop Agent 生成能力列表: {agent_id}")
+    logger.info(f"开始为 Agent 生成能力列表: {agent_id}")
 
     agent = await get_agent(agent_id, user_id)
     agent_config: Dict[str, Any] = agent.config or {}

@@ -111,14 +111,6 @@ const routes = [
     }
   },
   {
-    path: '/system/versions',
-    name: 'VersionList',
-    component: () => import('../views/VersionList.vue'),
-    meta: {
-      title: 'system.versionManagement'
-    }
-  },
-  {
     path: '/personal/model-providers',
     name: 'ModelProviderList',
     component: () => import('../views/ModelProviderList.vue'),
@@ -134,15 +126,6 @@ const routes = [
       title: 'sidebar.userProfile'
     }
   },
-  {
-    path: '/download',
-    name: 'Download',
-    component: () => import('../views/Download.vue'),
-    meta: {
-      title: 'download.title',
-      public: true
-    }
-  },
   // 重定向根路径到聊天页面
   {
     path: '/:pathMatch(.*)*',
@@ -156,7 +139,7 @@ const router = createRouter({
 })
 
 const shouldUseBrowserNavigation = (path) => (
-  typeof path === 'string' && (path.startsWith('/jaeger/') || path.startsWith('/api/') || path.startsWith('/oauth2/'))
+  typeof path === 'string' && (path.startsWith('/api/') || path.startsWith('/oauth2/'))
 )
 
 // 路由守卫 - 设置页面标题

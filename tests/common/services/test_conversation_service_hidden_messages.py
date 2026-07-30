@@ -155,10 +155,6 @@ async def test_get_conversation_messages_returns_404_only_when_session_is_absent
     monkeypatch.setattr(
         conversation_service, "get_global_session_manager", lambda: FakeManager()
     )
-    monkeypatch.setattr(
-        conversation_service, "_is_desktop_mode", lambda: False
-    )
-
     with pytest.raises(conversation_service.SageHTTPException) as exc_info:
         await conversation_service.get_conversation_messages("missing-session")
 

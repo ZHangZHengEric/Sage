@@ -1,33 +1,12 @@
-"""
-共享配置模块，供 server / desktop 共用。
-"""
+"""Sage Server startup configuration."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, Optional, overload
+from typing import Any, Optional, overload
 
 _GLOBAL_STARTUP_CONFIG: Any
-
-
-def get_default_sage_home() -> Path:
-    return Path.home() / ".sage"
-
-
-def get_local_storage_defaults() -> Dict[str, str]:
-    sage_home = get_default_sage_home()
-    return {
-        "sage_home": str(sage_home),
-        "logs_dir": str(sage_home / "logs"),
-        "session_dir": str(sage_home / "sessions"),
-        "agents_dir": str(sage_home / "agents"),
-        "skill_dir": str(sage_home / "skills"),
-        "user_dir": str(sage_home / "users"),
-        "db_file": str(sage_home / "sage.db"),
-        "env_file": str(sage_home / ".sage_env"),
-    }
 
 
 @dataclass
@@ -279,9 +258,6 @@ def is_production_like(cfg: StartupConfig) -> bool:
 
 
 def validate_startup_config(cfg: StartupConfig) -> None:
-    if cfg.app_mode != "server":
-        return
-
     auth_mode = (cfg.auth_mode or "").strip().lower()
     if auth_mode not in {"trusted_proxy", "oauth", "native"}:
         raise ValueError(
@@ -338,99 +314,8 @@ def _normalize_paths(cfg: StartupConfig) -> StartupConfig:
 
 
 def build_startup_config(mode: str = "server") -> StartupConfig:
-    if mode == "desktop":
-        local_defaults = get_local_storage_defaults()
-        cfg = StartupConfig(
-            app_mode="desktop",
-            port=env_int(ENV.PORT, StartupConfig.port),
-            logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"])
-            or local_defaults["logs_dir"],
-            session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"])
-            or local_defaults["session_dir"],
-            agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"])
-            or local_defaults["agents_dir"],
-            skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"])
-            or local_defaults["skill_dir"],
-            user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"])
-            or local_defaults["user_dir"],
-            db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type)
-            or StartupConfig.db_type,
-            db_file=env_str(ENV.DB_FILE, local_defaults["db_file"])
-            or local_defaults["db_file"],
-            preset_mcp_config=env_str(
-                ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config
-            )
-            or StartupConfig.preset_mcp_config,
-            preset_running_config=env_str(
-                ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config
-            )
-            or StartupConfig.preset_running_config,
-            default_llm_api_key=env_str(
-                ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key
-            )
-            or StartupConfig.default_llm_api_key,
-            default_llm_api_base_url=env_str(
-                ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
-            )
-            or StartupConfig.default_llm_api_base_url,
-            default_llm_model_name=env_str(
-                ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name
-            )
-            or StartupConfig.default_llm_model_name,
-            default_llm_max_tokens=env_int(
-                ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens
-            ),
-            default_llm_temperature=env_float(
-                ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature
-            ),
-            default_llm_max_model_len=env_int(
-                ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len
-            ),
-            default_llm_top_p=env_float(
-                ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p
-            ),
-            default_llm_presence_penalty=env_float(
-                ENV.DEFAULT_LLM_PRESENCE_PENALTY,
-                StartupConfig.default_llm_presence_penalty,
-            ),
-            context_history_ratio=env_float(
-                ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio
-            ),
-            context_active_ratio=env_float(
-                ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio
-            ),
-            context_max_new_message_ratio=env_float(
-                ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
-                StartupConfig.context_max_new_message_ratio,
-            ),
-            context_recent_turns=env_int(
-                ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
-            ),
-            jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key)
-            or StartupConfig.jwt_key,
-            jwt_expire_hours=env_int(
-                ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
-            ),
-            refresh_token_secret=env_str(
-                ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
-            )
-            or StartupConfig.refresh_token_secret,
-            embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
-            or StartupConfig.embed_base_url,
-            embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model)
-            or StartupConfig.embed_model,
-            embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
-            s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
-            s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
-            s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
-            s3_secure=env_bool(ENV.S3_SECURE, StartupConfig.s3_secure),
-            s3_bucket_name=env_str(ENV.S3_BUCKET_NAME, StartupConfig.s3_bucket_name),
-            s3_public_base_url=env_str(
-                ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url
-            ),
-        )
-        return _normalize_paths(cfg)
+    if mode != "server":
+        raise ValueError(f"Unsupported app mode: {mode}")
 
     cfg = StartupConfig(
         app_mode="server",

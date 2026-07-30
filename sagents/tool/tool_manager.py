@@ -492,7 +492,7 @@ class ToolManager:
             if impl_path.exists():
                 self._discover_import_path(path=str(impl_path), root_package="sagents")
             else:
-                # Filesystem path not available (e.g. PyInstaller bundle with PYZ archive).
+                # Filesystem path not available for this module.
                 # sagents.tool.impl.__init__ uses lazy __getattr__, so a bare package import
                 # does NOT load submodules and the @tool decorators never run.
                 # Explicitly import every known submodule so the decorators fire.
