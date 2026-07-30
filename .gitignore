@@ -238,3 +238,5 @@ app/desktop/scripts/certs
 .build_cache/
 
 .sandbox
+
+outputs
