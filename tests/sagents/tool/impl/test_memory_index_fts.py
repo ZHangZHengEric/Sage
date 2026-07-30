@@ -1356,18 +1356,8 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 self.assertGreaterEqual(len(results), 1)
             query_elapsed = time.perf_counter() - query_start
 
-            # CI runners are noisier than local; keep a soft gate, not a tight
-            # laptop benchmark. Functional checks above already require hits.
-            self.assertLess(
-                build_elapsed,
-                10.0,
-                f"index build too slow on CI-ish host: {build_elapsed:.3f}s",
-            )
-            self.assertLess(
-                query_elapsed,
-                2.5,
-                f"batch search too slow: {query_elapsed:.3f}s",
-            )
+            self.assertLess(build_elapsed, 4.0)
+            self.assertLess(query_elapsed, 2.5)
 
 
 if __name__ == "__main__":
