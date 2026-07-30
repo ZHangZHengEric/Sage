@@ -5,7 +5,10 @@ body forever. Same-process nested calls can leave the parent stuck even after
 the child session is already terminal. This helper finishes on the first of:
 
 1. child stream ``stream_end``
-2. child session terminal status (completed / error / interrupted)
+2. child session terminal status (completed / error / interrupted), but only
+   after this round has been observed as active — so a reused ``*_sub_*``
+   session that is still ``completed`` from a prior turn is not treated as
+   "already done" before the new run starts
 3. parent interrupt / cancel
 4. HTTP EOF (normal path)
 
@@ -17,8 +20,18 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
@@ -40,7 +53,32 @@ TERMINAL_STATUS_VALUES = frozenset(
     }
 )
 
+ACTIVE_STATUS_VALUES = frozenset(
+    {
+        SessionStatus.RUNNING.value,
+        "running",
+    }
+)
+
 DEFAULT_WATCH_POLL_SECONDS = 0.5
+DELEGATE_ROUND_ID_METADATA_KEY = "delegate_round_id"
+
+
+def _normalize_status(status: Optional[str]) -> Optional[str]:
+    if status is None:
+        return None
+    value = str(status).strip().lower()
+    return value or None
+
+
+def is_terminal_status(status: Optional[str]) -> bool:
+    normalized = _normalize_status(status)
+    return bool(normalized and normalized in TERMINAL_STATUS_VALUES)
+
+
+def is_active_status(status: Optional[str]) -> bool:
+    normalized = _normalize_status(status)
+    return bool(normalized and normalized in ACTIVE_STATUS_VALUES)
 
 
 @dataclass
@@ -51,6 +89,16 @@ class ChildStreamResult:
     reason: str = "eof"
     child_status: Optional[str] = None
     error: Optional[str] = None
+    round_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ChildSessionObservation:
+    """Status plus evidence that identifies a new child execution cycle."""
+
+    status: Optional[str] = None
+    request_id: Optional[str] = None
+    persisted_revision: Optional[str] = None
 
 
 def _payload_type(payload: StreamPayload) -> Optional[str]:
@@ -109,9 +157,7 @@ def resolve_child_workspace(
                     for entry in os.scandir(nested_root):
                         if not entry.is_dir():
                             continue
-                        nested = os.path.join(
-                            entry.path, "sub_sessions", session_id
-                        )
+                        nested = os.path.join(entry.path, "sub_sessions", session_id)
                         if os.path.isdir(nested):
                             return nested
     except Exception as exc:
@@ -122,14 +168,17 @@ def resolve_child_workspace(
     return None
 
 
-def read_child_session_status(
+def read_child_session_observation(
     session_id: str,
     parent_session_id: Optional[str] = None,
-) -> Optional[str]:
-    """Return child status from the live session or persisted session_context."""
+) -> ChildSessionObservation:
+    """Return child status and lifecycle evidence from live and disk state."""
 
     if not session_id:
-        return None
+        return ChildSessionObservation()
+
+    live_status: Optional[str] = None
+    request_id: Optional[str] = None
 
     try:
         from sagents.session_runtime import get_global_session_manager
@@ -139,9 +188,14 @@ def read_child_session_status(
         if live is not None:
             status = live.get_status()
             if isinstance(status, SessionStatus):
-                return status.value
-            if status is not None:
-                return str(status)
+                live_status = status.value
+            elif status is not None:
+                live_status = str(status)
+            context = live.get_context()
+            if context is not None:
+                current_request_id = getattr(context, "current_request_id", None)
+                if callable(current_request_id):
+                    request_id = current_request_id()
     except Exception as exc:
         logger.debug(
             f"read_child_session_status: live lookup failed for {session_id}: {exc}"
@@ -149,29 +203,49 @@ def read_child_session_status(
 
     workspace = resolve_child_workspace(session_id, parent_session_id)
     if not workspace:
-        return None
+        return ChildSessionObservation(status=live_status, request_id=request_id)
     context_path = os.path.join(workspace, "session_context.json")
     if not os.path.exists(context_path):
-        return None
+        return ChildSessionObservation(status=live_status, request_id=request_id)
     try:
         with open(context_path, "r", encoding="utf-8") as handle:
             snapshot = json.load(handle)
         if isinstance(snapshot, dict):
-            status = snapshot.get("status")
-            if status is not None:
-                return str(status)
+            persisted_status = snapshot.get("status")
+            updated_at = snapshot.get("updated_at")
+            return ChildSessionObservation(
+                status=live_status
+                or (str(persisted_status) if persisted_status is not None else None),
+                request_id=request_id,
+                persisted_revision=(
+                    str(updated_at) if updated_at is not None else None
+                ),
+            )
     except Exception as exc:
         logger.debug(
             f"read_child_session_status: disk read failed for {session_id}: {exc}"
         )
-    return None
+    return ChildSessionObservation(status=live_status, request_id=request_id)
+
+
+def read_child_session_status(
+    session_id: str,
+    parent_session_id: Optional[str] = None,
+) -> Optional[str]:
+    """Return child status from the live session or persisted session_context."""
+
+    return read_child_session_observation(
+        session_id, parent_session_id=parent_session_id
+    ).status
 
 
 def load_child_history_fallback(
     session_id: str,
     parent_session_id: Optional[str] = None,
+    *,
+    round_id: Optional[str] = None,
 ) -> str:
-    """Build a summary history string from the child's persisted messages."""
+    """Build history beginning at this round's marked input message."""
 
     workspace = resolve_child_workspace(session_id, parent_session_id)
     if not workspace:
@@ -187,6 +261,19 @@ def load_child_history_fallback(
         return ""
     if not messages:
         return ""
+    if round_id:
+        round_start = next(
+            (
+                index
+                for index, message in enumerate(messages)
+                if isinstance(message.metadata, dict)
+                and message.metadata.get(DELEGATE_ROUND_ID_METADATA_KEY) == round_id
+            ),
+            None,
+        )
+        if round_start is None:
+            return ""
+        messages = messages[round_start:]
     try:
         return MessageManager.convert_messages_to_str(messages)
     except Exception as exc:
@@ -202,19 +289,30 @@ def merge_history_with_fallback(
     parent_session_id: Optional[str] = None,
     *,
     prefer_fallback_if_longer: bool = True,
+    round_id: Optional[str] = None,
 ) -> str:
     """Prefer streamed history, but use disk when the HTTP stream was truncated."""
 
     streamed = (history_str or "").strip()
     fallback = load_child_history_fallback(
-        session_id, parent_session_id=parent_session_id
+        session_id,
+        parent_session_id=parent_session_id,
+        round_id=round_id,
     ).strip()
     if not fallback:
         return streamed
     if not streamed:
         return fallback
+    # Without a round marker, disk may contain prior rounds. A non-empty
+    # stream is safer than guessing which part of that ledger belongs to now.
+    if round_id is None:
+        return streamed
+    # The fallback is now scoped to this round, so it is safe to recover a
+    # truncated stream when the persisted text contains the streamed prefix.
     if prefer_fallback_if_longer and len(fallback) > len(streamed):
-        return fallback
+        sample = streamed if len(streamed) <= 240 else streamed[:240]
+        if sample and sample in fallback:
+            return fallback
     return streamed
 
 
@@ -235,22 +333,35 @@ async def consume_backend_child_stream(
 ) -> ChildStreamResult:
     """Consume a backend child stream until a non-EOF completion signal wins.
 
-    Waits as long as the child is still running. Completes as soon as the child
-    reaches a terminal status, ``stream_end`` arrives, HTTP EOF, or interrupt.
+    Waits as long as the child is still running. Completes as soon as this
+    round's child reaches a terminal status (after activity), ``stream_end``
+    arrives, HTTP EOF, or interrupt.
 
     Returns collected chunk batches and a reason. Callers must still summarize
     and return a tool string so ``tool_call_result`` is always written.
     """
 
     cancel_event = asyncio.Event()
+    round_id = uuid.uuid4().hex
+    round_messages: List[Dict[str, Any]] = []
+    for message in messages:
+        round_message = dict(message)
+        metadata = dict(round_message.get("metadata") or {})
+        metadata[DELEGATE_ROUND_ID_METADATA_KEY] = round_id
+        round_message["metadata"] = metadata
+        round_messages.append(round_message)
+    baseline = read_child_session_observation(
+        session_id, parent_session_id=parent_session_id
+    )
+    round_active = asyncio.Event()
     event_queue: asyncio.Queue = asyncio.Queue()
-    result = ChildStreamResult()
+    result = ChildStreamResult(round_id=round_id)
 
     async def _reader() -> None:
         try:
             async for chunks in backend_client.stream_chat(
                 agent_id=agent_id,
-                messages=messages,
+                messages=round_messages,
                 session_id=session_id,
                 system_context=system_context,
                 user_id=user_id,
@@ -284,20 +395,42 @@ async def consume_backend_child_stream(
                     await event_queue.put(("done", "interrupted"))
                     return
 
-                status = read_child_session_status(
+                observation = read_child_session_observation(
                     session_id, parent_session_id=parent_session_id
                 )
+                status = observation.status
                 if status:
                     observed_status = status
-                if status and status in TERMINAL_STATUS_VALUES:
-                    result.child_status = status
-                    logger.info(
-                        "[DelegateStream] child session terminal "
-                        f"session_id={session_id} status={status}; "
-                        "completing without waiting for HTTP EOF"
-                    )
-                    await event_queue.put(("done", "child_terminal"))
-                    return
+                if is_active_status(status):
+                    round_active.set()
+                if observation.request_id and (
+                    observation.request_id != baseline.request_id
+                ):
+                    round_active.set()
+                if observation.persisted_revision and (
+                    observation.persisted_revision != baseline.persisted_revision
+                ):
+                    round_active.set()
+
+                if is_terminal_status(status):
+                    # Chunks do not prove that a terminal status belongs to this
+                    # round. Require a lifecycle transition, request id, or a
+                    # newly persisted session snapshot before accepting it.
+                    if not round_active.is_set():
+                        logger.debug(
+                            "[DelegateStream] ignoring stale terminal status "
+                            f"session_id={session_id} status={status}; "
+                            "waiting for this round to become active"
+                        )
+                    else:
+                        result.child_status = status
+                        logger.info(
+                            "[DelegateStream] child session terminal "
+                            f"session_id={session_id} status={status}; "
+                            "completing without waiting for HTTP EOF"
+                        )
+                        await event_queue.put(("done", "child_terminal"))
+                        return
                 await asyncio.sleep(watch_poll_seconds)
         except asyncio.CancelledError:
             raise
@@ -310,9 +443,7 @@ async def consume_backend_child_stream(
                 result.child_status = observed_status
 
     reader_task = asyncio.create_task(_reader(), name=f"delegate-stream-{session_id}")
-    watcher_task = asyncio.create_task(
-        _watcher(), name=f"delegate-watch-{session_id}"
-    )
+    watcher_task = asyncio.create_task(_watcher(), name=f"delegate-watch-{session_id}")
 
     try:
         while True:
