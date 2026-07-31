@@ -1,5 +1,6 @@
 import importlib
 import logging
+import types
 
 
 def _load_logger_module(monkeypatch):
@@ -54,3 +55,80 @@ def test_logger_keeps_framework_file_handlers_by_default(monkeypatch, tmp_path):
     logger_module.Logger._close_handlers(logger.logger)
     logger_module.Logger._initialized = False
     logger_module.Logger._instance = None
+
+
+def test_session_logger_is_unregistered_and_cannot_be_recreated_after_close(
+    monkeypatch, tmp_path
+):
+    logger_module = _load_logger_module(monkeypatch)
+    monkeypatch.delenv("SAGE_DISABLE_SAGENTS_FILE_LOGGING", raising=False)
+
+    live_sessions = {
+        "finished-session": types.SimpleNamespace(
+            session_context=types.SimpleNamespace(session_workspace=str(tmp_path)),
+            status=types.SimpleNamespace(value="running"),
+        )
+    }
+    fake_manager = types.SimpleNamespace(
+        get_live_session=lambda session_id: live_sessions.get(session_id)
+    )
+
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    logger = logger_module.Logger(log_dir=str(tmp_path / "main-logs"))
+    logger_name = "sage_session_finished-session"
+    try:
+        session_logger = logger._get_session_logger("finished-session")
+        assert session_logger is not None
+        assert logger_name in logging.Logger.manager.loggerDict
+
+        live_sessions.clear()
+        logger.cleanup_session_logger("finished-session")
+
+        assert "finished-session" not in logger.session_loggers
+        assert logger_name not in logging.Logger.manager.loggerDict
+        assert logger._get_session_logger("finished-session") is None
+        assert logger_name not in logging.Logger.manager.loggerDict
+    finally:
+        logger.cleanup_session_logger("finished-session")
+        logger.stop_periodic_cleanup()
+        logger_module.Logger._close_handlers(logger.logger)
+        logger_module.Logger._initialized = False
+        logger_module.Logger._instance = None
+
+
+def test_terminal_session_cannot_create_file_logger(monkeypatch, tmp_path):
+    logger_module = _load_logger_module(monkeypatch)
+    monkeypatch.delenv("SAGE_DISABLE_SAGENTS_FILE_LOGGING", raising=False)
+
+    terminal_session = types.SimpleNamespace(
+        session_context=types.SimpleNamespace(session_workspace=str(tmp_path)),
+        status=types.SimpleNamespace(value="completed"),
+    )
+    fake_manager = types.SimpleNamespace(
+        get_live_session=lambda _session_id: terminal_session
+    )
+    import sagents.session_runtime
+
+    monkeypatch.setattr(
+        sagents.session_runtime,
+        "get_global_session_manager",
+        lambda: fake_manager,
+    )
+
+    logger = logger_module.Logger(log_dir=str(tmp_path / "main-logs"))
+    try:
+        assert logger._get_session_logger("terminal-session") is None
+        assert "sage_session_terminal-session" not in logging.Logger.manager.loggerDict
+    finally:
+        logger.cleanup_session_logger("terminal-session")
+        logger.stop_periodic_cleanup()
+        logger_module.Logger._close_handlers(logger.logger)
+        logger_module.Logger._initialized = False
+        logger_module.Logger._instance = None

@@ -318,7 +318,7 @@ class TestMemoryTool(unittest.TestCase):
             ],
         )
 
-    def test_file_memory_retriever_reuses_scoped_index_and_refreshes_once(self):
+    def test_file_memory_retriever_releases_scoped_index_after_each_search(self):
         tool = self.MemoryTool()
         session_context = types.SimpleNamespace(
             sandbox=object(),
@@ -335,41 +335,13 @@ class TestMemoryTool(unittest.TestCase):
                 tool.file_memory_retriever.search("provider cli", 3, session_context)
             )
 
-        self.assertEqual(len(_FakeIndex.instances), 1)
-        self.assertEqual(_FakeIndex.update_calls, 1)
+        self.assertEqual(len(_FakeIndex.instances), 2)
+        self.assertEqual(_FakeIndex.update_calls, 2)
+        self.assertEqual(tool.file_memory_retriever._index_cache, {})
         self.assertEqual(len(results1), 1)
         self.assertEqual(len(results2), 1)
         self.assertEqual(results1[0]["path"], "/workspace/app/cli/example.py")
         self.assertEqual(results1[0]["snippets"][0]["line_number"], 3)
-
-    def test_file_memory_retriever_refreshes_again_when_cached_index_is_stale(self):
-        tool = self.MemoryTool()
-        session_context = types.SimpleNamespace(
-            sandbox=object(),
-            sandbox_agent_workspace="/workspace",
-            agent_id="agent-a",
-            user_id="alice",
-        )
-
-        with patch("sagents.tool.impl.memory_index.MemoryIndex", _FakeIndex):
-            asyncio.run(
-                tool.file_memory_retriever.search("provider cli", 3, session_context)
-            )
-
-            scope_key = tool.file_memory_retriever._build_scope_key(
-                user_id="alice",
-                agent_id="agent-a",
-                workspace_path="/workspace",
-            )
-            cache_entry = tool.file_memory_retriever._index_cache[scope_key]
-            cache_entry.last_refresh_at = 0.0
-
-            asyncio.run(
-                tool.file_memory_retriever.search("provider cli", 3, session_context)
-            )
-
-        self.assertEqual(len(_FakeIndex.instances), 1)
-        self.assertEqual(_FakeIndex.update_calls, 2)
 
     def test_search_memory_success_returns_split_results(self):
         tool = self.MemoryTool()

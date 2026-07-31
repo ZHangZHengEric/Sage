@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import os
 import re
+import threading
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,12 @@ class _SessionHistoryCacheEntry:
     messages_fingerprint: str
     agent_config_fingerprint: str
     history_messages: List[Any]
+
+
+@dataclass
+class _SessionHistoryCacheState:
+    active_searches: int = 0
+    closed: bool = False
 
 
 class FileMemoryRetriever:
@@ -87,13 +94,62 @@ class SessionHistoryRetriever:
     """
 
     _history_cache: Dict[str, _SessionHistoryCacheEntry] = {}
+    _history_states: Dict[str, _SessionHistoryCacheState] = {}
+    _history_cache_lock = threading.RLock()
 
     def __init__(self, memory_tool: "MemoryTool"):
         self.memory_tool = memory_tool
 
     @classmethod
     def clear_cache(cls) -> None:
-        cls._history_cache.clear()
+        with cls._history_cache_lock:
+            cls._history_cache.clear()
+            for state in cls._history_states.values():
+                state.closed = True
+            cls._history_states = {
+                session_id: state
+                for session_id, state in cls._history_states.items()
+                if state.active_searches > 0
+            }
+
+    @classmethod
+    def clear_session_cache(cls, session_id: str, session_context: Any = None) -> bool:
+        """Remove the cached history snapshot for one completed session run."""
+        if not session_id:
+            return False
+        if session_context is not None:
+            setattr(session_context, "_session_history_cache_closed", True)
+        with cls._history_cache_lock:
+            removed = cls._history_cache.pop(session_id, None) is not None
+            state = cls._history_states.get(session_id)
+            if state is not None:
+                state.closed = True
+                if state.active_searches == 0:
+                    cls._history_states.pop(session_id, None)
+            return removed
+
+    @classmethod
+    def _begin_cache_use(cls, session_id: str) -> _SessionHistoryCacheState:
+        with cls._history_cache_lock:
+            state = cls._history_states.get(session_id)
+            if state is None:
+                state = _SessionHistoryCacheState()
+                cls._history_states[session_id] = state
+            state.active_searches += 1
+            return state
+
+    @classmethod
+    def _end_cache_use(
+        cls, session_id: str, state: _SessionHistoryCacheState
+    ) -> None:
+        with cls._history_cache_lock:
+            state.active_searches = max(0, state.active_searches - 1)
+            if (
+                state.active_searches == 0
+                and state.closed
+                and cls._history_states.get(session_id) is state
+            ):
+                cls._history_states.pop(session_id, None)
 
     @staticmethod
     def _serialize_message_content(content: Any) -> str:
@@ -128,36 +184,77 @@ class SessionHistoryRetriever:
             serialized = str(agent_config or {})
         return hashlib.md5(serialized.encode("utf-8")).hexdigest()
 
-    def _get_history_messages(self, session_id: str, session_context) -> List[Any]:
-        message_manager = session_context.message_manager
-        agent_config = getattr(session_context, "agent_config", {}) or {}
+    def _get_history_messages(
+        self,
+        session_id: str,
+        session_context,
+        cache_state: Optional[_SessionHistoryCacheState] = None,
+    ) -> List[Any]:
+        owns_cache_state = cache_state is None
+        if cache_state is None:
+            cache_state = self._begin_cache_use(session_id)
 
-        messages_fingerprint = self._fingerprint_messages(message_manager.messages)
-        agent_config_fingerprint = self._fingerprint_agent_config(agent_config)
+        try:
+            message_manager = session_context.message_manager
+            agent_config = getattr(session_context, "agent_config", {}) or {}
 
-        cache_entry = self._history_cache.get(session_id)
-        if (
-            cache_entry
-            and cache_entry.messages_fingerprint == messages_fingerprint
-            and cache_entry.agent_config_fingerprint == agent_config_fingerprint
-        ):
-            return cache_entry.history_messages
+            with self._history_cache_lock:
+                if getattr(
+                    session_context, "_session_history_cache_closed", False
+                ):
+                    cache_state.closed = True
 
-        # 历史边界：最近一次 compress_conversation_history 工具调用之前的所有消息
-        # 没有压缩调用时返回空列表（短会话不需要 RAG 检索）
-        anchor_index = message_manager.compute_history_anchor_index()
-        if anchor_index is None or anchor_index <= 0:
-            history_messages: List[Any] = []
-        else:
-            history_messages = list(message_manager.messages[:anchor_index])
+            messages_fingerprint = self._fingerprint_messages(
+                message_manager.messages
+            )
+            agent_config_fingerprint = self._fingerprint_agent_config(agent_config)
 
-        compact_history_messages = self._compact_history_messages(history_messages)
-        self._history_cache[session_id] = _SessionHistoryCacheEntry(
-            messages_fingerprint=messages_fingerprint,
-            agent_config_fingerprint=agent_config_fingerprint,
-            history_messages=compact_history_messages,
-        )
-        return compact_history_messages
+            with self._history_cache_lock:
+                cache_entry = (
+                    self._history_cache.get(session_id)
+                    if not cache_state.closed
+                    and not getattr(
+                        session_context, "_session_history_cache_closed", False
+                    )
+                    else None
+                )
+            if (
+                cache_entry
+                and cache_entry.messages_fingerprint == messages_fingerprint
+                and cache_entry.agent_config_fingerprint
+                == agent_config_fingerprint
+            ):
+                return cache_entry.history_messages
+
+            # 历史边界：最近一次 compress_conversation_history 工具调用之前的所有消息
+            # 没有压缩调用时返回空列表（短会话不需要 RAG 检索）
+            anchor_index = message_manager.compute_history_anchor_index()
+            if anchor_index is None or anchor_index <= 0:
+                history_messages: List[Any] = []
+            else:
+                history_messages = list(message_manager.messages[:anchor_index])
+
+            compact_history_messages = self._compact_history_messages(
+                history_messages
+            )
+            with self._history_cache_lock:
+                if getattr(
+                    session_context, "_session_history_cache_closed", False
+                ):
+                    cache_state.closed = True
+                if (
+                    not cache_state.closed
+                    and self._history_states.get(session_id) is cache_state
+                ):
+                    self._history_cache[session_id] = _SessionHistoryCacheEntry(
+                        messages_fingerprint=messages_fingerprint,
+                        agent_config_fingerprint=agent_config_fingerprint,
+                        history_messages=compact_history_messages,
+                    )
+            return compact_history_messages
+        finally:
+            if owns_cache_state:
+                self._end_cache_use(session_id, cache_state)
 
     @staticmethod
     def _compact_history_messages(messages: List[Any]) -> List[Any]:
@@ -232,8 +329,11 @@ class SessionHistoryRetriever:
     def search(
         self, query: str, top_k: int, session_id: str, session_context
     ) -> List[Dict[str, Any]]:
+        cache_state = self._begin_cache_use(session_id)
         try:
-            history_messages = self._get_history_messages(session_id, session_context)
+            history_messages = self._get_history_messages(
+                session_id, session_context, cache_state
+            )
             if not history_messages:
                 logger.debug("MemoryTool: No history messages to search")
                 return []
@@ -291,6 +391,8 @@ class SessionHistoryRetriever:
 
             logger.error(traceback.format_exc())
             return []
+        finally:
+            self._end_cache_use(session_id, cache_state)
 
 
 class MemoryTool:

@@ -99,6 +99,11 @@ async def _start_task_scheduler():
 async def cleanup_system():
     logger.info("Sage正在清理资源...")
     await shutdown_scheduler()
+    from common.services.async_task_service import shutdown_async_task_service
+    from sagents.session_runtime import shutdown_global_session_manager
+
+    await shutdown_async_task_service()
+    await shutdown_global_session_manager()
     # 关闭 观测链路上报 (需在 DB 关闭前)
     await close_observability()
     # 关闭第三方客户端

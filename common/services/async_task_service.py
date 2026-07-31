@@ -9,9 +9,20 @@ from common.core.exceptions import SageHTTPException
 
 
 class AsyncTaskService:
-    def __init__(self) -> None:
+    TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+
+    def __init__(
+        self,
+        *,
+        retention_seconds: float = 60 * 30,
+        cleanup_interval_seconds: float = 60,
+    ) -> None:
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._lock = asyncio.Lock()
+        self._retention_seconds = retention_seconds
+        self._cleanup_interval_seconds = cleanup_interval_seconds
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._shutdown = False
 
     async def submit(
         self,
@@ -35,13 +46,9 @@ class AsyncTaskService:
             "updated_at": now,
         }
 
-        async with self._lock:
-            self._cleanup_locked()
-            self._tasks[task_id] = task_data
-
         async def _run() -> None:
-            await self._update(task_id, status="running")
             try:
+                await self._update(task_id, status="running")
                 result = await runner()
                 await self._update(task_id, status="completed", result=result)
             except asyncio.CancelledError:
@@ -62,9 +69,21 @@ class AsyncTaskService:
                         "code": getattr(exc, "code", "TASK_FAILED"),
                     },
                 )
+            finally:
+                await self._drop_runner_reference(task_id, asyncio.current_task())
 
-        task = asyncio.create_task(_run())
-        await self._update(task_id, asyncio_task=task)
+        async with self._lock:
+            if self._shutdown:
+                raise RuntimeError("AsyncTaskService is shut down")
+            self._ensure_cleanup_task()
+            self._cleanup_locked()
+            self._tasks[task_id] = task_data
+            try:
+                task = asyncio.create_task(_run())
+            except BaseException:
+                self._tasks.pop(task_id, None)
+                raise
+            task_data["asyncio_task"] = task
         return self._public_task(task_data)
 
     async def get(self, task_id: str, owner_id: str) -> Dict[str, Any]:
@@ -108,6 +127,14 @@ class AsyncTaskService:
             task.update(updates)
             task["updated_at"] = time.time()
 
+    async def _drop_runner_reference(
+        self, task_id: str, runner_task: Optional[asyncio.Task]
+    ) -> None:
+        async with self._lock:
+            task = self._tasks.get(task_id)
+            if task and task.get("asyncio_task") is runner_task:
+                task.pop("asyncio_task", None)
+
     def _public_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "task_id": task["task_id"],
@@ -125,11 +152,52 @@ class AsyncTaskService:
         expired_task_ids = [
             task_id
             for task_id, task in self._tasks.items()
-            if task.get("status") in {"completed", "failed", "cancelled"}
-            and now - task.get("updated_at", now) > 60 * 30
+            if task.get("status") in self.TERMINAL_STATUSES
+            and now - task.get("updated_at", now) > self._retention_seconds
         ]
         for task_id in expired_task_ids:
             self._tasks.pop(task_id, None)
+
+    def _ensure_cleanup_task(self) -> None:
+        if self._cleanup_task is not None and not self._cleanup_task.done():
+            return
+        self._cleanup_task = asyncio.create_task(
+            self._cleanup_loop(),
+            name="async-task-service-cleanup",
+        )
+
+    async def _cleanup_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval_seconds)
+                async with self._lock:
+                    self._cleanup_locked()
+        except asyncio.CancelledError:
+            raise
+
+    async def shutdown(self) -> None:
+        """Cancel owned tasks and release all retained task results."""
+        async with self._lock:
+            self._shutdown = True
+            cleanup_task = self._cleanup_task
+            self._cleanup_task = None
+            runners = [
+                task.get("asyncio_task")
+                for task in self._tasks.values()
+                if task.get("asyncio_task") is not None
+                and not task["asyncio_task"].done()
+            ]
+        if cleanup_task:
+            if not cleanup_task.done():
+                cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
+
+        for runner in runners:
+            runner.cancel()
+        if runners:
+            await asyncio.gather(*runners, return_exceptions=True)
+        async with self._lock:
+            self._tasks.clear()
 
 
 _async_task_service: Optional[AsyncTaskService] = None
@@ -140,3 +208,12 @@ def get_async_task_service() -> AsyncTaskService:
     if _async_task_service is None:
         _async_task_service = AsyncTaskService()
     return _async_task_service
+
+
+async def shutdown_async_task_service() -> None:
+    global _async_task_service
+    service = _async_task_service
+    if service is None:
+        return
+    await service.shutdown()
+    _async_task_service = None
