@@ -136,6 +136,7 @@ def test_import_workspace_archive_atomically_replaces_target_subtree(tmp_path):
     assert (workspace / "user_health_data" / "activity" / "README.md").read_bytes() == b"activity"
     assert len(result["files"]) == 2
     assert result["idempotency_key"] == "import-1"
+    assert agent_service._WORKSPACE_ARCHIVE_LOCKS == {}
 
 
 def test_import_workspace_archive_rejects_path_traversal(tmp_path):

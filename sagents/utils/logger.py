@@ -174,6 +174,7 @@ class Logger:
 
         # Session-specific loggers cache
         self.session_loggers: Dict[str, logging.Logger] = {}
+        self._session_loggers_lock = threading.RLock()
 
         if self.file_logging_enabled:
             # 清理一个月前的日志文件
@@ -321,31 +322,19 @@ class Logger:
                 pass
         target_logger.handlers.clear()
 
-    def _get_session_logger(self, session_id: str) -> logging.Logger:
-        """获取或创建session专用的logger"""
-        if session_id in self.session_loggers:
-            session_logger = self.session_loggers[session_id]
-        else:
-            # 创建session专用logger
-            session_logger = logging.getLogger(f"sage_session_{session_id}")
-            session_logger.setLevel(logging.DEBUG)
-            session_logger.propagate = False
+    def _get_session_logger(self, session_id: str) -> Optional[logging.Logger]:
+        """Return a file logger only while the session is still live.
 
-            # 清除可能存在的handlers
-            if session_logger.handlers:
-                self._close_handlers(session_logger)
+        Python's logging registry keeps every named logger strongly referenced.  Do
+        not create the named logger until a live session workspace is available,
+        and serialize creation with cleanup so late background work cannot recreate
+        a logger after ``close_session``.
+        """
+        if not self.file_logging_enabled:
+            return None
 
-            self.session_loggers[session_id] = session_logger
-
-        # 检查是否已经有FileHandler
-        has_file_handler = any(
-            isinstance(h, logging.FileHandler) for h in session_logger.handlers
-        )
-
-        # 如果没有FileHandler，尝试添加
-        if not has_file_handler:
+        with self._session_loggers_lock:
             try:
-                # 获取session workspace路径
                 from sagents.session_runtime import get_global_session_manager
 
                 session_manager = get_global_session_manager()
@@ -354,33 +343,48 @@ class Logger:
                     if session_manager
                     else None
                 )
-                if session and session.session_context:
-                    # 检查 session_workspace 属性是否存在（init_more 完成后才有）
-                    if hasattr(session.session_context, "session_workspace"):
-                        session_workspace = session.session_context.session_workspace
+                session_context = getattr(session, "session_context", None)
+                status = getattr(session, "status", None)
+                status_value = getattr(status, "value", str(status or ""))
+                if status_value not in {"idle", "running"}:
+                    self.cleanup_session_logger(session_id)
+                    return None
+                session_workspace = getattr(
+                    session_context, "session_workspace", None
+                )
+                if not session_workspace:
+                    return None
 
-                        # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
-                        session_log_file = os.path.join(
-                            session_workspace, f"session_{session_id}.log"
-                        )
-                        # 使用FileHandler的追加模式，而不是RotatingFileHandler
-                        session_file_handler = logging.FileHandler(
-                            session_log_file, mode="a", encoding="utf-8"
-                        )
-                        session_file_handler.setLevel(logging.DEBUG)
-                        session_format = logging.Formatter(
-                            "%(asctime)s - %(levelname)s - [%(caller_filename)s:%(caller_lineno)d] - %(message)s"
-                        )
-                        session_file_handler.setFormatter(session_format)
+                cached_logger = self.session_loggers.get(session_id)
+                if cached_logger is not None:
+                    return cached_logger
 
-                        session_logger.addHandler(session_file_handler)
+                session_log_file = os.path.join(
+                    session_workspace, f"session_{session_id}.log"
+                )
+                session_file_handler = logging.FileHandler(
+                    session_log_file, mode="a", encoding="utf-8"
+                )
+                session_file_handler.setLevel(logging.DEBUG)
+                session_file_handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s - %(levelname)s - "
+                        "[%(caller_filename)s:%(caller_lineno)d] - %(message)s"
+                    )
+                )
+
+                session_logger = logging.getLogger(f"sage_session_{session_id}")
+                session_logger.setLevel(logging.DEBUG)
+                session_logger.propagate = False
+                self._close_handlers(session_logger)
+                session_logger.addHandler(session_file_handler)
+                self.session_loggers[session_id] = session_logger
+                return session_logger
             except Exception as e:
-                # 如果无法创建session专用日志文件，记录错误但不影响主要功能
                 print(
                     f"Warning: Failed to create session log file for {session_id}: {e}"
                 )
-
-        return session_logger
+                return None
 
     def _log(self, level, message, explicit_session_id: Optional[str] = None, **kwargs):
         # Get caller frame info to include filename and line number
@@ -437,12 +441,13 @@ class Logger:
         if session_id != "NO_SESSION":
             try:
                 session_logger = self._get_session_logger(session_id)
-                session_log_method = getattr(session_logger, level)
-                session_log_method(
-                    f"{message}",
-                    extra={"caller_filename": filename, "caller_lineno": lineno},
-                    **kwargs,
-                )
+                if session_logger is not None:
+                    session_log_method = getattr(session_logger, level)
+                    session_log_method(
+                        f"{message}",
+                        extra={"caller_filename": filename, "caller_lineno": lineno},
+                        **kwargs,
+                    )
             except Exception:
                 # 如果session日志记录失败，不影响主要功能
                 pass
@@ -497,11 +502,23 @@ class Logger:
 
     def cleanup_session_logger(self, session_id: str):
         """清理session专用的logger"""
-        if session_id in self.session_loggers:
-            session_logger = self.session_loggers[session_id]
-            self._close_handlers(session_logger)
-            # 从缓存中移除
-            del self.session_loggers[session_id]
+        logger_name = f"sage_session_{session_id}"
+        with self._session_loggers_lock:
+            session_logger = self.session_loggers.pop(session_id, None)
+            registered_logger = logging.Logger.manager.loggerDict.pop(
+                logger_name, None
+            )
+
+            loggers_to_close = []
+            if session_logger is not None:
+                loggers_to_close.append(session_logger)
+            if (
+                isinstance(registered_logger, logging.Logger)
+                and registered_logger is not session_logger
+            ):
+                loggers_to_close.append(registered_logger)
+            for target_logger in loggers_to_close:
+                self._close_handlers(target_logger)
 
 
 # Create a global logger instance for easy import
