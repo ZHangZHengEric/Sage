@@ -17,7 +17,19 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator, Tuple
 
+from loguru import logger
+
 _MERGE_SENTINEL = object()
+_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 13.0
+
+
+def _consume_task_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        pass
 
 
 async def interleave_message_and_progress(
@@ -80,10 +92,30 @@ async def interleave_message_and_progress(
                         yield ("tool_progress", p2)
                 break
     finally:
-        if not msg_task.done():
-            msg_task.cancel()
-        if not prog_task.done():
-            prog_task.cancel()
+        workers = (msg_task, prog_task)
+        for task in workers:
+            if not task.done():
+                task.cancel()
+        try:
+            done, pending = await asyncio.wait(
+                workers, timeout=_WORKER_SHUTDOWN_TIMEOUT_SECONDS
+            )
+        except asyncio.CancelledError:
+            for task in workers:
+                task.add_done_callback(_consume_task_exception)
+            raise
+
+        for task in done:
+            _consume_task_exception(task)
+        if pending:
+            logger.warning(
+                "Stream merge worker cleanup timed out; detaching "
+                f"{len(pending)} task(s) after "
+                f"{_WORKER_SHUTDOWN_TIMEOUT_SECONDS:.3f}s"
+            )
+            for task in pending:
+                task.cancel()
+                task.add_done_callback(_consume_task_exception)
 
 
 __all__ = ["interleave_message_and_progress"]

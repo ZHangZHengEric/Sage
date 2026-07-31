@@ -318,6 +318,11 @@ async def cleanup_system():
     if _browser_capability_coordinator:
         await _browser_capability_coordinator.stop()
         _browser_capability_coordinator = None
+    from common.services.async_task_service import shutdown_async_task_service
+    from sagents.session_runtime import shutdown_global_session_manager
+
+    await shutdown_async_task_service()
+    await shutdown_global_session_manager()
     await close_observability()
     # 关闭第三方客户端
     await shutdown_clients()
