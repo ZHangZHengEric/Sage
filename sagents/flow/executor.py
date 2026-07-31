@@ -57,6 +57,31 @@ def _visible_chunks_for_flow_stream(
     return [chunk for chunk in message_chunks if is_message_client_visible(chunk)]
 
 
+def _message_chunk_session_id(message: Any) -> Optional[str]:
+    if isinstance(message, MessageChunk):
+        return message.session_id
+    if isinstance(message, dict):
+        value = message.get("session_id")
+        return str(value) if value is not None else None
+    return getattr(message, "session_id", None)
+
+
+def _ledger_chunks_for_session(
+    session_id: str, message_chunks: Optional[List[Any]]
+) -> List[Any]:
+    """Keep parent inference ledger free of delegated child stream traffic.
+
+    Child ``{parent}_sub_*`` chunks may still be yielded to the client SSE
+    stream; only untagged / exact-session messages enter ``add_messages``.
+    """
+    ledger_chunks: List[Any] = []
+    for chunk in message_chunks or []:
+        chunk_session_id = _message_chunk_session_id(chunk)
+        if chunk_session_id is None or chunk_session_id == session_id:
+            ledger_chunks.append(chunk)
+    return ledger_chunks
+
+
 class _FlowExecutionTrace:
     def __init__(self) -> None:
         self.events: List[str] = []
@@ -307,23 +332,30 @@ class FlowExecutor:
                                 and message.get("role") == "tool"
                             )
                         ]
-                        if terminal_tool_chunks:
-                            ctx.add_messages(terminal_tool_chunks)
+                        terminal_ledger_chunks = _ledger_chunks_for_session(
+                            self.session_id, terminal_tool_chunks
+                        )
+                        if terminal_ledger_chunks:
+                            ctx.add_messages(terminal_ledger_chunks)
                             add_calls += 1
-                            chunks_seen += len(terminal_tool_chunks)
+                            chunks_seen += len(terminal_ledger_chunks)
                             last_chunk_summary = _message_chunk_debug_summary(
-                                terminal_tool_chunks
+                                terminal_ledger_chunks
                             )
                         logger.info(
                             f"FlowExecutor: session {self.session_id} reached terminal state "
                             f"{session.get_status().value} while running agent '{agent_key}', stopping"
                         )
                         return
-                    # 将消息添加到上下文 (这一步在 _execute_agent_phase 外部做还是内部做？)
-                    # 原逻辑是在外部做的: session_context.add_messages(message_chunks)
-                    # 所以这里我们也做
-                    ctx.add_messages(message_chunks)
-                    add_calls += 1
+                    # Parent ledger: only this session / untagged. Child *_sub_*
+                    # progress still yields to the client without polluting
+                    # parent tool-call pairing.
+                    ledger_chunks = _ledger_chunks_for_session(
+                        self.session_id, message_chunks
+                    )
+                    if ledger_chunks:
+                        ctx.add_messages(ledger_chunks)
+                        add_calls += 1
                     chunks_seen += len(message_chunks or [])
                     last_chunk_summary = _message_chunk_debug_summary(
                         message_chunks or []

@@ -4,7 +4,7 @@ import inspect
 import time
 import threading
 import uuid
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Set, Union
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
 
@@ -54,6 +54,9 @@ class SessionStatus(Enum):
 
 
 class SessionContext:
+    LOG_FLUSH_TIMEOUT_SECONDS = 5.0
+    LOG_WRITER_CANCEL_TIMEOUT_SECONDS = 0.5
+
     def __init__(
         self,
         session_id: str,
@@ -271,6 +274,21 @@ class SessionContext:
         self._llm_request_save_lock = threading.Lock()
         self._mcp_calls_lock = threading.Lock()
         self._mcp_calls_save_lock = threading.Lock()
+        # One writer task serializes all diagnostic log I/O for this session.
+        # The existing log lists are also the pending queue, avoiding one task
+        # (and one retained SessionContext) per LLM or MCP call.
+        self._log_writer_task: Optional[asyncio.Task] = None
+        self._llm_log_save_cursor = 0
+        self._dirty_mcp_request_ids: Set[str] = set()
+        self._mcp_request_versions: Dict[str, int] = {}
+        self._log_writer_closed = False
+        self._log_flush_lock = asyncio.Lock()
+        try:
+            self._owner_loop: Optional[asyncio.AbstractEventLoop] = (
+                asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            self._owner_loop = None
         self._save_lock = threading.Lock()
         self._message_journal_lock = threading.RLock()
         self._message_journal_seq = 0
@@ -639,6 +657,35 @@ class SessionContext:
         except OSError:
             return False
 
+    def _is_acceptable_message_session_id(
+        self, msg_session_id: Optional[str]
+    ) -> bool:
+        """Return True if message may enter this session's inference ledger.
+
+        Accepts only untagged chunks (``None``) or an exact match with this
+        session. Delegated child ``{parent}_sub_{n}`` traffic must stay in the
+        child session ledger; parents receive only the final delegate tool
+        result. Client-visible child progress is streamed by FlowExecutor
+        without calling ``add_messages``.
+        """
+        return msg_session_id is None or msg_session_id == self.session_id
+
+    @staticmethod
+    def _normalize_message_content_for_ledger(
+        msg: Union[MessageChunk, Dict[str, Any]],
+    ) -> None:
+        """Keep ledger content OpenAI-compatible (string | multimodal list)."""
+        if isinstance(msg, MessageChunk):
+            if isinstance(msg.content, dict):
+                msg.content = json.dumps(
+                    msg.content, ensure_ascii=False, default=str
+                )
+            return
+        if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
+            msg["content"] = json.dumps(
+                msg["content"], ensure_ascii=False, default=str
+            )
+
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
     ) -> None:
@@ -662,7 +709,8 @@ class SessionContext:
             elif isinstance(msg, dict):
                 msg_session_id = msg.get("session_id")
 
-            if msg_session_id is None or msg_session_id == self.session_id:
+            if self._is_acceptable_message_session_id(msg_session_id):
+                self._normalize_message_content_for_ledger(msg)
                 valid_messages.append(msg)
             else:
                 rejected_session_ids.append(str(msg_session_id))
@@ -2077,6 +2125,12 @@ class SessionContext:
         时序列化到 ``<session_workspace>/tokens_usage/<request_id>.json``。
         """
 
+        if self._log_writer_closed:
+            logger.warning(
+                f"SessionContext: ignore late LLM log after close, session_id={self.session_id}"
+            )
+            return
+
         llm_request = {
             "request": request,
             "response": response,
@@ -2089,11 +2143,16 @@ class SessionContext:
         except Exception as exc:
             logger.warning(f"SessionContext: 累加 per-request usage 失败: {exc}")
 
-        # 异步保存日志，不阻塞主流程
-        asyncio.create_task(self._async_save_llm_request(llm_request))
+        self._schedule_log_writer()
 
     def add_mcp_call(self, call: Dict[str, Any]) -> Optional[str]:
         """记录一次 MCP 调用，并按当前 chat request 聚合落盘。"""
+        if self._log_writer_closed:
+            logger.warning(
+                f"SessionContext: ignore late MCP log after close, session_id={self.session_id}"
+            )
+            return None
+
         with self._request_lock:
             cur = self._current_request
             if cur is None:
@@ -2117,9 +2176,175 @@ class SessionContext:
                 **call,
             }
             self.mcp_calls_logs.append(make_serializable(mcp_call))  # pyright: ignore[reportArgumentType]
+            self._dirty_mcp_request_ids.add(request_id)
+            self._mcp_request_versions[request_id] = (
+                self._mcp_request_versions.get(request_id, 0) + 1
+            )
 
-        asyncio.create_task(self._async_save_mcp_calls(request_id))
+        self._schedule_log_writer()
         return request_id
+
+    def _schedule_log_writer(self) -> None:
+        if self._log_writer_closed:
+            return
+        if self._log_writer_task is not None and not self._log_writer_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # The canonical lists retain the data until close flushes it on the
+            # owning event loop.
+            return
+        self._owner_loop = self._owner_loop or loop
+        self._log_writer_task = loop.create_task(
+            self._drain_pending_log_writes(),
+            name=f"session-log-writer-{self.session_id}",
+        )
+
+    async def _drain_pending_log_writes(self) -> None:
+        current_task = asyncio.current_task()
+        reached_empty_queue = False
+        try:
+            while True:
+                if self._llm_log_save_cursor < len(self.llm_requests_logs):
+                    llm_request = self.llm_requests_logs[self._llm_log_save_cursor]
+                    await self._async_save_llm_request(llm_request)
+                    self._llm_log_save_cursor += 1
+                    continue
+
+                with self._mcp_calls_lock:
+                    request_id = (
+                        next(iter(self._dirty_mcp_request_ids))
+                        if self._dirty_mcp_request_ids
+                        else None
+                    )
+                    request_version = (
+                        self._mcp_request_versions.get(request_id, 0)
+                        if request_id is not None
+                        else 0
+                    )
+                if request_id is not None:
+                    await self._async_save_mcp_calls(request_id)
+                    with self._mcp_calls_lock:
+                        # A call may have arrived for this request while the
+                        # aggregate was being written. Keep it dirty so the
+                        # next pass persists the newer snapshot.
+                        if (
+                            self._mcp_request_versions.get(request_id, 0)
+                            == request_version
+                        ):
+                            self._dirty_mcp_request_ids.discard(request_id)
+                            self._mcp_request_versions.pop(request_id, None)
+                    continue
+                reached_empty_queue = True
+                return
+        finally:
+            if self._log_writer_task is current_task:
+                self._log_writer_task = None
+                if (
+                    reached_empty_queue
+                    and not self._log_writer_closed
+                    and self._has_pending_log_writes()
+                ):
+                    # An item can arrive after the empty-queue check but before
+                    # this task clears the writer slot. Ensure that race always
+                    # hands off to a successor writer.
+                    self._schedule_log_writer()
+
+    def _has_pending_log_writes(self) -> bool:
+        if self._llm_log_save_cursor < len(self.llm_requests_logs):
+            return True
+        with self._mcp_calls_lock:
+            return bool(self._dirty_mcp_request_ids)
+
+    def _discard_diagnostic_log_buffers(self) -> None:
+        """Release diagnostic payloads after flush or a bounded-flush failure."""
+        self.llm_requests_logs.clear()
+        self._llm_log_save_cursor = 0
+        with self._mcp_calls_lock:
+            self.mcp_calls_logs.clear()
+            self._dirty_mcp_request_ids.clear()
+            self._mcp_request_versions.clear()
+
+    async def _cancel_log_writer(self, task: Optional[asyncio.Task]) -> None:
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            done, pending = await asyncio.wait(
+                {task}, timeout=self.LOG_WRITER_CANCEL_TIMEOUT_SECONDS
+            )
+            for finished in done:
+                if not finished.cancelled():
+                    finished.exception()
+            for unfinished in pending:
+                # A broken I/O adapter may suppress cancellation. Do not let it
+                # retain the SessionContext through the global writer slot.
+                unfinished.add_done_callback(
+                    lambda item: None if item.cancelled() else item.exception()
+                )
+        if self._log_writer_task is task:
+            self._log_writer_task = None
+
+    async def flush_pending_log_writes(
+        self, timeout_seconds: Optional[float] = None
+    ) -> bool:
+        async with self._log_flush_lock:
+            return await self._flush_pending_log_writes(timeout_seconds)
+
+    async def _flush_pending_log_writes(
+        self, timeout_seconds: Optional[float] = None
+    ) -> bool:
+        """Persist registered diagnostics within a bounded close window.
+
+        Returns ``True`` when every queued item was handled. On timeout the
+        writer is cancelled and all remaining diagnostic payloads are dropped
+        so Session cleanup can release its object graph.
+        """
+        self._log_writer_closed = True
+        timeout = (
+            self.LOG_FLUSH_TIMEOUT_SECONDS
+            if timeout_seconds is None
+            else max(0.0, float(timeout_seconds))
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        try:
+            while True:
+                task = self._log_writer_task
+                if task is None or task.done():
+                    if (
+                        self._llm_log_save_cursor >= len(self.llm_requests_logs)
+                        and not self._dirty_mcp_request_ids
+                    ):
+                        self._discard_diagnostic_log_buffers()
+                        return True
+                    task = asyncio.create_task(
+                        self._drain_pending_log_writes(),
+                        name=f"session-log-flush-{self.session_id}",
+                    )
+                    self._log_writer_task = task
+
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except asyncio.TimeoutError:
+            pending_llm = max(
+                0, len(self.llm_requests_logs) - self._llm_log_save_cursor
+            )
+            pending_mcp = len(self._dirty_mcp_request_ids)
+            logger.warning(
+                "SessionContext: diagnostic log flush timed out; dropping "
+                f"pending payloads session_id={self.session_id} "
+                f"llm={pending_llm} mcp={pending_mcp} timeout={timeout:.3f}s"
+            )
+            await self._cancel_log_writer(self._log_writer_task)
+            self._discard_diagnostic_log_buffers()
+            return False
+        except asyncio.CancelledError:
+            await self._cancel_log_writer(self._log_writer_task)
+            self._discard_diagnostic_log_buffers()
+            raise
 
     def current_request_id(self) -> Optional[str]:
         with self._request_lock:

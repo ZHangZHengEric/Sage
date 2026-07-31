@@ -1,6 +1,8 @@
 import asyncio
 import csv
 import hashlib
+import threading
+import time
 from io import StringIO
 from pathlib import Path
 
@@ -128,6 +130,58 @@ def test_mutate_workspace_csv_rejects_conflicts_and_unsafe_paths(tmp_path):
             expected_content_hash="wrong",
         )
     assert raised.value.status_code == 409
+
+
+def test_workspace_csv_lock_is_retained_for_waiters_then_removed():
+    key = "/workspace/shared.csv"
+    holder_entered = threading.Event()
+    release_holder = threading.Event()
+    waiter_entered = threading.Event()
+    errors = []
+
+    def holder():
+        try:
+            with agent_service._workspace_csv_lock(key):
+                holder_entered.set()
+                release_holder.wait(timeout=2)
+        except BaseException as exc:
+            errors.append(exc)
+
+    def waiter():
+        try:
+            holder_entered.wait(timeout=2)
+            with agent_service._workspace_csv_lock(key):
+                waiter_entered.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=holder)
+    second = threading.Thread(target=waiter)
+    first.start()
+    assert holder_entered.wait(timeout=2)
+    second.start()
+
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        with agent_service._WORKSPACE_CSV_LOCKS_GUARD:
+            entry = agent_service._WORKSPACE_CSV_LOCKS.get(key)
+            if entry is not None and entry.users == 2:
+                break
+        time.sleep(0.005)
+    else:
+        release_holder.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+        pytest.fail("waiting thread was not retained by the keyed lock")
+
+    assert not waiter_entered.is_set()
+    release_holder.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert errors == []
+    assert waiter_entered.is_set()
+    assert key not in agent_service._WORKSPACE_CSV_LOCKS
 
 
 def test_server_csv_route_forwards_user_scoped_mutation(monkeypatch):

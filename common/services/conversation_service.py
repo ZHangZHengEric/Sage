@@ -385,8 +385,20 @@ async def get_conversation_messages(
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
     session_manager = get_global_session_manager()
-    session = session_manager.get(session_id) if session_manager else None
-    if not session:
+    session = None
+    session_workspace = None
+    if session_manager:
+        get_live_session = getattr(session_manager, "get_live_session", None)
+        if callable(get_live_session):
+            session = get_live_session(session_id)
+        else:
+            # Compatibility with small integrations/test doubles implementing
+            # only the historical SessionManager.get() surface.
+            session = session_manager.get(session_id)
+        get_workspace = getattr(session_manager, "get_session_workspace", None)
+        if callable(get_workspace):
+            session_workspace = get_workspace(session_id)
+    if not session and not session_workspace:
         raise SageHTTPException(
             **{
                 **_conversation_error_kwargs(
@@ -414,6 +426,8 @@ async def get_conversation_messages(
             "updated_at": conversation.updated_at,
         }
     else:
+        if session is None and session_manager is not None:
+            session = session_manager.get(session_id)
         session_context = session.get_context() if session else None
         session_created_at = session.get_start_time() if session else None
         agent_config = (
@@ -601,11 +615,9 @@ def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
     session_manager = get_global_session_manager()
     if session_manager:
         try:
-            session = session_manager.get(session_id)
-            if session:
-                raw_messages = session.get_messages()
-                if raw_messages:
-                    return [message.to_dict() for message in raw_messages]
+            raw_messages = session_manager.get_session_messages(session_id)
+            if raw_messages:
+                return [message.to_dict() for message in raw_messages]
         except Exception as exc:
             logger.bind(session_id=session_id).warning(
                 f"读取 session 原始消息失败，回退数据库: {exc}"
@@ -818,7 +830,7 @@ async def edit_last_user_message(
     manager = get_global_session_manager()
     if manager:
         try:
-            await asyncio.to_thread(manager.close_session, session_id)
+            await manager.aclose_session(session_id)
         except Exception:
             manager.remove_session_context(session_id)
 

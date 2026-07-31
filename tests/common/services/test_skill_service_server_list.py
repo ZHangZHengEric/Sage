@@ -147,3 +147,44 @@ def test_collect_server_skills_only_returns_agent_skills_when_explicit(
     )
 
     assert {skill.name for skill in skills} == {"agent-a-skill"}
+
+
+def test_server_skills_cache_purges_expired_entries(monkeypatch):
+    skill_service._invalidate_server_skills_cache()
+    now = [100.0]
+    monkeypatch.setattr(skill_service.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        skill_service,
+        "_collect_server_skills_uncached",
+        lambda current_user_id, role, dimension: [],
+    )
+
+    skill_service._collect_server_skills("user-a", "user")
+    assert len(skill_service._server_skills_cache) == 1
+
+    now[0] += skill_service._SERVER_SKILLS_CACHE_TTL_SECONDS + 1
+    skill_service._collect_server_skills("user-b", "user")
+
+    assert list(skill_service._server_skills_cache) == [
+        skill_service._server_skills_cache_key("user-b", "user", None)
+    ]
+
+
+def test_server_skills_cache_enforces_lru_limit(monkeypatch):
+    skill_service._invalidate_server_skills_cache()
+    monkeypatch.setattr(skill_service, "_SERVER_SKILLS_CACHE_MAX_ENTRIES", 2)
+    monkeypatch.setattr(
+        skill_service,
+        "_collect_server_skills_uncached",
+        lambda current_user_id, role, dimension: [],
+    )
+
+    skill_service._collect_server_skills("user-a", "user")
+    skill_service._collect_server_skills("user-b", "user")
+    skill_service._collect_server_skills("user-a", "user")
+    skill_service._collect_server_skills("user-c", "user")
+
+    assert skill_service._server_skills_cache_key(
+        "user-b", "user", None
+    ) not in skill_service._server_skills_cache
+    assert len(skill_service._server_skills_cache) == 2

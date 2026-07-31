@@ -493,11 +493,13 @@ class SAgent:
         finally:
             total_ms = int((time.time() - start_time) * 1000)
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
-            self.session_manager.close_session(
-                session_id,
-                runtime_owner_id=runtime_env_owner_id,
-            )
-            reset_current_runtime_owner(runtime_owner_token)
+            try:
+                await self.session_manager.aclose_session(
+                    session_id,
+                    runtime_owner_id=runtime_env_owner_id,
+                )
+            finally:
+                reset_current_runtime_owner(runtime_owner_token)
 
     def _build_default_flow(
         self, agent_mode: Optional[str], max_loop_count: int

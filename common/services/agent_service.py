@@ -11,9 +11,10 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from contextlib import contextmanager
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -37,9 +38,17 @@ except ImportError:  # pragma: no cover - Windows fallback
     fcntl = None
 
 _WORKSPACE_FILE_HASH_ALGORITHM = "md5"
-_WORKSPACE_CSV_LOCKS: Dict[str, threading.Lock] = {}
+
+
+class _RefCountedWorkspaceLock:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.users = 0
+
+
+_WORKSPACE_CSV_LOCKS: Dict[str, _RefCountedWorkspaceLock] = {}
 _WORKSPACE_CSV_LOCKS_GUARD = threading.Lock()
-_WORKSPACE_ARCHIVE_LOCKS: Dict[str, threading.Lock] = {}
+_WORKSPACE_ARCHIVE_LOCKS: Dict[str, _RefCountedWorkspaceLock] = {}
 _WORKSPACE_ARCHIVE_LOCKS_GUARD = threading.Lock()
 _WORKSPACE_ARCHIVE_MAX_COMPRESSED_BYTES = 32 * 1024 * 1024
 _WORKSPACE_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
@@ -1454,9 +1463,48 @@ def delete_workspace_entry(
         )
 
 
-def _workspace_csv_lock(file_path: str) -> threading.Lock:
-    with _WORKSPACE_CSV_LOCKS_GUARD:
-        return _WORKSPACE_CSV_LOCKS.setdefault(file_path, threading.Lock())
+@contextmanager
+def _workspace_path_lock(
+    registry: Dict[str, _RefCountedWorkspaceLock],
+    guard: threading.Lock,
+    key: str,
+) -> Iterator[threading.Lock]:
+    """Hold a keyed lock and remove it after the final holder/waiter exits."""
+    with guard:
+        entry = registry.get(key)
+        if entry is None:
+            entry = _RefCountedWorkspaceLock()
+            registry[key] = entry
+        entry.users += 1
+
+    acquired = False
+    try:
+        entry.lock.acquire()
+        acquired = True
+        yield entry.lock
+    finally:
+        if acquired:
+            entry.lock.release()
+        with guard:
+            entry.users -= 1
+            if entry.users == 0 and registry.get(key) is entry:
+                registry.pop(key, None)
+
+
+def _workspace_csv_lock(file_path: str):
+    return _workspace_path_lock(
+        _WORKSPACE_CSV_LOCKS,
+        _WORKSPACE_CSV_LOCKS_GUARD,
+        file_path,
+    )
+
+
+def _workspace_archive_lock(directory_path: str):
+    return _workspace_path_lock(
+        _WORKSPACE_ARCHIVE_LOCKS,
+        _WORKSPACE_ARCHIVE_LOCKS_GUARD,
+        directory_path,
+    )
 
 
 def _csv_row_key(row: Dict[str, str], columns: List[str]) -> str:
@@ -1513,8 +1561,7 @@ def mutate_workspace_csv(
     ):
         raise SageHTTPException(status_code=400, detail="Invalid CSV key or sort columns")
 
-    lock = _workspace_csv_lock(target_path)
-    with lock:
+    with _workspace_csv_lock(target_path):
         existing_bytes = b""
         rows_by_key: Dict[str, Dict[str, str]] = {}
         if os.path.exists(target_path):
@@ -1890,9 +1937,7 @@ def import_workspace_archive(
                 )
 
         lock_key = os.path.normcase(os.path.abspath(target_dir))
-        with _WORKSPACE_ARCHIVE_LOCKS_GUARD:
-            lock = _WORKSPACE_ARCHIVE_LOCKS.setdefault(lock_key, threading.Lock())
-        with lock:
+        with _workspace_archive_lock(lock_key):
             lock_path = os.path.join(workspace_abs, ".workspace-archive-import.lock")
             with open(lock_path, "a+b") as lock_file:
                 if fcntl is not None:

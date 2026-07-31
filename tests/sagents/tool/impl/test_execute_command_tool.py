@@ -63,6 +63,8 @@ class _FakeBackgroundSandbox(_FakeSandbox):
         self.workspace_path = str(agent_workspace)
         self.host_workspace_path = str(agent_workspace)
         self.bg_calls = []
+        self.killed_tasks = []
+        self.cleaned_tasks = []
 
     def supports_background(self):
         return True
@@ -89,6 +91,13 @@ class _FakeBackgroundSandbox(_FakeSandbox):
     async def read_background_output(self, task_id, max_bytes=8192):
         return ""
 
+    async def kill_background(self, task_id, force=False):
+        self.killed_tasks.append((task_id, force))
+        return True
+
+    async def cleanup_background(self, task_id):
+        self.cleaned_tasks.append(task_id)
+
 
 def test_shell_tool_descriptions_do_not_expose_completion_reminder_protocol():
     descriptions = []
@@ -102,6 +111,58 @@ def test_shell_tool_descriptions_do_not_expose_completion_reminder_protocol():
     assert "无需轮询" not in combined
     assert "polling is unnecessary" not in combined
     assert "await_shell" in combined
+
+
+def test_session_cleanup_kills_only_its_background_tasks(monkeypatch, tmp_path):
+    monkeypatch.setattr(ExecuteCommandTool, "_BG_TASKS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_COMPLETION_EVENTS", {})
+    monkeypatch.setattr(ExecuteCommandTool, "_WATCHER_TASKS", {})
+    sandbox = _FakeBackgroundSandbox(tmp_path)
+    tool = ExecuteCommandTool()
+
+    async def scenario():
+        watcher_blocker = asyncio.Event()
+
+        async def watcher():
+            await watcher_blocker.wait()
+
+        watcher_task = asyncio.create_task(watcher())
+        tool._track_watcher("closing-session", watcher_task)
+        ExecuteCommandTool._BG_TASKS.update(
+            {
+                "closing-task": {
+                    "task_id": "closing-task",
+                    "session_id": "closing-session",
+                    "mode": "native",
+                    "sandbox": sandbox,
+                },
+                "other-task": {
+                    "task_id": "other-task",
+                    "session_id": "other-session",
+                    "mode": "native",
+                    "sandbox": sandbox,
+                },
+            }
+        )
+        ExecuteCommandTool._COMPLETION_EVENTS.update(
+            {
+                "closing-session": {"closing-task": {"task_id": "closing-task"}},
+                "other-session": {"other-task": {"task_id": "other-task"}},
+            }
+        )
+
+        await tool.cleanup_session_tasks("closing-session", sandbox=sandbox)
+
+        assert watcher_task.cancelled()
+        assert sandbox.killed_tasks == [("closing-task", True)]
+        assert sandbox.cleaned_tasks == ["closing-task"]
+        assert "closing-task" not in ExecuteCommandTool._BG_TASKS
+        assert "other-task" in ExecuteCommandTool._BG_TASKS
+        assert "closing-session" not in ExecuteCommandTool._COMPLETION_EVENTS
+        assert "other-session" in ExecuteCommandTool._COMPLETION_EVENTS
+        assert "closing-session" not in ExecuteCommandTool._WATCHER_TASKS
+
+    asyncio.run(scenario())
 
 
 def test_execute_shell_command_uses_provider_default_workdir(monkeypatch):

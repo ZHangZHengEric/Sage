@@ -7,6 +7,7 @@ import threading
 import time
 import zipfile
 import hashlib
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,9 +28,11 @@ from common.services.agent_workspace import get_agent_skill_dir
 
 
 _SERVER_SKILLS_CACHE_TTL_SECONDS = 5.0
+_SERVER_SKILLS_CACHE_MAX_ENTRIES = 256
 _server_skills_cache_lock = threading.Lock()
 _server_skills_cache_expires_at: Dict[Tuple[str, str, str], float] = {}
 _server_skills_cache: Dict[Tuple[str, str, str], List[SkillSchema]] = {}
+_server_skills_cache_lru: "OrderedDict[Tuple[str, str, str], None]" = OrderedDict()
 
 
 def _calculate_skill_hash(skill_path: str) -> str:
@@ -378,10 +381,10 @@ def _check_skill_permission(
 
 
 def _invalidate_server_skills_cache() -> None:
-    global _server_skills_cache_expires_at, _server_skills_cache
     with _server_skills_cache_lock:
-        _server_skills_cache_expires_at = {}
-        _server_skills_cache = {}
+        _server_skills_cache_expires_at.clear()
+        _server_skills_cache.clear()
+        _server_skills_cache_lru.clear()
 
 
 def _load_server_skill_info_from_dir(skill_path: str) -> Optional[SkillSchema]:
@@ -516,20 +519,42 @@ def _collect_server_skills(
     role: str = "admin",
     dimension: Optional[str] = None,
 ) -> List[SkillSchema]:
-    global _server_skills_cache_expires_at, _server_skills_cache
-
     now = time.monotonic()
     cache_key = _server_skills_cache_key(current_user_id, role, dimension)
     with _server_skills_cache_lock:
+        expired_keys = [
+            key
+            for key, expires_at in _server_skills_cache_expires_at.items()
+            if now >= expires_at
+        ]
+        for key in expired_keys:
+            _server_skills_cache_expires_at.pop(key, None)
+            _server_skills_cache.pop(key, None)
+            _server_skills_cache_lru.pop(key, None)
         if now < _server_skills_cache_expires_at.get(cache_key, 0.0):
+            _server_skills_cache_lru.move_to_end(cache_key)
             return list(_server_skills_cache.get(cache_key, []))
 
     skills = _collect_server_skills_uncached(current_user_id, role, dimension)
     with _server_skills_cache_lock:
+        now = time.monotonic()
+        expired_keys = [
+            key
+            for key, expires_at in _server_skills_cache_expires_at.items()
+            if now >= expires_at
+        ]
+        for key in expired_keys:
+            _server_skills_cache_expires_at.pop(key, None)
+            _server_skills_cache.pop(key, None)
+            _server_skills_cache_lru.pop(key, None)
         _server_skills_cache[cache_key] = list(skills)
-        _server_skills_cache_expires_at[cache_key] = (
-            time.monotonic() + _SERVER_SKILLS_CACHE_TTL_SECONDS
-        )
+        _server_skills_cache_expires_at[cache_key] = now + _SERVER_SKILLS_CACHE_TTL_SECONDS
+        _server_skills_cache_lru[cache_key] = None
+        _server_skills_cache_lru.move_to_end(cache_key)
+        while len(_server_skills_cache_lru) > _SERVER_SKILLS_CACHE_MAX_ENTRIES:
+            evicted_key, _ = _server_skills_cache_lru.popitem(last=False)
+            _server_skills_cache.pop(evicted_key, None)
+            _server_skills_cache_expires_at.pop(evicted_key, None)
     return skills
 
 

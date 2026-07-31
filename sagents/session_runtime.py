@@ -1,13 +1,15 @@
 import asyncio
+import concurrent.futures
 import inspect
 import json
 import os
+import threading
 import time
 import traceback
 import uuid
 import contextvars
 from contextlib import contextmanager
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union, Type
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union, Type
 
 from sagents.agent import (
     AgentBase,
@@ -63,6 +65,82 @@ _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
 _runtime_owner_id_var: contextvars.ContextVar[Optional[str]] = (
     contextvars.ContextVar("runtime_owner_id", default=None)
 )
+
+_SESSION_SHELL_CLEANUP_TIMEOUT_SECONDS = 6.0
+_SESSION_LOG_FLUSH_TIMEOUT_SECONDS = 6.0
+_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS = 13.0
+
+
+def _consume_cleanup_task_result(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    task.exception()
+
+
+async def _cleanup_session_shells_with_timeout(
+    session_id: str, session_context: Optional[SessionContext]
+) -> None:
+    """Detach session shell state and bound slow sandbox cleanup."""
+    from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
+
+    cleanup_task = asyncio.create_task(
+        ExecuteCommandTool().cleanup_session_tasks(
+            session_id,
+            sandbox=getattr(session_context, "sandbox", None),
+        ),
+        name=f"cleanup-session-shells-{session_id}",
+    )
+    try:
+        _, pending = await asyncio.wait(
+            {cleanup_task}, timeout=_SESSION_SHELL_CLEANUP_TIMEOUT_SECONDS
+        )
+    except asyncio.CancelledError:
+        cleanup_task.cancel()
+        cleanup_task.add_done_callback(_consume_cleanup_task_result)
+        raise
+    if pending:
+        cleanup_task.cancel()
+        cleanup_task.add_done_callback(_consume_cleanup_task_result)
+        logger.warning(
+            f"Session shell cleanup timed out: session_id={session_id} "
+            f"timeout={_SESSION_SHELL_CLEANUP_TIMEOUT_SECONDS:.3f}s"
+        )
+        return
+    await cleanup_task
+
+
+async def _flush_session_logs_with_timeout(
+    session_id: str, session_context: Optional[SessionContext]
+) -> None:
+    """Bound even third-party/fake SessionContext flush implementations."""
+    if session_context is None:
+        return
+    flush_task = asyncio.create_task(
+        session_context.flush_pending_log_writes(),
+        name=f"flush-session-logs-{session_id}",
+    )
+    try:
+        _, pending = await asyncio.wait(
+            {flush_task}, timeout=_SESSION_LOG_FLUSH_TIMEOUT_SECONDS
+        )
+    except asyncio.CancelledError:
+        flush_task.cancel()
+        flush_task.add_done_callback(_consume_cleanup_task_result)
+        raise
+    if pending:
+        flush_task.cancel()
+        flush_task.add_done_callback(_consume_cleanup_task_result)
+        logger.warning(
+            f"Session diagnostic log flush timed out: session_id={session_id} "
+            f"timeout={_SESSION_LOG_FLUSH_TIMEOUT_SECONDS:.3f}s"
+        )
+        return
+    completed = await flush_task
+    if completed is False:
+        logger.warning(
+            f"Session diagnostic logs were only partially flushed: "
+            f"session_id={session_id}"
+        )
 
 
 def _load_json_file_sync(file_path: str) -> Optional[Any]:
@@ -1321,6 +1399,38 @@ class Session:
         统一的会话清理逻辑
         """
         try:
+            from sagents.tool.impl.memory_tool import SessionHistoryRetriever
+
+            SessionHistoryRetriever.clear_session_cache(
+                session_id, self.session_context
+            )
+        except Exception as e:
+            logger.error(
+                f"SAgent: 清理会话 {session_id} 历史检索缓存时出错: {e}",
+                session_id=session_id,
+            )
+
+        try:
+            await _cleanup_session_shells_with_timeout(
+                session_id, self.session_context
+            )
+        except Exception as e:
+            logger.error(
+                f"SAgent: 清理会话 {session_id} 后台 shell 时出错: {e}",
+                session_id=session_id,
+            )
+
+        try:
+            await _flush_session_logs_with_timeout(
+                session_id, self.session_context
+            )
+        except Exception as e:
+            logger.error(
+                f"SAgent: flush session {session_id} diagnostic logs failed: {e}",
+                session_id=session_id,
+            )
+
+        try:
             lock = get_session_run_lock(session_id)
             if lock and lock.locked():
                 await safe_release(lock, session_id, "SAgent 会话清理")
@@ -1345,6 +1455,12 @@ class SessionManager:
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         self._sessions: Dict[object, Session] = {}
+        self._session_cleanup_tasks: Set[asyncio.Task] = set()
+        self._session_close_lock = threading.RLock()
+        self._session_close_futures: Dict[
+            object, concurrent.futures.Future[None]
+        ] = {}
+        self._shutdown = False
 
         from sagents.session_registry import SessionRegistry
 
@@ -1354,6 +1470,22 @@ class SessionManager:
         self._registry = SessionRegistry(db_path, root_dir=self.session_root_space)
         if need_migrate:
             self._migrate_from_filesystem()
+
+    def _track_cleanup_task(self, task: asyncio.Task) -> None:
+        self._session_cleanup_tasks.add(task)
+
+        def cleanup_done(done_task: asyncio.Task) -> None:
+            self._session_cleanup_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                exc = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None:
+                logger.error(f"Session cleanup task failed: {exc}")
+
+        task.add_done_callback(cleanup_done)
 
     def _migrate_from_filesystem(self):
         """One-time migration: scan existing directories and populate the SQLite registry."""
@@ -1467,21 +1599,29 @@ class SessionManager:
         Returns:
             Session 实例
         """
-        cache_key = self._runtime_cache_key(session_id, runtime_owner_id)
-        if cache_key not in self._sessions:
-            self._sessions[cache_key] = Session(
-                session_id=session_id,
-                enable_obs=self.enable_obs,
-                sandbox_type=sandbox_type,
-            )
-        else:
-            self._sessions[cache_key].sandbox_type = sandbox_type
+        with self._session_close_lock:
+            if self._shutdown:
+                raise RuntimeError("SessionManager is shut down")
+            cache_key = self._runtime_cache_key(session_id, runtime_owner_id)
+            if cache_key in self._session_close_futures:
+                raise RuntimeError(
+                    f"Session {session_id!r} is still closing; "
+                    "await aclose_session() before reusing its ID"
+                )
+            if cache_key not in self._sessions:
+                self._sessions[cache_key] = Session(
+                    session_id=session_id,
+                    enable_obs=self.enable_obs,
+                    sandbox_type=sandbox_type,
+                )
+            else:
+                self._sessions[cache_key].sandbox_type = sandbox_type
 
-        return self._sessions[cache_key]
+            return self._sessions[cache_key]
 
     def get(self, session_id: str) -> Optional[Session]:
         """
-        获取 Session。优先返回内存中的活对象；如果不存在，则尝试从磁盘恢复。
+        获取 Session。活对象直接返回；历史对象只临时从磁盘恢复。
 
         Args:
             session_id: 会话 ID
@@ -1489,7 +1629,6 @@ class SessionManager:
         Returns:
             Session 实例，找不到则返回 None
         """
-        cache_key = self._runtime_cache_key(session_id)
         session = self.get_live_session(session_id)
         if session:
             return session
@@ -1498,11 +1637,16 @@ class SessionManager:
         if not workspace:
             return None
 
-        session = self.get_or_create(session_id)
+        # Historical reads must not repopulate the process-wide live-session
+        # registry.  Callers may inspect this transient object for the duration
+        # of one request; dropping their reference releases its full context.
+        session = Session(
+            session_id=session_id,
+            enable_obs=self.enable_obs,
+        )
         session.set_workspace(workspace)
         loaded = session.load_persisted_state(workspace)
         if not loaded and not session.has_context() and not session.get_messages():
-            self._sessions.pop(cache_key, None)
             return None
         return session
 
@@ -1513,19 +1657,20 @@ class SessionManager:
         runtime_owner_id: Optional[str] = None,
     ) -> Optional[Session]:
         """仅获取内存中的活 session，不做磁盘恢复。"""
-        session = self._sessions.get(
-            self._runtime_cache_key(session_id, runtime_owner_id)
-        )
-        if session is not None:
-            return session
-        if runtime_owner_id is not None or _runtime_owner_id_var.get() is not None:
-            return None
-        matches = [
-            candidate
-            for candidate in self._sessions.values()
-            if candidate.session_id == session_id
-        ]
-        return matches[0] if len(matches) == 1 else None
+        with self._session_close_lock:
+            session = self._sessions.get(
+                self._runtime_cache_key(session_id, runtime_owner_id)
+            )
+            if session is not None:
+                return session
+            if runtime_owner_id is not None or _runtime_owner_id_var.get() is not None:
+                return None
+            matches = [
+                candidate
+                for candidate in self._sessions.values()
+                if candidate.session_id == session_id
+            ]
+            return matches[0] if len(matches) == 1 else None
 
     def _get_live_session(self, session_id: str) -> Optional[Session]:
         """兼容旧内部调用，优先使用 get_live_session。"""
@@ -1545,23 +1690,240 @@ class SessionManager:
         if session:
             session.clear_context()
 
+    async def _finish_session_close(
+        self, session_id: str, session: Optional[Session]
+    ) -> None:
+        """Release one detached session without crossing event-loop ownership."""
+        session_context = getattr(session, "session_context", None)
+
+        try:
+            await _cleanup_session_shells_with_timeout(session_id, session_context)
+        except Exception as e:
+            logger.warning(f"清理session {session_id} 后台 shell 时出错: {e}")
+
+        try:
+            await _flush_session_logs_with_timeout(session_id, session_context)
+        except Exception as e:
+            logger.warning(f"flush session {session_id} diagnostic logs failed: {e}")
+
+        try:
+            lock = get_session_run_lock(session_id)
+            if lock and lock.locked():
+                await safe_release(lock, session_id, "SessionManager close")
+            delete_session_run_lock(session_id)
+        except Exception as e:
+            logger.warning(f"清理session {session_id} 运行锁时出错: {e}")
+
+        try:
+            logger.cleanup_session_logger(session_id)
+        except Exception as e:
+            logger.warning(f"清理session {session_id} 日志资源时出错: {e}")
+
+        try:
+            from sagents.tool.impl.memory_tool import SessionHistoryRetriever
+
+            SessionHistoryRetriever.clear_session_cache(
+                session_id,
+                session_context,
+            )
+        except Exception as e:
+            logger.warning(f"清理session {session_id} 历史检索缓存时出错: {e}")
+
+        if session:
+            session.close()
+
+    def _begin_session_close(
+        self,
+        session_id: str,
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ) -> tuple[
+        Optional[Session], concurrent.futures.Future[None], bool
+    ]:
+        """Detach a session and reserve its ID until cleanup has completed."""
+        cache_key = self._runtime_cache_key(session_id, runtime_owner_id)
+        with self._session_close_lock:
+            existing = self._session_close_futures.get(cache_key)
+            if existing is not None:
+                return None, existing, False
+            completion: concurrent.futures.Future[None] = (
+                concurrent.futures.Future()
+            )
+            self._session_close_futures[cache_key] = completion
+            return self._sessions.pop(cache_key, None), completion, True
+
+    async def _run_session_close(
+        self,
+        session_id: str,
+        session: Optional[Session],
+        completion: concurrent.futures.Future[None],
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ) -> None:
+        cache_key = self._runtime_cache_key(session_id, runtime_owner_id)
+        try:
+            await self._finish_session_close(session_id, session)
+        except BaseException as exc:
+            if not completion.done():
+                completion.set_exception(exc)
+            raise
+        else:
+            if not completion.done():
+                completion.set_result(None)
+        finally:
+            with self._session_close_lock:
+                if self._session_close_futures.get(cache_key) is completion:
+                    self._session_close_futures.pop(cache_key, None)
+
+    async def _wait_for_session_close(
+        self, completion: concurrent.futures.Future[None]
+    ) -> None:
+        await asyncio.shield(asyncio.wrap_future(completion))
+
+    async def aclose_session(
+        self,
+        session_id: str,
+        *,
+        runtime_owner_id: Optional[str] = None,
+    ) -> None:
+        """Asynchronously close a session and wait for all owned resources."""
+        session, completion, owns_close = self._begin_session_close(
+            session_id, runtime_owner_id=runtime_owner_id
+        )
+        if not owns_close:
+            await self._wait_for_session_close(completion)
+            return
+        cleanup_task = asyncio.create_task(
+            self._run_session_close(
+                session_id,
+                session,
+                completion,
+                runtime_owner_id=runtime_owner_id,
+            ),
+            name=f"close-session-{session_id}",
+        )
+        self._track_cleanup_task(cleanup_task)
+        await asyncio.shield(cleanup_task)
+
     def close_session(
         self,
         session_id: str,
         *,
         runtime_owner_id: Optional[str] = None,
     ):
-        """关闭 Session"""
-        session = self._sessions.pop(
-            self._runtime_cache_key(session_id, runtime_owner_id),
-            None,
+        """Compatibility wrapper that schedules cleanup on the owning loop."""
+        session, completion, owns_close = self._begin_session_close(
+            session_id, runtime_owner_id=runtime_owner_id
         )
-        if session:
+        if not owns_close:
             try:
-                logger.cleanup_session_logger(session_id)
-            except Exception as e:
-                logger.warning(f"清理session {session_id} 日志资源时出错: {e}")
-            session.close()
+                asyncio.get_running_loop()
+            except RuntimeError:
+                try:
+                    completion.result(
+                        timeout=_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS
+                    )
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        f"Synchronous session close wait timed out; cleanup "
+                        f"continues on owner loop: session_id={session_id} "
+                        f"timeout={_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS:.3f}s"
+                    )
+            return
+        session_context = getattr(session, "session_context", None)
+        owner_loop = getattr(session_context, "_owner_loop", None)
+
+        if owner_loop is None:
+            try:
+                from sagents.tool.impl.execute_command_tool import ExecuteCommandTool
+
+                owner_loop = ExecuteCommandTool.get_session_loop(session_id)
+            except Exception:
+                owner_loop = None
+
+        cleanup_coro = self._run_session_close(
+            session_id,
+            session,
+            completion,
+            runtime_owner_id=runtime_owner_id,
+        )
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if owner_loop is not None and owner_loop.is_running():
+            if running_loop is owner_loop:
+                cleanup_task = owner_loop.create_task(
+                    cleanup_coro,
+                    name=f"close-session-{session_id}",
+                )
+                self._track_cleanup_task(cleanup_task)
+            else:
+                cleanup_future = asyncio.run_coroutine_threadsafe(
+                    cleanup_coro, owner_loop
+                )
+                try:
+                    cleanup_future.result(
+                        timeout=_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS
+                    )
+                except concurrent.futures.TimeoutError:
+                    # Cleanup remains scheduled on the owner loop. Returning is
+                    # essential for callers such as signal/worker threads.
+                    logger.warning(
+                        f"Synchronous session close timed out; cleanup continues "
+                        f"on owner loop: session_id={session_id} "
+                        f"timeout={_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS:.3f}s"
+                    )
+            return
+
+        if running_loop is not None:
+            cleanup_task = running_loop.create_task(
+                cleanup_coro,
+                name=f"close-session-{session_id}",
+            )
+            self._track_cleanup_task(cleanup_task)
+            return
+
+        asyncio.run(cleanup_coro)
+
+    async def shutdown(self) -> None:
+        """Close live sessions and wait for scheduled cleanup before shutdown."""
+        with self._session_close_lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+            live_cache_keys = list(self._sessions)
+        try:
+            for cache_key in live_cache_keys:
+                if (
+                    isinstance(cache_key, tuple)
+                    and len(cache_key) == 3
+                    and cache_key[0] == "runtime-owner"
+                ):
+                    _, owner_id, session_id = cache_key
+                    await self.aclose_session(
+                        str(session_id), runtime_owner_id=str(owner_id)
+                    )
+                else:
+                    await self.aclose_session(str(cache_key))
+            with self._session_close_lock:
+                closing = list(self._session_close_futures.values())
+            if closing:
+                await asyncio.gather(
+                    *(self._wait_for_session_close(item) for item in closing),
+                    return_exceptions=True,
+                )
+            current_loop = asyncio.get_running_loop()
+            pending = [
+                task
+                for task in list(self._session_cleanup_tasks)
+                if not task.done() and task.get_loop() is current_loop
+            ]
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        finally:
+            self._registry.close()
 
     def interrupt_session(
         self, session_id: str, message: str = "User requested interruption"
@@ -1579,9 +1941,24 @@ class SessionManager:
 
     def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取 Session 状态"""
-        session = self.get(session_id)
+        session = self.get_live_session(session_id)
         if session:
             return {"status": session.get_status().value}
+        workspace = self.get_session_workspace(session_id)
+        if not workspace:
+            return None
+        try:
+            snapshot = _load_json_file_sync(
+                os.path.join(workspace, "session_context.json")
+            )
+            if isinstance(snapshot, dict) and snapshot.get("status"):
+                return {"status": str(snapshot["status"])}
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.warning(
+                f"SessionManager: 读取 session {session_id} 状态失败: {exc}"
+            )
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:
@@ -1617,8 +1994,8 @@ class SessionManager:
         Args:
             session_id: 会话 ID（全局唯一）
         """
-        # 1. 尝试从内存获取（只有根会话会保留在内存中）
-        session = self.get(session_id)
+        # 1. Only a truly live session may serve messages from memory.
+        session = self.get_live_session(session_id)
         if session:
             return session.get_messages()
 
@@ -1663,13 +2040,30 @@ class SessionManager:
         return messages
 
     def get_tasks_status(self, session_id: str) -> Optional[Dict[str, Any]]:
-        session = self.get(session_id)
-        if not session:
+        session = self.get_live_session(session_id)
+        if session:
+            return session.get_tasks_status()
+        workspace = self.get_session_workspace(session_id)
+        if not workspace:
             return None
-        return session.get_tasks_status()
+        try:
+            snapshot = _load_json_file_sync(
+                os.path.join(workspace, "session_context.json")
+            )
+            if isinstance(snapshot, dict):
+                return snapshot.get("tasks_status") or {"tasks": []}
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.warning(
+                f"SessionManager: 读取 session {session_id} 任务状态失败: {exc}"
+            )
+        return None
 
     def save_session(self, session_id: str) -> bool:
-        session = self.get(session_id)
+        # Completed sessions are already persisted before close.  Never restore
+        # one merely to save it again, as that used to repopulate _sessions.
+        session = self.get_live_session(session_id)
         if not session or not session.has_context():
             return False
         try:
@@ -1769,6 +2163,16 @@ def initialize_global_session_manager(session_root_space: str, enable_obs: bool 
     global _global_session_manager
     _global_session_manager = SessionManager(session_root_space, enable_obs)
     return _global_session_manager
+
+
+async def shutdown_global_session_manager() -> None:
+    """Drain all session-owned cleanup and release the global manager."""
+    global _global_session_manager
+    manager = _global_session_manager
+    if manager is None:
+        return
+    await manager.shutdown()
+    _global_session_manager = None
 
 
 def get_global_session_manager(

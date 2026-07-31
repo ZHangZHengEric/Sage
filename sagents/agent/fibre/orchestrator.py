@@ -29,6 +29,10 @@ from sagents.tool import ToolManager
 from sagents.agent.fibre.tools import FibreTools
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.backend_client import FibreBackendClient
+from sagents.agent.fibre.delegate_stream import (
+    consume_backend_child_stream,
+    merge_history_with_fallback,
+)
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.utils.subtask_summary import summarize_subtask_history
 from sagents.utils.logger import logger
@@ -176,6 +180,11 @@ class FibreOrchestrator:
             )
 
         data = dict(payload)
+        content = data.get("content")
+        if isinstance(content, dict):
+            # OpenAI-compatible providers reject bare object content. Keep the
+            # original child id payload as a JSON string on the MessageChunk.
+            data["content"] = json.dumps(content, ensure_ascii=False, default=str)
         if data.get("role"):
             if data.get("content") is None and not data.get("tool_calls"):
                 data["content"] = ""
@@ -188,7 +197,7 @@ class FibreOrchestrator:
         if content is None:
             content = ""
         elif isinstance(content, dict):
-            content = json.dumps(content, ensure_ascii=False)
+            content = json.dumps(content, ensure_ascii=False, default=str)
         elif not isinstance(content, (str, list)):
             content = str(content)
 
@@ -549,9 +558,7 @@ class FibreOrchestrator:
                         )
                         if not producer_task.done():
                             producer_task.cancel()
-                        self._finish_queued_stream_item(
-                            queued_item, cancelled=True
-                        )
+                        self._finish_queued_stream_item(queued_item, cancelled=True)
                         break
                     async for chunks in self._yield_queued_stream_item(queued_item):
                         yield chunks
@@ -1401,10 +1408,30 @@ class FibreOrchestrator:
                     )
 
         # Collect response and summarize the execution trace.
+        # Completion is driven by stream_end / child terminal / EOF — not only HTTP EOF.
         all_content_chunks = []
 
         try:
-            async for chunks in self.backend_client.stream_chat(
+            interrupted = False
+
+            async def _on_chunks(chunks):
+                nonlocal interrupted
+                if parent_session and parent_session.should_interrupt():
+                    interrupted = True
+                    logger.warning(
+                        f"[DelegateTask Backend] session {caller_session_id} interrupted, aborting child session {session_id}"
+                    )
+                    await self.backend_client.interrupt_session(
+                        session_id, user_id=user_id
+                    )
+                    return
+                await self._publish_child_stream_chunks(chunks)
+                filtered_chunks = self._summary_content_chunks(chunks, session_id)
+                if filtered_chunks:
+                    all_content_chunks.extend(filtered_chunks)
+
+            stream_result = await consume_backend_child_stream(
+                backend_client=self.backend_client,
                 agent_id=agent_id,
                 messages=messages,
                 session_id=session_id,
@@ -1416,30 +1443,44 @@ class FibreOrchestrator:
                 interrupt_event=parent_session.interrupt_event
                 if parent_session
                 else None,
-            ):
-                if parent_session and parent_session.should_interrupt():
-                    logger.warning(
-                        f"[DelegateTask Backend] session {caller_session_id} interrupted, aborting child session {session_id}"
-                    )
-                    await self.backend_client.interrupt_session(
-                        session_id, user_id=user_id
-                    )
-                    break
-                await self._publish_child_stream_chunks(chunks)
-                filtered_chunks = self._summary_content_chunks(chunks, session_id)
-                if filtered_chunks:
-                    all_content_chunks.extend(filtered_chunks)
+                parent_session_id=caller_session_id,
+                on_chunks=_on_chunks,
+                should_interrupt=(
+                    (lambda: parent_session.should_interrupt())
+                    if parent_session
+                    else None
+                ),
+            )
 
-            if parent_session and parent_session.should_interrupt():
+            if (
+                interrupted
+                or stream_result.reason == "interrupted"
+                or (parent_session and parent_session.should_interrupt())
+            ):
                 return f"SubSessionID: {session_id}\nInterrupted by parent session"
 
             content_texts = [
                 chunk.content for chunk in all_content_chunks if chunk.content
             ]
             history_str = "\n".join(content_texts)
+            if (
+                stream_result.reason in {"child_terminal", "cancelled"}
+                or not (history_str or "").strip()
+            ):
+                history_str = merge_history_with_fallback(
+                    history_str,
+                    session_id,
+                    parent_session_id=caller_session_id,
+                    round_id=stream_result.round_id,
+                )
+                content_texts = [history_str] if history_str.strip() else []
 
             logger.info(
                 f"[DelegateTask Backend] Session: {session_id}, Agent: {agent_id}"
+            )
+            logger.info(
+                f"[DelegateTask Backend] finish_reason={stream_result.reason} "
+                f"child_status={stream_result.child_status}"
             )
             logger.info(
                 f"[DelegateTask Backend] Total chunks collected: {len(all_content_chunks)}"

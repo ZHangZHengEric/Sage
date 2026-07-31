@@ -21,7 +21,7 @@ import re
 import shlex
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..tool_base import tool
 from ..tool_progress import emit_tool_event, emit_tool_progress, get_progress_queue
@@ -144,10 +144,151 @@ class ExecuteCommandTool:
     # 两条路径互斥：被 await_shell 消费过的不会再走 LLM flush。
     _COMPLETION_EVENTS: Dict[object, Dict[str, Dict[str, Any]]] = {}
 
+    # watcher tasks must be cancelled together with their owning session.  Keeping
+    # them here also gives them a strong reference until their done callback runs.
+    _WATCHER_TASKS: Dict[str, Set[asyncio.Task]] = {}
+
     _APPROVAL_TTL_S = 30 * 60
 
     def __init__(self):
         self.security_manager = SecurityManager()
+
+    @classmethod
+    def _track_watcher(cls, session_id: str, watcher: asyncio.Task) -> None:
+        bucket = cls._WATCHER_TASKS.setdefault(session_id, set())
+        bucket.add(watcher)
+
+        def discard_finished_task(done_task: asyncio.Task) -> None:
+            current_bucket = cls._WATCHER_TASKS.get(session_id)
+            if current_bucket is None:
+                return
+            current_bucket.discard(done_task)
+            if not current_bucket:
+                cls._WATCHER_TASKS.pop(session_id, None)
+
+        watcher.add_done_callback(discard_finished_task)
+
+    @classmethod
+    def has_session_tasks(cls, session_id: str) -> bool:
+        if session_id in cls._WATCHER_TASKS:
+            return True
+        if session_id in cls._COMPLETION_EVENTS:
+            return True
+        return any(
+            info.get("session_id") == session_id
+            for info in cls._BG_TASKS.values()
+        )
+
+    @classmethod
+    def get_session_loop(
+        cls, session_id: str
+    ) -> Optional[asyncio.AbstractEventLoop]:
+        """Return the event loop that owns this session's watcher tasks."""
+        for watcher in cls._WATCHER_TASKS.get(session_id, set()):
+            try:
+                return watcher.get_loop()
+            except Exception:
+                continue
+        return None
+
+    @classmethod
+    def detach_session_tasks(
+        cls, session_id: str
+    ) -> Tuple[List[asyncio.Task], List[Dict[str, Any]]]:
+        """Atomically detach all process state owned by one closing session."""
+        watchers = list(cls._WATCHER_TASKS.pop(session_id, set()))
+        for watcher in watchers:
+            watcher.cancel()
+
+        cls._COMPLETION_EVENTS.pop(session_id, None)
+        task_infos: List[Dict[str, Any]] = []
+        for task_id, task_info in list(cls._BG_TASKS.items()):
+            if task_info.get("session_id") != session_id:
+                continue
+            detached = cls._BG_TASKS.pop(task_id, None)
+            if detached is not None:
+                task_infos.append(detached)
+        return watchers, task_infos
+
+    async def cleanup_detached_session_tasks(
+        self,
+        session_id: str,
+        watchers: List[asyncio.Task],
+        task_infos: List[Dict[str, Any]],
+        sandbox: Any = None,
+    ) -> None:
+        """Stop detached watcher tasks and sandbox processes for one session."""
+        current_task = asyncio.current_task()
+        pending_watchers = [
+            watcher for watcher in watchers if watcher is not current_task
+        ]
+
+        for task_info in task_infos:
+            task_id = task_info.get("task_id", "")
+            task_sandbox = sandbox or task_info.get("sandbox")
+            if task_sandbox is None:
+                logger.warning(
+                    "Session shell cleanup could not stop task without a sandbox: "
+                    f"session_id={session_id} task_id={task_id}"
+                )
+                continue
+
+            try:
+                if task_info.get("mode") == "native":
+                    try:
+                        await task_sandbox.kill_background(task_id, force=True)
+                    except Exception as exc:
+                        logger.warning(
+                            "Session shell force-kill failed: "
+                            f"session_id={session_id} task_id={task_id} "
+                            f"error={exc}"
+                        )
+                    try:
+                        await task_sandbox.cleanup_background(task_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Session shell sandbox cleanup failed: "
+                            f"session_id={session_id} task_id={task_id} "
+                            f"error={exc}"
+                        )
+                    continue
+
+                pid = int(task_info.get("pid"))
+                await self._shell(
+                    task_sandbox,
+                    f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null",
+                    timeout=5,
+                )
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Session shell cleanup found a task without a valid pid: "
+                    f"session_id={session_id} task_id={task_id}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Session shell cleanup failed: "
+                    f"session_id={session_id} task_id={task_id} error={exc}"
+                )
+
+        if pending_watchers:
+            try:
+                await asyncio.wait(pending_watchers, timeout=5)
+            except Exception as exc:
+                logger.debug(
+                    "Session shell cleanup could not await every watcher "
+                    f"for session_id={session_id}: {exc}"
+                )
+
+        # A cancelled watcher cannot repopulate this bucket after gather, but a
+        # concurrent consumer may have raced with cleanup.  Make the terminal
+        # ownership rule explicit once more.
+        self.__class__._COMPLETION_EVENTS.pop(session_id, None)
+
+    async def cleanup_session_tasks(self, session_id: str, sandbox: Any = None) -> None:
+        watchers, task_infos = self.detach_session_tasks(session_id)
+        await self.cleanup_detached_session_tasks(
+            session_id, watchers, task_infos, sandbox=sandbox
+        )
 
     @classmethod
     def pop_completion_events(cls, session_id: str) -> List[Dict[str, Any]]:
@@ -594,6 +735,8 @@ class ExecuteCommandTool:
                 "command": command,
                 "started_at": time.time(),
                 "mode": "native",
+                "session_id": session_id,
+                "sandbox": sandbox,
             }
             ExecuteCommandTool._BG_TASKS[task_id] = task_info
             return task_info
@@ -646,6 +789,8 @@ class ExecuteCommandTool:
             "command": command,
             "started_at": time.time(),
             "mode": "shell",
+            "session_id": session_id,
+            "sandbox": sandbox,
         }
         ExecuteCommandTool._BG_TASKS[task_id] = task_info
         return task_info
@@ -1032,7 +1177,10 @@ class ExecuteCommandTool:
 
         # 启动后台 watcher：命令结束时写入 completion 事件，供下一次 LLM 请求 flush 注入
         try:
-            asyncio.create_task(self._watch_completion(sandbox, task_info, session_id))
+            watcher = asyncio.create_task(
+                self._watch_completion(sandbox, task_info, session_id)
+            )
+            self._track_watcher(session_id, watcher)
         except RuntimeError:
             logger.warning("无法启动 completion watcher：当前无运行中的 event loop")
 
