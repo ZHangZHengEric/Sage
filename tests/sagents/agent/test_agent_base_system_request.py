@@ -134,6 +134,9 @@ async def test_build_system_segments_always_includes_fresh_response_language_con
     assert "<response_language>" in first["stable"]
     assert "当前回复语言为 zh-CN" in first["stable"]
     assert "工具结果" in first["stable"]
+    assert "本指令只决定语言" in first["stable"]
+    assert "中间执行记录" in first["stable"]
+    assert "推理摘要和最终答复" not in first["stable"]
 
     # The system contract is rebuilt from current trusted context even if the
     # user-side runtime context from an earlier turn was frozen.
@@ -141,6 +144,14 @@ async def test_build_system_segments_always_includes_fresh_response_language_con
     second = await agent._build_system_segments(session_id="sess", include_sections=[])
     assert "O idioma de resposta é pt-BR" in second["stable"]
     assert "当前回复语言为 zh-CN" not in second["stable"]
+    assert "regula apenas o idioma" in second["stable"]
+    assert "resumos de raciocínio" not in second["stable"]
+
+    session_context.system_context["response_language"] = "en-US"
+    third = await agent._build_system_segments(session_id="sess", include_sections=[])
+    assert "The response language is en-US" in third["stable"]
+    assert "controls language only" in third["stable"]
+    assert "reasoning summaries" not in third["stable"]
 
 
 @pytest.mark.asyncio
