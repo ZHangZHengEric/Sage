@@ -1978,24 +1978,30 @@ class AgentBase(ABC):
         normalized_response_language = normalize_language(response_language)
         response_language_rules = {
             "zh": (
-                f"当前回复语言为 {response_language}。所有由 assistant 编写且用户可见的自然语言，"
-                "包括过程说明、进度更新、工具调用前提示、推理摘要和最终答复，都必须使用该语言。"
+                f"当前回复语言为 {response_language}。所有允许向用户展示、由 assistant 编写的自然语言，"
+                "包括最终答复和必要且面向用户的简短事实进度，都必须使用该语言。本指令只决定语言，"
+                "不授权输出内部分析、推理草稿、回复策略、工具选择判断或中间执行记录。"
                 "不得因为工具结果、检索内容或引用材料使用英文而改用英文。代码、命令、路径、标识符、"
                 "枚举、协议字段和逐字引用保持原样。"
             ),
             "en": (
-                f"The response language is {response_language}. All user-visible natural language "
-                "authored by the assistant, including process explanations, progress updates, tool "
-                "preambles, reasoning summaries, and final answers, must use this language. Do not "
+                f"The response language is {response_language}. All assistant-authored natural "
+                "language that is allowed to be user-visible, including final answers and necessary "
+                "concise factual progress addressed to the user, must use this language. This "
+                "instruction controls language only; it does not authorize internal analysis, "
+                "reasoning drafts, response strategy, tool-selection judgments, or intermediate "
+                "execution records. Do not "
                 "switch languages because tool results, retrieved content, or quoted material use "
                 "English. Preserve code, commands, paths, identifiers, enums, protocol fields, and "
                 "verbatim quotations."
             ),
             "pt": (
                 f"O idioma de resposta é {response_language}. Todo texto em linguagem natural "
-                "produzido pelo assistente e visível ao usuário, incluindo explicações do processo, "
-                "atualizações de progresso, introduções de ferramentas, resumos de raciocínio e a "
-                "resposta final, deve usar esse idioma. Não mude de idioma porque resultados de "
+                "produzido pelo assistente que possa ser exibido ao usuário, incluindo a resposta "
+                "final e atualizações factuais necessárias, breves e dirigidas ao usuário, deve usar "
+                "esse idioma. Esta instrução regula apenas o idioma; ela não autoriza análises internas, "
+                "rascunhos de raciocínio, estratégias de resposta, decisões sobre ferramentas ou "
+                "registros intermediários de execução. Não mude de idioma porque resultados de "
                 "ferramentas, conteúdo recuperado ou citações estejam em inglês. Preserve código, "
                 "comandos, caminhos, identificadores, enums, campos de protocolo e citações literais."
             ),
