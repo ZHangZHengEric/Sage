@@ -107,18 +107,35 @@ def convert_spec_to_openai_format(
         if "description_i18n" in node:
             node.pop("description_i18n", None)
 
-        # 2. 递归处理 properties (object)
-        if (
-            node.get("type") == "object"
-            and "properties" in node
-            and isinstance(node["properties"], dict)
-        ):
+        # 2. 递归处理 properties。部分上游 schema 会省略显式 type，
+        # 因此不能依赖 type == object 才继续遍历。
+        if isinstance(node.get("properties"), dict):
             for prop in node["properties"].values():
                 _recursive_localize(prop)
 
         # 3. 递归处理 items (array)
-        if node.get("type") == "array" and "items" in node:
+        if isinstance(node.get("items"), dict):
             _recursive_localize(node["items"])
+
+        # 4. 递归处理 JSON Schema 组合结构，确保不会把内部
+        # description_i18n 元数据发送给模型供应商。
+        for keyword in ("anyOf", "oneOf", "allOf", "prefixItems"):
+            alternatives = node.get(keyword)
+            if isinstance(alternatives, list):
+                for alternative in alternatives:
+                    _recursive_localize(alternative)
+
+        for keyword in (
+            "additionalProperties",
+            "contains",
+            "not",
+            "if",
+            "then",
+            "else",
+        ):
+            child = node.get(keyword)
+            if isinstance(child, dict):
+                _recursive_localize(child)
 
     # 工具描述本地化
     localized_desc = _resolve_text(
@@ -169,35 +186,22 @@ def convert_spec_to_openai_format(
         import json as _json
 
         localized_returns = _json.loads(_json.dumps(rd))
-        # 对于 object 类型，移除根级 description/description_i18n
+        rdi_map = getattr(tool_spec, "return_properties_i18n", None)
+        properties = localized_returns.get("properties")
+        if isinstance(properties, dict) and isinstance(rdi_map, dict):
+            for property_name, property_schema in properties.items():
+                if not isinstance(property_schema, dict):
+                    continue
+                mapped = rdi_map.get(property_name)
+                if isinstance(mapped, dict) and not isinstance(
+                    property_schema.get("description_i18n"), dict
+                ):
+                    property_schema["description_i18n"] = mapped
+
+        _recursive_localize(localized_returns)
+        # 根级返回说明不属于具体字段，保持既有导出合同。
         if localized_returns.get("type") == "object":
             localized_returns.pop("description", None)
-            localized_returns.pop("description_i18n", None)
-
-        rdi_map = getattr(tool_spec, "return_properties_i18n", None)
-
-        def _apply_prop_i18n(
-            props: Dict[str, Any], rdi: Optional[Dict[str, Dict[str, str]]] = None
-        ):
-            if not isinstance(props, dict):
-                return
-            for _pname, _pinfo in props.items():
-                di18n = _pinfo.get("description_i18n")
-                candidate: Optional[Dict[str, str]] = None
-                if isinstance(di18n, dict):
-                    candidate = di18n
-                elif isinstance(rdi, dict):
-                    mapped = rdi.get(_pname)
-                    if isinstance(mapped, dict):
-                        candidate = mapped
-                base_desc = _pinfo.get("description", "")
-                _pinfo["description"] = _resolve_text(base_desc, candidate)
-                # 移除导出中的 description_i18n
-                _pinfo.pop("description_i18n", None)
-
-        # 应用到 returns.properties
-        if isinstance(localized_returns.get("properties"), dict):
-            _apply_prop_i18n(localized_returns["properties"], rdi_map)
 
     # These top-level context fields are auto-injected and must not be exposed to the LLM.
     _AUTO_INJECT_PARAMS = {"session_id", "user_id"}

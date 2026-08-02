@@ -6,6 +6,7 @@ import types
 import pytest
 
 from sagents.tool.impl.web_fetcher_tool import WebFetcherTool, _HttpStatusError
+from sagents.utils.i18n import tool_language
 
 
 class CssResult(list):
@@ -168,6 +169,53 @@ def test_fetch_html_page_rejects_non_success_http_status(monkeypatch):
         asyncio.run(WebFetcherTool()._fetch_html_page("https://example.com/missing", 7))
 
 
+def test_fetch_failures_localize_sage_wrapper_and_preserve_raw_error(
+    monkeypatch, tmp_path
+):
+    async def fail_fetch(_url, _timeout):
+        raise RuntimeError("RAW THIRD PARTY ERROR")
+
+    tool = WebFetcherTool()
+    monkeypatch.setattr(tool, "_fetch_html_page", fail_fetch)
+
+    with tool_language("pt-BR"):
+        plain = asyncio.run(tool._fetch_single_html("https://example.com", 5000, 3, 0))
+        saved = asyncio.run(
+            tool._fetch_single_html_with_save(
+                "https://example.com", 5000, str(tmp_path), 3, 0
+            )
+        )
+
+    for result in (plain, saved):
+        assert (
+            result["error"] == "A obtenção da página falhou. Número de tentativas: 1."
+        )
+        assert result["raw_error"] == "RAW THIRD PARTY ERROR"
+
+
+def test_download_failure_localizes_sage_wrapper_and_preserves_raw_error(
+    monkeypatch, tmp_path
+):
+    class BrokenClientSession:
+        def __init__(self):
+            raise RuntimeError("RAW DOWNLOAD ERROR")
+
+    monkeypatch.setattr(
+        "sagents.tool.impl.web_fetcher_tool.aiohttp.ClientSession",
+        BrokenClientSession,
+    )
+
+    with tool_language("zh-CN"):
+        result = asyncio.run(
+            WebFetcherTool()._download_file(
+                "https://example.com/report.pdf", str(tmp_path), 3, 0
+            )
+        )
+
+    assert result["error"] == "文件下载在 1 次尝试后失败。"
+    assert result["raw_error"] == "RAW DOWNLOAD ERROR"
+
+
 def test_fetch_html_with_save_does_not_retry_http_404(monkeypatch, tmp_path):
     calls = 0
 
@@ -204,10 +252,10 @@ def test_fetch_html_with_save_outputs_markdown_images_and_metadata(
         "Example",
         {
             "article": (
-                '<article><p>Intro text long enough to pass the content filter '
+                "<article><p>Intro text long enough to pass the content filter "
                 '<a href="https://example.com/more">more</a>.</p>'
                 '<p><img src="/a.png" alt="A" title="Chart"></p>'
-                '<p>Tail text keeps the original reading order intact.</p></article>'
+                "<p>Tail text keeps the original reading order intact.</p></article>"
             )
         },
     )
@@ -233,9 +281,10 @@ def test_fetch_html_with_save_outputs_markdown_images_and_metadata(
     assert result["metadata"]["images"] == [
         {"src": "https://domain.test/a.png", "alt": "A", "title": "Chart"}
     ]
-    assert "![A](https://domain.test/a.png)" in tmp_path.joinpath(
-        result["metadata"]["filename"]
-    ).read_text()
+    assert (
+        "![A](https://domain.test/a.png)"
+        in tmp_path.joinpath(result["metadata"]["filename"]).read_text()
+    )
 
 
 def test_fetch_html_with_save_truncates_markdown_and_saves_full_content(
@@ -278,7 +327,7 @@ def test_fetch_html_without_images_returns_markdown_text(monkeypatch, tmp_path):
         "Text",
         {
             "main": (
-                '<main><p>Plain content long enough to pass the content filter '
+                "<main><p>Plain content long enough to pass the content filter "
                 '<a href="https://domain.test/ref">reference</a>.</p></main>'
             )
         },
@@ -308,7 +357,7 @@ def test_fetch_html_skips_embedded_data_images(monkeypatch, tmp_path):
         "Embedded",
         {
             "article": (
-                '<article><p>Content long enough to keep this article body.</p>'
+                "<article><p>Content long enough to keep this article body.</p>"
                 '<p><img src="data:image/png;base64,abc" alt="inline"></p>'
                 '<p><img src="/remote.png" alt="remote"></p></article>'
             )
@@ -451,7 +500,7 @@ def test_xiaohongshu_unavailable_page_does_not_fallback_to_shell_markdown(
         "小红书 - 你访问的页面不见了",
         {
             "body": (
-                '<body><h1>你访问的页面不见了</h1>'
+                "<body><h1>你访问的页面不见了</h1>"
                 '<script>window.__INITIAL_STATE__={"note":{"noteDetailMap":{}}}</script>'
                 '<div class="main-content">站点壳子 <img src="data:image/png;base64,abc"></div>'
                 "</body>"

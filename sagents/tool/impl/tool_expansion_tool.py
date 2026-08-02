@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from ..tool_base import tool
 from ..tool_expansion import TOOL_EXPAND_TOOLS
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 
 
 class ToolExpansionTool:
@@ -54,7 +55,7 @@ class ToolExpansionTool:
                 "expanded_tools": [],
                 "invalid_tools": list(tool_names or []),
                 "already_selected_tools": [],
-                "error": "Session context or tool manager is not available",
+                "error": tool_t("tool_expand.unavailable"),
             }
 
         requested = self._normalize_tool_names(tool_names)

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Tuple
 from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
@@ -72,7 +73,10 @@ class LintTool:
 
     async def _lint_python(self, sandbox: Any, paths: List[str]) -> Dict[str, Any]:
         if not await self._has_command(sandbox, "ruff"):
-            return {"status": "skipped", "reason": "ruff not installed"}
+            return {
+                "status": "skipped",
+                "reason": tool_t("lint.not_installed", params={"tool": "ruff"}),
+            }
         joined = " ".join(shlex.quote(p) for p in paths)
         rc, out, err = await self._run(
             sandbox,
@@ -80,9 +84,11 @@ class LintTool:
             timeout=60,
         )
         if rc not in (0, 1):  # ruff: 0=clean, 1=有诊断, 其他=工具自身错
+            raw_reason = f"ruff exited {rc}: {err.strip() or out.strip()[:200]}"
             return {
                 "status": "error",
-                "reason": f"ruff exited {rc}: {err.strip() or out.strip()[:200]}",
+                "reason": tool_t("lint.exited", params={"tool": "ruff", "code": rc}),
+                "raw_reason": raw_reason,
             }
         diagnostics: List[Dict[str, Any]] = []
         try:
@@ -103,12 +109,20 @@ class LintTool:
                     )
         except Exception as exc:
             logger.warning(f"LintTool: 解析 ruff 输出失败: {exc}")
-            return {"status": "error", "reason": f"parse ruff output failed: {exc}"}
+            return {
+                "status": "error",
+                "reason": tool_t(
+                    "lint.parse_failed", params={"tool": "ruff", "message": exc}
+                ),
+            }
         return {"status": "ok", "diagnostics": diagnostics}
 
     async def _lint_eslint(self, sandbox: Any, paths: List[str]) -> Dict[str, Any]:
         if not await self._has_command(sandbox, "eslint"):
-            return {"status": "skipped", "reason": "eslint not installed"}
+            return {
+                "status": "skipped",
+                "reason": tool_t("lint.not_installed", params={"tool": "eslint"}),
+            }
         joined = " ".join(shlex.quote(p) for p in paths)
         # eslint 在没有配置时会报错；忽略这种情况返回 skipped
         rc, out, err = await self._run(
@@ -122,10 +136,15 @@ class LintTool:
                 "no eslint configuration" in err_text
                 or "couldn't find a configuration" in err_text
             ):
-                return {"status": "skipped", "reason": "no eslint config in project"}
+                return {
+                    "status": "skipped",
+                    "reason": tool_t("lint.no_config", params={"tool": "eslint"}),
+                }
+            raw_reason = f"eslint exited {rc}: {err.strip()[:200]}"
             return {
                 "status": "error",
-                "reason": f"eslint exited {rc}: {err.strip()[:200]}",
+                "reason": tool_t("lint.exited", params={"tool": "eslint", "code": rc}),
+                "raw_reason": raw_reason,
             }
         diagnostics: List[Dict[str, Any]] = []
         try:
@@ -149,20 +168,35 @@ class LintTool:
                         )
         except Exception as exc:
             logger.warning(f"LintTool: 解析 eslint 输出失败: {exc}")
-            return {"status": "error", "reason": f"parse eslint output failed: {exc}"}
+            return {
+                "status": "error",
+                "reason": tool_t(
+                    "lint.parse_failed", params={"tool": "eslint", "message": exc}
+                ),
+            }
         return {"status": "ok", "diagnostics": diagnostics}
 
     async def _lint_tsc(self, sandbox: Any, paths: List[str]) -> Dict[str, Any]:
         if not await self._has_command(sandbox, "tsc"):
-            return {"status": "skipped", "reason": "tsc not installed"}
+            return {
+                "status": "skipped",
+                "reason": tool_t("lint.not_installed", params={"tool": "tsc"}),
+            }
         # 仅尝试 noEmit；找不到 tsconfig 直接 skip
         # 这里不限定具体 path，由项目 tsconfig 控制
         rc, out, err = await self._run(sandbox, "tsc --noEmit", timeout=180)
         text = out + "\n" + err
         if "Cannot find a tsconfig" in text or "No inputs were found" in text:
-            return {"status": "skipped", "reason": "no tsconfig.json found"}
+            return {
+                "status": "skipped",
+                "reason": tool_t("lint.no_config", params={"tool": "tsconfig.json"}),
+            }
         if rc not in (0, 1, 2):
-            return {"status": "error", "reason": f"tsc exited {rc}"}
+            return {
+                "status": "error",
+                "reason": tool_t("lint.exited", params={"tool": "tsc", "code": rc}),
+                "raw_reason": f"tsc exited {rc}",
+            }
         diagnostics: List[Dict[str, Any]] = []
         # tsc 输出格式：path(line,col): error TSxxxx: message
         path_set = {os.path.normpath(p) for p in paths}

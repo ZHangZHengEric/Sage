@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from sagents.tool.tool_base import tool
+from sagents.utils.i18n import tool_t
 
 from ..user_context import DEFAULT_DESKTOP_USER_ID
 from .browser_bridge import BrowserBridgeHub
@@ -44,7 +45,7 @@ class BrowserBridgeTool:
         if not online:
             return {
                 "ok": False,
-                "error": "浏览器插件当前离线，请确认扩展已安装且浏览器页面仍在活动中。",
+                "error": tool_t("browser.offline"),
                 "status": status,
             }
 
@@ -58,13 +59,15 @@ class BrowserBridgeTool:
         if result is None:
             return {
                 "ok": False,
-                "error": f"浏览器命令执行超时（>{timeout_seconds}s）",
+                "error": tool_t("browser.timeout", params={"seconds": timeout_seconds}),
                 "command": command,
             }
         if not result.get("success", False):
+            raw_error = result.get("error")
             return {
                 "ok": False,
-                "error": result.get("error") or "浏览器命令执行失败",
+                "error": tool_t("browser.failed"),
+                **({"raw_error": raw_error} if raw_error else {}),
                 "command": command,
                 "result": result,
             }
@@ -465,7 +468,10 @@ class BrowserBridgeTool:
         }:
             return {
                 "ok": False,
-                "error": f"不支持的 action: {normalized_action}",
+                "error": tool_t(
+                    "browser.unsupported_action",
+                    params={"action": normalized_action},
+                ),
             }
 
         args: dict[str, Any] = {}

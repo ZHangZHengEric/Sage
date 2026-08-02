@@ -13,6 +13,7 @@ import httpx
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 from sagents.utils.multimodal_image import (
     compress_image_to_jpeg_bytes_for_llm as _compress_image_to_jpeg_bytes_for_llm,
     get_mime_type as _get_mime_type_util,
@@ -79,7 +80,9 @@ class ImageUnderstandingTool:
             # 检查文件是否存在
             exists = await sandbox.file_exists(image_path)
             if not exists:
-                raise ImageUnderstandingError(f"Image file does not exist: {image_path}")
+                raise ImageUnderstandingError(
+                    f"Image file does not exist: {image_path}"
+                )
 
             # 使用 base64 命令读取图片
             # macOS 的 base64 语法不同，需要使用 -i 指定输入文件
@@ -309,7 +312,9 @@ class ImageUnderstandingTool:
         session = session_manager.get(current_session_id)
 
         if not session:
-            raise ImageUnderstandingError(f"Failed to get session: {current_session_id}")
+            raise ImageUnderstandingError(
+                f"Failed to get session: {current_session_id}"
+            )
 
         # 获取 session 的 model 和 model_config
         model = session.model
@@ -353,7 +358,9 @@ class ImageUnderstandingTool:
                     "bad request",
                 ]
             ):
-                raise ImageUnderstandingError("The current model does not support image understanding")
+                raise ImageUnderstandingError(
+                    "The current model does not support image understanding"
+                )
             else:
                 raise e
 
@@ -416,14 +423,11 @@ class ImageUnderstandingTool:
         user_prompt = (
             prompt.strip()
             if prompt and prompt.strip()
-            else "请观察这张图片，识别其中的文字和关键视觉信息，并结合当前对话继续完成用户任务。"
+            else tool_t("image.default_prompt")
         )
-        return (
-            "【工具注入的图片上下文】\n"
-            f"图片来源: {image_path}\n"
-            "这是用户要求你查看的图片。请把图片内容作为当前任务的上下文，"
-            "在下一步回复中直接基于图片进行理解、描述或推理。\n\n"
-            f"用户的图片处理要求: {user_prompt}"
+        return tool_t(
+            "image.context",
+            params={"image_path": image_path, "prompt": user_prompt},
         )
 
     @tool(
@@ -478,7 +482,7 @@ class ImageUnderstandingTool:
             if not self._session_supports_multimodal(session):
                 return {
                     "status": "error",
-                    "message": "当前 agent 模型不支持图片输入，请切换到多模态模型后再分析图片。",
+                    "message": tool_t("image.unsupported"),
                 }
 
             try:
@@ -486,7 +490,11 @@ class ImageUnderstandingTool:
                     image_path, session_id
                 )
             except ImageUnderstandingError as e:
-                return {"status": "error", "message": str(e)}
+                return {
+                    "status": "error",
+                    "message": tool_t("image.failed", params={"message": str(e)}),
+                    "raw_error": str(e),
+                }
 
             content = [
                 {"type": "text", "text": self._build_native_prompt(image_path, prompt)},
@@ -507,7 +515,7 @@ class ImageUnderstandingTool:
 
             return {
                 "status": "success",
-                "message": "图片已加入下一轮多模态模型上下文，agent 将直接基于图片继续分析。",
+                "message": tool_t("image.queued"),
                 "data": {
                     "image_path": image_path,
                     "image_format": image_format,
@@ -518,4 +526,8 @@ class ImageUnderstandingTool:
 
         except Exception as e:
             logger.error(f"图片理解失败: {e}")
-            return {"status": "error", "message": f"Image understanding failed: {str(e)}"}
+            return {
+                "status": "error",
+                "message": tool_t("image.failed", params={"message": str(e)}),
+                "raw_error": str(e),
+            }

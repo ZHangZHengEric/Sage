@@ -15,6 +15,12 @@ from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.serialization import make_serializable
+from sagents.utils.i18n import (
+    get_tool_language,
+    normalize_language,
+    tool_language,
+    tool_t,
+)
 from pathlib import Path
 import json
 import asyncio
@@ -1382,6 +1388,33 @@ class ToolManager:
         tool_call_id: Optional[str] = None,
         **kwargs,
     ) -> Any:
+        """Execute a tool with a trusted task-local response language."""
+        session_context = _resolve_session_context(session_id)
+        response_language: Optional[str] = None
+        if session_context is not None:
+            try:
+                response_language = session_context.get_language()
+            except Exception:
+                system_context = getattr(session_context, "system_context", {})
+                if isinstance(system_context, dict):
+                    response_language = system_context.get("response_language")
+        with tool_language(response_language or "en"):
+            return await self._run_tool_async_impl(
+                tool_name,
+                session_id=session_id,
+                user_id=user_id,
+                tool_call_id=tool_call_id,
+                **kwargs,
+            )
+
+    async def _run_tool_async_impl(
+        self,
+        tool_name: str,
+        session_id: str = "",
+        user_id: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
+        **kwargs,
+    ) -> Any:
         """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
         session_context = _resolve_session_context(session_id)
@@ -1390,8 +1423,12 @@ class ToolManager:
         # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
         if not tool:
-            error_msg = (
-                f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
+            error_msg = tool_t(
+                "tool.manager.not_found",
+                params={
+                    "tool_name": tool_name,
+                    "available": ", ".join(self.tools.keys()),
+                },
             )
             logger.error(error_msg)
             return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
@@ -1472,7 +1509,10 @@ class ToolManager:
                         {
                             "success": False,
                             "status": "error",
-                            "error": f"Missing required parameters: {', '.join(missing_params)}",
+                            "error": tool_t(
+                                "tool.manager.missing_parameters",
+                                params={"parameters": ", ".join(missing_params)},
+                            ),
                             "required_params": required_params,
                             "provided_params": list(kwargs.keys()),
                         },
@@ -1487,7 +1527,10 @@ class ToolManager:
                         "error",
                         tool_call_id=tool_call_id,
                         response=final_result,
-                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                        error=tool_t(
+                            "tool.manager.missing_parameters",
+                            params={"parameters": ", ".join(missing_params)},
+                        ),
                     )
                     self._record_tool_trace_end(
                         session_context,
@@ -1496,7 +1539,10 @@ class ToolManager:
                         tool_call_id,
                         tool_started_at,
                         "error",
-                        error=f"缺少必填参数: {', '.join(missing_params)}",
+                        error=tool_t(
+                            "tool.manager.missing_parameters",
+                            params={"parameters": ", ".join(missing_params)},
+                        ),
                     )
                     return final_result
 
@@ -1512,7 +1558,10 @@ class ToolManager:
                     logger.error(f"Tool execution failed for {tool.name}: {e}")
                     raise e
             else:
-                error_msg = f"Unknown tool type: {type(tool).__name__}"
+                error_msg = tool_t(
+                    "tool.manager.unknown_type",
+                    params={"tool_type": type(tool).__name__},
+                )
                 logger.error(error_msg)
                 return self._format_error_response(
                     error_msg, tool_name, "UNKNOWN_TOOL_TYPE"
@@ -1526,8 +1575,11 @@ class ToolManager:
                 logger.error(
                     f"Tool '{tool_name}' returned invalid JSON: {validation_msg}"
                 )
+                localized_validation_error = tool_t(
+                    "tool.manager.invalid_json", params={"message": validation_msg}
+                )
                 error_result = self._format_error_response(
-                    f"Invalid JSON response: {validation_msg}",
+                    localized_validation_error,
                     tool_name,
                     "INVALID_JSON",
                 )
@@ -1539,7 +1591,7 @@ class ToolManager:
                     "error",
                     tool_call_id=tool_call_id,
                     response=error_result,
-                    error=f"Invalid JSON response: {validation_msg}",
+                    error=localized_validation_error,
                 )
                 self._record_tool_trace_end(
                     session_context,
@@ -1548,7 +1600,7 @@ class ToolManager:
                     tool_call_id,
                     tool_started_at,
                     "error",
-                    error=f"Invalid JSON response: {validation_msg}",
+                    error=localized_validation_error,
                 )
                 return error_result
 
@@ -1571,6 +1623,7 @@ class ToolManager:
             )
 
             # Step 5: Truncate result if too long (max 8000 tokens)
+            final_result = self._add_localized_tool_summary(tool, final_result)
             final_result = _truncate_result(final_result, MAX_TOOL_RESULT_TOKENS)
 
             return final_result
@@ -1603,8 +1656,13 @@ class ToolManager:
         except Exception as e:
             execution_time = time.time() - execution_start
             error_detail = _innermost_exception_message(e)
-            error_msg = (
-                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
+            error_msg = tool_t(
+                "tool.manager.execution_failed",
+                params={
+                    "tool_name": tool_name,
+                    "seconds": f"{execution_time:.2f}",
+                    "message": error_detail,
+                },
             )
             error_result = self._format_error_response(
                 error_msg, tool_name, "EXECUTION_ERROR", error_detail
@@ -1865,6 +1923,50 @@ class ToolManager:
             error_response["exception_detail"] = exception_detail
 
         return json.dumps(error_response, ensure_ascii=False, indent=2)
+
+    def _add_localized_tool_summary(
+        self,
+        tool: Union[ToolSpec, McpToolSpec, SageMcpToolSpec],
+        response_text: str,
+    ) -> str:
+        """Prefix built-in results with a localized Sage-authored summary.
+
+        Raw payloads (stdout, page content, file contents, MCP responses, and
+        protocol fields) remain byte-for-byte equivalent inside ``content``.
+        """
+        if not isinstance(tool, ToolSpec) or isinstance(tool, SageMcpToolSpec):
+            return response_text
+        from .builtin_i18n import TOOL_PT_DESCRIPTIONS
+
+        if tool.name not in TOOL_PT_DESCRIPTIONS:
+            return response_text
+        language = normalize_language(get_tool_language())
+        if language == "en":
+            return response_text
+        try:
+            payload = json.loads(response_text)
+        except Exception:
+            return response_text
+        if not isinstance(payload, dict):
+            return response_text
+        content = payload.get("content")
+        if not isinstance(content, dict):
+            return response_text
+        failed = bool(
+            content.get("success") is False
+            or content.get("ok") is False
+            or content.get("status") == "error"
+            or content.get("error")
+        )
+        summary = tool_t(
+            "tool.result.error" if failed else "tool.result.success",
+            params={"tool_name": tool.name},
+        )
+        localized_payload = {
+            **payload,
+            "content": {"localized_summary": summary, **content},
+        }
+        return json.dumps(localized_payload, ensure_ascii=False, indent=2)
 
     def _validate_json_response(
         self, response_text: str, tool_name: str

@@ -23,6 +23,7 @@ from ..error_codes import (
     make_tool_error as _make_tool_error,
 )
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 
 
 class _HttpStatusError(Exception):
@@ -235,16 +236,20 @@ class WebFetcherTool:
 
         if success_count == len(urls):
             status = "success"
-            message = f"Successfully processed all {len(urls)} URLs"
+            message = tool_t("web.success", params={"total": len(urls)})
         elif success_count > 0:
             status = "partial"
-            message = (
-                f"Successfully processed {success_count}/{len(urls)} URLs; "
-                f"{error_count} failed"
+            message = tool_t(
+                "web.partial",
+                params={
+                    "success": success_count,
+                    "total": len(urls),
+                    "failed": error_count,
+                },
             )
         else:
             status = "error"
-            message = f"Failed to process all {len(urls)} URLs"
+            message = tool_t("web.failed", params={"total": len(urls)})
 
         return {
             "status": status,
@@ -389,7 +394,8 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"Download failed after {retries + 1} attempts: {last_error}",
+            "error": tool_t("web.download_failed", params={"attempts": retries + 1}),
+            "raw_error": last_error,
             "content": None,
             "metadata": None,
         }
@@ -521,7 +527,7 @@ class WebFetcherTool:
                 if attempt < retries:
                     await asyncio.sleep(2**attempt)
             except asyncio.TimeoutError:
-                last_error = f"请求超时（超过 {timeout} 秒）"
+                last_error = tool_t("web.timeout", params={"seconds": timeout})
                 logger.warning(
                     f"WebFetcher: {url} 请求超时 (尝试 {attempt + 1}/{retries + 1})"
                 )
@@ -538,7 +544,8 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"Failed after {retries + 1} attempts: {last_error}",
+            "error": tool_t("web.fetch_failed", params={"attempts": retries + 1}),
+            "raw_error": last_error,
             "content": None,
             "metadata": None,
         }
@@ -602,7 +609,7 @@ class WebFetcherTool:
                 if attempt < retries:
                     await asyncio.sleep(2**attempt)
             except asyncio.TimeoutError:
-                last_error = f"请求超时（超过 {timeout} 秒）"
+                last_error = tool_t("web.timeout", params={"seconds": timeout})
                 logger.warning(
                     f"WebFetcher: {url} 请求超时 (尝试 {attempt + 1}/{retries + 1})"
                 )
@@ -619,7 +626,8 @@ class WebFetcherTool:
         return {
             "url": url,
             "status": "error",
-            "error": f"Failed after {retries + 1} attempts: {last_error}",
+            "error": tool_t("web.fetch_failed", params={"attempts": retries + 1}),
+            "raw_error": last_error,
             "content": None,
             "metadata": None,
         }
@@ -795,7 +803,9 @@ class WebFetcherTool:
             "安全验证",
         )
         has_initial_state = "__INITIAL_STATE__" in html
-        has_empty_note_state = '"noteDetailMap":{}' in html or '"noteDetailMap": {}' in html
+        has_empty_note_state = (
+            '"noteDetailMap":{}' in html or '"noteDetailMap": {}' in html
+        )
         if not any(marker in plain_text for marker in unavailable_markers):
             if not (has_initial_state and has_empty_note_state):
                 return None
@@ -852,7 +862,11 @@ class WebFetcherTool:
         if stripped.startswith("{") or stripped.startswith("["):
             candidates.append(stripped)
 
-        for marker in ("__INITIAL_STATE__", "__NEXT_DATA__", "window.__INITIAL_STATE__"):
+        for marker in (
+            "__INITIAL_STATE__",
+            "__NEXT_DATA__",
+            "window.__INITIAL_STATE__",
+        ):
             marker_index = text.find(marker)
             if marker_index == -1:
                 continue

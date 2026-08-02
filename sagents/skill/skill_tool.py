@@ -1,5 +1,6 @@
 from sagents.tool.tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 
 
 class SkillTool:
@@ -33,13 +34,15 @@ class SkillTool:
             str: A message indicating the result of the operation.
         """
         if not session_id:
-            raise ValueError("session_id is required for load_skill")
+            raise ValueError(tool_t("skill.error.session_required"))
 
         from sagents.utils.agent_session_helper import get_live_session
 
         session = get_live_session(session_id, log_prefix="SkillTool")
         if not session or not session.session_context:
-            raise ValueError(f"Invalid session_id: {session_id}")
+            raise ValueError(
+                tool_t("skill.error.invalid_session", params={"session_id": session_id})
+            )
 
         session_context = session.session_context
 
@@ -50,11 +53,17 @@ class SkillTool:
         ):
             skill_manager = session_context.sandbox_skill_manager
         else:
-            raise ValueError("Sandbox skill manager not available")
+            raise ValueError(tool_t("skill.error.manager_unavailable"))
 
         # 检查技能是否存在
         if skill_name not in skill_manager.skills:
-            return f"Error: Skill '{skill_name}' not found. Available skills: {', '.join(skill_manager.list_skills())}"
+            return tool_t(
+                "skill.error.not_found",
+                params={
+                    "skill_name": skill_name,
+                    "available": ", ".join(skill_manager.list_skills()),
+                },
+            )
 
         # 获取技能信息
         skill = skill_manager.skills[skill_name]
@@ -70,15 +79,15 @@ class SkillTool:
 
         # 构建技能内容
         result_content = [
-            f"## Skill: {skill.name}",
+            f"## {tool_t('skill.heading.skill')}: {skill.name}",
             "",
-            "### Skill Folder Path:",
+            f"### {tool_t('skill.heading.folder')}:",
             f"{sandbox_virtual_path}/skills/{skill.name}/",
             "",
-            "### File Structure:",
+            f"### {tool_t('skill.heading.files')}:",
             skill.file_list,
             "",
-            "### Instructions (SKILL.md):",
+            f"### {tool_t('skill.heading.instructions')}:",
             skill.instructions,
         ]
 
@@ -99,8 +108,16 @@ class SkillTool:
             if session_context
             else []
         )
-        skill_list = ", ".join([s.get("skill_name", "Unknown") for s in active_skills])
-        return f"Skill '{skill.name}' loaded successfully. Current Active skills: {skill_list}. Total skills: {len(active_skills)}. Please follow the instructions in the System Prompt."
+        unknown = tool_t("skill.unknown")
+        skill_list = ", ".join([s.get("skill_name", unknown) for s in active_skills])
+        return tool_t(
+            "skill.success",
+            params={
+                "skill_name": skill.name,
+                "active": skill_list,
+                "total": len(active_skills),
+            },
+        )
 
     def _update_active_skills(
         self, session_context, skill_name: str, skill_content: str
@@ -146,7 +163,7 @@ class SkillTool:
         # Also update legacy field for backward compatibility
         all_instructions = "\n\n".join(
             [
-                f"=== {s.get('skill_name', 'Unknown')} ===\n{s.get('skill_content', '')}"
+                f"=== {s.get('skill_name', tool_t('skill.unknown'))} ===\n{s.get('skill_content', '')}"
                 for s in active_skills
             ]
         )
