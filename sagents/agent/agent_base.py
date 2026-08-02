@@ -1285,6 +1285,10 @@ class AgentBase(ABC):
             messages = MessageManager.strip_rejected_tool_calls_from_llm_context(  # pyright: ignore[reportAssignmentType]
                 list(messages)  # pyright: ignore[reportArgumentType]
             )
+        messages = MessageManager.strip_historical_search_memory_from_llm_context(  # pyright: ignore[reportAssignmentType]
+            list(messages)
+        )
+        if messages and all(isinstance(m, MessageChunk) for m in messages):
             messages = MessageManager.strip_turn_status_from_llm_context(  # pyright: ignore[reportAssignmentType]
                 list(messages)  # pyright: ignore[reportArgumentType]
             )

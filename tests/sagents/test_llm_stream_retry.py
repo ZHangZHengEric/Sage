@@ -10,7 +10,10 @@ from openai.types.chat import chat_completion_chunk
 from sagents.agent.agent_base import AgentBase, PartialStreamConsumedError
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.message_manager import (
+    MessageManager,
+    SEARCH_MEMORY_TOOL_NAME,
+)
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.observability.agent_runtime import ObservableAsyncOpenAI
 
@@ -77,6 +80,91 @@ class DummyObservabilityManager:
 
     def on_llm_error(self, *args, **kwargs):
         pass
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_strips_historical_search_memory_at_request_boundary():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [
+        MessageChunk(role=MessageRole.USER.value, content="old request"),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            tool_calls=[
+                {
+                    "id": "search-old",
+                    "type": "function",
+                    "function": {
+                        "name": SEARCH_MEMORY_TOOL_NAME,
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"status":"success"}',
+            tool_call_id="search-old",
+        ),
+        MessageChunk(role=MessageRole.USER.value, content="current request"),
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages=messages,
+        session_id="sid",
+        step_name="test",
+    ):
+        pass
+
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert [message["role"] for message in sent_messages] == ["user", "user"]
+    assert [message["content"] for message in sent_messages] == [
+        "old request",
+        "current request",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_strips_historical_search_memory_from_dict_messages():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [
+        {"role": "user", "content": "old request"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "search-old",
+                    "type": "function",
+                    "function": {
+                        "name": SEARCH_MEMORY_TOOL_NAME,
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"status":"success"}',
+            "tool_call_id": "search-old",
+        },
+        {"role": "user", "content": "current request"},
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages=messages,
+        session_id="sid",
+        step_name="test",
+    ):
+        pass
+
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert sent_messages == [
+        {"role": "user", "content": "old request"},
+        {"role": "user", "content": "current request"},
+    ]
 
 
 @pytest.mark.asyncio

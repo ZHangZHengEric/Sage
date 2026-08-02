@@ -20,7 +20,7 @@ import time
 import re
 import uuid
 import os
-from typing import Dict, List, Optional, Any, Union, Sequence, Tuple
+from typing import Dict, List, Optional, Any, Union, Sequence, Tuple, TypeVar
 from copy import deepcopy
 from dataclasses import replace
 from sagents.utils.logger import logger
@@ -35,11 +35,16 @@ _max_base64_image_token_estimate = 3000  # base64 图片 token 估算上限
 
 # 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
 TURN_STATUS_TOOL_NAME = "turn_status"
+SEARCH_MEMORY_TOOL_NAME = "search_memory"
 COMPRESS_HISTORY_TOOL_NAME = "compress_conversation_history"
 TODO_WRITE_TOOL_NAME = "todo_write"
 DEFAULT_RULE_PROTECTION_COUNT = 20
 DEFAULT_LLM_PROTECTION_COUNT = 12
 DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD = 4096
+
+MessageItemT = TypeVar(
+    "MessageItemT", bound=Union[MessageChunk, Dict[str, Any]]
+)
 
 
 class MessageManager:
@@ -1274,6 +1279,9 @@ class MessageManager:
         if not messages:
             return []
         messages = MessageManager.strip_rejected_tool_calls_from_llm_context(messages)
+        messages = MessageManager.strip_historical_search_memory_from_llm_context(
+            messages
+        )
         filtered_messages = [
             msg
             for msg in messages
@@ -1571,9 +1579,11 @@ class MessageManager:
         return name, tid
 
     @staticmethod
-    def _message_has_non_empty_content(msg: MessageChunk) -> bool:
+    def _message_has_non_empty_content(
+        msg: Union[MessageChunk, Dict[str, Any]],
+    ) -> bool:
         """判断 assistant/user 等是否含有可视为「有效正文」的内容（含多模态文本段）。"""
-        content = msg.content
+        content = msg.get("content") if isinstance(msg, dict) else msg.content
         if content is None:
             return False
         if isinstance(content, str):
@@ -1586,6 +1596,118 @@ class MessageManager:
                         return True
             return False
         return bool(content)
+
+    @staticmethod
+    def strip_historical_search_memory_from_llm_context(
+        messages: List[MessageItemT],
+    ) -> List[MessageItemT]:
+        """Remove completed-turn ``search_memory`` pairs from LLM context.
+
+        ``search_memory`` calls remain in the durable ledger for history, UI,
+        and audit purposes. Once a newer user message starts another turn, the
+        older search call and its matching tool result no longer need to be
+        replayed to the model. Calls after the latest user message remain
+        available so the current turn can consume fresh retrieval results.
+
+        Mixed assistant tool-call messages are pruned pair-safely: unrelated
+        calls and assistant text are retained, and an assistant message is
+        dropped only when removing the historical search leaves it empty.
+        """
+        if not messages:
+            return []
+
+        def message_role(msg: MessageItemT) -> Optional[str]:
+            role = msg.get("role") if isinstance(msg, dict) else msg.role
+            return role.value if isinstance(role, MessageRole) else role
+
+        def message_tool_calls(msg: MessageItemT) -> List[Any]:
+            tool_calls = (
+                msg.get("tool_calls") if isinstance(msg, dict) else msg.tool_calls
+            )
+            return list(tool_calls or [])
+
+        def message_tool_call_id(msg: MessageItemT) -> Optional[str]:
+            tool_call_id = (
+                msg.get("tool_call_id")
+                if isinstance(msg, dict)
+                else msg.tool_call_id
+            )
+            return str(tool_call_id) if tool_call_id else None
+
+        def is_real_user_boundary(msg: MessageItemT) -> bool:
+            if message_role(msg) != MessageRole.USER.value:
+                return False
+            metadata = msg.get("metadata") if isinstance(msg, dict) else msg.metadata
+            metadata = metadata if isinstance(metadata, dict) else {}
+            return metadata.get("runtime_continuation_guidance") is not True
+
+        def with_tool_calls(
+            msg: MessageItemT, kept_tool_calls: List[Any]
+        ) -> MessageItemT:
+            if isinstance(msg, dict):
+                copied = deepcopy(msg)
+                if kept_tool_calls:
+                    copied["tool_calls"] = kept_tool_calls
+                else:
+                    copied.pop("tool_calls", None)
+                return copied  # pyright: ignore[reportReturnType]
+            return replace(
+                msg, tool_calls=kept_tool_calls or None
+            )  # pyright: ignore[reportReturnType]
+
+        latest_user_idx: Optional[int] = None
+        for idx in range(len(messages) - 1, -1, -1):
+            if is_real_user_boundary(messages[idx]):
+                latest_user_idx = idx
+                break
+        if latest_user_idx is None:
+            return list(messages)
+
+        historical_search_ids: set[str] = set()
+        for msg in messages[:latest_user_idx]:
+            tool_calls = message_tool_calls(msg)
+            if message_role(msg) != MessageRole.ASSISTANT.value or not tool_calls:
+                continue
+            for tool_call in tool_calls:
+                name, tool_call_id = MessageManager._tool_call_entry_name_and_id(
+                    tool_call
+                )
+                if name == SEARCH_MEMORY_TOOL_NAME and tool_call_id:
+                    historical_search_ids.add(str(tool_call_id))
+
+        out: List[MessageItemT] = []
+        for idx, msg in enumerate(messages):
+            tool_call_id = message_tool_call_id(msg)
+            if (
+                message_role(msg) == MessageRole.TOOL.value
+                and tool_call_id
+                and tool_call_id in historical_search_ids
+            ):
+                continue
+
+            tool_calls = message_tool_calls(msg)
+            if (
+                idx < latest_user_idx
+                and message_role(msg) == MessageRole.ASSISTANT.value
+                and tool_calls
+            ):
+                kept_tool_calls = [
+                    tool_call
+                    for tool_call in tool_calls
+                    if MessageManager._tool_call_entry_name_and_id(tool_call)[0]
+                    != SEARCH_MEMORY_TOOL_NAME
+                ]
+                if len(kept_tool_calls) == len(tool_calls):
+                    out.append(msg)
+                elif kept_tool_calls:
+                    out.append(with_tool_calls(msg, kept_tool_calls))
+                elif MessageManager._message_has_non_empty_content(msg):
+                    out.append(with_tool_calls(msg, []))
+                continue
+
+            out.append(msg)
+
+        return out
 
     @staticmethod
     def strip_turn_status_from_llm_context(
