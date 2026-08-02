@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 
 
 class DesktopBackendClient:
@@ -210,7 +211,7 @@ class QuestionnaireTool:
                 {
                     "success": True,
                     "status": "timeout",
-                    "message": "The user did not submit in time. Default values were used",
+                    "message": tool_t("questionnaire.timeout"),
                     "answers": default_answers,
                     "questionnaire_kind": questionnaire_kind,
                 },
@@ -222,11 +223,11 @@ class QuestionnaireTool:
             f"QuestionnaireTool: 成功获取问卷答案. questionnaire_id={questionnaire_id}, is_auto_submit={result.get('is_auto_submit', False)}"
         )
         return json.dumps(
-                {
-                    "success": True,
-                    "status": "submitted",
-                    "message": "The user submitted answers",
-                    "answers": result.get("answers", {}),
+            {
+                "success": True,
+                "status": "submitted",
+                "message": tool_t("questionnaire.submitted"),
+                "answers": result.get("answers", {}),
                 "questionnaire_id": result.get("questionnaire_id", questionnaire_id),
                 "submitted_at": result.get("submitted_at"),
                 "is_auto_submit": result.get("is_auto_submit", False),

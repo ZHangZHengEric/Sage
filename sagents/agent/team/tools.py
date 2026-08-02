@@ -2,6 +2,7 @@ from typing import Dict, List
 
 from sagents.tool.tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 
 
 class TeamTools:
@@ -50,11 +51,13 @@ class TeamTools:
             session_id, log_prefix="TeamTools.sys_team_delegate_task"
         )
         if not session:
-            return f"Error: Session not found for session_id: {session_id}"
+            return tool_t(
+                "agent.error.session_not_found", params={"session_id": session_id}
+            )
         session_context = session.session_context
         orchestrator = getattr(session_context, "orchestrator", None)
         if not orchestrator:
-            return "Error: Team orchestrator not found in session context."
+            return tool_t("agent.error.team_orchestrator_missing")
 
         response = await orchestrator.delegate_tasks(
             tasks, caller_session_id=session_id

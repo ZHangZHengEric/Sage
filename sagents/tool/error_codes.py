@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from sagents.utils.i18n import get_tool_language, normalize_language, tool_t
+
 
 class ToolErrorCode:
     """工具错误码常量集合（保持纯字符串便于跨进程序列化）。"""
@@ -55,15 +57,26 @@ def make_tool_error(
     Returns:
         统一格式的错误字典。
     """
+    language = normalize_language(get_tool_language())
+    localized_message = message
+    if language != "en":
+        localized_message = tool_t(f"tool.error.{code}", default=message)
+
     payload: Dict[str, Any] = {
         "success": False,
         "status": "error",
         "error_code": code or ToolErrorCode.INTERNAL_ERROR,
-        "error": message,
-        "message": message,  # 兼容旧消费方
+        "error": localized_message,
+        "message": localized_message,  # 兼容旧消费方
     }
+    if localized_message != message:
+        payload["raw_error"] = message
     if hint:
-        payload["hint"] = hint
+        if language == "en":
+            payload["hint"] = hint
+        else:
+            payload["hint"] = tool_t("tool.error.hint", default=hint)
+            payload["raw_hint"] = hint
     for key, value in extra.items():
         if value is None:
             continue

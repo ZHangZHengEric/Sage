@@ -49,7 +49,7 @@ from sagents.utils.stream_merger import (
 from sagents.utils.stream_tag_parser import (
     judge_delta_content_type as _judge_delta_content_type_util,
 )
-from sagents.utils.i18n import t
+from sagents.utils.i18n import normalize_language, t
 from sagents.utils.agent_session_helper import (
     get_live_session as _get_live_session_util,
     get_live_session_context as _get_live_session_context_util,
@@ -1959,6 +1959,48 @@ class AgentBase(ABC):
         session_context = None
         if session_id:
             session_context = self._get_live_session_context(session_id)
+
+        # Keep the response-language contract in the system message even when
+        # volatile runtime context is moved into the latest user message.  This
+        # prevents English tool output or retrieved content from changing the
+        # language of assistant-authored progress and final responses.
+        response_language = language or "en"
+        if session_context is not None:
+            response_language = str(
+                session_context.system_context.get(
+                    "response_language", response_language
+                )
+            )
+        normalized_response_language = normalize_language(response_language)
+        response_language_rules = {
+            "zh": (
+                f"当前回复语言为 {response_language}。所有由 assistant 编写且用户可见的自然语言，"
+                "包括过程说明、进度更新、工具调用前提示、推理摘要和最终答复，都必须使用该语言。"
+                "不得因为工具结果、检索内容或引用材料使用英文而改用英文。代码、命令、路径、标识符、"
+                "枚举、协议字段和逐字引用保持原样。"
+            ),
+            "en": (
+                f"The response language is {response_language}. All user-visible natural language "
+                "authored by the assistant, including process explanations, progress updates, tool "
+                "preambles, reasoning summaries, and final answers, must use this language. Do not "
+                "switch languages because tool results, retrieved content, or quoted material use "
+                "English. Preserve code, commands, paths, identifiers, enums, protocol fields, and "
+                "verbatim quotations."
+            ),
+            "pt": (
+                f"O idioma de resposta é {response_language}. Todo texto em linguagem natural "
+                "produzido pelo assistente e visível ao usuário, incluindo explicações do processo, "
+                "atualizações de progresso, introduções de ferramentas, resumos de raciocínio e a "
+                "resposta final, deve usar esse idioma. Não mude de idioma porque resultados de "
+                "ferramentas, conteúdo recuperado ou citações estejam em inglês. Preserve código, "
+                "comandos, caminhos, identificadores, enums, campos de protocolo e citações literais."
+            ),
+        }
+        stable_buf += (
+            "<response_language>\n"
+            f"{response_language_rules[normalized_response_language]}\n"
+            "</response_language>\n"
+        )
 
         # 1. Role Definition  → stable
         use_identity = False

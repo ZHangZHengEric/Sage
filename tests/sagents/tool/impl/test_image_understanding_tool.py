@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from sagents.tool.impl.image_understanding_tool import ImageUnderstandingTool
+from sagents.utils.i18n import tool_language
 
 
 class FakeSessionContext:
@@ -62,13 +63,14 @@ def test_analyze_image_injects_remote_url_without_extra_llm_call(monkeypatch):
     monkeypatch.setattr(tool, "_fetch_url_image_to_base64", fail_fetch)
     monkeypatch.setattr(tool, "_call_llm_with_image", fail_llm)
 
-    result = asyncio.run(
-        tool.analyze_image(
-            image_path="https://example.com/cat.png",
-            session_id="sess-1",
-            prompt="描述图片里的文字",
+    with tool_language("zh"):
+        result = asyncio.run(
+            tool.analyze_image(
+                image_path="https://example.com/cat.png",
+                session_id="sess-1",
+                prompt="描述图片里的文字",
+            )
         )
-    )
 
     assert result["status"] == "success"
     assert result["data"]["mode"] == "native_multimodal_context"
@@ -100,12 +102,13 @@ def test_analyze_image_rejects_text_only_model_before_image_processing(monkeypat
 
     monkeypatch.setattr(tool, "_build_native_image_content", fail_encode)
 
-    result = asyncio.run(
-        tool.analyze_image(
-            image_path="https://example.com/cat.png",
-            session_id="sess-1",
+    with tool_language("zh"):
+        result = asyncio.run(
+            tool.analyze_image(
+                image_path="https://example.com/cat.png",
+                session_id="sess-1",
+            )
         )
-    )
 
     assert result["status"] == "error"
     assert "不支持图片输入" in result["message"]

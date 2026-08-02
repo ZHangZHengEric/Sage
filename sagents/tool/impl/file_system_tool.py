@@ -6,6 +6,7 @@ from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.file_content_validator import FileContentValidator
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
 )
@@ -522,9 +523,9 @@ class FileSystemTool:
             result: Dict[str, Any] = {
                 "status": "success",
                 "success": True,
-                "message": "File written successfully"
+                "message": tool_t("file.write.success")
                 if validation.get("status") in {"passed", "skipped"}
-                else "File written successfully, but validation found issues",
+                else tool_t("file.write.validation_issues"),
                 "file_path": file_path,
                 "content_length": len(content),
                 "mode": mode,
@@ -800,9 +801,9 @@ class FileSystemTool:
                 return {
                     "status": "success",
                     "message": (
-                        "Line-based replacement ran, but the target range already matched the replacement; the file was unchanged"
+                        tool_t("file.update.unchanged")
                         if validation.get("status") in {"passed", "skipped"}
-                        else "Line-based replacement ran, but the target range already matched the replacement; the file was unchanged and validation found issues"
+                        else tool_t("file.update.unchanged_validation")
                     ),
                     "replacements": 0,
                     "operations_applied": len(operation_summaries),
@@ -826,9 +827,21 @@ class FileSystemTool:
                 "status": "success",
                 "success": True,
                 "message": (
-                    f"Successfully applied {len(operation_summaries)} update operations and made {total_replacements} replacements"
+                    tool_t(
+                        "file.update.success",
+                        params={
+                            "operations": len(operation_summaries),
+                            "replacements": total_replacements,
+                        },
+                    )
                     if validation.get("status") in {"passed", "skipped"}
-                    else f"Successfully applied {len(operation_summaries)} update operations and made {total_replacements} replacements; validation found issues"
+                    else tool_t(
+                        "file.update.validation_issues",
+                        params={
+                            "operations": len(operation_summaries),
+                            "replacements": total_replacements,
+                        },
+                    )
                 ),
                 "replacements": total_replacements,
                 "operations_applied": len(operation_summaries),

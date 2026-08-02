@@ -177,10 +177,24 @@ def tool(
             pass
         _t_returns_end = time.perf_counter() if _profile else None
 
+        localized_description_i18n = dict(description_i18n or {})
+        # Built-in tools are authored across several modules (including desktop
+        # browser and mode-specific tools). Enrich their schemas centrally so
+        # nested object fields and return schemas receive the same zh/en/pt
+        # guarantees as top-level parameters.
+        from .builtin_i18n import enrich_builtin_tool_i18n
+
+        enrich_builtin_tool_i18n(
+            tool_name,
+            localized_description_i18n,
+            parameters,
+            spec_return_data,
+        )
+
         spec = ToolSpec(
             name=tool_name,
             description=parsed_description or "",
-            description_i18n=description_i18n or {},
+            description_i18n=localized_description_i18n,
             func=func,
             parameters=parameters,
             required=required,
