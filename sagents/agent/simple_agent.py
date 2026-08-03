@@ -471,6 +471,40 @@ class SimpleAgent(AgentBase):
         return False
 
     @classmethod
+    def _content_has_ling_action(cls, content: Any) -> bool:
+        """Detect the Ling optional-action protocol marker.
+
+        ``<ling-action ... />`` is emitted only after the current user-facing
+        reply has been closed out. The buttons may start a new user-chosen
+        action, but they are not unfinished work in the current execution.
+        Match an actual opening tag (including HTML-escaped output), not prose
+        that merely mentions the marker name.
+        """
+        text = cls._extract_text_content_for_judge(content).strip()
+        if not text:
+            return False
+        text = unescape(text)
+        for fragment in text.split("<")[1:]:
+            raw_tag = fragment.split(">", 1)[0].strip()
+            if not raw_tag or raw_tag[0] in "/!?":
+                continue
+            tag_name = raw_tag.split(None, 1)[0].rstrip("/").lower()
+            if tag_name == "ling-action":
+                return True
+        return False
+
+    @classmethod
+    def _latest_assistant_has_ling_action(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                return cls._content_has_ling_action(message.get_content())
+            if message.is_user_input_message():
+                return False
+        return False
+
+    @classmethod
     def _latest_assistant_ends_with_question_mark(
         cls, messages_input: List[MessageChunk]
     ) -> bool:
@@ -893,6 +927,17 @@ class SimpleAgent(AgentBase):
             return TaskCompleteDecision(
                 task_interrupted=True,
                 reason="inline questionnaire requires user input",
+            )
+
+        # ling-action 是 Ling 客户端约定的收口标记。按钮代表用户可以另起一个
+        # 可选动作，不代表当前执行还有待完成步骤；不要再交给 LLM judge 猜测。
+        if self._latest_assistant_has_ling_action(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="ling-action marks a closed reply awaiting an optional user action",
             )
 
         # 第一层：确定性规则
