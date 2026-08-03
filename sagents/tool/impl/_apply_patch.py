@@ -90,7 +90,18 @@ def _normalize_patch_path(raw_path: str, line_number: int) -> str:
             line_number=line_number,
             path=raw_path,
         )
-    if any(part.split(":", 1)[0].rstrip(" .").casefold() == ".git" for part in parts):
+    if any(":" in part for part in parts):
+        raise PatchError(
+            f"Patch path components must not contain ':': {raw_path}",
+            code=ToolErrorCode.INVALID_ARGUMENT,
+            line_number=line_number,
+            path=raw_path,
+            hint=(
+                "A colon addresses an NTFS alternate data stream on Windows; "
+                "use plain file names."
+            ),
+        )
+    if any(part.casefold() == ".git" for part in windows_parts):
         raise PatchError(
             f"apply_patch cannot modify Git metadata: {raw_path}",
             code=ToolErrorCode.PERMISSION_DENIED,

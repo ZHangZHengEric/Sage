@@ -6,8 +6,8 @@ import asyncio
 import hashlib
 import os
 import posixpath
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..error_codes import ToolErrorCode, make_tool_error
 from ..tool_base import tool
@@ -57,6 +57,14 @@ class PlannedChange:
         return self.move_actual_path or self.actual_path
 
 
+@dataclass
+class _CommitJournal:
+    """Actual paths this transaction has started and finished mutating."""
+
+    started: Set[str] = field(default_factory=set)
+    completed: Set[str] = field(default_factory=set)
+
+
 class ApplyPatchTool:
     """Apply a preflighted text patch through the active session sandbox."""
 
@@ -72,15 +80,58 @@ class ApplyPatchTool:
         return posixpath.join(normalized_root, relative_path)
 
     @staticmethod
-    def _workspace_lock_key(sandbox: Any) -> str:
+    def _canonical_host_identity(path: str) -> str:
+        return os.path.normcase(
+            os.path.realpath(os.path.abspath(os.path.expanduser(str(path))))
+        )
+
+    @classmethod
+    def _host_workspace_identity(cls, sandbox: Any) -> Optional[str]:
+        """Resolve the host directory that actually backs the workspace.
+
+        Local/Passthrough providers report the virtual workspace path as
+        ``host_workspace_path``, so the volume mount containing the workspace is
+        the canonical identity: providers mounting one host directory at
+        different virtual roots must share a lock, while unrelated host
+        directories mounted at the same virtual root must not.
+        """
         host_workspace = getattr(sandbox, "host_workspace_path", None)
-        if host_workspace:
-            workspace_identity = os.path.normcase(
-                os.path.realpath(
-                    os.path.abspath(os.path.expanduser(str(host_workspace)))
+        if not host_workspace:
+            return None
+        workspace = str(getattr(sandbox, "workspace_path", "") or "") or str(
+            host_workspace
+        )
+        normalized_workspace = workspace.replace("\\", "/").rstrip("/") or "/"
+        best_mount: Optional[Tuple[str, str]] = None
+        for mount in getattr(sandbox, "volume_mounts", None) or []:
+            mount_path = str(getattr(mount, "mount_path", "") or "")
+            host_path = str(getattr(mount, "host_path", "") or "")
+            if not mount_path or not host_path:
+                continue
+            normalized_mount = mount_path.replace("\\", "/").rstrip("/") or "/"
+            if normalized_mount == "/":
+                matches = normalized_workspace.startswith("/")
+            else:
+                matches = normalized_workspace == normalized_mount or (
+                    normalized_workspace.startswith(normalized_mount + "/")
                 )
-            )
-            identity = f"host:{workspace_identity}"
+            if matches and (
+                best_mount is None or len(normalized_mount) > len(best_mount[0])
+            ):
+                best_mount = (normalized_mount, host_path)
+        if best_mount is None:
+            return cls._canonical_host_identity(str(host_workspace))
+        normalized_mount, host_path = best_mount
+        remainder = normalized_workspace[len(normalized_mount) :].strip("/")
+        if remainder:
+            host_path = os.path.join(host_path, *remainder.split("/"))
+        return cls._canonical_host_identity(host_path)
+
+    @classmethod
+    def _workspace_lock_key(cls, sandbox: Any) -> str:
+        host_identity = cls._host_workspace_identity(sandbox)
+        if host_identity:
+            identity = f"host:{host_identity}"
         else:
             sandbox_id = str(getattr(sandbox, "sandbox_id", "") or "")
             workspace = str(getattr(sandbox, "workspace_path", "") or "")
@@ -250,7 +301,12 @@ class ApplyPatchTool:
             await sandbox.ensure_directory(parent)
         await sandbox.write_file(path, content, encoding="utf-8", mode="overwrite")
 
-    async def _commit(self, sandbox: Any, plan: Sequence[PlannedChange]) -> None:
+    async def _commit(
+        self,
+        sandbox: Any,
+        plan: Sequence[PlannedChange],
+        journal: Optional[_CommitJournal] = None,
+    ) -> None:
         writes: List[Tuple[str, str]] = []
         deletes: List[str] = []
         for change in plan:
@@ -269,9 +325,47 @@ class ApplyPatchTool:
         # Complete every content write before destructive deletes. This keeps the
         # common failure path recoverable without recreating source files.
         for path, content in writes:
+            if journal is not None:
+                journal.started.add(path)
             await self._write_file(sandbox, path, content)
+            if journal is not None:
+                journal.completed.add(path)
         for path in deletes:
+            if journal is not None:
+                journal.started.add(path)
             await sandbox.delete_file(path)
+            if journal is not None:
+                journal.completed.add(path)
+
+    async def _commit_and_verify(
+        self,
+        sandbox: Any,
+        plan: Sequence[PlannedChange],
+        journal: _CommitJournal,
+    ) -> None:
+        await self._commit(sandbox, plan, journal=journal)
+        await self._verify_commit(sandbox, plan)
+
+    @staticmethod
+    async def _settle(task: "asyncio.Future[Any]") -> bool:
+        """Wait for ``task`` to finish even while this coroutine is cancelled.
+
+        The task is shielded so a cancelled tool call never interrupts an
+        in-flight sandbox mutation; rollback therefore always observes settled
+        file states. Returns True when a cancellation request arrived while
+        waiting. The task's result or exception stays on the task object.
+        """
+        interrupted = False
+        while True:
+            try:
+                await asyncio.shield(task)
+                return interrupted
+            except asyncio.CancelledError:
+                if task.done():
+                    return True
+                interrupted = True
+            except BaseException:
+                return interrupted
 
     @staticmethod
     async def _verify_commit(sandbox: Any, plan: Sequence[PlannedChange]) -> None:
@@ -335,6 +429,7 @@ class ApplyPatchTool:
         sandbox: Any,
         snapshots: Dict[str, FileSnapshot],
         plan: Sequence[PlannedChange],
+        journal: Optional[_CommitJournal] = None,
     ) -> Dict[str, Any]:
         errors: List[Dict[str, str]] = []
         planned_states = self._planned_file_states(plan)
@@ -347,7 +442,19 @@ class ApplyPatchTool:
                     continue
 
                 planned = planned_states.get(snapshot.relative_path)
-                if planned is None or not self._same_file_state(current, planned):
+                planned_matches = planned is not None and self._same_file_state(
+                    current, planned
+                )
+                # A mutation this transaction started but never completed can
+                # leave content matching neither the snapshot nor the planned
+                # state. That torn write is ours, not an external edit, so it
+                # must be restored.
+                interrupted_write = (
+                    journal is not None
+                    and snapshot.actual_path in journal.started
+                    and snapshot.actual_path not in journal.completed
+                )
+                if not planned_matches and not interrupted_write:
                     raise OSError(
                         "Rollback skipped because the path changed outside this patch "
                         f"transaction: {snapshot.relative_path}"
@@ -523,30 +630,51 @@ class ApplyPatchTool:
             except PatchError as error:
                 return self._patch_error_payload(error)
 
-            try:
-                await self._commit(sandbox, plan)
-                await self._verify_commit(sandbox, plan)
-            except asyncio.CancelledError:
-                rollback = await self._rollback(sandbox, snapshots, plan)
-                if not rollback["succeeded"]:
-                    logger.error(
-                        "ApplyPatchTool: rollback after cancellation failed "
-                        f"for session {session_id}: {rollback['errors']}"
-                    )
-                raise
-            except Exception as exc:
-                rollback = await self._rollback(sandbox, snapshots, plan)
+            # Shield the commit from cancellation so an in-flight write always
+            # settles before rollback runs; a cancelled call then either keeps
+            # the fully committed state for one instant and restores it, or
+            # restores immediately — never a partially written file.
+            journal = _CommitJournal()
+            commit_task = asyncio.ensure_future(
+                self._commit_and_verify(sandbox, plan, journal)
+            )
+            interrupted = await self._settle(commit_task)
+            commit_cancelled = commit_task.cancelled()
+            commit_error = None if commit_cancelled else commit_task.exception()
+
+            if interrupted or commit_cancelled or commit_error is not None:
+                rollback_task = asyncio.ensure_future(
+                    self._rollback(sandbox, snapshots, plan, journal=journal)
+                )
+                await self._settle(rollback_task)
+                rollback_error = rollback_task.exception()
+                rollback = (
+                    rollback_task.result()
+                    if rollback_error is None
+                    else {
+                        "attempted": True,
+                        "succeeded": False,
+                        "errors": [{"path": "*", "error": str(rollback_error)}],
+                    }
+                )
+                if interrupted or commit_cancelled:
+                    if not rollback["succeeded"]:
+                        logger.error(
+                            "ApplyPatchTool: rollback after cancellation failed "
+                            f"for session {session_id}: {rollback['errors']}"
+                        )
+                    raise asyncio.CancelledError
                 logger.error(
-                    f"ApplyPatchTool: commit failed for session {session_id}: {exc}"
+                    f"ApplyPatchTool: commit failed for session {session_id}: {commit_error}"
                 )
                 code = (
                     ToolErrorCode.PERMISSION_DENIED
-                    if isinstance(exc, PermissionError)
+                    if isinstance(commit_error, PermissionError)
                     else ToolErrorCode.SANDBOX_ERROR
                 )
                 return make_tool_error(
                     code,
-                    f"Patch commit failed: {exc}",
+                    f"Patch commit failed: {commit_error}",
                     rollback=rollback,
                 )
 

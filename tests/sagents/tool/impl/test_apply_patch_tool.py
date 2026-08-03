@@ -109,6 +109,10 @@ def test_parse_patch_supports_add_update_delete_and_move():
         ".git /config",
         ".git:metadata/config",
         ".. /outside.txt",
+        "notes.txt:secret",
+        "notes.txt:secret:$DATA",
+        "nested/notes.txt:Zone.Identifier",
+        "dir:stream/file.txt",
     ],
 )
 def test_parse_patch_rejects_paths_outside_workspace(path):
@@ -119,6 +123,19 @@ def test_parse_patch_rejects_paths_outside_workspace(path):
 +blocked
 *** End Patch"""
         )
+
+
+def test_parse_patch_rejects_alternate_data_stream_paths():
+    with pytest.raises(PatchError) as exc_info:
+        parse_patch(
+            """*** Begin Patch
+*** Add File: notes.txt:secret
++blocked
+*** End Patch"""
+        )
+
+    assert exc_info.value.code == "INVALID_ARGUMENT"
+    assert "':'" in str(exc_info.value)
 
 
 def test_parse_patch_rejects_invalid_utf8_text():
@@ -282,6 +299,60 @@ def test_workspace_lock_key_uses_host_workspace_across_sessions(tmp_path):
     assert ApplyPatchTool._workspace_lock_key(
         first
     ) != ApplyPatchTool._workspace_lock_key(remote)
+
+
+def test_workspace_lock_key_uses_mount_host_path_not_virtual_root(tmp_path):
+    shared_host = tmp_path / "shared"
+    shared_host.mkdir()
+    other_host = tmp_path / "other"
+    other_host.mkdir()
+
+    first = SimpleNamespace(
+        host_workspace_path="/sage-a",
+        workspace_path="/sage-a",
+        sandbox_id="session-a",
+        volume_mounts=[VolumeMount(str(shared_host), "/sage-a")],
+    )
+    second = SimpleNamespace(
+        host_workspace_path="/sage-b",
+        workspace_path="/sage-b",
+        sandbox_id="session-b",
+        volume_mounts=[VolumeMount(str(shared_host), "/sage-b")],
+    )
+    unrelated = SimpleNamespace(
+        host_workspace_path="/sage-a",
+        workspace_path="/sage-a",
+        sandbox_id="session-c",
+        volume_mounts=[VolumeMount(str(other_host), "/sage-a")],
+    )
+
+    # Same host directory behind different virtual roots must share one lock.
+    assert ApplyPatchTool._workspace_lock_key(
+        first
+    ) == ApplyPatchTool._workspace_lock_key(second)
+    # Different host directories behind the same virtual root must not.
+    assert ApplyPatchTool._workspace_lock_key(
+        first
+    ) != ApplyPatchTool._workspace_lock_key(unrelated)
+
+
+def test_workspace_lock_key_resolves_workspace_nested_in_mount(tmp_path):
+    mounted = SimpleNamespace(
+        host_workspace_path="/mnt/project",
+        workspace_path="/mnt/project",
+        sandbox_id="mounted",
+        volume_mounts=[VolumeMount(str(tmp_path), "/mnt")],
+    )
+    direct = SimpleNamespace(
+        host_workspace_path=str(tmp_path / "project"),
+        workspace_path=str(tmp_path / "project"),
+        sandbox_id="direct",
+        volume_mounts=[],
+    )
+
+    assert ApplyPatchTool._workspace_lock_key(
+        mounted
+    ) == ApplyPatchTool._workspace_lock_key(direct)
 
 
 @pytest.mark.asyncio
@@ -451,7 +522,7 @@ async def test_apply_patch_rollback_preserves_external_edits(monkeypatch):
     tool = ApplyPatchTool()
     monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
 
-    async def fail_after_external_edit(active_sandbox, plan):
+    async def fail_after_external_edit(active_sandbox, plan, journal=None):
         change = plan[0]
         assert change.output_actual_path is not None
         assert change.new_content is not None
@@ -560,7 +631,7 @@ async def test_apply_patch_rolls_back_when_commit_is_cancelled(monkeypatch):
     tool = ApplyPatchTool()
     monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
 
-    async def cancelled_commit(active_sandbox, plan):
+    async def cancelled_commit(active_sandbox, plan, journal=None):
         change = plan[0]
         path = change.output_actual_path
         content = change.new_content
@@ -582,6 +653,87 @@ async def test_apply_patch_rolls_back_when_commit_is_cancelled(monkeypatch):
             session_id="patch-cancelled",
         )
 
+    assert sandbox.files == {"/workspace/source.txt": "old\n"}
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_cancelled_mid_write_restores_original_content(monkeypatch):
+    """Regression: cancelling inside write_file after a partial mutation.
+
+    The commit is shielded, so the provider's in-flight write settles before
+    rollback runs and the file is restored to its snapshot — never left at the
+    partially written content.
+    """
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
+
+    class PartialWriteSandbox(FakeSandbox):
+        async def write_file(self, path, content, encoding="utf-8", mode="overwrite"):
+            self.write_calls.append(path)
+            self.files[path] = "partial\n"
+            write_started.set()
+            await release_write.wait()
+            self.files[path] = content
+
+    sandbox = PartialWriteSandbox({"/workspace/source.txt": "old\n"})
+    tool = ApplyPatchTool()
+    monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
+
+    task = asyncio.ensure_future(
+        tool.apply_patch(
+            patch="""*** Begin Patch
+*** Update File: source.txt
+@@
+-old
++new
+*** End Patch""",
+            session_id="patch-cancel-mid-write",
+        )
+    )
+    await write_started.wait()
+    task.cancel()
+    release_write.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert sandbox.files == {"/workspace/source.txt": "old\n"}
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_restores_torn_write_after_commit_failure(monkeypatch):
+    """A write that partially mutated the file before failing must be rolled
+    back even though the content matches neither the snapshot nor the planned
+    state: the torn write belongs to this transaction, not an external editor."""
+
+    class TornWriteSandbox(FakeSandbox):
+        tear_next_write = True
+
+        async def write_file(self, path, content, encoding="utf-8", mode="overwrite"):
+            self.write_calls.append(path)
+            if self.tear_next_write:
+                self.tear_next_write = False
+                self.files[path] = "partial\n"
+                raise OSError("simulated interrupted write")
+            self.files[path] = content
+
+    sandbox = TornWriteSandbox({"/workspace/source.txt": "old\n"})
+    tool = ApplyPatchTool()
+    monkeypatch.setattr(tool, "_get_sandbox", lambda session_id: sandbox)
+
+    result = await tool.apply_patch(
+        patch="""*** Begin Patch
+*** Update File: source.txt
+@@
+-old
++new
+*** End Patch""",
+        session_id="patch-torn-write",
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "SANDBOX_ERROR"
+    assert result["rollback"]["succeeded"] is True
     assert sandbox.files == {"/workspace/source.txt": "old\n"}
 
 
