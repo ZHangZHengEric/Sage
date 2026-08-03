@@ -551,10 +551,16 @@ class SimpleAgent(AgentBase):
         """
         raw_decision = result.get("decision")
         decision = raw_decision.strip().lower() if isinstance(raw_decision, str) else ""
-        if decision == "continue":
+        if "decision" in result:
+            if decision == "continue":
+                return False
+            if decision in {"completed", "need_user_input", "blocked"}:
+                return True
+            logger.warning(
+                "SimpleAgent: task_complete_judge 返回非法 decision="
+                f"{raw_decision!r}，默认继续执行"
+            )
             return False
-        if decision in {"completed", "need_user_input", "blocked"}:
-            return True
 
         task_interrupted = self._parse_task_interrupted_value(
             result.get("task_interrupted", False)
@@ -986,7 +992,7 @@ class SimpleAgent(AgentBase):
             expected_from_structured = (
                 normalized_structured_decision
                 in {"completed", "need_user_input", "blocked"}
-                if normalized_structured_decision
+                if "decision" in result
                 else legacy_value
             )
             if (

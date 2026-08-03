@@ -813,6 +813,21 @@ def test_structured_judge_decision_takes_priority_over_legacy_boolean():
     )
 
 
+def test_invalid_structured_decision_fails_closed_to_continue():
+    agent = _agent()
+
+    invalid_results = [
+        {"decision": "done"},
+        {"decision": "done", "task_interrupted": True},
+        {"decision": "done", "reason": "need user input"},
+        {"decision": ""},
+        {"decision": None, "task_interrupted": True},
+    ]
+
+    for result in invalid_results:
+        assert agent._task_interrupted_from_judge_result(result) is False
+
+
 def test_structured_need_user_input_plain_request_is_accepted(monkeypatch):
     agent = _agent()
 
