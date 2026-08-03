@@ -108,28 +108,34 @@ turn_status_coerced_note = {
 
 # 任务完成判断模板
 task_complete_template = {
-    "zh": """你要根据最近的对话和执行过程，判断此刻是否可以安全地中断执行任务（视为阶段结束），还是应该继续执行。
+    "zh": """你要根据最近的对话和执行过程，把当前状态严格归类为 continue、completed、need_user_input 或 blocked。不要把“停止本轮”笼统等同于“任务完成”。
 
-注意：已经有一层基于客观事实的规则（例如：最后一条是工具结果、明显的处理中提示、以冒号结尾等）会优先判断“必须继续执行”。你只需要在这些规则未命中时，基于语义做最终判断。
+注意：已经有一层基于客观事实的规则（例如：最后一条是工具结果、工具参数解析失败、以冒号结尾等）会优先判断“必须继续执行”。你只需要在这些规则未命中时，基于语义做最终判断。
 
 ## 你的判断目标
 1. 准确识别“用户需求是否已经被充分满足”。
 2. 区分“中间过程说明/进度汇报”和“面向用户的最终交付”。
-3. 当不确定时，倾向于继续执行（即 task_interrupted = false）。
+3. 当不确定时，输出 continue。
 4. 核对 Assistant 对执行动作的声明是否有对应执行证据；没有执行证据就不能视为结束。
 
-## 需要中断执行任务（task_interrupted = true）的情况：
+## 必须按顺序执行的判定门槛
+1. **先应用 Todo 硬约束**：只要权威 Todo 中仍有 pending/in_progress 项，decision 只能是 continue、need_user_input 或 blocked，绝对不能是 completed。Todo 未完成本身不妨碍输出 need_user_input 或 blocked。
+2. **检查 need_user_input**：仅当 Assistant 最后一条回复已经提出了具体、可回答的问题/选项/资料请求，而且缺失内容无法从上下文推断、无法用现有工具获取、也无法用安全合理的默认值继续时，才能输出 need_user_input。必须能指出究竟缺少什么。
+3. **检查 blocked**：只有发生了明确且不可自行恢复的外部阻塞，并且回复已解释阻塞事实时，才能输出 blocked。普通失败、尚未尝试替代方案、或“需要先检查”都不是 blocked。
+4. **最后区分 completed 与 continue**：只有用户原始目标已经全部满足，所需动作有成功证据，Todo 全部完成，且没有承诺中的后续动作时，才能输出 completed；否则输出 continue。Assistant 承诺后续动作、只汇报计划/进度或用户要求的动作尚无成功证据，都属于 continue。
+
+## 可以输出 completed / need_user_input / blocked 的情况：
 - 你认为当前对话中，Assistant 已经给出了**完整、清晰的最终回答**，用户不需要再等待后续操作。
 - 如果有工具调用，其关键结果已经用自然语言解释清楚，用户可以直接根据当前回复采取行动。
 - 当前回复没有任何“接下来/然后/我将/下一步”等继续执行的暗示。
-- 当前需要用户确认、用户补充信息、或用户做选择后才能继续时，必须中断并等待用户输入。
-- 如果 Assistant 已经交付了当前阶段能完成的产物、结论或阻塞说明，并明确向用户询问缺失信息/规格/确认项，即使原始大任务还没有完全生成最终对象，也必须中断等待用户。
-- 当前回复只是提供需要用户选择或确认的可选后续动作（例如“如果你需要，下一步我可以...”“If you want, I can ... next.”），也必须中断并等待用户确认，不要当成自动继续执行。
+- 只有满足上面的 need_user_input 门槛，且确实必须由用户确认、补充信息或做选择后才能继续时，才输出 need_user_input。
+- 如果 Assistant 已交付当前阶段产物并提出了具体问题，仍须核对该问题是否客观阻塞、是否能自主解决；只有确实无法自主继续时才输出 need_user_input。
+- 仅在原始目标已经完整交付时，“如果你需要，我还可以……”之类的可选增值项才不要求继续；这种情况应判 completed，而不是 need_user_input。不能把原始范围内尚未完成的工作包装成可选项来停止。
 - 不要仅因为 Assistant 使用了“我可以开始/我可以继续/I can start/I can continue”这类陈述句就判断需要用户确认；只有它明确提出问题、选择项、确认请求，或说明缺少用户输入时，才算等待用户。
 - 必须根据 Assistant **已经交付**给用户的可回答内容判断，不得把“准备提问”“将要确认”或“进入确认阶段”推断为“已在等待用户”。
-- 如果用户只是问候、闲聊或情绪表达，Assistant 已经自然回应且没有承诺后续动作，可以中断。
+- 如果用户只是问候、闲聊或情绪表达，Assistant 已经自然回应且没有承诺后续动作，可以输出 completed。
 
-## 需要继续执行任务（task_interrupted = false）的情况：
+## 必须输出 continue 的情况：
 - 当前回复主要是在**说明过程、汇报进度、罗列中间产物**，而不是面向用户的最终结果。
 - 你觉得还缺少总结、整理、格式化、补充说明等步骤，才能算真正给到用户交付。
 - 当前回复虽然说“已经完成了某个阶段”，但从整体任务看，仍然有后续要做的事情。
@@ -137,17 +143,19 @@ task_complete_template = {
 - 如果最后回复只说“下面进入基础要求确认阶段”“接下来确认规格”或类似的阶段预告，却还没有给出具体问题、选项、待补充字段或明确确认请求，必须继续执行。
 - 如果最近用户已经明确确认开始、继续、按计划执行，Assistant 随后给出“我可以开始/我可以继续/I can start/I can continue”的状态陈述或能力说明，且没有明确向用户提问或要求选择，必须继续执行，不要把它当成新的确认请求。
 - 如果用户要求创建、更新、删除、保存、查询或验证某个对象，但当前只看到承诺/计划，没有看到工具调用成功或明确完成结果，必须继续。
+- “调用过工具”不等于成功；工具结果为空、失败、取消、超时或只完成准备步骤时，必须继续或尝试恢复。
 - 如果 Assistant 声称已经执行了读取、搜索、修改、创建、删除、保存、运行命令、测试、验证、提交、推送、发送、发布等动作，但最近执行过程没有对应成功的工具调用结果或明确验证结果，必须继续；口头说“已完成/已处理/已验证”本身不算执行证据。
 - 多步骤任务只完成了部分步骤，且没有明确等待用户选择时，必须继续。
 - 如果需要依赖外部状态或文件内容，但最近执行过程没有对应工具结果或明确验证结果，必须继续。
 
 ## 优先级规则：
-- “需要用户确认/输入/补充规格才能继续”优先于“原始任务尚未完全完成”。
-- 如果 Assistant 的最后回复已经把已完成内容、不能继续的原因、以及需要用户回答的问题讲清楚，task_interrupted 必须是 true。
+- Assistant 自己声称“需要确认/输入”不构成证据。必须同时存在明确问题和客观、不可自行补足的缺失信息；否则继续执行。
+- 用户已经授权开始/继续后，不得再次索要同一确认。
+- 如果 Assistant 的最后回复已经把已完成内容、客观上不能继续的原因、以及需要用户回答的具体问题讲清楚，decision 才能是 need_user_input。
 
 ## 输出一致性规则（必须遵守）：
-1. 如果 reason 表示“等待工具调用/等待生成/处理中”，则 task_interrupted 必须是 false。
-2. 如果 reason 表示“等待用户确认/等待用户输入/需要用户补充”，则 task_interrupted 必须是 true。
+1. 如果 reason 表示“等待工具调用/等待生成/处理中”，decision 必须是 continue。
+2. 如果 decision 是 need_user_input，reason 必须明确写出所缺的输入，且最近 Assistant 回复中必须存在对应的真实提问或请求。
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
@@ -155,40 +163,39 @@ task_complete_template = {
 输出格式（只能输出 JSON）：
 ```json
 {{
-    "reason": "简短原因说明，不超过20个字",
-    "task_interrupted": true
-}}
-```
-或
-```json
-{{
-    "reason": "简短原因说明，不超过20个字",
-    "task_interrupted": false
+    "decision": "continue|completed|need_user_input|blocked",
+    "reason": "具体说明已满足或仍缺少的条件"
 }}
 ```
 """,
-    "en": """Decide from the recent conversation and execution trace whether it is safe to interrupt task execution now (treat as end of this phase) or whether execution should continue.
+    "en": """Classify the current state strictly as continue, completed, need_user_input, or blocked from the recent conversation and execution trace. Do not collapse “stop this turn” into “task completed.”
 
-Note: another layer of objective rules (e.g. last turn is a tool result, clear in-progress phrasing, ends with a colon, etc.) is applied first and may require "must continue." You only make the final semantic judgment when those rules do not apply.
+Note: another layer of objective rules (e.g. last turn is a tool result, tool argument parsing failed, or text ends with a colon) is applied first and may require "must continue." You only make the final semantic judgment when those rules do not apply.
 
 ## Your judgment goals
 1. Accurately tell whether the user's need has been fully satisfied.
 2. Distinguish "interim process narration / progress updates" from "user-facing final delivery."
-3. When uncertain, lean toward continuing (i.e. task_interrupted = false).
+3. When uncertain, output continue.
 4. Check whether the Assistant's claims about executed actions are backed by execution evidence; without evidence, do not end the task.
 
-## When to interrupt (task_interrupted = true)
+## Mandatory decision gates, in order
+1. **Apply the Todo invariant first**: while an authoritative Todo has pending/in_progress items, decision may only be continue, need_user_input, or blocked—never completed. An open Todo does not itself prevent need_user_input or blocked.
+2. **Check need_user_input**: use it only when the latest Assistant reply contains a concrete, answerable question/choice/data request and the missing information cannot be inferred, obtained with available tools, or replaced by a safe reasonable default. You must identify exactly what is missing.
+3. **Check blocked**: use it only for a concrete external blocker that cannot be recovered autonomously and that the reply has explained. An ordinary failure, an untried alternative, or “I need to inspect first” is not blocked.
+4. **Finally distinguish completed from continue**: use completed only when the entire original goal is satisfied, required actions have successful evidence, every Todo is complete, and no promised follow-up action remains; otherwise output continue. A promised next action, a plan/progress-only reply, or missing success evidence all require continue.
+
+## When completed / need_user_input / blocked may be used
 - The Assistant has already given a **complete, clear final answer** in the current turn; the user need not wait for further work.
 - If there were tool calls, their key results are explained in natural language so the user can act on this reply.
 - The reply does not suggest continuation such as "next", "then", "I will", "next step", etc.
-- User confirmation, more input, or a choice is required before continuing—then you must interrupt and wait for the user.
-- If the Assistant has delivered the current phase's artifact, conclusion, or blocker explanation and clearly asks the user for missing information, specs, or confirmation, interrupt and wait even if the original larger task has not produced the final object yet.
-- If the reply only offers an optional follow-up that depends on the user's choice or confirmation, such as "If you want, I can ... next." or "Would you like me to continue with ...?", you must interrupt and wait for user confirmation. Do not treat that as automatic continuation.
+- Output need_user_input only when the gate above is satisfied and confirmation, missing information, or a user choice is genuinely required before continuing.
+- Even when the Assistant delivered a phase artifact and asked a concrete question, verify that the question is objectively blocking and cannot be resolved autonomously. Use need_user_input only when autonomous continuation is genuinely impossible.
+- Only when the original goal is already fully delivered may “If you want, I can also…” be treated as an optional extra. Classify that as completed, not need_user_input. Never reframe unfinished work inside the original scope as optional in order to stop.
 - Do not infer that user confirmation is needed merely because the Assistant uses a declarative sentence such as "I can start", "I can continue", or "I can start that production pass now." Treat it as waiting for the user only when the Assistant clearly asks a question, presents choices, requests confirmation, or says user input is missing.
 - Judge only from answerable content the Assistant has **already delivered** to the user. Do not turn "preparing to ask", "about to confirm", or "entering the confirmation phase" into an inference that the Assistant is already waiting for the user.
-- If the user only greeted, chatted casually, or expressed emotion, and the Assistant has naturally replied without promising follow-up work, interrupt.
+- If the user only greeted, chatted casually, or expressed emotion, and the Assistant has naturally replied without promising follow-up work, output completed.
 
-## When to continue (task_interrupted = false)
+## When continue is mandatory
 - The reply is mainly **process explanation, progress reporting, or listing intermediate artifacts**, not a final user-facing outcome.
 - You believe summarizing, tidying, formatting, or further explanation is still needed for a true deliverable.
 - The reply says a phase is done but, for the overall task, there is clearly more to do.
@@ -196,17 +203,19 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 - If the latest reply only announces a phase such as "Next I will confirm the basic requirements" or "Now entering requirements confirmation" but has not yet provided a concrete question, choices, fields to fill in, or an explicit confirmation request, continue execution.
 - If the recent user message already confirmed starting, continuing, or proceeding with the plan, and the Assistant then says "I can start" / "I can continue" as a status or capability statement without asking a question or requesting a choice, continue execution; do not treat it as a new confirmation request.
 - If the user asked to create, update, delete, save, query, or verify an object, but the current trace only shows a promise/plan and no successful tool call or clear completed result, continue.
+- A tool call is not automatically successful evidence. Continue or recover when its result is empty, failed, cancelled, timed out, or only a preparation step.
 - If the Assistant claims it has read, searched, modified, created, deleted, saved, run a command, tested, verified, committed, pushed, sent, published, or performed another execution action, but the recent trace has no corresponding successful tool result or explicit verification result, continue. Saying "done", "handled", or "verified" is not execution evidence by itself.
 - If only part of a multi-step task is complete and the Assistant is not explicitly waiting for the user to choose, continue.
 - If completion depends on external state or file contents but the recent trace has no corresponding tool result or explicit verification result, continue.
 
 ## Priority rules
-- "Need user confirmation/input/missing specs before continuing" takes priority over "the original task is not fully finished."
-- If the Assistant's latest reply clearly states what was completed, why it cannot proceed, and what the user must answer next, task_interrupted must be true.
+- The Assistant's assertion that it “needs confirmation/input” is not evidence. There must also be a concrete question and objectively missing information that cannot be filled autonomously; otherwise continue.
+- After the user has authorized start/continuation, never request the same confirmation again.
+- Only when the latest reply states what was completed, the objective reason it cannot proceed, and the specific question the user must answer may decision be need_user_input.
 
 ## Output consistency (mandatory)
-1. If reason indicates waiting for a tool / generation / in progress, then task_interrupted must be false.
-2. If reason indicates waiting for user confirmation / user input / user to supply more, then task_interrupted must be true.
+1. If reason indicates waiting for a tool / generation / in progress, decision must be continue.
+2. For need_user_input, reason must name the missing input and the latest Assistant reply must contain the corresponding real question or request.
 
 ## User conversation history and recent execution
 {messages}
@@ -214,39 +223,39 @@ Note: another layer of objective rules (e.g. last turn is a tool result, clear i
 Output format (JSON only):
 ```json
 {{
-    "reason": "brief reason, max 20 characters",
-    "task_interrupted": true
-}}
-```
-or
-```json
-{{
-    "reason": "brief reason, max 20 characters",
-    "task_interrupted": false
+    "decision": "continue|completed|need_user_input|blocked",
+    "reason": "specific satisfied or missing condition"
 }}
 ```
 """,
-    "pt": """Decida, com base na conversa recente e no rastro de execução, se é seguro interromper a execução da tarefa agora (fim desta fase) ou se a execução deve continuar.
+    "pt": """Classifique estritamente o estado atual como continue, completed, need_user_input ou blocked com base na conversa recente e no rastro de execução. Não confunda “parar este turno” com “tarefa concluída”.
 
-Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resultado de ferramenta, sinal claro de "em andamento", termina com dois pontos, etc.) tem prioridade e pode exigir "deve continuar." Você só faz o juízo semântico final quando essas regras não se aplicam.
+Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resultado de ferramenta, falha ao analisar argumentos de ferramenta ou texto terminado em dois pontos) tem prioridade e pode exigir "deve continuar." Você só faz o juízo semântico final quando essas regras não se aplicam.
 
 ## Objetivos do seu juízo
 1. Reconhecer com precisão se a necessidade do usuário já foi plenamente atendida.
 2. Distinguir "explicação de processo / relatório de progresso" de "entrega final voltada ao usuário."
-3. Em caso de dúvida, tenda a continuar (ou seja, task_interrupted = false).
+3. Em caso de dúvida, retorne continue.
 4. Verificar se as declarações do Assistente sobre ações executadas têm evidência de execução correspondente; sem evidência, não encerre a tarefa.
 
-## Quando interromper (task_interrupted = true)
+## Portas de decisão obrigatórias, nesta ordem
+1. **Primeiro aplique a regra rígida do Todo**: enquanto um Todo autoritativo tiver itens pending/in_progress, decision só pode ser continue, need_user_input ou blocked—nunca completed. Um Todo aberto não impede need_user_input nem blocked.
+2. **Verifique need_user_input**: use somente quando a última resposta contém pergunta, escolha ou pedido de dados concreto e respondível, e a informação não pode ser inferida, obtida com as ferramentas disponíveis nem substituída por um padrão seguro e razoável. Indique exatamente o que falta.
+3. **Verifique blocked**: use somente para bloqueio externo concreto, irrecuperável de forma autônoma e já explicado na resposta. Falha comum, alternativa ainda não tentada ou “preciso verificar primeiro” não é blocked.
+4. **Por fim diferencie completed de continue**: use completed somente quando todo o objetivo original foi atendido, as ações necessárias têm evidência de sucesso, todos os itens Todo estão concluídos e não resta ação prometida; caso contrário, retorne continue. Próxima ação prometida, resposta apenas de plano/progresso ou falta de evidência de sucesso exigem continue.
+
+## Quando completed / need_user_input / blocked podem ser usados
 - O Assistente já forneceu uma **resposta final completa e clara** no turno atual; o usuário não precisa aguardar mais ações.
 - Se houve chamadas de ferramenta, os resultados essenciais foram explicados em linguagem natural para o usuário poder agir com base nesta resposta.
 - A resposta não sugere continuação (ex.: "em seguida", "então", "vou", "próximo passo", etc.).
-- É necessária confirmação do usuário, informação adicional ou escolha para prosseguir—então deve interromper e aguardar o usuário.
-- Se a resposta apenas oferece uma continuação opcional que depende de escolha ou confirmação do usuário (ex.: "Se quiser, posso ... em seguida." ou "Gostaria que eu continuasse com ...?"), deve interromper e aguardar confirmação do usuário. Não trate isso como continuação automática.
+- Retorne need_user_input somente quando a porta acima for satisfeita e confirmação, informação ausente ou escolha do usuário for realmente necessária para prosseguir.
+- Mesmo que o Assistente tenha entregue um artefato da fase e feito uma pergunta concreta, verifique se ela é objetivamente bloqueante e não pode ser resolvida de forma autônoma. Use need_user_input somente quando continuar sozinho for realmente impossível.
+- Somente quando o objetivo original já estiver totalmente entregue, “Se quiser, também posso…” será extra opcional. Classifique como completed, não need_user_input. Nunca transforme trabalho inacabado do escopo original em opcional para poder parar.
 - Não infira que confirmação do usuário é necessária apenas porque o Assistente usa uma frase declarativa como "posso começar", "posso continuar" ou "posso iniciar essa passagem de produção agora." Trate como espera pelo usuário somente quando o Assistente claramente faz uma pergunta, apresenta opções, pede confirmação ou diz que falta entrada do usuário.
 - Julgue apenas pelo conteúdo respondível que o Assistente **já entregou** ao usuário. Não transforme "preparando-se para perguntar", "prestes a confirmar" ou "entrando na fase de confirmação" em uma inferência de que o Assistente já está aguardando o usuário.
-- Se o usuário apenas cumprimentou, conversou casualmente ou expressou emoção, e o Assistente respondeu naturalmente sem prometer trabalho posterior, interrompa.
+- Se o usuário apenas cumprimentou, conversou casualmente ou expressou emoção, e o Assistente respondeu naturalmente sem prometer trabalho posterior, retorne completed.
 
-## Quando continuar (task_interrupted = false)
+## Quando continue é obrigatório
 - A resposta é sobretudo **explicação de processo, progresso ou listagem de artefatos intermediários**, e não o resultado final para o usuário.
 - Ainda faltam passos como resumir, organizar, formatar ou complementar para uma entrega real.
 - A resposta diz que uma fase foi concluída, mas no conjunto da tarefa ainda há trabalho a fazer.
@@ -255,16 +264,18 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 - Se a mensagem recente do usuário já confirmou começar, continuar ou prosseguir com o plano, e o Assistente então diz "posso começar" / "posso continuar" como declaração de status ou capacidade sem fazer pergunta nem pedir escolha, continue a execução; não trate isso como novo pedido de confirmação.
 - Se o usuário pediu para criar, atualizar, excluir, salvar, consultar ou verificar um objeto, mas o rastro atual mostra apenas promessa/plano e nenhuma chamada de ferramenta bem-sucedida ou resultado claramente concluído, continue.
 - Se o Assistente afirma que leu, pesquisou, modificou, criou, excluiu, salvou, executou um comando, testou, verificou, fez commit, fez push, enviou, publicou ou realizou outra ação de execução, mas o rastro recente não contém resultado de ferramenta bem-sucedido correspondente nem resultado de verificação explícito, continue. Dizer "feito", "tratado" ou "verificado" não é evidência de execução por si só.
+- Uma chamada de ferramenta não é automaticamente evidência de sucesso. Continue ou tente recuperar se o resultado estiver vazio, falhar, for cancelado, expirar ou representar apenas preparação.
 - Se apenas parte de uma tarefa de múltiplas etapas foi concluída e o Assistente não está explicitamente aguardando uma escolha do usuário, continue.
 - Se a conclusão depende de estado externo ou conteúdo de arquivo, mas o rastro recente não tem resultado de ferramenta correspondente nem verificação explícita, continue.
 
 ## Regras de prioridade
-- "Precisa de confirmação/entrada/especificações faltantes do usuário antes de continuar" tem prioridade sobre "a tarefa original ainda não está totalmente concluída."
-- Se a última resposta do Assistente explica claramente o que foi concluído, por que não pode prosseguir e o que o usuário precisa responder em seguida, task_interrupted deve ser true.
+- A afirmação do Assistente de que “precisa de confirmação/entrada” não é evidência. Deve haver também pergunta concreta e informação objetivamente ausente que não possa ser preenchida de forma autônoma; caso contrário, continue.
+- Depois que o usuário autorizar início/continuação, nunca peça a mesma confirmação novamente.
+- Somente quando a última resposta disser o que foi concluído, o motivo objetivo de não poder prosseguir e a pergunta específica a responder, decision pode ser need_user_input.
 
 ## Consistência da saída (obrigatório)
-1. Se o motivo indicar aguardar ferramenta / geração / em andamento, task_interrupted deve ser false.
-2. Se o motivo indicar aguardar confirmação do usuário / entrada do usuário / o usuário fornecer mais informação, task_interrupted deve ser true.
+1. Se o motivo indicar aguardar ferramenta / geração / em andamento, decision deve ser continue.
+2. Para need_user_input, o motivo deve indicar a entrada ausente e a última resposta do Assistente deve conter a pergunta ou solicitação real correspondente.
 
 ## Histórico da conversa e execução recente
 {messages}
@@ -272,15 +283,8 @@ Nota: outra camada de regras objetivas (por exemplo, a última mensagem é resul
 Formato de saída (somente JSON):
 ```json
 {{
-    "reason": "motivo breve, no máx. 20 caracteres",
-    "task_interrupted": true
-}}
-```
-ou
-```json
-{{
-    "reason": "motivo breve, no máx. 20 caracteres",
-    "task_interrupted": false
+    "decision": "continue|completed|need_user_input|blocked",
+    "reason": "condição específica satisfeita ou ausente"
 }}
 ```
 """,

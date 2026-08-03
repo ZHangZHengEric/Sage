@@ -26,6 +26,7 @@ import json
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass
+from html import unescape
 import re
 import os
 from sagents.utils.repeat_pattern import (
@@ -41,6 +42,7 @@ REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
 REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
 REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
 TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
+OPEN_TODO_ALLOWED_DECISIONS = frozenset({"continue", "need_user_input", "blocked"})
 
 
 @dataclass(frozen=True)
@@ -410,45 +412,77 @@ class SimpleAgent(AgentBase):
 
         return tools_json
 
-    def _has_explicit_followup_intent(self, content: str) -> bool:
-        text = (content or "").strip().lower()
+    @staticmethod
+    def _is_inline_questionnaire_name(name: str) -> bool:
+        normalized = str(name or "").strip().lower()
+        return normalized == "questionnaire" or (
+            normalized.endswith("-questionnaire") and normalized != "-questionnaire"
+        )
+
+    @classmethod
+    def _content_has_inline_questionnaire(cls, content: Any) -> bool:
+        """Detect questionnaire request blocks without parsing natural language.
+
+        Supported request markers are XML-style opening tags such as
+        ``<movo-questionnaire>`` and fenced blocks such as
+        `````movo-questionnaire```. Triple apostrophes are accepted as a
+        compatibility spelling because some clients use them to avoid nesting
+        Markdown fences. ``*-questionnaire-response`` is intentionally excluded.
+        """
+        text = cls._extract_text_content_for_judge(content).strip()
         if not text:
             return False
+        text = unescape(text)
 
-        conditional_markers = [
-            "如果你需要",
-            "如需",
-            "如果需要",
-            "if you need",
-            "if needed",
-            "if you want",
-        ]
-        if any(marker in text for marker in conditional_markers):
-            return False
+        # XML-like opening tags. Splitting is sufficient because only the tag
+        # name matters; payload validation remains SelfCheckAgent's job.
+        for fragment in text.split("<")[1:]:
+            raw_tag = fragment.split(">", 1)[0].strip()
+            if not raw_tag or raw_tag[0] in "/!?":
+                continue
+            tag_name = raw_tag.split(None, 1)[0].rstrip("/")
+            if cls._is_inline_questionnaire_name(tag_name):
+                return True
 
-        patterns = [
-            r"接下来",
-            r"下一步",
-            r"现在让我",
-            r"让我继续",
-            r"我将继续",
-            r"我会继续",
-            r"接着",
-            r"随后",
-            r"然后我",
-            r"我将(生成|整理|总结|分析|执行|补充|创建|处理)",
-            r"我会(生成|整理|总结|分析|执行|补充|创建|处理)",
-            r"继续(生成|整理|总结|分析|执行|处理)",
-            r"请稍等",
-            r"等待(工具调用|生成|处理)",
-            r"\bnext\b",
-            r"\bnext,? i('| wi)ll\b",
-            r"\bi('| wi)ll now\b",
-            r"\blet me\b",
-            r"\bplease wait\b",
-            r"\bcontinue (with|to|processing|analyzing|generating)\b",
-        ]
-        return any(re.search(pattern, text) for pattern in patterns)
+        # Fenced questionnaire blocks. Require the questionnaire name to be the
+        # only info string so response tags and prose mentions do not match.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if len(stripped) < 4 or stripped[0] not in {"`", "'"}:
+                continue
+            fence_char = stripped[0]
+            fence_len = len(stripped) - len(stripped.lstrip(fence_char))
+            if fence_len < 3:
+                continue
+            tag_name = stripped[fence_len:].strip()
+            if cls._is_inline_questionnaire_name(tag_name):
+                return True
+        return False
+
+    @classmethod
+    def _latest_assistant_has_inline_questionnaire(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                return cls._content_has_inline_questionnaire(message.get_content())
+            if message.is_user_input_message():
+                return False
+        return False
+
+    @classmethod
+    def _latest_assistant_ends_with_question_mark(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                text = cls._extract_text_content_for_judge(
+                    message.get_content()
+                ).rstrip()
+                return text.endswith(("?", "？"))
+            if message.is_user_input_message():
+                return False
+        return False
 
     def _normalize_task_interrupted_decision(
         self,
@@ -504,6 +538,30 @@ class SimpleAgent(AgentBase):
             return True
 
         return task_interrupted
+
+    def _task_interrupted_from_judge_result(
+        self,
+        result: Dict[str, Any],
+    ) -> bool:
+        """Parse the structured outcome, with backward compatibility.
+
+        ``decision`` is preferred because the legacy boolean conflates a
+        completed task with a turn that genuinely needs user input.  Old judge
+        responses remain supported while models/configurations roll forward.
+        """
+        raw_decision = result.get("decision")
+        decision = raw_decision.strip().lower() if isinstance(raw_decision, str) else ""
+        if decision == "continue":
+            return False
+        if decision in {"completed", "need_user_input", "blocked"}:
+            return True
+
+        task_interrupted = self._parse_task_interrupted_value(
+            result.get("task_interrupted", False)
+        )
+        raw_reason = result.get("reason", "")
+        reason = raw_reason if isinstance(raw_reason, str) else ""
+        return self._normalize_task_interrupted_decision(reason, task_interrupted)
 
     @staticmethod
     def _parse_task_interrupted_value(value: Any) -> bool:
@@ -751,11 +809,11 @@ class SimpleAgent(AgentBase):
 
         这些规则基于客观事实，尽量保证误判率接近 0。
 
-        说明：历史上的"处理中关键词"规则已下线（多语种下脆弱、且对反问用户场景容易误判导致死循环）。
-        现在仅保留：
+        说明：宽泛的"处理中关键词"规则已下线（多语种下脆弱、且对反问用户场景容易误判导致死循环）。
+        现在仅保留高置信度规则：
         - 规则 1：最后一条是 tool 调用结果
         - 规则 2：工具调用失败的过程消息
-        - 规则 4：assistant 以「继续标点」结尾且最近一条不是真实 user 消息
+        - 规则 3：assistant 以「继续标点」结尾且最近一条不是真实 user 消息
         """
         if not messages_input:
             return False
@@ -788,7 +846,7 @@ class SimpleAgent(AgentBase):
                 )
                 return True
 
-        # 规则4：assistant 文本以继续标点结尾时强制继续；
+        # 规则3：assistant 文本以继续标点结尾时强制继续；
         # 但若最后一条是真实 user 输入则不触发（避免反问用户被误判）
         if (
             last_message.role == MessageRole.ASSISTANT.value
@@ -801,7 +859,7 @@ class SimpleAgent(AgentBase):
                 continue_punctuations = [":", "："]
                 if last_char in continue_punctuations or stripped.endswith("..."):
                     logger.debug(
-                        "[SimpleAgent] must_continue 规则4命中：assistant 文本以继续标点结尾，必须继续"
+                        "[SimpleAgent] must_continue 规则3命中：assistant 文本以继续标点结尾，必须继续"
                     )
                     return True
 
@@ -820,9 +878,31 @@ class SimpleAgent(AgentBase):
         1. 先用确定性规则判断是否必须继续执行；
         2. 如果没有命中规则，再调用 LLM 进行综合判断。
         """
+        # Inline Questionnaire 是明确的等待用户协议，比普通继续规则和 LLM
+        # judge 优先级更高。即使 Todo 尚未完成，也必须保留 need_user_input。
+        if self._latest_assistant_has_inline_questionnaire(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="inline questionnaire requires user input",
+            )
+
         # 第一层：确定性规则
         if await self._must_continue_by_rules(messages_input):
             return TaskCompleteDecision(task_interrupted=False)
+
+        # 结尾问号是明确的等待用户信号。工具结果等必须继续的客观规则优先，
+        # 避免把工具执行前的旧问题误当成当前等待用户。
+        if self._latest_assistant_ends_with_question_mark(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="latest assistant reply ends with a question mark",
+            )
 
         # 第二层：LLM 综合判断
         # 只提取最后一个 user 以及之后的 messages
@@ -886,18 +966,45 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            task_interrupted = self._parse_task_interrupted_value(
-                result.get("task_interrupted", False)
-            )
+            if not isinstance(result, dict):
+                logger.warning(
+                    "SimpleAgent: 任务完成判断响应不是 JSON object，默认继续执行"
+                )
+                return TaskCompleteDecision(task_interrupted=False)
             raw_reason = result.get("reason", "")
             reason = raw_reason if isinstance(raw_reason, str) else ""
-            normalized = self._normalize_task_interrupted_decision(
-                reason, task_interrupted
+            legacy_value = self._parse_task_interrupted_value(
+                result.get("task_interrupted", False)
             )
-            if normalized != task_interrupted:
+            normalized = self._task_interrupted_from_judge_result(result)
+            structured_decision = result.get("decision")
+            normalized_structured_decision = (
+                structured_decision.strip().lower()
+                if isinstance(structured_decision, str)
+                else ""
+            )
+            expected_from_structured = (
+                normalized_structured_decision
+                in {"completed", "need_user_input", "blocked"}
+                if normalized_structured_decision
+                else legacy_value
+            )
+            if (
+                todo_plan
+                and normalized_structured_decision not in OPEN_TODO_ALLOWED_DECISIONS
+            ):
+                rejected_decision = normalized_structured_decision or "<missing>"
+                logger.warning(
+                    "SimpleAgent: 权威 Todo 仍有未完成项，只允许 continue / "
+                    "need_user_input / blocked；已拒绝 "
+                    f"decision={rejected_decision}"
+                )
+                normalized = False
+                reason = "authoritative Todo still has pending/in_progress items"
+            if normalized != expected_from_structured:
                 logger.warning(
                     f"SimpleAgent: 任务完成判断存在语义冲突，已自动修正。reason={reason}, "
-                    f"task_interrupted={task_interrupted} -> {normalized}"
+                    f"decision={structured_decision}, task_interrupted={legacy_value} -> {normalized}"
                 )
             logger.info(
                 f"SimpleAgent: 任务完成 LLM 判断结果: {result}, normalized={normalized}"
@@ -1490,7 +1597,12 @@ class SimpleAgent(AgentBase):
                     )
                 elif plain_text_direct_response:
                     consecutive_plain_text_direct_responses += 1
-                    if consecutive_plain_text_direct_responses >= 3:
+                    if (
+                        consecutive_plain_text_direct_responses >= 3
+                        and not self._latest_assistant_has_inline_questionnaire(
+                            messages_input
+                        )
+                    ):
                         logger.info(
                             "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
