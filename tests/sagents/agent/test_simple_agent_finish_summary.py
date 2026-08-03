@@ -591,6 +591,82 @@ def test_inline_questionnaire_protocol_detection_excludes_responses():
         assert agent._content_has_inline_questionnaire(content) is False
 
 
+def test_ling_action_protocol_detection_requires_opening_tag():
+    agent = _agent()
+
+    assert agent._content_has_ling_action(
+        '<ling-action label="继续" prompt="继续处理" />'
+    )
+    assert agent._content_has_ling_action(
+        '&lt;ling-action label="继续" prompt="继续处理" /&gt;'
+    )
+    assert agent._content_has_ling_action("</ling-action>") is False
+    assert agent._content_has_ling_action(
+        "文档里提到了 ling-action，但没有输出协议标签。"
+    ) is False
+    assert agent._content_has_ling_action(
+        '<other-action label="继续" prompt="继续处理" />'
+    ) is False
+
+
+def test_ling_action_forces_stop_without_calling_judge(monkeypatch):
+    agent = _agent()
+
+    async def _fail_llm(*args, **kwargs):
+        raise AssertionError("ling-action must bypass completion judge")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fail_llm)
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "incidental-read",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"status":"success","content":"internal context"}',
+            tool_call_id="incidental-read",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "当前回应已经完整。你今晚感觉怎么样？用户之后可能回复，但无需继续执行。\n"
+                '<ling-action label="继续聊" prompt="继续聊聊" />'
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="ling-action-stop",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
+    assert decision.reason.startswith("ling-action marks a closed reply")
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+
+
 def test_inline_questionnaire_forces_need_user_input_with_open_todo(monkeypatch):
     agent = _agent()
 
@@ -1679,6 +1755,40 @@ def test_task_complete_judge_confirmation_rules_are_synced_across_prompt_variant
         )
         assert interrupt_rule in prompt
         assert continue_rule in prompt
+
+
+def test_task_complete_judge_closes_optional_followups_and_incidental_tools():
+    prompt_manager = PromptManager()
+    expectations = {
+        "zh": (
+            "用户之后可能回复",
+            "<ling-action ... />",
+            "成功但附带性的读取、搜索或记忆调用",
+            "原始需求中哪一项尚未满足",
+            "不得凭空想象后续工作",
+        ),
+        "en": (
+            "The user may reply later",
+            "<ling-action ... />",
+            "successful incidental read, search, or memory call",
+            "exact unmet part of the original request",
+            "Do not invent future work",
+        ),
+        "pt": (
+            "O usuário pode responder depois",
+            "<ling-action ... />",
+            "chamada de memória incidental bem-sucedida",
+            "parte exata da solicitação original ainda não atendida",
+            "Não invente trabalho futuro",
+        ),
+    }
+
+    for language, required_fragments in expectations.items():
+        prompt = prompt_manager.get_agent_prompt(
+            "SimpleAgent", "task_complete_template", language=language
+        )
+        for fragment in required_fragments:
+            assert fragment in prompt
 
 
 def test_task_complete_judge_pending_question_rules_are_synced_across_prompt_variants():
