@@ -481,7 +481,8 @@ class CompressHistoryTool:
 
             # 3. 计算原始 token 数
             original_tokens = sum(
-                self._calculate_tokens(msg.get_content() or "") for msg in to_compress
+                MessageManager.calculate_message_token_length(msg)
+                for msg in to_compress
             )
 
             # 4. 格式化消息并调用 LLM 压缩

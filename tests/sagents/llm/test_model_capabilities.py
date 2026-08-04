@@ -3,7 +3,9 @@ import unittest
 from sagents.llm import model_capabilities
 from sagents.llm.model_capabilities import (
     build_llm_extra_body,
+    is_deepseek_model,
     is_openai_reasoning_model,
+    normalize_reasoning_effort,
     resolve_reasoning_effort,
 )
 
@@ -110,6 +112,61 @@ class TestBuildLlmExtraBody(unittest.TestCase):
     def test_reasoning_model_thinking_on_uses_medium(self):
         body = build_llm_extra_body("o3-mini", enable_thinking=True)
         self.assertEqual(body["reasoning_effort"], "medium")
+
+    def test_explicit_openai_thinking_level_is_used(self):
+        body = build_llm_extra_body(
+            "gpt-5.4", enable_thinking=True, thinking_level="high"
+        )
+        self.assertEqual(body["reasoning_effort"], "high")
+
+    def test_deepseek_thinking_level_uses_native_effort(self):
+        body = build_llm_extra_body(
+            "deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertEqual(body["reasoning_effort"], "max")
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertNotIn("enable_thinking", body)
+        self.assertNotIn("chat_template_kwargs", body)
+
+    def test_deepseek_medium_maps_to_high(self):
+        self.assertTrue(is_deepseek_model("DeepSeek-V4-Pro"))
+        self.assertTrue(is_deepseek_model("deepseek/deepseek-v4-pro"))
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-pro",
+                "medium",
+                base_url="https://api.deepseek.com",
+            ),
+            "high",
+        )
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-flash",
+                "low",
+                base_url="https://api.deepseek.com",
+            ),
+            "high",
+        )
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-pro",
+                "low",
+                base_url="https://api.deepseek.com",
+            ),
+            "high",
+        )
+
+    def test_third_party_deepseek_slug_does_not_enable_native_protocol(self):
+        body = build_llm_extra_body(
+            "deepseek-v4-flash",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertNotIn("reasoning_effort", body)
 
     def test_non_reasoning_model_sets_thinking_flags(self):
         body = build_llm_extra_body(

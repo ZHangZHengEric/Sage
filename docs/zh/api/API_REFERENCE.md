@@ -76,7 +76,7 @@ agent = SAgent(
 | `context_budget_config` | 上下文预算相关 |
 | `volume_mounts` | `List[VolumeMount]`，见 `sagents.utils.sandbox.config` |
 | `more_suggest` / `force_summary` | 更多建议、是否强制总结 |
-| `deep_thinking` | 已弱化；更推荐在消息体中用 `&lt;enable_deep_thinking&gt;` 等约定控制 |
+| `deep_thinking` | 兼容参数；推荐用消息头 `&lt;enable_deep_thinking&gt;true&lt;/enable_deep_thinking&gt;`，并可用 `&lt;thinking_level&gt;high|max&lt;/thinking_level&gt;` 选择模型原生思考强度 |
 
 一次会话结束（含异常路径后的 `finally`）会关闭会话，详见 `SAgent.run_stream` 中 `close_session` 的调用。
 
@@ -141,7 +141,7 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 
 ## 4. 默认执行图与 `agent_mode`
 
-未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的 `SequenceNode`、`SwitchNode`、`LoopNode`、`IfNode` 等拼装（含深度思考分支、`agent_mode` 分岔、`query_suggest` 等）。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
+未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的节点拼装 `agent_mode` 分岔与 `query_suggest` 等步骤。深度思考直接控制当前模型请求，不再额外执行 `TaskAnalysisAgent`。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
 
 ## 5. 工具与技能
 
@@ -165,7 +165,8 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 ## 6. 流式消息类型：`MessageChunk` / `MessageType`
 
 - 定义：`sagents/context/messages/message.py`。
-- `MessageChunk`：流式单块，含 `role`、`content`、`tool_calls`、`message_id`、`message_type` 等，与 OpenAI 风格消息对齐。
+- `MessageChunk`：流式单块，含 `role`、`content`、`reasoning_content`、`tool_calls`、`message_id`、`message_type` 等。同一次 assistant 响应的所有分块共享一个 `message_id`，持久化后思考、可见内容和工具调用是同一条 assistant 消息中的字段。
+- DeepSeek 官方 Chat Completions 工具调用：发生工具调用的 assistant 消息会按原生格式回传 `content`、`reasoning_content` 与 `tool_calls`；普通回答的历史思考不回传。上下文 token 估算同时计算 `content` 与 `reasoning_content`。
 - `MessageType`：枚举了当前使用的 `user_input`、`assistant_text`、`task_analysis`、`tool_call` 等；历史字段 `type: "normal"` 会经兼容逻辑归一化。
 
 ## 7. 环境变量

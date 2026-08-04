@@ -15,13 +15,14 @@ class FakeProvider:
         provider_id: str,
         *,
         model: str,
+        base_url: str | None = None,
         user_id: str = "user_1",
         supports_multimodal: bool = True,
         supports_structured_output: bool = True,
     ) -> None:
         self.id = provider_id
         self.name = provider_id
-        self.base_url = f"https://example.com/{provider_id}"
+        self.base_url = base_url or f"https://example.com/{provider_id}"
         self.api_keys = [f"key-{provider_id}"]
         self.model = model
         self.max_tokens = 1000
@@ -382,6 +383,71 @@ async def test_thinking_level_controls_reasoning_effort(monkeypatch):
     await service.invoke_model(request, user_id="user_1")
 
     assert captured["completion_kwargs"]["extra_body"]["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_max_thinking_level_controls_native_effort(monkeypatch):
+    providers = {
+        "provider_1": FakeProvider(
+            "provider_1",
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+        )
+    }
+    captured, _ = _patch_common(monkeypatch, providers)
+
+    async def fake_completion(client, **kwargs):
+        captured["completion_kwargs"] = kwargs
+        return FakeCompletion()
+
+    monkeypatch.setattr(
+        service, "create_chat_completion_with_fallback", fake_completion
+    )
+
+    request = DirectModelInvokeRequest(
+        provider_id="provider_1",
+        task="semantic_summary",
+        messages=[{"role": "user", "content": "hi"}],
+        thinking_level="max",
+    )
+
+    await service.invoke_model(request, user_id="user_1")
+
+    extra_body = captured["completion_kwargs"]["extra_body"]
+    assert extra_body["reasoning_effort"] == "max"
+    assert extra_body["thinking"] == {"type": "enabled"}
+    assert "enable_thinking" not in extra_body
+    assert "chat_template_kwargs" not in extra_body
+
+
+@pytest.mark.asyncio
+async def test_official_deepseek_retired_alias_is_mapped_before_invocation(monkeypatch):
+    providers = {
+        "provider_1": FakeProvider(
+            "provider_1",
+            model="deepseek-reasoner",
+            base_url="https://api.deepseek.com",
+        )
+    }
+    captured, _ = _patch_common(monkeypatch, providers)
+
+    async def fake_completion(client, **kwargs):
+        captured["completion_kwargs"] = kwargs
+        return FakeCompletion()
+
+    monkeypatch.setattr(
+        service, "create_chat_completion_with_fallback", fake_completion
+    )
+
+    request = DirectModelInvokeRequest(
+        provider_id="provider_1",
+        task="semantic_summary",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    await service.invoke_model(request, user_id="user_1")
+
+    assert captured["completion_kwargs"]["model"] == "deepseek-v4-flash"
 
 
 @pytest.mark.asyncio

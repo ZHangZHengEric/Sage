@@ -164,10 +164,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Start([输入 messages]) --> DT{is_deep_thinking?}
-    DT -->|是| Ana[task_analysis] --> Sw
-    DT -->|否| Sw
-    Sw{Switch agent_mode}
+    Start([输入 messages]) --> Sw{Switch agent_mode}
     Sw -->|simple| SimpleBody
     Sw -->|multi| MultiBody
     Sw -->|fibre| FibreBody
@@ -179,6 +176,8 @@ flowchart TB
     More -->|否| End
     QS --> End([结束])
 ```
+
+`deep_thinking` 直接转换为当前大模型请求的 thinking 参数，不再向默认 Flow 插入 `task_analysis` 节点。
 
 
 

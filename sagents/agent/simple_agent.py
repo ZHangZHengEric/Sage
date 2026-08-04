@@ -1762,12 +1762,10 @@ class SimpleAgent(AgentBase):
         tool_calls: Dict[str, Any] = {}
         if direct_response_state is not None:
             direct_response_state["had_tool_calls"] = False
-        reasoning_content_response_message_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
+        response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         full_content_accumulator = ""
         suppressed_status_only_content = ""
-        tool_calls_messages_id = str(uuid.uuid4())
         emitted_tool_call_stream = False
         # 处理流式响应块
         try:
@@ -1813,7 +1811,7 @@ class SimpleAgent(AgentBase):
                                 MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
                                     tool_calls=chunk.choices[0].delta.tool_calls,
-                                    message_id=tool_calls_messages_id,
+                                    message_id=response_message_id,
                                     message_type=MessageType.TOOL_CALL.value,
                                     agent_name=self.agent_name,
                                 )
@@ -1832,7 +1830,7 @@ class SimpleAgent(AgentBase):
                             MessageChunk(
                                 role="assistant",
                                 content=content_piece,
-                                message_id=content_response_message_id,
+                                message_id=response_message_id,
                                 message_type=MessageType.DO_SUBTASK_RESULT.value,
                                 agent_name=self.agent_name,
                             )
@@ -1847,8 +1845,8 @@ class SimpleAgent(AgentBase):
                         output_messages = [
                             MessageChunk(
                                 role="assistant",
-                                content=chunk.choices[0].delta.reasoning_content,
-                                message_id=reasoning_content_response_message_id,
+                                reasoning_content=chunk.choices[0].delta.reasoning_content,
+                                message_id=response_message_id,
                                 message_type=MessageType.REASONING_CONTENT.value,
                                 agent_name=self.agent_name,
                             )
@@ -2031,6 +2029,7 @@ class SimpleAgent(AgentBase):
                 messages_input=messages_input,
                 session_id=session_id or "",
                 emit_tool_call_message=emit_on_complete,
+                tool_call_message_id=response_message_id,
             ):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
@@ -2100,7 +2099,7 @@ class SimpleAgent(AgentBase):
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content="\n",
-                    message_id=content_response_message_id,
+                    message_id=response_message_id,
                     message_type=MessageType.DO_SUBTASK_RESULT.value,
                     agent_name=self.agent_name,
                 )

@@ -2,7 +2,7 @@ export const sanitizeSessionTitle = (value = '') => {
   let text = String(value ?? '')
 
   text = text.replace(
-    /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*)+/i,
+    /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*)+/i,
     ''
   )
   text = text.replace(/^\s*(?:<skill>[\s\S]*?<\/skill>\s*)+/i, '')

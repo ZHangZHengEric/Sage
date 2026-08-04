@@ -152,10 +152,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Start([输入 messages]) --> DT{is_deep_thinking?}
-    DT -->|是| Analysis[task_analysis] --> Sw
-    DT -->|否| Sw
-    Sw{agent_mode}
+    Start([输入 messages]) --> Sw{agent_mode}
     Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → summary?]
     Sw -->|multi| Multi[multi body<br/>memory_recall<br/>→ Loop 规划/执行/观察/判定<br/>→ task_summary]
     Sw -->|fibre| Fibre[fibre body<br/>Loop self_check_should_retry<br/>→ fibre 核心 → self_check]
@@ -166,6 +163,8 @@ flowchart TB
     More -->|是| Sug[query_suggest] --> End([输出])
     More -->|否| End
 ```
+
+深度思考直接作用于当前模型请求；默认流程不再为它单独执行 `task_analysis`。
 
 
 

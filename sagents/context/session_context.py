@@ -1892,6 +1892,7 @@ class SessionContext:
         system_context: Optional[dict] = None,
         available_workflows: Optional[dict] = None,
         deep_thinking: Optional[bool] = None,
+        thinking_level: Optional[str] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         max_loop_count: Optional[int] = None,
@@ -1910,6 +1911,7 @@ class SessionContext:
             system_context: 系统上下文
             available_workflows: 可用工作流
             deep_thinking: 深度思考模式
+            thinking_level: 模型原生思考等级
             agent_mode: 智能体运行模式
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
@@ -1938,6 +1940,7 @@ class SessionContext:
             "description": f"Agent configuration for session {self.session_id}",
             "system_prefix": system_prefix or "",
             "deep_thinking": deep_thinking if deep_thinking is not None else False,
+            "thinking_level": thinking_level,
             "agent_mode": agent_mode,
             "more_suggest": more_suggest,
             "max_loop_count": max_loop_count,

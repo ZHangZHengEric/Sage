@@ -166,14 +166,14 @@
       <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
-          <ReasoningContentMessage :content="message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
+          <ReasoningContentMessage :content="message.reasoning_content || message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
         </div>
       </div>
     </div>
 
     <!-- 助手消息 -->
     <div
-      v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
+      v-else-if="message.role === 'assistant' && !hasToolCalls && (message.reasoning_content || message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start px-4 group"
       :class="assistantRowGapClass">
       <div v-if="showAssistantAvatar" class="flex-none">
@@ -182,6 +182,12 @@
       <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="flex flex-col gap-1 w-full">
+          <ReasoningContentMessage
+            v-if="message.reasoning_content"
+            :content="message.reasoning_content"
+            :isStreaming="isStreaming"
+            :timestamp="message.timestamp"
+          />
           <div
             v-if="getTextContent(message.content)"
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
@@ -230,6 +236,21 @@
       </div>
       <div v-else class="flex-none" :class="assistantAvatarSpacerClass" />
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+        <ReasoningContentMessage
+          v-if="message.reasoning_content"
+          :content="message.reasoning_content"
+          :isStreaming="isStreaming"
+          :timestamp="message.timestamp"
+        />
+        <div
+          v-if="getTextContent(message.content)"
+          class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6"
+        >
+          <MarkdownRendererWithPreview
+            :content="formatMessageContent(getTextContent(message.content))"
+            :message-id="message.message_id || message.id"
+          />
+        </div>
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
           <div v-for="(toolCall, index) in visibleToolCalls" :key="toolCall.id || index">
             <!-- Global Error Card -->

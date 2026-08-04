@@ -112,10 +112,12 @@ class MessageChunk:
     # 必需字段 - OpenAI标准
     role: str  # 消息角色 (user, assistant, system, tool)
 
-    # 内容字段（content和tool_calls至少有一个）
+    # 内容字段（content、reasoning_content 和 tool_calls 至少有一个）
     # content 可以是字符串或列表（支持多模态，如图片+文本）
     # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
     content: Optional[Union[str, List[Dict[str, Any]]]] = None  # 消息内容
+    # 模型原生 thinking 内容。它与 content 同级，不能降级为普通 assistant 文本。
+    reasoning_content: Optional[str] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None  # 工具调用列表（OpenAI格式）
 
     # 消息标识
@@ -182,8 +184,14 @@ class MessageChunk:
         if role == MessageRole.TOOL.value and self.tool_call_id is None:
             raise ValueError("Messages with role=tool must include tool_call_id")
 
-        if self.content is None and self.tool_calls is None:
-            raise ValueError("Message must include content or tool_calls")
+        if (
+            self.content is None
+            and self.reasoning_content is None
+            and self.tool_calls is None
+        ):
+            raise ValueError(
+                "Message must include content, reasoning_content, or tool_calls"
+            )
 
         if self.metadata is None:
             self.metadata = {}

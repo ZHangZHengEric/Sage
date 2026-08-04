@@ -108,10 +108,8 @@ class CommonAgent(AgentBase):
         )
 
         tool_calls = {}
-        reasoning_content_response_message_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
+        response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
-        tool_calls_messages_id = str(uuid.uuid4())
 
         # 处理流式响应块
         async for chunk in response:
@@ -133,7 +131,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=chunk.choices[0].delta.tool_calls,
-                            message_id=tool_calls_messages_id,
+                            message_id=response_message_id,
                             message_type=MessageType.TOOL_CALL.value,
                         )
                     ]
@@ -150,7 +148,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content=chunk.choices[0].delta.content,
-                            message_id=content_response_message_id,
+                            message_id=response_message_id,
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )
                     ]
@@ -164,9 +162,9 @@ class CommonAgent(AgentBase):
                     output_messages = [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
-                            content=chunk.choices[0].delta.reasoning_content,
-                            message_id=reasoning_content_response_message_id,
-                            message_type=MessageType.TASK_ANALYSIS.value,
+                            reasoning_content=chunk.choices[0].delta.reasoning_content,
+                            message_id=response_message_id,
+                            message_type=MessageType.REASONING_CONTENT.value,
                         )
                     ]
                     yield output_messages
@@ -216,6 +214,7 @@ class CommonAgent(AgentBase):
                 messages_input=messages_input,  # pyright: ignore[reportArgumentType]
                 session_id=session_id,
                 emit_tool_call_message=emit_on_complete,
+                tool_call_message_id=response_message_id,
             ):
                 yield msg
         else:
@@ -224,7 +223,7 @@ class CommonAgent(AgentBase):
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content="",
-                    message_id=content_response_message_id,
+                    message_id=response_message_id,
                     message_type=MessageType.DO_SUBTASK_RESULT.value,
                 )
             ]
@@ -237,6 +236,8 @@ class CommonAgent(AgentBase):
         messages_input: List[Dict[str, Any]],
         session_id: str,
         emit_tool_call_message: bool = True,
+        tool_call_message_id: Optional[str] = None,
+        tool_call_message_metadata: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
@@ -258,6 +259,8 @@ class CommonAgent(AgentBase):
             handle_complete_task=True,
             emit_tool_call_message=emit_tool_call_message,
             execute_concurrently=False,
+            tool_call_message_id=tool_call_message_id,
+            tool_call_message_metadata=tool_call_message_metadata,
         ):
             yield messages
             if is_complete:
