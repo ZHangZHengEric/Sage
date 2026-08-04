@@ -540,8 +540,11 @@ class TeamOrchestrator(FibreOrchestrator):
                 max_loop_count=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
                     "max_loop_count"
                 ),
-                deep_thinking=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
+                inherited_deep_thinking=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
                     "deep_thinking", False
+                ),
+                inherited_thinking_level=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
+                    "thinking_level"
                 ),
                 agent_mode=member_mode,
             ):
@@ -696,6 +699,7 @@ class TeamOrchestrator(FibreOrchestrator):
             available_workflows=agent_def.available_workflows
             or parent_agent_config.get("available_workflows", {}),
             deep_thinking=parent_agent_config.get("deep_thinking", False),
+            thinking_level=parent_agent_config.get("thinking_level"),
             agent_mode=member_mode,
             more_suggest=parent_agent_config.get("more_suggest", False),
             max_loop_count=parent_agent_config.get("max_loop_count"),

@@ -141,11 +141,9 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         )
 
         tool_calls: Dict[str, Any] = {}
-        reasoning_content_response_message_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
+        response_message_id = str(uuid.uuid4())
         last_tool_call_id: Optional[str] = None
         full_content_accumulator = ""
-        tool_calls_messages_id = str(uuid.uuid4())
         # 处理流式响应块
         async for chunk in response:
             # print(chunk)
@@ -169,7 +167,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=chunk.choices[0].delta.tool_calls,
-                            message_id=tool_calls_messages_id,
+                            message_id=response_message_id,
                             message_type=MessageType.TOOL_CALL.value,
                         )
                     ]
@@ -188,7 +186,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content=content_piece,
-                            message_id=content_response_message_id,
+                            message_id=response_message_id,
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )
                     ]
@@ -202,9 +200,9 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     output_messages = [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
-                            content=chunk.choices[0].delta.reasoning_content,
-                            message_id=reasoning_content_response_message_id,
-                            message_type=MessageType.TASK_ANALYSIS.value,
+                            reasoning_content=chunk.choices[0].delta.reasoning_content,
+                            message_id=response_message_id,
+                            message_type=MessageType.REASONING_CONTENT.value,
                         )
                     ]
                     yield output_messages
@@ -261,6 +259,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 session_id=session_id,
                 handle_complete_task=True,
                 emit_tool_call_message=emit_on_complete,
+                tool_call_message_id=response_message_id,
             ):
                 yield messages
         else:
@@ -269,7 +268,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content="\n",
-                    message_id=content_response_message_id,
+                    message_id=response_message_id,
                     message_type=MessageType.DO_SUBTASK_RESULT.value,
                 )
             ]

@@ -44,3 +44,40 @@ def test_extract_enable_plan_tag_only_message():
 
     assert flags == {"enable_plan": True}
     assert messages[0]["content"] == ""
+
+
+def test_extract_thinking_level_with_deep_thinking():
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "<enable_deep_thinking>true</enable_deep_thinking>"
+                "<thinking_level>max</thinking_level> solve this"
+            ),
+        }
+    ]
+
+    flags = extract_control_flags_from_messages(messages)
+
+    assert flags == {"enable_deep_thinking": True, "thinking_level": "max"}
+    assert messages[0]["content"] == "solve this"
+
+
+def test_extract_deep_thinking_level_alias_from_multimodal_message():
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "<deep_thinking_level>high</deep_thinking_level> inspect",
+                },
+                {"type": "image_url", "image_url": {"url": "https://x/y.png"}},
+            ],
+        }
+    ]
+
+    flags = extract_control_flags_from_messages(messages)
+
+    assert flags == {"thinking_level": "high"}
+    assert messages[0]["content"][0]["text"] == "inspect"

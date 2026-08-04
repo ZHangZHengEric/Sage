@@ -10,7 +10,7 @@ from typing import Any, List
 def sanitize_title_text(text: str) -> str:
     cleaned = str(text or "")
     cleaned = re.sub(
-        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*)+",
+        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*</(?:thinking_level|deep_thinking_level)>\s*)+",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -124,6 +124,8 @@ def main() -> int:
             old_title.strip() in {"...", ""}
             or old_title.startswith("<enable_plan>")
             or old_title.startswith("<enable_deep_thinking>")
+            or old_title.startswith("<thinking_level>")
+            or old_title.startswith("<deep_thinking_level>")
             or old_title.startswith("<skill>")
             or old_title.startswith("<skills>")
             or old_title.startswith("<active_skills>")

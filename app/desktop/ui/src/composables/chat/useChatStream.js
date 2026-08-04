@@ -2,14 +2,16 @@ import { isCurrentSessionStreamEnd } from '@/utils/sessionStreamEvents.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
 const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
+const THINKING_LEVEL_TAG_RE = /^\s*<(?:thinking_level|deep_thinking_level)>\s*(minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*/i
 
 const stripControlTags = (text) => {
-  if (typeof text !== 'string') return { text, enablePlan: false, enableDeepThinking: false }
+  if (typeof text !== 'string') return { text, enablePlan: false, enableDeepThinking: false, thinkingLevel: null }
   let remaining = text
   let enablePlan = false
   let enableDeepThinking = false
   let planMatched = false
   let deepThinkingMatched = false
+  let thinkingLevel = null
 
   while (true) {
     let matched = false
@@ -27,24 +29,32 @@ const stripControlTags = (text) => {
       enableDeepThinking = deepThinkingMatch[1].toLowerCase() === 'true'
       remaining = remaining.slice(deepThinkingMatch[0].length)
     }
+    const thinkingLevelMatch = remaining.match(THINKING_LEVEL_TAG_RE)
+    if (thinkingLevelMatch) {
+      matched = true
+      thinkingLevel = thinkingLevelMatch[1].toLowerCase()
+      remaining = remaining.slice(thinkingLevelMatch[0].length)
+    }
     if (!matched) break
   }
 
   return {
     text: remaining,
     enablePlan: planMatched ? enablePlan : false,
-    enableDeepThinking: deepThinkingMatched ? enableDeepThinking : false
+    enableDeepThinking: deepThinkingMatched ? enableDeepThinking : false,
+    thinkingLevel
   }
 }
 
 const stripControlTagsFromMultimodal = (multimodalContent) => {
   if (!Array.isArray(multimodalContent)) {
-    return { content: multimodalContent, enablePlan: false, enableDeepThinking: false }
+    return { content: multimodalContent, enablePlan: false, enableDeepThinking: false, thinkingLevel: null }
   }
   const next = []
   let parsedText = false
   let enablePlan = false
   let enableDeepThinking = false
+  let thinkingLevel = null
 
   for (const item of multimodalContent) {
     if (!parsedText && item?.type === 'text' && typeof item.text === 'string') {
@@ -52,6 +62,7 @@ const stripControlTagsFromMultimodal = (multimodalContent) => {
       const result = stripControlTags(item.text)
       enablePlan = result.enablePlan
       enableDeepThinking = result.enableDeepThinking
+      thinkingLevel = result.thinkingLevel
       if (result.text) {
         next.push({ ...item, text: result.text })
       }
@@ -60,10 +71,10 @@ const stripControlTagsFromMultimodal = (multimodalContent) => {
     next.push(item)
   }
 
-  return { content: next, enablePlan, enableDeepThinking }
+  return { content: next, enablePlan, enableDeepThinking, thinkingLevel }
 }
 
-const prependControlTags = (text, { enablePlan, enableDeepThinking }) => {
+const prependControlTags = (text, { enablePlan, enableDeepThinking, thinkingLevel }) => {
   if (typeof text !== 'string') return text
   const tags = []
   if (typeof enablePlan === 'boolean') {
@@ -71,6 +82,9 @@ const prependControlTags = (text, { enablePlan, enableDeepThinking }) => {
   }
   if (typeof enableDeepThinking === 'boolean') {
     tags.push(`<enable_deep_thinking>${enableDeepThinking ? 'true' : 'false'}</enable_deep_thinking>`)
+  }
+  if (enableDeepThinking && thinkingLevel) {
+    tags.push(`<thinking_level>${thinkingLevel}</thinking_level>`)
   }
   if (tags.length === 0) return text
   return `${tags.join('')} ${text}`.trim()
@@ -290,12 +304,14 @@ export const useChatStream = ({
       if (isMultimodalEnabled && multimodalContent && multimodalContent.length > 0) {
         // Use multimodal format when enabled and content is provided
         messageContent = prependControlTagsToMultimodal(multimodalContent, {
-          enableDeepThinking: config.deepThinking
+          enableDeepThinking: config.deepThinking,
+          thinkingLevel: config.thinkingLevel
         })
       } else {
         // Use plain string format otherwise
         messageContent = prependControlTags(message, {
-          enableDeepThinking: config.deepThinking
+          enableDeepThinking: config.deepThinking,
+          thinkingLevel: config.thinkingLevel
         })
       }
 

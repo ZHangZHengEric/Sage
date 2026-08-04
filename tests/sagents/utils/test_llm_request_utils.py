@@ -7,6 +7,7 @@ from sagents.utils.llm_request_utils import (
     downgrade_image_url_parts_for_text_only_model,
     get_multimodal_support,
     redact_base64_data_urls_in_value,
+    sanitize_deepseek_tool_history,
     sanitize_model_request_kwargs,
     uses_max_completion_tokens,
 )
@@ -182,8 +183,127 @@ def test_sanitize_strips_reasoning_effort_tool_choice_required_case_insensitive(
             "tool_choice": "  Required ",
             "extra_body": {"reasoning_effort": "minimal"},
         },
+        model="gpt-5.4",
     )
     assert "reasoning_effort" not in out["extra_body"]
+
+
+def test_sanitize_keeps_deepseek_reasoning_effort_when_tools_present() -> None:
+    out = sanitize_model_request_kwargs(
+        {
+            "tools": [
+                {"type": "function", "function": {"name": "do_work"}},
+            ],
+            "extra_body": {"reasoning_effort": "max"},
+        },
+        model_config={"base_url": "https://api.deepseek.com"},
+        model="deepseek-v4-flash",
+    )
+    assert out["extra_body"]["reasoning_effort"] == "max"
+
+
+def test_sanitize_drops_tool_choice_for_deepseek_thinking() -> None:
+    out = sanitize_model_request_kwargs(
+        {
+            "tools": [{"type": "function", "function": {"name": "do_work"}}],
+            "tool_choice": "required",
+            "extra_body": {
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": "high",
+            },
+        },
+        model_config={"base_url": "https://api.deepseek.com"},
+        model="deepseek-v4-flash",
+    )
+    assert "tool_choice" not in out
+    assert out["extra_body"]["reasoning_effort"] == "high"
+
+
+def test_sanitize_keeps_tool_choice_for_deepseek_non_thinking() -> None:
+    out = sanitize_model_request_kwargs(
+        {
+            "tools": [{"type": "function", "function": {"name": "do_work"}}],
+            "tool_choice": "required",
+            "extra_body": {"thinking": {"type": "disabled"}},
+        },
+        model_config={"base_url": "https://api.deepseek.com"},
+        model="deepseek-v4-flash",
+    )
+    assert out["tool_choice"] == "required"
+
+
+def test_sanitize_keeps_tool_choice_for_third_party_deepseek_slug() -> None:
+    out = sanitize_model_request_kwargs(
+        {
+            "tools": [{"type": "function", "function": {"name": "do_work"}}],
+            "tool_choice": "required",
+            "extra_body": {"thinking": {"type": "enabled"}},
+        },
+        model_config={
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        model="deepseek-v4-flash",
+    )
+    assert out["tool_choice"] == "required"
+
+
+def test_deepseek_history_sanitizer_drops_missing_reasoning_pair_without_mutation() -> (
+    None
+):
+    messages = [
+        {"role": "user", "content": "weather"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "legacy-call",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "legacy-call", "content": "sunny"},
+        {"role": "user", "content": "tomorrow?"},
+    ]
+
+    out = sanitize_deepseek_tool_history(
+        messages,
+        request_kwargs={"extra_body": {"thinking": {"type": "enabled"}}},
+        model="deepseek-v4-flash",
+        model_config={"base_url": "https://api.deepseek.com"},
+    )
+
+    assert out == [messages[0], messages[3]]
+    assert len(messages) == 4
+    assert messages[1]["content"] is None
+
+
+def test_deepseek_history_sanitizer_keeps_missing_reasoning_when_thinking_off() -> (
+    None
+):
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "non-thinking-call",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        }
+    ]
+
+    out = sanitize_deepseek_tool_history(
+        messages,
+        request_kwargs={"extra_body": {"thinking": {"type": "disabled"}}},
+        model="deepseek-v4-flash",
+        model_config={"base_url": "https://api.deepseek.com"},
+    )
+
+    assert out is messages
 
 
 def test_sanitize_keeps_reasoning_effort_when_tool_choice_auto() -> None:
@@ -325,6 +445,34 @@ async def test_create_chat_completion_drops_unknown_extra_body_params() -> None:
     assert "chat_template_kwargs" not in response["kwargs"]["extra_body"]
     assert "enable_thinking" not in response["kwargs"]["extra_body"]
     assert response["kwargs"]["extra_body"]["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_maps_retired_official_deepseek_alias() -> None:
+    client = _FakeClient()
+
+    response = await create_chat_completion_with_fallback(
+        client,
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": "hi"}],
+        model_config={"base_url": "https://api.deepseek.com"},
+    )
+
+    assert response["kwargs"]["model"] == "deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_keeps_third_party_deepseek_alias() -> None:
+    client = _FakeClient()
+
+    response = await create_chat_completion_with_fallback(
+        client,
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": "hi"}],
+        model_config={"base_url": "https://openrouter.ai/api/v1"},
+    )
+
+    assert response["kwargs"]["model"] == "deepseek-chat"
 
 
 @pytest.mark.asyncio

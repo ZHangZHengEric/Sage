@@ -270,7 +270,7 @@ def build_minimal_cli_env_template() -> str:
         cfg.default_llm_api_base_url or "https://api.deepseek.com/v1"
     )
     model_name = (os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME") or "").strip() or (
-        cfg.default_llm_model_name or "deepseek-chat"
+        cfg.default_llm_model_name or "deepseek-v4-flash"
     )
     api_key = (os.environ.get("SAGE_DEFAULT_LLM_API_KEY") or "").strip()
 

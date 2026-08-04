@@ -24,6 +24,21 @@
           <p class="text-xs text-muted-foreground">
             {{ t('config.deepThinkingDesc') }}
           </p>
+          <div v-if="config.deepThinking && showThinkingLevel" class="space-y-2">
+            <Label>{{ t('config.thinkingLevel') }}</Label>
+            <Select
+              :model-value="config.thinkingLevel || 'high'"
+              @update:model-value="(value) => handleConfigChange({ thinkingLevel: value })"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">{{ t('config.thinkingLevelHigh') }}</SelectItem>
+                <SelectItem value="max">{{ t('config.thinkingLevelMax') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -175,6 +190,12 @@ const emit = defineEmits(['configChange', 'agentSelect', 'close'])
 
 // Composables
 const { t } = useLanguage()
+
+const showThinkingLevel = computed(() => {
+  const model = String(props.selectedAgent?.llmModel || '').trim().toLowerCase()
+  const baseUrl = String(props.selectedAgent?.llmBaseUrl || '').trim().toLowerCase()
+  return model.startsWith('deepseek-v4-') && /^https?:\/\/api\.deepseek\.com(?:\/|$)/.test(baseUrl)
+})
 
 // Methods
 const handleConfigChange = (changes) => {
