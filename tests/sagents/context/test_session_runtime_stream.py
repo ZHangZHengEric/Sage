@@ -42,7 +42,10 @@ async def test_run_stream_with_flow_fills_missing_session_id(monkeypatch, tmp_pa
         input_messages=[
             {
                 "role": MessageRole.USER.value,
-                "content": "hi",
+                "content": (
+                    "<enable_deep_thinking>true</enable_deep_thinking>"
+                    "<thinking_level>max</thinking_level> hi"
+                ),
                 "session_id": "child-session",
             }
         ],
@@ -56,6 +59,9 @@ async def test_run_stream_with_flow_fills_missing_session_id(monkeypatch, tmp_pa
 
     assert chunks[0].session_id == "child-session"
     assert chunks[1]["session_id"] == "child-session"
+    assert session.session_context.agent_config["deep_thinking"] is True
+    assert session.session_context.agent_config["thinking_level"] == "max"
+    assert session.session_context.message_manager.messages[0].content == "hi"
 
 
 @pytest.mark.parametrize(

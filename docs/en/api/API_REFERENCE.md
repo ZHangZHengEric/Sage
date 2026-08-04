@@ -74,7 +74,7 @@ agent = SAgent(
 | `available_workflows` | Uses `{}` internally if omitted |
 | `context_budget_config` | Context budget controls |
 | `volume_mounts` | List of `VolumeMount` from `sagents.utils.sandbox.config` |
-| `deep_thinking` | Legacy; prefer message-level tags such as `&lt;enable_deep_thinking&gt;` |
+| `deep_thinking` | Compatibility parameter; prefer `&lt;enable_deep_thinking&gt;true&lt;/enable_deep_thinking&gt;`, optionally followed by `&lt;thinking_level&gt;high|max&lt;/thinking_level&gt;` |
 
 The method ends a session in `finally` by calling `close_session` on the session manager. See the source for exact observability and chunk-yielding behavior.
 
@@ -134,7 +134,7 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 
 ## 4. Default flow and `agent_mode`
 
-If `custom_flow` is omitted, `_build_default_flow` builds a graph with `sagents/flow/schema.py` node types. High-level behavior is described in [Core Concepts](CORE_CONCEPTS.md) and [ARCHITECTURE_SAGENTS_AGENT_FLOW.md](ARCHITECTURE_SAGENTS_AGENT_FLOW.md).
+If `custom_flow` is omitted, `_build_default_flow` builds the `agent_mode` branch and optional suggestion steps with `sagents/flow/schema.py` node types. Deep thinking now controls the active model request directly; it no longer invokes a separate `TaskAnalysisAgent`. High-level behavior is described in [Core Concepts](CORE_CONCEPTS.md) and [ARCHITECTURE_SAGENTS_AGENT_FLOW.md](ARCHITECTURE_SAGENTS_AGENT_FLOW.md).
 
 ## 5. Tools and skills
 
@@ -158,7 +158,8 @@ If `custom_flow` is omitted, `_build_default_flow` builds a graph with `sagents/
 ## 6. `MessageChunk` and `MessageType`
 
 - File: `sagents/context/messages/message.py`  
-- `MessageChunk` holds streaming pieces (`role`, `content`, `tool_calls`, `message_id`, `message_type`, etc.)  
+- `MessageChunk` holds streaming pieces (`role`, `content`, `reasoning_content`, `tool_calls`, `message_id`, `message_type`, etc.). All chunks from one assistant response share one `message_id`, so persisted thinking, visible content, and tool calls become fields of one assistant message.
+- For first-party DeepSeek Chat Completions tool calls, assistant messages are replayed in the native shape with `content`, `reasoning_content`, and `tool_calls`. Historical reasoning from ordinary answers is omitted. Context token estimates count both content fields.
 - `MessageType` enumerates values such as `user_input`, `assistant_text`, `task_analysis`, `tool_call`, plus legacy compatibility for older stored messages
 
 ## 7. Environment

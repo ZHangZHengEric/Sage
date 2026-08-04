@@ -164,10 +164,7 @@ What `SAgent._build_default_flow(agent_mode, max_loop_count)` actually builds:
 
 ```mermaid
 flowchart TB
-    Start([input messages]) --> DT{is_deep_thinking?}
-    DT -->|yes| Ana[task_analysis] --> Sw
-    DT -->|no| Sw
-    Sw{Switch agent_mode}
+    Start([input messages]) --> Sw{Switch agent_mode}
     Sw -->|simple| SimpleBody
     Sw -->|multi| MultiBody
     Sw -->|fibre| FibreBody
@@ -179,6 +176,8 @@ flowchart TB
     More -->|no| End
     QS --> End([done])
 ```
+
+`deep_thinking` is translated directly into thinking parameters on the active model request; the default flow no longer inserts a `task_analysis` node.
 
 
 

@@ -83,6 +83,187 @@ class DummyObservabilityManager:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_tool_request_replays_only_tool_call_reasoning():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "tools": [
+                {"type": "function", "function": {"name": "weather"}}
+            ],
+            "tool_choice": "required",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            reasoning_content="need tool",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(role="assistant", content="checking"),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+        MessageChunk(
+            role="assistant",
+            reasoning_content="compose answer",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(role="assistant", content="sunny"),
+        MessageChunk(role="user", content="and tomorrow?"),
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages, enable_thinking=True
+    ):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = request["messages"][1]
+    assert assistant_tool_call["content"] == "checking"
+    assert assistant_tool_call["reasoning_content"] == "need tool"
+    assert assistant_tool_call["tool_calls"][0]["id"] == "call-1"
+    assert all(
+        "reasoning_content" not in message
+        for message in request["messages"]
+        if not message.get("tool_calls")
+    )
+    assert "tool_choice" not in request
+
+
+@pytest.mark.asyncio
+async def test_deepseek_replays_tool_call_reasoning_when_current_request_has_no_tools():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            reasoning_content="need tool",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+        MessageChunk(role="user", content="summarize without tools"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = request["messages"][1]
+    assert assistant_tool_call["reasoning_content"] == "need tool"
+    assert assistant_tool_call["tool_calls"][0]["id"] == "call-1"
+    assert "tools" not in request
+
+
+@pytest.mark.asyncio
+async def test_deepseek_thinking_omits_legacy_tool_turn_without_reasoning():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            tool_calls=[
+                {
+                    "id": "legacy-call",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="legacy-call"),
+        MessageChunk(role="assistant", content="It is sunny."),
+        MessageChunk(role="user", content="and tomorrow?"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request_messages = client.chat.completions.requests[0]["messages"]
+    assert all(not message.get("tool_calls") for message in request_messages)
+    assert all(message.get("role") != "tool" for message in request_messages)
+    assert [message.get("content") for message in request_messages] == [
+        "weather",
+        "It is sunny.",
+        "and tomorrow?",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_third_party_deepseek_slug_uses_generic_chat_completions_contract():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://example.com/openai/v1",
+            "tools": [{"type": "function", "function": {"name": "weather"}}],
+            "tool_choice": "required",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            reasoning_content="private provider-specific reasoning",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = next(
+        message for message in request["messages"] if message.get("tool_calls")
+    )
+    assert "reasoning_content" not in assistant_tool_call
+    assert "content" not in assistant_tool_call
+    assert request["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
 async def test_llm_stream_strips_historical_search_memory_at_request_boundary():
     client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
     agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
@@ -623,6 +804,24 @@ def _content_chunk(content, *, finish_reason=None):
     )
 
 
+def _reasoning_chunk(reasoning_content):
+    return chat_completion_chunk.ChatCompletionChunk(
+        id="chunk",
+        object="chat.completion.chunk",
+        created=0,
+        model="gpt-test",
+        choices=[
+            chat_completion_chunk.Choice(
+                index=0,
+                delta=chat_completion_chunk.ChoiceDelta(
+                    reasoning_content=reasoning_content
+                ),
+                finish_reason=None,
+            )
+        ],
+    )
+
+
 def _attempt_raises_before_yield(exc):
     async def attempt():
         if False:
@@ -918,6 +1117,63 @@ async def test_simple_agent_closes_partial_tool_call_in_low_latency_mode(monkeyp
     assert (
         len(MessageManager.convert_messages_to_dict_for_request(messages + chunks)) == 4
     )
+
+
+@pytest.mark.asyncio
+async def test_simple_agent_persists_reasoning_and_tool_calls_as_one_message(monkeypatch):
+    monkeypatch.setenv("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "true")
+    client = FakeClient(
+        attempts=[
+            _attempt_yields(
+                _reasoning_chunk("need a tool"),
+                _tool_call_chunk("call-1", '{"tasks":[]}'),
+            )
+        ]
+    )
+    agent = SimpleAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "todo_write",
+                "description": "write todos",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    chunks = []
+    async for chunk, is_complete in agent._call_llm_and_process_response(
+        messages_input=messages,
+        tools_json=tools,
+        tool_manager=None,
+        session_id="sid",
+    ):
+        chunks.extend(chunk)
+        if is_complete:
+            break
+
+    response_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.role == MessageRole.ASSISTANT.value
+        and (chunk.reasoning_content or chunk.tool_calls)
+    ]
+    assert len({chunk.message_id for chunk in response_chunks}) == 1
+
+    manager = MessageManager()
+    manager.add_messages(chunks)
+    persisted = [
+        message
+        for message in manager.messages
+        if message.message_id == response_chunks[0].message_id
+    ]
+    assert len(persisted) == 1
+    assert persisted[0].reasoning_content == "need a tool"
+    assert persisted[0].tool_calls[0]["id"] == "call-1"
+    assert persisted[0].message_type == MessageType.TOOL_CALL.value
 
 
 @pytest.mark.asyncio

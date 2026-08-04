@@ -506,7 +506,7 @@ const handleDrop = async (e) => {
   }
 }
 
-const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*)+/i
+const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*)+/i
 const LEADING_SKILL_TAGS_RE = /^(?:\s*<skill>(.*?)<\/skill>\s*)+/i
 const SINGLE_SKILL_TAG_RE = /<skill>(.*?)<\/skill>/gi
 

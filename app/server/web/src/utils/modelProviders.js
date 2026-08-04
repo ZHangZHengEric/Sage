@@ -2,7 +2,7 @@ export const MODEL_PROVIDERS = [
   {
     name: 'DeepSeek',
     base_url: 'https://api.deepseek.com',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     website: 'https://platform.deepseek.com/api_keys',
     model_list_url: 'https://platform.deepseek.com/api_keys'
   },

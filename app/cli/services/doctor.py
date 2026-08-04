@@ -258,7 +258,7 @@ def build_minimal_cli_env_template() -> str:
     )
     model_name = _normalize_env_value(
         os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"),
-        cfg.default_llm_model_name or "deepseek-chat",
+        cfg.default_llm_model_name or "deepseek-v4-flash",
     )
     api_key = (os.environ.get("SAGE_DEFAULT_LLM_API_KEY") or "").strip()
 

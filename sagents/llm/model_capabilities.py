@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Awaitable, Dict, Mapping, Optional
+from urllib.parse import urlparse
 
 import httpx
 from loguru import logger
@@ -27,6 +28,7 @@ _REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
 _VALID_REASONING_EFFORTS: frozenset[str] = frozenset(
     {"minimal", "low", "medium", "high"}
 )
+_VALID_THINKING_LEVELS: frozenset[str] = _VALID_REASONING_EFFORTS | {"max"}
 
 
 def is_openai_reasoning_model(model_name: str) -> bool:
@@ -43,6 +45,62 @@ def is_openai_reasoning_model(model_name: str) -> bool:
     if name in _REASONING_MODEL_EXACT:
         return True
     return any(name.startswith(prefix) for prefix in _REASONING_MODEL_PREFIXES)
+
+
+def is_deepseek_model(model_name: str) -> bool:
+    """Return whether the provider-facing model slug is a DeepSeek model."""
+    if not model_name:
+        return False
+    name = model_name.strip().lower()
+    return (
+        name.startswith("deepseek-")
+        or name.startswith("deepseek/")
+        or "/deepseek-" in name
+    )
+
+
+def is_official_deepseek_endpoint(base_url: Optional[str]) -> bool:
+    """Return whether ``base_url`` is DeepSeek's first-party API endpoint."""
+    if not base_url:
+        return False
+    raw = str(base_url).strip()
+    if not raw:
+        return False
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    return (parsed.hostname or "").lower() == "api.deepseek.com"
+
+
+def uses_deepseek_native_protocol(
+    model_name: str, base_url: Optional[str]
+) -> bool:
+    """Whether a request should use DeepSeek's native Chat Completions contract.
+
+    Third-party OpenAI-compatible endpoints may expose ``deepseek-*`` model names,
+    but their reasoning/tool-call replay contracts are not guaranteed to match the
+    first-party API.
+    """
+    return is_deepseek_model(model_name) and is_official_deepseek_endpoint(base_url)
+
+
+def normalize_reasoning_effort(
+    model_name: str,
+    thinking_level: str,
+    *,
+    base_url: Optional[str] = None,
+) -> str:
+    """Normalize the shared level vocabulary to a provider-supported value."""
+    level = str(thinking_level or "").strip().lower()
+    if level not in _VALID_THINKING_LEVELS:
+        raise ValueError(f"Unsupported thinking level: {thinking_level}")
+    if uses_deepseek_native_protocol(model_name, base_url):
+        # DeepSeek V4 exposes high/max. It accepts low/medium only as
+        # compatibility aliases and maps both to high.
+        if level in {"minimal", "low", "medium"}:
+            return "high"
+        return level
+    if is_openai_reasoning_model(model_name) and level == "max":
+        return "high"
+    return level
 
 
 def resolve_reasoning_effort(
@@ -69,7 +127,9 @@ def resolve_reasoning_effort(
 def build_llm_extra_body(
     model_name: str,
     *,
+    base_url: Optional[str] = None,
     enable_thinking: bool = False,
+    thinking_level: Optional[str] = None,
     step_name: Optional[str] = None,
     reasoning_effort_off_env: Optional[str] = None,
     default_off: str = "low",
@@ -85,12 +145,32 @@ def build_llm_extra_body(
     if step_name:
         extra_body["_step_name"] = step_name
 
+    if thinking_level:
+        enable_thinking = True
+
     if is_openai_reasoning_model(model_name):
-        extra_body["reasoning_effort"] = resolve_reasoning_effort(
-            enable_thinking=enable_thinking,
-            env_value=reasoning_effort_off_env,
-            default_off=default_off,
+        extra_body["reasoning_effort"] = (
+            normalize_reasoning_effort(
+                model_name, thinking_level, base_url=base_url
+            )
+            if thinking_level
+            else resolve_reasoning_effort(
+                enable_thinking=enable_thinking,
+                env_value=reasoning_effort_off_env,
+                default_off=default_off,
+            )
         )
+    elif uses_deepseek_native_protocol(model_name, base_url):
+        # The first-party Chat Completions API only documents these native
+        # fields. Do not mix in local-engine compatibility switches such as
+        # enable_thinking/chat_template_kwargs.
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+        if thinking_level:
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model_name, thinking_level, base_url=base_url
+            )
     else:
         extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
         extra_body["enable_thinking"] = enable_thinking

@@ -189,6 +189,7 @@ pub(crate) fn parse_stream_event(line: &str) -> Option<CliStreamEvent> {
         content: object
             .get("content")
             .and_then(Value::as_str)
+            .or_else(|| object.get("reasoning_content").and_then(Value::as_str))
             .or_else(|| object.get("message").and_then(Value::as_str))
             .unwrap_or_default()
             .to_string(),

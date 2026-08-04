@@ -26,7 +26,9 @@ def test_simple_and_fibre_memory_recall_run_outside_self_check_retry_loop(tmp_pa
         agent_mode="simple",
         max_loop_count=5,
     )
-    switch = flow.root.steps[1]
+    switch = flow.root.steps[0]
+
+    assert "task_analysis" not in _agent_keys(flow.root)
 
     for mode, executor_key in [
         ("simple", "simple"),
@@ -58,7 +60,7 @@ def test_simple_flow_does_not_run_task_summary_but_multi_still_does(tmp_path):
         agent_mode="simple",
         max_loop_count=5,
     )
-    switch = flow.root.steps[1]
+    switch = flow.root.steps[0]
 
     assert "task_summary" not in _agent_keys(switch.cases["simple"])
     assert "task_summary" in _agent_keys(switch.cases["multi"])

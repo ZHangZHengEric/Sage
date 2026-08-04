@@ -13,6 +13,7 @@ from sagents.utils.logger import logger
 from sagents.llm.capabilities import (
     downgrade_image_url_parts_for_text_only_model,
     get_multimodal_support,
+    normalize_chat_completions_model,
     sanitize_model_request_kwargs,
 )
 
@@ -133,10 +134,23 @@ class SageChatCompletions:
         kwargs.pop("fast_api_key", None)
         kwargs.pop("fast_base_url", None)
         kwargs.pop("fast_model_name", None)
+        active_model_config = {
+            **self._sage.model_capabilities,
+            "base_url": str(
+                getattr(client, "base_url", None)
+                or getattr(client, "_base_url", "")
+            ),
+        }
+        if isinstance(kwargs.get("model"), str):
+            kwargs["model"] = normalize_chat_completions_model(
+                kwargs["model"],
+                client=self._sage,
+                model_config=active_model_config,
+            )
         kwargs = sanitize_model_request_kwargs(
             kwargs,
             client=self._sage,
-            model_config=self._sage.model_capabilities,
+            model_config=active_model_config,
             model=kwargs.get("model") if isinstance(kwargs.get("model"), str) else None,
         )
         if (

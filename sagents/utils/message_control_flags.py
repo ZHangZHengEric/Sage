@@ -11,6 +11,12 @@ ENABLE_DEEP_THINKING_TAG_RE = re.compile(
     r"^\s*<enable_deep_thinking>\s*(true|false)\s*</enable_deep_thinking>\s*",
     re.IGNORECASE,
 )
+THINKING_LEVEL_TAG_RE = re.compile(
+    r"^\s*<(?:thinking_level|deep_thinking_level)>\s*"
+    r"(minimal|low|medium|high|max)\s*"
+    r"</(?:thinking_level|deep_thinking_level)>\s*",
+    re.IGNORECASE,
+)
 
 
 def _get_role(message: Any) -> str:
@@ -32,11 +38,11 @@ def _set_content(message: Any, content: Any) -> None:
         message.content = content
 
 
-def _extract_control_flags_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
+def _extract_control_flags_from_text(text: str) -> Tuple[str, Dict[str, Any]]:
     if not isinstance(text, str):
         return text, {}
 
-    flags: Dict[str, bool] = {}
+    flags: Dict[str, Any] = {}
     remaining = text
 
     while True:
@@ -56,18 +62,24 @@ def _extract_control_flags_from_text(text: str) -> Tuple[str, Dict[str, bool]]:
             remaining = remaining[deep_thinking_match.end() :]
             matched = True
 
+        thinking_level_match = THINKING_LEVEL_TAG_RE.match(remaining)
+        if thinking_level_match:
+            flags["thinking_level"] = thinking_level_match.group(1).lower()
+            remaining = remaining[thinking_level_match.end() :]
+            matched = True
+
         if not matched:
             break
 
     return remaining, flags
 
 
-def _extract_control_flags_from_content(content: Any) -> Tuple[Any, Dict[str, bool]]:
+def _extract_control_flags_from_content(content: Any) -> Tuple[Any, Dict[str, Any]]:
     if isinstance(content, str):
         return _extract_control_flags_from_text(content)
 
     if isinstance(content, list):
-        flags: Dict[str, bool] = {}
+        flags: Dict[str, Any] = {}
         new_content: List[Dict[str, Any]] = []
         parsed_first_text = False
 
@@ -97,8 +109,8 @@ def _extract_control_flags_from_content(content: Any) -> Tuple[Any, Dict[str, bo
     return content, {}
 
 
-def extract_control_flags_from_messages(messages: List[Any]) -> Dict[str, bool]:
-    flags: Dict[str, bool] = {}
+def extract_control_flags_from_messages(messages: List[Any]) -> Dict[str, Any]:
+    flags: Dict[str, Any] = {}
 
     for message in messages or []:
         if _get_role(message) != "user":

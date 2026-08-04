@@ -1537,7 +1537,7 @@ def _extract_text_from_content(content: Any) -> str:
 def _sanitize_title_text(text: str) -> str:
     cleaned = str(text or "")
     cleaned = re.sub(
-        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*)+",
+        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*</(?:thinking_level|deep_thinking_level)>\s*)+",
         "",
         cleaned,
         flags=re.IGNORECASE,

@@ -452,7 +452,7 @@ class SAgent:
                         continue
                     if first_show_time is None:
                         try:
-                            content = redacted.content
+                            content = redacted.content or redacted.reasoning_content
                             if content and str(content).strip():
                                 first_show_time = time.time()
                                 delta_ms = int((first_show_time - start_time) * 1000)
@@ -470,6 +470,7 @@ class SAgent:
                             )
                     if (
                         redacted.content
+                        or redacted.reasoning_content
                         or redacted.tool_calls
                         or redacted.matches_message_types(
                             [MessageType.TOKEN_USAGE.value]
@@ -486,15 +487,11 @@ class SAgent:
     ) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
 
-        # 1. 深度思考 (可选)
-        steps = [
-            IfNode(
-                condition="is_deep_thinking",
-                true_body=AgentNode(agent_key="task_analysis"),
-            )
-        ]
+        # 深度思考由模型原生 thinking/reasoning 能力处理，不再额外插入
+        # TaskAnalysisAgent，避免重复模型调用和独立 task_analysis 消息。
+        steps = []
 
-        # 2. 模式选择 (Switch)
+        # 1. 模式选择 (Switch)
         # 预定义多智能体循环体
         multi_agent_body = SequenceNode(
             steps=[

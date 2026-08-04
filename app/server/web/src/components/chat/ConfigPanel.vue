@@ -23,6 +23,21 @@
           <p class="text-xs text-muted-foreground">
             {{ t('config.deepThinkingDesc') }}
           </p>
+          <div v-if="config.deepThinking && showThinkingLevel" class="space-y-2">
+            <Label>{{ t('config.thinkingLevel') }}</Label>
+            <Select
+              :model-value="config.thinkingLevel || 'high'"
+              @update:model-value="(value) => handleConfigChange({ thinkingLevel: value })"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">{{ t('config.thinkingLevelHigh') }}</SelectItem>
+                <SelectItem value="max">{{ t('config.thinkingLevelMax') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -79,6 +94,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { Settings } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
@@ -106,6 +122,12 @@ const props = defineProps({
 const emit = defineEmits(['configChange', 'agentSelect', 'close'])
 
 const { t } = useLanguage()
+
+const showThinkingLevel = computed(() => {
+  const model = String(props.selectedAgent?.llmModel || '').trim().toLowerCase()
+  const baseUrl = String(props.selectedAgent?.llmBaseUrl || '').trim().toLowerCase()
+  return model.startsWith('deepseek-v4-') && /^https?:\/\/api\.deepseek\.com(?:\/|$)/.test(baseUrl)
+})
 
 const handleConfigChange = (changes) => {
   emit('configChange', changes)
