@@ -86,6 +86,44 @@ def test_next_request_runtime_metadata_keeps_visibility_and_lifecycle_fixed():
 
 
 @pytest.mark.asyncio
+async def test_complete_mode_emits_one_assistant_message_for_parallel_tool_calls():
+    agent = ParallelToolAgent(expected_starts=2)
+    agent.release.set()
+    calls = {
+        "call_1": _tool_call("call_1"),
+        "call_2": _tool_call("call_2"),
+    }
+
+    yielded = []
+    async for messages, is_complete in agent._handle_tool_calls(
+        tool_calls=calls,
+        tool_manager=None,
+        messages_input=[],
+        session_id="session-1",
+        emit_tool_call_message=True,
+        tool_call_message_id="response-tool-calls",
+        tool_call_message_metadata={"llm_response_id": "response-1"},
+    ):
+        assert is_complete is False
+        yielded.extend(messages)
+
+    assistant_messages = [
+        message for message in yielded if message.role == MessageRole.ASSISTANT.value
+    ]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0].message_id == "response-tool-calls"
+    assert assistant_messages[0].metadata["llm_response_id"] == "response-1"
+    assert [
+        tool_call["id"] for tool_call in assistant_messages[0].tool_calls or []
+    ] == ["call_1", "call_2"]
+    assert {
+        message.tool_call_id
+        for message in yielded
+        if message.role == MessageRole.TOOL.value
+    } == {"call_1", "call_2"}
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_calls_runs_tools_concurrently_with_limit_10():
     agent = ParallelToolAgent(expected_starts=3)
     calls = {

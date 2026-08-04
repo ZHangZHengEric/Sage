@@ -6,6 +6,7 @@ from sagents.utils.llm_request_utils import (
     get_multimodal_support,
     get_structured_output_support,
     is_unsupported_input_format_error,
+    normalize_chat_completions_model,
     sanitize_model_request_kwargs,
     uses_max_completion_tokens,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "get_multimodal_support",
     "get_structured_output_support",
     "is_unsupported_input_format_error",
+    "normalize_chat_completions_model",
     "sanitize_model_request_kwargs",
     "uses_max_completion_tokens",
 ]

@@ -780,6 +780,8 @@ class Session:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
+        inherited_deep_thinking: Optional[bool] = None,
+        inherited_thinking_level: Optional[str] = None,
         max_loop_count: Optional[int] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
@@ -827,6 +829,16 @@ class Session:
             enable_deep_thinking = bool(
                 control_flags.get("enable_deep_thinking", False)
             )
+            thinking_level = control_flags.get("thinking_level")
+            if (
+                "enable_deep_thinking" not in control_flags
+                and inherited_deep_thinking is not None
+            ):
+                enable_deep_thinking = bool(inherited_deep_thinking)
+            if thinking_level is None:
+                thinking_level = inherited_thinking_level
+            if thinking_level and "enable_deep_thinking" not in control_flags:
+                enable_deep_thinking = True
             if deep_thinking is not None:
                 logger.warning(
                     "SAgent: 参数 deep_thinking 已过时且已忽略，请改用消息控制标签 <enable_deep_thinking>"
@@ -843,6 +855,7 @@ class Session:
                 system_context=session_context.system_context,
                 available_workflows=available_workflows,
                 deep_thinking=enable_deep_thinking,
+                thinking_level=thinking_level,
                 agent_mode=agent_mode,
                 more_suggest=more_suggest,
                 max_loop_count=max_loop_count,
@@ -915,6 +928,7 @@ class Session:
             # 1. 预处理状态 (兼容旧逻辑)
             # 确保一些状态已经设置到 SessionContext 中，供 ConditionRegistry 使用
             session_context.audit_status["deep_thinking"] = enable_deep_thinking
+            session_context.audit_status["thinking_level"] = thinking_level
             session_context.audit_status["enable_plan"] = bool(
                 control_flags.get("enable_plan", False)
             )

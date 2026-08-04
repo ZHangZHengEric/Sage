@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { agentAPI } from '@/api/agent.js'
+import { modelProviderAPI } from '@/api/modelProvider.js'
 import { isLoggedIn } from '@/utils/auth.js'
 
 const normalizeAgentMode = (mode) => {
@@ -7,6 +8,12 @@ const normalizeAgentMode = (mode) => {
   if (normalized === 'fibre') return 'fibre'
   if (normalized === 'team') return 'team'
   return 'simple'
+}
+
+const isOfficialDeepSeekV4Agent = (agent) => {
+  const model = String(agent?.llmModel || '').trim().toLowerCase()
+  const baseUrl = String(agent?.llmBaseUrl || '').trim().toLowerCase()
+  return model.startsWith('deepseek-v4-') && /^https?:\/\/api\.deepseek\.com(?:\/|$)/.test(baseUrl)
 }
 
 export const useChatAgentConfig = ({
@@ -19,6 +26,7 @@ export const useChatAgentConfig = ({
   const selectedAgent = ref(null)
   const config = ref({
     deepThinking: true,
+    thinkingLevel: 'high',
     agentMode: 'simple',
     moreSuggest: false,
     maxLoopCount: null,
@@ -53,8 +61,12 @@ export const useChatAgentConfig = ({
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
       const agentMode = normalizeAgentMode(agent.agentMode)
+      const supportsThinkingLevels = isOfficialDeepSeekV4Agent(agent)
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
+        thinkingLevel: supportsThinkingLevels
+          ? (userConfigOverrides.value.thinkingLevel || 'high')
+          : 'high',
         agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,
@@ -127,6 +139,21 @@ export const useChatAgentConfig = ({
         await new Promise(resolve => setTimeout(resolve, 800))
         response = await agentAPI.getAgents()
         nextAgents = response || []
+      }
+
+      try {
+        const providers = await modelProviderAPI.listModelProviders()
+        const providerById = new Map(
+          (Array.isArray(providers) ? providers : []).map(provider => [provider.id, provider])
+        )
+        nextAgents = nextAgents.map(agent => {
+          const provider = providerById.get(agent.llm_provider_id)
+          return provider
+            ? { ...agent, llmModel: provider.model, llmBaseUrl: provider.base_url }
+            : agent
+        })
+      } catch (error) {
+        console.warn('[Chat] Failed to load model capabilities for agent settings:', error)
       }
 
       agents.value = nextAgents

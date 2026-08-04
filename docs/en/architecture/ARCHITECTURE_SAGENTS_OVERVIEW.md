@@ -152,10 +152,7 @@ Constraints:
 
 ```mermaid
 flowchart TB
-    Start([input messages]) --> DT{is_deep_thinking?}
-    DT -->|yes| Analysis[task_analysis] --> Sw
-    DT -->|no| Sw
-    Sw{agent_mode}
+    Start([input messages]) --> Sw{agent_mode}
     Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → summary?]
     Sw -->|multi| Multi[multi body<br/>memory_recall<br/>→ Loop plan/exec/observe/judge<br/>→ task_summary]
     Sw -->|fibre| Fibre[fibre body<br/>Loop self_check_should_retry<br/>→ fibre core → self_check]
@@ -166,6 +163,8 @@ flowchart TB
     More -->|yes| Sug[query_suggest] --> End([output])
     More -->|no| End
 ```
+
+Deep thinking applies directly to the active model request; the default flow no longer runs a separate `task_analysis` step.
 
 
 

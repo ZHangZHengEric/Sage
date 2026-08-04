@@ -1621,8 +1621,11 @@ class FibreOrchestrator:
                 max_loop_count=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
                     "max_loop_count"
                 ),
-                deep_thinking=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
+                inherited_deep_thinking=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
                     "deep_thinking", False
+                ),
+                inherited_thinking_level=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
+                    "thinking_level"
                 ),
                 agent_mode=sub_session.session_context.agent_config.get(  # pyright: ignore[reportOptionalMemberAccess]
                     "agent_mode", "simple"
@@ -1844,6 +1847,7 @@ class FibreOrchestrator:
             system_context=sub_agent_system_context,
             available_workflows=parent_agent_config.get("available_workflows", {}),
             deep_thinking=parent_agent_config.get("deep_thinking", False),
+            thinking_level=parent_agent_config.get("thinking_level"),
             agent_mode=child_agent_mode,
             more_suggest=parent_agent_config.get("more_suggest", False),
             max_loop_count=parent_agent_config.get("max_loop_count"),

@@ -40,7 +40,7 @@ pip install -e .
 
 export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
+export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-v4-flash"
 export SAGE_DB_TYPE="file"
 
 cargo run --quiet --offline --manifest-path app/terminal/Cargo.toml
@@ -82,7 +82,7 @@ sage tui config init /tmp/.sage_env --force
 sage tui doctor
 sage tui doctor probe-provider
 sage tui provider verify
-sage tui provider verify model=deepseek-chat base=https://api.deepseek.com/v1
+sage tui provider verify model=deepseek-v4-flash base=https://api.deepseek.com
 sage tui sessions
 sage tui sessions 25
 sage tui sessions inspect latest

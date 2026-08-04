@@ -259,8 +259,12 @@ class MessageManager:
                 if message.role == MessageRole.SYSTEM.value:
                     self.stats["system_messages_rejected"] += 1
                     continue
-                # 过滤 content 以及 tool_calls 都是空字符串或者None的消息
-                if not message.content and not message.tool_calls:
+                # 过滤 content、reasoning_content 以及 tool_calls 都为空的消息
+                if (
+                    not message.content
+                    and not message.reasoning_content
+                    and not message.tool_calls
+                ):
                     self.stats["filtered_messages"] += 1
                     continue
             except Exception:
@@ -310,7 +314,7 @@ class MessageManager:
         messages: Sequence[Union[MessageChunk, Dict]],
     ) -> int:
         """
-        计算消息列表的token长度, 只计算content字段
+        计算消息列表的 token 长度，同时计算 content 与 reasoning_content。
         优先使用动态比例计算，如果没有样本则使用静态规则
 
         Args:
@@ -326,14 +330,20 @@ class MessageManager:
         # 否则使用静态规则计算
         token_length = 0
         for message in messages:
-            if isinstance(message, dict):
-                message = MessageChunk.from_dict(message)
-            content = message.get_content()
-            # 使用 calculate_str_token_length 处理多模态消息（包含图片）
-            msg_tokens = MessageManager.calculate_str_token_length(content)
-            token_length += msg_tokens
+            token_length += MessageManager.calculate_message_token_length(message)
 
         return token_length
+
+    @staticmethod
+    def calculate_message_token_length(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> int:
+        """Estimate both visible content and model-native reasoning content."""
+        if isinstance(message, dict):
+            message = MessageChunk.from_dict(message)
+        return MessageManager.calculate_str_token_length(
+            message.get_content()
+        ) + MessageManager.calculate_str_token_length(message.reasoning_content)
 
     @staticmethod
     def calculate_message_token_components(
@@ -353,6 +363,10 @@ class MessageManager:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
             content = message.get_content()
+
+            reasoning_content = message.reasoning_content
+            if isinstance(reasoning_content, str):
+                text_chars += len(reasoning_content)
 
             if isinstance(content, str):
                 text_chars += len(content)
@@ -654,6 +668,31 @@ class MessageManager:
                     existing_message.content = (
                         existing_message.content or ""
                     ) + new_message.content
+
+            if new_message.reasoning_content is not None:
+                existing_message.reasoning_content = (
+                    existing_message.reasoning_content or ""
+                ) + new_message.reasoning_content
+
+            # reasoning/content/tool_calls are fields of one assistant response.
+            # The first streamed chunk may be reasoning-only; once visible content
+            # or tool calls arrive, keep the same message and promote its display
+            # type instead of persisting a separate reasoning message.
+            existing_type = existing_message.normalized_message_type()
+            new_type = new_message.normalized_message_type()
+            if new_message.tool_calls:
+                existing_message.type = MessageType.TOOL_CALL.value
+                existing_message.message_type = MessageType.TOOL_CALL.value
+            elif (
+                existing_type == MessageType.REASONING_CONTENT.value
+                and new_type
+                not in {
+                    MessageType.REASONING_CONTENT.value,
+                    MessageType.EMPTY.value,
+                }
+            ):
+                existing_message.type = new_type
+                existing_message.message_type = new_type
 
             # 合并 tool_calls（流式 tool_calls 增量合并）
             if new_message.tool_calls is not None:
@@ -1286,9 +1325,11 @@ class MessageManager:
             msg
             for msg in messages
             if msg.role != MessageRole.SYSTEM.value
-            and not msg.matches_message_types([MessageType.REASONING_CONTENT.value])
             and MessageManager.should_include_in_llm(msg)
         ]
+        filtered_messages = MessageManager._coalesce_reasoning_for_inference(
+            filtered_messages
+        )
         pairs = MessageManager._expanded_compression_pairs(filtered_messages)
         covered_by_visible: set[int] = set()
         hidden_pairs: set[int] = set()
@@ -1310,6 +1351,108 @@ class MessageManager:
                 continue
             out.append(msg)
         return MessageManager.strip_turn_status_from_llm_context(out)
+
+    @staticmethod
+    def _coalesce_reasoning_for_inference(
+        messages: List[MessageChunk],
+    ) -> List[MessageChunk]:
+        """Attach reasoning only to the assistant tool call that produced it.
+
+        Current durable messages keep reasoning beside content/tool_calls;
+        legacy sessions may still contain a dedicated reasoning display chunk.
+        DeepSeek requires reasoning beside the matching assistant ``tool_calls``
+        message, while reasoning for a normal/final answer should not enter later
+        request context.
+        """
+        output: List[MessageChunk] = []
+        pending_reasoning: List[str] = []
+        pending_assistant_messages: List[MessageChunk] = []
+        pending_response_id: Optional[str] = None
+        pending_agent_name: Optional[str] = None
+
+        def response_id(message: MessageChunk) -> Optional[str]:
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            value = metadata.get("llm_response_id")
+            return str(value) if value else None
+
+        def belongs_to_pending_response(message: MessageChunk) -> bool:
+            current_response_id = response_id(message)
+            if pending_response_id is None and current_response_id is None:
+                # Legacy sessions have no response identity; retain adjacency
+                # fallback only when both sides are legacy messages. When agent
+                # ownership exists, it still must match.
+                if pending_agent_name and message.agent_name:
+                    return pending_agent_name == message.agent_name
+                return True
+            return pending_response_id == current_response_id
+
+        def flush_pending_assistant_messages() -> None:
+            nonlocal pending_agent_name, pending_response_id
+            output.extend(pending_assistant_messages)
+            pending_assistant_messages.clear()
+            pending_reasoning.clear()
+            pending_response_id = None
+            pending_agent_name = None
+
+        def pending_visible_content() -> str:
+            return "".join(
+                content
+                for item in pending_assistant_messages
+                if isinstance((content := item.get_content()), str)
+            )
+
+        for source in messages:
+            message = deepcopy(source)
+            is_reasoning_message = message.matches_message_types(
+                [MessageType.REASONING_CONTENT.value]
+            )
+            if is_reasoning_message:
+                if (
+                    (pending_reasoning or pending_assistant_messages)
+                    and not belongs_to_pending_response(message)
+                ):
+                    flush_pending_assistant_messages()
+                reasoning = message.reasoning_content or message.get_content()
+                if isinstance(reasoning, str) and reasoning:
+                    pending_response_id = response_id(message)
+                    pending_agent_name = message.agent_name
+                    pending_reasoning.append(reasoning)
+                continue
+
+            if message.role == MessageRole.ASSISTANT.value:
+                if (
+                    (pending_reasoning or pending_assistant_messages)
+                    and not belongs_to_pending_response(message)
+                ):
+                    flush_pending_assistant_messages()
+                if pending_reasoning and not message.tool_calls:
+                    message.reasoning_content = None
+                    pending_assistant_messages.append(message)
+                    continue
+                if message.tool_calls:
+                    buffered_content = pending_visible_content()
+                    if buffered_content:
+                        current_content = (
+                            message.content if isinstance(message.content, str) else ""
+                        )
+                        message.content = buffered_content + current_content
+                    pending_assistant_messages.clear()
+                    combined = "".join(pending_reasoning)
+                    if message.reasoning_content:
+                        combined += message.reasoning_content
+                    message.reasoning_content = combined or None
+                else:
+                    message.reasoning_content = None
+                pending_reasoning = []
+                pending_response_id = None
+                pending_agent_name = None
+            elif pending_reasoning or pending_assistant_messages:
+                flush_pending_assistant_messages()
+
+            output.append(message)
+
+        flush_pending_assistant_messages()
+        return output
 
     @staticmethod
     def strip_rejected_tool_calls_from_llm_context(
@@ -1514,7 +1657,7 @@ class MessageManager:
             if not has_value and msg.role != MessageRole.USER.value:
                 continue
             segment.append(msg)
-            tokens += MessageManager.calculate_str_token_length(msg.get_content())
+            tokens += MessageManager.calculate_message_token_length(msg)
             if tokens >= target_min:
                 break
             if tokens >= target_max:
@@ -1853,6 +1996,7 @@ class MessageManager:
                 MessageType.DO_SUBTASK_RESULT.value,
                 MessageType.TOOL_CALL.value,
                 MessageType.TASK_ANALYSIS.value,
+                MessageType.REASONING_CONTENT.value,
                 MessageType.TOOL_CALL_RESULT.value,
                 MessageType.SKILL_OBSERVATION.value,
                 MessageType.AGENT_EXECUTION_ERROR.value,
@@ -2304,7 +2448,12 @@ class MessageManager:
         clean_msg = {
             "role": msg.role,
             "content": MessageManager._wrap_runtime_error_content_for_request(msg),
+            "reasoning_content": msg.reasoning_content,
             "tool_call_id": msg.tool_call_id,
             "tool_calls": tool_calls_dict,
         }
+        if msg.matches_message_types([MessageType.REASONING_CONTENT.value]):
+            # 兼容旧会话：历史 reasoning chunk 把推理文本存放在 content 中。
+            clean_msg["reasoning_content"] = msg.reasoning_content or msg.get_content()
+            clean_msg["content"] = None
         return {key: value for key, value in clean_msg.items() if value is not None}

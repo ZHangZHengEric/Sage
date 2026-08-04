@@ -593,6 +593,12 @@ export const useChatPage = (props) => {
         typeof existing.content === 'string' &&
         typeof messageData.content === 'string' &&
         messageData.content.length > 0
+      const shouldAppendReasoning =
+        existing.role === 'assistant' &&
+        messageData.role === 'assistant' &&
+        typeof existing.reasoning_content === 'string' &&
+        typeof messageData.reasoning_content === 'string' &&
+        messageData.reasoning_content.length > 0
 
       let nextMessage
       if (isToolResultMessage(messageData)) {
@@ -607,6 +613,11 @@ export const useChatPage = (props) => {
           content: shouldAppendContent
             ? (existing.content || '') + messageData.content
             : (messageData.content !== undefined ? messageData.content : existing.content),
+          reasoning_content: shouldAppendReasoning
+            ? (existing.reasoning_content || '') + messageData.reasoning_content
+            : (messageData.reasoning_content !== undefined
+                ? messageData.reasoning_content
+                : existing.reasoning_content),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {

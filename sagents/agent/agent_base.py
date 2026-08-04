@@ -26,10 +26,12 @@ from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import (
     build_llm_extra_body,
+    uses_deepseek_native_protocol,
 )
 from sagents.utils.llm_request_utils import (
     format_api_error_details,
     is_unsupported_input_format_error,
+    normalize_chat_completions_model,
 )
 from sagents.utils.multimodal_image import (
     process_multimodal_content as _process_multimodal_content_util,
@@ -345,6 +347,183 @@ class AgentBase(ABC):
         ``sagents.utils.message_sanitizer.strip_content_when_tool_calls``。
         """
         return _strip_content_when_tool_calls_util(messages)
+
+    @staticmethod
+    def _coalesce_reasoning_content_messages(
+        messages: List[Dict[str, Any]], *, preserve_reasoning: bool
+    ) -> List[Dict[str, Any]]:
+        """Fold streamed reasoning chunks into their assistant response message.
+
+        Legacy Sage sessions may keep reasoning as a dedicated display message,
+        while current sessions store it beside ``content``/``tool_calls``. Only a
+        provider adapter that explicitly requests replay should receive the field.
+        """
+        output: List[Dict[str, Any]] = []
+        pending_reasoning: List[str] = []
+        pending_assistant_messages: List[Dict[str, Any]] = []
+        pending_response_id: Optional[str] = None
+
+        def response_id(message: Dict[str, Any]) -> Optional[str]:
+            value = message.get("_sage_llm_response_id")
+            return str(value) if value else None
+
+        def belongs_to_pending_response(message: Dict[str, Any]) -> bool:
+            current_response_id = response_id(message)
+            if pending_response_id is None and current_response_id is None:
+                return True
+            return pending_response_id == current_response_id
+
+        def flush_pending_assistant_messages() -> None:
+            nonlocal pending_response_id
+            output.extend(pending_assistant_messages)
+            pending_assistant_messages.clear()
+            pending_reasoning.clear()
+            pending_response_id = None
+
+        def pending_visible_content() -> str:
+            return "".join(
+                content
+                for item in pending_assistant_messages
+                if isinstance((content := item.get("content")), str)
+            )
+
+        for raw in messages:
+            message = dict(raw)
+            reasoning = message.get("reasoning_content")
+            is_reasoning_only = (
+                message.get("role") == MessageRole.ASSISTANT.value
+                and isinstance(reasoning, str)
+                and bool(reasoning)
+                and not message.get("content")
+                and not message.get("tool_calls")
+            )
+            if is_reasoning_only:
+                if (
+                    (pending_reasoning or pending_assistant_messages)
+                    and not belongs_to_pending_response(message)
+                ):
+                    flush_pending_assistant_messages()
+                pending_response_id = response_id(message)
+                pending_reasoning.append(reasoning)
+                continue
+
+            if message.get("role") == MessageRole.ASSISTANT.value:
+                if (
+                    (pending_reasoning or pending_assistant_messages)
+                    and not belongs_to_pending_response(message)
+                ):
+                    flush_pending_assistant_messages()
+                has_tool_calls = bool(message.get("tool_calls"))
+                if pending_reasoning and not has_tool_calls:
+                    message.pop("reasoning_content", None)
+                    pending_assistant_messages.append(message)
+                    continue
+                if has_tool_calls and pending_reasoning:
+                    if preserve_reasoning:
+                        buffered_content = pending_visible_content()
+                        if buffered_content:
+                            current_content = message.get("content")
+                            message["content"] = buffered_content + (
+                                current_content
+                                if isinstance(current_content, str)
+                                else ""
+                            )
+                    else:
+                        output.extend(pending_assistant_messages)
+                    pending_assistant_messages.clear()
+                if preserve_reasoning and has_tool_calls and pending_reasoning:
+                    existing = message.get("reasoning_content")
+                    message["reasoning_content"] = "".join(pending_reasoning) + (
+                        existing if isinstance(existing, str) else ""
+                    )
+                pending_reasoning = []
+                pending_response_id = None
+                if (
+                    not preserve_reasoning
+                    and has_tool_calls
+                    and isinstance(message.get("content"), str)
+                    and message.get("content")
+                ):
+                    output.append(
+                        {
+                            "role": MessageRole.ASSISTANT.value,
+                            "content": message["content"],
+                        }
+                    )
+            elif pending_reasoning or pending_assistant_messages:
+                # A reasoning-only chunk without its assistant response is not a
+                # valid provider message and must not leak as normal content.
+                flush_pending_assistant_messages()
+
+            # Provider replay is only required for assistant messages that invoked
+            # tools. Ordinary/final reasoning stays out of later request context.
+            if not (preserve_reasoning and message.get("tool_calls")):
+                message.pop("reasoning_content", None)
+            output.append(message)
+
+        flush_pending_assistant_messages()
+        for message in output:
+            message.pop("_sage_llm_response_id", None)
+        return output
+
+    @staticmethod
+    def _drop_deepseek_tool_turns_without_reasoning(
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Drop unreplayable legacy tool turns from a DeepSeek thinking request.
+
+        DeepSeek requires the original reasoning for every assistant tool-call
+        message in a thinking-mode tool loop. Old/non-DeepSeek sessions may not
+        have stored that value, and fabricating an empty or synthetic chain of
+        thought is not a faithful replay. Keep the durable ledger untouched and
+        remove only the invalid assistant/tool pair from the provider view.
+        """
+        missing_tool_call_ids: set[str] = set()
+        for message in messages:
+            if (
+                message.get("role") != MessageRole.ASSISTANT.value
+                or not message.get("tool_calls")
+            ):
+                continue
+            reasoning = message.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                continue
+            for tool_call in message.get("tool_calls") or []:
+                if isinstance(tool_call, dict) and tool_call.get("id"):
+                    missing_tool_call_ids.add(str(tool_call["id"]))
+
+        if not missing_tool_call_ids:
+            return messages
+
+        filtered: List[Dict[str, Any]] = []
+        dropped_assistant_turns = 0
+        for message in messages:
+            if message.get("role") == MessageRole.ASSISTANT.value and message.get(
+                "tool_calls"
+            ):
+                tool_call_ids = {
+                    str(tool_call.get("id"))
+                    for tool_call in message.get("tool_calls") or []
+                    if isinstance(tool_call, dict) and tool_call.get("id")
+                }
+                if tool_call_ids & missing_tool_call_ids:
+                    dropped_assistant_turns += 1
+                    continue
+            if (
+                message.get("role") == MessageRole.TOOL.value
+                and str(message.get("tool_call_id") or "")
+                in missing_tool_call_ids
+            ):
+                continue
+            filtered.append(message)
+
+        logger.warning(
+            "DeepSeek thinking request omitted unreplayable legacy tool turns: "
+            f"assistant_turns={dropped_assistant_turns}, "
+            f"tool_calls={len(missing_tool_call_ids)}",
+            session_id="NO_SESSION",
+        )
+        return filtered
 
     async def _process_multimodal_content(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """处理多模态消息内容（本地图片转 base64、压缩到最大 512x512）。详见
@@ -1232,6 +1411,7 @@ class AgentBase(ABC):
         Returns:
             Generator: 语言模型的流式响应
         """
+        session = None
         if session_id:
             session = self._get_live_session(session_id)
             if session is None:
@@ -1261,6 +1441,21 @@ class AgentBase(ABC):
         fast_model_name = getattr(self.model, "fast_model_name", None)
         if model_type == "fast" and supports_sage_model_type and fast_model_name:
             model_name = fast_model_name
+        model_client = getattr(self.model, "_model", self.model)
+        active_base_url = (
+            final_config.get("fast_base_url")
+            if model_type == "fast" and final_config.get("fast_base_url")
+            else final_config.get("base_url")
+        ) or getattr(model_client, "base_url", None)
+        active_base_url = str(active_base_url) if active_base_url else None
+        model_name = normalize_chat_completions_model(
+            model_name,
+            client=model_client,
+            model_config={"base_url": active_base_url},
+        )
+        deepseek_native_protocol = uses_deepseek_native_protocol(
+            model_name, active_base_url
+        )
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
         final_config.pop("api_key", None)
@@ -1301,6 +1496,27 @@ class AgentBase(ABC):
         # change response_format while keeping the message payload unchanged.
         request_messages_snapshot: Optional[List[Dict[str, Any]]] = None
         response_format = final_config.pop("response_format", None)
+
+        # Thinking mode is request-scoped and stable across network retries.
+        final_enable_thinking = False
+        final_thinking_level = None
+        if enable_thinking is not None:
+            final_enable_thinking = enable_thinking
+        elif session is not None:
+            deep_thinking = session.session_context.agent_config.get(
+                "deep_thinking", False
+            )
+            if isinstance(deep_thinking, str):
+                final_enable_thinking = deep_thinking.lower() == "true"
+            else:
+                final_enable_thinking = bool(deep_thinking)
+        if final_enable_thinking and session is not None:
+            final_thinking_level = session.session_context.agent_config.get(
+                "thinking_level"
+            )
+        deepseek_thinking_protocol = (
+            deepseek_native_protocol and final_enable_thinking
+        )
 
         # 重试配置 - 增加重试次数以应对网络不稳定情况
         max_retries = 8
@@ -1343,6 +1559,12 @@ class AgentBase(ABC):
                                 continue
                             if msg.message_id:
                                 msg_dict["_sage_message_id"] = msg.message_id
+                            if isinstance(msg.metadata, dict):
+                                llm_response_id = msg.metadata.get("llm_response_id")
+                                if llm_response_id:
+                                    msg_dict["_sage_llm_response_id"] = str(
+                                        llm_response_id
+                                    )
                             msg_dict = await self._process_multimodal_content(msg_dict)
                             serializable_messages.append(msg_dict)
                             seg = None
@@ -1351,9 +1573,18 @@ class AgentBase(ABC):
                             cache_segments.append(seg)
                         else:
                             msg_copy = msg.copy()
-                            raw_message_id = MessageChunk.from_dict(msg).message_id
+                            raw_message = MessageChunk.from_dict(msg)
+                            raw_message_id = raw_message.message_id
                             if raw_message_id:
                                 msg_copy["_sage_message_id"] = raw_message_id
+                            if isinstance(raw_message.metadata, dict):
+                                llm_response_id = raw_message.metadata.get(
+                                    "llm_response_id"
+                                )
+                                if llm_response_id:
+                                    msg_copy["_sage_llm_response_id"] = str(
+                                        llm_response_id
+                                    )
                             msg_copy = await self._process_multimodal_content(msg_copy)
                             serializable_messages.append(msg_copy)
                             cache_segments.append(None)
@@ -1368,7 +1599,9 @@ class AgentBase(ABC):
                                 "content",
                                 "tool_calls",
                                 "tool_call_id",
+                                "reasoning_content",
                                 "_sage_message_id",
+                                "_sage_llm_response_id",
                             ]
                         }
                         for msg in serializable_messages
@@ -1444,6 +1677,17 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: 注入 {len(completion_events)} 条 shell completion reminder"
                         )
 
+                serializable_messages = self._coalesce_reasoning_content_messages(
+                    serializable_messages,
+                    preserve_reasoning=deepseek_thinking_protocol,
+                )
+                if deepseek_thinking_protocol:
+                    serializable_messages = (
+                        self._drop_deepseek_tool_turns_without_reasoning(
+                            serializable_messages
+                        )
+                    )
+
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
@@ -1486,9 +1730,10 @@ class AgentBase(ABC):
                     serializable_messages
                 )
                 # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
-                serializable_messages = self._remove_content_if_tool_calls(
-                    serializable_messages
-                )
+                if not deepseek_native_protocol:
+                    serializable_messages = self._remove_content_if_tool_calls(
+                        serializable_messages
+                    )
                 if request_messages_snapshot is None:
                     proposed_next_request_message_ids = [
                         str(msg["_sage_message_id"])
@@ -1530,25 +1775,12 @@ class AgentBase(ABC):
                 serializable_messages = deepcopy(request_messages_snapshot)
                 final_config = {k: v for k, v in final_config.items() if v is not None}
 
-                # 根据 enable_thinking 参数或 deep_thinking 配置决定是否启用思考模式
-                # 优先使用传入的 enable_thinking 参数
-                final_enable_thinking = False
-                if enable_thinking is not None:
-                    final_enable_thinking = enable_thinking
-                elif session is not None:
-                    deep_thinking = session.session_context.agent_config.get(
-                        "deep_thinking", False
-                    )
-                    # 处理字符串 "auto" 的情况，默认为 False
-                    if isinstance(deep_thinking, str):
-                        final_enable_thinking = deep_thinking.lower() == "true"
-                    else:
-                        final_enable_thinking = bool(deep_thinking)
-
                 # 构建 extra_body（与压缩等旁路请求共用同一套模型分支逻辑）
                 extra_body = build_llm_extra_body(
                     model_name,
+                    base_url=active_base_url,
                     enable_thinking=final_enable_thinking,
+                    thinking_level=final_thinking_level,
                     step_name=step_name,
                     reasoning_effort_off_env=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
                 )
@@ -1557,7 +1789,7 @@ class AgentBase(ABC):
                     self.model,
                     model=model_name,
                     messages=cast(List[Any], serializable_messages),
-                    model_config=final_config,
+                    model_config={**final_config, "base_url": active_base_url},
                     response_format=response_format,
                     stream=True,
                     stream_options={"include_usage": True},
@@ -2704,6 +2936,32 @@ class AgentBase(ABC):
             )
         ]
 
+    def _create_tool_calls_message(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        *,
+        message_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[MessageChunk]:
+        """Create one assistant message for one model response's tool calls."""
+        serialized_tool_calls: List[Dict[str, Any]] = []
+        for tool_call in tool_calls:
+            single_message = self._create_tool_call_message(tool_call)[0]
+            serialized_tool_calls.extend(single_message.tool_calls or [])
+
+        if not serialized_tool_calls:
+            return []
+        return [
+            MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                tool_calls=serialized_tool_calls,
+                message_type=MessageType.TOOL_CALL.value,
+                message_id=message_id or str(uuid.uuid4()),
+                agent_name=self.agent_name,
+                metadata=metadata,
+            )
+        ]
+
     async def _execute_tool(
         self,
         tool_call: Dict[str, Any],
@@ -2989,6 +3247,8 @@ class AgentBase(ABC):
         handle_complete_task: bool = False,
         emit_tool_call_message: bool = True,
         execute_concurrently: bool = True,
+        tool_call_message_id: Optional[str] = None,
+        tool_call_message_metadata: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         处理工具调用
@@ -3078,12 +3338,22 @@ class AgentBase(ABC):
                 )
                 return
 
-            # 如果上游已经把 tool_call 以流式消息发出来了，这里就不要重复发卡片了。
-            if emit_tool_call_message:
-                output_messages = self._create_tool_call_message(tool_call)
-                yield (output_messages, False)
+            executable_tool_calls.append(tool_call)
 
-            if not execute_concurrently:
+        # One LLM response owns one assistant message. Buffering until completion
+        # must not turn parallel tool calls into multiple assistant turns.
+        if emit_tool_call_message and executable_tool_calls:
+            yield (
+                self._create_tool_calls_message(
+                    executable_tool_calls,
+                    message_id=tool_call_message_id,
+                    metadata=tool_call_message_metadata,
+                ),
+                False,
+            )
+
+        if not execute_concurrently:
+            for tool_call in executable_tool_calls:
                 async for message_chunk_list in self._execute_tool(
                     tool_call=tool_call,
                     tool_manager=tool_manager,
@@ -3091,9 +3361,7 @@ class AgentBase(ABC):
                     session_id=session_id,
                 ):
                     yield (message_chunk_list, False)
-                continue
-
-            executable_tool_calls.append(tool_call)
+            return
 
         result_queue: asyncio.Queue[
             tuple[str, int, Optional[List[MessageChunk]]]
