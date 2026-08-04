@@ -68,7 +68,7 @@ flowchart TB
     Start[Startup] --> Scan[Scan registered tools<br/>local @tool + MCP]
     Run[Runtime] --> Call[run_tool name + args + SessionContext]
     Call --> Exec[local impl / remote MCP]
-    Exec --> Trunc[Truncate result by token<br/>MAX_TOOL_RESULT_TOKENS=12000]
+    Exec --> Trunc[Truncate result by token<br/>SAGE_MAX_TOOL_RESULT_TOKENS, default 12000]
     Trunc --> ToAgent[return tool_message]
     Run --> Meta[list_all_tools_name / get_tool_spec]
 ```
