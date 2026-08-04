@@ -25,7 +25,7 @@ class UserInputOptimizer:
         )
         if is_openai_reasoning_model:
             return {
-                "reasoning_effort": "low",
+                "reasoning_effort": "medium",
             }
         return {
             "chat_template_kwargs": {"enable_thinking": False},

@@ -182,7 +182,7 @@ async def test_deepseek_replays_tool_call_reasoning_when_current_request_has_no_
 
 
 @pytest.mark.asyncio
-async def test_deepseek_thinking_omits_legacy_tool_turn_without_reasoning():
+async def test_deepseek_thinking_fills_legacy_tool_turn_without_reasoning():
     client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
     agent = DummyAgent(
         model=client,
@@ -213,10 +213,15 @@ async def test_deepseek_thinking_omits_legacy_tool_turn_without_reasoning():
         pass
 
     request_messages = client.chat.completions.requests[0]["messages"]
-    assert all(not message.get("tool_calls") for message in request_messages)
-    assert all(message.get("role") != "tool" for message in request_messages)
+    tool_call_message = next(
+        message for message in request_messages if message.get("tool_calls")
+    )
+    assert tool_call_message["reasoning_content"] == "no thinking"
+    assert tool_call_message["content"] == "checking"
     assert [message.get("content") for message in request_messages] == [
         "weather",
+        "checking",
+        "sunny",
         "It is sunny.",
         "and tomorrow?",
     ]
@@ -1013,6 +1018,13 @@ async def test_streaming_call_records_llm_request_after_connection_error_retry_s
     assert len(session_context.llm_requests_logs) == 1
     recorded = session_context.llm_requests_logs[0]
     assert recorded["request"]["step_name"] == "direct_execution"
+    provider_attempts = recorded["request"]["_provider_request_attempts"]
+    assert len(provider_attempts) == 2
+    assert provider_attempts[-1]["model"] == "gpt-test"
+    assert provider_attempts[-1]["messages"] == [
+        {"role": "user", "content": "run"}
+    ]
+    assert provider_attempts[-1]["stream"] is True
     assert recorded["response"] is not None
     assert (
         recorded["response"].choices[0].message.content  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]

@@ -3,12 +3,7 @@ import { agentAPI } from '@/api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider.js'
 import { isLoggedIn } from '@/utils/auth.js'
 import { normalizeAgentMode } from '@/utils/agentMode.js'
-
-const isOfficialDeepSeekV4Agent = (agent) => {
-  const model = String(agent?.llmModel || '').trim().toLowerCase()
-  const baseUrl = String(agent?.llmBaseUrl || '').trim().toLowerCase()
-  return model.startsWith('deepseek-v4-') && /^https?:\/\/api\.deepseek\.com(?:\/|$)/.test(baseUrl)
-}
+import { getDefaultThinkingLevel, getThinkingLevelOptions } from '@/utils/modelCapabilities.js'
 
 export const useChatAgentConfig = ({
   t,
@@ -20,7 +15,7 @@ export const useChatAgentConfig = ({
   const selectedAgent = ref(null)
   const config = ref({
     deepThinking: true,
-    thinkingLevel: 'high',
+    thinkingLevel: 'medium',
     agentMode: 'simple',
     moreSuggest: false,
     maxLoopCount: null,
@@ -66,12 +61,13 @@ export const useChatAgentConfig = ({
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
       const agentMode = normalizeAgentMode(agent.agentMode)
-      const supportsThinkingLevels = isOfficialDeepSeekV4Agent(agent)
+      const thinkingLevelOptions = getThinkingLevelOptions(agent.llmModel, agent.llmBaseUrl)
+      const overriddenThinkingLevel = userConfigOverrides.value.thinkingLevel
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
-        thinkingLevel: supportsThinkingLevels
-          ? (userConfigOverrides.value.thinkingLevel || 'high')
-          : 'high',
+        thinkingLevel: thinkingLevelOptions.includes(overriddenThinkingLevel)
+          ? overriddenThinkingLevel
+          : getDefaultThinkingLevel(agent.llmModel, agent.llmBaseUrl),
         agentMode: userConfigOverrides.value.agentMode !== undefined ? normalizeAgentMode(userConfigOverrides.value.agentMode) : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,

@@ -30,7 +30,7 @@ def _build_no_thinking_extra_body(model: str) -> Dict[str, Any]:
         or model_name.startswith("gpt-5")
     )
     if is_openai_reasoning_model:
-        return {"reasoning_effort": "low"}
+        return {"reasoning_effort": "medium"}
     return {
         "chat_template_kwargs": {"enable_thinking": False},
         "enable_thinking": False,

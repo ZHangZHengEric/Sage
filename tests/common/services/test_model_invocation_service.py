@@ -196,7 +196,7 @@ async def test_provider_id_takes_priority_and_request_stays_openai_shaped(monkey
     assert kwargs["max_tokens"] == 50
     assert kwargs["seed"] == 7
     assert kwargs["model_type"] == "standard"
-    assert kwargs["extra_body"]["reasoning_effort"] == "low"
+    assert kwargs["extra_body"]["reasoning_effort"] == "medium"
     assert kwargs["messages"][0]["tool_calls"][0]["id"] == "call_1"
     assert kwargs["messages"][1]["tool_call_id"] == "call_1"
     assert kwargs["messages"][2]["name"] == "tester"
@@ -418,6 +418,40 @@ async def test_deepseek_max_thinking_level_controls_native_effort(monkeypatch):
     assert extra_body["thinking"] == {"type": "enabled"}
     assert "enable_thinking" not in extra_body
     assert "chat_template_kwargs" not in extra_body
+
+
+@pytest.mark.asyncio
+async def test_aliyun_qwen_adapts_frontend_max_to_native_xhigh_effort(
+    monkeypatch,
+):
+    providers = {
+        "provider_1": FakeProvider(
+            "provider_1",
+            model="qwen3.8-max-preview",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+    }
+    captured, _ = _patch_common(monkeypatch, providers)
+
+    async def fake_completion(client, **kwargs):
+        captured["completion_kwargs"] = kwargs
+        return FakeCompletion()
+
+    monkeypatch.setattr(
+        service, "create_chat_completion_with_fallback", fake_completion
+    )
+    request = DirectModelInvokeRequest(
+        provider_id="provider_1",
+        task="semantic_summary",
+        messages=[{"role": "user", "content": "hi"}],
+        thinking_level="max",
+    )
+
+    await service.invoke_model(request, user_id="user_1")
+
+    extra_body = captured["completion_kwargs"]["extra_body"]
+    assert extra_body["reasoning_effort"] == "xhigh"
+    assert extra_body["enable_thinking"] is True
 
 
 @pytest.mark.asyncio
