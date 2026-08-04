@@ -33,8 +33,9 @@ import os
 import sys
 import shutil
 
-# 工具返回结果的最大 token 数限制
+# 工具返回结果的默认最大 token 数限制
 MAX_TOOL_RESULT_TOKENS = 12000
+MAX_TOOL_RESULT_TOKENS_ENV = "SAGE_MAX_TOOL_RESULT_TOKENS"
 
 
 # `ToolSpec.category` → 前端展示的 source 标签映射。前端按 source 分组，并通过
@@ -111,18 +112,46 @@ def _apply_localized_schema_descriptions(
     return display_schema
 
 
-def _truncate_result(result: str, max_tokens: int = MAX_TOOL_RESULT_TOKENS) -> str:
+def get_max_tool_result_tokens() -> int:
+    """Return the configured per-tool result token limit."""
+    raw_value = os.environ.get(MAX_TOOL_RESULT_TOKENS_ENV)
+    if raw_value is None or raw_value.strip() == "":
+        return MAX_TOOL_RESULT_TOKENS
+
+    try:
+        max_tokens = int(raw_value)
+    except ValueError:
+        logger.warning(
+            f"ToolManager: invalid {MAX_TOOL_RESULT_TOKENS_ENV}={raw_value!r}, "
+            f"using default {MAX_TOOL_RESULT_TOKENS}"
+        )
+        return MAX_TOOL_RESULT_TOKENS
+
+    if max_tokens <= 0:
+        logger.warning(
+            f"ToolManager: non-positive {MAX_TOOL_RESULT_TOKENS_ENV}={max_tokens}, "
+            f"using default {MAX_TOOL_RESULT_TOKENS}"
+        )
+        return MAX_TOOL_RESULT_TOKENS
+
+    return max_tokens
+
+
+def _truncate_result(result: str, max_tokens: Optional[int] = None) -> str:
     """截断工具返回结果，限制在最大 token 数内
 
     Args:
         result: 原始结果字符串
-        max_tokens: 最大 token 数，默认 8000
+        max_tokens: 最大 token 数；未传入时读取环境变量，默认 12000
 
     Returns:
         截断后的结果，如果发生截断会添加提示信息
     """
     if not result:
         return result
+
+    if max_tokens is None:
+        max_tokens = get_max_tool_result_tokens()
 
     # 使用 MessageManager 的 token 计算方法
 
@@ -1622,9 +1651,9 @@ class ToolManager:
                 "success",
             )
 
-            # Step 5: Truncate result if too long (max 8000 tokens)
+            # Step 5: Truncate results using the configured per-tool token limit.
             final_result = self._add_localized_tool_summary(tool, final_result)
-            final_result = _truncate_result(final_result, MAX_TOOL_RESULT_TOKENS)
+            final_result = _truncate_result(final_result)
 
             return final_result
 

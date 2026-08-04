@@ -64,7 +64,7 @@ flowchart TB
     Start[启动期] --> Scan[扫描已注册工具<br/>本地 @tool + MCP]
     Run[运行期] --> Call[run_tool name + args + SessionContext]
     Call --> Exec[本地实现 / MCP 远端]
-    Exec --> Trunc[结果按 token 截断<br/>MAX_TOOL_RESULT_TOKENS=12000]
+    Exec --> Trunc[结果按 token 截断<br/>SAGE_MAX_TOOL_RESULT_TOKENS，默认 12000]
     Trunc --> ToAgent[返回 tool_message]
     Run --> Meta[list_all_tools_name / get_tool_spec]
 ```
