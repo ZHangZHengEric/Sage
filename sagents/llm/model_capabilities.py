@@ -26,7 +26,7 @@ _REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
 
 
 _VALID_REASONING_EFFORTS: frozenset[str] = frozenset(
-    {"minimal", "low", "medium", "high"}
+    {"minimal", "low", "medium", "high", "xhigh"}
 )
 _VALID_THINKING_LEVELS: frozenset[str] = _VALID_REASONING_EFFORTS | {"max"}
 
@@ -82,6 +82,91 @@ def uses_deepseek_native_protocol(
     return is_deepseek_model(model_name) and is_official_deepseek_endpoint(base_url)
 
 
+def _endpoint_hostname(base_url: Optional[str]) -> str:
+    if not base_url:
+        return ""
+    raw = str(base_url).strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    return (parsed.hostname or "").lower()
+
+
+def _is_aliyun_model_studio_endpoint(base_url: Optional[str]) -> bool:
+    hostname = _endpoint_hostname(base_url)
+    return hostname == "dashscope.aliyuncs.com" or hostname.endswith(
+        ".dashscope.aliyuncs.com"
+    )
+
+
+def _is_zhipu_endpoint(base_url: Optional[str]) -> bool:
+    return _endpoint_hostname(base_url) == "open.bigmodel.cn"
+
+
+def uses_aliyun_model_studio_protocol(base_url: Optional[str]) -> bool:
+    return _is_aliyun_model_studio_endpoint(base_url)
+
+
+def uses_zhipu_native_protocol(base_url: Optional[str]) -> bool:
+    return _is_zhipu_endpoint(base_url)
+
+
+def get_supported_thinking_levels(
+    model_name: str,
+    base_url: Optional[str] = None,
+) -> tuple[str, ...]:
+    """Return the discrete effort values supported by this model/provider pair.
+
+    The frontend vocabulary stays fixed. This native capability list is used at
+    the request boundary to map that vocabulary onto provider-specific values.
+    An empty tuple means Sage only knows how to toggle thinking for that model.
+    """
+    name = str(model_name or "").strip().lower()
+    if not name:
+        return ()
+    if uses_deepseek_native_protocol(name, base_url):
+        return ("low", "high", "max")
+    if is_openai_reasoning_model(name):
+        if name.startswith("gpt-5.6"):
+            return ("low", "medium", "high", "xhigh", "max")
+        if name.startswith(
+            ("gpt-5.2", "gpt-5.3", "gpt-5.4", "gpt-5.5")
+        ):
+            return ("low", "medium", "high", "xhigh")
+        if name.startswith("gpt-5.1"):
+            return ("low", "medium", "high")
+        if name.startswith("gpt-5"):
+            return ("minimal", "low", "medium", "high")
+        return ("low", "medium", "high")
+    if _is_aliyun_model_studio_endpoint(base_url):
+        if name.startswith("deepseek-v4-"):
+            return ("low", "high", "max")
+        if name.startswith("qwen3.8-max-preview"):
+            return ("low", "medium", "xhigh")
+        if name.startswith(("glm-5", "glm-5.1", "glm-5.2")):
+            return ("high", "max")
+        if name in {"kimi/kimi-k3", "kimi-k3"}:
+            return ("max",)
+    if _is_zhipu_endpoint(base_url) and name.startswith("glm-5.2"):
+        return ("high", "max")
+    return ()
+
+
+def get_default_thinking_level(
+    model_name: str,
+    base_url: Optional[str] = None,
+) -> Optional[str]:
+    """Map the frontend's default ``medium`` level to the model's native value."""
+    levels = get_supported_thinking_levels(model_name, base_url)
+    if not levels:
+        return None
+    return normalize_reasoning_effort(
+        model_name,
+        "medium",
+        base_url=base_url,
+    )
+
+
 def normalize_reasoning_effort(
     model_name: str,
     thinking_level: str,
@@ -92,27 +177,34 @@ def normalize_reasoning_effort(
     level = str(thinking_level or "").strip().lower()
     if level not in _VALID_THINKING_LEVELS:
         raise ValueError(f"Unsupported thinking level: {thinking_level}")
-    if uses_deepseek_native_protocol(model_name, base_url):
-        # DeepSeek V4 exposes high/max. It accepts low/medium only as
-        # compatibility aliases and maps both to high.
-        if level in {"minimal", "low", "medium"}:
-            return "high"
+    supported = get_supported_thinking_levels(model_name, base_url)
+    if not supported or level in supported:
         return level
-    if is_openai_reasoning_model(model_name) and level == "max":
-        return "high"
-    return level
+    effort_rank = {
+        "minimal": 0,
+        "low": 1,
+        "medium": 2,
+        "high": 3,
+        "xhigh": 4,
+        "max": 5,
+    }
+    requested_rank = effort_rank[level]
+    for candidate in supported:
+        if effort_rank[candidate] >= requested_rank:
+            return candidate
+    return supported[-1]
 
 
 def resolve_reasoning_effort(
     enable_thinking: bool,
     env_value: Optional[str] = None,
-    default_off: str = "low",
+    default_off: str = "medium",
 ) -> str:
     """根据是否启用思考与环境变量解析最终的 ``reasoning_effort``。
 
     - ``enable_thinking=True`` → ``"medium"``
     - ``enable_thinking=False`` → ``env_value`` 优先（小写），无效或为空时回退 ``default_off``
-    - 合法值：minimal / low / medium / high
+    - 合法值：minimal / low / medium / high / xhigh
     """
     if enable_thinking:
         return "medium"
@@ -132,7 +224,7 @@ def build_llm_extra_body(
     thinking_level: Optional[str] = None,
     step_name: Optional[str] = None,
     reasoning_effort_off_env: Optional[str] = None,
-    default_off: str = "low",
+    default_off: str = "medium",
     extra: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """构建与主 Agent 一致的 chat.completions ``extra_body``。
@@ -148,6 +240,9 @@ def build_llm_extra_body(
     if thinking_level:
         enable_thinking = True
 
+    supported_thinking_levels = get_supported_thinking_levels(
+        model_name, base_url
+    )
     if is_openai_reasoning_model(model_name):
         extra_body["reasoning_effort"] = (
             normalize_reasoning_effort(
@@ -168,6 +263,20 @@ def build_llm_extra_body(
             "type": "enabled" if enable_thinking else "disabled"
         }
         if thinking_level:
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model_name, thinking_level, base_url=base_url
+            )
+    elif uses_aliyun_model_studio_protocol(base_url):
+        extra_body["enable_thinking"] = enable_thinking
+        if thinking_level and supported_thinking_levels:
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model_name, thinking_level, base_url=base_url
+            )
+    elif uses_zhipu_native_protocol(base_url):
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+        if thinking_level and supported_thinking_levels:
             extra_body["reasoning_effort"] = normalize_reasoning_effort(
                 model_name, thinking_level, base_url=base_url
             )

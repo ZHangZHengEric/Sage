@@ -1699,11 +1699,48 @@ class SessionContext:
     def _save_llm_request_sync(self, llm_request: Dict[str, Any]) -> str:
         with self._llm_request_save_lock:
             file_path = self._prepare_llm_request_file_path(llm_request)
+            internal_request = llm_request["request"]
+            provider_attempts = internal_request.get(
+                "_provider_request_attempts", []
+            )
+            actual_request = (
+                provider_attempts[-1]
+                if provider_attempts
+                else {
+                    key: value
+                    for key, value in internal_request.items()
+                    if not str(key).startswith("_")
+                }
+            )
+            metadata = {
+                key: value
+                for key, value in internal_request.items()
+                if key
+                not in {
+                    "messages",
+                    "model",
+                    "model_config",
+                    "_provider_request_attempts",
+                    "_provider_metadata",
+                }
+                and not str(key).startswith("_")
+            }
+            provider_metadata = internal_request.get("_provider_metadata")
+            if isinstance(provider_metadata, dict):
+                metadata.update(provider_metadata)
+            if not provider_attempts:
+                metadata["request_view"] = "pre_adapter_fallback"
             serializable_request = {
-                "request": make_serializable(llm_request["request"]),
+                "schema_version": 2,
+                "request": make_serializable(actual_request),
                 "response": make_serializable(llm_request["response"]),
+                "metadata": make_serializable(metadata),
                 "timestamp": llm_request["timestamp"],
             }
+            if len(provider_attempts) > 1:
+                serializable_request["request_attempts"] = make_serializable(
+                    provider_attempts
+                )
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(serializable_request, f, ensure_ascii=False, indent=4)
             return file_path

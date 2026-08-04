@@ -24,14 +24,13 @@ from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
-from sagents.llm.model_capabilities import (
-    build_llm_extra_body,
-    uses_deepseek_native_protocol,
-)
+from sagents.llm.model_capabilities import build_llm_extra_body
 from sagents.utils.llm_request_utils import (
+    coalesce_reasoning_content_messages,
     format_api_error_details,
     is_unsupported_input_format_error,
     normalize_chat_completions_model,
+    redact_base64_data_urls_in_value,
 )
 from sagents.utils.multimodal_image import (
     process_multimodal_content as _process_multimodal_content_util,
@@ -352,178 +351,10 @@ class AgentBase(ABC):
     def _coalesce_reasoning_content_messages(
         messages: List[Dict[str, Any]], *, preserve_reasoning: bool
     ) -> List[Dict[str, Any]]:
-        """Fold streamed reasoning chunks into their assistant response message.
-
-        Legacy Sage sessions may keep reasoning as a dedicated display message,
-        while current sessions store it beside ``content``/``tool_calls``. Only a
-        provider adapter that explicitly requests replay should receive the field.
-        """
-        output: List[Dict[str, Any]] = []
-        pending_reasoning: List[str] = []
-        pending_assistant_messages: List[Dict[str, Any]] = []
-        pending_response_id: Optional[str] = None
-
-        def response_id(message: Dict[str, Any]) -> Optional[str]:
-            value = message.get("_sage_llm_response_id")
-            return str(value) if value else None
-
-        def belongs_to_pending_response(message: Dict[str, Any]) -> bool:
-            current_response_id = response_id(message)
-            if pending_response_id is None and current_response_id is None:
-                return True
-            return pending_response_id == current_response_id
-
-        def flush_pending_assistant_messages() -> None:
-            nonlocal pending_response_id
-            output.extend(pending_assistant_messages)
-            pending_assistant_messages.clear()
-            pending_reasoning.clear()
-            pending_response_id = None
-
-        def pending_visible_content() -> str:
-            return "".join(
-                content
-                for item in pending_assistant_messages
-                if isinstance((content := item.get("content")), str)
-            )
-
-        for raw in messages:
-            message = dict(raw)
-            reasoning = message.get("reasoning_content")
-            is_reasoning_only = (
-                message.get("role") == MessageRole.ASSISTANT.value
-                and isinstance(reasoning, str)
-                and bool(reasoning)
-                and not message.get("content")
-                and not message.get("tool_calls")
-            )
-            if is_reasoning_only:
-                if (
-                    (pending_reasoning or pending_assistant_messages)
-                    and not belongs_to_pending_response(message)
-                ):
-                    flush_pending_assistant_messages()
-                pending_response_id = response_id(message)
-                pending_reasoning.append(reasoning)
-                continue
-
-            if message.get("role") == MessageRole.ASSISTANT.value:
-                if (
-                    (pending_reasoning or pending_assistant_messages)
-                    and not belongs_to_pending_response(message)
-                ):
-                    flush_pending_assistant_messages()
-                has_tool_calls = bool(message.get("tool_calls"))
-                if pending_reasoning and not has_tool_calls:
-                    message.pop("reasoning_content", None)
-                    pending_assistant_messages.append(message)
-                    continue
-                if has_tool_calls and pending_reasoning:
-                    if preserve_reasoning:
-                        buffered_content = pending_visible_content()
-                        if buffered_content:
-                            current_content = message.get("content")
-                            message["content"] = buffered_content + (
-                                current_content
-                                if isinstance(current_content, str)
-                                else ""
-                            )
-                    else:
-                        output.extend(pending_assistant_messages)
-                    pending_assistant_messages.clear()
-                if preserve_reasoning and has_tool_calls and pending_reasoning:
-                    existing = message.get("reasoning_content")
-                    message["reasoning_content"] = "".join(pending_reasoning) + (
-                        existing if isinstance(existing, str) else ""
-                    )
-                pending_reasoning = []
-                pending_response_id = None
-                if (
-                    not preserve_reasoning
-                    and has_tool_calls
-                    and isinstance(message.get("content"), str)
-                    and message.get("content")
-                ):
-                    output.append(
-                        {
-                            "role": MessageRole.ASSISTANT.value,
-                            "content": message["content"],
-                        }
-                    )
-            elif pending_reasoning or pending_assistant_messages:
-                # A reasoning-only chunk without its assistant response is not a
-                # valid provider message and must not leak as normal content.
-                flush_pending_assistant_messages()
-
-            # Provider replay is only required for assistant messages that invoked
-            # tools. Ordinary/final reasoning stays out of later request context.
-            if not (preserve_reasoning and message.get("tool_calls")):
-                message.pop("reasoning_content", None)
-            output.append(message)
-
-        flush_pending_assistant_messages()
-        for message in output:
-            message.pop("_sage_llm_response_id", None)
-        return output
-
-    @staticmethod
-    def _drop_deepseek_tool_turns_without_reasoning(
-        messages: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """Drop unreplayable legacy tool turns from a DeepSeek thinking request.
-
-        DeepSeek requires the original reasoning for every assistant tool-call
-        message in a thinking-mode tool loop. Old/non-DeepSeek sessions may not
-        have stored that value, and fabricating an empty or synthetic chain of
-        thought is not a faithful replay. Keep the durable ledger untouched and
-        remove only the invalid assistant/tool pair from the provider view.
-        """
-        missing_tool_call_ids: set[str] = set()
-        for message in messages:
-            if (
-                message.get("role") != MessageRole.ASSISTANT.value
-                or not message.get("tool_calls")
-            ):
-                continue
-            reasoning = message.get("reasoning_content")
-            if isinstance(reasoning, str) and reasoning:
-                continue
-            for tool_call in message.get("tool_calls") or []:
-                if isinstance(tool_call, dict) and tool_call.get("id"):
-                    missing_tool_call_ids.add(str(tool_call["id"]))
-
-        if not missing_tool_call_ids:
-            return messages
-
-        filtered: List[Dict[str, Any]] = []
-        dropped_assistant_turns = 0
-        for message in messages:
-            if message.get("role") == MessageRole.ASSISTANT.value and message.get(
-                "tool_calls"
-            ):
-                tool_call_ids = {
-                    str(tool_call.get("id"))
-                    for tool_call in message.get("tool_calls") or []
-                    if isinstance(tool_call, dict) and tool_call.get("id")
-                }
-                if tool_call_ids & missing_tool_call_ids:
-                    dropped_assistant_turns += 1
-                    continue
-            if (
-                message.get("role") == MessageRole.TOOL.value
-                and str(message.get("tool_call_id") or "")
-                in missing_tool_call_ids
-            ):
-                continue
-            filtered.append(message)
-
-        logger.warning(
-            "DeepSeek thinking request omitted unreplayable legacy tool turns: "
-            f"assistant_turns={dropped_assistant_turns}, "
-            f"tool_calls={len(missing_tool_call_ids)}",
-            session_id="NO_SESSION",
+        return coalesce_reasoning_content_messages(
+            messages,
+            preserve_tool_reasoning=preserve_reasoning,
         )
-        return filtered
 
     async def _process_multimodal_content(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """处理多模态消息内容（本地图片转 base64、压缩到最大 512x512）。详见
@@ -1453,9 +1284,6 @@ class AgentBase(ABC):
             client=model_client,
             model_config={"base_url": active_base_url},
         )
-        deepseek_native_protocol = uses_deepseek_native_protocol(
-            model_name, active_base_url
-        )
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
         final_config.pop("api_key", None)
@@ -1471,6 +1299,15 @@ class AgentBase(ABC):
             final_config.pop("model_type", None)
         all_chunks = []
         attempt_chunks = []
+        provider_request_attempts: List[Dict[str, Any]] = []
+
+        def record_provider_request(request: Dict[str, Any]) -> None:
+            provider_request_attempts.append(
+                cast(
+                    Dict[str, Any],
+                    redact_base64_data_urls_in_value(deepcopy(request)),
+                )
+            )
 
         logical_request_id = f"llm_{uuid.uuid4().hex}"
         candidate_next_request_message_ids = set(
@@ -1514,10 +1351,6 @@ class AgentBase(ABC):
             final_thinking_level = session.session_context.agent_config.get(
                 "thinking_level"
             )
-        deepseek_thinking_protocol = (
-            deepseek_native_protocol and final_enable_thinking
-        )
-
         # 重试配置 - 增加重试次数以应对网络不稳定情况
         max_retries = 8
         retry_count = 0
@@ -1677,17 +1510,6 @@ class AgentBase(ABC):
                             f"{self.__class__.__name__}: 注入 {len(completion_events)} 条 shell completion reminder"
                         )
 
-                serializable_messages = self._coalesce_reasoning_content_messages(
-                    serializable_messages,
-                    preserve_reasoning=deepseek_thinking_protocol,
-                )
-                if deepseek_thinking_protocol:
-                    serializable_messages = (
-                        self._drop_deepseek_tool_turns_without_reasoning(
-                            serializable_messages
-                        )
-                    )
-
                 # 统计图片数量
                 image_count = 0
                 for msg in serializable_messages:
@@ -1729,11 +1551,6 @@ class AgentBase(ABC):
                 serializable_messages = self._drop_orphan_tool_messages(
                     serializable_messages
                 )
-                # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
-                if not deepseek_native_protocol:
-                    serializable_messages = self._remove_content_if_tool_calls(
-                        serializable_messages
-                    )
                 if request_messages_snapshot is None:
                     proposed_next_request_message_ids = [
                         str(msg["_sage_message_id"])
@@ -1791,6 +1608,7 @@ class AgentBase(ABC):
                     messages=cast(List[Any], serializable_messages),
                     model_config={**final_config, "base_url": active_base_url},
                     response_format=response_format,
+                    request_observer=record_provider_request,
                     stream=True,
                     stream_options={"include_usage": True},
                     extra_body=extra_body,
@@ -2121,8 +1939,17 @@ class AgentBase(ABC):
                             if first_token_time
                             else None,
                             "duration_sec": total_time,
+                            "_provider_request_attempts": deepcopy(
+                                provider_request_attempts
+                            ),
+                            "_provider_metadata": {
+                                "api": "chat.completions",
+                                "base_url": active_base_url,
+                                "request_view": "provider_facing",
+                                "redactions": ["data_url_base64"],
+                            },
                         }
-                        # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
+                        # 将流式 chunk 聚合为完整的非流式 response 后保存。
                         try:
                             llm_response = (
                                 self.merge_stream_response_to_non_stream_response(

@@ -23,18 +23,19 @@
           <p class="text-xs text-muted-foreground">
             {{ t('config.deepThinkingDesc') }}
           </p>
-          <div v-if="config.deepThinking && showThinkingLevel" class="space-y-2">
+          <div v-if="config.deepThinking && thinkingLevelOptions.length" class="space-y-2">
             <Label>{{ t('config.thinkingLevel') }}</Label>
             <Select
-              :model-value="config.thinkingLevel || 'high'"
+              :model-value="config.thinkingLevel || defaultThinkingLevel"
               @update:model-value="(value) => handleConfigChange({ thinkingLevel: value })"
             >
               <SelectTrigger class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="high">{{ t('config.thinkingLevelHigh') }}</SelectItem>
-                <SelectItem value="max">{{ t('config.thinkingLevelMax') }}</SelectItem>
+                <SelectItem v-for="level in thinkingLevelOptions" :key="level" :value="level">
+                  {{ thinkingLevelLabel(level) }}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -103,6 +104,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { getDefaultThinkingLevel, getThinkingLevelOptions } from '@/utils/modelCapabilities.js'
 
 const props = defineProps({
   config: {
@@ -123,11 +125,15 @@ const emit = defineEmits(['configChange', 'agentSelect', 'close'])
 
 const { t } = useLanguage()
 
-const showThinkingLevel = computed(() => {
-  const model = String(props.selectedAgent?.llmModel || '').trim().toLowerCase()
-  const baseUrl = String(props.selectedAgent?.llmBaseUrl || '').trim().toLowerCase()
-  return model.startsWith('deepseek-v4-') && /^https?:\/\/api\.deepseek\.com(?:\/|$)/.test(baseUrl)
-})
+const thinkingLevelOptions = computed(() => getThinkingLevelOptions(
+  props.selectedAgent?.llmModel,
+  props.selectedAgent?.llmBaseUrl
+))
+const defaultThinkingLevel = computed(() => getDefaultThinkingLevel(
+  props.selectedAgent?.llmModel,
+  props.selectedAgent?.llmBaseUrl
+))
+const thinkingLevelLabel = (level) => t(`config.thinkingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`)
 
 const handleConfigChange = (changes) => {
   emit('configChange', changes)

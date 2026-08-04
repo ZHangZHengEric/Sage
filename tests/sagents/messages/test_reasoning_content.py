@@ -326,59 +326,6 @@ def test_non_deepseek_keeps_canonical_tool_call_text_without_reasoning() -> None
     assert "content" not in result[1]
 
 
-def test_deepseek_drops_unreplayable_legacy_tool_pair_from_request_only() -> None:
-    messages = [
-        {"role": "user", "content": "weather"},
-        {
-            "role": "assistant",
-            "content": "Checking.",
-            "tool_calls": [
-                {
-                    "id": "call-missing-reasoning",
-                    "type": "function",
-                    "function": {"name": "weather", "arguments": "{}"},
-                }
-            ],
-        },
-        {
-            "role": "tool",
-            "tool_call_id": "call-missing-reasoning",
-            "content": "sunny",
-        },
-        {"role": "assistant", "content": "It is sunny."},
-    ]
-    original = [dict(message) for message in messages]
-
-    result = AgentBase._drop_deepseek_tool_turns_without_reasoning(messages)
-
-    assert result == [messages[0], messages[3]]
-    assert messages == original
-
-
-def test_deepseek_keeps_tool_pair_with_reasoning() -> None:
-    messages = [
-        {
-            "role": "assistant",
-            "content": "Checking.",
-            "reasoning_content": "Need current weather.",
-            "tool_calls": [
-                {
-                    "id": "call-with-reasoning",
-                    "type": "function",
-                    "function": {"name": "weather", "arguments": "{}"},
-                }
-            ],
-        },
-        {
-            "role": "tool",
-            "tool_call_id": "call-with-reasoning",
-            "content": "sunny",
-        },
-    ]
-
-    assert AgentBase._drop_deepseek_tool_turns_without_reasoning(messages) == messages
-
-
 def test_non_deepseek_or_no_tools_drops_reasoning_from_provider_history() -> None:
     messages = [
         {"role": "assistant", "reasoning_content": "private reasoning"},

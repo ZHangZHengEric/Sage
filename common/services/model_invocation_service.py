@@ -18,10 +18,13 @@ from common.schemas.model_invocation import (
 from common.services import token_usage_service
 from common.services.chat_utils import create_model_client
 from sagents.llm.model_capabilities import (
+    get_supported_thinking_levels,
     is_openai_reasoning_model,
     normalize_reasoning_effort,
     resolve_reasoning_effort,
+    uses_aliyun_model_studio_protocol,
     uses_deepseek_native_protocol,
+    uses_zhipu_native_protocol,
 )
 from sagents.utils.llm_request_utils import (
     create_chat_completion_with_fallback,
@@ -236,7 +239,7 @@ def _build_thinking_extra_body(
             extra_body["reasoning_effort"] = resolve_reasoning_effort(
                 enable_thinking=enable_thinking,
                 env_value=None,
-                default_off="low",
+                default_off="medium",
             )
         return extra_body
 
@@ -248,6 +251,24 @@ def _build_thinking_extra_body(
             "type": "enabled" if enable_thinking else "disabled"
         }
         if thinking_level:
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
+        return extra_body
+
+    if uses_aliyun_model_studio_protocol(base_url):
+        extra_body["enable_thinking"] = enable_thinking
+        if thinking_level and get_supported_thinking_levels(model, base_url):
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
+        return extra_body
+
+    if uses_zhipu_native_protocol(base_url):
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+        if thinking_level and get_supported_thinking_levels(model, base_url):
             extra_body["reasoning_effort"] = normalize_reasoning_effort(
                 model, thinking_level, base_url=base_url
             )
