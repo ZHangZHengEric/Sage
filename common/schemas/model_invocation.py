@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
-ReasoningLevel = Literal["minimal", "low", "medium", "high", "max"]
+ReasoningLevel = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 ModelType = Literal["standard", "fast"]
 ATTRIBUTION_METADATA_KEYS = (
     "task",

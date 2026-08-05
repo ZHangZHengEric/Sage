@@ -444,7 +444,7 @@ class MemoryRecallAgent(AgentBase):
         """
         logger.debug("MemoryRecallAgent: 调用LLM获取搜索查询")
 
-        response = self._call_llm_streaming(
+        response = self._call_aux_llm_streaming(
             messages=llm_request_messages,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="memory_recall",

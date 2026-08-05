@@ -112,8 +112,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--agent_mode",
         type=str,
         default=None,
-        choices=["fibre", "simple", "multi"],
-        help="智能体模式: fibre, simple, multi",
+        choices=["simple", "fibre", "team"],
+        help="智能体模式: simple, fibre, team",
     )
     parser.add_argument(
         "--simple_ui",
@@ -353,7 +353,7 @@ async def chat_simple(
     context_budget_config: Optional[Dict[str, Any]] = None,
 ):
     """
-    原 sage_cli.py 的对话逻辑，适用于 simple 和 multi 模式
+    原 sage_cli.py 的对话逻辑，适用于 simple、fibre 和 team 模式
     """
     console = Console()
     display_tools(console, tool_manager)
@@ -1120,12 +1120,14 @@ def parse_arguments() -> Dict[str, Any]:
     # 确定 agent_mode
     agent_mode = args.agent_mode
     if agent_mode is None:
-        if preset_running_agent_config.get("agentMode"):
-            agent_mode = preset_running_agent_config.get("agentMode")
-        elif preset_running_agent_config.get("multiAgent") is True:
-            agent_mode = "multi"
-        else:
-            agent_mode = "simple"  # 默认为 simple
+        configured_mode = str(
+            preset_running_agent_config.get("agentMode") or "simple"
+        ).strip().lower()
+        agent_mode = (
+            configured_mode
+            if configured_mode in {"simple", "fibre", "team"}
+            else "simple"
+        )
 
     # 确定 use_deepthink
     use_deepthink = preset_running_agent_config.get("deepThinking", False)

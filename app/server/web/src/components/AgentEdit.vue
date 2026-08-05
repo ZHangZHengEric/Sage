@@ -181,8 +181,8 @@
                 </FormItem>
               </div>
 
-              <!-- Row 2: Deep Thinking, More Suggest, Max Loop -->
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <!-- Row 2: Deep Thinking, Thinking Level, More Suggest, Max Loop -->
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <FormItem :label="t('agent.deepThinking')">
                   <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
                     <Switch
@@ -193,6 +193,19 @@
                       {{ store.formData.deepThinking ? t('agent.enabled') : t('agent.disabled') }}
                     </span>
                   </div>
+                </FormItem>
+
+                <FormItem :label="t('config.thinkingLevel')">
+                  <Select v-model="store.formData.thinkingLevel" :disabled="!store.formData.deepThinking">
+                    <SelectTrigger class="h-10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="level in thinkingLevelOptions" :key="level" :value="level">
+                        {{ thinkingLevelLabel(level) }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </FormItem>
 
                 <FormItem :label="t('agent.moreSuggest')">
@@ -879,6 +892,7 @@ import { getMcpServerLabel } from '../utils/mcpLabels.js'
 import { agentAPI } from '../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 import { skillAPI } from '../api/skill.js'
+import { THINKING_LEVEL_OPTIONS } from '@/utils/modelCapabilities.js'
 import { toast } from 'vue-sonner'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
@@ -912,6 +926,8 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'save'])
 const store = useAgentEditStore()
 const { t } = useLanguage()
+const thinkingLevelOptions = THINKING_LEVEL_OPTIONS
+const thinkingLevelLabel = (level) => t(`config.thinkingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`)
 const { listModelProviders } = modelProviderAPI
 
 const saving = ref(false)

@@ -787,6 +787,7 @@ def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> Non
             context_data["child_session_ids"] = []
             context_data["audit_status"] = {}
             context_data["tokens_usage_info"] = {"total_info": {}, "per_step_info": []}
+            context_data["prompt_token_checkpoints"] = {}
             system_context = context_data.get("system_context")
             if isinstance(system_context, dict):
                 system_context.pop("current_time", None)
@@ -873,6 +874,16 @@ async def edit_last_user_message(
     manager = get_global_session_manager()
     if manager:
         try:
+            live_session = manager.get_live_session(session_id)
+            live_context = (
+                live_session.get_context()
+                if live_session is not None and live_session.has_context()
+                else None
+            )
+            if live_context is not None and hasattr(
+                live_context, "prompt_budget_manager"
+            ):
+                live_context.prompt_budget_manager.clear()
             await manager.aclose_session(session_id)
         except Exception:
             manager.remove_session_context(session_id)

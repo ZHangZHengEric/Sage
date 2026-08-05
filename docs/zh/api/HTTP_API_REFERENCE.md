@@ -410,7 +410,6 @@ ref: http-api-reference
 - `agent_name`
 - `deep_thinking`
 - `max_loop_count`
-- `multi_agent`
 - `agent_mode`
 - `more_suggest`
 - `available_workflows`
@@ -475,8 +474,7 @@ ref: http-api-reference
   "deepThinking": false,
   "llm_provider_id": "provider_xxx",
   "enableMultimodal": false,
-  "multiAgent": false,
-  "agentMode": "default",
+  "agentMode": "team",
   "description": "Handles market research"
 }
 ```
@@ -567,8 +565,7 @@ ref: http-api-reference
 | `deepThinking`            | boolean  | 更深推理模式        | 复杂推理场景可开启           |
 | `llm_provider_id`         | string   | 绑定的模型提供方 ID   | 想明确指定 Provider 时    |
 | `enableMultimodal`        | boolean  | 是否启用多模态       | 需要图像输入时             |
-| `multiAgent`              | boolean  | 是否启用多 Agent   | 多 Agent 协作时         |
-| `agentMode`               | string   | Agent 模式      | 有模式切换需求时            |
+| `agentMode`               | string   | Agent 模式      | `simple`、`fibre` 或 `team` |
 | `description`             | string   | Agent 描述      | 管理页和自动生成场景          |
 
 
@@ -580,8 +577,7 @@ ref: http-api-reference
 | `agent_name`                | string   | 临时指定 Agent 名称    | 调试或临时覆盖展示名         |
 | `deep_thinking`             | boolean  | 临时启用深度推理         | 单次请求更重推理           |
 | `max_loop_count`            | integer  | 单次请求循环上限         | 控制成本或运行深度          |
-| `multi_agent`               | boolean  | 单次请求启用多 Agent    | 不改保存配置，只临时启用       |
-| `agent_mode`                | string   | 单次请求 Agent 模式    | 模式切换               |
+| `agent_mode`                | string   | 单次请求 Agent 模式    | `simple`、`fibre` 或 `team` |
 | `more_suggest`              | boolean  | 生成更多建议           | 前端想要更多候选建议时        |
 | `available_workflows`       | object   | 临时工作流集合          | 调试或临时工作流注入         |
 | `llm_model_config`          | object   | 临时模型配置           | 临时覆盖模型参数           |

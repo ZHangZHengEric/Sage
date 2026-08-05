@@ -384,15 +384,3 @@ async def test_invalid_tool_call_arguments_become_hidden_localized_runtime_diagn
     assert len(request_messages) == 1
     assert request_messages[0]["role"] == MessageRole.ASSISTANT.value
     assert "<runtime_diagnostic" in request_messages[0]["content"]
-
-
-def test_context_over_limit_error_uses_requested_language():
-    agent = ParallelToolAgent(expected_starts=0)
-
-    message = agent._context_over_limit_error_chunk(120, 100, "en-US")
-
-    assert message.message_type == MessageType.AGENT_EXECUTION_ERROR.value
-    assert (
-        "The compressed context still exceeds the model input limit" in message.content
-    )
-    assert "当前上下文" not in message.content

@@ -23,6 +23,9 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     || deepThinking === 'enabled'
   const normalizedAgentMode = String(importedConfig.agentMode || importedConfig.agent_mode || 'simple').trim().toLowerCase()
   const normalizedMode = ['fibre', 'team'].includes(normalizedAgentMode) ? normalizedAgentMode : 'simple'
+  const thinkingLevel = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(importedConfig.thinkingLevel)
+    ? importedConfig.thinkingLevel
+    : 'medium'
 
   return {
     name: `${importedConfig.name}${importSuffix}`,
@@ -30,8 +33,8 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     description: importedConfig.description || '',
     systemPrefix: importedConfig.systemPrefix || '',
     deepThinking: normalizedDeepThinking,
+    thinkingLevel,
     agentMode: normalizedMode,
-    multiAgent: importedConfig.multiAgent || false,
     maxLoopCount: importedConfig.maxLoopCount ?? null,
     availableTools: importedConfig.availableTools || [],
     availableSkills: importedConfig.availableSkills || [],

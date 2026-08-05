@@ -3,7 +3,7 @@ import { isCurrentSessionStreamEnd } from '@/utils/sessionStreamEvents.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
 const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
-const THINKING_LEVEL_TAG_RE = /^\s*<(?:thinking_level|deep_thinking_level)>\s*(minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*/i
+const THINKING_LEVEL_TAG_RE = /^\s*<(?:thinking_level|deep_thinking_level)>\s*(minimal|low|medium|high|xhigh|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*/i
 
 const stripControlTags = (text) => {
   if (typeof text !== 'string') return { text, enablePlan: false, enableDeepThinking: false, thinkingLevel: null }

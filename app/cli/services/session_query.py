@@ -85,7 +85,7 @@ def _resolve_agent_mode_from_config(agent_config: Dict[str, Any]) -> str:
         .strip()
         .lower()
     )
-    if raw_value in {"simple", "multi", "fibre"}:
+    if raw_value in {"simple", "fibre", "team"}:
         return raw_value
     return "simple"
 

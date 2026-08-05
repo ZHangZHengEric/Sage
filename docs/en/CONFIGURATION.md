@@ -62,6 +62,7 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_CONTEXT_HISTORY_RATIO`
 - `SAGE_CONTEXT_ACTIVE_RATIO`
 - `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO`
+- `SAGE_CONTEXT_COMPRESSION_THRESHOLD` (default `0.85`; input-only threshold independent of output token limits)
 - `SAGE_CONTEXT_RECENT_TURNS`
 
 ## Authentication and Session

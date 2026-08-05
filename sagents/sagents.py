@@ -29,6 +29,9 @@ from sagents.utils.sandbox.config import VolumeMount
 from sagents.observability.prometheus_handler import record_agent_first_token
 
 
+SUPPORTED_AGENT_MODES = ("simple", "fibre", "team")
+
+
 @dataclass
 class _HiddenToolStreamState:
     """SAgent.run_stream 内跟踪需隐藏工具调用流式续片所需的局部状态。
@@ -228,7 +231,7 @@ class SAgent:
             agent_id: Agent ID，用于标识当前 Agent
             deep_thinking: 过时参数。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制
             max_loop_count: 最大循环次数，防止无限循环
-            agent_mode: Agent 模式，可选 "simple" | "multi" | "fibre" | "team"
+            agent_mode: Agent 模式，可选 "simple" | "fibre" | "team"
             more_suggest: 是否启用更多建议功能
             force_summary: 是否强制生成总结
             system_context: 系统上下文字典，注入额外信息到提示词
@@ -274,6 +277,11 @@ class SAgent:
             raise ValueError("run_stream parameter model_config must be a non-empty dict")
         if max_loop_count is None:
             raise ValueError("run_stream parameter max_loop_count is required")
+        if agent_mode is not None and agent_mode not in SUPPORTED_AGENT_MODES:
+            supported = ", ".join(SUPPORTED_AGENT_MODES)
+            raise ValueError(
+                f"run_stream parameter agent_mode must be one of: {supported}"
+            )
 
         # 确定沙箱类型（优先级：参数 > __init__ > 环境变量 > 默认）
         effective_sandbox_type = (
@@ -487,35 +495,10 @@ class SAgent:
     ) -> AgentFlow:
         """构建默认的执行流程，兼容原有逻辑"""
 
-        # 深度思考由模型原生 thinking/reasoning 能力处理，不再额外插入
-        # TaskAnalysisAgent，避免重复模型调用和独立 task_analysis 消息。
+        # 深度思考由模型原生 thinking/reasoning 能力处理。
         steps = []
 
         # 1. 模式选择 (Switch)
-        # 预定义多智能体循环体
-        multi_agent_body = SequenceNode(
-            steps=[
-                AgentNode(agent_key="task_planning"),
-                AgentNode(agent_key="tool_suggestion"),
-                AgentNode(agent_key="task_executor"),
-                AgentNode(agent_key="task_observation"),
-                AgentNode(agent_key="task_completion_judge"),
-            ]
-        )
-
-        # 预定义多智能体完整流程（包含总结）
-        multi_agent_full = SequenceNode(
-            steps=[
-                AgentNode(agent_key="memory_recall"),
-                LoopNode(
-                    condition="task_not_completed",
-                    max_loops=max_loop_count,
-                    body=multi_agent_body,
-                ),
-                AgentNode(agent_key="task_summary"),
-            ]
-        )
-
         # 预定义简单模式
         simple_agent_prelude = ParallelNode(
             branches=[
@@ -642,7 +625,6 @@ class SAgent:
                     "fibre": fib_agent_body,
                     "team": team_agent_body,
                     "simple": simple_agent_body,
-                    "multi": multi_agent_full,
                 },
                 default=simple_agent_body,
             )

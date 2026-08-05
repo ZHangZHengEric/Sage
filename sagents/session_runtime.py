@@ -16,14 +16,6 @@ from sagents.agent import (
     TeamAgent,
     QuerySuggestAgent,
     SimpleAgent,
-    TaskAnalysisAgent,
-    TaskCompletionJudgeAgent,
-    TaskDecomposeAgent,
-    TaskExecutorAgent,
-    TaskObservationAgent,
-    TaskPlanningAgent,
-    TaskSummaryAgent,
-    WorkflowSelectAgent,
     ToolSuggestionAgent,
     MemoryRecallAgent,
     PlanAgent,
@@ -233,14 +225,6 @@ class Session:
         self._persisted_messages: Optional[List[MessageChunk]] = None
         self._agent_registry: Dict[str, Type[AgentBase]] = {
             "simple": SimpleAgent,
-            "task_analysis": TaskAnalysisAgent,
-            "task_decompose": TaskDecomposeAgent,
-            "task_executor": TaskExecutorAgent,
-            "task_observation": TaskObservationAgent,
-            "task_completion_judge": TaskCompletionJudgeAgent,
-            "task_planning": TaskPlanningAgent,
-            "task_summary": TaskSummaryAgent,
-            "workflow_select": WorkflowSelectAgent,
             "query_suggest": QuerySuggestAgent,
             "tool_suggestion": ToolSuggestionAgent,
             "fibre": FibreAgent,
@@ -452,6 +436,9 @@ class Session:
                     tool_manager=None,
                     skill_manager=None,
                     parent_session_id=snapshot.get("parent_session_id"),
+                )
+                self.session_context.prompt_budget_manager.restore(
+                    snapshot.get("prompt_token_checkpoints") or {}
                 )
                 self.session_context.session_workspace = (  # pyright: ignore[reportAttributeAccessIssue]
                     snapshot.get("session_workspace") or self.session_workspace
@@ -1358,9 +1345,7 @@ class Session:
             )
 
         try:
-            await _cleanup_session_shells_with_timeout(
-                session_id, self.session_context
-            )
+            await _cleanup_session_shells_with_timeout(session_id, self.session_context)
         except Exception as e:
             logger.error(
                 f"SAgent: 清理会话 {session_id} 后台 shell 时出错: {e}",
@@ -1368,9 +1353,7 @@ class Session:
             )
 
         try:
-            await _flush_session_logs_with_timeout(
-                session_id, self.session_context
-            )
+            await _flush_session_logs_with_timeout(session_id, self.session_context)
         except Exception as e:
             logger.error(
                 f"SAgent: flush session {session_id} diagnostic logs failed: {e}",
@@ -1404,9 +1387,7 @@ class SessionManager:
         self._sessions: Dict[str, Session] = {}
         self._session_cleanup_tasks: Set[asyncio.Task] = set()
         self._session_close_lock = threading.RLock()
-        self._session_close_futures: Dict[
-            str, concurrent.futures.Future[None]
-        ] = {}
+        self._session_close_futures: Dict[str, concurrent.futures.Future[None]] = {}
         self._shutdown = False
 
         from sagents.session_registry import SessionRegistry
@@ -1661,17 +1642,13 @@ class SessionManager:
 
     def _begin_session_close(
         self, session_id: str
-    ) -> tuple[
-        Optional[Session], concurrent.futures.Future[None], bool
-    ]:
+    ) -> tuple[Optional[Session], concurrent.futures.Future[None], bool]:
         """Detach a session and reserve its ID until cleanup has completed."""
         with self._session_close_lock:
             existing = self._session_close_futures.get(session_id)
             if existing is not None:
                 return None, existing, False
-            completion: concurrent.futures.Future[None] = (
-                concurrent.futures.Future()
-            )
+            completion: concurrent.futures.Future[None] = concurrent.futures.Future()
             self._session_close_futures[session_id] = completion
             return self._sessions.pop(session_id, None), completion, True
 
@@ -1721,9 +1698,7 @@ class SessionManager:
                 asyncio.get_running_loop()
             except RuntimeError:
                 try:
-                    completion.result(
-                        timeout=_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS
-                    )
+                    completion.result(timeout=_SYNC_SESSION_CLOSE_WAIT_TIMEOUT_SECONDS)
                 except concurrent.futures.TimeoutError:
                     logger.warning(
                         f"Synchronous session close wait timed out; cleanup "
@@ -1842,9 +1817,7 @@ class SessionManager:
         except FileNotFoundError:
             pass
         except Exception as exc:
-            logger.warning(
-                f"SessionManager: 读取 session {session_id} 状态失败: {exc}"
-            )
+            logger.warning(f"SessionManager: 读取 session {session_id} 状态失败: {exc}")
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:

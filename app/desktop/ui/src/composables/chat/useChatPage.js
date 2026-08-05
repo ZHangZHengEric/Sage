@@ -14,7 +14,7 @@ import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
-import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+import { mergeStreamedText, mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
 import { getSessionMessageIndexKey } from '@/utils/sessionStreamEvents.js'
 
 // 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
@@ -675,7 +675,7 @@ export const useChatPage = (props) => {
     
     if (messageIndexKey && messageIdIndexMap.value.has(messageIndexKey)) {
       const targetIndex = messageIdIndexMap.value.get(messageIndexKey)
-      const existing = messages.value[targetIndex]
+      let existing = messages.value[targetIndex]
       if (!existing) {
         rebuildMessageIdIndexMap()
         return
@@ -686,19 +686,18 @@ export const useChatPage = (props) => {
         typeof existing.content === 'string' &&
         typeof messageData.content === 'string' &&
         messageData.content.length > 0
-      const shouldAppendReasoning =
-        existing.role === 'assistant' &&
-        messageData.role === 'assistant' &&
-        typeof existing.reasoning_content === 'string' &&
-        typeof messageData.reasoning_content === 'string' &&
-        messageData.reasoning_content.length > 0
-
       if (shouldAppendContent && isSmoothableAssistantTextChunk(messageData)) {
         enqueueSmoothAssistantText(messageIndexKey, messageData)
         return
       }
 
       flushSmoothAssistantText(messageIndexKey, true)
+
+      // Draining the smooth-text buffer replaces the message in the array.
+      // Merge the tool-call patch into that latest message instead of the
+      // stale pre-flush object, otherwise only the already animated prefix
+      // remains visible.
+      existing = messages.value[targetIndex] || existing
 
       let nextMessage
       if (isToolResultMessage(messageData)) {
@@ -710,14 +709,15 @@ export const useChatPage = (props) => {
         nextMessage = {
           ...existing,
           ...messageData,
-          content: shouldAppendContent
-            ? (existing.content || '') + messageData.content
-            : (messageData.content !== undefined ? messageData.content : existing.content),
-          reasoning_content: shouldAppendReasoning
-            ? (existing.reasoning_content || '') + messageData.reasoning_content
-            : (messageData.reasoning_content !== undefined
-                ? messageData.reasoning_content
-                : existing.reasoning_content),
+          content: mergeStreamedText(
+            existing.content,
+            messageData.content,
+            Array.isArray(messageData.tool_calls) && messageData.tool_calls.length > 0
+          ),
+          reasoning_content: mergeStreamedText(
+            existing.reasoning_content,
+            messageData.reasoning_content
+          ),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {

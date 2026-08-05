@@ -113,7 +113,6 @@ class FibreBackendClient:
             "maxLoopCount": max_loop_count,
             "deepThinking": False,
             "llm_provider_id": llm_provider_id,
-            "multiAgent": False,
             "agentMode": agent_mode
             if agent_mode in {"simple", "fibre", "team"}
             else "simple",

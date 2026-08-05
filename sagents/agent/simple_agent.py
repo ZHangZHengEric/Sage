@@ -1,5 +1,14 @@
 from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase, PartialStreamConsumedError
+from sagents.context.messages.token_accounting import (
+    ContextOverflowStrategy,
+    ContextPolicy,
+    ContextViewSpec,
+)
+from .agent_base import (
+    AgentBase,
+    PartialStreamConsumedError,
+    ProviderContextWindowExceededError,
+)
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import (
@@ -135,6 +144,14 @@ class SimpleAgent(AgentBase):
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
         self.max_repeat_pattern_hits = _get_repeat_pattern_max_hits()
         self.agent_name = "SimpleAgent"
+        self.context_policy = ContextPolicy(
+            view_spec=ContextViewSpec(
+                policy_id="conversation_persistent_summary",
+                persistent_history=True,
+            ),
+            overflow_strategy=ContextOverflowStrategy.PERSISTENT_SUMMARY,
+        )
+        self.context_view_policy_id = self.context_policy.view_spec.policy_id
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
 
@@ -994,7 +1011,7 @@ class SimpleAgent(AgentBase):
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
-        response = self._call_llm_streaming(
+        response = self._call_aux_llm_streaming(
             messages=cast(
                 List[Union[MessageChunk, Dict[str, Any]]], llm_input_messages
             ),
@@ -1214,6 +1231,7 @@ class SimpleAgent(AgentBase):
             metadata={
                 "inference_view_only": True,
                 "runtime_continuation_guidance": True,
+                "context_protected": True,
             },
         )
 
@@ -1691,12 +1709,51 @@ class SimpleAgent(AgentBase):
         direct_response_state: Optional[Dict[str, bool]] = None,
         continuation_reason: Optional[str] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+        try:
+            live_context = self._get_live_session_context(session_id)
+            language = live_context.get_language() if live_context else "en"
+        except Exception:
+            language = "en"
+
+        tools_json = self._filter_tools_for_completion_mode(tools_json)
+        continuation_guidance = self._build_continuation_guidance_message(
+            continuation_reason or ""
+        )
+
+        async def build_complete_request(
+            history_view: List[MessageChunk],
+        ) -> List[MessageChunk]:
+            request_messages = await self.prepare_llm_request_messages(
+                session_id=session_id,
+                history_messages=history_view,
+                custom_prefix=_get_system_prefix(tool_manager, language),
+                language=language,
+            )
+            if continuation_guidance is not None:
+                request_messages = list(request_messages) + [continuation_guidance]
+            return request_messages
+
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
-        async for messages_chunk, is_final in self._prepare_messages_for_llm(
-            messages_input, session_id
-        ):
+        try:
+            prepared_iterator = self._prepare_messages_for_llm(
+                messages_input,
+                session_id,
+                request_builder=build_complete_request,
+                request_tools=tools_json,
+                step_name="direct_execution",
+            )
+        except TypeError as exc:
+            # Compatibility for custom/test subclasses overriding the historical
+            # two-argument hook. Provider overflow still returns to the session
+            # recovery loop; the provider boundary does not trim message roles.
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            prepared_iterator = self._prepare_messages_for_llm(
+                messages_input, session_id
+            )
+        async for messages_chunk, is_final in prepared_iterator:
             if is_final:
                 # 最终结果
                 prepared_messages = messages_chunk
@@ -1709,28 +1766,13 @@ class SimpleAgent(AgentBase):
             logger.error("SimpleAgent: 准备消息失败，没有获得最终消息列表")
             return
 
-        try:
-            live_context = self._get_live_session_context(session_id)
-            language = live_context.get_language() if live_context else "en"
-        except Exception:
-            language = "en"
-        prepared_messages = await self.prepare_llm_request_messages(
-            session_id=session_id,
-            history_messages=prepared_messages,
-            custom_prefix=_get_system_prefix(tool_manager, language),
-            language=language,
-        )
-        continuation_guidance = self._build_continuation_guidance_message(
-            continuation_reason or ""
-        )
-        if continuation_guidance is not None:
-            prepared_messages = list(prepared_messages) + [continuation_guidance]
+        prepared_history_messages = prepared_messages
+        prepared_messages = await build_complete_request(prepared_history_messages)
 
         logger.info(f"SimpleAgent: 准备了 {len(prepared_messages)} 条消息用于LLM")
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
-        tools_json = self._filter_tools_for_completion_mode(tools_json)
 
         if len(tools_json) > 0:
             model_config_override["tools"] = tools_json
@@ -1752,12 +1794,55 @@ class SimpleAgent(AgentBase):
             tools_json,
             force_tool_choice_required,
         )
-        response = self._call_llm_streaming(
-            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], prepared_messages),
-            session_id=session_id,
-            step_name="direct_execution",
-            model_config_override=model_config_override,
-        )
+
+        async def stream_with_context_recovery():
+            nonlocal prepared_history_messages, prepared_messages
+            recovery_source = prepared_history_messages
+            llm_compression_attempts = 0
+
+            while True:
+                response = self._call_llm_streaming(
+                    messages=cast(
+                        List[Union[MessageChunk, Dict[str, Any]]], prepared_messages
+                    ),
+                    session_id=session_id,
+                    step_name="direct_execution",
+                    model_config_override=model_config_override,
+                )
+                try:
+                    async for provider_chunk in response:
+                        yield (True, provider_chunk)
+                    return
+                except ProviderContextWindowExceededError:
+                    llm_compression_attempts += 1
+                    logger.warning(
+                        "SimpleAgent: provider 上下文超限，启动会话级恢复；"
+                        "规则压缩无字符收益时使用大模型历史压缩，"
+                        f"attempt={llm_compression_attempts}"
+                    )
+                    recovered_history = None
+                    recovery_iterator = self._prepare_context_messages_for_llm(
+                        recovery_source,
+                        session_id,
+                        request_builder=build_complete_request,
+                        request_tools=tools_json,
+                        step_name="direct_execution",
+                        provider_overflow_recovery=True,
+                    )
+                    async for recovery_messages, is_final in recovery_iterator:
+                        if is_final:
+                            recovered_history = recovery_messages
+                        else:
+                            yield (False, (recovery_messages, False))
+
+                    if recovered_history is None:
+                        raise
+
+                    recovery_source = recovered_history
+                    prepared_history_messages = recovered_history
+                    prepared_messages = await build_complete_request(
+                        prepared_history_messages
+                    )
 
         tool_calls: Dict[str, Any] = {}
         if direct_response_state is not None:
@@ -1769,7 +1854,11 @@ class SimpleAgent(AgentBase):
         emitted_tool_call_stream = False
         # 处理流式响应块
         try:
-            async for chunk in response:
+            async for is_provider_chunk, event in stream_with_context_recovery():
+                if not is_provider_chunk:
+                    yield event
+                    continue
+                chunk = event
                 # print(chunk)
                 if chunk is None:
                     logger.warning(
@@ -1845,7 +1934,9 @@ class SimpleAgent(AgentBase):
                         output_messages = [
                             MessageChunk(
                                 role="assistant",
-                                reasoning_content=chunk.choices[0].delta.reasoning_content,
+                                reasoning_content=chunk.choices[
+                                    0
+                                ].delta.reasoning_content,
                                 message_id=response_message_id,
                                 message_type=MessageType.REASONING_CONTENT.value,
                                 agent_name=self.agent_name,
@@ -2159,7 +2250,13 @@ class SimpleAgent(AgentBase):
         return False
 
     async def _prepare_messages_for_llm(
-        self, messages_input: List[MessageChunk], session_id: str
+        self,
+        messages_input: List[MessageChunk],
+        session_id: str,
+        request_builder=None,
+        request_tools=None,
+        step_name: str = "llm_call",
+        provider_overflow_recovery: bool = False,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         准备用于 LLM 的消息列表
@@ -2178,6 +2275,11 @@ class SimpleAgent(AgentBase):
                 - 最后 yield 最终的消息列表 (is_final=True)
         """
         async for messages_chunk, is_final in self._prepare_context_messages_for_llm(
-            messages_input, session_id
+            messages_input,
+            session_id,
+            request_builder=request_builder,
+            request_tools=request_tools,
+            step_name=step_name,
+            provider_overflow_recovery=provider_overflow_recovery,
         ):
             yield (messages_chunk, is_final)

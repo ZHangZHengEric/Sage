@@ -8,6 +8,7 @@ describe('agentConfigImport', () => {
 name: Research Bot
 description: YAML imported agent
 deepThinking: true
+thinkingLevel: high
 maxLoopCount: 12
 availableTools:
   - web_search
@@ -29,6 +30,7 @@ availableWorkflows:
       name: 'Research Bot (imported)',
       description: 'YAML imported agent',
       deepThinking: true,
+      thinkingLevel: 'high',
       maxLoopCount: 12,
       availableTools: ['web_search'],
       availableSkills: ['researcher'],
@@ -36,6 +38,18 @@ availableWorkflows:
       systemContext: { team: 'growth' },
       availableWorkflows: { triage: { enabled: true } },
     })
+  })
+
+  it('defaults an invalid or missing thinking level to medium', () => {
+    expect(buildImportedAgentDraft({ name: 'Bot', thinkingLevel: 'ultra' }).thinkingLevel).toBe('medium')
+    expect(buildImportedAgentDraft({ name: 'Bot', thinkingLevel: 'xhigh' }).thinkingLevel).toBe('xhigh')
+  })
+
+  it('retires legacy multi config without preserving the old boolean flag', () => {
+    const draft = buildImportedAgentDraft({ name: 'Legacy', agentMode: 'multi', multiAgent: true })
+
+    expect(draft.agentMode).toBe('simple')
+    expect(draft).not.toHaveProperty('multiAgent')
   })
 
   it('rejects non-object imports', () => {

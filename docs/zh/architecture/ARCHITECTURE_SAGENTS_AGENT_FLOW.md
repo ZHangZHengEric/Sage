@@ -37,40 +37,27 @@ Agent 自身不持有“这次会话的状态”，状态都在 `SessionContext`
 
 ```mermaid
 flowchart TB
-    subgraph 分析
-        Analysis[task_analysis]
-    end
-
     subgraph 召回与建议
         Recall[memory_recall]
         ToolSug[tool_suggestion]
-        WfSel[workflow_select]
         QSug[query_suggest]
     end
 
-    subgraph 简单模式
+    subgraph 共享执行
         Plan[plan]
         Simple[simple]
-    end
-
-    subgraph 多智能体模式
-        TPlan[task_planning]
-        TDecomp[task_decompose]
-        TExec[task_executor]
-        TObs[task_observation]
-        TJudge[task_completion_judge]
-        TSum[task_summary]
-    end
-
-    subgraph fibre 模式
-        Fibre[fibre]
         SelfCheck[self_check]
+    end
+
+    subgraph 编排模式
+        Fibre[fibre]
+        Team[team]
     end
 ```
 
 
 
-各 Agent 的 `agent_key` 是流程中 `AgentNode` 引用它的标识，例如 `simple`、`task_planning` 等。
+各 Agent 的 `agent_key` 是流程中 `AgentNode` 引用它的标识，例如 `simple`、`fibre` 或 `team`。
 
 ### 1.3 `FibreAgent` 与子智能体编排
 
@@ -116,9 +103,8 @@ flowchart LR
     Reg --> C2[enable_more_suggest]
     Reg --> C3[enable_plan]
     Reg --> C4[plan_should_start_execution]
-    Reg --> C5[task_not_completed]
-    Reg --> C6[self_check_should_retry]
-    Reg --> C7[need_summary]
+    Reg --> C5[self_check_should_retry]
+    Reg --> C6[need_summary]
 
     Reg -.被引用.-> If[IfNode.condition]
     Reg -.被引用.-> Loop[LoopNode.condition]
@@ -158,7 +144,7 @@ flowchart TB
 
 执行器只负责“怎么走”，不负责“走到 Agent 后做什么”——后者是 Agent 自己的责任。
 
-## 3. 默认流程：simple / multi / fibre
+## 3. 默认流程：simple / fibre / team
 
 `SAgent._build_default_flow(agent_mode, max_loop_count)` 拼出来的形状：
 
@@ -166,11 +152,11 @@ flowchart TB
 flowchart TB
     Start([输入 messages]) --> Sw{Switch agent_mode}
     Sw -->|simple| SimpleBody
-    Sw -->|multi| MultiBody
     Sw -->|fibre| FibreBody
+    Sw -->|team| TeamBody
     SimpleBody --> More
-    MultiBody --> More
     FibreBody --> More
+    TeamBody --> More
     More{enable_more_suggest?}
     More -->|是| QS[query_suggest]
     More -->|否| End
@@ -188,52 +174,33 @@ flowchart TB
     S0([进入 simple]) --> Par1{并行}
     Par1 --> ToolSug1[tool_suggestion]
     Par1 --> Recall1[memory_recall]
-    ToolSug1 --> If1
-    Recall1 --> If1
+    ToolSug1 --> Loop1
+    Recall1 --> Loop1
+    Loop1[Loop: self_check_should_retry<br/>最多 3 次] --> If1
     If1{enable_plan?}
     If1 -->|是| Plan1[plan]
     Plan1 --> If2{plan_should_start_execution?}
     If2 -->|是| SimpleAgent1[simple]
-    If2 -->|否| Need
+    If2 -->|否| SC1
     If1 -->|否| SimpleAgent2[simple]
-    SimpleAgent1 --> Need
-    SimpleAgent2 --> Need
-    Need{need_summary?}
-    Need -->|是| Sum[task_summary] --> EndS
-    Need -->|否| EndS([结束 simple])
+    SimpleAgent1 --> SC1
+    SimpleAgent2 --> SC1
+    SC1[self_check]
+    SC1 -.需要重试.-> Loop1
+    SC1 -->|停止| EndS([结束 simple])
 ```
-
-
-
-### multi_agent_full
-
-```mermaid
-flowchart TB
-    M0([进入 multi]) --> Recall2[memory_recall]
-    Recall2 --> Loop[Loop: task_not_completed<br/>最多 max_loop_count 次]
-    Loop --> P[task_planning]
-    P --> TS[tool_suggestion]
-    TS --> E[task_executor]
-    E --> O[task_observation]
-    O --> J[task_completion_judge]
-    J -.task_not_completed.-> Loop
-    J -->|完成| Sum2[task_summary]
-    Sum2 --> EndM([结束 multi])
-```
-
 
 
 ### fib_agent_body
 
 ```mermaid
 flowchart TB
-    F0([进入 fibre]) --> Loop2[Loop: self_check_should_retry<br/>最多 3 次]
-    Loop2 --> Core[fibre core]
-    Core --> Par2{并行}
+    F0([进入 fibre]) --> Par2{并行}
     Par2 --> TS2[tool_suggestion]
     Par2 --> R2[memory_recall]
-    TS2 --> If3
-    R2 --> If3
+    TS2 --> Loop2
+    R2 --> Loop2
+    Loop2[Loop: self_check_should_retry<br/>最多 3 次] --> If3
     If3{enable_plan?}
     If3 -->|是| Plan2[plan] --> If4{plan_should_start_execution?}
     If4 -->|是| FibA[fibre]
@@ -245,6 +212,8 @@ flowchart TB
     SC -.should_retry.-> Loop2
     SC -->|不再重试| EndF([结束 fibre])
 ```
+
+`team_agent_body` 使用相同的前置并行、可选规划和自检循环，但执行节点是 `team` 而不是 `fibre`。
 
 
 
@@ -265,27 +234,16 @@ def _user_paid(session_context, session=None) -> bool:
 ### 4.2 自定义 Flow
 
 ```python
-from sagents.flow.schema import (
-    AgentFlow, SequenceNode, AgentNode, IfNode, LoopNode,
-)
+from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode, IfNode
 
 custom_flow = AgentFlow(
     name="My Pipeline",
     root=SequenceNode(steps=[
         IfNode(
             condition="user_paid",
-            true_body=LoopNode(
-                condition="task_not_completed",
-                max_loops=10,
-                body=SequenceNode(steps=[
-                    AgentNode(agent_key="task_planning"),
-                    AgentNode(agent_key="task_executor"),
-                    AgentNode(agent_key="task_completion_judge"),
-                ]),
-            ),
+            true_body=AgentNode(agent_key="team"),
             false_body=AgentNode(agent_key="simple"),
         ),
-        AgentNode(agent_key="task_summary"),
     ]),
 )
 

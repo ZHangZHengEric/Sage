@@ -58,11 +58,14 @@ export const useChatAgentConfig = ({
       const agentMode = normalizeAgentMode(agent.agentMode)
       const thinkingLevelOptions = getThinkingLevelOptions(agent.llmModel, agent.llmBaseUrl)
       const overriddenThinkingLevel = userConfigOverrides.value.thinkingLevel
+      const agentThinkingLevel = agent.thinkingLevel
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
         thinkingLevel: thinkingLevelOptions.includes(overriddenThinkingLevel)
           ? overriddenThinkingLevel
-          : getDefaultThinkingLevel(agent.llmModel, agent.llmBaseUrl),
+          : thinkingLevelOptions.includes(agentThinkingLevel)
+            ? agentThinkingLevel
+            : getDefaultThinkingLevel(agent.llmModel, agent.llmBaseUrl),
         agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,

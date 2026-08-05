@@ -135,7 +135,7 @@ flowchart TB
     Args --> SBX[沙箱<br/>sandbox_type + sandbox_agent_workspace<br/>+ volume_mounts + sandbox_id]
     Args --> CAP[能力<br/>tool_manager + skill_manager]
     Args --> ID[身份<br/>session_id + user_id + agent_id]
-    Args --> MODE[模式<br/>agent_mode: simple/multi/fibre<br/>+ max_loop_count]
+    Args --> MODE[模式<br/>agent_mode: simple/fibre/team<br/>+ max_loop_count]
     Args --> EXT[扩展点<br/>custom_flow + custom_sub_agents<br/>+ available_workflows + system_context<br/>+ context_budget_config]
 ```
 
@@ -153,18 +153,18 @@ flowchart TB
 ```mermaid
 flowchart TB
     Start([输入 messages]) --> Sw{agent_mode}
-    Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → summary?]
-    Sw -->|multi| Multi[multi body<br/>memory_recall<br/>→ Loop 规划/执行/观察/判定<br/>→ task_summary]
-    Sw -->|fibre| Fibre[fibre body<br/>Loop self_check_should_retry<br/>→ fibre 核心 → self_check]
+    Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → self_check]
+    Sw -->|fibre| Fibre[fibre body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → fibre → self_check]
+    Sw -->|team| Team[team body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → team → self_check]
     Simple --> More
-    Multi --> More
     Fibre --> More
+    Team --> More
     More{enable_more_suggest?}
     More -->|是| Sug[query_suggest] --> End([输出])
     More -->|否| End
 ```
 
-深度思考直接作用于当前模型请求；默认流程不再为它单独执行 `task_analysis`。
+深度思考直接作用于当前模型请求；默认流程不再单独执行分析阶段。
 
 
 

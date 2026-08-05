@@ -83,11 +83,11 @@ def test_extract_deep_thinking_level_alias_from_multimodal_message():
     assert messages[0]["content"][0]["text"] == "inspect"
 
 
-def test_xhigh_is_not_a_frontend_control_level():
+def test_extract_xhigh_thinking_level():
     content = "<thinking_level>xhigh</thinking_level> solve this"
     messages = [{"role": "user", "content": content}]
 
     flags = extract_control_flags_from_messages(messages)
 
-    assert flags == {}
-    assert messages[0]["content"] == content
+    assert flags == {"thinking_level": "xhigh"}
+    assert messages[0]["content"] == "solve this"

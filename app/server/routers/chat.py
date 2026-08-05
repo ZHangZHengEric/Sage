@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -65,7 +66,7 @@ def _resolve_request_language(
 
 class RerunStreamRequest(BaseModel):
     agent_id: str | None = None
-    agent_mode: str | None = None
+    agent_mode: Literal["simple", "fibre", "team"] | None = None
     more_suggest: bool | None = None
     max_loop_count: int | None = None
     available_sub_agent_ids: list[str] | None = None

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -49,7 +49,7 @@ class CustomSubAgentConfig(BaseModel):
     available_skills: Optional[List[str]] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     system_context: Optional[Dict[str, Any]] = None
-    agent_mode: Optional[str] = None
+    agent_mode: Optional[Literal["simple", "fibre", "team"]] = None
 
 
 class StreamRequest(BaseChatRequest):
@@ -63,8 +63,7 @@ class StreamRequest(BaseChatRequest):
         description="已过时。请改用消息中的 <enable_deep_thinking>true/false</enable_deep_thinking> 控制。",
     )
     max_loop_count: Optional[int] = None
-    multi_agent: Optional[bool] = None
-    agent_mode: Optional[str] = None
+    agent_mode: Optional[Literal["simple", "fibre", "team"]] = None
     more_suggest: Optional[bool] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     llm_model_config: Optional[Dict[str, Any]] = None

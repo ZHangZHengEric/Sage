@@ -1,10 +1,9 @@
 import copy
 import json
 import re
-from typing import Any, Dict, Union
+from typing import Any, Dict
 
 from loguru import logger
-from sagents.context.messages.message import MessageRole
 
 
 class ContentProcessor:
@@ -19,10 +18,6 @@ class ContentProcessor:
         were persisted, which later caused OpenAI 400 on resume.
         """
         result = copy.deepcopy(result)
-        if result.get("role") == MessageRole.ASSISTANT.value and result.get(
-            "tool_calls"
-        ):
-            result.pop("content", None)
         if result.get("role") == "tool":
             content = result.get("content")
             if isinstance(content, dict):

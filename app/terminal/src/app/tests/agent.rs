@@ -32,7 +32,7 @@ fn agent_command_rejects_blank_agent_id() {
 fn agent_config_command_sets_config_and_clears_agent_id() {
     let mut app = App::new();
     app.set_selected_agent_id("agent_demo".to_string());
-    app.set_agent_mode_selection("multi".to_string());
+    app.set_agent_mode_selection("team".to_string());
     let _ = app.take_backend_restart_request();
 
     assert!(matches!(
@@ -136,9 +136,9 @@ fn agent_mode_status_uses_config_label_until_explicit_override() {
     assert_eq!(app.agent_mode_status_label(), "config default");
     assert_eq!(app.max_loop_count_status_label(), "config default");
 
-    app.set_agent_mode_selection("multi".to_string());
+    app.set_agent_mode_selection("team".to_string());
 
-    assert_eq!(app.agent_mode_status_label(), "multi");
+    assert_eq!(app.agent_mode_status_label(), "team");
     assert_eq!(app.max_loop_count_status_label(), "config default");
 }
 
@@ -185,13 +185,25 @@ fn mode_command_updates_agent_mode_and_requests_restart() {
 }
 
 #[test]
+fn mode_command_rejects_retired_multi_mode() {
+    let mut app = App::new();
+
+    assert!(matches!(
+        app.handle_command("/mode set multi"),
+        SubmitAction::Handled
+    ));
+    assert_eq!(app.agent_mode, "simple");
+    assert!(app.status.starts_with("invalid command"));
+}
+
+#[test]
 fn startup_options_apply_without_emitting_messages() {
     let mut app = App::new();
 
     app.apply_startup_options(
         Some("agent_demo".to_string()),
         None,
-        Some("multi".to_string()),
+        Some("team".to_string()),
         Some(DisplayMode::Verbose),
         None,
         Some("local".to_string()),
@@ -199,7 +211,7 @@ fn startup_options_apply_without_emitting_messages() {
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
-    assert_eq!(app.agent_mode, "multi");
+    assert_eq!(app.agent_mode, "team");
     assert_eq!(app.display_mode, DisplayMode::Verbose);
     assert_eq!(app.workspace_label, "~/.sage");
     assert_eq!(app.sandbox_type.as_deref(), Some("local"));
@@ -213,7 +225,7 @@ fn startup_options_apply_explicit_workspace_override() {
     app.apply_startup_options(
         Some("agent_demo".to_string()),
         Some(PathBuf::from("/tmp/coding_config.json")),
-        Some("multi".to_string()),
+        Some("team".to_string()),
         Some(DisplayMode::Compact),
         Some(PathBuf::from("/tmp/demo-workspace")),
         None,
@@ -225,7 +237,7 @@ fn startup_options_apply_explicit_workspace_override() {
         app.agent_config_path.as_deref(),
         Some(PathBuf::from("/tmp/coding_config.json").as_path())
     );
-    assert_eq!(app.agent_mode, "multi");
+    assert_eq!(app.agent_mode, "team");
     assert_eq!(app.display_mode, DisplayMode::Compact);
     assert_eq!(
         app.workspace_override_path(),

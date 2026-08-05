@@ -757,7 +757,7 @@ class TestCliJsonContracts(unittest.TestCase):
             agent_config={"agentMode": " Multi "},
         )
 
-        self.assertEqual(request.agent_mode, "multi")
+        self.assertEqual(request.agent_mode, "simple")
 
     def test_cli_agent_mode_overrides_config_and_is_normalized(self):
         request = cli_service.build_run_request(
@@ -774,10 +774,19 @@ class TestCliJsonContracts(unittest.TestCase):
             cli_service.build_run_request(
                 task="inspect repo",
                 user_id="user-demo",
-                agent_mode="parallel",
+                agent_mode="multi",
             )
 
         self.assertIn("Invalid agent mode", str(context.exception))
+
+    def test_cli_team_agent_mode_is_supported(self):
+        request = cli_service.build_run_request(
+            task="inspect repo",
+            user_id="user-demo",
+            agent_mode=" Team ",
+        )
+
+        self.assertEqual(request.agent_mode, "team")
 
     def test_agent_config_bool_loop_count_is_rejected(self):
         with self.assertRaises(cli_service.CLIError) as context:

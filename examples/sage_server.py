@@ -16,7 +16,7 @@ import traceback
 import uuid
 import warnings
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from _example_support import (
     add_project_root,
@@ -298,7 +298,6 @@ class SageStreamService:
             logger.debug("未使用预设max_loop_count")
 
         #         "deepThinking": false,
-        #   "multiAgent": false,
         # 设置deepThinking
         if "deepThinking" in self.preset_running_config:
             self.preset_deep_thinking = self.preset_running_config["deepThinking"]
@@ -762,10 +761,8 @@ class StreamRequest(BaseModel):
     user_id: Optional[str] = None
     deep_thinking: Optional[Union[bool, str]] = None
     max_loop_count: Optional[int] = None
-    multi_agent: Optional[Union[bool, str]] = None
-    agent_mode: Optional[str] = None  # fibre, simple, multi
+    agent_mode: Optional[Literal["simple", "fibre", "team"]] = None
     summary: bool = True  # 过时字段
-    deep_research: bool = True  # 过时字段，与multi_agent一致
     more_suggest: bool = False
     force_summary: bool = False
     system_context: Optional[Dict[str, Any]] = None
@@ -780,12 +777,6 @@ class StreamRequest(BaseModel):
 
     def __init__(self, **data):
         # 处理字段兼容性
-        if "deep_research" in data and "multi_agent" not in data:
-            data["multi_agent"] = data["deep_research"]
-            warnings.warn(
-                "deep_research字段已过时，请使用multi_agent", DeprecationWarning
-            )
-
         if "summary" in data:
             warnings.warn("summary字段已过时，将被忽略", DeprecationWarning)
 
@@ -1073,9 +1064,6 @@ async def stream_chat(request: StreamRequest):
         if request.available_tools is not None:
             logger.info(f"初始化工具代理，可用工具: {request.available_tools}")
             start_tool_proxy = time.time()
-            # 如果request.multi_agent 是true，要确保request.available_tools没有 complete_task 这个工具
-            if request.multi_agent and "complete_task" in request.available_tools:
-                request.available_tools.remove("complete_task")
             tool_proxy = ToolProxy(tool_manager, request.available_tools)  # pyright: ignore[reportArgumentType]
             end_tool_proxy = time.time()
             logger.info(f"初始化工具代理耗时: {end_tool_proxy - start_tool_proxy} 秒")
@@ -1168,7 +1156,6 @@ async def stream_chat(request: StreamRequest):
                 user_id=request.user_id,
                 deep_thinking=request.deep_thinking,
                 max_loop_count=request.max_loop_count,
-                multi_agent=request.multi_agent,
                 agent_mode=request.agent_mode,
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,

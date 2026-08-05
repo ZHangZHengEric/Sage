@@ -27,6 +27,18 @@ function mergeSnapshots (aSnap, bSnap) {
   return `${aSnap}${bSnap}`
 }
 
+export function mergeStreamedText (existingText, incomingText, incomingIsSnapshot = false) {
+  if (typeof incomingText !== 'string' || incomingText.length === 0) {
+    return existingText
+  }
+  if (typeof existingText !== 'string' || existingText.length === 0) {
+    return incomingText
+  }
+  return incomingIsSnapshot
+    ? mergeSnapshots(existingText, incomingText)
+    : `${existingText}${incomingText}`
+}
+
 export function mergeToolFunctionArguments (existingArgs, incomingArgs) {
   if (incomingArgs === undefined) {
     return existingArgs

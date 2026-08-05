@@ -68,7 +68,7 @@ agent = SAgent(
 | `input_messages` | `List[dict]` 或 `List[MessageChunk]`；可带/不带 `session_id`，未带时会补全为新建或从首条消息推断 |
 | `tool_manager` / `skill_manager` | `ToolManager` / `ToolProxy` 与 `SkillManager` / `SkillProxy` |
 | `session_id` / `user_id` / `agent_id` | 会话与用户、智能体标识 |
-| `agent_mode` | `"simple"` \| `"multi"` \| `"fibre"`，影响默认 `AgentFlow` 组装 |
+| `agent_mode` | `"simple"` \| `"fibre"` \| `"team"`，影响默认 `AgentFlow` 组装 |
 | `custom_flow` | 若提供，则**不**再使用内置默认流 |
 | `custom_sub_agents` | 子 Agent 配置列表 |
 | `system_context` | 注入到运行时的系统上下文字典 |
@@ -141,7 +141,7 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 
 ## 4. 默认执行图与 `agent_mode`
 
-未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的节点拼装 `agent_mode` 分岔与 `query_suggest` 等步骤。深度思考直接控制当前模型请求，不再额外执行 `TaskAnalysisAgent`。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
+未传 `custom_flow` 时，由 `_build_default_flow` 使用 `sagents/flow/schema.py` 中的节点拼装 `agent_mode` 分岔与 `query_suggest` 等步骤。深度思考直接控制当前模型请求，不再额外增加分析阶段。概念说明见 [核心概念](CORE_CONCEPTS.md) 与 [Agent / Flow 架构](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)。
 
 ## 5. 工具与技能
 

@@ -38,8 +38,8 @@ The runtime creates or reuses sessions through the global session manager in `sa
 The runtime supports multiple execution styles:
 
 - `simple`: direct single-agent interaction
-- `multi`: multi-step orchestration through planning and execution agents
 - `fibre`: advanced multi-agent orchestration with delegation support
+- `team`: team orchestration with delegated child agents
 
 Mode selection influences the default flow assembled inside `SAgent._build_default_flow(...)`.
 

@@ -197,12 +197,10 @@ flowchart LR
 ```mermaid
 flowchart LR
     AllTools[(全部工具)] --> ToolSug[tool_suggestion Agent]
-    AllWFs[(全部 workflow)] --> WfSel[workflow_select Agent]
     ToolSug -->|本次该用什么| LLM
-    WfSel -->|本次该走哪条| LLM
 ```
 
-工具/技能层负责“有什么”，建议 Agent 负责“这次用什么”。这样不用一次把全部 schema 塞进上下文。
+工具/技能层负责“有什么”，工具建议 Agent 负责“这次用什么”。这样不用一次把全部 schema 塞进上下文。
 
 ### 3.1 运行期工具扩展（Tool Expansion）
 

@@ -423,9 +423,11 @@ def _agent_config_agent_mode(value: Any) -> Optional[str]:
     if agent_mode is None:
         return None
     agent_mode = agent_mode.lower()
-    if agent_mode not in {"simple", "multi", "fibre"}:
+    if agent_mode == "multi":
+        return "simple"
+    if agent_mode not in {"simple", "fibre", "team"}:
         raise CLIError(
-            "Agent config `agentMode` must be one of: simple, multi, fibre.",
+            "Agent config `agentMode` must be one of: simple, fibre, team.",
             next_steps=["Fix the agent config JSON, then run the command again."],
             debug_detail=f"agentMode={agent_mode!r}",
         )
@@ -438,14 +440,14 @@ def _cli_agent_mode(value: Any) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         raise CLIError(
             "Invalid agent mode",
-            next_steps=["Use one of: simple, multi, fibre."],
+            next_steps=["Use one of: simple, fibre, team."],
             debug_detail=f"agent_mode={value!r}",
         )
     agent_mode = value.strip().lower()
-    if agent_mode not in {"simple", "multi", "fibre"}:
+    if agent_mode not in {"simple", "fibre", "team"}:
         raise CLIError(
             "Invalid agent mode",
-            next_steps=["Use one of: simple, multi, fibre."],
+            next_steps=["Use one of: simple, fibre, team."],
             debug_detail=f"agent_mode={value!r}",
         )
     return agent_mode
@@ -1083,10 +1085,6 @@ def build_run_request(
                 "forceSummary",
             )
             or False
-        ),
-        multi_agent=_agent_config_bool(
-            _agent_config_value(agent_config, "multiAgent", "multi_agent"),
-            "multiAgent",
         ),
         custom_sub_agents=_agent_config_custom_sub_agents(
             _agent_config_value(agent_config, "customSubAgents", "custom_sub_agents"),

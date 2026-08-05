@@ -37,40 +37,27 @@ Agents own no per-conversation state — that lives in `SessionContext` — so a
 
 ```mermaid
 flowchart TB
-    subgraph Analysis
-        Analysis[task_analysis]
-    end
-
     subgraph Recall & suggestion
         Recall[memory_recall]
         ToolSug[tool_suggestion]
-        WfSel[workflow_select]
         QSug[query_suggest]
     end
 
-    subgraph Simple mode
+    subgraph Shared execution
         Plan[plan]
         Simple[simple]
-    end
-
-    subgraph Multi-agent mode
-        TPlan[task_planning]
-        TDecomp[task_decompose]
-        TExec[task_executor]
-        TObs[task_observation]
-        TJudge[task_completion_judge]
-        TSum[task_summary]
-    end
-
-    subgraph Fibre mode
-        Fibre[fibre]
         SelfCheck[self_check]
+    end
+
+    subgraph Orchestration modes
+        Fibre[fibre]
+        Team[team]
     end
 ```
 
 
 
-Each agent's `agent_key` is how flow nodes reference it (e.g. `simple`, `task_planning`).
+Each agent's `agent_key` is how flow nodes reference it (for example `simple`, `fibre`, or `team`).
 
 ### 1.3 `FibreAgent` and Sub-agent Orchestration
 
@@ -116,9 +103,8 @@ flowchart LR
     Reg --> C2[enable_more_suggest]
     Reg --> C3[enable_plan]
     Reg --> C4[plan_should_start_execution]
-    Reg --> C5[task_not_completed]
-    Reg --> C6[self_check_should_retry]
-    Reg --> C7[need_summary]
+    Reg --> C5[self_check_should_retry]
+    Reg --> C6[need_summary]
 
     Reg -.referenced by.-> If[IfNode.condition]
     Reg -.referenced by.-> Loop[LoopNode.condition]
@@ -158,7 +144,7 @@ flowchart TB
 
 The executor only decides "how to walk the graph"; what happens inside an agent is the agent's own concern.
 
-## 3. Default Flow: simple / multi / fibre
+## 3. Default Flow: simple / fibre / team
 
 What `SAgent._build_default_flow(agent_mode, max_loop_count)` actually builds:
 
@@ -166,11 +152,11 @@ What `SAgent._build_default_flow(agent_mode, max_loop_count)` actually builds:
 flowchart TB
     Start([input messages]) --> Sw{Switch agent_mode}
     Sw -->|simple| SimpleBody
-    Sw -->|multi| MultiBody
     Sw -->|fibre| FibreBody
+    Sw -->|team| TeamBody
     SimpleBody --> More
-    MultiBody --> More
     FibreBody --> More
+    TeamBody --> More
     More{enable_more_suggest?}
     More -->|yes| QS[query_suggest]
     More -->|no| End
@@ -188,52 +174,33 @@ flowchart TB
     S0([enter simple]) --> Par1{parallel}
     Par1 --> ToolSug1[tool_suggestion]
     Par1 --> Recall1[memory_recall]
-    ToolSug1 --> If1
-    Recall1 --> If1
+    ToolSug1 --> Loop1
+    Recall1 --> Loop1
+    Loop1[Loop: self_check_should_retry<br/>up to 3] --> If1
     If1{enable_plan?}
     If1 -->|yes| Plan1[plan]
     Plan1 --> If2{plan_should_start_execution?}
     If2 -->|yes| SimpleAgent1[simple]
-    If2 -->|no| Need
+    If2 -->|no| SC1
     If1 -->|no| SimpleAgent2[simple]
-    SimpleAgent1 --> Need
-    SimpleAgent2 --> Need
-    Need{need_summary?}
-    Need -->|yes| Sum[task_summary] --> EndS
-    Need -->|no| EndS([end simple])
+    SimpleAgent1 --> SC1
+    SimpleAgent2 --> SC1
+    SC1[self_check]
+    SC1 -.should_retry.-> Loop1
+    SC1 -->|stop| EndS([end simple])
 ```
-
-
-
-### multi_agent_full
-
-```mermaid
-flowchart TB
-    M0([enter multi]) --> Recall2[memory_recall]
-    Recall2 --> Loop[Loop: task_not_completed<br/>up to max_loop_count]
-    Loop --> P[task_planning]
-    P --> TS[tool_suggestion]
-    TS --> E[task_executor]
-    E --> O[task_observation]
-    O --> J[task_completion_judge]
-    J -.task_not_completed.-> Loop
-    J -->|done| Sum2[task_summary]
-    Sum2 --> EndM([end multi])
-```
-
 
 
 ### fib_agent_body
 
 ```mermaid
 flowchart TB
-    F0([enter fibre]) --> Loop2[Loop: self_check_should_retry<br/>up to 3]
-    Loop2 --> Core[fibre core]
-    Core --> Par2{parallel}
+    F0([enter fibre]) --> Par2{parallel}
     Par2 --> TS2[tool_suggestion]
     Par2 --> R2[memory_recall]
-    TS2 --> If3
-    R2 --> If3
+    TS2 --> Loop2
+    R2 --> Loop2
+    Loop2[Loop: self_check_should_retry<br/>up to 3] --> If3
     If3{enable_plan?}
     If3 -->|yes| Plan2[plan] --> If4{plan_should_start_execution?}
     If4 -->|yes| FibA[fibre]
@@ -245,6 +212,8 @@ flowchart TB
     SC -.should_retry.-> Loop2
     SC -->|stop| EndF([end fibre])
 ```
+
+`team_agent_body` has the same prelude, optional planning, and self-check loop, but its execution node is `team` instead of `fibre`.
 
 
 
@@ -265,27 +234,16 @@ def _user_paid(session_context, session=None) -> bool:
 ### 4.2 Custom Flow
 
 ```python
-from sagents.flow.schema import (
-    AgentFlow, SequenceNode, AgentNode, IfNode, LoopNode,
-)
+from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode, IfNode
 
 custom_flow = AgentFlow(
     name="My Pipeline",
     root=SequenceNode(steps=[
         IfNode(
             condition="user_paid",
-            true_body=LoopNode(
-                condition="task_not_completed",
-                max_loops=10,
-                body=SequenceNode(steps=[
-                    AgentNode(agent_key="task_planning"),
-                    AgentNode(agent_key="task_executor"),
-                    AgentNode(agent_key="task_completion_judge"),
-                ]),
-            ),
+            true_body=AgentNode(agent_key="team"),
             false_body=AgentNode(agent_key="simple"),
         ),
-        AgentNode(agent_key="task_summary"),
     ]),
 )
 

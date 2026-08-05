@@ -7,6 +7,13 @@ from common.core.exceptions import SageHTTPException
 from common.schemas.chat import StreamRequest
 
 
+def test_rerun_request_rejects_retired_multi_mode():
+    with pytest.raises(ValueError):
+        chat_module.RerunStreamRequest(agent_mode="multi")
+
+    assert chat_module.RerunStreamRequest(agent_mode="team").agent_mode == "team"
+
+
 def test_validate_and_prepare_request_returns_503_when_chat_client_uninitialized(
     monkeypatch,
 ):
