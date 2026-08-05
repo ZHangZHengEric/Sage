@@ -219,15 +219,38 @@ class ISandboxHandle(ABC):
         pass
 
     # ========== 文件操作 ==========
+    #
+    # 文件原语行为契约（provider 实现须遵守，由
+    # tests/sagents/utils/sandbox/test_provider_fs_conformance.py 校验）：
+    #
+    # - 路径：入参为虚拟路径（工作区相对或已声明挂载内的路径）。实现须先按
+    #   POSIX 语义规范化，再校验其落在工作区或某个已声明挂载范围内；``..``
+    #   越界必须以 ``PermissionError`` 拒绝，不得静默穿透到范围之外。
+    # - 错误类型：路径不存在 → ``FileNotFoundError``；越界或权限不足 →
+    #   ``PermissionError``；其余底层失败 → ``OSError`` 子类。实现不得把失败
+    #   静默为成功，也不得把错误信息当作文件内容返回。
+    # - 编码：``encoding`` 参数须被尊重；无法按该编码解码的内容（如二进制）
+    #   应向上抛出，而非静默替换。
+    #
+    # 注：符号链接策略、以及远端 provider 对本契约的符合性，尚未纳入契约，
+    # 作为后续工作单独推进。
 
     @abstractmethod
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
         """
-        读取文件内容
+        读取文件内容并按 ``encoding`` 解码为字符串。
 
         Args:
             path: 文件路径（虚拟路径）
             encoding: 文件编码
+
+        Returns:
+            文件的完整文本内容
+
+        Raises:
+            FileNotFoundError: 路径不存在
+            PermissionError: 路径超出工作区/挂载范围，或无读权限
+            UnicodeDecodeError: 内容无法按 ``encoding`` 解码
         """
         pass
 
@@ -236,19 +259,29 @@ class ISandboxHandle(ABC):
         self, path: str, content: str, encoding: str = "utf-8", mode: str = "overwrite"
     ) -> None:
         """
-        写入文件
+        写入文件。
+
+        缺失的父目录会被自动创建。``mode="overwrite"`` 覆盖已有内容，
+        ``mode="append"`` 追加到已有内容之后（文件不存在时创建）。
 
         Args:
             path: 文件路径（虚拟路径）
             content: 文件内容
             encoding: 文件编码
             mode: 写入模式 (overwrite | append)
+
+        Raises:
+            PermissionError: 路径超出工作区/挂载范围，或目标为只读挂载
         """
         pass
 
     @abstractmethod
     async def file_exists(self, path: str) -> bool:
-        """检查文件是否存在"""
+        """检查路径是否存在。
+
+        目录存在时同样返回 ``True``（本方法判定的是"路径是否存在"，
+        而非"是否为普通文件"）。
+        """
         pass
 
     @abstractmethod
