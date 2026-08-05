@@ -17,6 +17,13 @@ import pytest
 from app.server.routers import chat as chat_module
 
 
+def test_rerun_request_rejects_retired_multi_mode():
+    with pytest.raises(ValueError):
+        chat_module.RerunStreamRequest(agent_mode="multi")
+
+    assert chat_module.RerunStreamRequest(agent_mode="team").agent_mode == "team"
+
+
 class _FakeRequest:
     """模拟 FastAPI Request.is_disconnected()：按预设序列返回。"""
 

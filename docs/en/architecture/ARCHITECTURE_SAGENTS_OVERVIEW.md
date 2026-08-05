@@ -135,7 +135,7 @@ flowchart TB
     Args --> SBX[Sandbox<br/>sandbox_type + sandbox_agent_workspace<br/>+ volume_mounts + sandbox_id]
     Args --> CAP[Capabilities<br/>tool_manager + skill_manager]
     Args --> ID[Identity<br/>session_id + user_id + agent_id]
-    Args --> MODE[Mode<br/>agent_mode: simple/multi/fibre<br/>+ max_loop_count]
+    Args --> MODE[Mode<br/>agent_mode: simple/fibre/team<br/>+ max_loop_count]
     Args --> EXT[Extension points<br/>custom_flow + custom_sub_agents<br/>+ available_workflows + system_context<br/>+ context_budget_config]
 ```
 
@@ -153,18 +153,18 @@ Constraints:
 ```mermaid
 flowchart TB
     Start([input messages]) --> Sw{agent_mode}
-    Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → summary?]
-    Sw -->|multi| Multi[multi body<br/>memory_recall<br/>→ Loop plan/exec/observe/judge<br/>→ task_summary]
-    Sw -->|fibre| Fibre[fibre body<br/>Loop self_check_should_retry<br/>→ fibre core → self_check]
+    Sw -->|simple| Simple[simple body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → simple → self_check]
+    Sw -->|fibre| Fibre[fibre body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → fibre → self_check]
+    Sw -->|team| Team[team body<br/>tool_suggestion ∥ memory_recall<br/>→ plan? → team → self_check]
     Simple --> More
-    Multi --> More
     Fibre --> More
+    Team --> More
     More{enable_more_suggest?}
     More -->|yes| Sug[query_suggest] --> End([output])
     More -->|no| End
 ```
 
-Deep thinking applies directly to the active model request; the default flow no longer runs a separate `task_analysis` step.
+Deep thinking applies directly to the active model request; the default flow has no separate analysis phase.
 
 
 

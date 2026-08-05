@@ -8,7 +8,7 @@ import {
 
 describe('modelCapabilities', () => {
   it('exposes the same five frontend levels for every configured model', () => {
-    const expected = ['minimal', 'low', 'medium', 'high', 'max']
+    const expected = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
     expect(THINKING_LEVEL_OPTIONS).toEqual(expected)
     for (const model of ['gpt-5.4', 'deepseek-v4-flash', 'qwen3.8-max-preview', 'gpt-4o']) {
@@ -21,8 +21,8 @@ describe('modelCapabilities', () => {
     expect(getDefaultThinkingLevel('deepseek-v4-flash')).toBe('medium')
   })
 
-  it('does not expose a selector before a model is configured', () => {
-    expect(getDefaultThinkingLevel('')).toBeNull()
-    expect(getThinkingLevelOptions(null)).toEqual([])
+  it('keeps the five-level selector independent from model metadata', () => {
+    expect(getDefaultThinkingLevel('')).toBe('medium')
+    expect(getThinkingLevelOptions(null)).toEqual(THINKING_LEVEL_OPTIONS)
   })
 })

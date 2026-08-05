@@ -177,7 +177,7 @@ Supported entrypoints:
 - startup flags:
   - `--agent-id <id>`
   - `--agent-config <path|coding>`
-  - `--agent-mode <simple|multi|fibre>`
+  - `--agent-mode <simple|fibre|team>`
   - `--display <compact|verbose>`
 - in-app commands:
   - `/agent`
@@ -185,13 +185,13 @@ Supported entrypoints:
   - `/agent config <path|coding>`
   - `/agent clear`
   - `/mode`
-  - `/mode set <simple|multi|fibre>`
+  - `/mode set <simple|fibre|team>`
   - `/display`
   - `/display set <compact|verbose>`
 
 `/agent set <agent_id>` and `/agent config <path|coding>` are mutually exclusive for the current TUI session. Setting one clears the other so the next backend request uses a single source of agent configuration. At startup, `--agent-config` also takes precedence over `--agent-id` if both are supplied. Agent config paths are session-scoped and are not saved as persistent defaults.
 
-When an agent config is active, the TUI shows it directly as `agent_config: coding` or `agent: config coding`. Config-owned mode and loop settings are shown as `config default`. An explicit startup `--agent-mode` or in-session `/mode set <simple|multi|fibre>` still overrides the config's mode for the current session.
+When an agent config is active, the TUI shows it directly as `agent_config: coding` or `agent: config coding`. Config-owned mode and loop settings are shown as `config default`. An explicit startup `--agent-mode` or in-session `/mode set <simple|fibre|team>` still overrides the config's mode for the current session.
 
 The actual agent definition, tools, skills, and behavior still come from the Sage runtime's stored agent configuration or the explicit `--agent-config` JSON used for this session.
 

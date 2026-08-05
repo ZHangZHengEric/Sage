@@ -29,7 +29,6 @@ def get_message_type_style(message_type: str) -> Tuple[str, str]:
         "user_input": ("blue", "💬 用户输入"),
         "assistant_text": ("blue", "💬 文本消息"),
         "task_analysis": ("cyan", "🔍 任务分析"),
-        "task_decomposition": ("yellow", "📋 任务拆解"),
         "planning": ("magenta", "📝 规划"),
         "execution": ("green", "🚀 执行"),
         "observation": ("bright_blue", "👀 观察"),

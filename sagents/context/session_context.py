@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.token_accounting import PromptBudgetManager
 from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
@@ -184,6 +185,7 @@ class SessionContext:
             "history_ratio",
             "active_ratio",
             "max_new_message_ratio",
+            "compression_threshold",
         }
         return {
             key: value
@@ -198,6 +200,7 @@ class SessionContext:
             "history_ratio": manager.history_ratio,
             "active_ratio": manager.active_ratio,
             "max_new_message_ratio": manager.max_new_message_ratio,
+            "compression_threshold": self.message_manager.compression_threshold,
         }
 
     def update_context_budget_config(
@@ -221,6 +224,12 @@ class SessionContext:
         manager.history_ratio = next_config["history_ratio"]
         manager.active_ratio = next_config["active_ratio"]
         manager.max_new_message_ratio = next_config["max_new_message_ratio"]
+        compression_threshold = float(next_config["compression_threshold"])
+        if not 0 < compression_threshold < 1:
+            raise ValueError(
+                "compression_threshold must be greater than 0 and less than 1"
+            )
+        self.message_manager.compression_threshold = compression_threshold
         manager.budget_info = None
         self.context_budget_config = next_config
         logger.info(
@@ -244,6 +253,7 @@ class SessionContext:
         self.message_manager = MessageManager(
             context_budget_config=context_budget_config
         )
+        self.prompt_budget_manager = PromptBudgetManager()
         self.context_budget_config = self._effective_context_budget_config()
         # pending_user_injections：运行中等待被下一次 LLM 请求消费的"引导用户消息"。
         # 不进入持久化快照，会话销毁即释放。
@@ -566,9 +576,7 @@ class SessionContext:
                 )
                 if (
                     message.message_id
-                    and self._message_journal_flushed_signatures.get(
-                        message.message_id
-                    )
+                    and self._message_journal_flushed_signatures.get(message.message_id)
                     == message_signature
                 ):
                     return False
@@ -587,9 +595,9 @@ class SessionContext:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     f.flush()
                 if message.message_id:
-                    self._message_journal_flushed_signatures[
-                        message.message_id
-                    ] = message_signature
+                    self._message_journal_flushed_signatures[message.message_id] = (
+                        message_signature
+                    )
             return True
         except Exception as e:
             logger.warning(
@@ -646,9 +654,7 @@ class SessionContext:
         except OSError:
             return False
 
-    def _is_acceptable_message_session_id(
-        self, msg_session_id: Optional[str]
-    ) -> bool:
+    def _is_acceptable_message_session_id(self, msg_session_id: Optional[str]) -> bool:
         """Return True if message may enter this session's inference ledger.
 
         Accepts only untagged chunks (``None``) or an exact match with this
@@ -666,14 +672,10 @@ class SessionContext:
         """Keep ledger content OpenAI-compatible (string | multimodal list)."""
         if isinstance(msg, MessageChunk):
             if isinstance(msg.content, dict):
-                msg.content = json.dumps(
-                    msg.content, ensure_ascii=False, default=str
-                )
+                msg.content = json.dumps(msg.content, ensure_ascii=False, default=str)
             return
         if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
-            msg["content"] = json.dumps(
-                msg["content"], ensure_ascii=False, default=str
-            )
+            msg["content"] = json.dumps(msg["content"], ensure_ascii=False, default=str)
 
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
@@ -740,11 +742,10 @@ class SessionContext:
                 self.message_manager.add_messages(msg)
                 if self._get_message_by_id(message_id) is not None:
                     self._track_message_journal_after_add(message_id)
-                    if (
-                        message_role
-                        in {MessageRole.USER.value, MessageRole.TOOL.value}
-                        or self._is_message_final(msg)
-                    ):
+                    if message_role in {
+                        MessageRole.USER.value,
+                        MessageRole.TOOL.value,
+                    } or self._is_message_final(msg):
                         self._append_message_to_journal(
                             message_id,
                             reason="stable_message",
@@ -1607,9 +1608,7 @@ class SessionContext:
         初始化沙箱技能管理器：按宿主 SkillProxy 给出的名称，仅从沙箱内
         ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
         """
-        self.sandbox_skill_manager = await self.sandbox.sync_skills(
-            self.skill_manager
-        )
+        self.sandbox_skill_manager = await self.sandbox.sync_skills(self.skill_manager)
 
     async def _finalize_system_context(self):
         """
@@ -1700,9 +1699,7 @@ class SessionContext:
         with self._llm_request_save_lock:
             file_path = self._prepare_llm_request_file_path(llm_request)
             internal_request = llm_request["request"]
-            provider_attempts = internal_request.get(
-                "_provider_request_attempts", []
-            )
+            provider_attempts = internal_request.get("_provider_request_attempts", [])
             actual_request = (
                 provider_attempts[-1]
                 if provider_attempts
@@ -2766,6 +2763,9 @@ class SessionContext:
                     ),
                     "context_budget_config": make_serializable(
                         self._effective_context_budget_config()
+                    ),
+                    "prompt_token_checkpoints": make_serializable(
+                        self.prompt_budget_manager.to_dict()
                     ),
                     # Agent 配置
                     "agent_config": make_serializable(self.agent_config),

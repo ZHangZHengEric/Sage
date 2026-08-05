@@ -1,5 +1,15 @@
-from sagents.flow.schema import AgentNode, IfNode, LoopNode, ParallelNode, SequenceNode
+import pytest
+
+from sagents.flow.schema import (
+    AgentNode,
+    IfNode,
+    LoopNode,
+    ParallelNode,
+    SequenceNode,
+    SwitchNode,
+)
 from sagents.sagents import SAgent
+from sagents.session_runtime import Session
 
 
 def _agent_keys(node):
@@ -18,6 +28,11 @@ def _agent_keys(node):
         keys.extend(_agent_keys(node.true_body))
         if node.false_body is not None:
             keys.extend(_agent_keys(node.false_body))
+    elif isinstance(node, SwitchNode):
+        for case in node.cases.values():
+            keys.extend(_agent_keys(case))
+        if node.default is not None:
+            keys.extend(_agent_keys(node.default))
     return keys
 
 
@@ -55,12 +70,43 @@ def test_simple_and_fibre_memory_recall_run_outside_self_check_retry_loop(tmp_pa
         assert "tool_suggestion" not in loop_keys
 
 
-def test_simple_flow_does_not_run_task_summary_but_multi_still_does(tmp_path):
+def test_default_flow_only_exposes_supported_modes(tmp_path):
     flow = SAgent(str(tmp_path), enable_obs=False)._build_default_flow(
         agent_mode="simple",
         max_loop_count=5,
     )
     switch = flow.root.steps[0]
 
-    assert "task_summary" not in _agent_keys(switch.cases["simple"])
-    assert "task_summary" in _agent_keys(switch.cases["multi"])
+    assert set(switch.cases) == {"simple", "fibre", "team"}
+    assert "task_analysis" not in _agent_keys(flow.root)
+    assert "task_summary" not in _agent_keys(flow.root)
+
+
+def test_runtime_registry_only_contains_current_agents():
+    registry = Session("registry-audit", enable_obs=False)._agent_registry
+
+    assert set(registry) == {
+        "simple",
+        "query_suggest",
+        "tool_suggestion",
+        "fibre",
+        "team",
+        "memory_recall",
+        "plan",
+        "self_check",
+    }
+
+
+@pytest.mark.asyncio
+async def test_public_runtime_rejects_retired_multi_mode(tmp_path):
+    stream = SAgent(str(tmp_path), enable_obs=False).run_stream(
+        input_messages=[],
+        model=object(),
+        model_config={"model": "test-model"},
+        system_prefix="",
+        max_loop_count=1,
+        agent_mode="multi",
+    )
+
+    with pytest.raises(ValueError, match="simple, fibre, team"):
+        await anext(stream)

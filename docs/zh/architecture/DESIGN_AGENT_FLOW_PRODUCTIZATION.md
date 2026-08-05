@@ -36,7 +36,7 @@ ref: design-agent-flow-productization
 - `IfNode.condition` 走 `ConditionRegistry`（Python 装饰器注册的内置条件）。
 - `SwitchNode.variable` 直接读 `session_context.audit_status[...]`，再 fallback 到 `system_context`；**字段名硬编码、平铺、无命名空间**。
 - `AgentNode.agent_config` 字段在 schema 中存在，**但 `FlowExecutor` 没把它透传**（代码内有 TODO 注释）。
-- `_agent_registry` 是写死在 `session_runtime.py` 里的字典：`simple / task_analysis / task_planning / task_executor / ...` 等内核阶段。**没有「用户创建的 Agent」一等公民概念能被 Flow 节点引用**。
+- `_agent_registry` 是写死在 `session_runtime.py` 里的字典：`simple / fibre / team / memory_recall / plan / self_check / ...` 等内核 Agent。**没有「用户创建的 Agent」一等公民概念能被 Flow 节点引用**。
 
 ### 1.2 用户实际在做的事
 不少用户在用「多个 Agent 自己拼成一条流水线」。今天他们只能：
@@ -163,7 +163,7 @@ AgentInstance（用户侧；当前 Agent 表的扩展）
 
 ### 3.4 与现有 `_agent_registry` 的关系
 
-今天 `session_runtime._agent_registry` 是「字符串 → Agent 类」的固定字典，承载内核阶段（`task_planning` 等）。改造后：
+今天 `session_runtime._agent_registry` 是「字符串 → Agent 类」的固定字典，承载内核 Agent（`simple`、`fibre`、`team` 等）。改造后：
 
 - 内核阶段保留在该字典里，作为 **隐式系统 Agent**，仅供内置 `_build_default_flow` 引用。
 - 用户编排的 Flow 节点引用 `agent_id`（实例 ID），由 `FlowExecutor` 在执行前 **从 Agent 实例服务加载 → 走模板编译器 → 得到运行时 Agent 对象**。

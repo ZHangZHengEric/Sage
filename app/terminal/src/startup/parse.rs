@@ -165,7 +165,7 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                     .ok_or_else(|| anyhow!("--agent-mode requires a value"))?;
                 options.agent_mode =
                     Some(normalize_agent_mode(value).ok_or_else(|| {
-                        anyhow!("--agent-mode must be one of: simple, multi, fibre")
+                        anyhow!("--agent-mode must be one of: simple, fibre, team")
                     })?);
                 idx += 2;
             }

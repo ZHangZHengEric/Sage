@@ -406,7 +406,6 @@ Used by `/api/chat`, and it requires `agent_id`:
 - `agent_name`
 - `deep_thinking`
 - `max_loop_count`
-- `multi_agent`
 - `agent_mode`
 - `more_suggest`
 - `available_workflows`
@@ -471,8 +470,7 @@ Used by `POST /api/chat/optimize-input` and `.../stream`.
   "deepThinking": false,
   "llm_provider_id": "provider_xxx",
   "enableMultimodal": false,
-  "multiAgent": false,
-  "agentMode": "default",
+  "agentMode": "team",
   "description": "Handles market research"
 }
 ```
@@ -563,8 +561,7 @@ Constraint:
 | `deepThinking`            | boolean  | Deeper reasoning mode     | Complex reasoning runs                 |
 | `llm_provider_id`         | string   | Bound provider ID         | Pin the model provider                 |
 | `enableMultimodal`        | boolean  | Enable multimodal support | Image-capable flows                    |
-| `multiAgent`              | boolean  | Enable multi-agent mode   | Multi-agent workflows                  |
-| `agentMode`               | string   | Agent mode                | Mode switching                         |
+| `agentMode`               | string   | Agent mode                | `simple`, `fibre`, or `team`           |
 | `description`             | string   | Agent description         | Management UI and generation flows     |
 
 
@@ -576,8 +573,7 @@ Constraint:
 | `agent_name`                | string   | Temporary agent name override  | Debug or temporary presentation      |
 | `deep_thinking`             | boolean  | Per-request deep reasoning     | One-off heavier reasoning            |
 | `max_loop_count`            | integer  | Per-request loop cap           | Control cost or depth                |
-| `multi_agent`               | boolean  | Per-request multi-agent toggle | Enable only for one request          |
-| `agent_mode`                | string   | Per-request agent mode         | Runtime mode selection               |
+| `agent_mode`                | string   | Per-request agent mode         | `simple`, `fibre`, or `team`         |
 | `more_suggest`              | boolean  | Return more suggestions        | UI wants extra candidate suggestions |
 | `available_workflows`       | object   | Temporary workflows            | Inject workflows per request         |
 | `llm_model_config`          | object   | Temporary model config         | Override model settings              |

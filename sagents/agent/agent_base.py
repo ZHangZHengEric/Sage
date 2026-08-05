@@ -1,5 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Union, AsyncGenerator, Sequence, cast
+from typing import (
+    List,
+    Dict,
+    Any,
+    Optional,
+    Union,
+    AsyncGenerator,
+    Sequence,
+    cast,
+    Callable,
+    Awaitable,
+    Mapping,
+)
 import datetime
 import json
 import uuid
@@ -22,6 +34,13 @@ from sagents.context.messages.message import (
 )
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.token_accounting import (
+    ContextOverflowStrategy,
+    ContextPolicy,
+    DEFAULT_COMPRESSION_THRESHOLD,
+    PromptBudgetManager,
+    PromptTokenEstimator,
+)
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import build_llm_extra_body
@@ -74,6 +93,14 @@ class PartialStreamConsumedError(RuntimeError):
         self.original_error = original_error
 
 
+class ProviderContextWindowExceededError(RuntimeError):
+    """Raised when the provider authoritatively rejects the request context."""
+
+    def __init__(self, original_error: Exception):
+        super().__init__(str(original_error))
+        self.original_error = original_error
+
+
 def _model_config_log_summary(model_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(model_config, dict):
         return {}
@@ -91,6 +118,69 @@ def _model_config_log_summary(model_config: Optional[Dict[str, Any]]) -> Dict[st
         "fast_model_name",
     )
     return {key: model_config.get(key) for key in keys if key in model_config}
+
+
+def _is_context_length_error(error: BaseException) -> bool:
+    """Recognize common provider context-window failures."""
+    message = str(error).lower()
+    if _is_rate_limit_error(error):
+        return False
+    direct_markers = (
+        "maximum context length",
+        "context_length_exceeded",
+        "context length exceeded",
+        "context_window_exceeded",
+        "context window exceeded",
+        "context window is too small",
+        "input_too_long",
+        "input is too long",
+        "prompt is too long",
+        "prompt_too_long",
+        "too many input tokens",
+        "range of input length",
+        "input length is too long",
+    )
+    if any(marker in message for marker in direct_markers):
+        return True
+    # Do not use bare ``context`` here: infrastructure errors such as gRPC's
+    # "context deadline exceeded" are timeouts, not model-window rejections.
+    return any(term in message for term in ("token", "input length")) and any(
+        term in message for term in ("exceed", "too long", "too large")
+    )
+
+
+def _is_rate_limit_error(error: BaseException) -> bool:
+    """Recognize SDK and text variants of provider throttling failures."""
+    if isinstance(error, RateLimitError):
+        return True
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+            "tokens per minute",
+            " tpm",
+        )
+    )
+
+
+def _request_message_character_count(messages: Sequence[Mapping[str, Any]]) -> int:
+    return len(json.dumps(messages, ensure_ascii=False, default=str))
+
+
+def _message_chunk_request_character_count(messages: Sequence[MessageChunk]) -> int:
+    """Count only fields that can reach the provider, excluding ledger metadata."""
+    provider_messages = [
+        converted
+        for message in messages
+        if (
+            converted := MessageManager.convert_message_to_dict_for_request(message)
+        )
+        is not None
+    ]
+    return _request_message_character_count(provider_messages)
 
 
 class AgentBase(ABC):
@@ -128,6 +218,11 @@ class AgentBase(ABC):
         self.system_prefix = system_prefix
         self.agent_description = f"{self.__class__.__name__} agent"
         self.agent_name = self.__class__.__name__
+        # Stable request-profile partition used by prompt accounting. Custom
+        # agents inherit a non-persistent inference-view policy; the provider
+        # boundary never deletes message roles to satisfy an estimate.
+        self.context_policy = ContextPolicy()
+        self.context_view_policy_id = self.context_policy.view_spec.policy_id
 
         # 设置最大输入长度（用于安全检查，防止消息过长）
         # 实际的上下文长度由 SessionContext 中的 context_budget_manager 动态管理
@@ -153,6 +248,48 @@ class AgentBase(ABC):
         return _get_live_session_context_util(
             session_id, log_prefix=self.__class__.__name__
         )
+
+    def _resolved_context_view_policy_id(self) -> str:
+        policy = getattr(self, "context_policy", None)
+        view_spec = getattr(policy, "view_spec", None)
+        return str(
+            getattr(view_spec, "policy_id", None)
+            or getattr(self, "context_view_policy_id", "default")
+        )
+
+    def _resolved_context_view_spec_hash(self) -> str:
+        policy = getattr(self, "context_policy", None)
+        view_spec = getattr(policy, "view_spec", None)
+        fingerprint = getattr(view_spec, "fingerprint", None)
+        if callable(fingerprint):
+            return str(fingerprint())
+        return self._resolved_context_view_policy_id()
+
+    def _resolve_prompt_accounting_identity(
+        self, model_config: Optional[Mapping[str, Any]] = None
+    ) -> tuple[str, str]:
+        """Resolve the same model/provider identity used by the actual request."""
+        config = dict(model_config or self.model_config or {})
+        model_name = str(config.get("model") or "gpt-3.5-turbo")
+        model_type = config.get("model_type")
+        model_client = getattr(self.model, "_model", self.model)
+        supports_sage_model_type = isinstance(
+            self.model, SageAsyncOpenAI
+        ) or isinstance(model_client, SageAsyncOpenAI)
+        fast_model_name = getattr(self.model, "fast_model_name", None)
+        if model_type == "fast" and supports_sage_model_type and fast_model_name:
+            model_name = str(fast_model_name)
+        active_base_url = (
+            config.get("fast_base_url")
+            if model_type == "fast" and config.get("fast_base_url")
+            else config.get("base_url")
+        ) or getattr(model_client, "base_url", None)
+        normalized_model = normalize_chat_completions_model(
+            model_name,
+            client=model_client,
+            model_config={"base_url": active_base_url},
+        )
+        return normalized_model, str(active_base_url or "")
 
     @staticmethod
     def _timezone_from_current_time(value: Any) -> Optional[datetime.timezone]:
@@ -186,7 +323,9 @@ class AgentBase(ABC):
         if session_context is None:
             return []
         try:
-            return session_context.flush_user_injections(ledger_messages=ledger_messages)
+            return session_context.flush_user_injections(
+                ledger_messages=ledger_messages
+            )
         except Exception as exc:
             logger.warning(
                 f"{self.__class__.__name__}: flush user injections 失败: {exc}"
@@ -409,19 +548,6 @@ class AgentBase(ABC):
         requested_limit = int(configured_max_input or self.max_model_input_len)
         return min(requested_limit, max_model_len)
 
-    def _resolve_persistent_compression_threshold(
-        self,
-        session_context: Optional[SessionContext],
-        raw_context_limit: int,
-    ) -> int:
-        configured_max_model = (
-            self.model_config.get("max_model_len", 128000)
-            if isinstance(self.model_config, dict)
-            else 128000
-        )
-        upper_limit = min(raw_context_limit, int(configured_max_model or 128000))
-        return max(1, int(upper_limit * 0.85))
-
     @staticmethod
     def _compression_chunks_succeeded(chunks: List[MessageChunk]) -> bool:
         for chunk in chunks:
@@ -629,9 +755,16 @@ class AgentBase(ABC):
             system_prefix_override=system_prefix_override,
             include_sections=effective_include_sections,
         )
-        payload_messages = self._without_system_messages(
-            history_messages
-        ) + self._without_system_messages(extra_messages)
+        protected_extra: List[MessageChunk] = []
+        for message in self._without_system_messages(extra_messages):
+            copied = MessageChunk.from_dict(message.to_dict())
+            metadata = dict(copied.metadata or {})
+            metadata["context_protected"] = True
+            copied.metadata = metadata
+            protected_extra.append(copied)
+        payload_messages = (
+            self._without_system_messages(history_messages) + protected_extra
+        )
         if session_id and runtime_in_user:
             payload_messages = await self._inject_latest_user_runtime_context(
                 payload_messages,
@@ -739,7 +872,9 @@ class AgentBase(ABC):
         stripped = cls._strip_skill_tags_from_message(message)
         if not current_time_context:
             return stripped
-        runtime_context = f"<runtime_context>\n{current_time_context}\n</runtime_context>"
+        runtime_context = (
+            f"<runtime_context>\n{current_time_context}\n</runtime_context>"
+        )
         return cls._wrap_message_with_runtime_context(stripped, runtime_context)
 
     @staticmethod
@@ -1064,24 +1199,16 @@ class AgentBase(ABC):
         except Exception:
             return None
 
-    def _context_over_limit_error_chunk(
-        self, current_tokens: int, limit: int, language: Optional[str] = None
-    ) -> MessageChunk:
-        return MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content=t(
-                "runtime.context_over_limit",
-                language,
-                {"current_tokens": current_tokens, "limit": limit},
-            ),
-            type=MessageType.AGENT_EXECUTION_ERROR.value,
-            agent_name=self.agent_name,
-        )
-
     async def _prepare_context_messages_for_llm(
         self,
         messages_input: List[MessageChunk],
         session_id: str,
+        request_builder: Optional[
+            Callable[[List[MessageChunk]], Awaitable[List[MessageChunk]]]
+        ] = None,
+        request_tools: Any = None,
+        step_name: str = "llm_call",
+        provider_overflow_recovery: bool = False,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         try:
             session_context = self._get_live_session_context(session_id)
@@ -1095,9 +1222,42 @@ class AgentBase(ABC):
             if isinstance(self.model_config, dict)
             else 128000
         )
-        trigger_limit = int(max_model_len * 0.85)
+        compression_threshold = (
+            message_manager.compression_threshold
+            if message_manager is not None
+            else DEFAULT_COMPRESSION_THRESHOLD
+        )
+        trigger_limit = PromptBudgetManager.input_limit(
+            max_model_len,
+            compression_threshold,
+            self._resolve_raw_context_limit(session_context),
+        )
         artifact_root = self._context_artifact_root(session_context)
         working_messages = list(messages_input)
+        recovery_baseline_characters = _message_chunk_request_character_count(
+            working_messages
+        )
+        provider_compression_failures = 0
+
+        policy = getattr(self, "context_policy", ContextPolicy())
+        if (
+            not provider_overflow_recovery
+            and getattr(policy, "overflow_strategy", None)
+            != ContextOverflowStrategy.PERSISTENT_SUMMARY
+        ):
+            view = MessageManager.build_inference_view(
+                working_messages,
+                session_id=session_id,
+                max_model_len=max_model_len,
+                artifact_root=artifact_root,
+                apply_rule_compression=True,
+            )
+            if message_manager is not None:
+                message_manager.store_inference_messages(view)
+            # Non-persistent auxiliary agents receive the normal inference view.
+            # The provider boundary never deletes roles based on an estimate.
+            yield (view, True)
+            return
 
         for _ in range(20):
             view = MessageManager.build_inference_view(
@@ -1109,30 +1269,81 @@ class AgentBase(ABC):
             )
             if message_manager is not None:
                 message_manager.store_inference_messages(view)
+            current_characters = _message_chunk_request_character_count(view)
+            if (
+                provider_overflow_recovery
+                and current_characters < recovery_baseline_characters
+            ):
+                logger.info(
+                    f"{self.agent_name}: provider 超限恢复的规则压缩已减少字符，"
+                    f"chars={recovery_baseline_characters}->{current_characters}"
+                )
+                yield (view, True)
+                return
             current_tokens = MessageManager.calculate_messages_token_length(view)
-            if current_tokens <= trigger_limit:
+            if request_builder is not None:
+                candidate_messages = await request_builder(view)
+                candidate_dicts = [
+                    converted
+                    for message in candidate_messages
+                    if (
+                        converted := MessageManager.convert_message_to_dict_for_request(
+                            message
+                        )
+                    )
+                    is not None
+                ]
+                manifest = PromptTokenEstimator.manifest(
+                    candidate_dicts, tools=request_tools
+                )
+                model_name, provider_identity = (
+                    self._resolve_prompt_accounting_identity()
+                )
+                profile_id = PromptBudgetManager.build_profile_id(
+                    model=model_name,
+                    provider_identity=provider_identity,
+                    agent_class=self.__class__.__name__,
+                    step_name=step_name,
+                    view_policy_id=self._resolved_context_view_spec_hash(),
+                )
+                budget_manager = (
+                    session_context.prompt_budget_manager
+                    if session_context is not None
+                    and hasattr(session_context, "prompt_budget_manager")
+                    else PromptBudgetManager()
+                )
+                current_tokens = budget_manager.project(
+                    profile_id, manifest
+                ).projected_tokens
+            if current_tokens <= trigger_limit and not provider_overflow_recovery:
                 yield (view, True)
                 return
 
             segment = MessageManager.select_llm_compression_segment(
                 working_messages,
-                max_model_len=max_model_len,
-                active_protection_count=12,
+                max_model_len=(
+                    max(
+                        256, max_model_len // (2 ** (provider_compression_failures + 1))
+                    )
+                    if provider_overflow_recovery
+                    else max_model_len
+                ),
+                active_protection_count=(2 if provider_overflow_recovery else 12),
             )
             if not segment:
                 logger.warning(
                     f"{self.agent_name}: 无可压缩历史段，当前上下文仍为 {current_tokens} tokens"
                 )
-                yield (
-                    [
-                        self._context_over_limit_error_chunk(
-                            current_tokens,
-                            trigger_limit,
-                            self._language_from_session_context(session_context),
-                        )
-                    ],
-                    False,
-                )
+                if provider_overflow_recovery:
+                    # Let the caller preserve the provider's original overflow
+                    # error. A synthetic budget message here would look like a
+                    # successful compression event even though no space changed.
+                    return
+                # A tokenizer-agnostic estimate is only a soft trigger. If the
+                # protected/current turn leaves no safe history segment to
+                # compress, send the request unchanged and let the provider be
+                # the authoritative context-window check.
+                yield (view, True)
                 return
 
             source_ids = [msg.message_id for msg in segment if msg.message_id]
@@ -1150,7 +1361,16 @@ class AgentBase(ABC):
                 yield (messages_chunk, False)
 
             if not self._compression_chunks_succeeded(emitted_chunks):
-                logger.warning(f"{self.agent_name}: 大模型压缩失败，停止继续压缩")
+                logger.warning(f"{self.agent_name}: 大模型压缩失败")
+                if provider_overflow_recovery and provider_compression_failures < 2:
+                    provider_compression_failures += 1
+                    logger.warning(
+                        f"{self.agent_name}: 缩小压缩分段后重试 "
+                        f"({provider_compression_failures + 1}/3)"
+                    )
+                    continue
+                if provider_overflow_recovery:
+                    return
                 view = MessageManager.build_inference_view(
                     working_messages,
                     session_id=session_id,
@@ -1169,7 +1389,12 @@ class AgentBase(ABC):
             if message_manager is not None and source_end:
                 message_manager.insert_messages_after(source_end, emitted_chunks)
 
-        logger.warning(f"{self.agent_name}: 大模型压缩达到最大轮数，返回当前上下文")
+        logger.warning(f"{self.agent_name}: 大模型压缩达到最大轮数")
+        if provider_overflow_recovery:
+            # Provider recovery is driven solely by an observable character
+            # reduction. Never report recovery based on a token estimate after
+            # repeated summaries failed to make the request smaller.
+            return
         final_view = MessageManager.build_inference_view(
             working_messages,
             session_id=session_id,
@@ -1179,19 +1404,9 @@ class AgentBase(ABC):
         )
         if message_manager is not None:
             message_manager.store_inference_messages(final_view)
-        final_tokens = MessageManager.calculate_messages_token_length(final_view)
-        if final_tokens > trigger_limit:
-            yield (
-                [
-                    self._context_over_limit_error_chunk(
-                        final_tokens,
-                        trigger_limit,
-                        self._language_from_session_context(session_context),
-                    )
-                ],
-                False,
-            )
-            return
+        # Reaching the local compression cap must not turn an estimate into a
+        # request rejection. Provider overflow, if any, re-enters the hard
+        # character-reduction/LLM-summary recovery path.
         yield (final_view, True)
 
     @staticmethod
@@ -1260,32 +1475,22 @@ class AgentBase(ABC):
         if model_config_override:
             final_config.update(model_config_override)
 
-        model_name = (
-            cast(str, final_config.pop("model"))
-            if "model" in final_config
-            else "gpt-3.5-turbo"
+        configured_max_model_len = int(final_config.get("max_model_len") or 128000)
+        configured_max_input_len = final_config.get("max_model_input_len")
+        if configured_max_input_len is not None:
+            configured_max_input_len = int(configured_max_input_len)
+
+        model_name, active_base_url = self._resolve_prompt_accounting_identity(
+            final_config
         )
-        model_type = final_config.get("model_type")
+        final_config.pop("model", None)
         supports_sage_model_type = isinstance(
             self.model, SageAsyncOpenAI
         ) or isinstance(getattr(self.model, "_model", None), SageAsyncOpenAI)
-        fast_model_name = getattr(self.model, "fast_model_name", None)
-        if model_type == "fast" and supports_sage_model_type and fast_model_name:
-            model_name = fast_model_name
-        model_client = getattr(self.model, "_model", self.model)
-        active_base_url = (
-            final_config.get("fast_base_url")
-            if model_type == "fast" and final_config.get("fast_base_url")
-            else final_config.get("base_url")
-        ) or getattr(model_client, "base_url", None)
-        active_base_url = str(active_base_url) if active_base_url else None
-        model_name = normalize_chat_completions_model(
-            model_name,
-            client=model_client,
-            model_config={"base_url": active_base_url},
-        )
+        active_base_url = active_base_url or None
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop("max_model_len", None)
+        final_config.pop("max_model_input_len", None)
         final_config.pop("api_key", None)
         final_config.pop("maxTokens", None)
         final_config.pop("base_url", None)
@@ -1300,8 +1505,18 @@ class AgentBase(ABC):
         all_chunks = []
         attempt_chunks = []
         provider_request_attempts: List[Dict[str, Any]] = []
+        provider_request_manifests = []
 
         def record_provider_request(request: Dict[str, Any]) -> None:
+            raw_messages = request.get("messages")
+            if isinstance(raw_messages, list):
+                provider_request_manifests.append(
+                    PromptTokenEstimator.manifest(
+                        raw_messages,
+                        tools=request.get("tools"),
+                        response_format=request.get("response_format"),
+                    )
+                )
             provider_request_attempts.append(
                 cast(
                     Dict[str, Any],
@@ -1333,6 +1548,42 @@ class AgentBase(ABC):
         # change response_format while keeping the message payload unchanged.
         request_messages_snapshot: Optional[List[Dict[str, Any]]] = None
         response_format = final_config.pop("response_format", None)
+        try:
+            budget_session_context = (
+                self._get_live_session_context(session_id) if session_id else None
+            )
+        except Exception:
+            budget_session_context = None
+        prompt_budget_manager = (
+            budget_session_context.prompt_budget_manager
+            if budget_session_context is not None
+            and hasattr(budget_session_context, "prompt_budget_manager")
+            else PromptBudgetManager()
+        )
+        budget_message_manager = getattr(
+            budget_session_context, "message_manager", None
+        )
+        compression_threshold = float(
+            getattr(
+                budget_message_manager,
+                "compression_threshold",
+                DEFAULT_COMPRESSION_THRESHOLD,
+            )
+        )
+        prompt_profile_id = PromptBudgetManager.build_profile_id(
+            model=model_name,
+            provider_identity=str(active_base_url or ""),
+            agent_class=self.__class__.__name__,
+            step_name=step_name,
+            view_policy_id=self._resolved_context_view_spec_hash(),
+        )
+        prompt_input_limit = PromptBudgetManager.input_limit(
+            configured_max_model_len,
+            compression_threshold,
+            configured_max_input_len,
+        )
+        request_accounting_manifest = None
+        request_token_projection = None
 
         # Thinking mode is request-scoped and stable across network retries.
         final_enable_thinking = False
@@ -1398,6 +1649,27 @@ class AgentBase(ABC):
                                     msg_dict["_sage_llm_response_id"] = str(
                                         llm_response_id
                                     )
+                                protected_ids = set(
+                                    getattr(
+                                        getattr(
+                                            getattr(self, "context_policy", None),
+                                            "view_spec",
+                                            None,
+                                        ),
+                                        "protected_message_ids",
+                                        (),
+                                    )
+                                )
+                                if (
+                                    msg.metadata.get("context_protected")
+                                    or (
+                                        msg.metadata.get("llm_scope") == "next_request"
+                                        and msg.metadata.get("llm_state", "pending")
+                                        == "pending"
+                                    )
+                                    or str(msg.message_id or "") in protected_ids
+                                ):
+                                    msg_dict["_sage_context_protected"] = True
                             msg_dict = await self._process_multimodal_content(msg_dict)
                             serializable_messages.append(msg_dict)
                             seg = None
@@ -1418,6 +1690,31 @@ class AgentBase(ABC):
                                     msg_copy["_sage_llm_response_id"] = str(
                                         llm_response_id
                                     )
+                                protected_ids = set(
+                                    getattr(
+                                        getattr(
+                                            getattr(self, "context_policy", None),
+                                            "view_spec",
+                                            None,
+                                        ),
+                                        "protected_message_ids",
+                                        (),
+                                    )
+                                )
+                                if (
+                                    raw_message.metadata.get("context_protected")
+                                    or (
+                                        raw_message.metadata.get("llm_scope")
+                                        == "next_request"
+                                        and raw_message.metadata.get(
+                                            "llm_state", "pending"
+                                        )
+                                        == "pending"
+                                    )
+                                    or str(raw_message.message_id or "")
+                                    in protected_ids
+                                ):
+                                    msg_copy["_sage_context_protected"] = True
                             msg_copy = await self._process_multimodal_content(msg_copy)
                             serializable_messages.append(msg_copy)
                             cache_segments.append(None)
@@ -1435,6 +1732,7 @@ class AgentBase(ABC):
                                 "reasoning_content",
                                 "_sage_message_id",
                                 "_sage_llm_response_id",
+                                "_sage_context_protected",
                             ]
                         }
                         for msg in serializable_messages
@@ -1502,7 +1800,11 @@ class AgentBase(ABC):
                             "</system_reminder>"
                         )
                         serializable_messages.append(
-                            {"role": "user", "content": reminder_text}
+                            {
+                                "role": "user",
+                                "content": reminder_text,
+                                "_sage_context_protected": True,
+                            }
                         )
                         cache_segments.append(None)
                     if completion_events:
@@ -1552,6 +1854,23 @@ class AgentBase(ABC):
                     serializable_messages
                 )
                 if request_messages_snapshot is None:
+                    preliminary_projection = prompt_budget_manager.project(
+                        prompt_profile_id,
+                        PromptTokenEstimator.manifest(
+                            serializable_messages,
+                            tools=final_config.get("tools"),
+                            response_format=response_format,
+                        ),
+                    )
+                    if preliminary_projection.projected_tokens > prompt_input_limit:
+                        logger.warning(
+                            f"{self.__class__.__name__}: prompt remains above the "
+                            "local estimate; "
+                            "sending it to the provider as the authoritative "
+                            "context-window check "
+                            f"(projected={preliminary_projection.projected_tokens}, "
+                            f"limit={prompt_input_limit})"
+                        )
                     proposed_next_request_message_ids = [
                         str(msg["_sage_message_id"])
                         for msg in serializable_messages
@@ -1583,8 +1902,37 @@ class AgentBase(ABC):
                                 not in candidate_next_request_message_ids
                                 or msg.get("_sage_message_id") in claimed_ids
                             ]
+                    request_accounting_manifest = PromptTokenEstimator.manifest(
+                        serializable_messages,
+                        tools=final_config.get("tools"),
+                        response_format=response_format,
+                    )
+                    request_token_projection = prompt_budget_manager.project(
+                        prompt_profile_id, request_accounting_manifest
+                    )
+                    if request_token_projection.projected_tokens > prompt_input_limit:
+                        logger.warning(
+                            f"{self.__class__.__name__}: final provider payload remains "
+                            "above the local estimate; provider overflow "
+                            "recovery will handle an authoritative rejection "
+                            f"(projected={request_token_projection.projected_tokens}, "
+                            f"limit={prompt_input_limit})"
+                        )
+                    logger.info(
+                        f"{self.__class__.__name__}: prompt budget "
+                        f"source={request_token_projection.source} "
+                        f"projected={request_token_projection.projected_tokens} "
+                        f"limit={prompt_input_limit} "
+                        f"threshold={compression_threshold:.3f} "
+                        f"added={request_token_projection.added_estimated_tokens} "
+                        f"removed={request_token_projection.removed_estimated_tokens} "
+                        f"overlap={request_token_projection.overlap_ratio:.3f} "
+                        f"conservative={request_token_projection.conservative_estimate}"
+                    )
                     for msg in serializable_messages:
                         msg.pop("_sage_message_id", None)
+                        msg.pop("_sage_llm_response_id", None)
+                        msg.pop("_sage_context_protected", None)
                     request_messages_snapshot = deepcopy(serializable_messages)
 
                 # Provider clients may normalize/mutate request dictionaries, so
@@ -1599,7 +1947,9 @@ class AgentBase(ABC):
                     enable_thinking=final_enable_thinking,
                     thinking_level=final_thinking_level,
                     step_name=step_name,
-                    reasoning_effort_off_env=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
+                    reasoning_effort_off_env=os.environ.get(
+                        "SAGE_REASONING_EFFORT_OFF"
+                    ),
                 )
 
                 stream = await create_chat_completion_with_fallback(
@@ -1682,11 +2032,7 @@ class AgentBase(ABC):
                 error_message = str(e).lower()
 
                 # 检查是否是限流错误
-                is_rate_limit = (
-                    isinstance(e, RateLimitError)
-                    or "rate limit" in error_message
-                    or "too many requests" in error_message
-                )
+                is_rate_limit = _is_rate_limit_error(e)
                 # 检查是否是网络连接错误（包括连接中断、超时等）
                 is_connection_error = (
                     isinstance(e, APIConnectionError)
@@ -1703,12 +2049,7 @@ class AgentBase(ABC):
                 is_read_error = (
                     isinstance(e, httpx.ReadError) or "read error" in error_message
                 )
-                # 检查是否是 token 超限错误
-                is_token_limit_error = (
-                    "range of input length" in error_message
-                    or "token" in error_message
-                    and "exceed" in error_message
-                )
+                is_token_limit_error = _is_context_length_error(e)
 
                 if attempt_yielded_chunks:
                     message = (
@@ -1717,6 +2058,13 @@ class AgentBase(ABC):
                     )
                     logger.warning(message)
                     raise PartialStreamConsumedError(message, e) from e
+
+                if is_token_limit_error and not is_rate_limit:
+                    logger.error(
+                        f"{self.__class__.__name__}: provider 上下文超限，"
+                        f"转交会话层规则/大模型压缩恢复: {e}"
+                    )
+                    raise ProviderContextWindowExceededError(e) from e
 
                 if retry_count < max_retries and (
                     is_rate_limit or is_connection_error or is_timeout or is_read_error
@@ -1741,12 +2089,6 @@ class AgentBase(ABC):
                     )
                     await asyncio.sleep(wait_time)
                     retrying_logical_request = True
-                elif is_token_limit_error:
-                    # token 超限错误，直接抛出，由上层处理压缩逻辑
-                    logger.error(
-                        f"{self.__class__.__name__}: Token 超限错误，需要压缩消息: {e}"
-                    )
-                    raise
                 else:
                     # 非可重试错误或已达到最大重试次数
                     if isinstance(e, APIError):
@@ -1817,14 +2159,28 @@ class AgentBase(ABC):
                     logger.warning(message)
                     raise PartialStreamConsumedError(message, e) from e
 
-                if (is_network_error or is_httpx_error) and retry_count < max_retries:
+                is_rate_limit = _is_rate_limit_error(e)
+                if _is_context_length_error(e):
+                    logger.error(
+                        f"{self.__class__.__name__}: provider 上下文超限，"
+                        f"转交会话层规则/大模型压缩恢复: {e}"
+                    )
+                    raise ProviderContextWindowExceededError(e) from e
+
+                if (
+                    is_rate_limit or is_network_error or is_httpx_error
+                ) and retry_count < max_retries:
                     # 使用指数退避 + 随机抖动，避免同时重试
                     import random
 
                     wait_time = min(
                         2**retry_count + random.uniform(0, 1), 30
                     )  # 最大30秒
-                    error_type = "HTTP超时" if is_httpx_error else "网络"
+                    error_type = (
+                        "限流"
+                        if is_rate_limit
+                        else ("HTTP超时" if is_httpx_error else "网络")
+                    )
                     if attempt_chunks:
                         logger.warning(
                             f"{self.__class__.__name__}: 流式响应已输出 {len(attempt_chunks)} 个chunk后遇到{error_type}错误，"
@@ -1933,6 +2289,20 @@ class AgentBase(ABC):
                             "model": model_name,
                             "messages": serializable_messages,
                             "prompt_cache_observation": prompt_cache_observation,
+                            "prompt_token_projection": (
+                                request_token_projection.to_dict()
+                                if request_token_projection is not None
+                                else None
+                            ),
+                            "prompt_input_limit": prompt_input_limit,
+                            "prompt_max_model_len": configured_max_model_len,
+                            "compression_threshold": compression_threshold,
+                            "context_view_policy_id": (
+                                self._resolved_context_view_policy_id()
+                            ),
+                            "context_view_spec_hash": (
+                                self._resolved_context_view_spec_hash()
+                            ),
                             "started_at": start_request_time,
                             "first_token_time": first_token_time,
                             "ttfb_sec": (first_token_time - start_request_time)
@@ -1968,24 +2338,72 @@ class AgentBase(ABC):
                             session_context.add_llm_request(llm_request, llm_response)  # pyright: ignore[reportArgumentType]
 
                             if llm_response and llm_response.usage:
-                                components = (
-                                    MessageManager.calculate_message_token_components(
-                                        messages
-                                    )
-                                )
-                                input_chars = components["text_chars"]
-                                image_tokens = components["image_tokens"]
-                                actual_tokens = llm_response.usage.prompt_tokens
+                                usage_value = llm_response.usage
+                                actual_tokens = getattr(
+                                    usage_value, "prompt_tokens", None
+                                ) or getattr(usage_value, "input_tokens", None)
+                                if actual_tokens is None and isinstance(
+                                    usage_value, dict
+                                ):
+                                    actual_tokens = usage_value.get(
+                                        "prompt_tokens"
+                                    ) or usage_value.get("input_tokens")
 
-                                session_context.message_manager.update_token_ratio(
-                                    input_chars,
-                                    actual_tokens,
-                                    image_token_count=image_tokens,
-                                )
+                                if (
+                                    request_accounting_manifest is not None
+                                    and actual_tokens
+                                ):
+                                    successful_manifest = (
+                                        provider_request_manifests[-1]
+                                        if provider_request_manifests
+                                        else request_accounting_manifest
+                                    )
+                                    prompt_budget_manager.update_checkpoint(
+                                        prompt_profile_id,
+                                        int(actual_tokens),
+                                        successful_manifest,
+                                    )
+                                # Do not feed request-scoped provider usage into the
+                                # legacy process-global character ratio. That ratio
+                                # has no model/provider identity and cannot align its
+                                # denominator with trimmed messages + tools + response
+                                # format. PromptBudgetManager is the authoritative,
+                                # profile-isolated calibration path.
                         else:
                             logger.warning(
                                 f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request"
                             )
+
+    async def _call_aux_llm_streaming(
+        self,
+        messages: List[Union[MessageChunk, Dict[str, Any]]],
+        session_id: Optional[str] = None,
+        step_name: str = "aux_llm_call",
+        model_config_override: Optional[Dict[str, Any]] = None,
+        enable_thinking: Optional[bool] = None,
+    ):
+        """Run a non-critical LLM stage without aborting the main agent flow.
+
+        Persistent LLM history compression belongs to the main execution request,
+        where compression events can be emitted and recorded. Auxiliary stages
+        therefore degrade to an empty result on a provider context rejection
+        instead of terminating the conversation or deleting conversation roles.
+        """
+        try:
+            async for chunk in self._call_llm_streaming(
+                messages=messages,
+                session_id=session_id,
+                step_name=step_name,
+                model_config_override=model_config_override,
+                enable_thinking=enable_thinking,
+            ):
+                yield chunk
+        except ProviderContextWindowExceededError as exc:
+            logger.warning(
+                f"{self.__class__.__name__}: auxiliary step {step_name} remains "
+                f"over provider context; skip this optional "
+                f"stage and continue the main flow: {exc}"
+            )
 
     async def _build_system_segments(
         self,
@@ -3085,7 +3503,7 @@ class AgentBase(ABC):
             tool_manager: 工具管理器
             messages_input: 输入消息列表
             session_id: 会话ID
-            handle_complete_task: 是否处理complete_task工具（TaskExecutorAgent需要）
+            handle_complete_task: 是否将 complete_task 作为内部完成信号处理
             execute_concurrently: 是否并发执行工具；关闭时按 LLM 返回顺序逐个执行
 
         Yields:
@@ -3149,7 +3567,7 @@ class AgentBase(ABC):
                 parsed_arguments, ensure_ascii=False
             )
 
-            # 检查是否为complete_task（仅TaskExecutorAgent需要处理）
+            # 可选地将 complete_task 转换为内部完成信号。
             if handle_complete_task and tool_name == "complete_task":
                 logger.info(f"{self.agent_name}: complete_task，停止执行")
                 yield (
@@ -3190,9 +3608,9 @@ class AgentBase(ABC):
                     yield (message_chunk_list, False)
             return
 
-        result_queue: asyncio.Queue[
-            tuple[str, int, Optional[List[MessageChunk]]]
-        ] = asyncio.Queue()
+        result_queue: asyncio.Queue[tuple[str, int, Optional[List[MessageChunk]]]] = (
+            asyncio.Queue()
+        )
 
         async def execute_and_publish_tool_result(
             index: int,

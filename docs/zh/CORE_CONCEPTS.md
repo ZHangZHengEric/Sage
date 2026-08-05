@@ -38,8 +38,8 @@ ref: core-concepts
 运行时支持多种执行风格：
 
 - `simple`：直接单智能体交互
-- `multi`：通过规划与执行智能体完成多步编排
 - `fibre`：支持委派的高级多智能体编排
+- `team`：支持子智能体委派的团队编排
 
 模式选择会影响 `SAgent._build_default_flow(...)` 内部组装的默认流程。
 

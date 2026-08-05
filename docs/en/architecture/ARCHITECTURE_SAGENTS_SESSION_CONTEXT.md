@@ -177,7 +177,6 @@ Memory is optional for agents — invoked explicitly by `MemoryRecallAgent` and 
 flowchart LR
     AvailWF[run_stream available_workflows arg] --> WM[WorkflowManager]
     WM --> WfList[(registered workflow templates)]
-    WfSel[workflow_select agent] -->|pick on demand| WM
     WM -->|currently usable steps| Agent
 ```
 

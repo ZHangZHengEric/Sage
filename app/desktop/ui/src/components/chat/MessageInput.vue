@@ -163,6 +163,26 @@
           >
             {{ t('config.deepThinking') }}
           </Button>
+
+          <div v-if="deepThinkingEnabled" class="flex items-center gap-1.5">
+            <span class="text-xs text-muted-foreground">{{ t('config.thinkingLevel') }}</span>
+            <Select
+              :model-value="config.thinkingLevel || 'medium'"
+              @update:model-value="updateThinkingLevel"
+            >
+              <SelectTrigger
+                class="h-8 w-[76px] rounded-full border-primary/30 bg-primary/10 px-3 text-xs"
+                :title="t('config.thinkingLevel')"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="level in thinkingLevelOptions" :key="level" :value="level">
+                  {{ thinkingLevelLabel(level) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div class="ml-auto flex items-center gap-2">
@@ -214,10 +234,12 @@ import { ossApi } from '../../api/oss.js'
 import { skillAPI } from '../../api/skill.js'
 import { chatAPI } from '../../api/chat.js'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { listen } from '@tauri-apps/api/event'
 import { Loader2, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import ChipInput from './ChipInput.vue'
+import { THINKING_LEVEL_OPTIONS } from '@/utils/modelCapabilities.js'
 import {
   removeAttachmentPlaceholder,
   textHasAttachmentPlaceholder,
@@ -421,6 +443,8 @@ const planEnabled = ref(false)
 const isOptimizingInput = ref(false)
 const optimizeAbortController = ref(null)
 const deepThinkingEnabled = computed(() => props.config?.deepThinking !== false)
+const thinkingLevelOptions = THINKING_LEVEL_OPTIONS
+const thinkingLevelLabel = (level) => t(`config.thinkingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`)
 const activeToggleClass = 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15 hover:border-primary/40'
 const inactiveToggleClass = 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/60'
 
@@ -449,6 +473,10 @@ const sendButtonTitle = computed(() => {
 
 const toggleDeepThinking = () => {
   emit('configChange', { deepThinking: !deepThinkingEnabled.value })
+}
+
+const updateThinkingLevel = (thinkingLevel) => {
+  emit('configChange', { deepThinking: true, thinkingLevel })
 }
 
 const applyPlanTag = (messageContent) => {
@@ -591,7 +619,7 @@ const processTauriFile = async (filePath) => {
 }
 
 // 解析粘贴/手动输入到头部的控制标签 + 多个连续 <skill>...</skill>
-const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*)+/i
+const LEADING_CONTROL_TAG_RE = /^\s*(?:<enable_plan>\s*(?:true|false)\s*<\/enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*<\/enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|xhigh|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*)+/i
 const LEADING_SKILL_TAGS_RE = /^(?:\s*<skill>(.*?)<\/skill>\s*)+/i
 const SINGLE_SKILL_TAG_RE = /<skill>(.*?)<\/skill>/gi
 

@@ -388,7 +388,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
         agent_config: Some("/tmp/coding_config.json".to_string()),
-        agent_mode: Some("multi".to_string()),
+        agent_mode: Some("team".to_string()),
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
@@ -421,7 +421,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
         agent_config: None,
-        agent_mode: Some("multi".to_string()),
+        agent_mode: Some("team".to_string()),
         display_mode: Some(DisplayMode::Verbose),
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
@@ -442,7 +442,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
     let merged = super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
         agent_config: Some("/tmp/coding_config.json".to_string()),
-        agent_mode: Some("multi".to_string()),
+        agent_mode: Some("team".to_string()),
         display_mode: None,
         workspace: None,
         sandbox_type: None,
@@ -463,7 +463,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
         merged.agent_config.as_deref(),
         Some("/tmp/coding_config.json")
     );
-    assert_eq!(merged.agent_mode.as_deref(), Some("multi"));
+    assert_eq!(merged.agent_mode.as_deref(), Some("team"));
     assert_eq!(merged.display_mode, Some(DisplayMode::Verbose));
     assert_eq!(merged.workspace.as_deref(), Some("/tmp/demo-workspace"));
     assert_eq!(merged.sandbox_type.as_deref(), Some("passthrough"));
@@ -471,10 +471,10 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
 }
 
 #[test]
-fn parse_startup_action_rejects_invalid_agent_mode() {
-    let err = parse_startup_action(vec!["--agent-mode".to_string(), "weird".to_string()])
+fn parse_startup_action_rejects_retired_multi_mode() {
+    let err = parse_startup_action(vec!["--agent-mode".to_string(), "multi".to_string()])
         .expect_err("should fail");
-    assert!(err.to_string().contains("simple, multi, fibre"));
+    assert!(err.to_string().contains("simple, fibre, team"));
 }
 
 #[test]

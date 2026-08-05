@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from common.schemas.base import BaseResponse
+from common.utils.agent_mode import normalize_persisted_agent_mode
 
 
 class AgentAbilitiesRequest(BaseModel):
@@ -81,10 +82,12 @@ class AgentConfigDTO(BaseModel):
     memoryType: Optional[str] = None
     maxLoopCount: Optional[int] = None
     deepThinking: Optional[bool] = False
+    thinkingLevel: Optional[
+        Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+    ] = "medium"
     llm_provider_id: Optional[str] = None
     enableMultimodal: Optional[bool] = False
-    multiAgent: Optional[bool] = False
-    agentMode: Optional[str] = None
+    agentMode: Optional[Literal["simple", "fibre", "team"]] = None
     description: Optional[str] = None
     is_default: Optional[bool] = False
     created_at: Optional[str] = None
@@ -153,10 +156,13 @@ def convert_config_to_agent(
         memoryType=_first_present(config, "memoryType", "memory_type"),
         maxLoopCount=_first_present(config, "maxLoopCount", "max_loop_count"),
         deepThinking=_first_present(config, "deepThinking", "deep_thinking") or False,
+        thinkingLevel=_first_present(config, "thinkingLevel", "thinking_level")
+        or "medium",
         enableMultimodal=_first_present(config, "enableMultimodal", "enable_multimodal")
         or False,
-        multiAgent=_first_present(config, "multiAgent", "multi_agent") or False,
-        agentMode=_first_present(config, "agentMode", "agent_mode"),
+        agentMode=normalize_persisted_agent_mode(
+            _first_present(config, "agentMode", "agent_mode")
+        ),
         description=config.get("description"),
         is_default=is_default,
         created_at=config.get("created_at"),
@@ -181,8 +187,8 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "memoryType": agent.memoryType,
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
+        "thinkingLevel": agent.thinkingLevel,
         "enableMultimodal": agent.enableMultimodal,
-        "multiAgent": agent.multiAgent,
         "agentMode": agent.agentMode,
         "description": agent.description,
         "is_default": agent.is_default,

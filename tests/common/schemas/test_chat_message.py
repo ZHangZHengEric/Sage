@@ -1,4 +1,7 @@
-from common.schemas.chat import Message
+import pytest
+from pydantic import ValidationError
+
+from common.schemas.chat import Message, StreamRequest
 
 
 def test_message_preserves_type_fields_for_runtime_context():
@@ -31,3 +34,18 @@ def test_message_preserves_guidance_metadata():
 
     assert payload["metadata"]["guidance_id"] == "guidance-1"
     assert payload["metadata"]["source"] == "guidance"
+
+
+@pytest.mark.parametrize("agent_mode", ["simple", "fibre", "team"])
+def test_stream_request_accepts_supported_modes_and_has_no_legacy_multi_flag(
+    agent_mode,
+):
+    request = StreamRequest(messages=[], agent_mode=agent_mode)
+
+    assert request.agent_mode == agent_mode
+    assert "multi_agent" not in request.model_dump()
+
+
+def test_stream_request_rejects_retired_multi_mode():
+    with pytest.raises(ValidationError):
+        StreamRequest(messages=[], agent_mode="multi")  # type: ignore[arg-type]

@@ -163,7 +163,6 @@ flowchart LR
 flowchart LR
     AvailWF[run_stream 入参 available_workflows] --> WM[WorkflowManager]
     WM --> WfList[(已注册 Workflow 模板)]
-    WfSel[workflow_select Agent] -->|按需挑选| WM
     WM -->|当前可用步骤| Agent
 ```
 

@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { normalizeAgentMode } from '@/utils/agentMode.js'
 
+const THINKING_LEVELS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+
 export const useAgentEditStore = defineStore('agent-edit', () => {
   // Constants
   const STEPS = [
@@ -22,6 +24,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     description: '',
     systemPrefix: '',
     deepThinking: false,
+    thinkingLevel: 'medium',
     agentMode: 'simple',
     moreSuggest: false,
     memoryType: "session",
@@ -138,6 +141,9 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
         agentMode: normalizeAgentMode(agentData.agentMode)
       }
       formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))
+      if (!THINKING_LEVELS.has(formData.value.thinkingLevel)) {
+        formData.value.thinkingLevel = 'medium'
+      }
       if (formData.value.maxLoopCount === null || formData.value.maxLoopCount === undefined || formData.value.maxLoopCount === '') {
         formData.value.maxLoopCount = 100
       } else if (formData.value.maxLoopCount < 1) {

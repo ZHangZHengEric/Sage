@@ -67,7 +67,7 @@ agent = SAgent(
 |-----------|-------------|
 | `input_messages` | `List[dict]` or `List[MessageChunk]`; `session_id` can be filled from the first message or generated |
 | `tool_manager` / `skill_manager` | `ToolManager` / `ToolProxy` and `SkillManager` / `SkillProxy` |
-| `agent_mode` | `"simple"` \| `"multi"` \| `"fibre"` — selects the default `AgentFlow` |
+| `agent_mode` | `"simple"` \| `"fibre"` \| `"team"` — selects the default `AgentFlow` |
 | `custom_flow` | If set, the built-in default flow is **not** used |
 | `custom_sub_agents` | Sub-agent configuration list |
 | `system_context` | Extra system context `dict` |
@@ -134,7 +134,7 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 
 ## 4. Default flow and `agent_mode`
 
-If `custom_flow` is omitted, `_build_default_flow` builds the `agent_mode` branch and optional suggestion steps with `sagents/flow/schema.py` node types. Deep thinking now controls the active model request directly; it no longer invokes a separate `TaskAnalysisAgent`. High-level behavior is described in [Core Concepts](CORE_CONCEPTS.md) and [ARCHITECTURE_SAGENTS_AGENT_FLOW.md](ARCHITECTURE_SAGENTS_AGENT_FLOW.md).
+If `custom_flow` is omitted, `_build_default_flow` builds the `agent_mode` branch and optional suggestion steps with `sagents/flow/schema.py` node types. Deep thinking controls the active model request directly instead of adding a separate analysis phase. High-level behavior is described in [Core Concepts](CORE_CONCEPTS.md) and [ARCHITECTURE_SAGENTS_AGENT_FLOW.md](ARCHITECTURE_SAGENTS_AGENT_FLOW.md).
 
 ## 5. Tools and skills
 

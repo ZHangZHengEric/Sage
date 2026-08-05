@@ -268,7 +268,7 @@ impl App {
                     None => {
                         self.queue_message(
                             MessageKind::System,
-                            "Usage: /mode | /mode show | /mode set <simple|multi|fibre>",
+                            "Usage: /mode | /mode show | /mode set <simple|fibre|team>",
                         );
                         self.status = format!("invalid command  {}", self.session_id);
                         SubmitAction::Handled
@@ -277,7 +277,7 @@ impl App {
                 _ => {
                     self.queue_message(
                         MessageKind::System,
-                        "Usage: /mode | /mode show | /mode set <simple|multi|fibre>",
+                        "Usage: /mode | /mode show | /mode set <simple|fibre|team>",
                     );
                     self.status = format!("invalid command  {}", self.session_id);
                     SubmitAction::Handled

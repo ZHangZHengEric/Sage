@@ -10,7 +10,7 @@ from typing import Any, List
 def sanitize_title_text(text: str) -> str:
     cleaned = str(text or "")
     cleaned = re.sub(
-        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|max)\s*</(?:thinking_level|deep_thinking_level)>\s*)+",
+        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|xhigh|max)\s*</(?:thinking_level|deep_thinking_level)>\s*)+",
         "",
         cleaned,
         flags=re.IGNORECASE,

@@ -128,7 +128,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
-        choices=["simple", "multi", "fibre"],
+        choices=["simple", "fibre", "team"],
         default=None,
     )
     run_parser.add_argument(
@@ -170,7 +170,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
-        choices=["simple", "multi", "fibre"],
+        choices=["simple", "fibre", "team"],
         default=None,
     )
     chat_parser.add_argument(
@@ -214,7 +214,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument(
         "--agent-mode",
         dest="agent_mode",
-        choices=["simple", "multi", "fibre"],
+        choices=["simple", "fibre", "team"],
         default=None,
     )
     resume_parser.add_argument(

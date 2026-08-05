@@ -40,7 +40,7 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
         agent_mode: preferences
             .agent_mode
             .as_deref()
-            .and_then(normalize_agent_mode),
+            .and_then(normalize_persisted_agent_mode),
         display_mode: preferences.display_mode,
         workspace: preferences
             .workspace
@@ -55,6 +55,13 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
             .as_deref()
             .and_then(normalize_sandbox_approval_mode),
     })
+}
+
+fn normalize_persisted_agent_mode(value: &str) -> Option<String> {
+    if value.trim().eq_ignore_ascii_case("multi") {
+        return Some("simple".to_string());
+    }
+    normalize_agent_mode(value)
 }
 
 pub(crate) fn load_next_local_session_sequence() -> Result<u32> {
@@ -135,12 +142,22 @@ mod tests {
     use std::env;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{load_startup_preferences, persist_app_preferences_notice};
+    use super::{
+        load_startup_preferences, normalize_persisted_agent_mode, persist_app_preferences_notice,
+    };
     use crate::app::App;
+    use crate::backend::tests::lock_env;
     use crate::display_policy::DisplayMode;
+
+    #[test]
+    fn retired_multi_preference_normalizes_to_simple() {
+        assert_eq!(
+            normalize_persisted_agent_mode("multi").as_deref(),
+            Some("simple")
+        );
+    }
 
     #[test]
     fn persisted_preferences_load_back_into_startup_options() {
@@ -167,14 +184,14 @@ mod tests {
         let mut app = App::new();
         app.set_display_mode(DisplayMode::Verbose);
         app.set_selected_agent_id("agent_demo".to_string());
-        app.set_agent_mode_selection("multi".to_string());
+        app.set_agent_mode_selection("team".to_string());
         app.set_workspace_selection("/tmp/demo-workspace".to_string());
         app.set_sandbox_type_selection("local".to_string());
         app.set_sandbox_approval_mode_selection("untrusted".to_string());
         let loaded = load_startup_preferences().expect("preferences should load");
 
         assert_eq!(loaded.agent_id.as_deref(), Some("agent_demo"));
-        assert_eq!(loaded.agent_mode.as_deref(), Some("multi"));
+        assert_eq!(loaded.agent_mode.as_deref(), Some("team"));
         assert_eq!(loaded.display_mode, Some(DisplayMode::Verbose));
         assert_eq!(loaded.workspace.as_deref(), Some("/tmp/demo-workspace"));
         assert_eq!(loaded.sandbox_type.as_deref(), Some("local"));
@@ -206,7 +223,7 @@ mod tests {
         let mut original = App::new();
         original.set_display_mode(DisplayMode::Verbose);
         original.set_selected_agent_id("agent_demo".to_string());
-        original.set_agent_mode_selection("multi".to_string());
+        original.set_agent_mode_selection("team".to_string());
         original.set_workspace_selection("/tmp/demo-workspace".to_string());
         original.set_sandbox_type_selection("remote".to_string());
         original.set_sandbox_approval_mode_selection("never".to_string());
@@ -225,7 +242,7 @@ mod tests {
         );
 
         assert_eq!(restored.selected_agent_id.as_deref(), Some("agent_demo"));
-        assert_eq!(restored.agent_mode, "multi");
+        assert_eq!(restored.agent_mode, "team");
         assert_eq!(restored.display_mode, DisplayMode::Verbose);
         assert_eq!(restored.workspace_label, "/tmp/demo-workspace");
         assert_eq!(restored.sandbox_type.as_deref(), Some("remote"));
@@ -329,14 +346,6 @@ mod tests {
 
         let next = super::load_next_local_session_sequence().expect("sequence should load");
         assert_eq!(next, 124);
-    }
-
-    fn lock_env() -> MutexGuard<'static, ()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     struct EnvVarGuard {

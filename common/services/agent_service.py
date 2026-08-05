@@ -32,6 +32,7 @@ from common.services.agent_workspace import (
     sync_selected_skills_to_workspace,
 )
 from common.schemas.agent import AgentAbilityItem
+from common.utils.agent_mode import normalize_persisted_agent_mode
 
 try:
     import fcntl
@@ -98,7 +99,9 @@ def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
         tools_set.add("search_memory")
         logger.info("Agent 记忆类型为用户，强制添加 search_memory 工具")
 
-    agent_mode = agent_config.get("agentMode") or agent_config.get("agent_mode")
+    agent_mode = normalize_persisted_agent_mode(
+        agent_config.get("agentMode") or agent_config.get("agent_mode")
+    )
     if agent_mode == "fibre":
         fibre_tools = {"sys_spawn_agent", "sys_delegate_task"}
         team_tools = {"sys_team_delegate_task"}
@@ -115,12 +118,12 @@ def enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
         tools_set.difference_update(fibre_tools)
         logger.info(f"Agent 策略为 team，强制添加 team 工具: {team_tools}")
     else:
-        multi_agent_tools = {
+        delegation_tools = {
             "sys_spawn_agent",
             "sys_delegate_task",
             "sys_team_delegate_task",
         }
-        tools_set.difference_update(multi_agent_tools)
+        tools_set.difference_update(delegation_tools)
 
     if tools_set != original_tools:
         new_tools = list(tools_set)
@@ -228,15 +231,9 @@ def _normalize_agent_mode(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     if not mode_key:
         return agent_config
 
-    raw_value = str(agent_config.get(mode_key) or "").strip().lower()
-    if raw_value in {"", "auto"}:
-        normalized_value = "simple"
-    elif raw_value in {"simple", "multi", "fibre", "team"}:
-        normalized_value = raw_value
-    else:
-        normalized_value = "simple"
-
-    agent_config[mode_key] = normalized_value
+    agent_config[mode_key] = normalize_persisted_agent_mode(
+        agent_config.get(mode_key)
+    )
     return agent_config
 
 

@@ -13,7 +13,7 @@ ENABLE_DEEP_THINKING_TAG_RE = re.compile(
 )
 THINKING_LEVEL_TAG_RE = re.compile(
     r"^\s*<(?:thinking_level|deep_thinking_level)>\s*"
-    r"(minimal|low|medium|high|max)\s*"
+    r"(minimal|low|medium|high|xhigh|max)\s*"
     r"</(?:thinking_level|deep_thinking_level)>\s*",
     re.IGNORECASE,
 )

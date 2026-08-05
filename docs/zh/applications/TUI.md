@@ -177,7 +177,7 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
 - 启动参数：
   - `--agent-id <id>`
   - `--agent-config <path|coding>`
-  - `--agent-mode <simple|multi|fibre>`
+  - `--agent-mode <simple|fibre|team>`
   - `--display <compact|verbose>`
 - TUI 内命令：
   - `/agent`
@@ -185,13 +185,13 @@ TUI 现在可以覆盖运行时使用的 agent，但不会自己接管 agent 配
   - `/agent config <path|coding>`
   - `/agent clear`
   - `/mode`
-  - `/mode set <simple|multi|fibre>`
+  - `/mode set <simple|fibre|team>`
   - `/display`
   - `/display set <compact|verbose>`
 
 `/agent set <agent_id>` 和 `/agent config <path|coding>` 在当前 TUI 会话里互斥。设置其中一个会清掉另一个，保证下一次后端请求只使用一个 Agent 配置来源。启动时如果同时传 `--agent-config` 和 `--agent-id`，TUI 也会优先使用 `--agent-config`。Agent config 路径只在当前会话生效，不会被保存成持久默认值。
 
-当 agent config 生效时，TUI 会直接显示 `agent_config: coding` 或 `agent: config coding`。由 config 接管的 mode 和 loop 设置显示为 `config default`。如果启动时显式传 `--agent-mode`，或在会话里执行 `/mode set <simple|multi|fibre>`，本次会话仍会用这个显式 mode 覆盖 config 里的 mode。
+当 agent config 生效时，TUI 会直接显示 `agent_config: coding` 或 `agent: config coding`。由 config 接管的 mode 和 loop 设置显示为 `config default`。如果启动时显式传 `--agent-mode`，或在会话里执行 `/mode set <simple|fibre|team>`，本次会话仍会用这个显式 mode 覆盖 config 里的 mode。
 
 真正的 agent 定义、工具、skills 和行为仍然来自 Sage runtime 已保存的 agent 配置，或本次会话显式传入的 `--agent-config` JSON。
 

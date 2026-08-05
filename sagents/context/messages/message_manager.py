@@ -20,18 +20,29 @@ import time
 import re
 import uuid
 import os
+from collections import OrderedDict
+import threading
 from typing import Dict, List, Optional, Any, Union, Sequence, Tuple, TypeVar
 from copy import deepcopy
 from dataclasses import replace
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
 from .message import MessageRole, MessageType, MessageChunk
+from .token_accounting import (
+    ContextViewSpec,
+    DEFAULT_COMPRESSION_THRESHOLD,
+    InferenceViewTokenReport,
+    PromptTokenEstimator,
+)
 
 # 全局动态 token 比例计算（所有 MessageManager 实例共享）
 _global_token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
 _global_max_ratio_samples = 10  # 最多保留10个样本
 _global_default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
 _max_base64_image_token_estimate = 3000  # base64 图片 token 估算上限
+_message_token_estimate_cache: "OrderedDict[str, int]" = OrderedDict()
+_message_token_estimate_cache_limit = 2048
+_message_token_estimate_cache_lock = threading.Lock()
 
 # 协议性状态工具：可持久化在 messages.json，但不参与发往 LLM 的 tool_calls/tool 对（见 strip_turn_status_from_llm_context）
 TURN_STATUS_TOOL_NAME = "turn_status"
@@ -42,9 +53,7 @@ DEFAULT_RULE_PROTECTION_COUNT = 20
 DEFAULT_LLM_PROTECTION_COUNT = 12
 DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD = 4096
 
-MessageItemT = TypeVar(
-    "MessageItemT", bound=Union[MessageChunk, Dict[str, Any]]
-)
+MessageItemT = TypeVar("MessageItemT", bound=Union[MessageChunk, Dict[str, Any]])
 
 
 class MessageManager:
@@ -59,7 +68,7 @@ class MessageManager:
         self,
         session_id: Optional[str] = None,
         max_token_limit: int = 8000,
-        compression_threshold: float = 0.7,
+        compression_threshold: float = DEFAULT_COMPRESSION_THRESHOLD,
         context_budget_config: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -77,7 +86,18 @@ class MessageManager:
         """
         self.session_id = session_id or f"session_{uuid.uuid4().hex[:8]}"
         self.max_token_limit = max_token_limit
-        self.compression_threshold = compression_threshold
+        if (
+            context_budget_config is not None
+            and context_budget_config.get("compression_threshold") is not None
+        ):
+            compression_threshold = float(
+                context_budget_config["compression_threshold"]
+            )
+        if not 0 < float(compression_threshold) < 1:
+            raise ValueError(
+                "compression_threshold must be greater than 0 and less than 1"
+            )
+        self.compression_threshold = float(compression_threshold)
 
         if context_budget_config is None:
             context_budget_config = {}
@@ -344,6 +364,118 @@ class MessageManager:
         return MessageManager.calculate_str_token_length(
             message.get_content()
         ) + MessageManager.calculate_str_token_length(message.reasoning_content)
+
+    @staticmethod
+    def _normalize_view_spec(
+        view_spec: Optional[Union[ContextViewSpec, Dict[str, Any]]],
+    ) -> ContextViewSpec:
+        if view_spec is None:
+            return ContextViewSpec()
+        if isinstance(view_spec, ContextViewSpec):
+            return view_spec
+        if not isinstance(view_spec, dict):
+            raise TypeError("view_spec must be ContextViewSpec, dict, or None")
+        return ContextViewSpec(
+            policy_id=str(view_spec.get("policy_id") or "default"),
+            recent_turns=max(0, int(view_spec.get("recent_turns") or 0)),
+            allowed_message_types=tuple(view_spec.get("allowed_message_types") or ()),
+            include_compression_anchors=bool(
+                view_spec.get("include_compression_anchors", True)
+            ),
+            apply_artifact_offload=bool(view_spec.get("apply_artifact_offload", False)),
+            protected_message_ids=tuple(
+                str(item) for item in view_spec.get("protected_message_ids", ())
+            ),
+            persistent_history=bool(view_spec.get("persistent_history", False)),
+        )
+
+    @staticmethod
+    def measure_inference_view(
+        messages: Sequence[Union[MessageChunk, Dict[str, Any]]],
+        view_spec: Optional[Union[ContextViewSpec, Dict[str, Any]]] = None,
+        through_message_id: Optional[str] = None,
+        model_identity: Optional[str] = None,
+    ) -> InferenceViewTokenReport:
+        """Measure a concrete inference view and return per-message estimates.
+
+        Cumulative values are estimates for this exact view, never provider usage.
+        Provider usage is request-scoped and is managed by ``PromptBudgetManager``.
+        """
+        spec = MessageManager._normalize_view_spec(view_spec)
+        chunks = [
+            MessageChunk.from_dict(item) if isinstance(item, dict) else item
+            for item in messages
+        ]
+        view = MessageManager.build_inference_view(
+            list(chunks), apply_rule_compression=spec.apply_artifact_offload
+        )
+
+        if not spec.include_compression_anchors:
+            view = [
+                item
+                for item in view
+                if not MessageManager._is_compress_history_tool_call(item)
+                and not MessageManager._is_successful_compression_result(item)
+            ]
+        if spec.allowed_message_types:
+            allowed = set(spec.allowed_message_types)
+            view = [
+                item
+                for item in view
+                if item.role == MessageRole.USER.value
+                or item.normalized_message_type() in allowed
+            ]
+        if spec.recent_turns > 0:
+            user_indices = [
+                idx
+                for idx, item in enumerate(view)
+                if item.role == MessageRole.USER.value
+            ]
+            if len(user_indices) > spec.recent_turns:
+                view = view[user_indices[-spec.recent_turns] :]
+
+        report_messages: List[Dict[str, Any]] = []
+        cumulative = 0
+        model_key = str(model_identity or "default")
+        for item in view:
+            provider_message = MessageManager.convert_message_to_dict_for_request(item)
+            if provider_message is None:
+                continue
+            component = PromptTokenEstimator.component(
+                "system" if item.role == MessageRole.SYSTEM.value else "message",
+                provider_message,
+                message_id=item.message_id,
+            )
+            cache_key = f"{model_key}:{component.fingerprint}"
+            with _message_token_estimate_cache_lock:
+                cached = _message_token_estimate_cache.get(cache_key)
+                if cached is None:
+                    cached = component.estimated_tokens
+                    _message_token_estimate_cache[cache_key] = cached
+                    if (
+                        len(_message_token_estimate_cache)
+                        > _message_token_estimate_cache_limit
+                    ):
+                        _message_token_estimate_cache.popitem(last=False)
+                else:
+                    _message_token_estimate_cache.move_to_end(cache_key)
+            cumulative += cached
+            report_messages.append(
+                {
+                    "message_id": item.message_id,
+                    "fingerprint": component.fingerprint,
+                    "estimated_tokens": cached,
+                    "cumulative_estimated_tokens": cumulative,
+                }
+            )
+            if through_message_id and item.message_id == through_message_id:
+                break
+
+        return {
+            "view_spec_hash": spec.fingerprint(),
+            "messages": report_messages,
+            "total_estimated_tokens": cumulative,
+        }
 
     @staticmethod
     def calculate_message_token_components(
@@ -1408,9 +1540,8 @@ class MessageManager:
             )
             if is_reasoning_message:
                 if (
-                    (pending_reasoning or pending_assistant_messages)
-                    and not belongs_to_pending_response(message)
-                ):
+                    pending_reasoning or pending_assistant_messages
+                ) and not belongs_to_pending_response(message):
                     flush_pending_assistant_messages()
                 reasoning = message.reasoning_content or message.get_content()
                 if isinstance(reasoning, str) and reasoning:
@@ -1421,9 +1552,8 @@ class MessageManager:
 
             if message.role == MessageRole.ASSISTANT.value:
                 if (
-                    (pending_reasoning or pending_assistant_messages)
-                    and not belongs_to_pending_response(message)
-                ):
+                    pending_reasoning or pending_assistant_messages
+                ) and not belongs_to_pending_response(message):
                     flush_pending_assistant_messages()
                 if pending_reasoning and not message.tool_calls:
                     message.reasoning_content = None
@@ -1642,6 +1772,8 @@ class MessageManager:
         target_max = int(max_model_len * 0.35)
         segment: List[MessageChunk] = []
         tokens = 0
+        from sagents.context.messages.token_accounting import PromptTokenEstimator
+
         for idx, msg in enumerate(effective):
             if idx in protected:
                 continue
@@ -1657,7 +1789,13 @@ class MessageManager:
             if not has_value and msg.role != MessageRole.USER.value:
                 continue
             segment.append(msg)
-            tokens += MessageManager.calculate_message_token_length(msg)
+            request_message = MessageManager.convert_message_to_dict_for_request(msg)
+            if request_message is not None:
+                tokens += PromptTokenEstimator.manifest(
+                    [request_message]
+                ).conservative_tokens
+            else:
+                tokens += MessageManager.calculate_message_token_length(msg)
             if tokens >= target_min:
                 break
             if tokens >= target_max:
@@ -1771,9 +1909,7 @@ class MessageManager:
 
         def message_tool_call_id(msg: MessageItemT) -> Optional[str]:
             tool_call_id = (
-                msg.get("tool_call_id")
-                if isinstance(msg, dict)
-                else msg.tool_call_id
+                msg.get("tool_call_id") if isinstance(msg, dict) else msg.tool_call_id
             )
             return str(tool_call_id) if tool_call_id else None
 
@@ -1794,9 +1930,7 @@ class MessageManager:
                 else:
                     copied.pop("tool_calls", None)
                 return copied  # pyright: ignore[reportReturnType]
-            return replace(
-                msg, tool_calls=kept_tool_calls or None
-            )  # pyright: ignore[reportReturnType]
+            return replace(msg, tool_calls=kept_tool_calls or None)  # pyright: ignore[reportReturnType]
 
         latest_user_idx: Optional[int] = None
         for idx in range(len(messages) - 1, -1, -1):

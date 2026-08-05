@@ -586,13 +586,19 @@ def setup_ui(config: Dict):
         agent_mode_options = {
             "simple": "Simple (基础模式)",
             "fibre": "Fibre (多智能体协作)",
-            "multi": "Multi (多智能体 - 旧版)",  # 保留兼容
+            "team": "Team (固定团队协作)",
         }
+        configured_mode = str(config.get("agent_mode") or "simple").lower()
+        agent_mode_keys = list(agent_mode_options.keys())
         agent_mode = st.selectbox(
             "🤖 智能体模式",
-            options=list(agent_mode_options.keys()),
+            options=agent_mode_keys,
             format_func=lambda x: agent_mode_options[x],
-            index=1 if config.get("agent_mode") == "fibre" else 0,
+            index=(
+                agent_mode_keys.index(configured_mode)
+                if configured_mode in agent_mode_options
+                else 0
+            ),
         )
 
         use_deepthink = st.toggle(

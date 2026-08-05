@@ -3,7 +3,7 @@ use crate::display_policy::DisplayMode;
 use crate::preferences::persist_app_preferences_notice;
 use std::path::PathBuf;
 
-const VALID_AGENT_MODES: &[&str] = &["simple", "multi", "fibre"];
+const VALID_AGENT_MODES: &[&str] = &["simple", "fibre", "team"];
 
 impl App {
     pub fn apply_startup_options(

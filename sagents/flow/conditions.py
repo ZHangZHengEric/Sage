@@ -97,7 +97,7 @@ def check_need_summary(session_context, session=None) -> bool:
         return False
 
     # turn_status 是协议性工具而非任务执行工具，调用前模型已输出自然语言说明，
-    # 无需再次触发 TaskSummaryAgent，否则会在 need_user_input/blocked/task_done
+    # 无需再触发额外总结，否则会在 need_user_input/blocked/task_done
     # 之后多余地生成一条 final_answer。force_summary=True 时不受此限制。
     if last_msg_role == MessageRole.TOOL.value and not force_summary:
         content = (
@@ -119,58 +119,6 @@ def check_need_summary(session_context, session=None) -> bool:
                         return False
             except (json.JSONDecodeError, TypeError):
                 pass
-
-    return True
-
-
-@ConditionRegistry.register("task_not_completed")
-def check_task_not_completed(session_context, session=None) -> bool:
-    """检查多智能体任务是否尚未全部完成"""
-    from sagents.context.session_context import SessionStatus
-
-    # 1. 检查是否已进入终态
-    if session:
-        session_status = session.get_status()
-        if session_status in {
-            SessionStatus.INTERRUPTED,
-            SessionStatus.COMPLETED,
-            SessionStatus.ERROR,
-        }:
-            return False
-
-    # 2. 检查是否被中断
-    if session and session.get_status() == SessionStatus.INTERRUPTED:
-        return False
-
-    # 如果自检失败，必须继续循环修复，不能被旧的 completion_status 短路。
-    if session_context.audit_status.get("self_check_passed") is False:
-        logger.info("SAgent: 检测到 self_check 失败，继续循环修复")
-        return True
-
-    # 3. 检查审计状态中的完成标志
-    if session_context.audit_status.get("task_completed", False):
-        logger.info("SAgent: 检测到 task_completed 标志，任务结束")
-        return False
-
-    # 4. 检查 completion_status
-    status = session_context.audit_status.get("completion_status")
-    if status in ["completed", "need_user_input", "failed"]:
-        logger.info(f"SAgent: 检测到 completion_status={status}，任务结束")
-        return False
-
-    # 5. 检查待办任务列表 (如果存在)
-    # 尝试从 system_context 获取 todo_list
-    todo_list = session_context.system_context.get("todo_list", [])
-    if todo_list:
-        pending_tasks = [
-            t for t in todo_list if (t.get("status") or "pending") != "completed"
-        ]
-        if not pending_tasks:
-            logger.info("SAgent: 所有任务已标记完成")
-            # 如果确实有任务列表且都完成了，也可以视为结束
-            # 但通常 completion_status 会由 Judge Agent 设置，所以这里仅作为辅助判断
-            # 如果 Judge 还没运行，可能状态还没更新，所以主要依赖 completion_status
-            pass
 
     return True
 

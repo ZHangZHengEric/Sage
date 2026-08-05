@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from sagents.agent.task_decompose_agent import TaskDecomposeAgent
 from sagents.agent.common_agent import CommonAgent
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
@@ -66,32 +65,6 @@ class TestCompressionIntegration(unittest.TestCase):
         self.convert_str_patcher.stop()
         self.convert_dict_patcher.stop()
 
-    def test_task_decompose_agent_compression(self):
-        agent = TaskDecomposeAgent(self.mock_model, self.mock_config)
-        agent._should_abort_due_to_session = MagicMock(return_value=False)
-
-        # Mock _call_llm_streaming to return empty async iterator
-        async def mock_call_llm(*args, **kwargs):
-            yield MagicMock(choices=[])
-
-        agent._call_llm_streaming = mock_call_llm
-        agent.prepare_unified_system_message = AsyncMock(
-            return_value=MessageChunk(role="system", content="sys")
-        )
-
-        import asyncio
-
-        async def run_test():
-            async for _ in agent.run_stream(self.mock_session_context):
-                pass
-
-        asyncio.run(run_test())
-
-        # Verify extract called
-        self.mock_message_manager.extract_all_context_messages.assert_called()
-        # Verify prompt-local token budget view called with correct budget
-        self.mock_token_view.assert_called_with(self.mock_messages, 4000)
-
     def test_common_agent_does_not_compress_in_run_stream(self):
         """CommonAgent.run_stream 仅拉取历史，不调用 token budget view。"""
         agent = CommonAgent(self.mock_model, self.mock_config)
@@ -117,33 +90,6 @@ class TestCompressionIntegration(unittest.TestCase):
 
         self.mock_token_view.assert_not_called()
         self.mock_message_manager.extract_all_context_messages.assert_called()
-
-    def test_no_compression_when_no_budget_info(self):
-        # Remove budget info
-        self.mock_budget_manager.budget_info = None
-
-        agent = TaskDecomposeAgent(self.mock_model, self.mock_config)
-        agent._should_abort_due_to_session = MagicMock(return_value=False)
-
-        async def mock_call_llm(*args, **kwargs):
-            yield MagicMock(choices=[])
-
-        agent._call_llm_streaming = mock_call_llm
-        agent.prepare_unified_system_message = AsyncMock(
-            return_value=MessageChunk(role="system", content="sys")
-        )
-
-        import asyncio
-
-        async def run_test():
-            async for _ in agent.run_stream(self.mock_session_context):
-                pass
-
-        asyncio.run(run_test())
-
-        # Verify token budget view NOT called
-        self.mock_token_view.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

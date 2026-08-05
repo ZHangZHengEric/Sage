@@ -156,7 +156,7 @@ const COMMANDS: [SlashCommandDef; 27] = [
     SlashCommandDef {
         command: "/mode",
         description: "Show or override the current agent mode",
-        usage: "/mode | /mode show | /mode set <simple|multi|fibre>",
+        usage: "/mode | /mode show | /mode set <simple|fibre|team>",
         example: "/mode set fibre",
     },
     SlashCommandDef {

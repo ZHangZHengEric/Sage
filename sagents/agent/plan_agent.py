@@ -8,7 +8,7 @@ import re
 import shlex
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union, cast
 
-from sagents.agent.agent_base import AgentBase
+from sagents.agent.agent_base import AgentBase, ProviderContextWindowExceededError
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
@@ -33,8 +33,8 @@ class PlanAgent(AgentBase):
     """
     执行前规划智能体。
 
-    这版实现故意不走 SimpleAgent 的“通用执行循环”，而是更接近
-    TaskAnalysisAgent / TaskCompletionJudgeAgent 这种“专用单职责 agent”：
+    这版实现故意不走 SimpleAgent 的“通用执行循环”，而是保持为
+    专用的单职责 agent：
 
     1. 自己决定 planning 阶段要使用什么 system prompt
     2. 自己决定 planning 阶段应该带哪些历史消息
@@ -223,6 +223,15 @@ class PlanAgent(AgentBase):
                     logger.info("PlanAgent: no progress in this loop, stop loop")
                     break
 
+        except ProviderContextWindowExceededError as exc:
+            # Planning is optional. If its dedicated request cannot fit even
+            # in the provider window, continue into execution where the
+            # persistent conversation compressor can recover the main turn.
+            session_context.audit_status["plan_status"] = "start_execution"
+            logger.warning(
+                "PlanAgent: planning context remains over the provider limit; "
+                f"skip planning and continue execution: {exc}"
+            )
         finally:
             self._active_session_context = None
             session_context.tool_manager = original_tool_manager
@@ -703,7 +712,7 @@ class PlanAgent(AgentBase):
             system_prompt=system_prompt,
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
-        response = self._call_llm_streaming(
+        response = self._call_aux_llm_streaming(
             messages=cast(
                 List[Union[MessageChunk, Dict[str, Any]]],
                 [{"role": "user", "content": prompt}],

@@ -275,7 +275,7 @@ fn submit_selected_agent_popup_executes_agent_command() {
     app.set_agent_catalog(vec![(
         "agent-123".to_string(),
         "Research Agent".to_string(),
-        "multi".to_string(),
+        "team".to_string(),
         false,
         "2026-04-28T10:00:00".to_string(),
     )]);

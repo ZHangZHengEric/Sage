@@ -215,14 +215,12 @@ A skill can both shape model behavior via its description and be invoked by the 
 ```mermaid
 flowchart LR
     AllTools[(all tools)] --> ToolSug[tool_suggestion Agent]
-    AllWFs[(all workflows)] --> WfSel[workflow_select Agent]
     ToolSug -->|"what to use this turn"| LLM
-    WfSel -->|"which workflow to take"| LLM
 ```
 
 
 
-The tool/skill layer answers "what is available"; suggestion Agents answer "what should we use this turn", so we don't have to stuff every schema into the context.
+The tool/skill layer answers "what is available"; the suggestion Agent narrows what should be used this turn, so we don't have to stuff every schema into the context.
 
 ### 3.1 Runtime Tool Expansion
 

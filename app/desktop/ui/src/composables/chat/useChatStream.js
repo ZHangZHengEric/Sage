@@ -2,7 +2,12 @@ import { isCurrentSessionStreamEnd } from '@/utils/sessionStreamEvents.js'
 
 const ENABLE_PLAN_TAG_RE = /^\s*<enable_plan>\s*(true|false)\s*<\/enable_plan>\s*/i
 const ENABLE_DEEP_THINKING_TAG_RE = /^\s*<enable_deep_thinking>\s*(true|false)\s*<\/enable_deep_thinking>\s*/i
-const THINKING_LEVEL_TAG_RE = /^\s*<(?:thinking_level|deep_thinking_level)>\s*(minimal|low|medium|high|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*/i
+const THINKING_LEVEL_TAG_RE = /^\s*<(?:thinking_level|deep_thinking_level)>\s*(minimal|low|medium|high|xhigh|max)\s*<\/(?:thinking_level|deep_thinking_level)>\s*/i
+
+const normalizeAgentMode = (mode) => {
+  const normalized = String(mode || '').trim().toLowerCase()
+  return ['simple', 'fibre', 'team'].includes(normalized) ? normalized : 'simple'
+}
 
 const stripControlTags = (text) => {
   if (typeof text !== 'string') return { text, enablePlan: false, enableDeepThinking: false, thinkingLevel: null }
@@ -318,7 +323,7 @@ export const useChatStream = ({
       const requestBody = {
         messages: [{ role: 'user', content: messageContent }],
         session_id: sessionId,
-        agent_mode: config.agentMode,
+        agent_mode: normalizeAgentMode(config.agentMode),
         more_suggest: config.moreSuggest,
         max_loop_count: config.maxLoopCount,
         agent_id: selectedAgent.id,
@@ -386,7 +391,7 @@ export const useChatStream = ({
       }
 
       const requestBody = {
-        agent_mode: config?.agentMode,
+        agent_mode: normalizeAgentMode(config?.agentMode),
         more_suggest: config?.moreSuggest,
         max_loop_count: config?.maxLoopCount,
         agent_id: selectedAgent?.id,

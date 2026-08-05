@@ -6,6 +6,10 @@ import pytest
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.token_accounting import (
+    PromptBudgetManager,
+    PromptTokenEstimator,
+)
 
 
 def _msg(
@@ -915,7 +919,127 @@ async def test_prepare_messages_for_llm_failed_compression_does_not_modify_manag
 
 
 @pytest.mark.asyncio
-async def test_prepare_messages_for_llm_returns_error_when_no_compressible_segment(
+async def test_provider_overflow_recovery_accepts_any_rule_character_reduction(
+    monkeypatch,
+):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
+    manager = MessageManager(session_id="sess-provider-rule")
+    old = _msg(
+        MessageRole.ASSISTANT.value,
+        "old history" * 100,
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-old",
+    )
+    current = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    session_context = SimpleNamespace(
+        message_manager=manager,
+        sandbox_agent_workspace=None,
+        system_context={},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+    monkeypatch.setattr(
+        "sagents.agent.agent_base.MessageManager.build_inference_view",
+        lambda messages, **kwargs: [current],
+    )
+
+    async def must_not_call_llm_compression(*args, **kwargs):
+        raise AssertionError("rule compression already reduced characters")
+        yield []
+
+    monkeypatch.setattr(
+        agent, "_compress_messages_with_tool", must_not_call_llm_compression
+    )
+
+    chunks = [
+        item
+        async for item in agent._prepare_messages_for_llm(
+            [old, current],
+            "sess-provider-rule",
+            provider_overflow_recovery=True,
+        )
+    ]
+
+    assert chunks == [([current], True)]
+
+
+@pytest.mark.asyncio
+async def test_provider_overflow_recovery_uses_llm_when_rule_has_no_char_gain(
+    monkeypatch,
+):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
+    manager = MessageManager(session_id="sess-provider-llm")
+    old = _msg(
+        MessageRole.ASSISTANT.value,
+        "old history" * 500,
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-old",
+    )
+    current = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    manager.add_messages([old, current])
+    session_context = SimpleNamespace(
+        message_manager=manager,
+        sandbox_agent_workspace=None,
+        system_context={},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+
+    tool_call, tool_result = _compression_pair(
+        call_message_id="compress-call",
+        result_message_id="compress-result",
+        call_id="compress-1",
+        source_ids=["a-old"],
+    )
+
+    def fake_build_view(messages, **kwargs):
+        if any(message.message_id == "compress-result" for message in messages):
+            return [tool_call, tool_result, current]
+        return list(messages)
+
+    monkeypatch.setattr(
+        "sagents.agent.agent_base.MessageManager.build_inference_view",
+        fake_build_view,
+    )
+    monkeypatch.setattr(
+        "sagents.agent.agent_base.MessageManager.select_llm_compression_segment",
+        lambda messages, **kwargs: [old],
+    )
+
+    async def fake_compress(messages, session_id, **kwargs):
+        yield [tool_call]
+        yield [tool_result]
+
+    monkeypatch.setattr(agent, "_compress_messages_with_tool", fake_compress)
+
+    chunks = [
+        item
+        async for item in agent._prepare_messages_for_llm(
+            [old, current],
+            "sess-provider-llm",
+            provider_overflow_recovery=True,
+        )
+    ]
+
+    assert chunks[0] == ([tool_call], False)
+    assert chunks[1] == ([tool_result], False)
+    assert chunks[-1] == ([tool_call, tool_result, current], True)
+
+
+@pytest.mark.asyncio
+async def test_soft_estimate_does_not_block_when_no_compressible_segment(
     monkeypatch,
 ):
     agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
@@ -950,11 +1074,114 @@ async def test_prepare_messages_for_llm_returns_error_when_no_compressible_segme
     ]
 
     assert len(chunks) == 1
-    error_chunks, is_final = chunks[0]
-    assert is_final is False
-    assert error_chunks[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
-    assert "压缩后仍超过模型输入限制" in error_chunks[0].content
+    request_view, is_final = chunks[0]
+    assert is_final is True
+    assert request_view == raw_messages
     assert manager.messages == raw_messages
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_checkpoint_can_trigger_soft_compression(monkeypatch):
+    agent = SimpleAgent(
+        model=None,
+        model_config={"model": "gpt-test", "max_model_len": 1000},
+    )
+    manager = MessageManager(session_id="sess-checkpoint-trigger")
+    raw_messages = [
+        _msg(
+            MessageRole.USER.value,
+            "old request",
+            MessageType.USER_INPUT.value,
+            message_id="u-old",
+        ),
+        _msg(
+            MessageRole.ASSISTANT.value,
+            "old answer",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id="a-old",
+        ),
+        _msg(
+            MessageRole.USER.value,
+            "current request",
+            MessageType.USER_INPUT.value,
+            message_id="u-current",
+        ),
+        *[
+            _msg(
+                MessageRole.ASSISTANT.value,
+                f"tail-{idx}",
+                MessageType.ASSISTANT_TEXT.value,
+                message_id=f"tail-{idx}",
+            )
+            for idx in range(12)
+        ],
+    ]
+    manager.add_messages(raw_messages)
+    budget_manager = PromptBudgetManager()
+    session_context = SimpleNamespace(
+        message_manager=manager,
+        prompt_budget_manager=budget_manager,
+        sandbox_agent_workspace=None,
+        system_context={},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+
+    async def build_request(history_messages):
+        return list(history_messages)
+
+    provider_messages = [
+        MessageManager.convert_message_to_dict_for_request(message)
+        for message in raw_messages
+    ]
+    manifest = PromptTokenEstimator.manifest(provider_messages)
+    model_name, provider_identity = agent._resolve_prompt_accounting_identity()
+    profile_id = PromptBudgetManager.build_profile_id(
+        model=model_name,
+        provider_identity=provider_identity,
+        agent_class=agent.__class__.__name__,
+        step_name="direct_execution",
+        view_policy_id=agent._resolved_context_view_spec_hash(),
+    )
+    assert manifest.estimated_tokens < 850
+    budget_manager.update_checkpoint(profile_id, 900, manifest)
+
+    compression_called = False
+    failed_result = _msg(
+        MessageRole.TOOL.value,
+        "compression failed",
+        MessageType.TOOL_CALL_RESULT.value,
+        message_id="compress-result",
+        tool_call_id="compress-1",
+        metadata={
+            "tool_name": "compress_conversation_history",
+            "status": "error",
+            "compression_anchor": False,
+        },
+    )
+
+    async def fake_compress(messages, session_id, **kwargs):
+        nonlocal compression_called
+        compression_called = True
+        yield [failed_result]
+
+    monkeypatch.setattr(agent, "_compress_messages_with_tool", fake_compress)
+
+    chunks = [
+        item
+        async for item in agent._prepare_context_messages_for_llm(
+            raw_messages,
+            "sess-checkpoint-trigger",
+            request_builder=build_request,
+            request_tools=[],
+            step_name="direct_execution",
+        )
+    ]
+
+    assert compression_called is True
+    assert chunks[0] == ([failed_result], False)
+    assert chunks[-1][1] is True
 
 
 @pytest.mark.asyncio

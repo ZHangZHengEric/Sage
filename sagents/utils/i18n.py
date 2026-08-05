@@ -109,10 +109,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         "workflow.error.context_length": "输入内容过长，请缩短后重试",
         "workflow.error.connection": "网络连接失败，请检查网络设置或稍后重试",
         "workflow.error.service_unavailable": "服务暂时不可用，请稍后再试",
-        "runtime.context_over_limit": (
-            "当前上下文压缩后仍超过模型输入限制：{current_tokens} > {limit}。"
-            "请缩小当前请求范围，或允许我先整理/归档更早的执行过程后继续。"
-        ),
         "runtime.tool_call_parse.title": "我尝试调用工具 `{tool_name}`，但参数解析失败。",
         "runtime.tool_call_parse.reason_title": "错误原因",
         "runtime.tool_call_parse.reason": "JSON格式无效或结构不完整",
@@ -262,11 +258,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "workflow.error.service_unavailable": (
             "The service is temporarily unavailable. Try again later"
-        ),
-        "runtime.context_over_limit": (
-            "The compressed context still exceeds the model input limit: "
-            "{current_tokens} > {limit}. Narrow the current request, or let me "
-            "summarize/archive earlier execution history before continuing."
         ),
         "runtime.tool_call_parse.title": (
             "I tried to call tool `{tool_name}`, but its arguments could not be parsed."
@@ -428,11 +419,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "workflow.error.service_unavailable": (
             "O servico esta temporariamente indisponivel. Tente novamente mais tarde"
-        ),
-        "runtime.context_over_limit": (
-            "O contexto comprimido ainda excede o limite de entrada do modelo: "
-            "{current_tokens} > {limit}. Reduza o escopo da solicitacao atual ou permita "
-            "que eu resuma/arquive o historico de execucao anterior antes de continuar."
         ),
         "runtime.tool_call_parse.title": (
             "Tentei chamar a ferramenta `{tool_name}`, mas nao consegui analisar os argumentos."

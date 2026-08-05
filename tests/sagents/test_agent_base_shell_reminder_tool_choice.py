@@ -130,6 +130,7 @@ async def test_shell_completion_reminder_preserves_tool_choice_auto(monkeypatch)
     assert calls[0]["kwargs"]["tool_choice"] == "auto"
     assert "<system_reminder>" in _message_text(calls[0]["messages"][-1])
     assert "shtask_1" in _message_text(calls[0]["messages"][-1])
+    assert "_sage_context_protected" not in calls[0]["messages"][-1]
 
     assert calls[1]["model_config"]["tool_choice"] == "auto"
     assert calls[1]["kwargs"]["tool_choice"] == "auto"

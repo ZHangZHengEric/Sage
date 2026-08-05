@@ -293,9 +293,6 @@ class FlowExecutor:
                 return
             trace.add(f"agent({agent_key})")
 
-            # 特殊处理 multi agent 需要的工具注册 (如果 agent_key 是 multi 相关的)
-            # 但理论上应该在 Agent 内部处理，这里保持纯粹
-
             # 获取 Agent 实例
             # 注意：session_runtime._get_agent 是内部方法，这里我们需要访问
             try:
