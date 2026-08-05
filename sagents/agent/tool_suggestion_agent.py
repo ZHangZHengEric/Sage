@@ -109,11 +109,7 @@ class ToolSuggestionAgent(AgentBase):
     def _extract_tool_selection_context_messages(
         cls, message_manager: Any
     ) -> List[MessageChunk]:
-        active_messages = MessageManager.build_inference_view(
-            message_manager.messages,
-            session_id=message_manager.session_id,
-            apply_rule_compression=False,
-        )
+        active_messages = MessageManager.build_inference_view(message_manager.messages)
 
         chats: List[List[MessageChunk]] = []
         current_chat: List[MessageChunk] = []

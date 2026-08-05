@@ -1815,9 +1815,14 @@ class SimpleAgent(AgentBase):
                     return
                 except ProviderContextWindowExceededError:
                     llm_compression_attempts += 1
+                    if llm_compression_attempts > 20:
+                        logger.error(
+                            "SimpleAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                        )
+                        raise
                     logger.warning(
                         "SimpleAgent: provider 上下文超限，启动会话级恢复；"
-                        "规则压缩无字符收益时使用大模型历史压缩，"
+                        "使用大模型历史压缩，"
                         f"attempt={llm_compression_attempts}"
                     )
                     recovered_history = None

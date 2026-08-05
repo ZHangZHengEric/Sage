@@ -88,6 +88,28 @@ class TestCompressHistoryTool:
         assert "Assistant response" in result
         print("OK: _format_messages_for_compression")
 
+    def test_format_messages_for_compression_drops_all_reasoning_content(self):
+        normal = self.create_message(
+            MessageRole.ASSISTANT.value,
+            "visible answer",
+        )
+        normal.reasoning_content = "private normal reasoning"
+        legacy_reasoning = self.create_message(
+            MessageRole.ASSISTANT.value,
+            "private legacy reasoning",
+            msg_type=MessageType.REASONING_CONTENT.value,
+        )
+
+        result = self.tool._format_messages_for_compression(
+            [normal, legacy_reasoning]
+        )
+
+        assert "visible answer" in result
+        assert "private normal reasoning" not in result
+        assert "private legacy reasoning" not in result
+        assert normal.reasoning_content == "private normal reasoning"
+        assert legacy_reasoning.content == "private legacy reasoning"
+
     def test_compress_conversation_history_uses_caller_range_metadata(self):
         """Test: caller-selected range is recorded in structured output"""
         messages = [
@@ -134,6 +156,10 @@ class TestCompressHistoryTool:
         assert '"context_recovery_guidance"' in result["message"]
         assert "source_message_ids" not in result["message"]
         assert "source_range" not in result["message"]
+        assert payload["stats"]["summary_characters"] == len(result["message"])
+        assert payload["stats"]["compressed_tokens"] == self.tool._calculate_tokens(
+            result["message"]
+        )
 
     def test_compress_conversation_history_filters_system_messages(self):
         """Test: system messages are never compressed or recorded as covered source."""
@@ -237,6 +263,86 @@ class TestCompressHistoryTool:
         assert result["data"]["open_tasks"] == ["run matrix tests"]
         assert result["data"]["stats"]["summary_parse_status"] == "json"
 
+    def test_parse_structured_summary_unwraps_nested_fenced_json(self):
+        nested = json.dumps(
+            {
+                "summary": "inner summary",
+                "decisions": ["keep the inner decision"],
+                "open_tasks": ["finish the matrix"],
+            },
+            ensure_ascii=False,
+        )
+        raw = json.dumps(
+            {
+                "summary": f"```json\n{nested}\n```",
+                "decisions": [],
+                "open_tasks": [],
+            },
+            ensure_ascii=False,
+        )
+
+        payload, parse_status, omission = self.tool._parse_structured_summary(raw)
+
+        assert parse_status == "nested_json"
+        assert payload["summary"] == "inner summary"
+        assert payload["decisions"] == ["keep the inner decision"]
+        assert payload["open_tasks"] == ["finish the matrix"]
+        assert omission == {}
+
+    def test_split_oversized_turn_keeps_tool_call_and_results_atomic(self):
+        user = self.create_message(MessageRole.USER.value, "request")
+        assistant = self.create_message(
+            MessageRole.ASSISTANT.value,
+            "",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "demo", "arguments": "{}"},
+                }
+            ],
+        )
+        result = self.create_message(
+            MessageRole.TOOL.value,
+            "result",
+            tool_call_id="call-1",
+        )
+        tail = self.create_message(MessageRole.ASSISTANT.value, "done")
+
+        units = self.tool._split_oversized_unit([user, assistant, result, tail])
+
+        assert units == [[user], [assistant, result], [tail]]
+
+    def test_hierarchical_summary_feeds_prior_batch_only_in_memory(self):
+        first = [
+            self.create_message(MessageRole.USER.value, "first user"),
+            self.create_message(MessageRole.ASSISTANT.value, "first answer"),
+        ]
+        second = [
+            self.create_message(MessageRole.USER.value, "second user"),
+            self.create_message(MessageRole.ASSISTANT.value, "second answer"),
+        ]
+        self.tool._compression_batches = lambda messages, session_id: [first, second]
+        prompts = []
+
+        async def fake_call(messages_text, session_id):
+            prompts.append(messages_text)
+            if len(prompts) == 1:
+                return json.dumps({"summary": "first batch summary"})
+            return json.dumps({"summary": "final hierarchical summary"})
+
+        self.tool._call_llm_for_compression = fake_call
+
+        payload, parse_status, _, batch_count = asyncio.run(
+            self.tool._summarize_batches([*first, *second], "test_session")
+        )
+
+        assert batch_count == 2
+        assert parse_status == "json"
+        assert payload["summary"] == "final hierarchical summary"
+        assert "first batch summary" in prompts[1]
+        assert "second user" in prompts[1]
+
     def _todo_pair(self, call_id: str, status: str, message_prefix: str):
         assistant = self.create_message(
             MessageRole.ASSISTANT.value,
@@ -261,6 +367,44 @@ class TestCompressHistoryTool:
                             "status": status,
                         }
                     ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id=call_id,
+        )
+        return assistant, tool
+
+    def _compression_summary_pair(self, call_id: str, status: str):
+        assistant = self.create_message(
+            MessageRole.ASSISTANT.value,
+            "",
+            tool_calls=[
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": "compress_conversation_history",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        )
+        tool = self.create_message(
+            MessageRole.TOOL.value,
+            json.dumps(
+                {
+                    "summary": "older compact summary",
+                    "todo_state_at_compaction_boundary": {
+                        "snapshot_kind": "active_todo_state_at_compressed_range_end",
+                        "override_rule": "later todo_write overrides this snapshot",
+                        "active": [
+                            {
+                                "id": "t1",
+                                "content": "inherited task",
+                                "status": status,
+                            }
+                        ],
+                    },
                 },
                 ensure_ascii=False,
             ),
@@ -297,7 +441,57 @@ class TestCompressHistoryTool:
         assert "later todo_write" in todo_snapshot["override_rule"]
         assert todo_snapshot["active"][0]["status"] == "pending"
         assert "todo_state_at_compaction_boundary" in result["data"]["reference_note"]
+        assert "latest user message in the current inference context" in result[
+            "data"
+        ]["reference_note"]
         assert result["data"]["reference_only"] is True
+
+    def test_compress_conversation_history_inherits_todo_from_prior_summary(self):
+        assistant, tool = self._compression_summary_pair(
+            "auto_compress_previous", "in_progress"
+        )
+        assistant.message_id = "summary-call"
+        tool.message_id = "summary-result"
+
+        async def fake_call(messages_text, session_id):
+            return "new summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                [assistant, tool],
+                "test_session",
+                source_message_ids=["summary-call", "summary-result"],
+            )
+        )
+
+        snapshot = result["data"]["todo_state_at_compaction_boundary"]
+        assert snapshot["active"] == [
+            {
+                "id": "t1",
+                "content": "inherited task",
+                "status": "in_progress",
+            }
+        ]
+
+    def test_later_completed_todo_clears_inherited_summary_snapshot(self):
+        old_assistant, old_tool = self._compression_summary_pair(
+            "auto_compress_previous", "pending"
+        )
+        new_assistant, new_tool = self._todo_pair("todo-call-2", "completed", "new")
+
+        async def fake_call(messages_text, session_id):
+            return "new summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                [old_assistant, old_tool, new_assistant, new_tool],
+                "test_session",
+            )
+        )
+
+        assert "todo_state_at_compaction_boundary" not in result["data"]
 
     def test_compress_conversation_history_skips_todo_state_when_updated_later(self):
         old_assistant, old_tool = self._todo_pair("todo-call-1", "pending", "old")
@@ -328,6 +522,36 @@ class TestCompressHistoryTool:
         )
 
         assert result["status"] == "success"
+        assert "todo_state_at_compaction_boundary" not in result["data"]
+
+    def test_compress_conversation_history_skips_todo_when_completed_later(self):
+        old_assistant, old_tool = self._todo_pair("todo-call-1", "pending", "old")
+        old_assistant.message_id = "a1"
+        old_tool.message_id = "t1"
+        new_assistant, new_tool = self._todo_pair("todo-call-2", "completed", "new")
+        new_assistant.message_id = "a2"
+        new_tool.message_id = "t2"
+
+        class _Manager:
+            messages = [old_assistant, old_tool, new_assistant, new_tool]
+
+        class _Context:
+            message_manager = _Manager()
+
+        async def fake_call(messages_text, session_id):
+            return "summary"
+
+        self.tool._call_llm_for_compression = fake_call
+        self.tool._get_session_context = lambda session_id: _Context()
+        result = asyncio.run(
+            self.tool.compress_conversation_history(
+                [old_assistant, old_tool],
+                "test_session",
+                source_message_ids=["a1", "t1"],
+                source_end_message_id="t1",
+            )
+        )
+
         assert "todo_state_at_compaction_boundary" not in result["data"]
 
     def test_compress_conversation_history_skips_todo_state_without_active_todo(self):
@@ -453,20 +677,47 @@ class TestCompressHistoryTool:
         assert captured["model"] is FakeSession.model
         assert captured["kwargs"]["model"] == "gpt-4o"
         assert captured["kwargs"]["model_config"] == {}
+        assert captured["kwargs"]["response_format"] == {"type": "json_object"}
         assert captured["kwargs"]["extra_body"]["chat_template_kwargs"] == {
             "enable_thinking": False
         }
 
-    def test_compression_levels_config(self):
-        """Test: compression levels configuration"""
-        assert "light" in self.tool.compression_levels
-        assert "medium" in self.tool.compression_levels
-        assert "heavy" in self.tool.compression_levels
+    def test_call_llm_for_compression_skips_json_mode_when_unsupported(
+        self, monkeypatch
+    ):
+        captured = {}
 
-        assert "tool_truncate" in self.tool.compression_levels["light"]
-        assert "assistant_summary" in self.tool.compression_levels["light"]
-        print("OK: compression_levels_config")
+        class FakeSession:
+            model = object()
+            model_config = {
+                "model": "plain-model",
+                "supports_structured_output": False,
+            }
 
+        class FakeStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        async def fake_fallback(client, **kwargs):
+            captured.update(kwargs)
+            return FakeStream()
+
+        monkeypatch.setattr(
+            "sagents.utils.agent_session_helper.get_live_session",
+            lambda session_id, log_prefix=None: FakeSession(),
+        )
+        monkeypatch.setattr(
+            "sagents.tool.impl.compress_history_tool.create_chat_completion_with_fallback",
+            fake_fallback,
+        )
+
+        asyncio.run(self.tool._call_llm_for_compression("messages", "test_session"))
+
+        assert captured["response_format"] is None
+        assert captured["model_config"] == {}
 
 class TestCompressHistoryToolIntegration:
     """Integration tests for CompressHistoryTool (require mock session)"""
@@ -538,7 +789,6 @@ def run_tests():
             "test_compress_conversation_history_compresses_caller_input",
             test_class.test_compress_conversation_history_compresses_caller_input,
         ),
-        ("test_compression_levels_config", test_class.test_compression_levels_config),
         # Integration tests
         (
             "test_end_to_end_compression_flow",

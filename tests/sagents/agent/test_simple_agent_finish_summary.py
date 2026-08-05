@@ -3254,10 +3254,7 @@ def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
         pattern={"mode": "tool_call", "period": 2, "cycles": 2},
     )
 
-    inference = MessageManager.build_inference_view(
-        [questionnaire],
-        apply_rule_compression=False,
-    )
+    inference = MessageManager.build_inference_view([questionnaire])
 
     assert "<movo-questionnaire>" in questionnaire.content
     assert len(inference) == 1

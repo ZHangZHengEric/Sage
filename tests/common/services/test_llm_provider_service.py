@@ -9,6 +9,14 @@ from common.services.llm_provider_probe_utils import friendly_provider_probe_err
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_MISSING_MODULE = object()
+_STUBBED_MODULE_NAMES = (
+    "loguru",
+    "common.models.llm_provider",
+    "common.schemas.base",
+    "sagents.llm",
+    "llm_provider_service_under_test",
+)
 
 
 @dataclass
@@ -195,7 +203,19 @@ class FakeDao:
 class TestLLMProviderProbeRequired(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
+        cls._original_modules = {
+            name: sys.modules.get(name, _MISSING_MODULE)
+            for name in _STUBBED_MODULE_NAMES
+        }
         cls.module = _load_service_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, original in cls._original_modules.items():
+            if original is _MISSING_MODULE:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
 
     async def test_create_provider_probes_before_save(self):
         dao = FakeDao()

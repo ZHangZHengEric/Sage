@@ -141,9 +141,7 @@ def test_inference_view_fuses_reasoning_with_matching_tool_call() -> None:
         ),
     ]
 
-    result = MessageManager.build_inference_view(
-        messages, apply_rule_compression=False
-    )
+    result = MessageManager.build_inference_view(messages)
 
     assert len(result) == 3
     assert result[1].reasoning_content == "need tool"
@@ -182,9 +180,7 @@ def test_inference_view_does_not_move_reasoning_between_model_responses() -> Non
         ),
     ]
 
-    result = MessageManager.build_inference_view(
-        messages, apply_rule_compression=False
-    )
+    result = MessageManager.build_inference_view(messages)
 
     assert [message.get_content() for message in result] == [
         "weather",
@@ -217,9 +213,7 @@ def test_legacy_inference_view_does_not_move_reasoning_between_agents() -> None:
         ),
     ]
 
-    result = MessageManager.build_inference_view(
-        messages, apply_rule_compression=False
-    )
+    result = MessageManager.build_inference_view(messages)
 
     assert len(result) == 1
     assert result[0].tool_calls[0]["id"] == "call-b"

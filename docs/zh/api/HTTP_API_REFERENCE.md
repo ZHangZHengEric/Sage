@@ -589,7 +589,7 @@ ref: http-api-reference
 | `force_summary`             | boolean  | 强制总结             | 想在结束时强制输出总结        |
 | `memory_type`               | string   | 单次记忆模式           | 临时切换记忆策略           |
 | `custom_sub_agents`         | array    | 内联子 Agent 配置     | 不依赖已保存子 Agent      |
-| `context_budget_config`     | object   | 上下文预算配置          | 控制上下文裁剪和预算         |
+| `context_budget_config`     | object   | 上下文预算配置          | 控制请求预算；主历史只使用大模型持久摘要压缩 |
 | `extra_mcp_config`          | object   | 额外 MCP 配置        | 临时挂接 MCP server 参数 |
 
 

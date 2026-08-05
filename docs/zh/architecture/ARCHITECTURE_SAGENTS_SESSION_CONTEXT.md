@@ -119,19 +119,20 @@ flowchart TB
     Inputs[chunk 流入] --> MM[MessageManager]
     MM --> Merge[合并同 message_id 的多段]
     MM --> Filter[过滤 system 消息<br/>system 由 Agent 单独拼]
-    MM --> Compress[按 token 预算压缩 / 裁剪]
-    MM --> Estimate[token 估算<br/>全局比例采样池]
-    MM --> Out1[Agent 调 LLM 前取符合预算的历史]
+    MM --> Compress[大模型持久摘要<br/>与覆盖锚点]
+    MM --> Estimate[完整请求 token 投影<br/>Provider usage 动态校准]
+    MM --> Out1[Agent 构造完整 Provider 请求]
     MM --> Out2[流式输出给上游]
-    MM --> CB[ContextBudgetManager<br/>窗口/优先级/buffer]
-    CB --> Compress
+    MM --> CB[ContextBudgetManager<br/>辅助 Agent 临时 prompt 限长]
 ```
 
 要点：
 
 - system 消息不进历史，由 Agent 在调用时单独拼。
-- 上下文预算被收敛到 `ContextBudgetManager` 一处，所有 Agent 共用同一套规则。
-- token 估算用全局采样比例（启发式），避免每条都跑 tokenizer。
+- 主会话历史不再按规则截断，也不再创建新 artifact。完整输入超过窗口的 85% 时，只用大模型生成的持久摘要替换旧历史；Provider 真实上下文超限时直接进入同一摘要恢复链。
+- 最新 user 与近期活跃消息受保护，assistant 工具调用必须与所有对应 tool result 成对保留。多次摘要通过覆盖锚点串联，推理视图只保留最新有效摘要。
+- 完整请求 token 投影只是主动触发信号，并使用 Provider prompt usage 动态校准；不扣除最大输出 token。Provider 拒绝始终是权威结果。
+- 辅助 Agent 仍可构造临时的预算限长 prompt 视图，但不会回写主会话 ledger。
 
 ## 4. 记忆：会话级 + 用户级
 

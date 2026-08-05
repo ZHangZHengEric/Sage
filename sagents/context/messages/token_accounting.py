@@ -168,7 +168,6 @@ class ContextViewSpec:
     recent_turns: int = 0
     allowed_message_types: Tuple[str, ...] = ()
     include_compression_anchors: bool = True
-    apply_artifact_offload: bool = False
     protected_message_ids: Tuple[str, ...] = ()
     persistent_history: bool = False
 
@@ -177,16 +176,14 @@ class ContextViewSpec:
 
 
 class ContextOverflowStrategy(str, Enum):
-    LOCAL_ADAPTIVE_TRIM = "local_adaptive_trim"
+    PASSTHROUGH = "passthrough"
     PERSISTENT_SUMMARY = "persistent_summary"
 
 
 @dataclass(frozen=True)
 class ContextPolicy:
     view_spec: ContextViewSpec = field(default_factory=ContextViewSpec)
-    overflow_strategy: ContextOverflowStrategy = (
-        ContextOverflowStrategy.LOCAL_ADAPTIVE_TRIM
-    )
+    overflow_strategy: ContextOverflowStrategy = ContextOverflowStrategy.PASSTHROUGH
     protect_latest_user: bool = True
     protect_extra_messages: bool = True
     persistent_compressor: Optional[Any] = None

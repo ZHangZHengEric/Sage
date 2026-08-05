@@ -81,6 +81,7 @@ class CommonAgent(AgentBase):
 
         recovery_source = list(all_messages)
         llm_request_message = await build_request(recovery_source)
+        recovery_attempts = 0
         while True:
             try:
                 async for msg in self._call_llm_and_process_response(
@@ -92,6 +93,12 @@ class CommonAgent(AgentBase):
                     yield msg
                 return
             except ProviderContextWindowExceededError:
+                recovery_attempts += 1
+                if recovery_attempts > 20:
+                    logger.error(
+                        "CommonAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                    )
+                    raise
                 recovered_history = None
                 async for recovery_messages, is_final in (
                     self._prepare_context_messages_for_llm(

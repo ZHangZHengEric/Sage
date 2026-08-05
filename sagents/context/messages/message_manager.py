@@ -19,7 +19,6 @@ import json
 import time
 import re
 import uuid
-import os
 from collections import OrderedDict
 import threading
 from typing import Dict, List, Optional, Any, Union, Sequence, Tuple, TypeVar
@@ -49,9 +48,7 @@ TURN_STATUS_TOOL_NAME = "turn_status"
 SEARCH_MEMORY_TOOL_NAME = "search_memory"
 COMPRESS_HISTORY_TOOL_NAME = "compress_conversation_history"
 TODO_WRITE_TOOL_NAME = "todo_write"
-DEFAULT_RULE_PROTECTION_COUNT = 20
 DEFAULT_LLM_PROTECTION_COUNT = 12
-DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD = 4096
 
 MessageItemT = TypeVar("MessageItemT", bound=Union[MessageChunk, Dict[str, Any]])
 
@@ -113,7 +110,7 @@ class MessageManager:
         # 消息存储（只存储非system消息）
         self.messages: List[MessageChunk] = []
         # 最近一次发往 LLM 前构造出的 inference view。
-        # self.messages 始终是原始 ledger；规则 artifact offload 只写入这个视图。
+        # self.messages 始终是原始 ledger；推理视图只隐藏已被有效摘要覆盖的历史。
         self.inference_messages: List[MessageChunk] = []
         # 从 compression anchors 派生的调试/审计索引，不作为推理真相源。
         self.compact_manifest: Dict[str, Any] = {}
@@ -327,6 +324,56 @@ class MessageManager:
             old_messages_chunks = MessageManager.merge_new_message_old_messages(
                 new_message, old_messages_chunks
             )
+
+        # Auto-generated compression messages are emitted during a running
+        # SimpleAgent loop. A normal streaming merge appends them to the current
+        # turn, which changes chronology on the next provider request. Relocate a
+        # completed successful pair to its source boundary, matching the durable
+        # ledger layout.
+        for result in new_messages_chunks:
+            metadata = result.metadata if isinstance(result.metadata, dict) else {}
+            if not MessageManager._is_successful_compression_result(result):
+                continue
+            source_end = metadata.get("source_end_message_id")
+            if not source_end or not result.tool_call_id:
+                continue
+            assistant = next(
+                (
+                    message
+                    for message in old_messages_chunks
+                    if message.role == MessageRole.ASSISTANT.value
+                    and result.tool_call_id
+                    in MessageManager._tool_result_ids_for_assistant(message)
+                ),
+                None,
+            )
+            if assistant is None:
+                continue
+            pair_ids = {
+                message_id
+                for message_id in (assistant.message_id, result.message_id)
+                if message_id
+            }
+            without_pair = [
+                message
+                for message in old_messages_chunks
+                if message.message_id not in pair_ids
+            ]
+            source_index = next(
+                (
+                    idx
+                    for idx, message in enumerate(without_pair)
+                    if message.message_id == source_end
+                ),
+                None,
+            )
+            if source_index is None:
+                continue
+            old_messages_chunks = (
+                without_pair[: source_index + 1]
+                + [assistant, result]
+                + without_pair[source_index + 1 :]
+            )
         return old_messages_chunks
 
     @staticmethod
@@ -382,7 +429,6 @@ class MessageManager:
             include_compression_anchors=bool(
                 view_spec.get("include_compression_anchors", True)
             ),
-            apply_artifact_offload=bool(view_spec.get("apply_artifact_offload", False)),
             protected_message_ids=tuple(
                 str(item) for item in view_spec.get("protected_message_ids", ())
             ),
@@ -406,9 +452,7 @@ class MessageManager:
             MessageChunk.from_dict(item) if isinstance(item, dict) else item
             for item in messages
         ]
-        view = MessageManager.build_inference_view(
-            list(chunks), apply_rule_compression=spec.apply_artifact_offload
-        )
+        view = MessageManager.build_inference_view(list(chunks))
 
         if not spec.include_compression_anchors:
             view = [
@@ -1001,11 +1045,6 @@ class MessageManager:
         )
 
     @staticmethod
-    def _is_artifact_reference_message(msg: MessageChunk) -> bool:
-        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
-        return metadata.get("context_artifact_ref") is True
-
-    @staticmethod
     def _compression_pairs(
         messages: List[MessageChunk],
     ) -> List[Dict[str, Any]]:
@@ -1038,6 +1077,19 @@ class MessageManager:
             metadata = (
                 result_msg.metadata if isinstance(result_msg.metadata, dict) else {}
             )
+            raw_summary = result_msg.get_content()
+            payload = MessageManager._safe_parse_compression_payload(raw_summary)
+            summary = payload.get("summary") if isinstance(payload, dict) else None
+            if (
+                (not isinstance(summary, str) or not summary.strip())
+                and isinstance(raw_summary, str)
+                and not raw_summary.lstrip().startswith("{")
+            ):
+                # Historical sessions may have persisted the successful summary
+                # as plain text before the structured payload was introduced.
+                summary = raw_summary
+            if not isinstance(summary, str) or not summary.strip():
+                continue
             source_ids = [
                 mid
                 for mid in metadata.get("source_message_ids", [])
@@ -1046,6 +1098,11 @@ class MessageManager:
             covered_indices = {
                 id_to_index[mid] for mid in source_ids if mid in id_to_index
             }
+            if source_ids and 0 < len(covered_indices) < len(set(source_ids)):
+                # A partially resolved range could hide only part of the source
+                # while presenting the summary as complete. Treat it as an
+                # invalid audit record instead.
+                continue
             start_id = metadata.get("source_start_message_id")
             end_id = metadata.get("source_end_message_id")
             if (
@@ -1058,7 +1115,22 @@ class MessageManager:
                 if start_idx <= end_idx:
                     covered_indices.update(range(start_idx, end_idx + 1))
             if not covered_indices:
-                continue
+                # A provider-overflow retry works from the already-collapsed
+                # inference view, so the source messages referenced by a valid
+                # summary may no longer be present. Keep that detached summary
+                # as a first-class node so a later hierarchical summary can
+                # include it. Metadata without a real summary remains invalid.
+                has_declared_source = bool(source_ids) or (
+                    isinstance(start_id, str)
+                    and bool(start_id)
+                    and isinstance(end_id, str)
+                    and bool(end_id)
+                )
+                if (
+                    not has_declared_source
+                    or not summary.strip()
+                ):
+                    continue
             pair_indices = {assistant_idx, *result_indices}
             pairs.append(
                 {
@@ -1066,6 +1138,7 @@ class MessageManager:
                     "result_indices": result_indices,
                     "pair_indices": pair_indices,
                     "covered_indices": covered_indices,
+                    "detached_coverage": not bool(covered_indices),
                     "insert_idx": max(pair_indices),
                 }
             )
@@ -1199,8 +1272,13 @@ class MessageManager:
                         "original_tokens",
                         "compressed_tokens",
                         "compression_ratio",
+                        "token_estimate_kind",
+                        "source_characters",
+                        "summary_characters",
                         "source_message_count",
+                        "compression_input_message_count",
                         "summary_parse_status",
+                        "compression_batch_count",
                     )
                     if key in stats
                 },
@@ -1275,102 +1353,6 @@ class MessageManager:
         return protected
 
     @staticmethod
-    def _artifact_root(session_id: Optional[str], artifact_root: Optional[str]) -> str:
-        root = artifact_root
-        if not root:
-            raise ValueError("artifact_root is required for rule artifact offload")
-        safe_session_id = session_id or "unknown_session"
-        return os.path.join(root, safe_session_id)
-
-    @staticmethod
-    def _write_context_artifact(
-        msg: MessageChunk,
-        session_id: Optional[str],
-        artifact_root: Optional[str],
-    ) -> Tuple[str, str]:
-        root = MessageManager._artifact_root(session_id, artifact_root)
-        os.makedirs(root, exist_ok=True)
-        message_id = msg.message_id or str(uuid.uuid4())
-        path = os.path.join(root, f"{message_id}.txt")
-        content = msg.get_content()
-        if isinstance(content, (list, dict)):
-            content_text = json.dumps(content, ensure_ascii=False, indent=2)
-        else:
-            content_text = str(content or "")
-        if not os.path.exists(path):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content_text)
-        safe_session_id = session_id or "unknown_session"
-        display_path = os.path.join(
-            ".sage", "context", "artifacts", safe_session_id, f"{message_id}.txt"
-        )
-        return path, display_path
-
-    @staticmethod
-    def _artifact_reference_content(
-        msg: MessageChunk,
-        path: str,
-        abs_path: Optional[str] = None,
-    ) -> str:
-        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
-        tool_name = metadata.get("tool_name")
-        first_line = ""
-        content = msg.get_content()
-        if isinstance(content, str):
-            first_line = content.strip().splitlines()[0] if content.strip() else ""
-        brief_parts = [
-            f"role: {msg.role}",
-            f"message_type: {msg.message_type}",
-        ]
-        if tool_name:
-            brief_parts.append(f"tool_name: {tool_name}")
-        if first_line:
-            brief_parts.append(f"first_line: {first_line[:200]}")
-        lines = [
-            f"[Content moved to context artifact]\noriginal_content_path: {path}\n"
-        ]
-        if abs_path:
-            lines.append(f"original_content_abs_path: {abs_path}\n")
-        lines.extend(
-            [
-                f"message_id: {msg.message_id}\n",
-                f"role: {msg.role}\n",
-                f"message_type: {msg.message_type}\n",
-                f"brief: {'; '.join(brief_parts)}",
-            ]
-        )
-        return "".join(lines)
-
-    @staticmethod
-    def _should_rule_offload(
-        msg: MessageChunk,
-        protected_indices: set[int],
-        idx: int,
-        max_model_len: int,
-    ) -> bool:
-        if idx in protected_indices:
-            return False
-        if msg.role in {MessageRole.USER.value, MessageRole.SYSTEM.value}:
-            return False
-        if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
-            return False
-        if MessageManager._is_artifact_reference_message(msg):
-            return False
-        if MessageManager._is_compress_history_tool_call(msg):
-            return False
-        metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
-        if metadata.get("tool_name") == COMPRESS_HISTORY_TOOL_NAME:
-            return False
-        content = msg.get_content()
-        if not content:
-            return False
-        token_estimate = MessageManager.calculate_str_token_length(content)
-        return (
-            token_estimate > DEFAULT_RULE_OFFLOAD_TOKEN_THRESHOLD
-            or token_estimate > int(max_model_len * 0.1)
-        )
-
-    @staticmethod
     def _last_tool_call_result_index(
         messages: List[MessageChunk],
         tool_name: str,
@@ -1396,56 +1378,6 @@ class MessageManager:
         return None
 
     @staticmethod
-    def _apply_rule_artifact_offload(
-        messages: List[MessageChunk],
-        session_id: Optional[str],
-        max_model_len: int,
-        artifact_root: Optional[str],
-        protection_count: int = DEFAULT_RULE_PROTECTION_COUNT,
-    ) -> List[MessageChunk]:
-        if not messages:
-            return []
-        if not artifact_root:
-            logger.debug(
-                "MessageManager: artifact_root 未设置，跳过规则 artifact offload"
-            )
-            return deepcopy(messages)
-        protected = MessageManager._pair_safe_protected_indices(
-            messages, protection_count
-        )
-        last_todo_result_idx = MessageManager._last_tool_call_result_index(
-            messages, TODO_WRITE_TOOL_NAME
-        )
-        if last_todo_result_idx is not None:
-            protected.add(last_todo_result_idx)
-        out = deepcopy(messages)
-        for idx, msg in enumerate(out):
-            if not MessageManager._should_rule_offload(
-                msg, protected, idx, max_model_len
-            ):
-                continue
-            token_estimate = MessageManager.calculate_str_token_length(
-                msg.get_content()
-            )
-            path, display_path = MessageManager._write_context_artifact(
-                msg, session_id, artifact_root
-            )
-            msg.content = MessageManager._artifact_reference_content(
-                msg, display_path, abs_path=path
-            )
-            if msg.metadata is None:
-                msg.metadata = {}
-            msg.metadata.update(
-                {
-                    "context_artifact_ref": True,
-                    "original_content_path": display_path,
-                    "original_content_abs_path": path,
-                    "original_token_estimate": token_estimate,
-                }
-            )
-        return out
-
-    @staticmethod
     def _base_inference_view(messages: List[MessageChunk]) -> List[MessageChunk]:
         if not messages:
             return []
@@ -1456,8 +1388,7 @@ class MessageManager:
         filtered_messages = [
             msg
             for msg in messages
-            if msg.role != MessageRole.SYSTEM.value
-            and MessageManager.should_include_in_llm(msg)
+            if MessageManager.should_include_in_llm(msg)
         ]
         filtered_messages = MessageManager._coalesce_reasoning_for_inference(
             filtered_messages
@@ -1472,6 +1403,10 @@ class MessageManager:
             covered_by_visible.update(pair["covered_indices"])
         out: List[MessageChunk] = []
         for idx, msg in enumerate(filtered_messages):
+            if msg.role == MessageRole.SYSTEM.value:
+                # Keep legacy system IDs available while validating compression
+                # coverage, then enforce the normal provider-view exclusion.
+                continue
             if idx in hidden_pairs:
                 continue
             if idx in covered_by_visible:
@@ -1644,6 +1579,8 @@ class MessageManager:
 
         metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
         scope = metadata.get("llm_scope")
+        if scope == "never":
+            return False
         if scope == "next_request":
             return metadata.get("llm_state", "pending") == "pending"
         if scope in {None, "durable"}:
@@ -1694,22 +1631,14 @@ class MessageManager:
     @staticmethod
     def build_inference_view(
         messages: List[MessageChunk],
-        session_id: Optional[str] = None,
-        max_model_len: int = 128000,
-        artifact_root: Optional[str] = None,
-        rule_protection_count: int = DEFAULT_RULE_PROTECTION_COUNT,
-        apply_rule_compression: bool = True,
     ) -> List[MessageChunk]:
-        base = MessageManager._base_inference_view(messages)
-        if not apply_rule_compression:
-            return base
-        return MessageManager._apply_rule_artifact_offload(
-            base,
-            session_id=session_id,
-            max_model_len=max_model_len,
-            artifact_root=artifact_root,
-            protection_count=rule_protection_count,
-        )
+        """Build the provider-facing history view from durable messages.
+
+        Main-session history is reduced only by successful persistent LLM
+        summaries. Legacy artifact-reference messages remain readable as ordinary
+        historical text, but this path never creates or truncates content.
+        """
+        return MessageManager._base_inference_view(messages)
 
     def insert_messages_after(
         self, message_id: str, messages: Union[MessageChunk, List[MessageChunk]]
@@ -1750,97 +1679,118 @@ class MessageManager:
     @staticmethod
     def select_llm_compression_segment(
         messages: List[MessageChunk],
-        max_model_len: int,
         active_protection_count: int = DEFAULT_LLM_PROTECTION_COUNT,
     ) -> Optional[List[MessageChunk]]:
+        """Select history for one persistent LLM summary.
+
+        The latest user message and a pair-safe recent tail are always protected.
+        With multiple visible turns, every unprotected message before the latest
+        user belongs to history. With a single visible turn, only the closed
+        assistant/tool prefix is eligible. The latest visible summary pair is
+        included so every new summary supersedes the previous one.
+        """
         effective = MessageManager._base_inference_view(messages)
         if not effective:
             return None
         protected = MessageManager._pair_safe_protected_indices(
             effective, active_protection_count
         )
-        current_user_ids = [
-            msg.message_id for msg in effective if msg.role == MessageRole.USER.value
+        user_indices = [
+            idx for idx, msg in enumerate(effective) if msg.role == MessageRole.USER.value
         ]
-        if current_user_ids:
-            last_user_id = next(
-                reversed([mid for mid in current_user_ids if mid]), None
-            )
-        else:
-            last_user_id = None
-        target_min = int(max_model_len * 0.25)
-        target_max = int(max_model_len * 0.35)
-        segment: List[MessageChunk] = []
-        tokens = 0
-        from sagents.context.messages.token_accounting import PromptTokenEstimator
+        last_user_idx = user_indices[-1] if user_indices else None
+        selected: set[int] = set()
 
-        for idx, msg in enumerate(effective):
-            if idx in protected:
-                continue
-            if msg.role == MessageRole.SYSTEM.value:
-                continue
-            if last_user_id and msg.message_id == last_user_id:
-                continue
-            has_value = (
-                msg.role in {MessageRole.ASSISTANT.value, MessageRole.TOOL.value}
-                or MessageManager._is_successful_compression_result(msg)
-                or MessageManager._is_compress_history_tool_call(msg)
+        visible_pairs = [
+            pair
+            for pair in MessageManager._expanded_compression_pairs(effective)
+            if not pair.get("covered_by_later")
+        ]
+        if visible_pairs:
+            latest_pair = max(visible_pairs, key=lambda pair: pair["assistant_idx"])
+            pair_indices = set(latest_pair["pair_indices"])
+            # Summary nodes are historical memory rather than active-turn
+            # messages. They must remain eligible even when the pair happens to
+            # fall inside the numeric recent-message tail; otherwise a second
+            # provider overflow cannot build the next hierarchical summary.
+            selected.update(pair_indices)
+
+        if last_user_idx is not None and len(user_indices) > 1:
+            selected.update(
+                idx
+                for idx in range(last_user_idx)
+                if idx not in protected
+                and effective[idx].role != MessageRole.SYSTEM.value
             )
-            if not has_value and msg.role != MessageRole.USER.value:
+        elif last_user_idx is not None:
+            protected_after_user = [idx for idx in protected if idx > last_user_idx]
+            active_limit = (
+                min(protected_after_user) if protected_after_user else len(effective)
+            )
+            safe_end: Optional[int] = None
+            for idx in range(last_user_idx + 1, active_limit):
+                msg = effective[idx]
+                if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
+                    continue
+                result_ids = MessageManager._tool_result_ids_for_assistant(msg)
+                if not result_ids:
+                    continue
+                matched_result_indices = {
+                    result_idx
+                    for result_idx in range(idx + 1, active_limit)
+                    if effective[result_idx].role == MessageRole.TOOL.value
+                    and effective[result_idx].tool_call_id in result_ids
+                }
+                matched_ids = {
+                    effective[result_idx].tool_call_id
+                    for result_idx in matched_result_indices
+                }
+                if result_ids.issubset(matched_ids):
+                    safe_end = max(matched_result_indices)
+            if safe_end is not None:
+                selected.update(
+                    idx
+                    for idx in range(last_user_idx + 1, safe_end + 1)
+                    if idx not in protected
+                )
+        elif effective:
+            selected.update(
+                idx for idx in range(len(effective)) if idx not in protected
+            )
+
+        # A provider tool pair is atomic. Drop incomplete pairs rather than
+        # hiding only one side behind a summary anchor.
+        for idx, msg in enumerate(effective):
+            if msg.role != MessageRole.ASSISTANT.value or not msg.tool_calls:
                 continue
-            segment.append(msg)
-            request_message = MessageManager.convert_message_to_dict_for_request(msg)
-            if request_message is not None:
-                tokens += PromptTokenEstimator.manifest(
-                    [request_message]
-                ).conservative_tokens
-            else:
-                tokens += MessageManager.calculate_message_token_length(msg)
-            if tokens >= target_min:
-                break
-            if tokens >= target_max:
-                break
+            result_ids = MessageManager._tool_result_ids_for_assistant(msg)
+            result_indices = {
+                result_idx
+                for result_idx, result in enumerate(effective)
+                if result.role == MessageRole.TOOL.value
+                and result.tool_call_id in result_ids
+            }
+            if idx in selected and (
+                not result_ids
+                or not result_ids.issubset(
+                    {effective[result_idx].tool_call_id for result_idx in result_indices}
+                )
+                or not result_indices.issubset(selected)
+            ):
+                selected.discard(idx)
+                selected.difference_update(result_indices)
+            elif idx not in selected:
+                selected.difference_update(result_indices)
+
+        if last_user_idx is not None:
+            selected.discard(last_user_idx)
+        segment = [effective[idx] for idx in sorted(selected)]
         if not any(
             msg.role in {MessageRole.ASSISTANT.value, MessageRole.TOOL.value}
             for msg in segment
         ):
             return None
-        segment_ids = {msg.message_id for msg in segment if msg.message_id}
-        expanded_segment = list(segment)
-        for msg in effective:
-            if msg.role == MessageRole.ASSISTANT.value and msg.tool_calls:
-                result_ids = set(MessageManager._tool_result_ids_for_assistant(msg))
-                if result_ids and result_ids.intersection(
-                    item.tool_call_id
-                    for item in segment
-                    if item.role == MessageRole.TOOL.value
-                ):
-                    if msg.message_id and msg.message_id not in segment_ids:
-                        expanded_segment.append(msg)
-                        segment_ids.add(msg.message_id)
-                continue
-            if msg.role != MessageRole.TOOL.value or not msg.tool_call_id:
-                continue
-            for assistant in effective:
-                if (
-                    assistant.role == MessageRole.ASSISTANT.value
-                    and assistant.tool_calls
-                    and msg.tool_call_id
-                    in MessageManager._tool_result_ids_for_assistant(assistant)
-                    and assistant.message_id in segment_ids
-                ):
-                    if msg.message_id and msg.message_id not in segment_ids:
-                        expanded_segment.append(msg)
-                        segment_ids.add(msg.message_id)
-                    break
-
-        order = {
-            msg.message_id: idx
-            for idx, msg in enumerate(effective)
-            if msg.message_id is not None
-        }
-        expanded_segment.sort(key=lambda msg: order.get(msg.message_id, 10**9))
-        return expanded_segment or None
+        return segment
 
     @staticmethod
     def _tool_call_entry_name_and_id(tc: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -2092,10 +2042,7 @@ class MessageManager:
         Returns:
             List[MessageChunk]: 提取后的消息列表
         """
-        return MessageManager.build_inference_view(
-            messages,
-            apply_rule_compression=False,
-        )
+        return MessageManager.build_inference_view(messages)
 
     def extract_all_context_messages(
         self,
@@ -2138,11 +2085,7 @@ class MessageManager:
             ]
 
         # 全量消息进入；压缩覆盖关系由 build_inference_view 统一处理。
-        active_messages = MessageManager.build_inference_view(
-            self.messages,
-            session_id=self.session_id,
-            apply_rule_compression=False,
-        )
+        active_messages = MessageManager.build_inference_view(self.messages)
 
         for msg in active_messages:
             if msg.is_user_input_message():
@@ -2178,93 +2121,6 @@ class MessageManager:
             f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}"
         )
         return result_messages
-
-    @staticmethod
-    def _apply_compression_level(msg: MessageChunk, level: int) -> MessageChunk:
-        """
-        应用特定等级的压缩 (Level 1 / Level 2)
-
-        Args:
-            msg: 原始消息
-            level: 压缩等级 (1: 轻度, 2: 强力)
-
-        Returns:
-            MessageChunk: 压缩后的消息副本
-        """
-        new_msg = deepcopy(msg)
-        content = new_msg.content
-
-        # 处理多模态消息格式
-        if isinstance(content, list):
-            # 多模态消息：压缩文本部分，保留图片（图片数据不被截断）
-            new_content = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        # 压缩文本内容
-                        text = item.get("text", "")
-                        if level == 1 and len(text) > 200:
-                            text = (
-                                text[:100]
-                                + f"\n...[Text truncated, total {len(text)} chars]...\n"
-                                + text[-100:]
-                            )
-                        elif level == 2 and len(text) > 100:
-                            text = (
-                                text[:100] + f"...[Text omitted, length: {len(text)}]"
-                            )
-                        new_content.append({"type": "text", "text": text})
-                    elif item.get("type") == "image_url":
-                        # 保留图片，但在 Level 2 时替换为占位符（移除图片，不截断）
-                        if level == 2:
-                            # Level 2: 将图片替换为占位符描述（完整移除，不截断 base64 数据）
-                            new_content.append(
-                                {
-                                    "type": "text",
-                                    "text": "...[Image content omitted]...",
-                                }
-                            )
-                        else:
-                            # Level 1: 保留完整图片数据，不截断
-                            new_content.append(item)
-                    else:
-                        new_content.append(item)
-                else:
-                    new_content.append(item)
-            new_msg.content = new_content
-            return new_msg
-
-        content = content or ""
-
-        if level == 1:
-            # Level 1: Tool Output 截断 (100+100), Remove Thinking
-            if new_msg.role == MessageRole.TOOL.value:
-                if len(content) > 200:
-                    new_msg.content = (
-                        content[:100]
-                        + f"\n...[Tool output truncated, total {len(content)} chars]...\n"
-                        + content[-100:]
-                    )
-            elif new_msg.role == MessageRole.ASSISTANT.value:
-                # 移除 <thinking>
-                if "<thinking>" in content:
-                    new_msg.content = re.sub(
-                        r"<thinking>.*?</thinking>", "", content, flags=re.DOTALL
-                    ).strip()
-
-        elif level == 2:
-            # Level 2: 强力截断 (100 chars)
-            if new_msg.role == MessageRole.TOOL.value:
-                if len(content) > 100:
-                    new_msg.content = (
-                        content[:100]
-                        + f"...[Tool output omitted, length: {len(content)}]"
-                    )
-            elif new_msg.role == MessageRole.ASSISTANT.value:
-                if len(content) > 100:
-                    new_msg.content = content[:100] + "...[Content truncated]"
-
-        return new_msg
 
     @staticmethod
     def _group_messages_indices(messages: List[MessageChunk]) -> List[List[int]]:
@@ -2391,45 +2247,6 @@ class MessageManager:
                 return working_messages
 
         return working_messages
-
-    @staticmethod
-    def should_compress_messages(
-        messages: List[MessageChunk],
-        max_model_len: int = 40000,
-        max_new_tokens: int = 20000,
-    ) -> tuple[bool, int, int]:
-        """
-        判断是否需要压缩消息（静态版本，不依赖实例）
-
-        触发条件：
-        1. 剩余空间 < 20% * max_model_len
-        2. 或 剩余空间 < max_new_tokens
-
-        Args:
-            messages: 消息列表
-            max_model_len: 最大模型长度，默认 40000
-            max_new_tokens: 最大新token数，默认 20000
-
-        Returns:
-            tuple[bool, int, int]: (是否需要压缩, 当前token数, 最大模型长度)
-        """
-        # 计算当前消息长度
-        current_tokens = MessageManager.calculate_messages_token_length(messages)
-
-        # 阈值判断
-        remaining_tokens = max_model_len - current_tokens
-        threshold_ratio = int(max_model_len * 0.2)
-
-        should_compress = (
-            remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens
-        )
-
-        if should_compress:
-            logger.info(
-                f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}, 当前 {current_tokens}, 20%阈值 {threshold_ratio}, max_new_tokens {max_new_tokens}), 需要压缩"
-            )
-
-        return should_compress, current_tokens, max_model_len
 
     @staticmethod
     def normalize_content_for_provider(content: Any) -> Any:
