@@ -137,6 +137,19 @@ async def test_parent_traversal_escape_is_rejected(provider, tmp_path):
     assert not (tmp_path / "escape.txt").exists()
 
 
+# --- atomic overwrite ---------------------------------------------------------
+
+
+async def test_overwrite_replaces_content_without_temp_leftovers(provider, tmp_path):
+    await provider.write_file("f.txt", "first version\n")
+    await provider.write_file("f.txt", "second version\n")
+    assert await provider.read_file("f.txt") == "second version\n"
+    # The atomic writer must not leave its temp file behind in the workspace.
+    workspace = tmp_path / "workspace"
+    leftovers = [p.name for p in workspace.iterdir() if p.name.startswith(".sage-tmp-")]
+    assert leftovers == []
+
+
 # --- delete -------------------------------------------------------------------
 
 

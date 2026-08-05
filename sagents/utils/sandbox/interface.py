@@ -220,8 +220,9 @@ class ISandboxHandle(ABC):
 
     # ========== 文件操作 ==========
     #
-    # 文件原语行为契约（provider 实现须遵守，由
-    # tests/sagents/utils/sandbox/test_provider_fs_conformance.py 校验）：
+    # 文件原语行为契约。进程内 provider（Local/Passthrough）保证以下行为，
+    # 并由 tests/sagents/utils/sandbox/test_provider_fs_conformance.py 校验；
+    # 远端 provider 正在向此契约收敛（见文末）：
     #
     # - 路径：入参为虚拟路径（工作区相对或已声明挂载内的路径）。实现须先按
     #   POSIX 语义规范化，再校验其落在工作区或某个已声明挂载范围内；``..``
@@ -232,8 +233,9 @@ class ISandboxHandle(ABC):
     # - 编码：``encoding`` 参数须被尊重；无法按该编码解码的内容（如二进制）
     #   应向上抛出，而非静默替换。
     #
-    # 注：符号链接策略、以及远端 provider 对本契约的符合性，尚未纳入契约，
-    # 作为后续工作单独推进。
+    # 注：本契约目前由进程内 provider（Local/Passthrough）保证，并由上述
+    # 一致性测试校验；远端 provider（kubernetes/firecracker/opensandbox）
+    # 尚未完全符合，连同符号链接策略作为后续工作单独推进。
 
     @abstractmethod
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
