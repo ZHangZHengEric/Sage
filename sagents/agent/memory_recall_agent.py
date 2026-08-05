@@ -133,11 +133,7 @@ class MemoryRecallAgent(AgentBase):
     def _extract_query_context_messages(message_manager: Any) -> List[MessageChunk]:
         """Build a compact query-generation view from recent conversation text."""
 
-        active_messages = MessageManager.build_inference_view(
-            message_manager.messages,
-            session_id=message_manager.session_id,
-            apply_rule_compression=False,
-        )
+        active_messages = MessageManager.build_inference_view(message_manager.messages)
 
         chats: List[List[MessageChunk]] = []
         current_chat: List[MessageChunk] = []

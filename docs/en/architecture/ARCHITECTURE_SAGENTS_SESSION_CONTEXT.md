@@ -129,12 +129,11 @@ flowchart TB
     Inputs[chunks in] --> MM[MessageManager]
     MM --> Merge[merge same message_id pieces]
     MM --> Filter[filter system messages<br/>system is built per-call by agents]
-    MM --> Compress[compress / trim by token budget]
-    MM --> Estimate[token estimation<br/>global ratio sample pool]
-    MM --> Out1[agents fetch budget-fitting history before LLM call]
+    MM --> Compress[persistent model summary<br/>with coverage anchors]
+    MM --> Estimate[full-request token projection<br/>calibrated by provider usage]
+    MM --> Out1[agents build the complete provider request]
     MM --> Out2[stream out to caller]
-    MM --> CB[ContextBudgetManager<br/>window / priority / buffer]
-    CB --> Compress
+    MM --> CB[ContextBudgetManager<br/>auxiliary prompt limits]
 ```
 
 
@@ -142,8 +141,10 @@ flowchart TB
 Highlights:
 
 - System messages do not enter history; agents assemble them at call time.
-- Context budgeting is centralized in `ContextBudgetManager`; all agents share the same rules.
-- Token estimation uses a global sampled ratio (heuristic) to avoid running the tokenizer per message.
+- Main-session history is never rule-truncated or moved to new artifacts. Above 85% of the input window it is replaced only by a persistent model-generated summary; provider context-window errors enter the same summary recovery path directly.
+- The latest user message and recent active messages are protected, and assistant tool calls stay paired with all matching tool results. Repeated summaries form coverage anchors, so only the latest effective summary remains in the inference view.
+- Full-request token projection is a soft proactive trigger calibrated by provider prompt usage. Output-token limits are not deducted. Provider rejection remains authoritative.
+- Auxiliary Agents may still build a temporary budget-limited prompt view; that view never rewrites the main session ledger.
 
 ## 4. Memory: Session-level + User-level
 

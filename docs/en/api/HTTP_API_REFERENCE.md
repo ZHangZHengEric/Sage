@@ -585,7 +585,7 @@ Constraint:
 | `force_summary`             | boolean  | Force a summary                | Require a closing summary            |
 | `memory_type`               | string   | Temporary memory mode          | Override memory strategy             |
 | `custom_sub_agents`         | array    | Inline sub-agent configs       | Use ad-hoc sub-agents                |
-| `context_budget_config`     | object   | Context budget settings        | Control trimming and budget          |
+| `context_budget_config`     | object   | Context budget settings        | Control request budgeting; main history is compacted only by persistent model summaries |
 | `extra_mcp_config`          | object   | Extra MCP config               | Attach MCP config per request        |
 
 

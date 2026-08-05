@@ -1,6 +1,4 @@
 import unittest
-import time
-import tempfile
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 
@@ -72,8 +70,7 @@ class TestMessageCompression(unittest.TestCase):
             )
         print("=" * 60)
 
-    def test_level_1_compression(self):
-        """规则压缩将旧的大 tool result 可逆 offload 到 artifact"""
+    def test_main_inference_view_never_truncates_or_offloads_content(self):
         messages = [
             self.create_message(MessageRole.SYSTEM.value, "System Prompt"),
             self.create_message(MessageRole.USER.value, "User Request"),
@@ -85,116 +82,24 @@ class TestMessageCompression(unittest.TestCase):
             ],
         ]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compressed = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-test",
-                max_model_len=2000,
-                artifact_root=tmpdir,
-                apply_rule_compression=True,
-            )
-        self.print_messages("Level 1 Compression Result", compressed)
+        compressed = MessageManager.build_inference_view(messages)
 
         self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
-        self.assertIn("[Content moved to context artifact]", compressed[1].content)  # pyright: ignore[reportArgumentType]
-        self.assertTrue(compressed[1].metadata["context_artifact_ref"])
-        self.assertNotIn("token_estimate:", compressed[1].content)  # pyright: ignore[reportArgumentType]
-
-        # 规则压缩不再做不可逆 thinking 删除。
+        self.assertEqual(compressed[1].content, "T" * 20000)
         self.assertIn("<thinking>", compressed[2].content)  # pyright: ignore[reportArgumentType]
         self.assertIn("The answer is 42", compressed[2].content)  # pyright: ignore[reportArgumentType]
 
-    def test_artifact_reference_is_stable_across_inference_views(self):
-        """同一条历史 tool result 多次 offload 时，prompt reference 保持稳定。"""
+    def test_legacy_artifact_reference_remains_readable_as_history_text(self):
+        reference = "[Content moved to context artifact]\noriginal_content_path: old.txt"
         messages = [
             self.create_message(MessageRole.USER.value, "User Request"),
-            self.create_message(MessageRole.TOOL.value, "T" * 20000),
-            *[
-                self.create_message(MessageRole.ASSISTANT.value, f"tail {idx}")
-                for idx in range(20)
-            ],
+            self.create_message(MessageRole.TOOL.value, reference),
         ]
+        messages[1].metadata["context_artifact_ref"] = True
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            first = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-stable-artifact",
-                max_model_len=2000,
-                artifact_root=tmpdir,
-                apply_rule_compression=True,
-            )
-            second = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-stable-artifact",
-                max_model_len=2000,
-                artifact_root=tmpdir,
-                apply_rule_compression=True,
-            )
-
-        self.assertEqual(first[1].content, second[1].content)
-        self.assertIn("[Content moved to context artifact]", first[1].content)  # pyright: ignore[reportArgumentType]
-        self.assertNotIn("token_estimate:", first[1].content)  # pyright: ignore[reportArgumentType]
-
-    def test_rule_compression_protects_last_todo_write_result(self):
-        messages = [
-            self.create_message(MessageRole.USER.value, "User Request"),
-            self.create_assistant_tool_call("todo_write", "todo_old"),
-            self.create_tool_result("todo_old", "OLD" * 7000),
-            self.create_assistant_tool_call("todo_write", "todo_new"),
-            self.create_tool_result("todo_new", "NEW" * 7000),
-            *[
-                self.create_message(MessageRole.ASSISTANT.value, f"tail {idx}")
-                for idx in range(25)
-            ],
-        ]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compressed = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-todo",
-                max_model_len=2000,
-                artifact_root=tmpdir,
-                rule_protection_count=5,
-                apply_rule_compression=True,
-            )
-
-        old_result = next(msg for msg in compressed if msg.tool_call_id == "todo_old")
-        new_result = next(msg for msg in compressed if msg.tool_call_id == "todo_new")
-        self.assertIn("[Content moved to context artifact]", old_result.content)  # pyright: ignore[reportArgumentType]
-        self.assertNotIn("[Content moved to context artifact]", new_result.content)  # pyright: ignore[reportArgumentType]
-        self.assertTrue(str(new_result.content).startswith("NEW"))
-
-    def test_level_2_aging(self):
-        """规则压缩不再因为 aging 做不可逆截断，只做 artifact offload"""
-        old_time = time.time() - 25 * 3600  # 25 hours ago
-        messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System Prompt"),
-            self.create_message(MessageRole.USER.value, "Old User"),
-            self.create_message(
-                MessageRole.ASSISTANT.value,
-                "Old Assistant Long Content " * 400,
-                timestamp=old_time,
-            ),
-            self.create_message(MessageRole.USER.value, "New User"),
-            *[
-                self.create_message(MessageRole.ASSISTANT.value, f"tail {idx}")
-                for idx in range(20)
-            ],
-        ]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compressed = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-aging",
-                max_model_len=2000,
-                artifact_root=tmpdir,
-                apply_rule_compression=True,
-            )
-        self.print_messages("Aging Strategy Result", compressed)
-
-        self.assertTrue(all(msg.role != MessageRole.SYSTEM.value for msg in compressed))
-        self.assertIn("[Content moved to context artifact]", compressed[1].content)  # pyright: ignore[reportArgumentType]
-        self.assertNotIn("...[Content truncated]", compressed[1].content)  # pyright: ignore[reportArgumentType]
+        view = MessageManager.build_inference_view(messages)
+        self.assertEqual(view[1].content, reference)
+        self.assertTrue(view[1].metadata["context_artifact_ref"])
 
     def test_level_3_history_drop(self):
         """测试 Level 3: 历史分组丢弃"""
@@ -266,58 +171,6 @@ class TestMessageCompression(unittest.TestCase):
         tool_msg = compressed[-1]
         self.assertNotIn("truncated", tool_msg.content)  # pyright: ignore[reportArgumentType]
         self.assertNotIn("omitted", tool_msg.content)  # pyright: ignore[reportArgumentType]
-
-    def test_recent_messages_count_protection(self):
-        """测试规则保护区按条数保护末尾 N 条消息"""
-        # 构造场景：最近的 tool output 非常大，远超 token budget
-        very_long_tool_output = "X" * 5000  # 很长的 tool 输出
-        messages = [
-            self.create_message(MessageRole.SYSTEM.value, "System"),
-            # 旧消息组
-            self.create_message(MessageRole.USER.value, "User 1 (Old)"),
-            self.create_message(MessageRole.ASSISTANT.value, "Asst 1 " * 100),
-            # 最近消息（末尾 2 条）
-            self.create_message(MessageRole.USER.value, "User 2 (Recent)"),
-            self.create_message(MessageRole.TOOL.value, very_long_tool_output),
-        ]
-
-        tiny_budget = 50
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compressed_no_protect = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-no-protect",
-                max_model_len=tiny_budget,
-                artifact_root=tmpdir,
-                rule_protection_count=0,
-                apply_rule_compression=True,
-            )
-        self.print_messages("No recent protection", compressed_no_protect)
-        self.assertIn(
-            "[Content moved to context artifact]", compressed_no_protect[-1].content
-        )  # pyright: ignore[reportArgumentType]
-
-        # 保护末尾 2 条（recent_messages_count=2）：User 2 和 Tool 不被压缩
-        with tempfile.TemporaryDirectory() as tmpdir:
-            compressed_with_protect = MessageManager.build_inference_view(
-                messages,
-                session_id="sess-protect",
-                max_model_len=tiny_budget,
-                artifact_root=tmpdir,
-                rule_protection_count=2,
-                apply_rule_compression=True,
-            )
-        self.print_messages("With recent_messages_count=2", compressed_with_protect)
-
-        # 验证最近的 tool output 不被截断
-        last_tool_msg = compressed_with_protect[-1]
-        self.assertNotIn("omitted", last_tool_msg.content)  # pyright: ignore[reportArgumentType]
-        self.assertNotIn("truncated", last_tool_msg.content)  # pyright: ignore[reportArgumentType]
-        self.assertEqual(last_tool_msg.content, very_long_tool_output)
-
-        # 验证 User 2（倒数第 2 条）也被保护
-        user2_msg = compressed_with_protect[-2]
-        self.assertEqual(user2_msg.content, "User 2 (Recent)")
 
     def test_token_budget_view_is_prompt_local_and_preserves_originals(self):
         messages = [

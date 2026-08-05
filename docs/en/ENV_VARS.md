@@ -176,7 +176,7 @@ single-user environment inheritance for compatibility.
 | `SAGE_REPEAT_PATTERN_MAX_HITS` | `3` | Consecutive repeat-pattern detections before SimpleAgent hard-pauses the execution loop |
 | `SAGE_CLI_MAX_LOOP_COUNT` | — | Max loops per CLI turn |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | code defaults | Context budget allocation knobs |
-| `SAGE_CONTEXT_COMPRESSION_THRESHOLD` | `0.85` | Maximum fraction of the model context window available to the complete input request before safe rule-based offload or persistent compression. Must be greater than `0` and less than `1`; output-token limits do not affect it. |
+| `SAGE_CONTEXT_COMPRESSION_THRESHOLD` | `0.85` | Maximum fraction of the model input window available to the complete input request before persistent model-generated history summarization starts. Must be greater than `0` and less than `1`; output-token limits do not affect it. |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD` | `15` | When the available tool count is at or below this value, skip the LLM tool-suggestion call and pass all available tools through |
 | `SAGE_MAX_TOOL_RESULT_TOKENS` | `12000` | Estimated maximum token count for one tool result returned to the agent; empty, non-integer, or non-positive values fall back to the default |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE` | `false` | When `false`, stream tool-call deltas for lower UI latency; when `true`, buffer a complete tool call before emitting it |

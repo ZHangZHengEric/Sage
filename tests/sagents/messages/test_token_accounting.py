@@ -1,6 +1,8 @@
 from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.messages.token_accounting import (
+    ContextOverflowStrategy,
+    ContextPolicy,
     ContextViewSpec,
     MAX_CHECKPOINTS_PER_SESSION,
     PromptBudgetManager,
@@ -10,6 +12,10 @@ from sagents.context.messages.token_accounting import (
 
 def _provider_message(role: str, content: str) -> dict:
     return {"role": role, "content": content}
+
+
+def test_default_context_policy_is_explicit_passthrough():
+    assert ContextPolicy().overflow_strategy is ContextOverflowStrategy.PASSTHROUGH
 
 
 def test_measure_inference_view_reports_per_message_and_prefix_totals():

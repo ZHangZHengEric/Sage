@@ -90,7 +90,6 @@ def _compression_pair(
         "commands_run": [],
         "important_errors": [],
         "user_requirements": [],
-        "original_content_paths": [],
         "stats": {"source_message_count": len(source_ids)},
     }
     tool_result = _msg(
@@ -112,9 +111,7 @@ def _compression_pair(
     return tool_call, tool_result
 
 
-def test_rule_artifact_offload_keeps_main_ledger_and_protects_user_and_tool_args(
-    tmp_path,
-):
+def test_main_inference_view_preserves_large_history_without_artifact_offload():
     old_user = _msg(
         MessageRole.USER.value,
         "U" * 30_000,
@@ -134,34 +131,16 @@ def test_rule_artifact_offload_keeps_main_ledger_and_protects_user_and_tool_args
     ]
     messages = [old_user, old_tool_call, old_tool, *recent_tail]
 
-    view = MessageManager.build_inference_view(
-        messages,
-        session_id="sess-artifact",
-        max_model_len=20_000,
-        artifact_root=str(tmp_path),
-        apply_rule_compression=True,
-    )
+    view = MessageManager.build_inference_view(messages)
 
     assert old_tool.content == "T" * 30_000
     assert view[0].content == "U" * 30_000
     assert view[1].tool_calls[0]["function"]["arguments"] == '{"full": "arguments"}'
-    assert "[Content moved to context artifact]" in view[2].content
-    assert (
-        "original_content_path: .sage/context/artifacts/sess-artifact/t-old.txt"
-        in view[2].content
-    )
-    assert "original_content_abs_path:" in view[2].content
-    original_content_path = view[2].metadata["original_content_path"]
-    assert original_content_path == ".sage/context/artifacts/sess-artifact/t-old.txt"
-    assert (
-        view[2]
-        .metadata["original_content_abs_path"]
-        .endswith("/sess-artifact/t-old.txt")
-    )
-    assert (tmp_path / "sess-artifact" / "t-old.txt").read_text() == "T" * 30_000
+    assert view[2].content == "T" * 30_000
+    assert not view[2].metadata.get("context_artifact_ref")
 
 
-def test_rule_artifact_offload_does_not_compress_compression_pair(tmp_path):
+def test_main_inference_view_uses_llm_compression_pair_without_rewriting_it():
     raw = _msg(
         MessageRole.ASSISTANT.value,
         "raw",
@@ -176,142 +155,10 @@ def test_rule_artifact_offload_does_not_compress_compression_pair(tmp_path):
         summary="S" * 30_000,
     )
 
-    view = MessageManager.build_inference_view(
-        [raw, tool_call, tool_result],
-        session_id="sess-compress",
-        max_model_len=20_000,
-        artifact_root=str(tmp_path),
-        apply_rule_compression=True,
-    )
+    view = MessageManager.build_inference_view([raw, tool_call, tool_result])
 
     assert [msg.message_id for msg in view] == ["compress-call", "compress-result"]
     assert "[Content moved to context artifact]" not in view[-1].content
-
-
-@pytest.mark.parametrize(
-    ("role", "message_type", "should_offload"),
-    [
-        (MessageRole.USER.value, MessageType.USER_INPUT.value, False),
-        (MessageRole.SYSTEM.value, MessageType.SYSTEM.value, False),
-        (MessageRole.ASSISTANT.value, MessageType.ASSISTANT_TEXT.value, True),
-        (MessageRole.TOOL.value, MessageType.TOOL_CALL_RESULT.value, True),
-        (MessageRole.ASSISTANT.value, MessageType.SKILL_OBSERVATION.value, True),
-    ],
-)
-def test_rule_artifact_offload_role_matrix(
-    tmp_path, role, message_type, should_offload
-):
-    long_msg = _msg(
-        role,
-        "X" * 30_000,
-        message_type,
-        message_id="candidate",
-        tool_call_id="call-1" if role == MessageRole.TOOL.value else None,
-    )
-    messages = [
-        long_msg,
-        *[
-            _msg(
-                MessageRole.ASSISTANT.value,
-                f"tail-{idx}",
-                MessageType.ASSISTANT_TEXT.value,
-                message_id=f"tail-{idx}",
-            )
-            for idx in range(20)
-        ],
-    ]
-
-    view = MessageManager.build_inference_view(
-        messages,
-        session_id="sess-matrix",
-        max_model_len=20_000,
-        artifact_root=str(tmp_path),
-        apply_rule_compression=True,
-    )
-
-    if should_offload:
-        assert "[Content moved to context artifact]" in view[0].content
-        assert (
-            view[0]
-            .metadata["original_content_path"]
-            .startswith(".sage/context/artifacts/sess-matrix/")
-        )
-    elif role == MessageRole.SYSTEM.value:
-        assert all(msg.role != MessageRole.SYSTEM.value for msg in view)
-    else:
-        assert view[0].content == "X" * 30_000
-
-
-def test_rule_artifact_offload_requires_artifact_root():
-    long_tool = _tool_result("tool-old", "call-1", "T" * 30_000)
-    view = MessageManager.build_inference_view(
-        [
-            long_tool,
-            *[
-                _msg(
-                    MessageRole.ASSISTANT.value,
-                    f"tail-{idx}",
-                    MessageType.ASSISTANT_TEXT.value,
-                    message_id=f"tail-{idx}",
-                )
-                for idx in range(20)
-            ],
-        ],
-        session_id="sess-no-root",
-        max_model_len=20_000,
-        artifact_root=None,
-        apply_rule_compression=True,
-    )
-
-    assert view[0].content == "T" * 30_000
-    assert not view[0].metadata.get("context_artifact_ref")
-
-
-def test_rule_pair_safe_protection_expands_multi_tool_call_group(tmp_path):
-    assistant = _msg(
-        MessageRole.ASSISTANT.value,
-        "",
-        MessageType.TOOL_CALL.value,
-        message_id="tool-call-group",
-        tool_calls=[
-            {
-                "id": "call-a",
-                "type": "function",
-                "function": {"name": "a", "arguments": '{"a": "full"}'},
-            },
-            {
-                "id": "call-b",
-                "type": "function",
-                "function": {"name": "b", "arguments": '{"b": "full"}'},
-            },
-        ],
-    )
-    result_a = _tool_result("result-a", "call-a", "A" * 30_000)
-    result_b = _tool_result("result-b", "call-b", "B" * 30_000)
-    messages = [
-        _msg(
-            MessageRole.ASSISTANT.value,
-            "old",
-            MessageType.ASSISTANT_TEXT.value,
-            message_id="old",
-        ),
-        assistant,
-        result_a,
-        result_b,
-    ]
-
-    view = MessageManager.build_inference_view(
-        messages,
-        session_id="sess-pairsafe",
-        max_model_len=20_000,
-        artifact_root=str(tmp_path),
-        rule_protection_count=1,
-        apply_rule_compression=True,
-    )
-
-    assert view[1].tool_calls[0]["function"]["arguments"] == '{"a": "full"}'
-    assert view[2].content == "A" * 30_000
-    assert view[3].content == "B" * 30_000
 
 
 @pytest.mark.parametrize(
@@ -358,6 +205,44 @@ def test_invalid_compression_pair_metadata_does_not_hide_raw_messages(metadata):
         "compress-call",
         "compress-result",
     ]
+
+
+def test_empty_or_partial_compression_summary_never_hides_source_messages():
+    raw_a = _msg(
+        MessageRole.USER.value,
+        "request",
+        MessageType.USER_INPUT.value,
+        message_id="raw-a",
+    )
+    raw_b = _msg(
+        MessageRole.ASSISTANT.value,
+        "answer",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="raw-b",
+    )
+    empty_call, empty_result = _compression_pair(
+        call_message_id="empty-call",
+        result_message_id="empty-result",
+        call_id="empty",
+        source_ids=["raw-a", "raw-b"],
+        summary="",
+    )
+    partial_call, partial_result = _compression_pair(
+        call_message_id="partial-call",
+        result_message_id="partial-result",
+        call_id="partial",
+        source_ids=["raw-a", "missing-source"],
+    )
+
+    empty_view = MessageManager.build_inference_view(
+        [raw_a, raw_b, empty_call, empty_result]
+    )
+    partial_view = MessageManager.build_inference_view(
+        [raw_a, raw_b, partial_call, partial_result]
+    )
+
+    assert [msg.message_id for msg in empty_view][:2] == ["raw-a", "raw-b"]
+    assert [msg.message_id for msg in partial_view][:2] == ["raw-a", "raw-b"]
 
 
 def test_inference_view_keeps_visible_compression_pair_and_hides_covered_raw_messages():
@@ -489,12 +374,194 @@ def test_llm_segment_can_include_visible_compression_pair_as_summary_node():
 
     segment = MessageManager.select_llm_compression_segment(
         [raw, inner_call, inner_result, *tail],
-        max_model_len=2000,
         active_protection_count=12,
     )
 
     assert segment is not None
     assert [msg.message_id for msg in segment] == ["inner-call", "inner-result"]
+
+
+def test_detached_summary_remains_eligible_for_repeated_provider_recovery():
+    inner_call, inner_result = _compression_pair(
+        call_message_id="inner-call",
+        result_message_id="inner-result",
+        call_id="inner",
+        source_ids=["raw-no-longer-in-view"],
+        summary="large prior summary",
+    )
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+
+    view = MessageManager.build_inference_view(
+        [inner_call, inner_result, current_user]
+    )
+    segment = MessageManager.select_llm_compression_segment(
+        view,
+        active_protection_count=2,
+    )
+
+    assert [msg.message_id for msg in view] == [
+        "inner-call",
+        "inner-result",
+        "u-current",
+    ]
+    assert segment is not None
+    assert [msg.message_id for msg in segment] == ["inner-call", "inner-result"]
+
+
+def test_llm_segment_includes_latest_summary_and_later_completed_turns():
+    raw = _msg(
+        MessageRole.ASSISTANT.value,
+        "old raw",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="raw-a",
+    )
+    inner_call, inner_result = _compression_pair(
+        call_message_id="inner-call",
+        result_message_id="inner-result",
+        call_id="inner",
+        source_ids=["raw-a"],
+    )
+    later_user = _msg(
+        MessageRole.USER.value,
+        "later request",
+        MessageType.USER_INPUT.value,
+        message_id="u-later",
+    )
+    later_assistant = _msg(
+        MessageRole.ASSISTANT.value,
+        "later answer",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-later",
+    )
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    tail = [
+        _msg(
+            MessageRole.ASSISTANT.value,
+            f"tail-{idx}",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id=f"tail-{idx}",
+        )
+        for idx in range(12)
+    ]
+
+    segment = MessageManager.select_llm_compression_segment(
+        [
+            raw,
+            inner_call,
+            inner_result,
+            later_user,
+            later_assistant,
+            current_user,
+            *tail,
+        ],
+        active_protection_count=12,
+    )
+
+    assert segment is not None
+    assert [msg.message_id for msg in segment] == [
+        "inner-call",
+        "inner-result",
+        "u-later",
+        "a-later",
+    ]
+
+
+def test_single_turn_segment_uses_only_closed_tool_groups():
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    first_call = _tool_call("call-message-1", "call-1")
+    first_result = _tool_result("result-1", "call-1", "first result")
+    second_call = _tool_call("call-message-2", "call-2")
+    second_result = _tool_result("result-2", "call-2", "second result")
+    recent_tail = [
+        _msg(
+            MessageRole.ASSISTANT.value,
+            f"tail-{idx}",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id=f"tail-{idx}",
+        )
+        for idx in range(2)
+    ]
+
+    segment = MessageManager.select_llm_compression_segment(
+        [
+            current_user,
+            first_call,
+            first_result,
+            second_call,
+            second_result,
+            *recent_tail,
+        ],
+        active_protection_count=2,
+    )
+
+    assert segment is not None
+    assert [msg.message_id for msg in segment] == [
+        "call-message-1",
+        "result-1",
+        "call-message-2",
+        "result-2",
+    ]
+
+
+def test_recent_protection_expands_to_complete_tool_pair():
+    old_user = _msg(
+        MessageRole.USER.value,
+        "old request",
+        MessageType.USER_INPUT.value,
+        message_id="u-old",
+    )
+    old_assistant = _msg(
+        MessageRole.ASSISTANT.value,
+        "old answer",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-old",
+    )
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    protected_call = _tool_call("protected-call", "protected-1")
+    protected_result = _tool_result(
+        "protected-result", "protected-1", "recent result"
+    )
+    recent_tail = _msg(
+        MessageRole.ASSISTANT.value,
+        "recent tail",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="recent-tail",
+    )
+
+    segment = MessageManager.select_llm_compression_segment(
+        [
+            old_user,
+            old_assistant,
+            current_user,
+            protected_call,
+            protected_result,
+            recent_tail,
+        ],
+        active_protection_count=2,
+    )
+
+    assert segment is not None
+    assert [msg.message_id for msg in segment] == ["u-old", "a-old"]
 
 
 def test_insert_messages_after_places_compression_pair_at_source_tail():
@@ -571,6 +638,47 @@ def test_insert_messages_after_moves_already_appended_compression_pair():
     assert manager.insert_messages_after("a1", [tool_call, tool_result]) is True
 
     assert [msg.message_id for msg in manager.messages] == [
+        "u1",
+        "a1",
+        "compress-call",
+        "compress-result",
+        "u2",
+    ]
+
+
+def test_stream_merge_relocates_compression_pair_before_current_turn():
+    old_messages = [
+        _msg(
+            MessageRole.USER.value,
+            "request",
+            MessageType.USER_INPUT.value,
+            message_id="u1",
+        ),
+        _msg(
+            MessageRole.ASSISTANT.value,
+            "answer",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id="a1",
+        ),
+        _msg(
+            MessageRole.USER.value,
+            "current",
+            MessageType.USER_INPUT.value,
+            message_id="u2",
+        ),
+    ]
+    tool_call, tool_result = _compression_pair(
+        call_message_id="compress-call",
+        result_message_id="compress-result",
+        call_id="compress-1",
+        source_ids=["u1", "a1"],
+    )
+
+    merged = MessageManager.merge_new_messages_to_old_messages(
+        [tool_call, tool_result], old_messages
+    )
+
+    assert [msg.message_id for msg in merged] == [
         "u1",
         "a1",
         "compress-call",
@@ -692,7 +800,6 @@ def test_select_llm_compression_segment_preserves_tool_pair_and_current_user():
 
     segment = MessageManager.select_llm_compression_segment(
         [old_user, old_call, old_tool, current_user, *tail],
-        max_model_len=2000,
         active_protection_count=12,
     )
 
@@ -722,6 +829,12 @@ def test_select_llm_compression_segment_never_includes_system_message():
         MessageType.ASSISTANT_TEXT.value,
         message_id="a-old",
     )
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
     tail = [
         _msg(
             MessageRole.ASSISTANT.value,
@@ -733,8 +846,7 @@ def test_select_llm_compression_segment_never_includes_system_message():
     ]
 
     segment = MessageManager.select_llm_compression_segment(
-        [system, old_user, old_assistant, *tail],
-        max_model_len=2000,
+        [system, old_user, old_assistant, current_user, *tail],
         active_protection_count=12,
     )
 
@@ -919,7 +1031,7 @@ async def test_prepare_messages_for_llm_failed_compression_does_not_modify_manag
 
 
 @pytest.mark.asyncio
-async def test_provider_overflow_recovery_accepts_any_rule_character_reduction(
+async def test_provider_overflow_recovery_does_not_treat_view_filtering_as_compression(
     monkeypatch,
 ):
     agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
@@ -950,7 +1062,7 @@ async def test_provider_overflow_recovery_accepts_any_rule_character_reduction(
     )
 
     async def must_not_call_llm_compression(*args, **kwargs):
-        raise AssertionError("rule compression already reduced characters")
+        raise AssertionError("there is no safe LLM compression segment")
         yield []
 
     monkeypatch.setattr(
@@ -966,11 +1078,11 @@ async def test_provider_overflow_recovery_accepts_any_rule_character_reduction(
         )
     ]
 
-    assert chunks == [([current], True)]
+    assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_provider_overflow_recovery_uses_llm_when_rule_has_no_char_gain(
+async def test_provider_overflow_recovery_uses_llm_compression_directly(
     monkeypatch,
 ):
     agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
@@ -1036,6 +1148,85 @@ async def test_provider_overflow_recovery_uses_llm_when_rule_has_no_char_gain(
     assert chunks[0] == ([tool_call], False)
     assert chunks[1] == ([tool_result], False)
     assert chunks[-1] == ([tool_call, tool_result, current], True)
+
+
+@pytest.mark.asyncio
+async def test_ineffective_summary_is_audited_but_never_becomes_anchor(monkeypatch):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 100})
+    manager = MessageManager(session_id="sess-ineffective")
+    old_user = _msg(
+        MessageRole.USER.value,
+        "old request",
+        MessageType.USER_INPUT.value,
+        message_id="u-old",
+    )
+    old_assistant = _msg(
+        MessageRole.ASSISTANT.value,
+        "old answer",
+        MessageType.ASSISTANT_TEXT.value,
+        message_id="a-old",
+    )
+    current_user = _msg(
+        MessageRole.USER.value,
+        "current request",
+        MessageType.USER_INPUT.value,
+        message_id="u-current",
+    )
+    tail = [
+        _msg(
+            MessageRole.ASSISTANT.value,
+            f"tail-{idx}",
+            MessageType.ASSISTANT_TEXT.value,
+            message_id=f"tail-{idx}",
+        )
+        for idx in range(12)
+    ]
+    raw_messages = [old_user, old_assistant, current_user, *tail]
+    manager.add_messages(raw_messages)
+    session_context = SimpleNamespace(
+        message_manager=manager,
+        sandbox_agent_workspace=None,
+        system_context={},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda session_id: session_context
+    )
+    monkeypatch.setattr(
+        "sagents.agent.agent_base.MessageManager.calculate_messages_token_length",
+        lambda messages: 1000,
+    )
+    tool_call, tool_result = _compression_pair(
+        call_message_id="compress-call",
+        result_message_id="compress-result",
+        call_id="compress-1",
+        source_ids=["u-old", "a-old"],
+        summary="S" * 20_000,
+    )
+
+    async def fake_compress(messages, session_id, **kwargs):
+        yield [tool_call]
+        yield [tool_result]
+
+    monkeypatch.setattr(agent, "_compress_messages_with_tool", fake_compress)
+
+    chunks = [
+        item
+        async for item in agent._prepare_messages_for_llm(
+            raw_messages, "sess-ineffective"
+        )
+    ]
+
+    assert chunks[0] == ([tool_call], False)
+    assert chunks[1] == ([tool_result], False)
+    assert chunks[-1] == (raw_messages, True)
+    assert tool_call.metadata["compression_anchor"] is False
+    assert tool_result.metadata["compression_anchor"] is False
+    assert tool_result.metadata["status"] == "ineffective"
+    assert tool_result.metadata["llm_scope"] == "never"
+    assert manager.messages == raw_messages
+    assert [msg.message_id for msg in MessageManager.build_inference_view(raw_messages)] == [
+        msg.message_id for msg in raw_messages
+    ]
 
 
 @pytest.mark.asyncio

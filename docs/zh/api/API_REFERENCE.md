@@ -166,7 +166,7 @@ agent.delete_pending_user_injection("sess_123", guidance_id)
 
 - 定义：`sagents/context/messages/message.py`。
 - `MessageChunk`：流式单块，含 `role`、`content`、`reasoning_content`、`tool_calls`、`message_id`、`message_type` 等。同一次 assistant 响应的所有分块共享一个 `message_id`，持久化后思考、可见内容和工具调用是同一条 assistant 消息中的字段。
-- DeepSeek 官方 Chat Completions 工具调用：发生工具调用的 assistant 消息会按原生格式回传 `content`、`reasoning_content` 与 `tool_calls`；普通回答的历史思考不回传。上下文 token 估算同时计算 `content` 与 `reasoning_content`。
+- DeepSeek 官方 Chat Completions 工具调用：发生工具调用的 assistant 消息会按原生格式回传 `content`、`reasoning_content` 与 `tool_calls`；普通回答的历史思考不回传。普通请求的上下文 token 估算同时计算 `content` 与 `reasoning_content`，但历史压缩模型永远不会收到 `reasoning_content`。
 - `MessageType`：枚举了当前使用的 `user_input`、`assistant_text`、`task_analysis`、`tool_call` 等；历史字段 `type: "normal"` 会经兼容逻辑归一化。
 
 ## 7. 环境变量

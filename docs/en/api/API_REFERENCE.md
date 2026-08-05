@@ -159,7 +159,7 @@ If `custom_flow` is omitted, `_build_default_flow` builds the `agent_mode` branc
 
 - File: `sagents/context/messages/message.py`  
 - `MessageChunk` holds streaming pieces (`role`, `content`, `reasoning_content`, `tool_calls`, `message_id`, `message_type`, etc.). All chunks from one assistant response share one `message_id`, so persisted thinking, visible content, and tool calls become fields of one assistant message.
-- For first-party DeepSeek Chat Completions tool calls, assistant messages are replayed in the native shape with `content`, `reasoning_content`, and `tool_calls`. Historical reasoning from ordinary answers is omitted. Context token estimates count both content fields.
+- For first-party DeepSeek Chat Completions tool calls, assistant messages are replayed in the native shape with `content`, `reasoning_content`, and `tool_calls`. Historical reasoning from ordinary answers is omitted. Normal request token estimates count both content fields, while the history-compaction model never receives `reasoning_content`.
 - `MessageType` enumerates values such as `user_input`, `assistant_text`, `task_analysis`, `tool_call`, plus legacy compatibility for older stored messages
 
 ## 7. Environment

@@ -185,7 +185,7 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 | `SAGE_REPEAT_PATTERN_MAX_HITS`                 | `3`     | SimpleAgent 连续检测到重复循环 pattern 多少次后硬暂停执行循环 |
 | `SAGE_CLI_MAX_LOOP_COUNT`                      | —       | CLI 单轮最大循环次数                                                                                                                                                                 |
 | `SAGE_CONTEXT_HISTORY_RATIO` / `SAGE_CONTEXT_ACTIVE_RATIO` / `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` / `SAGE_CONTEXT_RECENT_TURNS` | 代码默认值 | 上下文预算分配参数 |
-| `SAGE_CONTEXT_COMPRESSION_THRESHOLD`          | `0.85`  | 完整输入请求占模型上下文窗口的最大比例，超过后执行安全的规则卸载或持久压缩。取值必须大于 `0` 且小于 `1`，不受最大输出 token 配置影响。 |
+| `SAGE_CONTEXT_COMPRESSION_THRESHOLD`          | `0.85`  | 完整输入请求占模型输入窗口的最大比例，超过后执行大模型生成的持久历史摘要。取值必须大于 `0` 且小于 `1`，不受最大输出 token 配置影响。 |
 | `SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD`        | `15`    | 可用工具数小于等于该值时跳过 LLM 工具推荐调用，直接透传所有可用工具                                                                                                                                            |
 | `SAGE_MAX_TOOL_RESULT_TOKENS`                  | `12000` | 返回给 Agent 的单个工具结果最大 token 数（估算值）；空值、非整数或非正整数回退到默认值                                                                                                                          |
 | `SAGE_EMIT_TOOL_CALL_ON_COMPLETE`              | `false` | `false` 时低延迟流式发送 tool-call delta；`true` 时完整收集 tool call 后再发送                                                                                                                                |

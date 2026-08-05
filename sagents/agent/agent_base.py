@@ -166,23 +166,6 @@ def _is_rate_limit_error(error: BaseException) -> bool:
     )
 
 
-def _request_message_character_count(messages: Sequence[Mapping[str, Any]]) -> int:
-    return len(json.dumps(messages, ensure_ascii=False, default=str))
-
-
-def _message_chunk_request_character_count(messages: Sequence[MessageChunk]) -> int:
-    """Count only fields that can reach the provider, excluding ledger metadata."""
-    provider_messages = [
-        converted
-        for message in messages
-        if (
-            converted := MessageManager.convert_message_to_dict_for_request(message)
-        )
-        is not None
-    ]
-    return _request_message_character_count(provider_messages)
-
-
 class AgentBase(ABC):
     """
     智能体基类
@@ -556,8 +539,18 @@ class AgentBase(ABC):
                 chunk.role == MessageRole.TOOL.value
                 and metadata.get("tool_name") == "compress_conversation_history"
                 and metadata.get("status") == "success"
+                and metadata.get("compression_anchor") is True
             ):
-                return True
+                content = chunk.get_content()
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                try:
+                    payload = json.loads(content)
+                except Exception:
+                    continue
+                summary = payload.get("summary") if isinstance(payload, dict) else None
+                if isinstance(summary, str) and summary.strip():
+                    return True
         return False
 
     async def _compress_messages_with_tool(
@@ -677,18 +670,6 @@ class AgentBase(ABC):
                     list(messages[: idx + 1]) + list(chunks) + list(messages[idx + 1 :])
                 )
         return list(messages)
-
-    def _context_artifact_root(
-        self, session_context: Optional[SessionContext]
-    ) -> Optional[str]:
-        workspace = None
-        if session_context is not None:
-            workspace = getattr(
-                session_context, "sandbox_agent_workspace", None
-            ) or getattr(session_context, "system_context", {}).get("private_workspace")
-        if not workspace:
-            return None
-        return os.path.join(str(workspace), ".sage", "context", "artifacts")
 
     @staticmethod
     def _without_system_messages(
@@ -1232,12 +1213,74 @@ class AgentBase(ABC):
             compression_threshold,
             self._resolve_raw_context_limit(session_context),
         )
-        artifact_root = self._context_artifact_root(session_context)
         working_messages = list(messages_input)
-        recovery_baseline_characters = _message_chunk_request_character_count(
-            working_messages
-        )
         provider_compression_failures = 0
+
+        async def measure_request(
+            history: List[MessageChunk],
+        ) -> tuple[int, int, Optional[Any]]:
+            """Return projected tokens, provider-facing chars and projection."""
+            candidate_messages = (
+                await request_builder(history)
+                if request_builder is not None
+                else list(history)
+            )
+            candidate_dicts = [
+                converted
+                for message in candidate_messages
+                if (
+                    converted := MessageManager.convert_message_to_dict_for_request(
+                        message
+                    )
+                )
+                is not None
+            ]
+            request_characters = len(
+                json.dumps(
+                    {"messages": candidate_dicts, "tools": request_tools or []},
+                    ensure_ascii=False,
+                    default=str,
+                )
+            )
+            if request_builder is None:
+                return (
+                    MessageManager.calculate_messages_token_length(history),
+                    request_characters,
+                    None,
+                )
+            manifest = PromptTokenEstimator.manifest(
+                candidate_dicts, tools=request_tools
+            )
+            model_name, provider_identity = self._resolve_prompt_accounting_identity()
+            profile_id = PromptBudgetManager.build_profile_id(
+                model=model_name,
+                provider_identity=provider_identity,
+                agent_class=self.__class__.__name__,
+                step_name=step_name,
+                view_policy_id=self._resolved_context_view_spec_hash(),
+            )
+            budget_manager = (
+                session_context.prompt_budget_manager
+                if session_context is not None
+                and hasattr(session_context, "prompt_budget_manager")
+                else PromptBudgetManager()
+            )
+            projection = budget_manager.project(profile_id, manifest)
+            return projection.projected_tokens, request_characters, projection
+
+        def exclude_failed_compression(chunks: List[MessageChunk], status: str) -> None:
+            for chunk in chunks:
+                metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+                metadata.update(
+                    {
+                        "compression_anchor": False,
+                        "llm_scope": "never",
+                        "compression_validation": status,
+                    }
+                )
+                if chunk.role == MessageRole.TOOL.value:
+                    metadata["status"] = status
+                chunk.metadata = metadata
 
         policy = getattr(self, "context_policy", ContextPolicy())
         if (
@@ -1245,13 +1288,7 @@ class AgentBase(ABC):
             and getattr(policy, "overflow_strategy", None)
             != ContextOverflowStrategy.PERSISTENT_SUMMARY
         ):
-            view = MessageManager.build_inference_view(
-                working_messages,
-                session_id=session_id,
-                max_model_len=max_model_len,
-                artifact_root=artifact_root,
-                apply_rule_compression=True,
-            )
+            view = MessageManager.build_inference_view(working_messages)
             if message_manager is not None:
                 message_manager.store_inference_messages(view)
             # Non-persistent auxiliary agents receive the normal inference view.
@@ -1259,75 +1296,19 @@ class AgentBase(ABC):
             yield (view, True)
             return
 
-        for _ in range(20):
-            view = MessageManager.build_inference_view(
-                working_messages,
-                session_id=session_id,
-                max_model_len=max_model_len,
-                artifact_root=artifact_root,
-                apply_rule_compression=True,
-            )
+        for compression_pass in range(1, 21):
+            view = MessageManager.build_inference_view(working_messages)
             if message_manager is not None:
                 message_manager.store_inference_messages(view)
-            current_characters = _message_chunk_request_character_count(view)
-            if (
-                provider_overflow_recovery
-                and current_characters < recovery_baseline_characters
-            ):
-                logger.info(
-                    f"{self.agent_name}: provider 超限恢复的规则压缩已减少字符，"
-                    f"chars={recovery_baseline_characters}->{current_characters}"
-                )
-                yield (view, True)
-                return
-            current_tokens = MessageManager.calculate_messages_token_length(view)
-            if request_builder is not None:
-                candidate_messages = await request_builder(view)
-                candidate_dicts = [
-                    converted
-                    for message in candidate_messages
-                    if (
-                        converted := MessageManager.convert_message_to_dict_for_request(
-                            message
-                        )
-                    )
-                    is not None
-                ]
-                manifest = PromptTokenEstimator.manifest(
-                    candidate_dicts, tools=request_tools
-                )
-                model_name, provider_identity = (
-                    self._resolve_prompt_accounting_identity()
-                )
-                profile_id = PromptBudgetManager.build_profile_id(
-                    model=model_name,
-                    provider_identity=provider_identity,
-                    agent_class=self.__class__.__name__,
-                    step_name=step_name,
-                    view_policy_id=self._resolved_context_view_spec_hash(),
-                )
-                budget_manager = (
-                    session_context.prompt_budget_manager
-                    if session_context is not None
-                    and hasattr(session_context, "prompt_budget_manager")
-                    else PromptBudgetManager()
-                )
-                current_tokens = budget_manager.project(
-                    profile_id, manifest
-                ).projected_tokens
+            current_tokens, current_characters, current_projection = (
+                await measure_request(view)
+            )
             if current_tokens <= trigger_limit and not provider_overflow_recovery:
                 yield (view, True)
                 return
 
             segment = MessageManager.select_llm_compression_segment(
                 working_messages,
-                max_model_len=(
-                    max(
-                        256, max_model_len // (2 ** (provider_compression_failures + 1))
-                    )
-                    if provider_overflow_recovery
-                    else max_model_len
-                ),
                 active_protection_count=(2 if provider_overflow_recovery else 12),
             )
             if not segment:
@@ -1347,9 +1328,18 @@ class AgentBase(ABC):
                 return
 
             source_ids = [msg.message_id for msg in segment if msg.message_id]
+            if len(source_ids) != len(segment):
+                logger.warning(
+                    f"{self.agent_name}: 压缩段包含缺失 message_id 的消息，放弃持久化压缩"
+                )
+                if provider_overflow_recovery:
+                    return
+                yield (view, True)
+                return
             source_start = source_ids[0] if source_ids else None
             source_end = source_ids[-1] if source_ids else None
             emitted_chunks: List[MessageChunk] = []
+            emitted_batches: List[List[MessageChunk]] = []
             async for messages_chunk in self._compress_messages_with_tool(
                 segment,
                 session_id,
@@ -1357,37 +1347,104 @@ class AgentBase(ABC):
                 source_start_message_id=source_start,
                 source_end_message_id=source_end,
             ):
+                emitted_batches.append(messages_chunk)
                 emitted_chunks.extend(messages_chunk)
-                yield (messages_chunk, False)
 
             if not self._compression_chunks_succeeded(emitted_chunks):
+                exclude_failed_compression(emitted_chunks, "error")
+                for messages_chunk in emitted_batches:
+                    yield (messages_chunk, False)
                 logger.warning(f"{self.agent_name}: 大模型压缩失败")
                 if provider_overflow_recovery and provider_compression_failures < 2:
                     provider_compression_failures += 1
                     logger.warning(
-                        f"{self.agent_name}: 缩小压缩分段后重试 "
+                        f"{self.agent_name}: 重试大模型历史压缩 "
                         f"({provider_compression_failures + 1}/3)"
                     )
                     continue
                 if provider_overflow_recovery:
                     return
-                view = MessageManager.build_inference_view(
-                    working_messages,
-                    session_id=session_id,
-                    max_model_len=max_model_len,
-                    artifact_root=artifact_root,
-                    apply_rule_compression=True,
-                )
+                view = MessageManager.build_inference_view(working_messages)
                 if message_manager is not None:
                     message_manager.store_inference_messages(view)
                 yield (view, True)
                 return
 
-            working_messages = self._insert_chunks_after_message_id(
+            candidate_working_messages = self._insert_chunks_after_message_id(
                 working_messages, source_end, emitted_chunks
             )
+            candidate_view = MessageManager.build_inference_view(
+                candidate_working_messages
+            )
+            after_tokens, after_characters, after_projection = await measure_request(
+                candidate_view
+            )
+            if after_characters >= current_characters:
+                exclude_failed_compression(emitted_chunks, "ineffective")
+                for messages_chunk in emitted_batches:
+                    yield (messages_chunk, False)
+                logger.warning(
+                    f"{self.agent_name}: 大模型历史压缩未减少请求字符，"
+                    f"chars={current_characters}->{after_characters}"
+                )
+                if provider_overflow_recovery and provider_compression_failures < 2:
+                    provider_compression_failures += 1
+                    continue
+                if provider_overflow_recovery:
+                    return
+                yield (view, True)
+                return
+
+            for chunk in emitted_chunks:
+                metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+                metadata.update(
+                    {
+                        "compression_validation": "accepted",
+                        "request_characters_before": current_characters,
+                        "request_characters_after": after_characters,
+                        "projected_tokens_before": current_tokens,
+                        "projected_tokens_after": after_tokens,
+                        "local_estimated_tokens_before": getattr(
+                            current_projection, "full_estimate", current_tokens
+                        ),
+                        "local_estimated_tokens_after": getattr(
+                            after_projection, "full_estimate", after_tokens
+                        ),
+                        "provider_prompt_tokens_checkpoint_before": getattr(
+                            current_projection, "actual_prompt_tokens", None
+                        ),
+                        "provider_prompt_tokens_checkpoint_after": getattr(
+                            after_projection, "actual_prompt_tokens", None
+                        ),
+                    }
+                )
+                chunk.metadata = metadata
+            for messages_chunk in emitted_batches:
+                yield (messages_chunk, False)
+
+            logger.info(
+                f"{self.agent_name}: 大模型历史压缩已验收 "
+                f"pass={compression_pass} chars={current_characters}->{after_characters} "
+                f"local_estimated_tokens="
+                f"{getattr(current_projection, 'full_estimate', current_tokens)}->"
+                f"{getattr(after_projection, 'full_estimate', after_tokens)} "
+                f"projected_tokens={current_tokens}->{after_tokens} "
+                f"provider_prompt_tokens_checkpoint="
+                f"{getattr(current_projection, 'actual_prompt_tokens', None)}->"
+                f"{getattr(after_projection, 'actual_prompt_tokens', None)} "
+                f"projection_source_before={getattr(current_projection, 'source', 'local')} "
+                f"projection_source_after={getattr(after_projection, 'source', 'local')}"
+            )
+            working_messages = candidate_working_messages
             if message_manager is not None and source_end:
                 message_manager.insert_messages_after(source_end, emitted_chunks)
+                message_manager.store_inference_messages(candidate_view)
+            if provider_overflow_recovery:
+                # A real provider overflow is retried after any observable
+                # provider-facing character reduction. The provider remains the
+                # authority if the request is still too large.
+                yield (candidate_view, True)
+                return
 
         logger.warning(f"{self.agent_name}: 大模型压缩达到最大轮数")
         if provider_overflow_recovery:
@@ -1395,13 +1452,7 @@ class AgentBase(ABC):
             # reduction. Never report recovery based on a token estimate after
             # repeated summaries failed to make the request smaller.
             return
-        final_view = MessageManager.build_inference_view(
-            working_messages,
-            session_id=session_id,
-            max_model_len=max_model_len,
-            artifact_root=artifact_root,
-            apply_rule_compression=True,
-        )
+        final_view = MessageManager.build_inference_view(working_messages)
         if message_manager is not None:
             message_manager.store_inference_messages(final_view)
         # Reaching the local compression cap must not turn an estimate into a
