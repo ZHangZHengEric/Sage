@@ -28,7 +28,7 @@ def add_session_log_cleanup_job(sessions_root: str) -> None:
         cleanup_old_llm_request_logs,
         trigger=CronTrigger(hour=0, minute=0),
         args=[sessions_root],
-        kwargs={"retention_days": 7},
+        kwargs={"retention_days": 7, "proactive_eval_retention_days": 3},
         id="cleanup_old_llm_request_logs",
         replace_existing=True,
         max_instances=1,
