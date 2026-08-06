@@ -52,6 +52,8 @@ REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
 REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
 TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
 OPEN_TODO_ALLOWED_DECISIONS = frozenset({"continue", "need_user_input", "blocked"})
+QUESTIONNAIRE_ASYNC_TOOL_NAME = "questionnaire_async"
+QUESTIONNAIRE_ASYNC_SUCCESS_STATUSES = frozenset({"validation_passed", "awaiting_user_input"})
 
 
 @dataclass(frozen=True)
@@ -1325,6 +1327,37 @@ class SimpleAgent(AgentBase):
         return msg.tool_call_id or "unknown"
 
     @staticmethod
+    def _extract_tool_result_payload(content: Any) -> Optional[Dict[str, Any]]:
+        """将工具返回内容转成 dict，失败时返回 None。"""
+        if content is None:
+            return None
+        parsed = None
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+            except Exception:
+                return None
+        else:
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+        if isinstance(parsed.get("content"), (dict, str)):
+            try:
+                nested = (
+                    parsed["content"]
+                    if not isinstance(parsed["content"], str)
+                    else json.loads(parsed["content"])
+                )
+                if isinstance(nested, dict):
+                    return nested
+            except Exception:
+                pass
+        return parsed
+
+    @staticmethod
     def _extract_text_content_for_judge(content: Any) -> str:
         if content is None:
             return ""
@@ -2240,6 +2273,40 @@ class SimpleAgent(AgentBase):
         Returns:
             bool: 是否应该停止执行
         """
+        validation_call_ids: Dict[str, str] = {}
+        for msg in all_new_response_chunks:
+            if msg.role != MessageRole.ASSISTANT.value:
+                continue
+            for tool_call in msg.tool_calls or []:
+                call_id = self._tool_call_id_for_judge(tool_call)
+                if not call_id:
+                    continue
+                tool_name = self._tool_call_name_for_judge(tool_call)
+                if tool_name:
+                    validation_call_ids[call_id] = tool_name
+
+        if validation_call_ids:
+            for msg in all_new_response_chunks:
+                if (
+                    msg.role != MessageRole.TOOL.value
+                    or not msg.tool_call_id
+                    or validation_call_ids.get(msg.tool_call_id)
+                    != QUESTIONNAIRE_ASYNC_TOOL_NAME
+                ):
+                    continue
+                payload = self._extract_tool_result_payload(msg.get_content())
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("success") is True and (
+                    payload.get("validation_passed") is True
+                    or payload.get("status") in QUESTIONNAIRE_ASYNC_SUCCESS_STATUSES
+                    or payload.get("should_end") is True
+                ):
+                    logger.info(
+                        "SimpleAgent: questionnaire_async 参数通过，终止本轮会话"
+                    )
+                    return True
+
         if len(all_new_response_chunks) == 0:
             logger.info("SimpleAgent: 没有更多响应块，停止执行")
             return True

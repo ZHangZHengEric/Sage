@@ -25,6 +25,7 @@ TOOL_PT_DESCRIPTIONS: Dict[str, str] = {
     "todo_write": "Criar ou atualizar incrementalmente a lista de tarefas.",
     "todo_read": "Ler a lista de tarefas atual.",
     "questionnaire": "Exibir um questionário ao usuário e coletar as respostas.",
+    "questionnaire_async": "Iniciar um questionário e aguardar a resposta do usuário.",
     "turn_status": "Informar o estado atual da execução ao usuário.",
     "search_memory": "Pesquisar informações relevantes na memória do usuário.",
     "fetch_webpages": "Baixar e extrair o conteúdo das páginas informadas.",

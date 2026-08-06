@@ -120,8 +120,8 @@ def _assert_exported_schema_is_clean(node, path, language):
 
 def test_all_34_builtin_tools_have_complete_recursive_zh_en_pt_metadata():
     specs = list(_specs())
-    assert len(specs) == 34
-    assert len({spec.name for spec in specs}) == 34
+    assert len(specs) == 35
+    assert len({spec.name for spec in specs}) == 35
 
     for spec in specs:
         assert all(spec.description_i18n.get(lang) for lang in ("zh", "en", "pt")), (
