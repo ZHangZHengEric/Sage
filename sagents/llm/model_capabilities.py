@@ -293,6 +293,7 @@ def build_llm_extra_body(
 
 def _build_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:
     http_client = httpx.AsyncClient(
+        headers={"Accept-Encoding": "identity"},
         timeout=httpx.Timeout(timeout),
         trust_env=False,
     )
