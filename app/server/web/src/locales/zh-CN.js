@@ -63,7 +63,7 @@ export default {
   'profile.passwordChangeFailed': '修改失败',
   'auth.login': '登录',
   'auth.logout': '退出',
-  'auth.logoAlt': 'Sage 标志',
+  'auth.logoAlt': 'Speakly AI 标志',
   'auth.account': '账号',
   'auth.username': '用户名',
   'auth.accountPlaceholder': '请输入用户名',
