@@ -109,11 +109,7 @@ class ToolSuggestionAgent(AgentBase):
     def _extract_tool_selection_context_messages(
         cls, message_manager: Any
     ) -> List[MessageChunk]:
-        active_messages = MessageManager.build_inference_view(
-            message_manager.messages,
-            session_id=message_manager.session_id,
-            apply_rule_compression=False,
-        )
+        active_messages = MessageManager.build_inference_view(message_manager.messages)
 
         chats: List[List[MessageChunk]] = []
         current_chat: List[MessageChunk] = []
@@ -540,7 +536,7 @@ class ToolSuggestionAgent(AgentBase):
         if require_json:
             model_config_override["response_format"] = {"type": "json_object"}  # pyright: ignore[reportArgumentType]
 
-        response = self._call_llm_streaming(
+        response = self._call_aux_llm_streaming(
             messages=messages_input,  # pyright: ignore[reportArgumentType]
             session_id=session_id,
             step_name="tool_suggestion",

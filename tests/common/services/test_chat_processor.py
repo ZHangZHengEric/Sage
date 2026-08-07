@@ -3,6 +3,26 @@ import json
 from common.services.chat_processor import ContentProcessor
 
 
+def test_clean_content_preserves_assistant_content_with_reasoning_and_tool_calls():
+    original = {
+        "role": "assistant",
+        "content": "命令被安全策略拦截，我改用脚本文件方式验证。",
+        "reasoning_content": "I will use a script file instead.",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "file_write", "arguments": "{}"},
+            }
+        ],
+    }
+
+    cleaned = ContentProcessor.clean_content(original)
+
+    assert cleaned == original
+    assert cleaned is not original
+
+
 def test_clean_content_keeps_tool_content_as_json_string():
     original = {
         "role": "tool",

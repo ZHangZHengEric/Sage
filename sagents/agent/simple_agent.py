@@ -1,5 +1,14 @@
 from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase, PartialStreamConsumedError
+from sagents.context.messages.token_accounting import (
+    ContextOverflowStrategy,
+    ContextPolicy,
+    ContextViewSpec,
+)
+from .agent_base import (
+    AgentBase,
+    PartialStreamConsumedError,
+    ProviderContextWindowExceededError,
+)
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import (
@@ -26,6 +35,7 @@ import json
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass
+from html import unescape
 import re
 import os
 from sagents.utils.repeat_pattern import (
@@ -41,6 +51,9 @@ REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
 REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
 REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
 TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
+OPEN_TODO_ALLOWED_DECISIONS = frozenset({"continue", "need_user_input", "blocked"})
+QUESTIONNAIRE_ASYNC_TOOL_NAME = "questionnaire_async"
+QUESTIONNAIRE_ASYNC_SUCCESS_STATUSES = frozenset({"validation_passed", "awaiting_user_input"})
 
 
 @dataclass(frozen=True)
@@ -133,6 +146,14 @@ class SimpleAgent(AgentBase):
         # 循环模式触发阈值：连续命中后触发软纠偏/硬暂停
         self.max_repeat_pattern_hits = _get_repeat_pattern_max_hits()
         self.agent_name = "SimpleAgent"
+        self.context_policy = ContextPolicy(
+            view_spec=ContextViewSpec(
+                policy_id="conversation_persistent_summary",
+                persistent_history=True,
+            ),
+            overflow_strategy=ContextOverflowStrategy.PERSISTENT_SUMMARY,
+        )
+        self.context_view_policy_id = self.context_policy.view_spec.policy_id
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug("SimpleAgent 初始化完成")
 
@@ -410,45 +431,111 @@ class SimpleAgent(AgentBase):
 
         return tools_json
 
-    def _has_explicit_followup_intent(self, content: str) -> bool:
-        text = (content or "").strip().lower()
+    @staticmethod
+    def _is_inline_questionnaire_name(name: str) -> bool:
+        normalized = str(name or "").strip().lower()
+        return normalized == "questionnaire" or (
+            normalized.endswith("-questionnaire") and normalized != "-questionnaire"
+        )
+
+    @classmethod
+    def _content_has_inline_questionnaire(cls, content: Any) -> bool:
+        """Detect questionnaire request blocks without parsing natural language.
+
+        Supported request markers are XML-style opening tags such as
+        ``<movo-questionnaire>`` and fenced blocks such as
+        `````movo-questionnaire```. Triple apostrophes are accepted as a
+        compatibility spelling because some clients use them to avoid nesting
+        Markdown fences. ``*-questionnaire-response`` is intentionally excluded.
+        """
+        text = cls._extract_text_content_for_judge(content).strip()
         if not text:
             return False
+        text = unescape(text)
 
-        conditional_markers = [
-            "如果你需要",
-            "如需",
-            "如果需要",
-            "if you need",
-            "if needed",
-            "if you want",
-        ]
-        if any(marker in text for marker in conditional_markers):
+        # XML-like opening tags. Splitting is sufficient because only the tag
+        # name matters; payload validation remains SelfCheckAgent's job.
+        for fragment in text.split("<")[1:]:
+            raw_tag = fragment.split(">", 1)[0].strip()
+            if not raw_tag or raw_tag[0] in "/!?":
+                continue
+            tag_name = raw_tag.split(None, 1)[0].rstrip("/")
+            if cls._is_inline_questionnaire_name(tag_name):
+                return True
+
+        # Fenced questionnaire blocks. Require the questionnaire name to be the
+        # only info string so response tags and prose mentions do not match.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if len(stripped) < 4 or stripped[0] not in {"`", "'"}:
+                continue
+            fence_char = stripped[0]
+            fence_len = len(stripped) - len(stripped.lstrip(fence_char))
+            if fence_len < 3:
+                continue
+            tag_name = stripped[fence_len:].strip()
+            if cls._is_inline_questionnaire_name(tag_name):
+                return True
+        return False
+
+    @classmethod
+    def _latest_assistant_has_inline_questionnaire(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                return cls._content_has_inline_questionnaire(message.get_content())
+            if message.is_user_input_message():
+                return False
+        return False
+
+    @classmethod
+    def _content_has_ling_action(cls, content: Any) -> bool:
+        """Detect the Ling optional-action protocol marker.
+
+        ``<ling-action ... />`` is emitted only after the current user-facing
+        reply has been closed out. The buttons may start a new user-chosen
+        action, but they are not unfinished work in the current execution.
+        Match an actual opening tag (including HTML-escaped output), not prose
+        that merely mentions the marker name.
+        """
+        text = cls._extract_text_content_for_judge(content).strip()
+        if not text:
             return False
+        text = unescape(text)
+        for fragment in text.split("<")[1:]:
+            raw_tag = fragment.split(">", 1)[0].strip()
+            if not raw_tag or raw_tag[0] in "/!?":
+                continue
+            tag_name = raw_tag.split(None, 1)[0].rstrip("/").lower()
+            if tag_name == "ling-action":
+                return True
+        return False
 
-        patterns = [
-            r"接下来",
-            r"下一步",
-            r"现在让我",
-            r"让我继续",
-            r"我将继续",
-            r"我会继续",
-            r"接着",
-            r"随后",
-            r"然后我",
-            r"我将(生成|整理|总结|分析|执行|补充|创建|处理)",
-            r"我会(生成|整理|总结|分析|执行|补充|创建|处理)",
-            r"继续(生成|整理|总结|分析|执行|处理)",
-            r"请稍等",
-            r"等待(工具调用|生成|处理)",
-            r"\bnext\b",
-            r"\bnext,? i('| wi)ll\b",
-            r"\bi('| wi)ll now\b",
-            r"\blet me\b",
-            r"\bplease wait\b",
-            r"\bcontinue (with|to|processing|analyzing|generating)\b",
-        ]
-        return any(re.search(pattern, text) for pattern in patterns)
+    @classmethod
+    def _latest_assistant_has_ling_action(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                return cls._content_has_ling_action(message.get_content())
+            if message.is_user_input_message():
+                return False
+        return False
+
+    @classmethod
+    def _latest_assistant_ends_with_question_mark(
+        cls, messages_input: List[MessageChunk]
+    ) -> bool:
+        for message in reversed(messages_input or []):
+            if message.role == MessageRole.ASSISTANT.value:
+                text = cls._extract_text_content_for_judge(
+                    message.get_content()
+                ).rstrip()
+                return text.endswith(("?", "？"))
+            if message.is_user_input_message():
+                return False
+        return False
 
     def _normalize_task_interrupted_decision(
         self,
@@ -504,6 +591,36 @@ class SimpleAgent(AgentBase):
             return True
 
         return task_interrupted
+
+    def _task_interrupted_from_judge_result(
+        self,
+        result: Dict[str, Any],
+    ) -> bool:
+        """Parse the structured outcome, with backward compatibility.
+
+        ``decision`` is preferred because the legacy boolean conflates a
+        completed task with a turn that genuinely needs user input.  Old judge
+        responses remain supported while models/configurations roll forward.
+        """
+        raw_decision = result.get("decision")
+        decision = raw_decision.strip().lower() if isinstance(raw_decision, str) else ""
+        if "decision" in result:
+            if decision == "continue":
+                return False
+            if decision in {"completed", "need_user_input", "blocked"}:
+                return True
+            logger.warning(
+                "SimpleAgent: task_complete_judge 返回非法 decision="
+                f"{raw_decision!r}，默认继续执行"
+            )
+            return False
+
+        task_interrupted = self._parse_task_interrupted_value(
+            result.get("task_interrupted", False)
+        )
+        raw_reason = result.get("reason", "")
+        reason = raw_reason if isinstance(raw_reason, str) else ""
+        return self._normalize_task_interrupted_decision(reason, task_interrupted)
 
     @staticmethod
     def _parse_task_interrupted_value(value: Any) -> bool:
@@ -751,11 +868,11 @@ class SimpleAgent(AgentBase):
 
         这些规则基于客观事实，尽量保证误判率接近 0。
 
-        说明：历史上的"处理中关键词"规则已下线（多语种下脆弱、且对反问用户场景容易误判导致死循环）。
-        现在仅保留：
+        说明：宽泛的"处理中关键词"规则已下线（多语种下脆弱、且对反问用户场景容易误判导致死循环）。
+        现在仅保留高置信度规则：
         - 规则 1：最后一条是 tool 调用结果
         - 规则 2：工具调用失败的过程消息
-        - 规则 4：assistant 以「继续标点」结尾且最近一条不是真实 user 消息
+        - 规则 3：assistant 以「继续标点」结尾且最近一条不是真实 user 消息
         """
         if not messages_input:
             return False
@@ -788,7 +905,7 @@ class SimpleAgent(AgentBase):
                 )
                 return True
 
-        # 规则4：assistant 文本以继续标点结尾时强制继续；
+        # 规则3：assistant 文本以继续标点结尾时强制继续；
         # 但若最后一条是真实 user 输入则不触发（避免反问用户被误判）
         if (
             last_message.role == MessageRole.ASSISTANT.value
@@ -801,7 +918,7 @@ class SimpleAgent(AgentBase):
                 continue_punctuations = [":", "："]
                 if last_char in continue_punctuations or stripped.endswith("..."):
                     logger.debug(
-                        "[SimpleAgent] must_continue 规则4命中：assistant 文本以继续标点结尾，必须继续"
+                        "[SimpleAgent] must_continue 规则3命中：assistant 文本以继续标点结尾，必须继续"
                     )
                     return True
 
@@ -820,9 +937,42 @@ class SimpleAgent(AgentBase):
         1. 先用确定性规则判断是否必须继续执行；
         2. 如果没有命中规则，再调用 LLM 进行综合判断。
         """
+        # Inline Questionnaire 是明确的等待用户协议，比普通继续规则和 LLM
+        # judge 优先级更高。即使 Todo 尚未完成，也必须保留 need_user_input。
+        if self._latest_assistant_has_inline_questionnaire(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="inline questionnaire requires user input",
+            )
+
+        # ling-action 是 Ling 客户端约定的收口标记。按钮代表用户可以另起一个
+        # 可选动作，不代表当前执行还有待完成步骤；不要再交给 LLM judge 猜测。
+        if self._latest_assistant_has_ling_action(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="ling-action marks a closed reply awaiting an optional user action",
+            )
+
         # 第一层：确定性规则
         if await self._must_continue_by_rules(messages_input):
             return TaskCompleteDecision(task_interrupted=False)
+
+        # 结尾问号是明确的等待用户信号。工具结果等必须继续的客观规则优先，
+        # 避免把工具执行前的旧问题误当成当前等待用户。
+        if self._latest_assistant_ends_with_question_mark(messages_input):
+            audit_status = getattr(session_context, "audit_status", None)
+            if isinstance(audit_status, dict):
+                audit_status["completion_status"] = "need_user_input"
+            return TaskCompleteDecision(
+                task_interrupted=True,
+                reason="latest assistant reply ends with a question mark",
+            )
 
         # 第二层：LLM 综合判断
         # 只提取最后一个 user 以及之后的 messages
@@ -863,7 +1013,7 @@ class SimpleAgent(AgentBase):
         )
         llm_input_messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
-        response = self._call_llm_streaming(
+        response = self._call_aux_llm_streaming(
             messages=cast(
                 List[Union[MessageChunk, Dict[str, Any]]], llm_input_messages
             ),
@@ -886,18 +1036,45 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            task_interrupted = self._parse_task_interrupted_value(
-                result.get("task_interrupted", False)
-            )
+            if not isinstance(result, dict):
+                logger.warning(
+                    "SimpleAgent: 任务完成判断响应不是 JSON object，默认继续执行"
+                )
+                return TaskCompleteDecision(task_interrupted=False)
             raw_reason = result.get("reason", "")
             reason = raw_reason if isinstance(raw_reason, str) else ""
-            normalized = self._normalize_task_interrupted_decision(
-                reason, task_interrupted
+            legacy_value = self._parse_task_interrupted_value(
+                result.get("task_interrupted", False)
             )
-            if normalized != task_interrupted:
+            normalized = self._task_interrupted_from_judge_result(result)
+            structured_decision = result.get("decision")
+            normalized_structured_decision = (
+                structured_decision.strip().lower()
+                if isinstance(structured_decision, str)
+                else ""
+            )
+            expected_from_structured = (
+                normalized_structured_decision
+                in {"completed", "need_user_input", "blocked"}
+                if "decision" in result
+                else legacy_value
+            )
+            if (
+                todo_plan
+                and normalized_structured_decision not in OPEN_TODO_ALLOWED_DECISIONS
+            ):
+                rejected_decision = normalized_structured_decision or "<missing>"
+                logger.warning(
+                    "SimpleAgent: 权威 Todo 仍有未完成项，只允许 continue / "
+                    "need_user_input / blocked；已拒绝 "
+                    f"decision={rejected_decision}"
+                )
+                normalized = False
+                reason = "authoritative Todo still has pending/in_progress items"
+            if normalized != expected_from_structured:
                 logger.warning(
                     f"SimpleAgent: 任务完成判断存在语义冲突，已自动修正。reason={reason}, "
-                    f"task_interrupted={task_interrupted} -> {normalized}"
+                    f"decision={structured_decision}, task_interrupted={legacy_value} -> {normalized}"
                 )
             logger.info(
                 f"SimpleAgent: 任务完成 LLM 判断结果: {result}, normalized={normalized}"
@@ -1056,6 +1233,7 @@ class SimpleAgent(AgentBase):
             metadata={
                 "inference_view_only": True,
                 "runtime_continuation_guidance": True,
+                "context_protected": True,
             },
         )
 
@@ -1147,6 +1325,37 @@ class SimpleAgent(AgentBase):
         if isinstance(tool_name, str) and tool_name:
             return tool_name
         return msg.tool_call_id or "unknown"
+
+    @staticmethod
+    def _extract_tool_result_payload(content: Any) -> Optional[Dict[str, Any]]:
+        """将工具返回内容转成 dict，失败时返回 None。"""
+        if content is None:
+            return None
+        parsed = None
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+            except Exception:
+                return None
+        else:
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+        if isinstance(parsed.get("content"), (dict, str)):
+            try:
+                nested = (
+                    parsed["content"]
+                    if not isinstance(parsed["content"], str)
+                    else json.loads(parsed["content"])
+                )
+                if isinstance(nested, dict):
+                    return nested
+            except Exception:
+                pass
+        return parsed
 
     @staticmethod
     def _extract_text_content_for_judge(content: Any) -> str:
@@ -1490,7 +1699,12 @@ class SimpleAgent(AgentBase):
                     )
                 elif plain_text_direct_response:
                     consecutive_plain_text_direct_responses += 1
-                    if consecutive_plain_text_direct_responses >= 3:
+                    if (
+                        consecutive_plain_text_direct_responses >= 3
+                        and not self._latest_assistant_has_inline_questionnaire(
+                            messages_input
+                        )
+                    ):
                         logger.info(
                             "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
@@ -1528,12 +1742,51 @@ class SimpleAgent(AgentBase):
         direct_response_state: Optional[Dict[str, bool]] = None,
         continuation_reason: Optional[str] = None,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+        try:
+            live_context = self._get_live_session_context(session_id)
+            language = live_context.get_language() if live_context else "en"
+        except Exception:
+            language = "en"
+
+        tools_json = self._filter_tools_for_completion_mode(tools_json)
+        continuation_guidance = self._build_continuation_guidance_message(
+            continuation_reason or ""
+        )
+
+        async def build_complete_request(
+            history_view: List[MessageChunk],
+        ) -> List[MessageChunk]:
+            request_messages = await self.prepare_llm_request_messages(
+                session_id=session_id,
+                history_messages=history_view,
+                custom_prefix=_get_system_prefix(tool_manager, language),
+                language=language,
+            )
+            if continuation_guidance is not None:
+                request_messages = list(request_messages) + [continuation_guidance]
+            return request_messages
+
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
-        async for messages_chunk, is_final in self._prepare_messages_for_llm(
-            messages_input, session_id
-        ):
+        try:
+            prepared_iterator = self._prepare_messages_for_llm(
+                messages_input,
+                session_id,
+                request_builder=build_complete_request,
+                request_tools=tools_json,
+                step_name="direct_execution",
+            )
+        except TypeError as exc:
+            # Compatibility for custom/test subclasses overriding the historical
+            # two-argument hook. Provider overflow still returns to the session
+            # recovery loop; the provider boundary does not trim message roles.
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            prepared_iterator = self._prepare_messages_for_llm(
+                messages_input, session_id
+            )
+        async for messages_chunk, is_final in prepared_iterator:
             if is_final:
                 # 最终结果
                 prepared_messages = messages_chunk
@@ -1546,28 +1799,13 @@ class SimpleAgent(AgentBase):
             logger.error("SimpleAgent: 准备消息失败，没有获得最终消息列表")
             return
 
-        try:
-            live_context = self._get_live_session_context(session_id)
-            language = live_context.get_language() if live_context else "en"
-        except Exception:
-            language = "en"
-        prepared_messages = await self.prepare_llm_request_messages(
-            session_id=session_id,
-            history_messages=prepared_messages,
-            custom_prefix=_get_system_prefix(tool_manager, language),
-            language=language,
-        )
-        continuation_guidance = self._build_continuation_guidance_message(
-            continuation_reason or ""
-        )
-        if continuation_guidance is not None:
-            prepared_messages = list(prepared_messages) + [continuation_guidance]
+        prepared_history_messages = prepared_messages
+        prepared_messages = await build_complete_request(prepared_history_messages)
 
         logger.info(f"SimpleAgent: 准备了 {len(prepared_messages)} 条消息用于LLM")
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
-        tools_json = self._filter_tools_for_completion_mode(tools_json)
 
         if len(tools_json) > 0:
             model_config_override["tools"] = tools_json
@@ -1589,26 +1827,76 @@ class SimpleAgent(AgentBase):
             tools_json,
             force_tool_choice_required,
         )
-        response = self._call_llm_streaming(
-            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], prepared_messages),
-            session_id=session_id,
-            step_name="direct_execution",
-            model_config_override=model_config_override,
-        )
+
+        async def stream_with_context_recovery():
+            nonlocal prepared_history_messages, prepared_messages
+            recovery_source = prepared_history_messages
+            llm_compression_attempts = 0
+
+            while True:
+                response = self._call_llm_streaming(
+                    messages=cast(
+                        List[Union[MessageChunk, Dict[str, Any]]], prepared_messages
+                    ),
+                    session_id=session_id,
+                    step_name="direct_execution",
+                    model_config_override=model_config_override,
+                )
+                try:
+                    async for provider_chunk in response:
+                        yield (True, provider_chunk)
+                    return
+                except ProviderContextWindowExceededError:
+                    llm_compression_attempts += 1
+                    if llm_compression_attempts > 20:
+                        logger.error(
+                            "SimpleAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                        )
+                        raise
+                    logger.warning(
+                        "SimpleAgent: provider 上下文超限，启动会话级恢复；"
+                        "使用大模型历史压缩，"
+                        f"attempt={llm_compression_attempts}"
+                    )
+                    recovered_history = None
+                    recovery_iterator = self._prepare_context_messages_for_llm(
+                        recovery_source,
+                        session_id,
+                        request_builder=build_complete_request,
+                        request_tools=tools_json,
+                        step_name="direct_execution",
+                        provider_overflow_recovery=True,
+                    )
+                    async for recovery_messages, is_final in recovery_iterator:
+                        if is_final:
+                            recovered_history = recovery_messages
+                        else:
+                            yield (False, (recovery_messages, False))
+
+                    if recovered_history is None:
+                        raise
+
+                    recovery_source = recovered_history
+                    prepared_history_messages = recovered_history
+                    prepared_messages = await build_complete_request(
+                        prepared_history_messages
+                    )
 
         tool_calls: Dict[str, Any] = {}
         if direct_response_state is not None:
             direct_response_state["had_tool_calls"] = False
-        reasoning_content_response_message_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
+        response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         full_content_accumulator = ""
         suppressed_status_only_content = ""
-        tool_calls_messages_id = str(uuid.uuid4())
         emitted_tool_call_stream = False
         # 处理流式响应块
         try:
-            async for chunk in response:
+            async for is_provider_chunk, event in stream_with_context_recovery():
+                if not is_provider_chunk:
+                    yield event
+                    continue
+                chunk = event
                 # print(chunk)
                 if chunk is None:
                     logger.warning(
@@ -1650,7 +1938,7 @@ class SimpleAgent(AgentBase):
                                 MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
                                     tool_calls=chunk.choices[0].delta.tool_calls,
-                                    message_id=tool_calls_messages_id,
+                                    message_id=response_message_id,
                                     message_type=MessageType.TOOL_CALL.value,
                                     agent_name=self.agent_name,
                                 )
@@ -1669,7 +1957,7 @@ class SimpleAgent(AgentBase):
                             MessageChunk(
                                 role="assistant",
                                 content=content_piece,
-                                message_id=content_response_message_id,
+                                message_id=response_message_id,
                                 message_type=MessageType.DO_SUBTASK_RESULT.value,
                                 agent_name=self.agent_name,
                             )
@@ -1684,8 +1972,10 @@ class SimpleAgent(AgentBase):
                         output_messages = [
                             MessageChunk(
                                 role="assistant",
-                                content=chunk.choices[0].delta.reasoning_content,
-                                message_id=reasoning_content_response_message_id,
+                                reasoning_content=chunk.choices[
+                                    0
+                                ].delta.reasoning_content,
+                                message_id=response_message_id,
                                 message_type=MessageType.REASONING_CONTENT.value,
                                 agent_name=self.agent_name,
                             )
@@ -1868,6 +2158,7 @@ class SimpleAgent(AgentBase):
                 messages_input=messages_input,
                 session_id=session_id or "",
                 emit_tool_call_message=emit_on_complete,
+                tool_call_message_id=response_message_id,
             ):
                 # chunk 是 (messages, is_complete)
                 messages, is_complete = chunk
@@ -1937,7 +2228,7 @@ class SimpleAgent(AgentBase):
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content="\n",
-                    message_id=content_response_message_id,
+                    message_id=response_message_id,
                     message_type=MessageType.DO_SUBTASK_RESULT.value,
                     agent_name=self.agent_name,
                 )
@@ -1982,6 +2273,40 @@ class SimpleAgent(AgentBase):
         Returns:
             bool: 是否应该停止执行
         """
+        validation_call_ids: Dict[str, str] = {}
+        for msg in all_new_response_chunks:
+            if msg.role != MessageRole.ASSISTANT.value:
+                continue
+            for tool_call in msg.tool_calls or []:
+                call_id = self._tool_call_id_for_judge(tool_call)
+                if not call_id:
+                    continue
+                tool_name = self._tool_call_name_for_judge(tool_call)
+                if tool_name:
+                    validation_call_ids[call_id] = tool_name
+
+        if validation_call_ids:
+            for msg in all_new_response_chunks:
+                if (
+                    msg.role != MessageRole.TOOL.value
+                    or not msg.tool_call_id
+                    or validation_call_ids.get(msg.tool_call_id)
+                    != QUESTIONNAIRE_ASYNC_TOOL_NAME
+                ):
+                    continue
+                payload = self._extract_tool_result_payload(msg.get_content())
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("success") is True and (
+                    payload.get("validation_passed") is True
+                    or payload.get("status") in QUESTIONNAIRE_ASYNC_SUCCESS_STATUSES
+                    or payload.get("should_end") is True
+                ):
+                    logger.info(
+                        "SimpleAgent: questionnaire_async 参数通过，终止本轮会话"
+                    )
+                    return True
+
         if len(all_new_response_chunks) == 0:
             logger.info("SimpleAgent: 没有更多响应块，停止执行")
             return True
@@ -1997,7 +2322,13 @@ class SimpleAgent(AgentBase):
         return False
 
     async def _prepare_messages_for_llm(
-        self, messages_input: List[MessageChunk], session_id: str
+        self,
+        messages_input: List[MessageChunk],
+        session_id: str,
+        request_builder=None,
+        request_tools=None,
+        step_name: str = "llm_call",
+        provider_overflow_recovery: bool = False,
     ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         准备用于 LLM 的消息列表
@@ -2016,6 +2347,11 @@ class SimpleAgent(AgentBase):
                 - 最后 yield 最终的消息列表 (is_final=True)
         """
         async for messages_chunk, is_final in self._prepare_context_messages_for_llm(
-            messages_input, session_id
+            messages_input,
+            session_id,
+            request_builder=request_builder,
+            request_tools=request_tools,
+            step_name=step_name,
+            provider_overflow_recovery=provider_overflow_recovery,
         ):
             yield (messages_chunk, is_final)

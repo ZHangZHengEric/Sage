@@ -1,5 +1,7 @@
 import asyncio
+import json
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +17,68 @@ def _context(tmp_path):
     )
     context.session_workspace = str(tmp_path)
     return context
+
+
+def test_llm_request_file_uses_actual_provider_payload_and_aggregated_response(
+    tmp_path,
+):
+    context = _context(tmp_path)
+    provider_request = {
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "no thinking",
+                "tool_calls": [{"id": "call-1"}],
+            }
+        ],
+        "stream": True,
+    }
+    response = {
+        "model": "deepseek-v4-flash",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "done",
+                    "reasoning_content": "reasoned",
+                }
+            }
+        ],
+    }
+    internal_request = {
+        "step_name": "direct_execution",
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "assistant", "tool_calls": [{"id": "call-1"}]}],
+        "started_at": 1.0,
+        "duration_sec": 2.0,
+        "_provider_request_attempts": [
+            {**provider_request, "response_format": {"type": "json_object"}},
+            provider_request,
+        ],
+        "_provider_metadata": {
+            "api": "chat.completions",
+            "base_url": "https://api.deepseek.com",
+        },
+    }
+
+    path = context._save_llm_request_sync(
+        {"request": internal_request, "response": response, "timestamp": 3.0}
+    )
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+
+    assert payload["schema_version"] == 2
+    assert payload["request"] == provider_request
+    assert len(payload["request_attempts"]) == 2
+    assert payload["request_attempts"][0]["response_format"] == {
+        "type": "json_object"
+    }
+    assert payload["response"] == response
+    assert "response_chunks" not in payload
+    assert payload["metadata"]["step_name"] == "direct_execution"
+    assert payload["metadata"]["api"] == "chat.completions"
+    assert "model_config" not in payload["request"]
 
 
 @pytest.mark.asyncio

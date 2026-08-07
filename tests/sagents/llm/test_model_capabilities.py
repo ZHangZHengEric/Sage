@@ -3,7 +3,11 @@ import unittest
 from sagents.llm import model_capabilities
 from sagents.llm.model_capabilities import (
     build_llm_extra_body,
+    get_default_thinking_level,
+    get_supported_thinking_levels,
+    is_deepseek_model,
     is_openai_reasoning_model,
+    normalize_reasoning_effort,
     resolve_reasoning_effort,
 )
 
@@ -20,18 +24,26 @@ class TestResolveReasoningEffort(unittest.TestCase):
             "medium",
         )
 
-    def test_thinking_disabled_default_low(self):
+    def test_thinking_disabled_default_medium(self):
         self.assertEqual(
             resolve_reasoning_effort(enable_thinking=False, env_value=None),
-            "low",
+            "medium",
         )
         self.assertEqual(
             resolve_reasoning_effort(enable_thinking=False, env_value=""),
-            "low",
+            "medium",
         )
 
     def test_thinking_disabled_env_override(self):
-        for v in ["minimal", "low", "medium", "high", "MINIMAL", " High "]:
+        for v in [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "MINIMAL",
+            " High ",
+        ]:
             with self.subTest(env=v):
                 self.assertEqual(
                     resolve_reasoning_effort(enable_thinking=False, env_value=v),
@@ -43,7 +55,7 @@ class TestResolveReasoningEffort(unittest.TestCase):
             with self.subTest(env=v):
                 self.assertEqual(
                     resolve_reasoning_effort(enable_thinking=False, env_value=v),
-                    "low",
+                    "medium",
                 )
 
     def test_custom_default_off(self):
@@ -104,12 +116,135 @@ class TestBuildLlmExtraBody(unittest.TestCase):
             step_name="compress_history",
         )
         self.assertEqual(body["_step_name"], "compress_history")
-        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertEqual(body["reasoning_effort"], "medium")
         self.assertNotIn("enable_thinking", body)
 
     def test_reasoning_model_thinking_on_uses_medium(self):
         body = build_llm_extra_body("o3-mini", enable_thinking=True)
         self.assertEqual(body["reasoning_effort"], "medium")
+
+    def test_explicit_openai_thinking_level_is_used(self):
+        body = build_llm_extra_body(
+            "gpt-5.4", enable_thinking=True, thinking_level="high"
+        )
+        self.assertEqual(body["reasoning_effort"], "high")
+
+    def test_deepseek_thinking_level_uses_native_effort(self):
+        body = build_llm_extra_body(
+            "deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertEqual(body["reasoning_effort"], "max")
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertNotIn("enable_thinking", body)
+        self.assertNotIn("chat_template_kwargs", body)
+
+    def test_deepseek_uses_accepted_low_high_max_levels(self):
+        self.assertTrue(is_deepseek_model("DeepSeek-V4-Pro"))
+        self.assertTrue(is_deepseek_model("deepseek/deepseek-v4-pro"))
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-flash",
+                "minimal",
+                base_url="https://api.deepseek.com",
+            ),
+            "low",
+        )
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-pro",
+                "medium",
+                base_url="https://api.deepseek.com",
+            ),
+            "high",
+        )
+        self.assertEqual(
+            normalize_reasoning_effort(
+                "deepseek-v4-flash",
+                "low",
+                base_url="https://api.deepseek.com",
+            ),
+            "low",
+        )
+        self.assertEqual(
+            get_supported_thinking_levels(
+                "deepseek-v4-pro", "https://api.deepseek.com"
+            ),
+            ("low", "high", "max"),
+        )
+
+    def test_openai_levels_are_model_specific(self):
+        self.assertEqual(
+            get_supported_thinking_levels("gpt-5"),
+            ("minimal", "low", "medium", "high"),
+        )
+        self.assertEqual(
+            get_supported_thinking_levels("gpt-5.4-mini"),
+            ("low", "medium", "high", "xhigh"),
+        )
+        self.assertEqual(
+            get_supported_thinking_levels("gpt-5.6-sol"),
+            ("low", "medium", "high", "xhigh", "max"),
+        )
+        self.assertEqual(
+            normalize_reasoning_effort("gpt-5.4", "max"),
+            "xhigh",
+        )
+        self.assertEqual(
+            normalize_reasoning_effort("gpt-5.4", "minimal"),
+            "low",
+        )
+        self.assertEqual(get_default_thinking_level("gpt-5.6"), "medium")
+
+    def test_provider_specific_non_openai_levels(self):
+        aliyun_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.assertEqual(
+            get_supported_thinking_levels("qwen3.8-max-preview", aliyun_url),
+            ("low", "medium", "xhigh"),
+        )
+        self.assertEqual(
+            get_default_thinking_level("qwen3.8-max-preview", aliyun_url),
+            "medium",
+        )
+        qwen_body = build_llm_extra_body(
+            "qwen3.8-max-preview",
+            base_url=aliyun_url,
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertEqual(
+            qwen_body,
+            {"enable_thinking": True, "reasoning_effort": "xhigh"},
+        )
+        self.assertEqual(
+            get_supported_thinking_levels(
+                "glm-5.2", "https://open.bigmodel.cn/api/paas/v4"
+            ),
+            ("high", "max"),
+        )
+        body = build_llm_extra_body(
+            "glm-5.2",
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertEqual(body["reasoning_effort"], "max")
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertNotIn("enable_thinking", body)
+        self.assertNotIn("chat_template_kwargs", body)
+
+    def test_aliyun_deepseek_uses_compatible_protocol_fields(self):
+        body = build_llm_extra_body(
+            "deepseek-v4-flash",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            enable_thinking=True,
+            thinking_level="max",
+        )
+        self.assertEqual(body["reasoning_effort"], "max")
+        self.assertTrue(body["enable_thinking"])
+        self.assertNotIn("thinking", body)
 
     def test_non_reasoning_model_sets_thinking_flags(self):
         body = build_llm_extra_body(

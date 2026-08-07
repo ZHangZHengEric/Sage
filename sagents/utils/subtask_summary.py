@@ -43,7 +43,7 @@ def _build_summary_extra_body(model_name: str, step_name: str) -> Dict[str, Any]
         extra_body["reasoning_effort"] = resolve_reasoning_effort(
             enable_thinking=False,
             env_value=os.environ.get("SAGE_REASONING_EFFORT_OFF"),
-            default_off="low",
+            default_off="medium",
         )
     else:
         extra_body["chat_template_kwargs"] = {"enable_thinking": False}

@@ -21,6 +21,7 @@ from sagents.tool import get_tool_manager
 from sagents.utils.lock_manager import safe_release
 from sagents.utils.sandbox.policy import normalize_approval_mode
 from sagents.utils.user_input_optimizer import UserInputOptimizer
+from common.utils.agent_mode import normalize_persisted_agent_mode
 
 from common.core import config
 from common.core.context import get_request_locale
@@ -200,7 +201,6 @@ def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
         "fast_model": llm_config.get("fast_model_name"),
         "max_model_len": llm_config.get("max_model_len"),
         "max_loop_count": request.max_loop_count,
-        "multi_agent": request.multi_agent,
         "available_tools_count": len(request.available_tools or []),
         "available_skills": request.available_skills or [],
         "available_knowledge_bases_count": len(request.available_knowledge_bases or []),
@@ -482,6 +482,7 @@ def _build_context_budget_config(request: StreamRequest) -> Dict[str, Any]:
         "history_ratio": cfg.context_history_ratio,
         "active_ratio": cfg.context_active_ratio,
         "max_new_message_ratio": cfg.context_max_new_message_ratio,
+        "compression_threshold": cfg.context_compression_threshold,
         "recent_turns": cfg.context_recent_turns,
     }
 
@@ -648,7 +649,9 @@ async def _populate_custom_sub_agents(request: StreamRequest) -> None:
                 system_context=system_context,
                 available_tools=sub_agent.config.get("availableTools", []),
                 available_skills=sub_agent.config.get("availableSkills", []),
-                agent_mode=sub_agent.config.get("agentMode"),
+                agent_mode=normalize_persisted_agent_mode(
+                    sub_agent.config.get("agentMode")
+                ),
             )
         )
     request.custom_sub_agents = custom_sub_agents
@@ -691,7 +694,9 @@ async def populate_request_from_agent_config(
         ):
             request.max_loop_count = agent_config.get("maxLoopCount")
         if agent_config.get("agentMode") is not None and request.agent_mode is None:
-            request.agent_mode = agent_config.get("agentMode")
+            request.agent_mode = normalize_persisted_agent_mode(
+                agent_config.get("agentMode")
+            )
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
         if request.command_policy is None:
@@ -832,7 +837,6 @@ async def populate_request_from_agent_config(
     _fill_if_none(request, "available_tools", [])
     _fill_if_none(request, "available_skills", [])
     _merge_dict(request, "available_workflows", {})
-    _fill_if_none(request, "multi_agent", False)
     _fill_if_none(request, "more_suggest", False)
     _merge_dict(request, "system_context", {})
     _fill_if_none(request, "system_prefix", "")
@@ -1380,7 +1384,7 @@ def _extract_text_from_content(content: Any) -> str:
 def _sanitize_title_text(text: str) -> str:
     cleaned = str(text or "")
     cleaned = re.sub(
-        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*)+",
+        r"^\s*(?:<enable_plan>\s*(?:true|false)\s*</enable_plan>\s*|<enable_deep_thinking>\s*(?:true|false)\s*</enable_deep_thinking>\s*|<(?:thinking_level|deep_thinking_level)>\s*(?:minimal|low|medium|high|xhigh|max)\s*</(?:thinking_level|deep_thinking_level)>\s*)+",
         "",
         cleaned,
         flags=re.IGNORECASE,

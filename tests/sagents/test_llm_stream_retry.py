@@ -1,16 +1,31 @@
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import pytest
 import httpx
 
-from openai import APIConnectionError
+from openai import APIConnectionError, APIError
 from openai.types.chat import chat_completion_chunk
+from openai.types.completion_usage import CompletionUsage
 
-from sagents.agent.agent_base import AgentBase, PartialStreamConsumedError
+from sagents.agent.agent_base import (
+    AgentBase,
+    PartialStreamConsumedError,
+    ProviderContextWindowExceededError,
+    _is_context_length_error,
+    _is_rate_limit_error,
+)
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.message_manager import (
+    MessageManager,
+    SEARCH_MEMORY_TOOL_NAME,
+)
+from sagents.context.messages.token_accounting import (
+    PromptBudgetManager,
+    PromptTokenEstimator,
+)
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.observability.agent_runtime import ObservableAsyncOpenAI
 
@@ -19,6 +34,51 @@ class DummyAgent(AgentBase):
     async def run_stream(self, session_context):
         if False:
             yield []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "maximum context length exceeded",
+        "context_length_exceeded",
+        "context_window_exceeded",
+        "input_too_long",
+        "Input is too long for the requested model",
+        "prompt_too_long",
+        "too many input tokens",
+        "input length is too long",
+    ],
+)
+def test_context_window_error_detection_accepts_provider_variants(message):
+    assert _is_context_length_error(RuntimeError(message))
+
+
+def test_context_window_error_detection_rejects_context_deadline_timeout():
+    assert not _is_context_length_error(RuntimeError("context deadline exceeded"))
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "input token rate limit exceeded",
+        "requested tokens exceed the tokens per minute limit",
+        "rate_limit: too many input tokens",
+    ],
+)
+def test_context_window_error_detection_rejects_token_rate_limits(message):
+    assert not _is_context_length_error(RuntimeError(message))
+    assert _is_rate_limit_error(RuntimeError(message))
+
+
+def test_prompt_accounting_identity_uses_provider_request_resolution():
+    client = FakeClient()
+    client.base_url = "https://provider.example/v1"
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+
+    model, provider = agent._resolve_prompt_accounting_identity()
+
+    assert model == "gpt-test"
+    assert provider == "https://provider.example/v1"
 
 
 class FakeCompletions:
@@ -77,6 +137,273 @@ class DummyObservabilityManager:
 
     def on_llm_error(self, *args, **kwargs):
         pass
+
+
+@pytest.mark.asyncio
+async def test_deepseek_tool_request_replays_only_tool_call_reasoning():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "tools": [{"type": "function", "function": {"name": "weather"}}],
+            "tool_choice": "required",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            reasoning_content="need tool",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(role="assistant", content="checking"),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+        MessageChunk(
+            role="assistant",
+            reasoning_content="compose answer",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(role="assistant", content="sunny"),
+        MessageChunk(role="user", content="and tomorrow?"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = request["messages"][1]
+    assert assistant_tool_call["content"] == "checking"
+    assert assistant_tool_call["reasoning_content"] == "need tool"
+    assert assistant_tool_call["tool_calls"][0]["id"] == "call-1"
+    assert all(
+        "reasoning_content" not in message
+        for message in request["messages"]
+        if not message.get("tool_calls")
+    )
+    assert "tool_choice" not in request
+
+
+@pytest.mark.asyncio
+async def test_deepseek_replays_tool_call_reasoning_when_current_request_has_no_tools():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            reasoning_content="need tool",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+        MessageChunk(role="user", content="summarize without tools"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = request["messages"][1]
+    assert assistant_tool_call["reasoning_content"] == "need tool"
+    assert assistant_tool_call["tool_calls"][0]["id"] == "call-1"
+    assert "tools" not in request
+
+
+@pytest.mark.asyncio
+async def test_deepseek_thinking_fills_legacy_tool_turn_without_reasoning():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            tool_calls=[
+                {
+                    "id": "legacy-call",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="legacy-call"),
+        MessageChunk(role="assistant", content="It is sunny."),
+        MessageChunk(role="user", content="and tomorrow?"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request_messages = client.chat.completions.requests[0]["messages"]
+    tool_call_message = next(
+        message for message in request_messages if message.get("tool_calls")
+    )
+    assert tool_call_message["reasoning_content"] == "no thinking"
+    assert tool_call_message["content"] == "checking"
+    assert [message.get("content") for message in request_messages] == [
+        "weather",
+        "checking",
+        "sunny",
+        "It is sunny.",
+        "and tomorrow?",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_third_party_deepseek_slug_uses_generic_chat_completions_contract():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://example.com/openai/v1",
+            "tools": [{"type": "function", "function": {"name": "weather"}}],
+            "tool_choice": "required",
+        },
+    )
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            reasoning_content="private provider-specific reasoning",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-1"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request = client.chat.completions.requests[0]
+    assistant_tool_call = next(
+        message for message in request["messages"] if message.get("tool_calls")
+    )
+    assert "reasoning_content" not in assistant_tool_call
+    assert "content" not in assistant_tool_call
+    assert request["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_strips_historical_search_memory_at_request_boundary():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [
+        MessageChunk(role=MessageRole.USER.value, content="old request"),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            tool_calls=[
+                {
+                    "id": "search-old",
+                    "type": "function",
+                    "function": {
+                        "name": SEARCH_MEMORY_TOOL_NAME,
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"status":"success"}',
+            tool_call_id="search-old",
+        ),
+        MessageChunk(role=MessageRole.USER.value, content="current request"),
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages=messages,
+        session_id="sid",
+        step_name="test",
+    ):
+        pass
+
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert [message["role"] for message in sent_messages] == ["user", "user"]
+    assert [message["content"] for message in sent_messages] == [
+        "old request",
+        "current request",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_strips_historical_search_memory_from_dict_messages():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [
+        {"role": "user", "content": "old request"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "search-old",
+                    "type": "function",
+                    "function": {
+                        "name": SEARCH_MEMORY_TOOL_NAME,
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"status":"success"}',
+            "tool_call_id": "search-old",
+        },
+        {"role": "user", "content": "current request"},
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages=messages,
+        session_id="sid",
+        step_name="test",
+    ):
+        pass
+
+    sent_messages = client.chat.completions.requests[0]["messages"]
+    assert sent_messages == [
+        {"role": "user", "content": "old request"},
+        {"role": "user", "content": "current request"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -290,8 +617,9 @@ async def test_network_retry_keeps_claim_and_consumes_once_after_terminal_reply(
         pass
 
     assert client.chat.completions.calls == 2
-    assert client.chat.completions.requests[0]["messages"] == (
-        client.chat.completions.requests[1]["messages"]
+    assert (
+        client.chat.completions.requests[0]["messages"]
+        == (client.chat.completions.requests[1]["messages"])
     )
     assert context.claim_calls == 1
     assert context.release_calls == 0
@@ -535,6 +863,39 @@ def _content_chunk(content, *, finish_reason=None):
     )
 
 
+def _usage_chunk(prompt_tokens: int):
+    return chat_completion_chunk.ChatCompletionChunk(
+        id="usage",
+        object="chat.completion.chunk",
+        created=0,
+        model="gpt-test",
+        choices=[],
+        usage=CompletionUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=1,
+            total_tokens=prompt_tokens + 1,
+        ),
+    )
+
+
+def _reasoning_chunk(reasoning_content):
+    return chat_completion_chunk.ChatCompletionChunk(
+        id="chunk",
+        object="chat.completion.chunk",
+        created=0,
+        model="gpt-test",
+        choices=[
+            chat_completion_chunk.Choice(
+                index=0,
+                delta=chat_completion_chunk.ChoiceDelta(
+                    reasoning_content=reasoning_content
+                ),
+                finish_reason=None,
+            )
+        ],
+    )
+
+
 def _attempt_raises_before_yield(exc):
     async def attempt():
         if False:
@@ -558,6 +919,316 @@ def _attempt_yields(*chunks):
             yield chunk
 
     return attempt
+
+
+@pytest.mark.asyncio
+async def test_provider_guard_preserves_prepared_history_and_uses_provider_authority():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "gpt-test",
+            "max_model_len": 200,
+            # Output configuration must not affect the input threshold.
+            "max_tokens": 100_000,
+        },
+    )
+    messages = [
+        MessageChunk(role=MessageRole.SYSTEM.value, content="system"),
+        MessageChunk(role=MessageRole.USER.value, content="old request"),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content="x" * 2000),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content="old final answer"),
+        MessageChunk(role=MessageRole.USER.value, content="latest request"),
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="runtime repair notice",
+            message_id="repair-notice",
+            metadata={"llm_scope": "next_request", "llm_state": "pending"},
+        ),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, step_name="custom"):
+        pass
+
+    sent = client.chat.completions.requests[0]["messages"]
+    assert sent[0]["role"] == "system"
+    assert any(message.get("content") == "latest request" for message in sent)
+    assert sent[-1]["content"] == "runtime repair notice"
+    assert any(message.get("content") == "x" * 2000 for message in sent)
+    assert any(message.get("content") == "old final answer" for message in sent)
+
+
+@pytest.mark.asyncio
+async def test_successful_request_seeds_profile_checkpoint_from_prompt_usage():
+    client = FakeClient(
+        attempts=[_attempt_yields(_content_chunk("ok"), _usage_chunk(321))]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    budget_manager = PromptBudgetManager()
+    context = SimpleNamespace(
+        prompt_budget_manager=budget_manager,
+        message_manager=MessageManager(),
+        add_llm_request=lambda request, response: None,
+    )
+    context.message_manager.update_token_ratio = lambda *args, **kwargs: pytest.fail(
+        "request-scoped usage must not update the legacy process-global ratio"
+    )
+    agent._get_live_session = lambda session_id: None
+    agent._get_live_session_context = lambda session_id: context
+
+    async for _ in agent._call_llm_streaming(
+        [MessageChunk(role=MessageRole.USER.value, content="hello")],
+        session_id="checkpoint-session",
+        step_name="custom",
+    ):
+        pass
+
+    checkpoints = budget_manager.to_dict()
+    assert len(checkpoints) == 1
+    assert next(iter(checkpoints.values()))["actual_prompt_tokens"] == 321
+
+
+@pytest.mark.asyncio
+async def test_conservative_preflight_does_not_block_provider_authority():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("accepted"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={"model": "gpt-test", "max_model_len": 100},
+    )
+    messages = [
+        MessageChunk(role=MessageRole.USER.value, content="🧑🏽‍💻🚀" * 300)
+    ]
+
+    chunks = [chunk async for chunk in agent._call_llm_streaming(messages)]
+
+    assert client.chat.completions.calls == 1
+    assert [chunk.choices[0].delta.content for chunk in chunks] == ["accepted"]
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_context_overflow_degrades_without_aborting_flow():
+    client = FakeClient(
+        attempts=[
+            _attempt_raises_before_yield(
+                RuntimeError("maximum context length exceeded")
+            )
+        ]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+
+    chunks = [
+        chunk
+        async for chunk in agent._call_aux_llm_streaming(
+            [MessageChunk(role=MessageRole.USER.value, content="request")],
+            step_name="optional_stage",
+        )
+    ]
+
+    assert chunks == []
+    assert client.chat.completions.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_multimodal_checkpoint_uses_unredacted_provider_manifest():
+    client = FakeClient(
+        attempts=[_attempt_yields(_content_chunk("ok"), _usage_chunk(321))]
+    )
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    budget_manager = PromptBudgetManager()
+    context = SimpleNamespace(
+        prompt_budget_manager=budget_manager,
+        message_manager=MessageManager(),
+        add_llm_request=lambda request, response: None,
+    )
+    agent._get_live_session = lambda session_id: None
+    agent._get_live_session_context = lambda session_id: context
+
+    message = MessageChunk(
+        role=MessageRole.USER.value,
+        content=[
+            {"type": "text", "text": "inspect"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64," + "A" * 4096},
+            },
+        ],
+    )
+    async for _ in agent._call_llm_streaming(
+        [message], session_id="multimodal-checkpoint", step_name="custom"
+    ):
+        pass
+
+    sent_manifest = PromptTokenEstimator.manifest(
+        client.chat.completions.requests[-1]["messages"]
+    )
+    checkpoint = next(iter(budget_manager.to_dict().values()))
+    assert checkpoint["components"] == [
+        component.to_dict() for component in sent_manifest.components
+    ]
+
+
+@pytest.mark.asyncio
+async def test_provider_context_error_is_delegated_to_session_recovery():
+    old_response = "old assistant response " * 400
+    context_error = APIError(
+        "maximum context length exceeded",
+        request=httpx.Request("POST", "https://provider.example/chat"),
+        body=None,
+    )
+    client = FakeClient(
+        attempts=[_attempt_raises_before_yield(context_error)]
+    )
+    agent = DummyAgent(
+        model=client,
+        model_config={"model": "gpt-test", "max_model_len": 4000},
+    )
+    messages = [
+        MessageChunk(role=MessageRole.SYSTEM.value, content="system"),
+        MessageChunk(role=MessageRole.USER.value, content="old request"),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content=old_response),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content="old final answer"),
+        MessageChunk(role=MessageRole.USER.value, content="latest request"),
+    ]
+
+    with pytest.raises(ProviderContextWindowExceededError):
+        async for _ in agent._call_llm_streaming(
+            messages, enable_thinking=False
+        ):
+            pass
+
+    assert client.chat.completions.calls == 1
+    first_request = client.chat.completions.requests[0]
+    assert any(
+        message.get("content") == old_response for message in first_request["messages"]
+    )
+    assert any(
+        message.get("content") == "old final answer"
+        for message in first_request["messages"]
+    )
+    assert first_request["messages"][-1]["content"] == "latest request"
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_error_is_normalized_for_session_recovery():
+    context_error = RuntimeError("maximum context length exceeded")
+    client = FakeClient(
+        attempts=[_attempt_raises_before_yield(context_error)]
+    )
+    agent = DummyAgent(
+        model=client,
+        model_config={"model": "gpt-test", "max_model_len": 4000},
+    )
+    intermediate = "intermediate assistant work " * 400
+    messages = [
+        MessageChunk(role=MessageRole.SYSTEM.value, content="system"),
+        MessageChunk(role=MessageRole.USER.value, content="old request"),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content=intermediate),
+        MessageChunk(role=MessageRole.ASSISTANT.value, content="old final answer"),
+        MessageChunk(role=MessageRole.USER.value, content="latest request"),
+    ]
+
+    with pytest.raises(ProviderContextWindowExceededError):
+        async for _ in agent._call_llm_streaming(
+            messages, enable_thinking=False
+        ):
+            pass
+
+    assert client.chat.completions.calls == 1
+    assert any(
+        message.get("content") == intermediate
+        for message in client.chat.completions.requests[0]["messages"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_simple_agent_uses_llm_compression_when_rule_trim_cannot_shrink():
+    old_response = "old assistant response " * 400
+    context_error = APIError(
+        "maximum context length exceeded",
+        request=httpx.Request("POST", "https://provider.example/chat"),
+        body=None,
+    )
+    client = FakeClient(
+        attempts=[
+            _attempt_raises_before_yield(context_error),
+            _attempt_yields(_content_chunk("continued after compression")),
+        ]
+    )
+    agent = SimpleAgent(
+        model=client,
+        model_config={"model": "gpt-test", "max_model_len": 4000},
+    )
+    agent._get_live_session = lambda session_id: None
+    agent._get_live_session_context = lambda session_id: None
+    recovery_flags = []
+
+    async def fake_prepare_context(
+        messages_input,
+        session_id,
+        *,
+        provider_overflow_recovery=False,
+        **kwargs,
+    ):
+        recovery_flags.append(provider_overflow_recovery)
+        if provider_overflow_recovery:
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content="compressed by model",
+                        tool_call_id="compress-1",
+                    )
+                ],
+                False,
+            )
+            yield (
+                [
+                    MessageChunk(
+                        role=MessageRole.USER.value, content="compressed request"
+                    )
+                ],
+                True,
+            )
+        else:
+            yield (list(messages_input), True)
+
+    async def passthrough_request_messages(*, history_messages=None, **kwargs):
+        return list(history_messages or [])
+
+    agent._prepare_context_messages_for_llm = fake_prepare_context
+    agent.prepare_llm_request_messages = passthrough_request_messages
+
+    emitted = []
+    async for messages, _ in agent._call_llm_and_process_response(
+        messages_input=[
+                MessageChunk(role=MessageRole.USER.value, content="old request"),
+                MessageChunk(role=MessageRole.ASSISTANT.value, content=old_response),
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value, content="old final answer"
+                ),
+                MessageChunk(role=MessageRole.USER.value, content="request"),
+        ],
+        tools_json=[],
+        tool_manager=None,
+        session_id="context-recovery",
+    ):
+        emitted.extend(messages)
+
+    assert client.chat.completions.calls == 2
+    assert recovery_flags == [False, True]
+    assert any(message.content == "compressed by model" for message in emitted)
+    assert any(message.content == "continued after compression" for message in emitted)
+    assert any(
+        message.get("content") == old_response
+        for message in client.chat.completions.requests[0]["messages"]
+    )
+    assert not any(
+        message.get("content") == old_response
+        for message in client.chat.completions.requests[-1]["messages"]
+    )
+    assert client.chat.completions.requests[-1]["messages"] == [
+        {"role": "user", "content": "compressed request"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -726,6 +1397,11 @@ async def test_streaming_call_records_llm_request_after_connection_error_retry_s
     assert len(session_context.llm_requests_logs) == 1
     recorded = session_context.llm_requests_logs[0]
     assert recorded["request"]["step_name"] == "direct_execution"
+    provider_attempts = recorded["request"]["_provider_request_attempts"]
+    assert len(provider_attempts) == 2
+    assert provider_attempts[-1]["model"] == "gpt-test"
+    assert provider_attempts[-1]["messages"] == [{"role": "user", "content": "run"}]
+    assert provider_attempts[-1]["stream"] is True
     assert recorded["response"] is not None
     assert (
         recorded["response"].choices[0].message.content  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]
@@ -830,6 +1506,65 @@ async def test_simple_agent_closes_partial_tool_call_in_low_latency_mode(monkeyp
     assert (
         len(MessageManager.convert_messages_to_dict_for_request(messages + chunks)) == 4
     )
+
+
+@pytest.mark.asyncio
+async def test_simple_agent_persists_reasoning_and_tool_calls_as_one_message(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_EMIT_TOOL_CALL_ON_COMPLETE", "true")
+    client = FakeClient(
+        attempts=[
+            _attempt_yields(
+                _reasoning_chunk("need a tool"),
+                _tool_call_chunk("call-1", '{"tasks":[]}'),
+            )
+        ]
+    )
+    agent = SimpleAgent(model=client, model_config={"model": "gpt-test"})
+    agent._get_live_session = lambda session_id: None
+    messages = [MessageChunk(role=MessageRole.USER.value, content="run")]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "todo_write",
+                "description": "write todos",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    chunks = []
+    async for chunk, is_complete in agent._call_llm_and_process_response(
+        messages_input=messages,
+        tools_json=tools,
+        tool_manager=None,
+        session_id="sid",
+    ):
+        chunks.extend(chunk)
+        if is_complete:
+            break
+
+    response_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.role == MessageRole.ASSISTANT.value
+        and (chunk.reasoning_content or chunk.tool_calls)
+    ]
+    assert len({chunk.message_id for chunk in response_chunks}) == 1
+
+    manager = MessageManager()
+    manager.add_messages(chunks)
+    persisted = [
+        message
+        for message in manager.messages
+        if message.message_id == response_chunks[0].message_id
+    ]
+    assert len(persisted) == 1
+    assert persisted[0].reasoning_content == "need a tool"
+    assert persisted[0].tool_calls[0]["id"] == "call-1"
+    assert persisted[0].message_type == MessageType.TOOL_CALL.value
 
 
 @pytest.mark.asyncio

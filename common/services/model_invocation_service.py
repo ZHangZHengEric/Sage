@@ -18,11 +18,17 @@ from common.schemas.model_invocation import (
 from common.services import token_usage_service
 from common.services.chat_utils import create_model_client
 from sagents.llm.model_capabilities import (
+    get_supported_thinking_levels,
     is_openai_reasoning_model,
+    normalize_reasoning_effort,
     resolve_reasoning_effort,
+    uses_aliyun_model_studio_protocol,
+    uses_deepseek_native_protocol,
+    uses_zhipu_native_protocol,
 )
 from sagents.utils.llm_request_utils import (
     create_chat_completion_with_fallback,
+    normalize_chat_completions_model,
     redact_base64_data_urls_in_value,
 )
 
@@ -210,6 +216,7 @@ def _build_thinking_extra_body(
     *,
     existing_extra_body: Any,
     model: str,
+    base_url: Optional[str],
     task: Optional[str],
     deep_thinking: Optional[bool],
     thinking_level: Optional[str],
@@ -225,16 +232,46 @@ def _build_thinking_extra_body(
 
     if is_openai_reasoning_model(model):
         if thinking_level:
-            extra_body["reasoning_effort"] = thinking_level
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
         else:
             extra_body["reasoning_effort"] = resolve_reasoning_effort(
                 enable_thinking=enable_thinking,
                 env_value=None,
-                default_off="low",
+                default_off="medium",
             )
         return extra_body
 
     if deep_thinking is None and thinking_level is None:
+        return extra_body
+
+    if uses_deepseek_native_protocol(model, base_url):
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+        if thinking_level:
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
+        return extra_body
+
+    if uses_aliyun_model_studio_protocol(base_url):
+        extra_body["enable_thinking"] = enable_thinking
+        if thinking_level and get_supported_thinking_levels(model, base_url):
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
+        return extra_body
+
+    if uses_zhipu_native_protocol(base_url):
+        extra_body["thinking"] = {
+            "type": "enabled" if enable_thinking else "disabled"
+        }
+        if thinking_level and get_supported_thinking_levels(model, base_url):
+            extra_body["reasoning_effort"] = normalize_reasoning_effort(
+                model, thinking_level, base_url=base_url
+            )
         return extra_body
 
     extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
@@ -394,11 +431,21 @@ async def invoke_model(
         model_type=request.model_type,
     )
     model_name = _model_for_request(model_config, request.model_type)
+    active_base_url = (
+        model_config.get("fast_base_url")
+        if request.model_type == "fast"
+        else model_config.get("base_url")
+    )
+    model_name = normalize_chat_completions_model(
+        model_name,
+        model_config={"base_url": active_base_url},
+    )
     attribution = _resolve_attribution(request)
     kwargs = _build_openai_request_kwargs(request, model_config)
     kwargs["extra_body"] = _build_thinking_extra_body(
         existing_extra_body=kwargs.get("extra_body"),
         model=model_name,
+        base_url=active_base_url,
         task=attribution,
         deep_thinking=request.deep_thinking,
         thinking_level=request.thinking_level,
@@ -461,11 +508,21 @@ async def stream_model(
         model_type=request.model_type,
     )
     model_name = _model_for_request(model_config, request.model_type)
+    active_base_url = (
+        model_config.get("fast_base_url")
+        if request.model_type == "fast"
+        else model_config.get("base_url")
+    )
+    model_name = normalize_chat_completions_model(
+        model_name,
+        model_config={"base_url": active_base_url},
+    )
     attribution = _resolve_attribution(request)
     kwargs = _build_openai_request_kwargs(request, model_config)
     kwargs["extra_body"] = _build_thinking_extra_body(
         existing_extra_body=kwargs.get("extra_body"),
         model=model_name,
+        base_url=active_base_url,
         task=attribution,
         deep_thinking=request.deep_thinking,
         thinking_level=request.thinking_level,

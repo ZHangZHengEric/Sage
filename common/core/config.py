@@ -48,6 +48,7 @@ class StartupConfig:
     context_history_ratio: float = 0.2
     context_active_ratio: float = 0.3
     context_max_new_message_ratio: float = 0.5
+    context_compression_threshold: float = 0.85
     context_recent_turns: int = 0
 
     auth_providers_json: Optional[str] = None
@@ -118,6 +119,7 @@ class ENV:
     CONTEXT_HISTORY_RATIO = "SAGE_CONTEXT_HISTORY_RATIO"
     CONTEXT_ACTIVE_RATIO = "SAGE_CONTEXT_ACTIVE_RATIO"
     CONTEXT_MAX_NEW_MESSAGE_RATIO = "SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO"
+    CONTEXT_COMPRESSION_THRESHOLD = "SAGE_CONTEXT_COMPRESSION_THRESHOLD"
     CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
 
     TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
@@ -373,6 +375,10 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         context_max_new_message_ratio=env_float(
             ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
             StartupConfig.context_max_new_message_ratio,
+        ),
+        context_compression_threshold=env_float(
+            ENV.CONTEXT_COMPRESSION_THRESHOLD,
+            StartupConfig.context_compression_threshold,
         ),
         context_recent_turns=env_int(
             ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns

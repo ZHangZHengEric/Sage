@@ -28,6 +28,7 @@ from ..tool_progress import emit_tool_event, emit_tool_progress, get_progress_qu
 from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 from sagents.utils.sandbox._stdout_echo import echo_header, echo_footer
 from sagents.utils.sandbox.policy import SandboxPolicyDecision, SandboxPolicyGateway
 from sagents.utils.sandbox.approval import get_sandbox_approval_broker
@@ -175,14 +176,11 @@ class ExecuteCommandTool:
         if session_id in cls._COMPLETION_EVENTS:
             return True
         return any(
-            info.get("session_id") == session_id
-            for info in cls._BG_TASKS.values()
+            info.get("session_id") == session_id for info in cls._BG_TASKS.values()
         )
 
     @classmethod
-    def get_session_loop(
-        cls, session_id: str
-    ) -> Optional[asyncio.AbstractEventLoop]:
+    def get_session_loop(cls, session_id: str) -> Optional[asyncio.AbstractEventLoop]:
         """Return the event loop that owns this session's watcher tasks."""
         for watcher in cls._WATCHER_TASKS.get(session_id, set()):
             try:
@@ -460,12 +458,12 @@ class ExecuteCommandTool:
                     pending=pending,
                     decision="deny",
                     status="timeout",
-                    content="Sandbox approval timed out before the command was run.",
+                    content=tool_t("shell.approval.timeout"),
                 )
             )
             return make_tool_error(
                 ToolErrorCode.SAFETY_BLOCKED,
-                "Sandbox approval timed out before the command was run.",
+                tool_t("shell.approval.timeout"),
                 hint="Ask the user to retry the command if it is still needed.",
                 command=command,
                 policy_action="deny",
@@ -481,12 +479,12 @@ class ExecuteCommandTool:
                     pending=pending,
                     decision="deny",
                     status="denied",
-                    content="Sandbox approval was denied; the command was not run.",
+                    content=tool_t("shell.approval.denied"),
                 )
             )
             return make_tool_error(
                 ToolErrorCode.SAFETY_BLOCKED,
-                "Sandbox approval was denied; the command was not run.",
+                tool_t("shell.approval.denied"),
                 hint="Choose a safer command or ask the user for a different approval.",
                 command=command,
                 policy_action="deny",
@@ -504,7 +502,7 @@ class ExecuteCommandTool:
                 pending=pending,
                 decision="approve",
                 status="approved",
-                content="Sandbox approval was approved; running the command.",
+                content=tool_t("shell.approval.approved"),
             )
         )
         return None
@@ -1195,16 +1193,14 @@ class ExecuteCommandTool:
                     "output_file": log_path,
                     "tail_output": tail,
                     "command": command,
-                    "message": (
-                        f"Started in the background with task_id={task_id}; the command is still running."
-                    ),
+                    "message": tool_t("shell.background", params={"task_id": task_id}),
                     "next_action": {
-                        "if_result_required": "call await_shell immediately",
+                        "if_result_required": tool_t("shell.next.await_now"),
                         "await_shell_args": {
                             "task_id": task_id,
                             "block_until_ms": max(60000, _suggest_next_block_ms(0)),
                         },
-                        "do_not": "do not answer with waiting/progress text only",
+                        "do_not": tool_t("shell.next.no_progress_only"),
                     },
                 }
 
@@ -1244,18 +1240,18 @@ class ExecuteCommandTool:
                 "running_for_ms": running_ms,
                 "suggested_next_block_ms": _suggest_next_block_ms(running_ms),
                 "command": command,
-                "message": (
-                    f"The command is still running after block_until_ms={block_until_ms}."
+                "message": tool_t(
+                    "shell.running", params={"block_until_ms": block_until_ms}
                 ),
                 "next_action": {
-                    "if_result_required": "call await_shell immediately",
+                    "if_result_required": tool_t("shell.next.await_now"),
                     "await_shell_args": {
                         "task_id": task_id,
                         "block_until_ms": max(
                             60000, _suggest_next_block_ms(running_ms)
                         ),
                     },
-                    "do_not": "do not answer with waiting/progress text only",
+                    "do_not": tool_t("shell.next.no_progress_only"),
                 },
             }
         finally:
@@ -1437,16 +1433,16 @@ class ExecuteCommandTool:
             "suggested_next_block_ms": next_block_ms,
             "block_until_ms_requested": requested_block_until_ms,
             "block_until_ms_used": block_until_ms,
-            "message": (
-                f"The task is still running after await_shell waited block_until_ms={block_until_ms}."
+            "message": tool_t(
+                "shell.await_running", params={"block_until_ms": block_until_ms}
             ),
             "next_action": {
-                "if_result_required": "call await_shell again",
+                "if_result_required": tool_t("shell.next.await_again"),
                 "await_shell_args": {
                     "task_id": task_id,
                     "block_until_ms": next_block_ms,
                 },
-                "do_not": "do not answer with waiting/progress text only",
+                "do_not": tool_t("shell.next.no_progress_only"),
             },
         }
 

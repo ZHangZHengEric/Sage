@@ -1,7 +1,9 @@
 import { ref, computed } from 'vue'
 import { agentAPI } from '@/api/agent.js'
+import { modelProviderAPI } from '@/api/modelProvider.js'
 import { isLoggedIn } from '@/utils/auth.js'
 import { normalizeAgentMode } from '@/utils/agentMode.js'
+import { getDefaultThinkingLevel, getThinkingLevelOptions } from '@/utils/modelCapabilities.js'
 
 export const useChatAgentConfig = ({
   t,
@@ -13,6 +15,7 @@ export const useChatAgentConfig = ({
   const selectedAgent = ref(null)
   const config = ref({
     deepThinking: true,
+    thinkingLevel: 'medium',
     agentMode: 'simple',
     moreSuggest: false,
     maxLoopCount: null,
@@ -58,8 +61,16 @@ export const useChatAgentConfig = ({
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
       const agentMode = normalizeAgentMode(agent.agentMode)
+      const thinkingLevelOptions = getThinkingLevelOptions(agent.llmModel, agent.llmBaseUrl)
+      const overriddenThinkingLevel = userConfigOverrides.value.thinkingLevel
+      const agentThinkingLevel = agent.thinkingLevel
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
+        thinkingLevel: thinkingLevelOptions.includes(overriddenThinkingLevel)
+          ? overriddenThinkingLevel
+          : thinkingLevelOptions.includes(agentThinkingLevel)
+            ? agentThinkingLevel
+            : getDefaultThinkingLevel(agent.llmModel, agent.llmBaseUrl),
         agentMode: userConfigOverrides.value.agentMode !== undefined ? normalizeAgentMode(userConfigOverrides.value.agentMode) : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : agent.maxLoopCount,
@@ -114,8 +125,22 @@ export const useChatAgentConfig = ({
     }
     try {
       const response = await agentAPI.getAgents()
-      // 后端返回格式: [...]
-      agents.value = response || []
+      let nextAgents = response || []
+      try {
+        const providers = await modelProviderAPI.listModelProviders()
+        const providerById = new Map(
+          (Array.isArray(providers) ? providers : []).map(provider => [provider.id, provider])
+        )
+        nextAgents = nextAgents.map(agent => {
+          const provider = providerById.get(agent.llm_provider_id)
+          return provider
+            ? { ...agent, llmModel: provider.model, llmBaseUrl: provider.base_url }
+            : agent
+        })
+      } catch (error) {
+        console.warn('[Chat] Failed to load model capabilities for agent settings:', error)
+      }
+      agents.value = nextAgents
     } catch (error) {
       if (isLoggedIn()) {
         toast.error(t('chat.loadAgentsError'))

@@ -487,26 +487,16 @@ def test_missing_turn_status_tool_does_not_request_retry():
     assert _agent()._should_request_turn_status_after_text_response(chunks, []) is False
 
 
-def test_committed_next_step_still_uses_llm_judge(monkeypatch):
+def test_committed_next_step_is_classified_by_llm_judge(monkeypatch):
     agent = _agent()
     captured = {}
 
-    async def _fake_system_message(session_id, custom_prefix, language):
-        return custom_prefix
-
     async def _fake_llm_streaming(*args, **kwargs):
         captured["step_name"] = kwargs["step_name"]
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(
-                        content='{"task_interrupted": false, "reason": "continuing work"}'
-                    )
-                )
-            ]
+        yield _llm_chunk(
+            content='{"decision":"continue","reason":"promised next action"}'
         )
 
-    monkeypatch.setattr(agent, "prepare_unified_system_message", _fake_system_message)
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
 
     msg_manager = SimpleNamespace(
@@ -536,6 +526,460 @@ def test_committed_next_step_still_uses_llm_judge(monkeypatch):
         is False
     )
     assert captured["step_name"] == "task_complete_judge"
+
+
+def test_screenshot_style_create_file_promise_is_classified_as_continue(monkeypatch):
+    agent = _agent()
+    captured = {}
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        yield _llm_chunk(content='{"decision":"continue","reason":"网页文件尚未创建"}')
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "让我先把回答说清楚，并直接把网页版做出来给她用。"
+                "先创建网页版文件。我先把清单做成可打勾网页版，并把文件整理好。"
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="s-screenshot-regression",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is False
+    assert "我先把清单做成可打勾网页版" in captured["prompt"]
+    assert "承诺后续动作" in captured["prompt"]
+
+
+def test_inline_questionnaire_protocol_detection_excludes_responses():
+    agent = _agent()
+    request_blocks = [
+        '<yiii-questionnaire>{"questions":[]}</yiii-questionnaire>',
+        '<foo-questionnaire>{"questions":[]}</foo-questionnaire>',
+        "```sage-questionnaire\nquestions: []\n```",
+        "'''ling-questionnaire\nquestions: []\n'''",
+        "<questionnaire>{}</questionnaire>",
+        "&lt;movo-questionnaire&gt;{}&lt;/movo-questionnaire&gt;",
+    ]
+
+    for content in request_blocks:
+        assert agent._content_has_inline_questionnaire(content) is True
+
+    response_blocks = [
+        '<yiii-questionnaire-response>{"answers":[]}</yiii-questionnaire-response>',
+        "```questionnaire-response\nanswers: []\n```",
+        "The docs mention movo-questionnaire but do not ask anything.",
+    ]
+    for content in response_blocks:
+        assert agent._content_has_inline_questionnaire(content) is False
+
+
+def test_ling_action_protocol_detection_requires_opening_tag():
+    agent = _agent()
+
+    assert agent._content_has_ling_action(
+        '<ling-action label="继续" prompt="继续处理" />'
+    )
+    assert agent._content_has_ling_action(
+        '&lt;ling-action label="继续" prompt="继续处理" /&gt;'
+    )
+    assert agent._content_has_ling_action("</ling-action>") is False
+    assert agent._content_has_ling_action(
+        "文档里提到了 ling-action，但没有输出协议标签。"
+    ) is False
+    assert agent._content_has_ling_action(
+        '<other-action label="继续" prompt="继续处理" />'
+    ) is False
+
+
+def test_ling_action_forces_stop_without_calling_judge(monkeypatch):
+    agent = _agent()
+
+    async def _fail_llm(*args, **kwargs):
+        raise AssertionError("ling-action must bypass completion judge")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fail_llm)
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "incidental-read",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"status":"success","content":"internal context"}',
+            tool_call_id="incidental-read",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "当前回应已经完整。你今晚感觉怎么样？用户之后可能回复，但无需继续执行。\n"
+                '<ling-action label="继续聊" prompt="继续聊聊" />'
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="ling-action-stop",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
+    assert decision.reason.startswith("ling-action marks a closed reply")
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+
+
+def test_inline_questionnaire_forces_need_user_input_with_open_todo(monkeypatch):
+    agent = _agent()
+
+    async def _fail_llm(*args, **kwargs):
+        raise AssertionError("inline questionnaire must bypass completion judge")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fail_llm)
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="继续实现功能",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-open-questionnaire",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=(
+                '{"tasks":[{"id":"implement","name":"实现功能",'
+                '"status":"in_progress"}]}'
+            ),
+            tool_call_id="todo-open-questionnaire",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "需要你选择部署目标。\n"
+                '<sage-questionnaire>{"title":"部署目标","questions":[]}'
+                "</sage-questionnaire>"
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="todo-questionnaire",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
+    assert decision.reason == "inline questionnaire requires user input"
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+
+
+def test_trailing_question_mark_forces_need_user_input_without_calling_judge(
+    monkeypatch,
+):
+    agent = _agent()
+
+    async def _fail_llm(*args, **kwargs):
+        raise AssertionError("question mark must bypass completion judge")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fail_llm)
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="继续处理任务",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="请提供目标服务器地址？",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="question-mark",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
+    assert decision.reason == "latest assistant reply ends with a question mark"
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+
+
+def test_non_trailing_question_mark_still_uses_judge(monkeypatch):
+    agent = _agent()
+    judge_calls = []
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        yield _llm_chunk(content='{"decision":"continue","reason":"仍会继续处理"}')
+
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="继续处理任务",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="服务地址是什么？我会先检查默认配置。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="non-trailing-question-mark",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is False
+    assert len(judge_calls) == 1
+    assert "completion_status" not in session_context.audit_status
+
+
+def test_tool_result_still_continues_after_older_assistant_question(monkeypatch):
+    agent = _agent()
+    session_context = SimpleNamespace(
+        audit_status={},
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="检查服务状态",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="服务地址是什么？我先尝试读取默认配置。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content='{"status":"running"}',
+            tool_call_id="check-service",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="question-before-tool",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is False
+    assert "completion_status" not in session_context.audit_status
+
+
+def test_structured_judge_decision_takes_priority_over_legacy_boolean():
+    agent = _agent()
+
+    assert (
+        agent._task_interrupted_from_judge_result(
+            {
+                "decision": "continue",
+                "task_interrupted": True,
+                "reason": "仍需执行",
+            },
+        )
+        is False
+    )
+    assert (
+        agent._task_interrupted_from_judge_result(
+            {"decision": "completed", "reason": "原始目标已满足"},
+        )
+        is True
+    )
+    assert (
+        agent._task_interrupted_from_judge_result(
+            {"task_interrupted": True, "reason": "need user input"},
+        )
+        is True
+    )
+
+
+def test_invalid_structured_decision_fails_closed_to_continue():
+    agent = _agent()
+
+    invalid_results = [
+        {"decision": "done"},
+        {"decision": "done", "task_interrupted": True},
+        {"decision": "done", "reason": "need user input"},
+        {"decision": ""},
+        {"decision": None, "task_interrupted": True},
+    ]
+
+    for result in invalid_results:
+        assert agent._task_interrupted_from_judge_result(result) is False
+
+
+def test_structured_need_user_input_plain_request_is_accepted(monkeypatch):
+    agent = _agent()
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(
+            content=('{"decision":"need_user_input","reason":"需要用户确认技术方案"}')
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="请上传视频文件或提供可公开访问的 .mp4 直链。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="s-fake-user-wait",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
+
+
+def test_structured_need_user_input_with_concrete_question_is_accepted(monkeypatch):
+    agent = _agent()
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(
+            content=('{"decision":"need_user_input","reason":"缺少目标服务器地址"}')
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = _base_messages() + [
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="目标服务器地址是什么？当前上下文中没有这个信息。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="s-real-user-wait",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+    assert decision.task_interrupted is True
 
 
 def test_task_complete_decision_captures_continue_reason(monkeypatch):
@@ -939,6 +1383,96 @@ def test_task_complete_judge_includes_latest_todo_plan_before_last_user(monkeypa
     assert "user: Build the feature" not in captured["prompt"]
 
 
+def test_open_todo_code_guard_allows_only_non_completed_states(monkeypatch):
+    agent = _agent()
+    judge_results = iter(
+        [
+            '{"decision":"completed","reason":"任务已经完成"}',
+            '{"decision":"continue","reason":"验证仍在进行"}',
+            '{"decision":"need_user_input","reason":"缺少服务器地址"}',
+            '{"decision":"blocked","reason":"外部服务拒绝访问"}',
+            '{"task_interrupted":true,"reason":"任务完成"}',
+        ]
+    )
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        yield _llm_chunk(content=next(judge_results))
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "zh",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="实现并验证功能",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="",
+            tool_calls=[
+                {
+                    "id": "todo-open",
+                    "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }
+            ],
+            message_type=MessageType.TOOL_CALL.value,
+        ),
+        MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=(
+                '{"tasks":[{"id":"verify","name":"运行验证","status":"in_progress"}]}'
+            ),
+            tool_call_id="todo-open",
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content="当前阶段已完成。",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    def _judge(latest_text):
+        current_messages = list(messages)
+        current_messages[-1] = MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=latest_text,
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        )
+        return asyncio.run(
+            agent._get_task_complete_decision(
+                messages_input=current_messages,
+                session_id="todo-open-guard",
+                tool_manager=None,
+                session_context=session_context,  # pyright: ignore[reportArgumentType]
+            )
+        )
+
+    # completed is inconsistent with an open Todo and is coerced to continue.
+    rejected_completed = _judge("当前阶段已完成。")
+    assert rejected_completed.task_interrupted is False
+    assert "Todo still has pending/in_progress" in rejected_completed.reason
+    # The other three states remain valid while Todo work is open.
+    assert _judge("验证仍在进行。").task_interrupted is False
+    assert (
+        _judge("请提供目标服务器地址，当前上下文中没有这个信息。").task_interrupted
+        is True
+    )
+    assert _judge("外部服务拒绝访问，当前无法继续。").task_interrupted is True
+    # Open Todo requires an explicit four-state decision; legacy/missing state fails closed.
+    assert _judge("任务完成。").task_interrupted is False
+
+
 def test_task_complete_judge_does_not_revive_older_unfinished_todo_snapshot():
     agent = _agent()
     messages = [
@@ -1093,7 +1627,10 @@ def test_task_complete_judge_prompt_requires_evidence_for_execution_claims(
     prompt = captured["llm_messages"][0]["content"]
     assert "claims about executed actions are backed by execution evidence" in prompt
     assert 'Saying "done", "handled", or "verified" is not execution evidence' in prompt
-    assert "Need user confirmation/input/missing specs before continuing" in prompt
+    assert (
+        "The Assistant's assertion that it “needs confirmation/input” is not evidence"
+        in prompt
+    )
 
 
 def test_task_complete_judge_does_not_treat_can_start_after_confirmation_as_user_wait(
@@ -1220,6 +1757,40 @@ def test_task_complete_judge_confirmation_rules_are_synced_across_prompt_variant
         assert continue_rule in prompt
 
 
+def test_task_complete_judge_closes_optional_followups_and_incidental_tools():
+    prompt_manager = PromptManager()
+    expectations = {
+        "zh": (
+            "用户之后可能回复",
+            "<ling-action ... />",
+            "成功但附带性的读取、搜索或记忆调用",
+            "原始需求中哪一项尚未满足",
+            "不得凭空想象后续工作",
+        ),
+        "en": (
+            "The user may reply later",
+            "<ling-action ... />",
+            "successful incidental read, search, or memory call",
+            "exact unmet part of the original request",
+            "Do not invent future work",
+        ),
+        "pt": (
+            "O usuário pode responder depois",
+            "<ling-action ... />",
+            "chamada de memória incidental bem-sucedida",
+            "parte exata da solicitação original ainda não atendida",
+            "Não invente trabalho futuro",
+        ),
+    }
+
+    for language, required_fragments in expectations.items():
+        prompt = prompt_manager.get_agent_prompt(
+            "SimpleAgent", "task_complete_template", language=language
+        )
+        for fragment in required_fragments:
+            assert fragment in prompt
+
+
 def test_task_complete_judge_pending_question_rules_are_synced_across_prompt_variants():
     prompt_manager = PromptManager()
     expectations = [
@@ -1306,7 +1877,7 @@ def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
     latest_reply = (
         "I prepared the current phase result. "
         + "detail " * 450
-        + "<movo-questionnaire>need specs</movo-questionnaire> "
+        + "Please provide the output dimensions. "
         + "Once you answer, I will continue."
     )
     messages = [
@@ -1341,7 +1912,7 @@ def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
     )
 
     prompt = captured["llm_messages"][0]["content"]
-    assert "<movo-questionnaire>need specs</movo-questionnaire>" in prompt
+    assert "Please provide the output dimensions." in prompt
     assert "Once you answer, I will continue." in prompt
     assert "assistant content omitted" not in prompt
     assert "[truncated, original chars:" not in prompt
@@ -1917,6 +2488,67 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
     ]
 
 
+def test_third_plain_text_questionnaire_still_sets_need_user_input(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+    judge_calls = []
+    original_get_task_complete_decision = agent._get_task_complete_decision
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        content = f"纯文本回答 {len(direct_calls)}"
+        if len(direct_calls) == 3:
+            content = (
+                "请选择部署目标。\n"
+                '<sage-questionnaire>{"questions":[]}</sage-questionnaire>'
+            )
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=content,
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_get_task_complete_decision(*args, **kwargs):
+        judge_calls.append((args, kwargs))
+        if len(judge_calls) < 3:
+            return TaskCompleteDecision(task_interrupted=False)
+        return await original_get_task_complete_decision(*args, **kwargs)
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(
+        agent, "_get_task_complete_decision", _fake_get_task_complete_decision
+    )
+    session_context = _loop_session_context()
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 3
+    assert len(judge_calls) == 3
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+    assert "<sage-questionnaire>" in str(chunks[-1].content)
+
+
 def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = _agent()
@@ -2038,6 +2670,68 @@ def test_llm_judge_completed_plain_text_does_not_force_required(monkeypatch):
     assert len(judge_calls) == 1
     assert direct_calls[0]["force_tool_choice_required"] is False
     assert [chunk.content for chunk in chunks] == ["已经完成。"]
+
+
+def test_llm_judge_need_user_input_plain_request_stops_execution(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    direct_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="请上传视频文件或提供可公开访问的 .mp4 直链。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        assert kwargs["step_name"] == "task_complete_judge"
+        yield _llm_chunk(
+            content=('{"decision":"need_user_input","reason":"缺少可读取的视频素材"}')
+        )
+
+    async def _open_todo_plan(*args, **kwargs):
+        return (
+            '<current_todo_plan>{"authoritative":true,'
+            '"tasks":[{"id":"analyze","status":"in_progress"}]}'
+            "</current_todo_plan>"
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+    monkeypatch.setattr(agent, "_build_task_complete_todo_plan", _open_todo_plan)
+    session_context = _loop_session_context()
+    session_context.message_manager.context_budget_manager = SimpleNamespace(
+        budget_info={"active_budget": 3000}
+    )
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s1",
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 1
+    assert [chunk.content for chunk in chunks] == [
+        "请上传视频文件或提供可公开访问的 .mp4 直链。"
+    ]
 
 
 def test_llm_judge_tool_activity_resets_required_after_plain_text(monkeypatch):
@@ -2560,10 +3254,7 @@ def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
         pattern={"mode": "tool_call", "period": 2, "cycles": 2},
     )
 
-    inference = MessageManager.build_inference_view(
-        [questionnaire],
-        apply_rule_compression=False,
-    )
+    inference = MessageManager.build_inference_view([questionnaire])
 
     assert "<movo-questionnaire>" in questionnaire.content
     assert len(inference) == 1

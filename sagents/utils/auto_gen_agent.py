@@ -389,7 +389,6 @@ class AutoGenAgentFunc:
                     ),
                 ),
                 "deepThinking": False,
-                "multiAgent": False,
                 "moreSupport": False,
                 "maxLoopCount": max_loop_count,
                 "llmConfig": {"model": "", "maxTokens": "", "temperature": ""},

@@ -3,7 +3,7 @@ import json
 import uuid
 import os
 
-from .agent_base import AgentBase
+from .agent_base import AgentBase, ProviderContextWindowExceededError
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
@@ -54,7 +54,6 @@ class CommonAgent(AgentBase):
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(
             recent_turns=10,
-            max_length=self.max_history_context_length,  # pyright: ignore[reportCallIssue]
             last_turn_user_only=False,
         )
         transient_injected = self._transient_user_injections(injected)
@@ -73,18 +72,52 @@ class CommonAgent(AgentBase):
             if tool_name in tools_json
         ]
 
-        llm_request_message = await self.prepare_llm_request_messages(
-            session_id=session_id,
-            history_messages=all_messages,
-            language=session_context.get_language(),
-        )
-        async for msg in self._call_llm_and_process_response(
-            messages_input=llm_request_message,
-            tools_json=tools_json,
-            tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
-            session_id=session_id,
-        ):
-            yield msg
+        async def build_request(history_messages: List[MessageChunk]):
+            return await self.prepare_llm_request_messages(
+                session_id=session_id,
+                history_messages=history_messages,
+                language=session_context.get_language(),
+            )
+
+        recovery_source = list(all_messages)
+        llm_request_message = await build_request(recovery_source)
+        recovery_attempts = 0
+        while True:
+            try:
+                async for msg in self._call_llm_and_process_response(
+                    messages_input=llm_request_message,
+                    tools_json=tools_json,
+                    tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
+                    session_id=session_id,
+                ):
+                    yield msg
+                return
+            except ProviderContextWindowExceededError:
+                recovery_attempts += 1
+                if recovery_attempts > 20:
+                    logger.error(
+                        "CommonAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                    )
+                    raise
+                recovered_history = None
+                async for recovery_messages, is_final in (
+                    self._prepare_context_messages_for_llm(
+                        recovery_source,
+                        session_id,
+                        request_builder=build_request,
+                        request_tools=tools_json,
+                        step_name="task_execution",
+                        provider_overflow_recovery=True,
+                    )
+                ):
+                    if is_final:
+                        recovered_history = recovery_messages
+                    else:
+                        yield recovery_messages
+                if recovered_history is None:
+                    raise
+                recovery_source = recovered_history
+                llm_request_message = await build_request(recovery_source)
 
     async def _call_llm_and_process_response(
         self,
@@ -108,10 +141,8 @@ class CommonAgent(AgentBase):
         )
 
         tool_calls = {}
-        reasoning_content_response_message_id = str(uuid.uuid4())
-        content_response_message_id = str(uuid.uuid4())
+        response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
-        tool_calls_messages_id = str(uuid.uuid4())
 
         # 处理流式响应块
         async for chunk in response:
@@ -133,7 +164,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=chunk.choices[0].delta.tool_calls,
-                            message_id=tool_calls_messages_id,
+                            message_id=response_message_id,
                             message_type=MessageType.TOOL_CALL.value,
                         )
                     ]
@@ -150,7 +181,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content=chunk.choices[0].delta.content,
-                            message_id=content_response_message_id,
+                            message_id=response_message_id,
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )
                     ]
@@ -164,9 +195,9 @@ class CommonAgent(AgentBase):
                     output_messages = [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
-                            content=chunk.choices[0].delta.reasoning_content,
-                            message_id=reasoning_content_response_message_id,
-                            message_type=MessageType.TASK_ANALYSIS.value,
+                            reasoning_content=chunk.choices[0].delta.reasoning_content,
+                            message_id=response_message_id,
+                            message_type=MessageType.REASONING_CONTENT.value,
                         )
                     ]
                     yield output_messages
@@ -216,6 +247,7 @@ class CommonAgent(AgentBase):
                 messages_input=messages_input,  # pyright: ignore[reportArgumentType]
                 session_id=session_id,
                 emit_tool_call_message=emit_on_complete,
+                tool_call_message_id=response_message_id,
             ):
                 yield msg
         else:
@@ -224,7 +256,7 @@ class CommonAgent(AgentBase):
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content="",
-                    message_id=content_response_message_id,
+                    message_id=response_message_id,
                     message_type=MessageType.DO_SUBTASK_RESULT.value,
                 )
             ]
@@ -237,6 +269,8 @@ class CommonAgent(AgentBase):
         messages_input: List[Dict[str, Any]],
         session_id: str,
         emit_tool_call_message: bool = True,
+        tool_call_message_id: Optional[str] = None,
+        tool_call_message_metadata: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
@@ -258,6 +292,8 @@ class CommonAgent(AgentBase):
             handle_complete_task=True,
             emit_tool_call_message=emit_tool_call_message,
             execute_concurrently=False,
+            tool_call_message_id=tool_call_message_id,
+            tool_call_message_metadata=tool_call_message_metadata,
         ):
             yield messages
             if is_complete:

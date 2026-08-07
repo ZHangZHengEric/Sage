@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from sagents.context.messages.token_accounting import PromptBudgetManager
 from sagents.context.session_memory import create_session_memory_manager
 from sagents.skill import SkillProxy, SkillManager
 from sagents.skill.sandbox_skill_manager import SandboxSkillManager
@@ -195,6 +196,7 @@ class SessionContext:
             "history_ratio",
             "active_ratio",
             "max_new_message_ratio",
+            "compression_threshold",
         }
         return {
             key: value
@@ -209,6 +211,7 @@ class SessionContext:
             "history_ratio": manager.history_ratio,
             "active_ratio": manager.active_ratio,
             "max_new_message_ratio": manager.max_new_message_ratio,
+            "compression_threshold": self.message_manager.compression_threshold,
         }
 
     def update_context_budget_config(
@@ -232,6 +235,12 @@ class SessionContext:
         manager.history_ratio = next_config["history_ratio"]
         manager.active_ratio = next_config["active_ratio"]
         manager.max_new_message_ratio = next_config["max_new_message_ratio"]
+        compression_threshold = float(next_config["compression_threshold"])
+        if not 0 < compression_threshold < 1:
+            raise ValueError(
+                "compression_threshold must be greater than 0 and less than 1"
+            )
+        self.message_manager.compression_threshold = compression_threshold
         manager.budget_info = None
         self.context_budget_config = next_config
         logger.info(
@@ -255,6 +264,7 @@ class SessionContext:
         self.message_manager = MessageManager(
             context_budget_config=context_budget_config
         )
+        self.prompt_budget_manager = PromptBudgetManager()
         self.context_budget_config = self._effective_context_budget_config()
         # pending_user_injections：运行中等待被下一次 LLM 请求消费的"引导用户消息"。
         # 不进入持久化快照，会话销毁即释放。
@@ -577,9 +587,7 @@ class SessionContext:
                 )
                 if (
                     message.message_id
-                    and self._message_journal_flushed_signatures.get(
-                        message.message_id
-                    )
+                    and self._message_journal_flushed_signatures.get(message.message_id)
                     == message_signature
                 ):
                     return False
@@ -598,9 +606,9 @@ class SessionContext:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     f.flush()
                 if message.message_id:
-                    self._message_journal_flushed_signatures[
-                        message.message_id
-                    ] = message_signature
+                    self._message_journal_flushed_signatures[message.message_id] = (
+                        message_signature
+                    )
             return True
         except Exception as e:
             logger.warning(
@@ -657,9 +665,7 @@ class SessionContext:
         except OSError:
             return False
 
-    def _is_acceptable_message_session_id(
-        self, msg_session_id: Optional[str]
-    ) -> bool:
+    def _is_acceptable_message_session_id(self, msg_session_id: Optional[str]) -> bool:
         """Return True if message may enter this session's inference ledger.
 
         Accepts only untagged chunks (``None``) or an exact match with this
@@ -677,14 +683,10 @@ class SessionContext:
         """Keep ledger content OpenAI-compatible (string | multimodal list)."""
         if isinstance(msg, MessageChunk):
             if isinstance(msg.content, dict):
-                msg.content = json.dumps(
-                    msg.content, ensure_ascii=False, default=str
-                )
+                msg.content = json.dumps(msg.content, ensure_ascii=False, default=str)
             return
         if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
-            msg["content"] = json.dumps(
-                msg["content"], ensure_ascii=False, default=str
-            )
+            msg["content"] = json.dumps(msg["content"], ensure_ascii=False, default=str)
 
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
@@ -751,11 +753,10 @@ class SessionContext:
                 self.message_manager.add_messages(msg)
                 if self._get_message_by_id(message_id) is not None:
                     self._track_message_journal_after_add(message_id)
-                    if (
-                        message_role
-                        in {MessageRole.USER.value, MessageRole.TOOL.value}
-                        or self._is_message_final(msg)
-                    ):
+                    if message_role in {
+                        MessageRole.USER.value,
+                        MessageRole.TOOL.value,
+                    } or self._is_message_final(msg):
                         self._append_message_to_journal(
                             message_id,
                             reason="stable_message",
@@ -1652,9 +1653,7 @@ class SessionContext:
         初始化沙箱技能管理器：按宿主 SkillProxy 给出的名称，仅从沙箱内
         ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
         """
-        self.sandbox_skill_manager = await self.sandbox.sync_skills(
-            self.skill_manager
-        )
+        self.sandbox_skill_manager = await self.sandbox.sync_skills(self.skill_manager)
 
     async def _finalize_system_context(self):
         """
@@ -1744,11 +1743,46 @@ class SessionContext:
     def _save_llm_request_sync(self, llm_request: Dict[str, Any]) -> str:
         with self._llm_request_save_lock:
             file_path = self._prepare_llm_request_file_path(llm_request)
+            internal_request = llm_request["request"]
+            provider_attempts = internal_request.get("_provider_request_attempts", [])
+            actual_request = (
+                provider_attempts[-1]
+                if provider_attempts
+                else {
+                    key: value
+                    for key, value in internal_request.items()
+                    if not str(key).startswith("_")
+                }
+            )
+            metadata = {
+                key: value
+                for key, value in internal_request.items()
+                if key
+                not in {
+                    "messages",
+                    "model",
+                    "model_config",
+                    "_provider_request_attempts",
+                    "_provider_metadata",
+                }
+                and not str(key).startswith("_")
+            }
+            provider_metadata = internal_request.get("_provider_metadata")
+            if isinstance(provider_metadata, dict):
+                metadata.update(provider_metadata)
+            if not provider_attempts:
+                metadata["request_view"] = "pre_adapter_fallback"
             serializable_request = {
-                "request": make_serializable(llm_request["request"]),
+                "schema_version": 2,
+                "request": make_serializable(actual_request),
                 "response": make_serializable(llm_request["response"]),
+                "metadata": make_serializable(metadata),
                 "timestamp": llm_request["timestamp"],
             }
+            if len(provider_attempts) > 1:
+                serializable_request["request_attempts"] = make_serializable(
+                    provider_attempts
+                )
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(serializable_request, f, ensure_ascii=False, indent=4)
             return file_path
@@ -1937,6 +1971,7 @@ class SessionContext:
         system_context: Optional[dict] = None,
         available_workflows: Optional[dict] = None,
         deep_thinking: Optional[bool] = None,
+        thinking_level: Optional[str] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         max_loop_count: Optional[int] = None,
@@ -1955,6 +1990,7 @@ class SessionContext:
             system_context: 系统上下文
             available_workflows: 可用工作流
             deep_thinking: 深度思考模式
+            thinking_level: 模型原生思考等级
             agent_mode: 智能体运行模式
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
@@ -1983,6 +2019,7 @@ class SessionContext:
             "description": f"Agent configuration for session {self.session_id}",
             "system_prefix": system_prefix or "",
             "deep_thinking": deep_thinking if deep_thinking is not None else False,
+            "thinking_level": thinking_level,
             "agent_mode": agent_mode,
             "more_suggest": more_suggest,
             "max_loop_count": max_loop_count,
@@ -2771,6 +2808,9 @@ class SessionContext:
                     ),
                     "context_budget_config": make_serializable(
                         self._effective_context_budget_config()
+                    ),
+                    "prompt_token_checkpoints": make_serializable(
+                        self.prompt_budget_manager.to_dict()
                     ),
                     # Agent 配置
                     "agent_config": make_serializable(self.agent_config),

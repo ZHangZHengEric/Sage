@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
 from openai import APIError
@@ -18,6 +19,13 @@ _REASONING_MODEL_PREFIXES: tuple[str, ...] = (
     "gpt-5",
 )
 _REASONING_MODEL_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
+_RETIRED_DEEPSEEK_MODEL_ALIASES: frozenset[str] = frozenset(
+    {"deepseek-chat", "deepseek-reasoner"}
+)
+_CHAT_COMPLETIONS_TOOL_REASONING_EFFORT_UNSUPPORTED_PREFIXES: tuple[str, ...] = (
+    "gpt-5.6-luna",
+)
+DEFAULT_TOOL_REASONING_CONTENT = "no thinking"
 
 
 def _is_openai_reasoning_model_name(model: Optional[str]) -> bool:
@@ -30,6 +38,81 @@ def _is_openai_reasoning_model_name(model: Optional[str]) -> bool:
     if name in _REASONING_MODEL_EXACT:
         return True
     return any(name.startswith(p) for p in _REASONING_MODEL_PREFIXES)
+
+
+def _is_deepseek_model_name(model: Optional[str]) -> bool:
+    if not model:
+        return False
+    name = model.strip().lower()
+    return (
+        name.startswith("deepseek-")
+        or name.startswith("deepseek/")
+        or "/deepseek-" in name
+    )
+
+
+def _provider_base_url(
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> Optional[str]:
+    if isinstance(model_config, Mapping) and model_config.get("base_url"):
+        return str(model_config["base_url"])
+    for candidate in (
+        client,
+        getattr(client, "_model", None),
+        getattr(client, "_standard", None),
+    ):
+        if candidate is None:
+            continue
+        value = getattr(candidate, "base_url", None) or getattr(
+            candidate, "_base_url", None
+        )
+        if value:
+            return str(value)
+    return None
+
+
+def _uses_deepseek_native_protocol(
+    model: Optional[str],
+    *,
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    if not _is_deepseek_model_name(model):
+        return False
+    base_url = _provider_base_url(client=client, model_config=model_config)
+    if not base_url:
+        return False
+    parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
+    return (parsed.hostname or "").lower() == "api.deepseek.com"
+
+
+def normalize_chat_completions_model(
+    model: str,
+    *,
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Resolve retired first-party DeepSeek aliases at the request boundary.
+
+    DeepSeek documented both legacy names as aliases of V4 Flash before their
+    retirement. Keep saved Sage providers working without mutating their durable
+    configuration; third-party endpoints with the same slugs remain untouched.
+    """
+    normalized = str(model or "").strip()
+    if (
+        normalized.lower() in _RETIRED_DEEPSEEK_MODEL_ALIASES
+        and _uses_deepseek_native_protocol(
+            normalized, client=client, model_config=model_config
+        )
+    ):
+        logger.warning(
+            f"DeepSeek model alias {normalized!r} is retired; "
+            "using 'deepseek-v4-flash' for this Chat Completions request",
+            session_id="NO_SESSION",
+        )
+        return "deepseek-v4-flash"
+    return normalized
 
 
 def uses_max_completion_tokens(model: Optional[str]) -> bool:
@@ -222,30 +305,329 @@ def downgrade_image_url_parts_for_text_only_model(messages: Any) -> tuple[Any, i
     return new_messages, downgraded
 
 
-def _tool_choice_is_required(tool_choice: Any) -> bool:
-    if isinstance(tool_choice, str):
-        return tool_choice.strip().lower() == "required"
-    return False
-
-
-def _drop_reasoning_effort_when_tools_present(sanitized: Dict[str, Any]) -> None:
-    """
-    OpenAI：gpt-5.4 等在 chat/completions 上，只要请求携带 tools，
-    extra_body.reasoning_effort 就会触发 invalid_request_error，与 tool_choice 无关。
-    """
-    tools = sanitized.get("tools")
-    has_tools = isinstance(tools, (list, tuple)) and len(tools) > 0
-    if not has_tools:
+def _promote_reasoning_effort_for_openai_models(
+    sanitized: Dict[str, Any], model: Optional[str]
+) -> None:
+    """Move the standard Chat Completions parameter out of ``extra_body``."""
+    if not model or not _is_openai_reasoning_model_name(model):
         return
     eb = sanitized.get("extra_body")
     if not isinstance(eb, dict) or "reasoning_effort" not in eb:
         return
-    sanitized["extra_body"] = {k: v for k, v in eb.items() if k != "reasoning_effort"}
+    effort = eb.get("reasoning_effort")
+    if "reasoning_effort" not in sanitized and effort is not None:
+        sanitized["reasoning_effort"] = effort
+    remaining_extra_body = {k: v for k, v in eb.items() if k != "reasoning_effort"}
+    if remaining_extra_body:
+        sanitized["extra_body"] = remaining_extra_body
+    else:
+        sanitized.pop("extra_body", None)
     logger.debug(
-        "sanitize_model_request_kwargs: dropped reasoning_effort from extra_body "
-        "(tools present, chat/completions compatibility)",
+        "sanitize_model_request_kwargs: promoted reasoning_effort to the standard "
+        "Chat Completions parameter",
         session_id="NO_SESSION",
     )
+
+
+def _drop_reasoning_effort_for_incompatible_tool_requests(
+    sanitized: Dict[str, Any], model: Optional[str]
+) -> None:
+    """Apply model-specific Chat Completions tool compatibility rules.
+
+    GPT-5.6 Luna rejects ``reasoning_effort`` when function tools are present on
+    ``/v1/chat/completions`` and directs callers to the Responses API instead.
+    Sage still uses Chat Completions here, so retain tools and omit only the
+    incompatible effort parameter for this request shape.
+    """
+    name = str(model or "").strip().lower()
+    if not name or not sanitized.get("tools"):
+        return
+    if not any(
+        name == prefix or name.startswith(f"{prefix}-")
+        for prefix in _CHAT_COMPLETIONS_TOOL_REASONING_EFFORT_UNSUPPORTED_PREFIXES
+    ):
+        return
+
+    dropped = sanitized.pop("reasoning_effort", None) is not None
+    extra_body = sanitized.get("extra_body")
+    if isinstance(extra_body, dict) and "reasoning_effort" in extra_body:
+        remaining = {
+            key: value
+            for key, value in extra_body.items()
+            if key != "reasoning_effort"
+        }
+        if remaining:
+            sanitized["extra_body"] = remaining
+        else:
+            sanitized.pop("extra_body", None)
+        dropped = True
+    if dropped:
+        logger.warning(
+            "sanitize_model_request_kwargs: dropped reasoning_effort "
+            f"(model {model!r} does not support it with function tools in "
+            "Chat Completions)",
+            session_id="NO_SESSION",
+        )
+
+
+def _drop_tool_choice_for_deepseek_thinking(
+    sanitized: Dict[str, Any],
+    model: Optional[str],
+    *,
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """DeepSeek V4 thinking supports tools but rejects ``tool_choice``."""
+    if not _uses_deepseek_native_protocol(
+        model, client=client, model_config=model_config
+    ) or "tool_choice" not in sanitized:
+        return
+    tools = sanitized.get("tools")
+    if not isinstance(tools, (list, tuple)) or not tools:
+        return
+
+    extra_body = sanitized.get("extra_body")
+    extra_body = extra_body if isinstance(extra_body, dict) else {}
+    thinking = extra_body.get("thinking")
+    thinking_type = (
+        str(thinking.get("type") or "").strip().lower()
+        if isinstance(thinking, Mapping)
+        else ""
+    )
+    explicitly_disabled = thinking_type == "disabled"
+    explicitly_disabled = explicitly_disabled or extra_body.get(
+        "enable_thinking"
+    ) is False
+    template_kwargs = extra_body.get("chat_template_kwargs")
+    explicitly_disabled = explicitly_disabled or (
+        isinstance(template_kwargs, Mapping)
+        and template_kwargs.get("enable_thinking") is False
+    )
+    if explicitly_disabled:
+        return
+
+    sanitized.pop("tool_choice", None)
+    logger.debug(
+        "sanitize_model_request_kwargs: dropped tool_choice "
+        "(DeepSeek thinking mode does not support it)",
+        session_id="NO_SESSION",
+    )
+
+
+def sanitize_deepseek_tool_history(
+    messages: Any,
+    *,
+    request_kwargs: Mapping[str, Any],
+    model: Optional[str],
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    """Fill required DeepSeek tool-call replay fields in the outbound view.
+
+    Old sessions and non-thinking turns may contain a valid tool call without
+    ``reasoning_content``. DeepSeek requires that field when replaying tool-call
+    history, so send a neutral marker without changing the durable message.
+    """
+    if not _uses_deepseek_native_protocol(
+        model, client=client, model_config=model_config
+    ):
+        return messages
+    if not isinstance(messages, Sequence) or isinstance(
+        messages, (str, bytes, bytearray)
+    ):
+        return messages
+
+    changed = False
+    filled_count = 0
+    sanitized_messages: list[Any] = []
+    for message in messages:
+        if isinstance(message, Mapping):
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                message_copy = dict(message)
+                if message_copy.get("content") is None:
+                    message_copy["content"] = ""
+                    changed = True
+                reasoning = message_copy.get("reasoning_content")
+                if not isinstance(reasoning, str) or not reasoning.strip():
+                    message_copy["reasoning_content"] = (
+                        DEFAULT_TOOL_REASONING_CONTENT
+                    )
+                    changed = True
+                    filled_count += 1
+                sanitized_messages.append(message_copy)
+                continue
+        sanitized_messages.append(message)
+
+    if not changed:
+        return messages
+    logger.warning(
+        "DeepSeek Chat Completions history filled missing tool reasoning: "
+        f"assistant_turns={filled_count}",
+        session_id="NO_SESSION",
+    )
+    return sanitized_messages
+
+
+def coalesce_reasoning_content_messages(
+    messages: Any,
+    *,
+    preserve_tool_reasoning: bool,
+) -> Any:
+    """Fold legacy streamed assistant chunks into provider-facing messages.
+
+    Sage's durable ledger remains canonical. This function only builds a copied
+    request view and uses ``_sage_llm_response_id`` to avoid joining chunks from
+    different model responses.
+    """
+    if not isinstance(messages, Sequence) or isinstance(
+        messages, (str, bytes, bytearray)
+    ):
+        return messages
+
+    output: list[Any] = []
+    pending_reasoning: list[str] = []
+    pending_assistant_messages: list[dict[str, Any]] = []
+    pending_response_id: Optional[str] = None
+
+    def response_id(message: Mapping[str, Any]) -> Optional[str]:
+        value = message.get("_sage_llm_response_id")
+        return str(value) if value else None
+
+    def belongs_to_pending_response(message: Mapping[str, Any]) -> bool:
+        current_response_id = response_id(message)
+        if pending_response_id is None and current_response_id is None:
+            return True
+        return pending_response_id == current_response_id
+
+    def flush_pending_assistant_messages() -> None:
+        nonlocal pending_response_id
+        output.extend(pending_assistant_messages)
+        pending_assistant_messages.clear()
+        pending_reasoning.clear()
+        pending_response_id = None
+
+    def pending_visible_content() -> str:
+        return "".join(
+            content
+            for item in pending_assistant_messages
+            if isinstance((content := item.get("content")), str)
+        )
+
+    for raw in messages:
+        if not isinstance(raw, Mapping):
+            if pending_reasoning or pending_assistant_messages:
+                flush_pending_assistant_messages()
+            output.append(raw)
+            continue
+
+        message = dict(raw)
+        reasoning = message.get("reasoning_content")
+        is_reasoning_only = (
+            message.get("role") == "assistant"
+            and isinstance(reasoning, str)
+            and bool(reasoning)
+            and not message.get("content")
+            and not message.get("tool_calls")
+        )
+        if is_reasoning_only:
+            if (
+                (pending_reasoning or pending_assistant_messages)
+                and not belongs_to_pending_response(message)
+            ):
+                flush_pending_assistant_messages()
+            pending_response_id = response_id(message)
+            pending_reasoning.append(reasoning)
+            continue
+
+        if message.get("role") == "assistant":
+            if (
+                (pending_reasoning or pending_assistant_messages)
+                and not belongs_to_pending_response(message)
+            ):
+                flush_pending_assistant_messages()
+            has_tool_calls = bool(message.get("tool_calls"))
+            if pending_reasoning and not has_tool_calls:
+                message.pop("reasoning_content", None)
+                pending_assistant_messages.append(message)
+                continue
+            if has_tool_calls and pending_reasoning:
+                if preserve_tool_reasoning:
+                    buffered_content = pending_visible_content()
+                    if buffered_content:
+                        current_content = message.get("content")
+                        message["content"] = buffered_content + (
+                            current_content if isinstance(current_content, str) else ""
+                        )
+                else:
+                    output.extend(pending_assistant_messages)
+                pending_assistant_messages.clear()
+            if preserve_tool_reasoning and has_tool_calls and pending_reasoning:
+                existing = message.get("reasoning_content")
+                message["reasoning_content"] = "".join(pending_reasoning) + (
+                    existing if isinstance(existing, str) else ""
+                )
+            pending_reasoning = []
+            pending_response_id = None
+            if (
+                not preserve_tool_reasoning
+                and has_tool_calls
+                and isinstance(message.get("content"), str)
+                and message.get("content")
+            ):
+                output.append({"role": "assistant", "content": message["content"]})
+        elif pending_reasoning or pending_assistant_messages:
+            flush_pending_assistant_messages()
+
+        if not (preserve_tool_reasoning and message.get("tool_calls")):
+            message.pop("reasoning_content", None)
+        output.append(message)
+
+    flush_pending_assistant_messages()
+    for message in output:
+        if isinstance(message, dict):
+            message.pop("_sage_llm_response_id", None)
+            message.pop("_sage_message_id", None)
+    return output
+
+
+def prepare_chat_completion_messages(
+    messages: Any,
+    *,
+    request_kwargs: Mapping[str, Any],
+    model: Optional[str],
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    """Build a provider-compatible request view from canonical Sage history."""
+    use_deepseek_protocol = _uses_deepseek_native_protocol(
+        model, client=client, model_config=model_config
+    )
+    prepared = coalesce_reasoning_content_messages(
+        messages,
+        preserve_tool_reasoning=use_deepseek_protocol,
+    )
+    if use_deepseek_protocol:
+        return sanitize_deepseek_tool_history(
+            prepared,
+            request_kwargs=request_kwargs,
+            model=model,
+            client=client,
+            model_config=model_config,
+        )
+
+    if not isinstance(prepared, list):
+        return prepared
+    generic_messages: list[Any] = []
+    for raw in prepared:
+        if not isinstance(raw, Mapping):
+            generic_messages.append(raw)
+            continue
+        message = dict(raw)
+        message.pop("reasoning_content", None)
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            message.pop("content", None)
+        generic_messages.append(message)
+    return generic_messages
 
 
 def _drop_sampling_params_for_reasoning_models(
@@ -287,8 +669,8 @@ def sanitize_model_request_kwargs(
 
     另：对仅支持 max_completion_tokens 的模型，将 max_tokens 映射为该参数。
 
-    当请求携带 ``tools`` 时，从 ``extra_body`` 移除 ``reasoning_effort``，
-    避免部分 OpenAI 推理模型在 chat/completions 上报错。
+    对 OpenAI reasoning 模型，把 ``extra_body.reasoning_effort`` 提升为标准的
+    Chat Completions 顶层参数；再应用具体模型的 tools 兼容规则。
 
     对 OpenAI/Azure reasoning 模型（o1/o3/o4/gpt-5*），移除 ``temperature`` 等采样参数
     （这类模型通常只接受默认采样值）。
@@ -322,7 +704,24 @@ def sanitize_model_request_kwargs(
     )
     if structured_support is False:
         sanitized.pop("response_format", None)
-    _drop_reasoning_effort_when_tools_present(sanitized)
+    _promote_reasoning_effort_for_openai_models(sanitized, resolved_model)
+    _drop_reasoning_effort_for_incompatible_tool_requests(
+        sanitized, resolved_model
+    )
+    _drop_tool_choice_for_deepseek_thinking(
+        sanitized,
+        resolved_model,
+        client=client,
+        model_config=model_config,
+    )
+    if "messages" in sanitized:
+        sanitized["messages"] = sanitize_deepseek_tool_history(
+            sanitized["messages"],
+            request_kwargs=sanitized,
+            model=resolved_model,
+            client=client,
+            model_config=model_config,
+        )
     _drop_sampling_params_for_reasoning_models(sanitized, resolved_model)
     return sanitized
 
@@ -530,6 +929,7 @@ async def create_chat_completion_with_fallback(
     messages: Any,
     model_config: Optional[Dict[str, Any]] = None,
     response_format: Optional[Dict[str, Any]] = None,
+    request_observer: Optional[Callable[[Dict[str, Any]], None]] = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -539,11 +939,24 @@ async def create_chat_completion_with_fallback(
     if response_format is not None:
         request_kwargs["response_format"] = response_format
 
+    model = normalize_chat_completions_model(
+        model,
+        client=client,
+        model_config=model_config,
+    )
+
     request_kwargs = sanitize_model_request_kwargs(
         request_kwargs,
         client=client,
         model_config=model_config,
         model=model,
+    )
+    messages = prepare_chat_completion_messages(
+        messages,
+        request_kwargs=request_kwargs,
+        model=model,
+        client=client,
+        model_config=model_config,
     )
     if get_multimodal_support(client=client, model_config=model_config) is False:
         messages, downgraded_images = downgrade_image_url_parts_for_text_only_model(
@@ -560,6 +973,20 @@ async def create_chat_completion_with_fallback(
     structured_output_fallback_used = False
     while True:
         try:
+            if request_observer is not None:
+                try:
+                    provider_request = {
+                        "model": model,
+                        "messages": deepcopy(messages),
+                        **deepcopy(request_kwargs),
+                    }
+                    request_observer(provider_request)
+                except Exception as exc:
+                    logger.warning(
+                        "记录 provider-facing LLM 请求失败，不影响实际调用: "
+                        f"model={model}, error={exc}",
+                        session_id="NO_SESSION",
+                    )
             return await client.chat.completions.create(
                 model=model,
                 messages=messages,

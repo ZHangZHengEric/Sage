@@ -15,7 +15,7 @@ import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { isToolResultMessage } from '@/utils/messageLabels.js'
-import { mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
+import { mergeStreamedText, mergeToolFunctionArguments } from '@/utils/mergeToolFunctionArguments.js'
 import { getSessionMessageIndexKey } from '@/utils/sessionStreamEvents.js'
 import { getWebBasePath } from '@/config/runtime.js'
 import { storeToRefs } from 'pinia'
@@ -587,13 +587,6 @@ export const useChatPage = (props) => {
         rebuildMessageIdIndexMap()
         return
       }
-      const shouldAppendContent =
-        existing.role === 'assistant' &&
-        messageData.role === 'assistant' &&
-        typeof existing.content === 'string' &&
-        typeof messageData.content === 'string' &&
-        messageData.content.length > 0
-
       let nextMessage
       if (isToolResultMessage(messageData)) {
         nextMessage = {
@@ -604,9 +597,15 @@ export const useChatPage = (props) => {
         nextMessage = {
           ...existing,
           ...messageData,
-          content: shouldAppendContent
-            ? (existing.content || '') + messageData.content
-            : (messageData.content !== undefined ? messageData.content : existing.content),
+          content: mergeStreamedText(
+            existing.content,
+            messageData.content,
+            Array.isArray(messageData.tool_calls) && messageData.tool_calls.length > 0
+          ),
+          reasoning_content: mergeStreamedText(
+            existing.reasoning_content,
+            messageData.reasoning_content
+          ),
           timestamp: messageData.timestamp || Date.now()
         }
         if (messageData.tool_calls || existing.tool_calls) {

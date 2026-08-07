@@ -118,6 +118,43 @@ async def test_build_system_segments_explains_runtime_context_boundary():
 
 
 @pytest.mark.asyncio
+async def test_build_system_segments_always_includes_fresh_response_language_contract(
+    monkeypatch,
+):
+    agent = CommonAgent(model=object(), model_config={})
+    session_context = SimpleNamespace(
+        sandbox=None,
+        system_context={"session_id": "sess", "response_language": "zh-CN"},
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda _session_id: session_context
+    )
+
+    first = await agent._build_system_segments(session_id="sess", include_sections=[])
+    assert "<response_language>" in first["stable"]
+    assert "当前回复语言为 zh-CN" in first["stable"]
+    assert "工具结果" in first["stable"]
+    assert "本指令只决定语言" in first["stable"]
+    assert "中间执行记录" in first["stable"]
+    assert "推理摘要和最终答复" not in first["stable"]
+
+    # The system contract is rebuilt from current trusted context even if the
+    # user-side runtime context from an earlier turn was frozen.
+    session_context.system_context["response_language"] = "pt-BR"
+    second = await agent._build_system_segments(session_id="sess", include_sections=[])
+    assert "O idioma de resposta é pt-BR" in second["stable"]
+    assert "当前回复语言为 zh-CN" not in second["stable"]
+    assert "regula apenas o idioma" in second["stable"]
+    assert "resumos de raciocínio" not in second["stable"]
+
+    session_context.system_context["response_language"] = "en-US"
+    third = await agent._build_system_segments(session_id="sess", include_sections=[])
+    assert "The response language is en-US" in third["stable"]
+    assert "controls language only" in third["stable"]
+    assert "reasoning summaries" not in third["stable"]
+
+
+@pytest.mark.asyncio
 async def test_build_system_segments_hides_sandbox_policy_from_runtime_context(
     monkeypatch,
 ):
@@ -436,9 +473,10 @@ async def test_prepare_llm_request_messages_keeps_only_current_time_for_historic
     assert "<todo_list>todo-1</todo_list>" in first_request_messages[1].content
     assert "<current_time>time-1</current_time>" in second_request_messages[1].content
     assert "<todo_list>todo-1</todo_list>" not in second_request_messages[1].content
-    assert "<user_request>\nfirst request\n</user_request>" in second_request_messages[
-        1
-    ].content
+    assert (
+        "<user_request>\nfirst request\n</user_request>"
+        in second_request_messages[1].content
+    )
     assert "<current_time>time-2</current_time>" in second_request_messages[3].content
     assert "<todo_list>todo-2</todo_list>" in second_request_messages[3].content
 
@@ -554,7 +592,9 @@ async def test_prepare_llm_request_messages_extracts_current_time_from_multimoda
     assert isinstance(historical_content, list)
     assert "<current_time>runtime-time</current_time>" in historical_content[0]["text"]
     assert "user-time" not in historical_content[0]["text"]
-    assert historical_content[1]["text"] == "<current_time>user-time</current_time> 看图"
+    assert (
+        historical_content[1]["text"] == "<current_time>user-time</current_time> 看图"
+    )
     assert historical_content[2]["type"] == "image_url"
 
 

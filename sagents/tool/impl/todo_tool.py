@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
+from sagents.utils.i18n import tool_t
 import datetime
 
 
@@ -497,9 +498,12 @@ class ToDoTool:
                         await self._sync_to_system_context([], session_id)
                         # 返回完整的任务列表（虽然文件已删除）
                         result = {
-                            "summary": (
-                                "All tasks are complete. The task list was cleared.\n"
-                                f"Added: {added_count}, Updated: {updated_count}"
+                            "summary": tool_t(
+                                "todo.completed",
+                                params={
+                                    "added": added_count,
+                                    "updated": updated_count,
+                                },
                             ),
                             "tasks": task_list,
                         }
@@ -522,10 +526,13 @@ class ToDoTool:
 
             # 构建 JSON 返回结果（task_list 已在上面的代码中构建）
             result = {
-                "summary": (
-                    "Task list updated successfully. "
-                    f"Added: {added_count}, Updated: {updated_count}. "
-                    f"Current pending task count: {len(pending_tasks)}"
+                "summary": tool_t(
+                    "todo.updated",
+                    params={
+                        "added": added_count,
+                        "updated": updated_count,
+                        "pending": len(pending_tasks),
+                    },
                 ),
                 "tasks": task_list,
             }
@@ -535,7 +542,7 @@ class ToDoTool:
                 f"ToDoTool: Failed to save tasks to {file_path}", session_id=session_id
             )
             return json.dumps(
-                {"summary": "Failed to save the task list.", "tasks": []},
+                {"summary": tool_t("todo.save_failed"), "tasks": []},
                 ensure_ascii=False,
             )
 
@@ -639,15 +646,19 @@ class ToDoTool:
         ]
 
         if not unfinished:
-            return "There are no unfinished tasks."
+            return tool_t("todo.none")
 
-        result = "Current unfinished task list:\n"
+        result = f"{tool_t('todo.list_title')}\n"
         for t in unfinished:
             status = self._normalize_status(t.get("status"))
-            tag = "[in progress]" if status == "in_progress" else "[todo]"
+            tag = (
+                f"[{tool_t('todo.tag.in_progress')}]"
+                if status == "in_progress"
+                else f"[{tool_t('todo.tag.pending')}]"
+            )
             result += f"- {tag} {t.get('content')} (ID: {t.get('id')})"
             if t.get("conclusion"):
-                result += f" [conclusion: {t.get('conclusion')}]"
+                result += f" [{tool_t('todo.conclusion')}: {t.get('conclusion')}]"
             result += "\n"
 
         return result
