@@ -67,6 +67,22 @@ class TestResolveReasoningEffort(unittest.TestCase):
         )
 
 
+class TestBuildClient(unittest.TestCase):
+    def test_disables_response_compression_for_streaming_probes(self):
+        client = model_capabilities._build_client(
+            "test-key", "https://provider.example/v1", timeout=10.0
+        )
+
+        try:
+            self.assertEqual(
+                client._client.headers["Accept-Encoding"], "identity"
+            )
+        finally:
+            import asyncio
+
+            asyncio.run(client.close())
+
+
 class TestIsOpenAIReasoningModel(unittest.TestCase):
     def test_reasoning_models_recognized(self):
         for name in [

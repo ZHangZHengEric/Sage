@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from sagents.llm.chat import OpenAIChat
 from sagents.llm.sage_openai import SageAsyncOpenAI
 
 
@@ -67,6 +69,42 @@ class TestSageAsyncOpenAI(unittest.TestCase):
         self.assertEqual(
             standard_client.chat.completions.calls[0]["model"], "standard-model"
         )
+
+    def test_openai_chat_disables_compression_for_streaming_transport(self):
+        constructed_clients = []
+
+        class _FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                constructed_clients.append(self)
+
+            async def close(self):
+                http_client = self.kwargs.get("http_client")
+                if http_client is not None:
+                    await http_client.aclose()
+
+        with patch("sagents.llm.chat.AsyncOpenAI", _FakeAsyncOpenAI):
+            client = OpenAIChat(
+                api_key="test-key",
+                base_url="https://provider.example/v1",
+                model_name="standard-model",
+                fast_model_name="fast-model",
+            )
+
+        try:
+            self.assertEqual(len(constructed_clients), 2)
+            standard_http_client = constructed_clients[0].kwargs["http_client"]
+            fast_http_client = constructed_clients[1].kwargs["http_client"]
+
+            self.assertEqual(
+                standard_http_client.headers["Accept-Encoding"], "identity"
+            )
+            self.assertEqual(fast_http_client.headers["Accept-Encoding"], "identity")
+            self.assertIsNot(standard_http_client, fast_http_client)
+        finally:
+            import asyncio
+
+            asyncio.run(client.close())
 
 
 if __name__ == "__main__":

@@ -2,9 +2,19 @@ from __future__ import annotations
 import itertools
 from collections import defaultdict
 from typing import Optional, Dict, List, Any
+import httpx
 from openai import AsyncOpenAI
 from sagents.utils.logger import logger
 from sagents.llm.sage_openai import SageAsyncOpenAI
+
+
+def _create_openai_client(api_key: str, base_url: Optional[str]) -> AsyncOpenAI:
+    http_client = httpx.AsyncClient(headers={"Accept-Encoding": "identity"})
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        http_client=http_client,
+    )
 
 
 class OpenAIChat:
@@ -28,14 +38,20 @@ class OpenAIChat:
         self.model_capabilities = model_capabilities or {}
 
         # 创建标准模型客户端
-        self._standard_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._standard_client = _create_openai_client(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
         # 创建快速模型客户端（如果配置了）
         self._fast_client = None
         if fast_model_name:
             fast_key = fast_api_key or api_key
             fast_url = fast_base_url or base_url
-            self._fast_client = AsyncOpenAI(api_key=fast_key, base_url=fast_url)
+            self._fast_client = _create_openai_client(
+                api_key=fast_key,
+                base_url=fast_url,
+            )
 
         # 创建 SageAsyncOpenAI 实例
         self._sage_client = SageAsyncOpenAI(
