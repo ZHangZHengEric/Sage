@@ -28,6 +28,7 @@ import sys
 import asyncio
 from typing import Any, Dict, List, Optional
 
+from ... import _fs_safety
 from ...interface import (
     ISandboxHandle,
     SandboxType,
@@ -137,36 +138,16 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 (os.path.realpath(os.path.abspath(os.path.expanduser(path))), False)
             )
 
-        deduped: Dict[str, bool] = {}
-        for root, read_only in roots:
-            if not root:
-                continue
-            deduped[root] = deduped.get(root, True) and read_only
-        return sorted(deduped.items(), key=lambda item: len(item[0]), reverse=True)
-
-    def _path_under_root(self, path: str, root: str) -> bool:
-        try:
-            return os.path.commonpath([path, root]) == root
-        except ValueError:
-            return False
+        return _fs_safety.dedupe_roots(roots)
 
     def _validate_host_path_allowed(
         self, host_path: str, operation: str = "read"
     ) -> str:
-        actual = os.path.realpath(os.path.abspath(host_path))
-        write_operation = operation in {"write", "delete", "mkdir"}
-        for root, read_only in self._allowed_path_roots():
-            if self._path_under_root(actual, root):
-                if write_operation and read_only:
-                    raise PermissionError(
-                        f"Path is read-only in passthrough sandbox: {host_path}"
-                    )
-                return actual
-
-        allowed = ", ".join(root for root, _ in self._allowed_path_roots()) or "<none>"
-        raise PermissionError(
-            f"Access denied: path outside sandbox workspace or mounted paths: {host_path}. "
-            f"Allowed roots: {allowed}"
+        return _fs_safety.resolve_within_roots(
+            host_path,
+            self._allowed_path_roots(),
+            operation=operation,
+            read_only_label="passthrough sandbox",
         )
 
     def is_path_allowed(self, path: str, operation: str = "read") -> bool:
@@ -406,10 +387,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
     def _write_file_sync(
         self, host_path: str, content: str, encoding: str, mode: str
     ) -> None:
-        os.makedirs(os.path.dirname(host_path), exist_ok=True)
-        write_mode = "a" if mode == "append" else "w"
-        with open(host_path, write_mode, encoding=encoding) as f:
-            f.write(content)
+        _fs_safety.write_text(host_path, content, encoding=encoding, mode=mode)
 
     def _list_directory_sync(
         self, host_path: str, include_hidden: bool
