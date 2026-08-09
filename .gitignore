@@ -13,6 +13,7 @@ app/desktop/tauri/resources/node/bin/node
 # Byte-compiled / optimized / DLL files
 __pycache__/
 logs/
+/outputs/
 workspace/
 agent_sessions
 deploy/monitoring/prometheus.local.yml
