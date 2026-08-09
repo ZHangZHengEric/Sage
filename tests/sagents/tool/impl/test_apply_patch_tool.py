@@ -175,6 +175,39 @@ def test_apply_update_operation_preserves_crlf():
     assert removed == 1
 
 
+def test_apply_update_operation_preserves_missing_final_newline():
+    operation = parse_patch(
+        """*** Begin Patch
+*** Update File: demo.txt
+@@
+-old
++new
+*** End Patch"""
+    )[0]
+
+    content, added, removed = apply_update_operation("old", operation)
+
+    assert content == "new"
+    assert added == 1
+    assert removed == 1
+
+
+def test_apply_update_operation_preserves_missing_final_newline_when_appending():
+    operation = parse_patch(
+        """*** Begin Patch
+*** Update File: demo.txt
+@@
++appended
+*** End Patch"""
+    )[0]
+
+    content, added, removed = apply_update_operation("first", operation)
+
+    assert content == "first\nappended"
+    assert added == 1
+    assert removed == 0
+
+
 def test_apply_update_operation_rejects_ambiguous_hunk():
     operation = parse_patch(
         """*** Begin Patch
