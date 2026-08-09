@@ -14,10 +14,13 @@ follow-up work.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import stat
+import sys
 import tempfile
-from typing import List, Tuple
+from functools import lru_cache
+from typing import Any, List, Optional, Tuple
 
 # Operations that mutate the filesystem; read-only mounts reject these.
 WRITE_OPERATIONS = frozenset({"write", "delete", "mkdir"})
@@ -104,6 +107,50 @@ def resolve_within_roots(
     )
 
 
+@lru_cache(maxsize=1)
+def _darwin_copyfile() -> Optional[Any]:
+    """Return macOS copyfile(3) for builds without os.*xattr."""
+    if sys.platform != "darwin":
+        return None
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        copy_file = libc.copyfile
+    except (AttributeError, OSError):
+        return None
+    copy_file.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    ]
+    copy_file.restype = ctypes.c_int
+    return copy_file
+
+
+def _copy_xattrs(source: str, destination: str) -> None:
+    """Copy accessible extended attributes without making writes less reliable."""
+    if all(hasattr(os, name) for name in ("listxattr", "getxattr", "setxattr")):
+        try:
+            names = os.listxattr(source)
+        except OSError:
+            return
+        for name in names:
+            try:
+                os.setxattr(destination, name, os.getxattr(source, name))
+            except OSError:
+                # Attributes can disappear or be system-managed. Preserve the
+                # attributes still accessible without failing the content write.
+                continue
+        return
+
+    copy_file = _darwin_copyfile()
+    if copy_file is not None:
+        # COPYFILE_XATTR from <copyfile.h>. copyfile(3) returns non-zero on
+        # failure; metadata preservation is intentionally best effort.
+        copy_file(os.fsencode(source), os.fsencode(destination), None, 1 << 2)
+
+
 def write_text(
     actual_path: str,
     content: str,
@@ -121,10 +168,11 @@ def write_text(
     directory is not fsynced).
 
     Because ``os.replace`` swaps the inode instead of truncating in place, an
-    overwrite carries over the previous file's permission bits and, best effort,
-    its ownership, but it does not keep hard links to the old inode pointing at
-    the new content, and it briefly needs extra space for the temporary copy.
-    A newly created file uses ``DEFAULT_FILE_MODE``.
+    overwrite carries over the previous file's permission bits, ownership, and
+    extended attributes on platforms that expose them (the latter two best
+    effort), but it does not keep hard links to the old inode pointing at the new
+    content, and it briefly needs extra space for the temporary copy. A newly
+    created file uses ``DEFAULT_FILE_MODE``.
 
     ``append`` appends to the existing file (creating it if absent). A torn
     append can leave trailing bytes but never destroys existing content, so it
@@ -146,7 +194,6 @@ def write_text(
     except FileNotFoundError:
         existing = None
     target_mode = stat.S_IMODE(existing.st_mode) if existing else DEFAULT_FILE_MODE
-
     fd, tmp_path = tempfile.mkstemp(dir=parent, prefix=".sage-tmp-")
     try:
         with os.fdopen(fd, "w", encoding=encoding) as handle:
@@ -161,6 +208,8 @@ def write_text(
                 os.chown(tmp_path, existing.st_uid, existing.st_gid)
             except OSError:
                 pass
+        if existing is not None:
+            _copy_xattrs(actual_path, tmp_path)
         os.replace(tmp_path, actual_path)
     except BaseException:
         try:

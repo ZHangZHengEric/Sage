@@ -7,7 +7,10 @@ root de-duplication, path containment, and the atomic writer.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
+import subprocess
+import sys
 
 import pytest
 
@@ -114,7 +117,9 @@ def test_write_text_creates_parent_dirs(tmp_path):
     assert target.read_text() == "x"
 
 
-def test_write_text_failure_preserves_original_and_leaves_no_temp(tmp_path, monkeypatch):
+def test_write_text_failure_preserves_original_and_leaves_no_temp(
+    tmp_path, monkeypatch
+):
     target = tmp_path / "f.txt"
     target.write_text("original\n")
 
@@ -162,6 +167,34 @@ def test_write_text_new_file_uses_default_mode(tmp_path):
     target = tmp_path / "new.txt"
     _fs_safety.write_text(str(target), "x")
     assert stat.S_IMODE(target.stat().st_mode) == _fs_safety.DEFAULT_FILE_MODE
+
+
+def test_write_text_preserves_existing_file_xattrs(tmp_path):
+    target = tmp_path / "metadata.txt"
+    target.write_text("old\n")
+    attribute = "com.sage.test" if sys.platform == "darwin" else "user.sage.test"
+    if hasattr(os, "setxattr"):
+        try:
+            os.setxattr(target, attribute, b"preserved")
+        except OSError as exc:
+            pytest.skip(f"extended attributes are not supported: {exc}")
+    elif sys.platform == "darwin" and shutil.which("xattr"):
+        subprocess.run(["xattr", "-w", attribute, "preserved", str(target)], check=True)
+    else:
+        pytest.skip("extended attributes are not supported by this platform")
+
+    _fs_safety.write_text(str(target), "new\n")
+
+    assert target.read_text() == "new\n"
+    if hasattr(os, "getxattr"):
+        assert os.getxattr(target, attribute) == b"preserved"
+    else:
+        result = subprocess.run(
+            ["xattr", "-p", attribute, str(target)],
+            check=True,
+            capture_output=True,
+        )
+        assert result.stdout.rstrip(b"\n") == b"preserved"
 
 
 # --- write_text: append -------------------------------------------------------
