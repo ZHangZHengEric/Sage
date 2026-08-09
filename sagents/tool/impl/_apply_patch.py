@@ -426,13 +426,14 @@ def _detect_newline(content: str) -> str:
     return "\n"
 
 
-def _split_source_lines(content: str) -> Tuple[List[str], str]:
+def _split_source_lines(content: str) -> Tuple[List[str], str, bool]:
     newline = _detect_newline(content)
+    has_final_newline = content.endswith(("\r\n", "\r", "\n"))
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
-    return lines, newline
+    return lines, newline, has_final_newline
 
 
 def _matching_positions(
@@ -514,7 +515,7 @@ def apply_update_operation(
     if not operation.chunks and operation.move_path is not None:
         return original_content, 0, 0
 
-    lines, newline = _split_source_lines(original_content)
+    lines, newline, has_final_newline = _split_source_lines(original_content)
     cursor = 0
     added = 0
     removed = 0
@@ -550,7 +551,7 @@ def apply_update_operation(
         removed += chunk.lines_removed
 
     new_content = newline.join(lines)
-    if lines:
+    if lines and has_final_newline:
         new_content += newline
     if new_content == original_content and operation.move_path is None:
         raise PatchError(
