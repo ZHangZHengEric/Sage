@@ -364,7 +364,7 @@ class ComponentManager:
             logger.debug(f"设置MCP配置路径: {self.mcp_config}")
             await tool_manager._discover_mcp_tools(mcp_setting_path=self.mcp_config)
 
-        # 如果有preset_available_tools配置，使用ToolProxy进行工具过滤
+        # preset 使用显式白名单；否则使用默认代理隐藏 explicit_only 工具
         if self.preset_available_tools:
             logger.info(f"使用工具代理，可用工具: {self.preset_available_tools}")
             tool_proxy = ToolProxy(tool_manager, self.preset_available_tools)
@@ -373,7 +373,7 @@ class ComponentManager:
             )
             return tool_proxy
 
-        return tool_manager
+        return ToolProxy(tool_manager, None)
 
     def _init_skill_manager(self) -> Optional[Union[SkillManager, SkillProxy]]:
         """初始化技能管理器"""

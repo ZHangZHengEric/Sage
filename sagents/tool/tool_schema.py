@@ -58,6 +58,10 @@ class ToolSpec:
     # 工具分类标签（如 "browser"），用于前端按来源分组；为 None 时按 "基础工具" 处理。
     # 由 @tool(category=...) 显式声明，或由宿主类的 TOOL_CATEGORY 类属性批量赋值。
     category: Optional[str] = None
+    # True means the tool remains discoverable/configurable but is hidden from
+    # proxies that use the legacy "all tools" mode. A caller must name it in an
+    # explicit available_tools whitelist.
+    explicit_only: bool = False
 
 
 @dataclass

@@ -534,6 +534,7 @@ class ToolManager:
                 import importlib
 
                 _impl_modules = [
+                    "sagents.tool.impl.apply_patch_tool",
                     "sagents.tool.impl.execute_command_tool",
                     "sagents.tool.impl.file_system_tool",
                     "sagents.tool.impl.memory_tool",
