@@ -27,6 +27,7 @@ import asyncio
 import fnmatch
 from typing import Any, Dict, List, Optional
 
+from ... import _fs_safety
 from ..._stdout_echo import echo_chunk
 from ..._bg_runner import HostBackgroundRunner
 from ...environment import build_agent_environment, is_server_process
@@ -108,35 +109,17 @@ class LocalSandboxProvider(ISandboxHandle):
         for path in self._allowed_paths or []:
             roots.append((os.path.realpath(os.path.expanduser(path)), False))
 
-        deduped: Dict[str, bool] = {}
-        for root, read_only in roots:
-            if not root:
-                continue
-            deduped[root] = deduped.get(root, True) and read_only
-        return sorted(deduped.items(), key=lambda item: len(item[0]), reverse=True)
-
-    def _path_under_root(self, path: str, root: str) -> bool:
-        try:
-            return os.path.commonpath([path, root]) == root
-        except ValueError:
-            return False
+        return _fs_safety.dedupe_roots(roots)
 
     def _validate_host_path_allowed(
         self, host_path: str, operation: str = "read"
     ) -> str:
         """Ensure a resolved host path is inside the workspace or explicit mounts."""
-        actual = os.path.realpath(os.path.abspath(host_path))
-        write_operation = operation in {"write", "delete", "mkdir"}
-        for root, read_only in self._allowed_path_roots():
-            if self._path_under_root(actual, root):
-                if write_operation and read_only:
-                    raise PermissionError(f"Path is read-only in sandbox: {host_path}")
-                return actual
-
-        allowed = ", ".join(root for root, _ in self._allowed_path_roots()) or "<none>"
-        raise PermissionError(
-            f"Access denied: path outside sandbox workspace or mounted paths: {host_path}. "
-            f"Allowed roots: {allowed}"
+        return _fs_safety.resolve_within_roots(
+            host_path,
+            self._allowed_path_roots(),
+            operation=operation,
+            read_only_label="sandbox",
         )
 
     def is_path_allowed(self, path: str, operation: str = "read") -> bool:
@@ -629,10 +612,7 @@ class LocalSandboxProvider(ISandboxHandle):
     def _write_file_sync(
         self, actual_path: str, content: str, encoding: str, mode: str
     ) -> None:
-        os.makedirs(os.path.dirname(actual_path), exist_ok=True)
-        write_mode = "a" if mode == "append" else "w"
-        with open(actual_path, write_mode, encoding=encoding) as f:
-            f.write(content)
+        _fs_safety.write_text(actual_path, content, encoding=encoding, mode=mode)
 
     def _list_directory_sync(
         self, actual_path: str, include_hidden: bool
