@@ -18,8 +18,6 @@ There is no wall-clock timeout while the child is still running.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import uuid
 from dataclasses import dataclass
 from typing import (
@@ -35,7 +33,7 @@ from typing import (
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_context import SessionContext, SessionStatus
+from sagents.context.session_context import SessionStatus
 from sagents.utils.logger import logger
 
 StreamPayload = Union[MessageChunk, Dict[str, Any]]
@@ -122,7 +120,7 @@ def resolve_child_workspace(
     session_id: str,
     parent_session_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Locate the child session workspace on disk or via the session registry."""
+    """Return the backend locator registered for a child session."""
 
     if not session_id:
         return None
@@ -131,35 +129,7 @@ def resolve_child_workspace(
         from sagents.session_runtime import get_global_session_manager
 
         manager = get_global_session_manager()
-        workspace = manager.get_session_workspace(session_id)
-        if workspace and os.path.isdir(workspace):
-            return workspace
-
-        live = manager.get_live_session(session_id)
-        if live is not None:
-            live_ws = getattr(live, "session_workspace", None)
-            if live_ws and os.path.isdir(live_ws):
-                return str(live_ws)
-            ctx = getattr(live, "session_context", None)
-            ctx_ws = getattr(ctx, "session_workspace", None) if ctx else None
-            if ctx_ws and os.path.isdir(ctx_ws):
-                return str(ctx_ws)
-
-        if parent_session_id:
-            parent_ws = manager.get_session_workspace(parent_session_id)
-            if parent_ws:
-                candidate = os.path.join(parent_ws, "sub_sessions", session_id)
-                if os.path.isdir(candidate):
-                    return candidate
-                # Nested sub-sessions: walk one level of sub_sessions trees.
-                nested_root = os.path.join(parent_ws, "sub_sessions")
-                if os.path.isdir(nested_root):
-                    for entry in os.scandir(nested_root):
-                        if not entry.is_dir():
-                            continue
-                        nested = os.path.join(entry.path, "sub_sessions", session_id)
-                        if os.path.isdir(nested):
-                            return nested
+        return manager.get_session_workspace(session_id)
     except Exception as exc:
         logger.debug(
             f"resolve_child_workspace: registry lookup failed for {session_id}: {exc}"
@@ -201,15 +171,9 @@ def read_child_session_observation(
             f"read_child_session_status: live lookup failed for {session_id}: {exc}"
         )
 
-    workspace = resolve_child_workspace(session_id, parent_session_id)
-    if not workspace:
-        return ChildSessionObservation(status=live_status, request_id=request_id)
-    context_path = os.path.join(workspace, "session_context.json")
-    if not os.path.exists(context_path):
-        return ChildSessionObservation(status=live_status, request_id=request_id)
     try:
-        with open(context_path, "r", encoding="utf-8") as handle:
-            snapshot = json.load(handle)
+        manager = get_global_session_manager()
+        snapshot = manager.storage.load_session_snapshot(session_id)
         if isinstance(snapshot, dict):
             persisted_status = snapshot.get("status")
             updated_at = snapshot.get("updated_at")
@@ -247,13 +211,12 @@ def load_child_history_fallback(
 ) -> str:
     """Build history beginning at this round's marked input message."""
 
-    workspace = resolve_child_workspace(session_id, parent_session_id)
-    if not workspace:
-        return ""
     try:
-        messages, _, _ = SessionContext.load_persisted_message_ledger(
-            workspace, session_id=session_id
-        )
+        from sagents.session_runtime import get_global_session_manager
+
+        manager = get_global_session_manager()
+        ledger = manager.storage.load_message_ledger(session_id)
+        messages = [MessageChunk.from_dict(item) for item in ledger.messages]
     except Exception as exc:
         logger.warning(
             f"load_child_history_fallback: failed to load ledger for {session_id}: {exc}"

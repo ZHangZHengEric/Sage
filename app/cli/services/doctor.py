@@ -106,7 +106,11 @@ def collect_doctor_info() -> Dict[str, Any]:
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
-    session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
+    from sagents.storage import create_session_store
+
+    session_storage = dict(
+        create_session_store(session_root=cfg.session_dir, initialize=False).healthcheck()
+    )
     dep_status = dependency_status()
     issues = collect_runtime_issues(cfg)
     memory_diagnostics = _collect_memory_runtime_diagnostics()
@@ -141,8 +145,7 @@ def collect_doctor_info() -> Dict[str, Any]:
         "agents_dir_exists": os.path.exists(cfg.agents_dir),
         "session_dir": cfg.session_dir,
         "session_dir_exists": os.path.exists(cfg.session_dir),
-        "session_registry_db": session_registry_db,
-        "session_registry_db_exists": os.path.exists(session_registry_db),
+        "session_storage": session_storage,
         "logs_dir": cfg.logs_dir,
         "logs_dir_exists": os.path.exists(cfg.logs_dir),
         "dependencies": dep_status,
@@ -199,7 +202,11 @@ def collect_config_info() -> Dict[str, Any]:
     env_files = [shared_env_file]
     if os.path.exists(project_env_file):
         env_files.append(project_env_file)
-    session_registry_db = os.path.join(cfg.session_dir, "sessions_index.sqlite")
+    from sagents.storage import create_session_store
+
+    session_storage = dict(
+        create_session_store(session_root=cfg.session_dir, initialize=False).healthcheck()
+    )
     memory_diagnostics = _collect_memory_runtime_diagnostics()
     return {
         "env_file": effective_env_file,
@@ -216,7 +223,7 @@ def collect_config_info() -> Dict[str, Any]:
         "memory_strategies": memory_diagnostics["memory_strategies"],
         "agents_dir": cfg.agents_dir,
         "session_dir": cfg.session_dir,
-        "session_registry_db": session_registry_db,
+        "session_storage": session_storage,
         "logs_dir": cfg.logs_dir,
         "env_sources": {
             "SAGE_HOME": local_defaults["sage_home"],

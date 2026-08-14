@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sqlite3
 
 import pytest
 
@@ -203,11 +202,10 @@ async def test_sync_cross_thread_close_has_bounded_wait(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_closes_session_registry_connection(tmp_path):
+async def test_shutdown_closes_session_storage(tmp_path):
     manager = SessionManager(str(tmp_path), enable_obs=False)
-    assert manager._registry._conn.execute("SELECT 1").fetchone() == (1,)
+    assert manager.storage.healthcheck()["catalog_ready"] is True
 
     await manager.shutdown()
 
-    with pytest.raises(sqlite3.ProgrammingError):
-        manager._registry._conn.execute("SELECT 1")
+    assert manager.storage.healthcheck()["initialized"] is False

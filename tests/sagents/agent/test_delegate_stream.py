@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from sagents.agent.fibre.delegate_stream import (
     merge_history_with_fallback,
 )
 from sagents.context.messages.message import MessageChunk
+from sagents.storage import create_session_store
 
 
 class _HangingBackendClient:
@@ -292,9 +294,11 @@ def test_load_child_history_fallback_from_messages_json(tmp_path, monkeypatch):
         json.dumps(messages, ensure_ascii=False), encoding="utf-8"
     )
 
+    store = create_session_store(session_root=str(tmp_path))
+    store.bind_session_workspace(session_id, str(workspace))
     monkeypatch.setattr(
-        "sagents.agent.fibre.delegate_stream.resolve_child_workspace",
-        lambda sid, parent_session_id=None: str(workspace),
+        "sagents.session_runtime.get_global_session_manager",
+        lambda: SimpleNamespace(storage=store),
     )
 
     history = load_child_history_fallback(session_id, parent_session_id="parent")

@@ -63,9 +63,13 @@ def test_session_logger_is_unregistered_and_cannot_be_recreated_after_close(
     logger_module = _load_logger_module(monkeypatch)
     monkeypatch.delenv("SAGE_DISABLE_SAGENTS_FILE_LOGGING", raising=False)
 
+    class FakeStore:
+        def append_session_log(self, _session_id, _text):
+            return ""
+
     live_sessions = {
         "finished-session": types.SimpleNamespace(
-            session_context=types.SimpleNamespace(session_workspace=str(tmp_path)),
+            session_context=types.SimpleNamespace(storage=FakeStore()),
             status=types.SimpleNamespace(value="running"),
         )
     }
