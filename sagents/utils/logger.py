@@ -13,6 +13,23 @@ _DISABLE_FILE_LOGGING_ENV = "SAGE_DISABLE_SAGENTS_FILE_LOGGING"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
+class _SessionStoreLogHandler(logging.Handler):
+    """Logging handler that delegates session logs to the configured store."""
+
+    def __init__(self, storage, session_id: str):
+        super().__init__()
+        self.storage = storage
+        self.session_id = session_id
+
+    def emit(self, record):
+        try:
+            self.storage.append_session_log(
+                self.session_id, self.format(record) + "\n"
+            )
+        except Exception:
+            self.handleError(record)
+
+
 def _file_logging_disabled() -> bool:
     return os.getenv(_DISABLE_FILE_LOGGING_ENV, "").strip().lower() in _TRUE_VALUES
 
@@ -349,22 +366,15 @@ class Logger:
                 if status_value not in {"idle", "running"}:
                     self.cleanup_session_logger(session_id)
                     return None
-                session_workspace = getattr(
-                    session_context, "session_workspace", None
-                )
-                if not session_workspace:
+                storage = getattr(session_context, "storage", None)
+                if storage is None:
                     return None
 
                 cached_logger = self.session_loggers.get(session_id)
                 if cached_logger is not None:
                     return cached_logger
-
-                session_log_file = os.path.join(
-                    session_workspace, f"session_{session_id}.log"
-                )
-                session_file_handler = logging.FileHandler(
-                    session_log_file, mode="a", encoding="utf-8"
-                )
+                storage.append_session_log(session_id, "")
+                session_file_handler = _SessionStoreLogHandler(storage, session_id)
                 session_file_handler.setLevel(logging.DEBUG)
                 session_file_handler.setFormatter(
                     logging.Formatter(

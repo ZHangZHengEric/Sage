@@ -1,28 +1,13 @@
 from __future__ import annotations
 
-import os
-import shutil
 import time
 from pathlib import Path
 from typing import Dict
 
 from loguru import logger
+from sagents.storage import create_session_store
 
-
-LLM_REQUEST_DIR_NAME = "llm_request"
 PROACTIVE_EVAL_SESSION_PREFIX = "proactive_eval_"
-
-
-def _latest_tree_mtime(path: Path) -> float:
-    latest = path.stat().st_mtime
-    for child in path.rglob("*"):
-        if child.is_symlink():
-            continue
-        try:
-            latest = max(latest, child.stat().st_mtime)
-        except OSError:
-            continue
-    return latest
 
 
 def cleanup_old_llm_request_logs(
@@ -43,57 +28,17 @@ def cleanup_old_llm_request_logs(
         "errors": 0,
     }
 
-    if not root.exists():
-        logger.info(f"LLM request cleanup skipped, sessions root not found: {root}")
-        return stats
-
-    for session_dir in root.iterdir():
-        if (
-            session_dir.is_symlink()
-            or not session_dir.is_dir()
-            or not session_dir.name.startswith(PROACTIVE_EVAL_SESSION_PREFIX)
-        ):
-            continue
-        stats["scanned_proactive_eval_dirs"] += 1
-        try:
-            if _latest_tree_mtime(session_dir) >= proactive_eval_cutoff:
-                continue
-            shutil.rmtree(session_dir)
-            stats["deleted_session_dirs"] += 1
-        except Exception as exc:
-            stats["errors"] += 1
-            logger.warning(
-                f"Failed to delete old proactive eval session {session_dir}: {exc}"
-            )
-
-    for request_dir in root.glob(f"**/{LLM_REQUEST_DIR_NAME}"):
-        if not request_dir.is_dir():
-            continue
-        stats["scanned_dirs"] += 1
-        try:
-            for path in request_dir.iterdir():
-                if path.is_dir():
-                    continue
-                try:
-                    if path.stat().st_mtime >= cutoff:
-                        continue
-                    path.unlink()
-                    stats["deleted_files"] += 1
-                except Exception as exc:
-                    stats["errors"] += 1
-                    logger.warning(
-                        f"Failed to delete old LLM request log {path}: {exc}"
-                    )
-
-            try:
-                if not any(request_dir.iterdir()):
-                    os.rmdir(request_dir)
-                    stats["deleted_empty_dirs"] += 1
-            except OSError:
-                pass
-        except Exception as exc:
-            stats["errors"] += 1
-            logger.warning(f"Failed to scan LLM request log dir {request_dir}: {exc}")
+    store = create_session_store(session_root=str(root), initialize=False)
+    proactive_stats = store.purge_sessions(
+        before=proactive_eval_cutoff,
+        session_id_prefix=PROACTIVE_EVAL_SESSION_PREFIX,
+    )
+    stats["scanned_proactive_eval_dirs"] = proactive_stats["scanned_dirs"]
+    stats["deleted_session_dirs"] = proactive_stats["deleted_session_dirs"]
+    request_stats = store.purge_llm_requests(before=cutoff)
+    for key in ("scanned_dirs", "deleted_files", "deleted_empty_dirs"):
+        stats[key] = request_stats[key]
+    stats["errors"] = proactive_stats["errors"] + request_stats["errors"]
 
     logger.info(
         "LLM request cleanup finished: "

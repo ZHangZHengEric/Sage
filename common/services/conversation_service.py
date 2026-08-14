@@ -6,8 +6,6 @@ import asyncio
 import hashlib
 import json
 import os
-import tempfile
-import zipfile
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -538,66 +536,6 @@ async def delete_conversation(
     return conversation_id
 
 
-def _resolve_session_directory(session_id: str) -> Path:
-    safe_session_id = str(session_id or "").strip()
-    if not safe_session_id or Path(safe_session_id).name != safe_session_id:
-        raise SageHTTPException(
-            status_code=400,
-            message_key="conversation.session_id_invalid",
-            error_detail="Invalid session_id",
-        )
-
-    sessions_root = Path(get_sessions_root()).resolve()
-    session_dir = (sessions_root / safe_session_id).resolve()
-    try:
-        session_dir.relative_to(sessions_root)
-    except ValueError:
-        raise SageHTTPException(
-            status_code=400,
-            message_key="conversation.session_id_invalid",
-            error_detail="Session path escapes sessions root",
-        )
-
-    if not session_dir.is_dir():
-        raise SageHTTPException(
-            status_code=404,
-            message_key="conversation.folder_not_found",
-            message_params={"session_id": safe_session_id},
-            error_detail=f"Session directory '{safe_session_id}' not found",
-        )
-    return session_dir
-
-
-def _build_session_archive_sync(session_dir: Path, session_id: str) -> str:
-    tmp_file = tempfile.NamedTemporaryFile(
-        prefix=f"sage-session-{session_id}-",
-        suffix=".zip",
-        delete=False,
-    )
-    tmp_file.close()
-    zip_path = tmp_file.name
-
-    try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(session_dir, followlinks=False):
-                root_path = Path(root)
-                dirs[:] = [name for name in dirs if not (root_path / name).is_symlink()]
-                for file_name in files:
-                    file_path = root_path / file_name
-                    if file_path.is_symlink() or not file_path.is_file():
-                        continue
-                    arcname = Path(session_id) / file_path.relative_to(session_dir)
-                    zipf.write(file_path, arcname.as_posix())
-    except Exception:
-        try:
-            os.unlink(zip_path)
-        except OSError:
-            pass
-        raise
-
-    return zip_path
-
-
 async def prepare_session_folder_download(
     session_id: str,
     *,
@@ -620,10 +558,18 @@ async def prepare_session_folder_download(
             error_detail=f"Conversation '{session_id}' not found",
         )
 
-    session_dir = _resolve_session_directory(session_id)
-    archive_path = await asyncio.to_thread(
-        _build_session_archive_sync, session_dir, session_id
-    )
+    manager = get_global_session_manager()
+    try:
+        archive_path = await asyncio.to_thread(
+            manager.storage.export_session_archive, session_id
+        )
+    except FileNotFoundError:
+        raise SageHTTPException(
+            status_code=404,
+            message_key="conversation.folder_not_found",
+            message_params={"session_id": session_id},
+            error_detail=f"Session '{session_id}' not found in storage",
+        )
     return archive_path, f"{session_id}.zip", "application/zip"
 
 
@@ -740,61 +686,29 @@ def _truncate_messages_after_last_user(
     return truncated_messages, last_user_message
 
 
-def _session_workspace_file_paths(
-    session_id: str,
-) -> Tuple[Optional[Path], Path, Path, Path]:
-    sessions_root = Path(get_sessions_root())
-    manager = get_global_session_manager()
-    workspace_path: Optional[Path] = None
-    if manager:
-        found = manager.get_session_workspace(session_id)
-        if found:
-            workspace_path = Path(found)
-    if workspace_path is None:
-        workspace_path = sessions_root / session_id
-
-    messages_path = workspace_path / "messages.json"
-    context_path = workspace_path / "session_context.json"
-    tools_usage_path = workspace_path / "tools_usage.json"
-    return workspace_path, messages_path, context_path, tools_usage_path
-
-
 def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> None:
-    workspace_path, messages_path, context_path, tools_usage_path = (
-        _session_workspace_file_paths(session_id)
-    )
-    if not workspace_path:
-        return
-
-    workspace_path.mkdir(parents=True, exist_ok=True)
-
-    with open(messages_path, "w", encoding="utf-8") as f:
-        json.dump(messages, f, ensure_ascii=False, indent=4)
-
-    if context_path.exists():
-        try:
-            with open(context_path, "r", encoding="utf-8") as f:
-                context_data = json.load(f)
-        except Exception as exc:
-            logger.bind(session_id=session_id).warning(
-                f"读取 session_context.json 失败，跳过状态重置: {exc}"
-            )
-            context_data = None
-
-        if isinstance(context_data, dict):
-            context_data["status"] = "idle"
-            context_data["updated_at"] = get_local_now().timestamp()
-            context_data["child_session_ids"] = []
-            context_data["audit_status"] = {}
-            context_data["tokens_usage_info"] = {"total_info": {}, "per_step_info": []}
-            context_data["prompt_token_checkpoints"] = {}
-            system_context = context_data.get("system_context")
-            if isinstance(system_context, dict):
-                system_context.pop("current_time", None)
-                system_context.pop("available_sub_agents", None)
-                system_context.pop("custom_sub_agents", None)
-            with open(context_path, "w", encoding="utf-8") as f:
-                json.dump(context_data, f, ensure_ascii=False, indent=4)
+    manager = get_global_session_manager()
+    storage = getattr(manager, "storage", None) if manager else None
+    if storage is None:
+        raise RuntimeError("session storage is not initialized")
+    storage.save_message_snapshot(session_id, messages)
+    context_data = storage.load_session_snapshot(session_id)
+    if isinstance(context_data, dict):
+        context_data["status"] = "idle"
+        context_data["updated_at"] = get_local_now().timestamp()
+        context_data["child_session_ids"] = []
+        context_data["audit_status"] = {}
+        context_data["tokens_usage_info"] = {
+            "total_info": {},
+            "per_step_info": [],
+        }
+        context_data["prompt_token_checkpoints"] = {}
+        system_context = context_data.get("system_context")
+        if isinstance(system_context, dict):
+            system_context.pop("current_time", None)
+            system_context.pop("available_sub_agents", None)
+            system_context.pop("custom_sub_agents", None)
+        storage.save_session_snapshot(session_id, context_data)
 
     tools_usage: Dict[str, int] = {}
     for message in messages:
@@ -803,8 +717,7 @@ def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> Non
             if tool_name:
                 tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
 
-    with open(tools_usage_path, "w", encoding="utf-8") as f:
-        json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+    storage.save_tools_usage(session_id, tools_usage)
 
 
 async def edit_last_user_message(
@@ -946,7 +859,7 @@ async def get_rerun_conversation_payload(
 
 def _load_tools_usage_counts_sync(
     conversations: List[Conversation],
-    sessions_root: Path,
+    storage=None,
 ) -> Dict[str, int]:
     usage_counter: Counter[str] = Counter()
 
@@ -955,13 +868,10 @@ def _load_tools_usage_counts_sync(
         if not session_id:
             continue
 
-        tools_usage_path = sessions_root / session_id / "tools_usage.json"
-        if not tools_usage_path.is_file():
-            continue
-
         try:
-            with tools_usage_path.open("r", encoding="utf-8") as f:
-                tools_usage = json.load(f)
+            if storage is None:
+                raise RuntimeError("session storage is not initialized")
+            tools_usage = storage.load_tools_usage(session_id)
             if not isinstance(tools_usage, dict):
                 continue
             for tool_name, count in tools_usage.items():
@@ -989,7 +899,8 @@ async def get_agent_usage_stats(
         agent_id=agent_id,
     )
 
-    sessions_root = Path(get_sessions_root())
+    manager = get_global_session_manager()
+    storage = getattr(manager, "storage", None) if manager else None
     return await asyncio.to_thread(
-        _load_tools_usage_counts_sync, conversations, sessions_root
+        _load_tools_usage_counts_sync, conversations, storage
     )
