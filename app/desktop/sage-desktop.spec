@@ -14,8 +14,9 @@ instead of passing CLI flags. Behaviour is parameterised via env vars:
 
 import os
 import sys
+from importlib.metadata import PackageNotFoundError
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 
 # --- mode ---
@@ -33,6 +34,19 @@ else:
 # --- collect deps that PyInstaller cannot trace statically ---
 datas = []
 binaries = []
+
+# FastMCP resolves its version during import via `importlib.metadata`. The
+# importable module is provided by `fastmcp-slim`, while the `fastmcp`
+# distribution may also be installed as a compatibility/meta package. Module
+# discovery alone does not include either `.dist-info` directory, so a frozen
+# sidecar crashes before startup unless their package metadata is copied.
+for _distribution in ("fastmcp-slim", "fastmcp"):
+    try:
+        datas += copy_metadata(_distribution)
+    except PackageNotFoundError:
+        # Support environments that install only one of the two distributions;
+        # FastMCP itself uses the same fallback order at runtime.
+        pass
 
 # `sagents.tool.impl.__init__` uses lazy `__getattr__` for tool modules,
 # so the static tracer never reaches the @tool decorators. Collect the
