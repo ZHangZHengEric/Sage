@@ -7,6 +7,20 @@ on:
     tags:
       - 'desktop-v*'
   workflow_dispatch:
+    inputs:
+      build_target:
+        description: Desktop target to build
+        required: true
+        default: macos-arm64
+        type: choice
+        options:
+          - macos-arm64
+          - all
+      version:
+        description: Artifact version used for manual builds
+        required: true
+        default: dev
+        type: string
 
 
 jobs:
@@ -16,27 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-latest
-            platform: macos
-            arch: aarch64
-            target: aarch64-apple-darwin
-          - runner: macos-15-intel
-            platform: macos
-            arch: x86_64
-            target: x86_64-apple-darwin
-          - runner: ubuntu-22.04
-            platform: linux
-            arch: x86_64
-            target: x86_64-unknown-linux-gnu
-          - runner: ubuntu-22.04-arm
-            platform: linux
-            arch: aarch64
-            target: aarch64-unknown-linux-gnu
-          - runner: windows-latest
-            platform: windows
-            arch: x86_64
-            target: x86_64-pc-windows-msvc
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.build_target == 'macos-arm64' && '[{"runner":"macos-latest","platform":"macos","arch":"aarch64","target":"aarch64-apple-darwin"}]' || '[{"runner":"macos-latest","platform":"macos","arch":"aarch64","target":"aarch64-apple-darwin"},{"runner":"macos-15-intel","platform":"macos","arch":"x86_64","target":"x86_64-apple-darwin"},{"runner":"ubuntu-22.04","platform":"linux","arch":"x86_64","target":"x86_64-unknown-linux-gnu"},{"runner":"ubuntu-22.04-arm","platform":"linux","arch":"aarch64","target":"aarch64-unknown-linux-gnu"},{"runner":"windows-latest","platform":"windows","arch":"x86_64","target":"x86_64-pc-windows-msvc"}]') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -165,8 +159,14 @@ jobs:
 
       - name: Rename Artifacts (macOS)
         if: matrix.platform == 'macos'
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          else
+            VERSION="$MANUAL_VERSION"
+          fi
           
           # Rename DMG
           cd app/desktop/tauri/target/release/bundle/dmg/
@@ -182,6 +182,14 @@ jobs:
           for file in *.tar.gz.sig; do
             mv "$file" "Sage-${VERSION}-${{ matrix.arch }}.app.tar.gz.sig"
           done
+
+      - name: Upload Manual Build (macOS)
+        if: github.event_name == 'workflow_dispatch' && matrix.platform == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sage-${{ inputs.version }}-macos-${{ matrix.arch }}
+          path: app/desktop/tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
 
       - name: Rename Artifacts (Windows)
         if: matrix.platform == 'windows'
@@ -203,7 +211,7 @@ jobs:
           }
 
       - name: Release (macOS)
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'macos'
         with:
           files: |
@@ -212,7 +220,7 @@ jobs:
             app/desktop/tauri/target/release/bundle/macos/*.app.tar.gz.sig
 
       - name: Release (Windows)
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'windows'
         with:
           files: |
@@ -243,7 +251,7 @@ jobs:
           done
 
       - name: Release (Linux)
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'linux'
         with:
           files: |

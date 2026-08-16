@@ -17,6 +17,7 @@ from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
 
 from sagents.utils.logger import logger
+from sagents.storage import SessionStore, create_session_store
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
 from sagents.utils.serialization import make_serializable
 import json
@@ -65,6 +66,7 @@ class SessionContext:
         tool_manager: Optional[Any] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         parent_session_id: Optional[str] = None,
+        storage: Optional[SessionStore] = None,
     ):
         # 基础身份与外部依赖
         self.session_id = session_id
@@ -91,6 +93,9 @@ class SessionContext:
         self.skill_manager = skill_manager
         self.sandbox_skill_manager: Optional[SandboxSkillManager] = None
         self.parent_session_id = parent_session_id
+        self.storage = storage or create_session_store(
+            session_root=session_root_space
+        )
         self._init_runtime_state(context_budget_config=context_budget_config)
         # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
         self._session_root_space = session_root_space
@@ -436,15 +441,10 @@ class SessionContext:
             "flow_node_timings": flow_node_timings,
         }
 
-    @staticmethod
-    def _message_journal_path_for_workspace(session_workspace: str) -> str:
-        return os.path.join(session_workspace, MESSAGE_JOURNAL_FILE)
-
-    def _message_journal_path(self) -> str:
-        session_workspace = getattr(self, "session_workspace", None)
-        if not session_workspace:
-            return ""
-        return self._message_journal_path_for_workspace(session_workspace)
+    def _bind_storage_workspace(self) -> None:
+        workspace = getattr(self, "session_workspace", None)
+        if workspace:
+            self.storage.bind_session_workspace(self.session_id, workspace)
 
     @staticmethod
     def _upsert_persisted_message(
@@ -464,86 +464,39 @@ class SessionContext:
     def load_persisted_message_ledger(
         session_workspace: str,
         session_id: Optional[str] = None,
+        storage: Optional[SessionStore] = None,
     ) -> tuple[List[MessageChunk], int, int]:
-        messages: List[MessageChunk] = []
-        max_journal_seq = 0
-        journal_records = 0
-
-        messages_path = os.path.join(session_workspace, "messages.json")
+        effective_session_id = session_id or os.path.basename(session_workspace)
+        effective_storage = storage
+        if effective_storage is None:
+            effective_storage = create_session_store(
+                session_root=os.path.dirname(session_workspace),
+                initialize=False,
+            )
+            effective_storage.bind_session_workspace(
+                effective_session_id, session_workspace
+            )
         try:
-            if os.path.exists(messages_path):
-                with open(messages_path, "r", encoding="utf-8") as f:
-                    messages_data = json.load(f)
-                if isinstance(messages_data, list):
-                    messages = [
-                        MessageChunk.from_dict(msg)
-                        for msg in messages_data
-                        if isinstance(msg, dict)
-                    ]
+            ledger = effective_storage.load_message_ledger(effective_session_id)
+            messages = []
+            for message_data in ledger.messages:
+                try:
+                    messages.append(MessageChunk.from_dict(message_data))
+                except Exception as exc:
+                    logger.warning(
+                        "SessionContext: skipped invalid persisted message "
+                        f"session_id={effective_session_id}: {exc}"
+                    )
+            return messages, ledger.max_sequence, ledger.journal_records
         except UnicodeDecodeError:
             logger.warning(
-                "SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages"
+                "SessionContext: message ledger decode failed, file may be "
+                "in legacy encoding, will start with empty messages"
             )
-            messages = []
-        except Exception as e:
-            logger.warning(f"SessionContext: Failed to load messages.json: {e}")
-            messages = []
-
-        journal_path = SessionContext._message_journal_path_for_workspace(
-            session_workspace
-        )
-        if not os.path.exists(journal_path):
-            return messages, max_journal_seq, journal_records
-
-        try:
-            with open(journal_path, "r", encoding="utf-8") as f:
-                for line_number, line in enumerate(f, start=1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        logger.warning(
-                            "SessionContext: skipped invalid message journal record "
-                            f"session_id={session_id} line={line_number}: {exc}"
-                        )
-                        continue
-                    if not isinstance(record, dict):
-                        continue
-                    if record.get("op") != "put_message":
-                        continue
-                    record_session_id = record.get("session_id")
-                    if (
-                        session_id
-                        and record_session_id
-                        and record_session_id != session_id
-                    ):
-                        continue
-                    seq = record.get("seq")
-                    if isinstance(seq, int):
-                        max_journal_seq = max(max_journal_seq, seq)
-                    message_data = record.get("message")
-                    if not isinstance(message_data, dict):
-                        continue
-                    try:
-                        message = MessageChunk.from_dict(message_data)
-                    except Exception as exc:
-                        logger.warning(
-                            "SessionContext: skipped invalid message journal message "
-                            f"session_id={session_id} line={line_number}: {exc}"
-                        )
-                        continue
-                    messages = SessionContext._upsert_persisted_message(
-                        messages, message
-                    )
-                    journal_records += 1
-        except Exception as e:
-            logger.warning(
-                f"SessionContext: Failed to replay {MESSAGE_JOURNAL_FILE}: {e}"
-            )
-
-        return messages, max_journal_seq, journal_records
+            return [], 0, 0
+        except Exception as exc:
+            logger.warning(f"SessionContext: Failed to load message ledger: {exc}")
+            return [], 0, 0
 
     def _get_message_by_id(self, message_id: Optional[str]) -> Optional[MessageChunk]:
         if not message_id:
@@ -563,7 +516,7 @@ class SessionContext:
         if not session_workspace:
             return False
         try:
-            os.makedirs(session_workspace, exist_ok=True)
+            self._bind_storage_workspace()
             with self._message_journal_lock:
                 message = self._get_message_by_id(message_id)
                 if message is None:
@@ -591,9 +544,7 @@ class SessionContext:
                     "reason": reason,
                     "message": message_data,
                 }
-                with open(self._message_journal_path(), "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    f.flush()
+                self.storage.append_message_event(self.session_id, record)
                 if message.message_id:
                     self._message_journal_flushed_signatures[message.message_id] = (
                         message_signature
@@ -628,15 +579,10 @@ class SessionContext:
         )
 
     def _clear_message_journal_after_snapshot(self) -> None:
-        journal_path = self._message_journal_path()
-        if not journal_path:
-            return
-        if not os.path.exists(journal_path):
-            return
         try:
+            self._bind_storage_workspace()
             with self._message_journal_lock:
-                if os.path.exists(journal_path):
-                    open(journal_path, "w", encoding="utf-8").close()
+                self.storage.clear_message_events(self.session_id)
             logger.info(
                 f"SessionContext: cleared {MESSAGE_JOURNAL_FILE} "
                 f"session_id={self.session_id}"
@@ -649,8 +595,8 @@ class SessionContext:
 
     def _message_journal_has_records(self) -> bool:
         try:
-            journal_path = self._message_journal_path()
-            return bool(journal_path) and os.path.getsize(journal_path) > 0
+            self._bind_storage_workspace()
+            return self.storage.message_events_have_records(self.session_id)
         except OSError:
             return False
 
@@ -1370,12 +1316,12 @@ class SessionContext:
         Args:
             session_root_space: 会话根空间路径（宿主机）
         """
-        if not session_root_space or not os.path.exists(session_root_space):
+        if not session_root_space:
             raise ValueError(
                 f"SessionContext 初始化需要传入有效的 session_root_space: {session_root_space}"
             )
 
-        self.session_root_space = os.path.abspath(session_root_space)
+        self.session_root_space = str(session_root_space)
 
         # 确定 session_workspace（会话数据，始终在宿主机）
         parent_session_id = self.parent_session_id or self.system_context.get(
@@ -1389,10 +1335,9 @@ class SessionContext:
                 manager = get_global_session_manager()
                 parent_session = manager.get(parent_session_id)
                 if parent_session and parent_session.session_context:
-                    self.session_workspace = os.path.join(
-                        parent_session.session_context.session_workspace,
-                        "sub_sessions",
+                    self.session_workspace = self.storage.create_session_workspace(
                         self.session_id,
+                        parent_workspace=parent_session.session_context.session_workspace,
                     )
                 else:
                     raise ValueError(
@@ -1411,11 +1356,16 @@ class SessionContext:
                     f"Failed to resolve parent session workspace for {parent_session_id}: {e}"
                 )
         else:
-            self.session_workspace = os.path.join(
-                self.session_root_space, self.session_id
+            self.session_workspace = self.storage.create_session_workspace(
+                self.session_id
             )
 
-        os.makedirs(self.session_workspace, exist_ok=True)
+        self.storage.bind_session_workspace(self.session_id, self.session_workspace)
+        self.storage.register_session(
+            self.session_id,
+            self.session_workspace,
+            parent_session_id=parent_session_id,
+        )
 
     async def _prepare_workspace_bootstrap_files(self):
         """
@@ -1661,6 +1611,7 @@ class SessionContext:
         messages, max_journal_seq, journal_records = self.load_persisted_message_ledger(
             self.session_workspace,
             session_id=self.session_id,
+            storage=self.storage,
         )
         self.message_manager.messages = messages
         self.message_manager.stats["total_messages"] = len(messages)
@@ -1675,29 +1626,9 @@ class SessionContext:
             f"journal_records={journal_records}"
         )
 
-    def _prepare_llm_request_file_path(self, llm_request: Dict[str, Any]) -> str:
-        llm_request_folder = os.path.join(self.session_workspace, "llm_request")
-        os.makedirs(llm_request_folder, exist_ok=True)
-
-        existing_files = os.listdir(llm_request_folder)
-        max_index = -1
-        for file in existing_files:
-            if file.endswith(".json"):
-                try:
-                    index = int(file.split("_")[0])
-                    max_index = max(max_index, index)
-                except ValueError:
-                    continue
-
-        file_name = (
-            f"{max_index + 1}_{llm_request['request'].get('step_name', 'unknown')}_"
-            f"{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
-        )
-        return os.path.join(llm_request_folder, file_name)
-
     def _save_llm_request_sync(self, llm_request: Dict[str, Any]) -> str:
         with self._llm_request_save_lock:
-            file_path = self._prepare_llm_request_file_path(llm_request)
+            self._bind_storage_workspace()
             internal_request = llm_request["request"]
             provider_attempts = internal_request.get("_provider_request_attempts", [])
             actual_request = (
@@ -1738,16 +1669,13 @@ class SessionContext:
                 serializable_request["request_attempts"] = make_serializable(
                     provider_attempts
                 )
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(serializable_request, f, ensure_ascii=False, indent=4)
-            return file_path
+            return self.storage.append_llm_request(
+                self.session_id, serializable_request
+            )
 
     def _save_mcp_calls_sync(self, request_id: str) -> str:
         with self._mcp_calls_save_lock:
-            target_dir = os.path.join(self.session_workspace, "mcp_calls")
-            os.makedirs(target_dir, exist_ok=True)
-            file_path = os.path.join(target_dir, f"{request_id}.json")
-
+            self._bind_storage_workspace()
             with self._mcp_calls_lock:
                 calls = [
                     make_serializable(call)
@@ -1761,9 +1689,9 @@ class SessionContext:
                 "call_count": len(calls),
                 "calls": calls,
             }
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            return file_path
+            return self.storage.save_mcp_calls(
+                self.session_id, request_id, payload
+            )
 
     def _has_mcp_calls_for_request(self, request_id: str) -> bool:
         with self._mcp_calls_lock:
@@ -2402,12 +2330,11 @@ class SessionContext:
         cur["duration_sec"] = max(0.0, cur["ended_at"] - cur["started_at"])
         cur["status"] = status
         try:
-            target_dir = os.path.join(self.session_workspace, "tokens_usage")
-            os.makedirs(target_dir, exist_ok=True)
-            file_path = os.path.join(target_dir, f"{cur['request_id']}.json")
+            self._bind_storage_workspace()
             payload = make_serializable(cur)
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+            file_path = self.storage.save_request_usage(
+                self.session_id, cur["request_id"], payload
+            )
             logger.info(
                 f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
                 f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
@@ -2672,12 +2599,11 @@ class SessionContext:
                 self._last_save_signature = signature
                 self._last_save_time = now
                 return
+            self.storage.bind_session_workspace(self.session_id, session_workspace)
 
             # 1. 保存 messages 到 messages.json
             # 始终覆盖，保存完整历史
             messages_saved = False
-            messages_path = os.path.join(session_workspace, "messages.json")
-            messages_tmp_path = f"{messages_path}.tmp"
             with self._message_journal_lock:
                 self.flush_message_journal_current(reason="before_session_save")
                 logger.info(
@@ -2689,17 +2615,12 @@ class SessionContext:
                     f"last_messages={self._debug_last_message_snapshots()}"
                 )
                 try:
-                    with open(messages_tmp_path, "w", encoding="utf-8") as f:
-                        serializable_messages = make_serializable(
-                            self.message_manager.messages
-                        )
-                        json.dump(
-                            serializable_messages,
-                            f,
-                            ensure_ascii=False,
-                            indent=4,
-                        )
-                    os.replace(messages_tmp_path, messages_path)
+                    serializable_messages = make_serializable(
+                        self.message_manager.messages
+                    )
+                    messages_path = self.storage.save_message_snapshot(
+                        self.session_id, serializable_messages
+                    )
                     messages_saved = True
                     logger.info(
                         "SessionContext: saved messages.json "
@@ -2709,11 +2630,6 @@ class SessionContext:
                     )
                 except Exception as e:
                     logger.error(f"SessionContext: Failed to save messages.json: {e}")
-                    try:
-                        if os.path.exists(messages_tmp_path):
-                            os.remove(messages_tmp_path)
-                    except Exception:
-                        pass
 
                 if messages_saved:
                     self._clear_message_journal_after_snapshot()
@@ -2721,17 +2637,9 @@ class SessionContext:
             # 2. 保存 compact_manifest.json（派生索引，仅用于审计/调试）
             try:
                 compact_manifest = self.message_manager.get_compact_manifest()
-                with open(
-                    os.path.join(self.session_workspace, "compact_manifest.json"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    json.dump(
-                        make_serializable(compact_manifest),
-                        f,
-                        ensure_ascii=False,
-                        indent=4,
-                    )
+                self.storage.save_compact_manifest(
+                    self.session_id, make_serializable(compact_manifest)
+                )
             except Exception as e:
                 logger.error(
                     f"SessionContext: Failed to save compact_manifest.json: {e}"
@@ -2771,12 +2679,7 @@ class SessionContext:
                     "agent_config": make_serializable(self.agent_config),
                 }
 
-                with open(
-                    os.path.join(self.session_workspace, "session_context.json"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    json.dump(context_data, f, ensure_ascii=False, indent=4)
+                self.storage.save_session_snapshot(self.session_id, context_data)
 
             except Exception as e:
                 logger.error(
@@ -2795,12 +2698,7 @@ class SessionContext:
                                     tools_usage.get(tool_name, 0) + 1
                                 )
 
-                with open(
-                    os.path.join(self.session_workspace, "tools_usage.json"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+                self.storage.save_tools_usage(self.session_id, tools_usage)
             except Exception as e:
                 logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
 
