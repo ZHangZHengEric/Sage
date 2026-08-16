@@ -402,6 +402,7 @@ class _FilesystemSessionStore(SessionStore):
                 if latest >= before:
                     continue
                 shutil.rmtree(session_dir)
+                self.remove_session(session_dir.name)
                 stats["deleted_session_dirs"] += 1
             except Exception:
                 stats["errors"] += 1
