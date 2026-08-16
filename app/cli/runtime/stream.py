@@ -5,7 +5,6 @@ import sys
 import time
 from contextlib import suppress
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from app.cli.runtime.contracts import (
@@ -107,36 +106,21 @@ def _install_stdin_control_reader(request) -> Optional[Callable[[], None]]:
     return _cleanup
 
 
-def _resolve_session_log_path(session_id: Optional[str]) -> Optional[Path]:
-    if not session_id:
-        return None
-    session_dir = (
-        os.environ.get("SAGE_SESSION_DIR")
-        or os.environ.get("SAGE_SESSION_DIR_PATH")
-        or None
-    )
-    if not session_dir:
-        from common.core.config import get_local_storage_defaults
-
-        session_dir = get_local_storage_defaults()["session_dir"]
-    return Path(session_dir) / session_id / f"session_{session_id}.log"
-
-
 def _extract_recent_session_issue_notice(
     session_id: Optional[str],
     *,
     request_started_at_epoch: float,
 ) -> Optional[str]:
-    log_path = _resolve_session_log_path(session_id)
-    if not log_path or not log_path.is_file():
+    if not session_id:
         return None
 
     try:
-        with log_path.open("rb") as handle:
-            handle.seek(0, 2)
-            size = handle.tell()
-            handle.seek(max(0, size - SESSION_LOG_SCAN_BYTES))
-            tail = handle.read().decode("utf-8", errors="ignore")
+        from sagents.session_runtime import get_global_session_manager
+
+        manager = get_global_session_manager()
+        tail = manager.storage.read_session_log_tail(
+            session_id, max_bytes=SESSION_LOG_SCAN_BYTES
+        )
     except Exception:  # noqa: BLE001
         return None
 

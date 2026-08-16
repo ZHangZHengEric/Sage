@@ -954,8 +954,7 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
         from datetime import datetime
         from io import StringIO
         import json
-        import os
-        import tempfile
+        from types import SimpleNamespace
 
         original_wait_for = asyncio.wait_for
         first_poll = {"value": True}
@@ -966,33 +965,33 @@ class TestStreamRequestIdlePolling(unittest.IsolatedAsyncioTestCase):
                 raise asyncio.TimeoutError
             return await original_wait_for(awaitable, timeout)
 
-        with tempfile.TemporaryDirectory() as tempdir:
-            session_dir = os.path.join(tempdir, request.session_id)  # pyright: ignore[reportAttributeAccessIssue]
-            os.makedirs(session_dir, exist_ok=True)
-            session_log = os.path.join(session_dir, f"session_{request.session_id}.log")  # pyright: ignore[reportAttributeAccessIssue]
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-            with open(session_log, "w", encoding="utf-8") as handle:
-                handle.write(
-                    f"{timestamp} - WARNING - [agent/agent_base.py:425] - ToolSuggestionAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.\n"
-                )
-
-            stdout = StringIO()
-            with (
-                patch("app.cli.service.run_request_stream", fake_run_request_stream),
-                patch("sys.stdout", stdout),
-                patch("sys.stderr", StringIO()),
-                patch("app.cli.runtime.stream.asyncio.wait_for", fake_wait_for),
-                patch("app.cli.runtime.stream.STREAM_IDLE_NOTICE_SECONDS", 0.0),
-                patch("app.cli.runtime.stream.STREAM_IDLE_REPEAT_SECONDS", 0.0),
-                patch.dict("os.environ", {"SAGE_SESSION_DIR": tempdir}, clear=False),
-            ):
-                result = await _stream_request(
-                    request,
-                    json_output=True,
-                    stats_output=False,
-                    workspace=None,
-                    command_mode="chat",
-                )
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        log_tail = f"{timestamp} - WARNING - [agent/agent_base.py:425] - ToolSuggestionAgent: 遇到网络连接错误，等待 2 秒后重试 (1/8): Connection error.\n"
+        store = type(
+            "Store",
+            (),
+            {"read_session_log_tail": lambda self, session_id, max_bytes: log_tail},
+        )()
+        stdout = StringIO()
+        with (
+            patch("app.cli.service.run_request_stream", fake_run_request_stream),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", StringIO()),
+            patch("app.cli.runtime.stream.asyncio.wait_for", fake_wait_for),
+            patch("app.cli.runtime.stream.STREAM_IDLE_NOTICE_SECONDS", 0.0),
+            patch("app.cli.runtime.stream.STREAM_IDLE_REPEAT_SECONDS", 0.0),
+            patch(
+                "sagents.session_runtime.get_global_session_manager",
+                return_value=SimpleNamespace(storage=store),
+            ),
+        ):
+            result = await _stream_request(
+                request,
+                json_output=True,
+                stats_output=False,
+                workspace=None,
+                command_mode="chat",
+            )
 
         self.assertEqual(result, 0)
         events = [

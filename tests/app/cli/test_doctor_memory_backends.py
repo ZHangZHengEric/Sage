@@ -95,6 +95,8 @@ class TestDoctorMemoryBackends(unittest.TestCase):
             info = cli_service.collect_doctor_info()
 
         self.assertIn("memory_backends", info)
+        self.assertEqual(info["session_storage"]["backend"], "filesystem")
+        self.assertNotIn("session_registry_db", info)
         self.assertEqual(info["memory_backends"]["session_history"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["file_memory"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["session_history"]["resolved"], "noop")
@@ -131,6 +133,8 @@ class TestDoctorMemoryBackends(unittest.TestCase):
             info = cli_service.collect_config_info()
 
         self.assertIn("memory_backends", info)
+        self.assertEqual(info["session_storage"]["backend"], "filesystem")
+        self.assertNotIn("session_registry_db", info)
         self.assertEqual(info["memory_backends"]["session_history"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["file_memory"]["status"], "ok")
         self.assertEqual(info["memory_backends"]["session_history"]["resolved"], "noop")

@@ -26,6 +26,7 @@ from sagents.flow.schema import (
 )
 from sagents.session_runtime import get_global_session_manager
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.storage import SessionStorageConfigInput
 from sagents.observability.prometheus_handler import record_agent_first_token
 
 
@@ -157,13 +158,16 @@ class SAgent:
         session_root_space: str,
         enable_obs: bool = True,
         sandbox_type: Optional[str] = None,
+        storage_config: SessionStorageConfigInput = None,
     ):
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         # 优先使用传入的参数，其次从环境变量读取，默认使用 local
         self.sandbox_type = sandbox_type or os.environ.get("SAGE_SANDBOX_MODE", "local")
         self.session_manager = get_global_session_manager(
-            session_root_space=self.session_root_space, enable_obs=enable_obs
+            session_root_space=self.session_root_space,
+            enable_obs=enable_obs,
+            storage_config=storage_config,
         )
 
     async def run_stream(

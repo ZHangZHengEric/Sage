@@ -48,6 +48,11 @@ from sagents.flow.executor import FlowExecutor
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.message_control_flags import extract_control_flags_from_messages
 from sagents.utils.i18n import normalize_language, t
+from sagents.storage import (
+    SessionStorageConfigInput,
+    SessionStore,
+    create_session_store,
+)
 
 
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
@@ -131,11 +136,6 @@ async def _flush_session_logs_with_timeout(
         )
 
 
-def _load_json_file_sync(file_path: str) -> Optional[Any]:
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 @contextmanager
 def session_scope(session_id: Optional[str]):
     token = _session_id_var.set(session_id)
@@ -197,11 +197,16 @@ def _context_budget_config_from_model(
 
 class Session:
     def __init__(
-        self, session_id: str, enable_obs: bool = True, sandbox_type: str = "local"
+        self,
+        session_id: str,
+        enable_obs: bool = True,
+        sandbox_type: str = "local",
+        storage: Optional[SessionStore] = None,
     ):
         self.session_id = session_id
         self.enable_obs = enable_obs
         self.sandbox_type = sandbox_type
+        self.storage = storage
         self.session_context: Optional[SessionContext] = None
         self.session_workspace: Optional[str] = None
         self.status: SessionStatus = SessionStatus.IDLE
@@ -254,6 +259,14 @@ class Session:
     def set_workspace(self, session_workspace: Optional[str]) -> None:
         if session_workspace:
             self.session_workspace = str(session_workspace)
+            if self.storage is None:
+                self.storage = create_session_store(
+                    session_root=os.path.dirname(self.session_workspace),
+                    initialize=False,
+                )
+            self.storage.bind_session_workspace(
+                self.session_id, self.session_workspace
+            )
 
     def get_context(self) -> Optional[SessionContext]:
         return self.session_context
@@ -348,12 +361,8 @@ class Session:
         if not self.session_workspace:
             return None
 
-        context_path = os.path.join(self.session_workspace, "session_context.json")
-        if not os.path.exists(context_path):
-            return None
-
         try:
-            snapshot = _load_json_file_sync(context_path)
+            snapshot = self.storage.load_session_snapshot(self.session_id)
             if isinstance(snapshot, dict):
                 self._persisted_snapshot = snapshot
                 return snapshot
@@ -373,6 +382,7 @@ class Session:
             self._persisted_messages = SessionContext.load_persisted_message_ledger(
                 self.session_workspace,
                 session_id=self.session_id,
+                storage=self.storage,
             )[0]
         except Exception as exc:
             logger.debug(
@@ -436,6 +446,7 @@ class Session:
                     tool_manager=None,
                     skill_manager=None,
                     parent_session_id=snapshot.get("parent_session_id"),
+                    storage=self.storage,
                 )
                 self.session_context.prompt_budget_manager.restore(
                     snapshot.get("prompt_token_checkpoints") or {}
@@ -597,41 +608,10 @@ class Session:
             self.model = ObservableAsyncOpenAI(self.model, self.observability_manager)
 
     def _load_saved_system_context(self, session_id: str) -> Optional[Dict[str, Any]]:
-        # 尝试从 SessionManager 获取已知的 session_workspace
-        # 如果是第一次创建，可能还不知道路径，返回 None
-        # 如果 SessionManager 已经扫描到，则直接使用
-
-        # 我们需要访问全局 SessionManager 吗？
-        # Session 实例本身不知道自己属于哪个 Manager，除非传入。
-        # 但我们有 get_global_session_manager。
-
-        # 更好的方式：Session 初始化时，应该尝试定位自己的 workspace
-
-        # 假设我们通过全局 Manager 查找
         try:
-            manager = get_global_session_manager()
-            if manager:
-                session_workspace = manager.get_session_workspace(
-                    session_id, only_all_session_paths=True
-                )
-                if session_workspace:
-                    context_path = os.path.join(
-                        session_workspace, "session_context.json"
-                    )
-                    if os.path.exists(context_path):
-                        data = _load_json_file_sync(context_path)
-                        return (
-                            data.get("system_context")
-                            if isinstance(data, dict)
-                            else None
-                        )
-
-            default_path = os.path.join(
-                self.session_root_space, session_id, "session_context.json"
-            )
-            if os.path.exists(default_path):
-                data = _load_json_file_sync(default_path)
-                return data.get("system_context") if isinstance(data, dict) else None
+            storage = self.storage or get_global_session_manager().storage
+            data = storage.load_session_snapshot(session_id)
+            return data.get("system_context") if isinstance(data, dict) else None
 
         except UnicodeDecodeError:
             logger.warning(
@@ -721,6 +701,7 @@ class Session:
             tool_manager=tool_manager,
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
+            storage=self.storage,
         )
 
         # 异步初始化 SessionContext
@@ -1381,7 +1362,12 @@ class Session:
 
 
 class SessionManager:
-    def __init__(self, session_root_space: str, enable_obs: bool = True):
+    def __init__(
+        self,
+        session_root_space: str,
+        enable_obs: bool = True,
+        storage_config: SessionStorageConfigInput = None,
+    ):
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         self._sessions: Dict[str, Session] = {}
@@ -1389,15 +1375,14 @@ class SessionManager:
         self._session_close_lock = threading.RLock()
         self._session_close_futures: Dict[str, concurrent.futures.Future[None]] = {}
         self._shutdown = False
-
-        from sagents.session_registry import SessionRegistry
-
-        db_path = os.path.join(self.session_root_space, "sessions_index.sqlite")
-        need_migrate = not os.path.exists(db_path)
-        os.makedirs(self.session_root_space, exist_ok=True)
-        self._registry = SessionRegistry(db_path, root_dir=self.session_root_space)
+        self.storage = create_session_store(
+            storage_config,
+            session_root=self.session_root_space,
+        )
+        self.storage.initialize()
+        need_migrate = not self.storage.list_sessions()
         if need_migrate:
-            self._migrate_from_filesystem()
+            self._migrate_legacy_sessions()
 
     def _track_cleanup_task(self, task: asyncio.Task) -> None:
         self._session_cleanup_tasks.add(task)
@@ -1415,71 +1400,25 @@ class SessionManager:
 
         task.add_done_callback(cleanup_done)
 
-    def _migrate_from_filesystem(self):
-        """One-time migration: scan existing directories and populate the SQLite registry."""
-        if not os.path.exists(self.session_root_space):
-            logger.info(
-                f"SessionManager: Session root space does not exist: {self.session_root_space}"
-            )
-            return
-
-        logger.info(
-            f"SessionManager: Migrating existing sessions from {self.session_root_space} into SQLite registry"
-        )
-        entries = []
+    def _migrate_legacy_sessions(self):
+        """Ask the selected backend to import any legacy session records."""
         try:
-            with os.scandir(self.session_root_space) as root_entries:
-                for entry in root_entries:
-                    if not entry.is_dir():
-                        continue
-                    entry_path = entry.path
-                    if os.path.exists(
-                        os.path.join(entry_path, "session_context.json")
-                    ) or os.path.exists(os.path.join(entry_path, "messages.json")):
-                        entries.append((entry.name, entry_path, None))
-                        logger.debug(f"Migrating root session: {entry.name}")
-
-                    sub_sessions_dir = os.path.join(entry_path, "sub_sessions")
-                    if not os.path.isdir(sub_sessions_dir):
-                        continue
-                    with os.scandir(sub_sessions_dir) as sub_entries:
-                        for sub_entry in sub_entries:
-                            if not sub_entry.is_dir():
-                                continue
-                            sub_entry_path = sub_entry.path
-                            if os.path.exists(
-                                os.path.join(sub_entry_path, "session_context.json")
-                            ) or os.path.exists(
-                                os.path.join(sub_entry_path, "messages.json")
-                            ):
-                                entries.append(
-                                    (sub_entry.name, sub_entry_path, entry.name)
-                                )
-                                logger.debug(f"Migrating sub session: {sub_entry.name}")
+            migrated = self.storage.migrate_legacy_sessions()
         except FileNotFoundError:
-            logger.info(
-                f"SessionManager: Session root space disappeared during migration: {self.session_root_space}"
-            )
+            logger.info("SessionManager: Legacy session source is unavailable")
             return
         except Exception as e:
-            logger.warning(
-                f"SessionManager: Failed to scan sessions in {self.session_root_space}: {e}"
-            )
+            logger.warning(f"SessionManager: Failed to migrate legacy sessions: {e}")
             return
-
-        if entries:
-            self._registry.register_batch(entries)
-        logger.info(
-            f"SessionManager: Migrated {len(entries)} sessions into SQLite registry"
-        )
+        logger.info(f"SessionManager: Migrated {migrated} legacy sessions")
 
     def _is_sub_session(self, session_id: str) -> bool:
         """判断是否为子会话"""
-        return self._registry.is_sub_session(session_id)
+        return self.storage.get_parent_session_id(session_id) is not None
 
     def get_parent_session_id(self, session_id: str) -> Optional[str]:
         """获取父会话 ID"""
-        return self._registry.get_parent_session_id(session_id)
+        return self.storage.get_parent_session_id(session_id)
 
     def get_session_workspace(
         self, session_id: str, only_all_session_paths: bool = False
@@ -1494,7 +1433,7 @@ class SessionManager:
         Returns:
             工作区路径，找不到则返回 None
         """
-        return self._registry.get_workspace(session_id)
+        return self.storage.get_session_workspace(session_id)
 
     def cache_session_workspace(
         self,
@@ -1504,7 +1443,7 @@ class SessionManager:
     ):
         if not session_id or not session_workspace:
             return
-        self._registry.register(
+        self.storage.register_session(
             session_id, session_workspace, parent_session_id=parent_session_id
         )
 
@@ -1538,6 +1477,7 @@ class SessionManager:
                     session_id=session_id,
                     enable_obs=self.enable_obs,
                     sandbox_type=sandbox_type,
+                    storage=self.storage,
                 )
             else:
                 self._sessions[session_id].sandbox_type = sandbox_type
@@ -1568,6 +1508,7 @@ class SessionManager:
         session = Session(
             session_id=session_id,
             enable_obs=self.enable_obs,
+            storage=self.storage,
         )
         session.set_workspace(workspace)
         loaded = session.load_persisted_state(workspace)
@@ -1784,7 +1725,7 @@ class SessionManager:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
         finally:
-            self._registry.close()
+            self.storage.close()
 
     def interrupt_session(
         self, session_id: str, message: str = "User requested interruption"
@@ -1805,13 +1746,10 @@ class SessionManager:
         session = self.get_live_session(session_id)
         if session:
             return {"status": session.get_status().value}
-        workspace = self.get_session_workspace(session_id)
-        if not workspace:
+        if not self.storage.session_exists(session_id):
             return None
         try:
-            snapshot = _load_json_file_sync(
-                os.path.join(workspace, "session_context.json")
-            )
+            snapshot = self.storage.load_session_snapshot(session_id)
             if isinstance(snapshot, dict) and snapshot.get("status"):
                 return {"status": str(snapshot["status"])}
         except FileNotFoundError:
@@ -1850,12 +1788,9 @@ class SessionManager:
             logger.warning(f"SessionManager: 无法找到会话 {session_id} 的路径")
             return []
 
-        messages_path = os.path.join(session_workspace_path, "messages.json")
-        if not os.path.exists(messages_path):
-            return []
-
         try:
-            raw_messages = _load_json_file_sync(messages_path)
+            ledger = self.storage.load_message_ledger(session_id)
+            raw_messages = ledger.messages
         except json.JSONDecodeError as e:
             logger.error(
                 f"SessionManager: Failed to decode messages.json for session {session_id}: {e}"
@@ -1888,13 +1823,10 @@ class SessionManager:
         session = self.get_live_session(session_id)
         if session:
             return session.get_tasks_status()
-        workspace = self.get_session_workspace(session_id)
-        if not workspace:
+        if not self.storage.session_exists(session_id):
             return None
         try:
-            snapshot = _load_json_file_sync(
-                os.path.join(workspace, "session_context.json")
-            )
+            snapshot = self.storage.load_session_snapshot(session_id)
             if isinstance(snapshot, dict):
                 return snapshot.get("tasks_status") or {"tasks": []}
         except FileNotFoundError:
@@ -2003,10 +1935,18 @@ def build_conversation_messages_view(session_id: str) -> Dict[str, Any]:
 _global_session_manager: Optional[SessionManager] = None
 
 
-def initialize_global_session_manager(session_root_space: str, enable_obs: bool = True):
+def initialize_global_session_manager(
+    session_root_space: str,
+    enable_obs: bool = True,
+    storage_config: SessionStorageConfigInput = None,
+):
     """初始化全局 SessionManager"""
     global _global_session_manager
-    _global_session_manager = SessionManager(session_root_space, enable_obs)
+    _global_session_manager = SessionManager(
+        session_root_space,
+        enable_obs,
+        storage_config=storage_config,
+    )
     return _global_session_manager
 
 
@@ -2021,7 +1961,9 @@ async def shutdown_global_session_manager() -> None:
 
 
 def get_global_session_manager(
-    session_root_space: Optional[str] = None, enable_obs: bool = True
+    session_root_space: Optional[str] = None,
+    enable_obs: bool = True,
+    storage_config: SessionStorageConfigInput = None,
 ) -> SessionManager:
     """
     获取全局 SessionManager 实例
@@ -2037,7 +1979,11 @@ def get_global_session_manager(
     if _global_session_manager is None:
         if session_root_space is None:
             raise ValueError("session_root_space is required for first initialization")
-        _global_session_manager = SessionManager(session_root_space, enable_obs)
+        _global_session_manager = SessionManager(
+            session_root_space,
+            enable_obs,
+            storage_config=storage_config,
+        )
     return _global_session_manager
 
 
