@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from sagents.session_registry import SessionRegistry
-from sagents.storage.base import MessageLedger, SessionStore
+from sagents.storage.base import MessageLedger, SessionStore, StorageError
 
 
 MESSAGE_SNAPSHOT_FILE = "messages.json"
@@ -40,6 +40,20 @@ class _FilesystemSessionStore(SessionStore):
     @property
     def registry_path(self) -> str:
         return os.path.join(self._root, "sessions_index.sqlite")
+
+    @staticmethod
+    def _validate_session_id(session_id: str) -> str:
+        value = str(session_id or "")
+        if (
+            not value
+            or value != value.strip()
+            or value in {".", ".."}
+            or "/" in value
+            or "\\" in value
+            or "\x00" in value
+        ):
+            raise StorageError("invalid session_id")
+        return value
 
     def initialize(self) -> None:
         os.makedirs(self._root, exist_ok=True)
@@ -71,22 +85,39 @@ class _FilesystemSessionStore(SessionStore):
         return self._registry
 
     def register_session(self, session_id, workspace, parent_session_id=None) -> None:
-        self._catalog().register(session_id, workspace, parent_session_id)
+        safe_session_id = self._validate_session_id(session_id)
+        safe_parent_id = (
+            self._validate_session_id(parent_session_id)
+            if parent_session_id is not None
+            else None
+        )
+        self._catalog().register(safe_session_id, workspace, safe_parent_id)
 
     def register_sessions(self, entries) -> None:
-        self._catalog().register_batch(list(entries))
+        normalized = []
+        for session_id, workspace, parent_session_id in entries:
+            safe_session_id = self._validate_session_id(session_id)
+            safe_parent_id = (
+                self._validate_session_id(parent_session_id)
+                if parent_session_id is not None
+                else None
+            )
+            normalized.append((safe_session_id, workspace, safe_parent_id))
+        self._catalog().register_batch(normalized)
 
     def get_session_workspace(self, session_id: str) -> Optional[str]:
-        return self._catalog().get_workspace(session_id)
+        return self._catalog().get_workspace(self._validate_session_id(session_id))
 
     def session_exists(self, session_id: str) -> bool:
-        return self._catalog().exists(session_id)
+        return self._catalog().exists(self._validate_session_id(session_id))
 
     def get_parent_session_id(self, session_id: str) -> Optional[str]:
-        return self._catalog().get_parent_session_id(session_id)
+        return self._catalog().get_parent_session_id(
+            self._validate_session_id(session_id)
+        )
 
     def remove_session(self, session_id: str) -> None:
-        self._catalog().remove(session_id)
+        self._catalog().remove(self._validate_session_id(session_id))
 
     def list_sessions(self) -> Mapping[str, str]:
         return self._catalog().list_all()
@@ -124,25 +155,28 @@ class _FilesystemSessionStore(SessionStore):
         )
 
     def create_session_workspace(self, session_id, *, parent_workspace=None) -> str:
+        safe_session_id = self._validate_session_id(session_id)
         if parent_workspace:
-            workspace = os.path.join(parent_workspace, "sub_sessions", session_id)
+            workspace = os.path.join(parent_workspace, "sub_sessions", safe_session_id)
         else:
-            workspace = os.path.join(self._root, session_id)
+            workspace = os.path.join(self._root, safe_session_id)
         os.makedirs(workspace, exist_ok=True)
-        self.bind_session_workspace(session_id, workspace)
+        self.bind_session_workspace(safe_session_id, workspace)
         return workspace
 
     def bind_session_workspace(self, session_id: str, workspace: str) -> None:
-        self._workspace_hints[session_id] = os.path.abspath(str(workspace))
+        safe_session_id = self._validate_session_id(session_id)
+        self._workspace_hints[safe_session_id] = os.path.abspath(str(workspace))
 
     def _workspace(self, session_id: str) -> str:
-        hinted = self._workspace_hints.get(session_id)
+        safe_session_id = self._validate_session_id(session_id)
+        hinted = self._workspace_hints.get(safe_session_id)
         if hinted:
             return hinted
-        workspace = self.get_session_workspace(session_id)
+        workspace = self.get_session_workspace(safe_session_id)
         if workspace:
             return workspace
-        return os.path.join(self._root, session_id)
+        return os.path.join(self._root, safe_session_id)
 
     @staticmethod
     def _read_json(path: str) -> Optional[Any]:
@@ -409,13 +443,22 @@ class _FilesystemSessionStore(SessionStore):
         return stats
 
     def export_session_archive(self, session_id: str) -> str:
-        if not self.session_exists(session_id):
+        safe_session_id = self._validate_session_id(session_id)
+        if not self.session_exists(safe_session_id):
             raise FileNotFoundError(session_id)
-        session_dir = Path(self._workspace(session_id)).resolve()
+        registered_workspace = self.get_session_workspace(safe_session_id)
+        if not registered_workspace:
+            raise FileNotFoundError(session_id)
+        session_dir = Path(registered_workspace).resolve()
+        storage_root = Path(self._root).resolve()
+        try:
+            session_dir.relative_to(storage_root)
+        except ValueError as exc:
+            raise StorageError("session workspace escapes storage root") from exc
         if not session_dir.is_dir():
             raise FileNotFoundError(session_id)
         tmp_file = tempfile.NamedTemporaryFile(
-            prefix=f"sage-session-{session_id}-",
+            prefix=f"sage-session-{safe_session_id}-",
             suffix=".zip",
             delete=False,
         )
@@ -437,7 +480,7 @@ class _FilesystemSessionStore(SessionStore):
                         path = root_path / filename
                         if path.is_symlink() or not path.is_file():
                             continue
-                        arcname = Path(session_id) / path.relative_to(session_dir)
+                        arcname = Path(safe_session_id) / path.relative_to(session_dir)
                         archive.write(path, arcname.as_posix())
             return tmp_file.name
         except Exception:

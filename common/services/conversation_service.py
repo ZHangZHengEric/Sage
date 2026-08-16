@@ -4,8 +4,6 @@ Conversation shared service-layer entry points for server and desktop routers.
 
 import asyncio
 import hashlib
-import json
-import os
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -78,6 +76,25 @@ def _build_session_trace_url(session_id: str) -> Optional[str]:
         return f"{base}/trace/{trace_id}"
 
     return f"/jaeger/trace/{trace_id}"
+
+
+def _validate_session_id_for_storage(session_id: str) -> str:
+    value = str(session_id or "")
+    if (
+        not value
+        or value != value.strip()
+        or value in {".", ".."}
+        or Path(value).name != value
+        or "/" in value
+        or "\\" in value
+        or "\x00" in value
+    ):
+        raise SageHTTPException(
+            status_code=400,
+            message_key="conversation.session_id_invalid",
+            error_detail="Invalid session_id",
+        )
+    return value
 
 
 def inject_user_message(
@@ -547,6 +564,8 @@ async def prepare_session_folder_download(
             message_key="conversation.download_admin_required",
             error_detail="admin_required",
         )
+
+    session_id = _validate_session_id_for_storage(session_id)
 
     dao = ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
