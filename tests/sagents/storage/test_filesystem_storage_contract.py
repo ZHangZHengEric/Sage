@@ -8,6 +8,7 @@ continue to produce and consume this layout and payload shape.
 import json
 import os
 import sqlite3
+import time
 
 from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.session_context import MESSAGE_JOURNAL_FILE, SessionContext
@@ -189,8 +190,10 @@ def test_llm_request_files_remain_numbered_json_records(tmp_path):
         {"request": {"step_name": "execute"}, "response": {"ok": 2}, "timestamp": 2.0}
     )
 
-    assert os.path.basename(first) == "0_plan_19700101000001.json"
-    assert os.path.basename(second) == "1_execute_19700101000002.json"
+    first_stamp = time.strftime("%Y%m%d%H%M%S", time.localtime(1.0))
+    second_stamp = time.strftime("%Y%m%d%H%M%S", time.localtime(2.0))
+    assert os.path.basename(first) == f"0_plan_{first_stamp}.json"
+    assert os.path.basename(second) == f"1_execute_{second_stamp}.json"
     payload = json.loads(open(second, encoding="utf-8").read())
     assert payload == {
         "schema_version": 2,

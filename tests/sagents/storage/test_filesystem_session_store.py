@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import zipfile
 
 from sagents.session_runtime import SessionManager
@@ -106,3 +107,23 @@ def test_filesystem_store_exports_session_without_exposing_directory_walk(tmp_pa
 
     with zipfile.ZipFile(archive_path) as archive:
         assert "session-a/session_context.json" in archive.namelist()
+
+
+def test_purge_sessions_removes_expired_directory_and_registry_entry(tmp_path):
+    store = create_session_store(session_root=str(tmp_path))
+    session_id = "proactive_eval_expired"
+    workspace = store.create_session_workspace(session_id)
+    store.register_session(session_id, workspace)
+
+    expired_at = time.time() - 10 * 24 * 60 * 60
+    os.utime(workspace, (expired_at, expired_at))
+
+    stats = store.purge_sessions(
+        before=time.time() - 3 * 24 * 60 * 60,
+        session_id_prefix="proactive_eval_",
+    )
+
+    assert stats["deleted_session_dirs"] == 1
+    assert not os.path.exists(workspace)
+    assert not store.session_exists(session_id)
+    assert session_id not in store.list_sessions()
