@@ -1,10 +1,11 @@
 import json
 import os
+import pytest
 import time
 import zipfile
 
 from sagents.session_runtime import SessionManager
-from sagents.storage import SessionStore, create_session_store
+from sagents.storage import SessionStore, StorageError, create_session_store
 
 
 def test_filesystem_store_implements_session_store_contract(tmp_path):
@@ -127,3 +128,22 @@ def test_purge_sessions_removes_expired_directory_and_registry_entry(tmp_path):
     assert not os.path.exists(workspace)
     assert not store.session_exists(session_id)
     assert session_id not in store.list_sessions()
+
+
+@pytest.mark.parametrize("session_id", ["..", "../outside", "nested/session", "nested\\session"])
+def test_filesystem_store_rejects_path_traversal_session_ids(tmp_path, session_id):
+    store = create_session_store(session_root=str(tmp_path))
+
+    with pytest.raises(StorageError, match="invalid session_id"):
+        store.create_session_workspace(session_id)
+
+
+def test_export_session_archive_rejects_workspace_outside_storage_root(tmp_path):
+    store = create_session_store(session_root=str(tmp_path))
+    session_id = "safe-session"
+    outside_workspace = tmp_path.parent / "sage-outside-session"
+    outside_workspace.mkdir()
+    store.register_session(session_id, str(outside_workspace))
+
+    with pytest.raises(StorageError, match="escapes storage root"):
+        store.export_session_archive(session_id)
