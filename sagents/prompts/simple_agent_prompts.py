@@ -153,6 +153,7 @@ task_complete_template = {
 
 ## 优先级规则：
 - Assistant 自己声称“需要确认/输入”不构成证据。必须同时存在明确问题和客观、不可自行补足的缺失信息；否则继续执行。
+- `<agent_system_requirements>` 是执行 Agent 当时必须遵守的要求，`<available_tools>` 是当轮实际可用工具名。如果 Agent 要求用指定工具来请求信息、澄清、选择、确认或授权，且该工具当轮可用，那么只有最近执行过程中存在该工具的成功调用，才能输出 need_user_input。普通文本中的“请填写下面的问卷”“请确认”或类似请求不算有效等待；缺少成功工具调用时必须输出 continue。
 - 用户已经授权开始/继续后，不得再次索要同一确认。
 - 如果 Assistant 的最后回复已经把已完成内容、客观上不能继续的原因、以及需要用户回答的具体问题讲清楚，decision 才能是 need_user_input。
 
@@ -225,6 +226,7 @@ Note: another layer of objective rules (e.g. the latest direct response contains
 
 ## Priority rules
 - The Assistant's assertion that it “needs confirmation/input” is not evidence. There must also be a concrete question and objectively missing information that cannot be filled autonomously; otherwise continue.
+- `<agent_system_requirements>` contains the requirements that governed the executing Agent, and `<available_tools>` lists the tools actually available in that turn. If those requirements mandate a specific tool for requesting information, clarification, selection, confirmation, or authorization, and that tool is available, output need_user_input only when the recent execution contains a successful call to that tool. Plain text such as “fill in the questionnaire below,” “please confirm,” or an equivalent request is not a valid waiting state; without the successful tool call, output continue.
 - After the user has authorized start/continuation, never request the same confirmation again.
 - Only when the latest reply states what was completed, the objective reason it cannot proceed, and the specific question the user must answer may decision be need_user_input.
 
@@ -297,6 +299,7 @@ Nota: outra camada de regras objetivas (por exemplo, a resposta direta mais rece
 
 ## Regras de prioridade
 - A afirmação do Assistente de que “precisa de confirmação/entrada” não é evidência. Deve haver também pergunta concreta e informação objetivamente ausente que não possa ser preenchida de forma autônoma; caso contrário, continue.
+- `<agent_system_requirements>` contém os requisitos que regiam o Agent executor, e `<available_tools>` lista as ferramentas realmente disponíveis naquele turno. Se esses requisitos exigirem uma ferramenta específica para solicitar informação, esclarecimento, seleção, confirmação ou autorização, e essa ferramenta estiver disponível, retorne need_user_input somente quando a execução recente contiver uma chamada bem-sucedida dessa ferramenta. Texto comum como “preencha o questionário abaixo”, “confirme, por favor” ou solicitação equivalente não constitui espera válida; sem a chamada bem-sucedida, retorne continue.
 - Depois que o usuário autorizar início/continuação, nunca peça a mesma confirmação novamente.
 - Somente quando a última resposta disser o que foi concluído, o motivo objetivo de não poder prosseguir e a pergunta específica a responder, decision pode ser need_user_input.
 

@@ -734,16 +734,31 @@ def test_inline_questionnaire_forces_need_user_input_with_open_todo(monkeypatch)
     assert session_context.audit_status["completion_status"] == "need_user_input"
 
 
-def test_trailing_question_mark_forces_need_user_input_without_calling_judge(
+def test_trailing_question_mark_uses_protocol_aware_judge(
     monkeypatch,
 ):
     agent = _agent()
+    captured = {}
 
-    async def _fail_llm(*args, **kwargs):
-        raise AssertionError("question mark must bypass completion judge")
-        yield  # pragma: no cover
+    async def _fake_system_prompt_build(**_kwargs):
+        return (
+            "Whenever any user response is required, call questionnaire_async. "
+            "Never replace a questionnaire with an ordinary prose question."
+        )
 
-    monkeypatch.setattr(agent, "_call_llm_streaming", _fail_llm)
+    async def _fake_llm(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        yield _llm_chunk(
+            content=(
+                '{"decision":"continue","reason":'
+                '"questionnaire_async was required but was not called"}'
+            )
+        )
+
+    monkeypatch.setattr(
+        agent, "prepare_llm_system_prompt_text", _fake_system_prompt_build
+    )
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm)
     session_context = SimpleNamespace(
         audit_status={},
         message_manager=SimpleNamespace(
@@ -770,12 +785,19 @@ def test_trailing_question_mark_forces_need_user_input_without_calling_judge(
             session_id="question-mark",
             tool_manager=None,
             session_context=session_context,  # pyright: ignore[reportArgumentType]
+            tools_json=[
+                {
+                    "type": "function",
+                    "function": {"name": "questionnaire_async"},
+                }
+            ],
         )
     )
 
-    assert decision.task_interrupted is True
-    assert decision.reason == "latest assistant reply ends with a question mark"
-    assert session_context.audit_status["completion_status"] == "need_user_input"
+    assert decision.task_interrupted is False
+    assert "请提供目标服务器地址？" in captured["prompt"]
+    assert '["questionnaire_async"]' in captured["prompt"]
+    assert "completion_status" not in session_context.audit_status
 
 
 def test_non_trailing_question_mark_still_uses_judge(monkeypatch):
@@ -1213,22 +1235,23 @@ def test_task_completion_mode_llm_judge_disables_turn_status_contract(monkeypatc
     assert _agent()._turn_status_enabled() is False
 
 
-def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
+def test_task_complete_judge_includes_base_system_and_current_tool_names(
     monkeypatch,
 ):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
     agent = SimpleAgent(
         model=_DummyModel(),
         model_config={},
-        system_prefix="Agent system with active_skills and workspace_files",
+        system_prefix="unused test system",
     )
     captured = {}
 
     async def _never_must_continue(messages):
         return False
 
-    async def _fail_system_prompt_build(**_kwargs):
-        raise AssertionError("task complete judge should not build agent system prompt")
+    async def _fake_system_prompt_build(**kwargs):
+        captured["system_kwargs"] = kwargs
+        return "Agent system requires questionnaire_async for every user response."
 
     async def _fake_llm_streaming(*args, **kwargs):
         captured["llm_messages"] = kwargs["messages"]
@@ -1244,7 +1267,7 @@ def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
 
     monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
     monkeypatch.setattr(
-        agent, "prepare_llm_system_prompt_text", _fail_system_prompt_build
+        agent, "prepare_llm_system_prompt_text", _fake_system_prompt_build
     )
     monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
 
@@ -1255,7 +1278,11 @@ def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
         message_manager=msg_manager,
         get_language=lambda: "en",
     )
-    tool_manager = _ToolNameManager(["dudu_generate_route_scheme"])
+    tool_manager = _ToolNameManager(["hidden_global_tool"])
+    tools_json = [
+        {"type": "function", "function": {"name": "z_tool"}},
+        {"type": "function", "function": {"name": "questionnaire_async"}},
+    ]
     messages = [
         MessageChunk(
             role=MessageRole.USER.value,
@@ -1276,18 +1303,106 @@ def test_task_complete_judge_omits_agent_system_context_in_llm_judge_mode(
                 session_id="s1",
                 tool_manager=tool_manager,  # pyright: ignore[reportArgumentType]
                 session_context=session_context,  # pyright: ignore[reportArgumentType]
+                tools_json=tools_json,
             )
         )
         is True
     )
     prompt = captured["llm_messages"][0]["content"]
-    assert "Agent system with active_skills" not in prompt
+    assert captured["system_kwargs"]["include_sections"] == [
+        "role_definition",
+        "AGENT.MD",
+    ]
+    assert "Agent system requires questionnaire_async" in prompt
+    assert '["questionnaire_async", "z_tool"]' in prompt
+    assert "hidden_global_tool" not in prompt
     assert "<active_skills>" not in prompt
     assert "<available_skills>" not in prompt
     assert "<system_context>" not in prompt
     assert "<workspace_files>" not in prompt
     assert "user: start" in prompt
     assert "assistant: done" in prompt
+    assert prompt.index("## Priority rules") < prompt.index(
+        "<agent_system_requirements>"
+    )
+    assert prompt.index("<agent_system_requirements>") < prompt.index(
+        "<available_tools>"
+    )
+    assert prompt.index("<available_tools>") < prompt.index("user: start")
+
+
+def test_task_complete_judge_marks_missing_required_questionnaire_as_continue(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "llm_judge")
+    agent = _agent()
+    captured = {}
+
+    async def _never_must_continue(messages):
+        return False
+
+    async def _fake_system_prompt_build(**_kwargs):
+        return (
+            "Whenever any user response is required, call questionnaire_async. "
+            "Never replace a questionnaire with an ordinary prose question."
+        )
+
+    async def _fake_llm_streaming(*args, **kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        yield _llm_chunk(
+            content=(
+                '{"decision":"continue","reason":'
+                '"questionnaire_async was required but was not called"}'
+            )
+        )
+
+    monkeypatch.setattr(agent, "_must_continue_by_rules", _never_must_continue)
+    monkeypatch.setattr(
+        agent, "prepare_llm_system_prompt_text", _fake_system_prompt_build
+    )
+    monkeypatch.setattr(agent, "_call_llm_streaming", _fake_llm_streaming)
+
+    session_context = SimpleNamespace(
+        message_manager=SimpleNamespace(
+            context_budget_manager=SimpleNamespace(budget_info={"active_budget": 3000})
+        ),
+        get_language=lambda: "en",
+    )
+    messages = [
+        MessageChunk(
+            role=MessageRole.USER.value,
+            content="Continue preparing Episode 04.",
+            message_type=MessageType.USER_INPUT.value,
+        ),
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=(
+                "Before I write the episode, I need the earlier story content "
+                "and delivery format. Please provide them in the questionnaire below."
+            ),
+            message_type=MessageType.ASSISTANT_TEXT.value,
+        ),
+    ]
+
+    decision = asyncio.run(
+        agent._get_task_complete_decision(
+            messages_input=messages,
+            session_id="missing-questionnaire",
+            tool_manager=None,
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+            tools_json=[
+                {
+                    "type": "function",
+                    "function": {"name": "questionnaire_async"},
+                }
+            ],
+        )
+    )
+
+    assert decision.task_interrupted is False
+    assert "questionnaire_async" in captured["prompt"]
+    assert "Plain text such as" in captured["prompt"]
+    assert "Please provide them in the questionnaire below." in captured["prompt"]
 
 
 def test_task_complete_judge_includes_latest_todo_plan_before_last_user(monkeypatch):
@@ -1838,6 +1953,23 @@ def test_task_complete_judge_pending_question_rules_are_synced_across_prompt_var
         )
         assert delivered_rule in prompt
         assert pending_example in prompt
+
+
+def test_task_complete_judge_required_user_input_tool_rules_are_synced():
+    prompt_manager = PromptManager()
+    expectations = [
+        ("SimpleAgent", "zh", "<agent_system_requirements>", "成功调用"),
+        ("SimpleAgent", "en", "<agent_system_requirements>", "successful call"),
+        ("SimpleAgent", "pt", "<agent_system_requirements>", "chamada bem-sucedida"),
+    ]
+
+    for agent, language, context_tag, success_rule in expectations:
+        prompt = prompt_manager.get_agent_prompt(
+            agent, "task_complete_template", language=language
+        )
+        assert context_tag in prompt
+        assert "<available_tools>" in prompt
+        assert success_rule in prompt
 
 
 def test_task_complete_judge_preserves_latest_assistant_waiting_for_user_tail(
