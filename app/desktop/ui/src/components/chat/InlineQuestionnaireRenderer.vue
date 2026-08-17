@@ -1,8 +1,9 @@
 <template>
   <div class="inline-questionnaire-renderer flex w-full flex-col gap-3">
     <template v-for="part in parts" :key="part.key">
-      <MarkdownRendererWithPreview
+      <component
         v-if="part.type === 'markdown' && part.content.trim()"
+        :is="markdownRenderer"
         :content="part.content"
         :compact="compact"
         :message-id="messageId"
@@ -30,6 +31,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
 import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import InlineQuestionnaireCard from './InlineQuestionnaireCard.vue'
 import InlineQuestionnaireResponse from './InlineQuestionnaireResponse.vue'
@@ -57,9 +59,16 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  withPreview: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['sendMessage'])
+const markdownRenderer = computed(() => (
+  props.withPreview ? MarkdownRendererWithPreview : MarkdownRenderer
+))
 
 const parts = computed(() => (
   splitInlineQuestionnaireContent(props.content, props.messageId || 'assistant_questionnaire')

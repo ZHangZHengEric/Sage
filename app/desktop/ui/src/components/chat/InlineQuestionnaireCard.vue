@@ -98,6 +98,7 @@
               v-model="textValue"
               rows="3"
               class="resize-none bg-background/70"
+              :aria-label="currentQuestion.text"
               :disabled="!canEdit"
             />
             <Textarea
@@ -105,6 +106,7 @@
               v-model="otherText"
               rows="2"
               class="resize-none bg-background/70"
+              :aria-label="uiText.other"
               :disabled="!canEdit"
             />
           </div>
@@ -115,6 +117,7 @@
               variant="outline"
               size="sm"
               class="h-9 w-10 px-0"
+              :aria-label="t('common.previous')"
               :disabled="currentIndex === 0 || isSubmitting || submitted"
               @click="goBack"
             >

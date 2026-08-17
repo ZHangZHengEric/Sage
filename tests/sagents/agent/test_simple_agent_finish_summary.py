@@ -2614,11 +2614,44 @@ def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
         False,
         True,
     ]
-    assert [chunk.content for chunk in chunks if chunk.content] == [
+    visible_contents = [chunk.content for chunk in chunks if chunk.content]
+    assert visible_contents[:2] == [
         "纯文本回答",
         '{"ok": true}',
-        "The agent exceeded the maximum loop count (2). The task is paused. Do you want to continue?",
     ]
+    questionnaire = chunks[-1]
+    assert "已达到本轮最大循环次数（2），任务已暂停。" in questionnaire.content
+    assert "```questionnaire" in questionnaire.content
+    assert "title: 任务已暂停" in questionnaire.content
+    assert "text: 是否继续当前任务？" in questionnaire.content
+    assert "options:\n  - 继续" in questionnaire.content
+    assert "default: 继续" in questionnaire.content
+    assert "movo-questionnaire" not in questionnaire.content
+    assert questionnaire.metadata["runtime_notice"] == "max_loop_questionnaire"
+    assert questionnaire.metadata["stop_reason"] == "max_loop_count"
+    assert questionnaire.metadata["needs_user_input"] is True
+
+
+def test_max_loop_questionnaire_uses_session_language():
+    agent = _agent()
+
+    english = agent._build_max_loop_questionnaire(
+        max_loop_count=50,
+        language="en-US",
+    )
+    portuguese = agent._build_max_loop_questionnaire(
+        max_loop_count=50,
+        language="pt-BR",
+    )
+
+    assert "The maximum loop count for this turn (50)" in english.content
+    assert "text: Continue the current task?" in english.content
+    assert "options:\n  - Continue" in english.content
+    assert "O numero maximo de ciclos desta rodada (50)" in portuguese.content
+    assert "text: Continuar a tarefa atual?" in portuguese.content
+    assert "options:\n  - Continuar" in portuguese.content
+    assert "```questionnaire" in english.content
+    assert "```movo-questionnaire" not in english.content
 
 
 def test_llm_judge_completed_plain_text_does_not_force_required(monkeypatch):
@@ -3238,7 +3271,8 @@ def test_repeat_pattern_break_after_tool_emits_recovery_questionnaire(monkeypatc
     assert len(direct_calls) == 2
     assert [chunk.role for chunk in chunks] == ["tool", "tool", "assistant"]
     questionnaire = chunks[-1]
-    assert "<movo-questionnaire>" in questionnaire.content
+    assert "<questionnaire>" in questionnaire.content
+    assert "movo-questionnaire" not in questionnaire.content
     assert '"id": "loop_recovery_action"' in questionnaire.content
     assert "执行路径正在重复" in questionnaire.content
     assert "请说明你希望我接下来如何处理" in questionnaire.content
@@ -3256,7 +3290,7 @@ def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
 
     inference = MessageManager.build_inference_view([questionnaire])
 
-    assert "<movo-questionnaire>" in questionnaire.content
+    assert "<questionnaire>" in questionnaire.content
     assert len(inference) == 1
     assert inference[0].content == questionnaire.content
     assert "Execution path is repeating" in inference[0].content
@@ -3282,6 +3316,43 @@ def test_repeat_recovery_questionnaire_uses_session_language():
     assert "Descreva como voce deseja que eu prossiga" in portuguese.content
     assert '"type": "free_text"' in portuguese.content
     assert '"answer_title": "Respostas do questionario"' in portuguese.content
+
+
+def test_repeat_recovery_response_accepts_only_sage_frontend_namespaces():
+    def user_message(tag: str) -> MessageChunk:
+        return MessageChunk(
+            role=MessageRole.USER.value,
+            content=(
+                f"<{tag}-response>"
+                '{"answers":[{"question_id":"loop_recovery_action","answer":"继续"}]}'
+                f"</{tag}-response>"
+            ),
+            message_type=MessageType.USER_INPUT.value,
+        )
+
+    assert _agent()._latest_user_is_repeat_recovery_response(
+        [user_message("questionnaire")]
+    ) is True
+    assert _agent()._latest_user_is_repeat_recovery_response(
+        [user_message("sage-questionnaire")]
+    ) is True
+    assert _agent()._latest_user_is_repeat_recovery_response(
+        [user_message("movo-questionnaire")]
+    ) is False
+    extra_tag = user_message("questionnaire")
+    extra_tag.content = (
+        '<questionnaire-response-extra>{"answers":['
+        '{"question_id":"loop_recovery_action"}]}'
+        "</questionnaire-response-extra>"
+    )
+    assert _agent()._latest_user_is_repeat_recovery_response([extra_tag]) is False
+
+    malformed = user_message("questionnaire")
+    malformed.content = (
+        '<questionnaire-response>{"question_id":"loop_recovery_action"}'
+        "</questionnaire-response>"
+    )
+    assert _agent()._latest_user_is_repeat_recovery_response([malformed]) is False
 
 
 def test_historical_repeat_signature_requests_required_escape():

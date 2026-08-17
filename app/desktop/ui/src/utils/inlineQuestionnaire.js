@@ -1,4 +1,6 @@
-const QUESTIONNAIRE_TAGS = ['movo-questionnaire', 'ling-questionnaire', 'sage-questionnaire', 'questionnaire']
+import { load as loadYaml } from 'js-yaml'
+
+const QUESTIONNAIRE_TAGS = ['sage-questionnaire', 'questionnaire']
 const RESPONSE_TAGS = QUESTIONNAIRE_TAGS.map((tag) => `${tag}-response`)
 const ARTIFACT_TAGS = ['movo-artifacts', 'ling-artifacts', 'sage-artifacts', 'artifacts']
 const DEFAULT_UI_TEXT = {
@@ -15,7 +17,6 @@ const TAG_PATTERN = new RegExp(
   `<(${[...QUESTIONNAIRE_TAGS, ...RESPONSE_TAGS, ...ARTIFACT_TAGS].join('|')})(\\s[^>]*)?>([\\s\\S]*?)<\\\\?/\\1\\s*>`,
   'gi'
 )
-
 const BASIC_HTML_ENTITIES = [
   [/&quot;/g, '"'],
   [/&#34;/g, '"'],
@@ -30,33 +31,33 @@ export function splitInlineQuestionnaireContent(content, keyPrefix = 'questionna
   const text = normalizeTransportText(String(content || ''))
   const parts = []
   let lastIndex = 0
-  let match
   let count = 0
 
-  TAG_PATTERN.lastIndex = 0
-  while ((match = TAG_PATTERN.exec(text)) !== null) {
-    if (match.index > lastIndex) {
+  for (const match of collectInlineProtocolMatches(text)) {
+    if (match.start > lastIndex) {
       parts.push({
         type: 'markdown',
         key: `${keyPrefix}-text-${count}`,
-        content: text.slice(lastIndex, match.index),
+        content: text.slice(lastIndex, match.start),
       })
     }
 
-    const tag = match[1].toLowerCase()
-    const attrs = parseAttributes(match[2] || '')
-    const rawJson = match[3] || ''
+    const tag = match.tag
+    const attrs = match.attrs
+    const rawPayload = match.rawPayload
     const isResponse = tag.endsWith('-response')
     const isArtifacts = ARTIFACT_TAGS.includes(tag)
     const baseTag = isResponse ? tag.slice(0, -'-response'.length) : tag
     const payload = isArtifacts
-      ? parseArtifacts(rawJson, { tag })
+      ? parseArtifacts(rawPayload, { tag })
       : isResponse
-        ? parseQuestionnaireResponse(rawJson, baseTag)
-        : parseQuestionnaire(rawJson, {
+        ? parseQuestionnaireResponse(rawPayload, baseTag)
+        : parseQuestionnaire(rawPayload, {
             attrs,
             tag: baseTag,
             id: `${keyPrefix}_q${count + 1}`,
+            format: match.format,
+            hasPreface: match.hasPreface,
           })
 
     if (payload) {
@@ -65,17 +66,18 @@ export function splitInlineQuestionnaireContent(content, keyPrefix = 'questionna
         key: `${keyPrefix}-${isArtifacts ? 'artifacts' : isResponse ? 'response' : 'questionnaire'}-${count}`,
         tag: baseTag,
         payload,
+        rawText: match.rawText,
       })
     } else {
       parts.push({
         type: 'markdown',
         key: `${keyPrefix}-invalid-${count}`,
-        content: match[0],
+        content: match.rawText,
       })
     }
 
     count += 1
-    lastIndex = TAG_PATTERN.lastIndex
+    lastIndex = match.end
   }
 
   if (lastIndex < text.length) {
@@ -87,6 +89,213 @@ export function splitInlineQuestionnaireContent(content, keyPrefix = 'questionna
   }
 
   return parts
+}
+
+function collectInlineProtocolMatches(text) {
+  const { matches, codeRanges } = collectFencedQuestionnaireMatches(text)
+  let match
+
+  TAG_PATTERN.lastIndex = 0
+  while ((match = TAG_PATTERN.exec(text)) !== null) {
+    if (isInsideRange(match.index, codeRanges)) continue
+    matches.push({
+      start: match.index,
+      end: TAG_PATTERN.lastIndex,
+      tag: match[1].toLowerCase(),
+      attrs: parseAttributes(match[2] || ''),
+      rawPayload: match[3] || '',
+      rawText: match[0],
+      format: 'json',
+    })
+  }
+
+  matches.sort((left, right) => left.start - right.start || right.end - left.end)
+  const nonOverlapping = []
+  let lastEnd = -1
+  for (const candidate of matches) {
+    if (candidate.start < lastEnd) continue
+    nonOverlapping.push(candidate)
+    lastEnd = candidate.end
+  }
+  return nonOverlapping
+}
+
+function collectFencedQuestionnaireMatches(text) {
+  const matches = []
+  const codeRanges = []
+  const lines = lineEntries(text)
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const opening = markdownFenceOpening(lines[index].body)
+    if (!opening) continue
+
+    const tag = opening.info.toLowerCase()
+    const isQuestionnaire = opening.marker === '`' && QUESTIONNAIRE_TAGS.includes(tag)
+    let closingIndex = -1
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (isMarkdownFenceClosing(lines[cursor].body, opening)) {
+        closingIndex = cursor
+        break
+      }
+    }
+
+    if (!isQuestionnaire || closingIndex < 0) {
+      const rangeEnd = closingIndex >= 0 ? lines[closingIndex].end : text.length
+      codeRanges.push([lines[index].start, rangeEnd])
+      if (closingIndex >= 0) index = closingIndex
+      else break
+      continue
+    }
+
+    const payloadStart = lines[index].end
+    const end = lines[closingIndex].contentEnd
+    matches.push({
+      start: lines[index].start,
+      end,
+      tag,
+      attrs: {},
+      rawPayload: text.slice(payloadStart, lines[closingIndex].start),
+      rawText: text.slice(lines[index].start, end),
+      format: 'yaml',
+    })
+    index = closingIndex
+  }
+
+  codeRanges.push(...collectIndentedCodeRanges(
+    lines,
+    [...codeRanges, ...matches.map((match) => [match.start, match.end])]
+  ))
+  codeRanges.push(...collectInlineCodeRanges(
+    text,
+    [
+      ...codeRanges,
+      ...matches.map((match) => [match.start, match.end]),
+    ]
+  ))
+  codeRanges.sort((left, right) => left[0] - right[0])
+
+  if (matches.length > 0) {
+    matches[0].hasPreface = hasVisibleQuestionnairePreface(
+      text.slice(0, matches[0].start),
+      codeRanges
+    )
+  }
+
+  return { matches, codeRanges }
+}
+
+function collectIndentedCodeRanges(lines, excludedRanges) {
+  return lines
+    .filter((line) => (
+      /^(?: {4}|\t)/.test(line.body)
+      && !isInsideRange(line.start, excludedRanges)
+    ))
+    .map((line) => [line.start, line.end])
+}
+
+function collectInlineCodeRanges(text, blockRanges) {
+  const ranges = []
+  const sortedBlocks = [...blockRanges].sort((left, right) => left[0] - right[0])
+  let segmentStart = 0
+  for (const [blockStart, blockEnd] of [...sortedBlocks, [text.length, text.length]]) {
+    ranges.push(...collectInlineCodeRangesInSegment(text, segmentStart, blockStart))
+    segmentStart = Math.max(segmentStart, blockEnd)
+  }
+  return ranges
+}
+
+function collectInlineCodeRangesInSegment(text, segmentStart, segmentEnd) {
+  const ranges = []
+  let cursor = segmentStart
+  while (cursor < segmentEnd) {
+    if (text[cursor] !== '`') {
+      cursor += 1
+      continue
+    }
+
+    let openerEnd = cursor + 1
+    while (text[openerEnd] === '`') openerEnd += 1
+    const delimiter = '`'.repeat(openerEnd - cursor)
+    let closing = text.indexOf(delimiter, openerEnd)
+    while (closing >= 0 && closing < segmentEnd) {
+      const beforeIsTick = closing > 0 && text[closing - 1] === '`'
+      const afterIsTick = text[closing + delimiter.length] === '`'
+      if (!beforeIsTick && !afterIsTick) break
+      closing = text.indexOf(delimiter, closing + delimiter.length)
+    }
+    if (closing < 0 || closing >= segmentEnd) {
+      cursor = openerEnd
+      continue
+    }
+    ranges.push([cursor, closing + delimiter.length])
+    cursor = closing + delimiter.length
+  }
+  return ranges
+}
+
+export function canSubmitQuestionnaireMessage(messages, messageIndex, readonly = false) {
+  if (readonly) return false
+  if (!Array.isArray(messages) || messageIndex < 0 || messageIndex >= messages.length) {
+    return false
+  }
+
+  for (let index = messageIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (message?.role === 'user') return false
+    if (message?.role !== 'assistant') continue
+    const messageType = message.message_type || message.type
+    if (messageType === 'empty' || messageType === 'token_usage') continue
+    return false
+  }
+  return true
+}
+
+function hasVisibleQuestionnairePreface(prefix, codeRanges) {
+  let visible = ''
+  let cursor = 0
+  for (const [start, end] of codeRanges) {
+    if (start >= prefix.length) break
+    visible += prefix.slice(cursor, Math.max(cursor, start))
+    cursor = Math.max(cursor, Math.min(end, prefix.length))
+  }
+  visible += prefix.slice(cursor)
+  return visible.replace(TAG_PATTERN, '').trim().length > 0
+}
+
+function lineEntries(text) {
+  const lines = []
+  let start = 0
+  while (start < text.length) {
+    const newline = text.indexOf('\n', start)
+    const end = newline < 0 ? text.length : newline + 1
+    const contentEnd = newline < 0 ? text.length : newline
+    lines.push({
+      start,
+      end,
+      contentEnd,
+      body: text.slice(start, contentEnd).replace(/\r$/, ''),
+    })
+    start = end
+  }
+  return lines
+}
+
+function markdownFenceOpening(line) {
+  const match = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/)
+  if (!match) return null
+  const marker = match[1][0]
+  const info = match[2].trim()
+  if (marker === '`' && info.includes('`')) return null
+  return { marker, length: match[1].length, info }
+}
+
+function isMarkdownFenceClosing(line, opening) {
+  const escaped = opening.marker === '`' ? '`' : '~'
+  return new RegExp(`^[ \\t]{0,3}${escaped}{${opening.length},}[ \\t]*$`).test(line)
+}
+
+function isInsideRange(index, ranges) {
+  return ranges.some(([start, end]) => start <= index && index < end)
 }
 
 export function parseArtifacts(rawJson, { tag = 'artifacts' } = {}) {
@@ -106,8 +315,20 @@ export function parseArtifacts(rawJson, { tag = 'artifacts' } = {}) {
   }
 }
 
-export function parseQuestionnaire(rawJson, { attrs = {}, tag = 'questionnaire', id = 'questionnaire_q1' } = {}) {
-  const decoded = decodeJsonObject(rawJson)
+export function parseQuestionnaire(
+  rawPayload,
+  {
+    attrs = {},
+    tag = 'questionnaire',
+    id = 'questionnaire_q1',
+    format = 'json',
+    hasPreface = true,
+  } = {}
+) {
+  const decoded = format === 'yaml'
+    ? decodeYamlObject(rawPayload)
+    : decodeJsonObject(rawPayload)
+  if (format === 'yaml' && (!hasPreface || !isStrictFencedQuestionnaire(decoded, rawPayload))) return null
   if (!decoded || !Array.isArray(decoded.questions)) return null
 
   const questions = decoded.questions
@@ -127,6 +348,47 @@ export function parseQuestionnaire(rawJson, { attrs = {}, tag = 'questionnaire',
     timeoutSeconds: attrTimeout || payloadTimeout || 0,
     questions,
   }
+}
+
+function isStrictFencedQuestionnaire(payload, rawPayload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+  const payloadText = String(rawPayload || '').trim()
+  if (!payloadText || payloadText.startsWith('{') || payloadText.startsWith('[')) return false
+  if (/^[ \t]{0,3}(?:`{3,}|~{3,})/m.test(String(rawPayload || ''))) return false
+  if (!hasExactFields(payload, ['title', 'questions'])) return false
+  if (typeof payload.title !== 'string' || !payload.title.trim()) return false
+  if (!Array.isArray(payload.questions) || payload.questions.length === 0) return false
+
+  return payload.questions.every((question) => {
+    if (!question || typeof question !== 'object' || Array.isArray(question)) return false
+    const type = question.type
+    if (!['single_choice', 'multi_choice', 'free_text'].includes(type)) return false
+    const allowedFields = type === 'free_text'
+      ? ['type', 'text', 'default']
+      : ['type', 'text', 'default', 'options', 'allow_other']
+    if (!hasOnlyFields(question, allowedFields)) return false
+    if (typeof question.text !== 'string' || !question.text.trim()) return false
+    if (!Object.prototype.hasOwnProperty.call(question, 'default')) return false
+
+    if (type === 'free_text') return typeof question.default === 'string'
+    if (!Array.isArray(question.options) || question.options.length === 0) return false
+    if (question.options.some((option) => typeof option !== 'string' || !option.trim())) return false
+    if (question.allow_other !== undefined && typeof question.allow_other !== 'boolean') return false
+    if (type === 'single_choice') {
+      return typeof question.default === 'string' && question.options.includes(question.default)
+    }
+    return Array.isArray(question.default)
+      && question.default.every((value) => typeof value === 'string' && question.options.includes(value))
+  })
+}
+
+function hasExactFields(value, expected) {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && expected.every((field) => keys.includes(field))
+}
+
+function hasOnlyFields(value, allowed) {
+  return Object.keys(value).every((field) => allowed.includes(field))
 }
 
 export function buildQuestionnaireSubmission(
@@ -201,6 +463,20 @@ export function parseQuestionnaireResponse(rawJson, tag = 'questionnaire') {
     status: asString(decoded.status).trim() || 'submitted',
     answers: decoded.answers.map(normalizeAnswer).filter(Boolean),
   }
+}
+
+export function questionnaireFromAsyncToolResult(
+  toolResult,
+  { id = 'questionnaire_async_q1' } = {}
+) {
+  const result = toolResult?.content ?? toolResult
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+  if (result.success !== true || result.validation_passed !== true) return null
+  if (!Array.isArray(result.questions) || result.questions.length === 0) return null
+  return parseQuestionnaire(JSON.stringify({
+    title: result.title || '',
+    questions: result.questions,
+  }), { tag: 'questionnaire', id })
 }
 
 export function displayTextForAnswers(answers, uiText) {
@@ -369,6 +645,17 @@ function decodeJsonObject(rawJson) {
     }
   }
   return null
+}
+
+function decodeYamlObject(rawYaml) {
+  try {
+    const decoded = loadYaml(String(rawYaml || ''))
+    return decoded && typeof decoded === 'object' && !Array.isArray(decoded)
+      ? decoded
+      : null
+  } catch {
+    return null
+  }
 }
 
 function jsonDecodeCandidates(rawJson) {

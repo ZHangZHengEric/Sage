@@ -164,6 +164,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "问题",
         "runtime.repeat_recovery.unanswered": "未填写",
         "runtime.repeat_recovery.answer_separator": "：",
+        "runtime.max_loop.title": "任务已暂停",
+        "runtime.max_loop.notice": (
+            "已达到本轮最大循环次数（{max_loop_count}），任务已暂停。"
+        ),
+        "runtime.max_loop.question": "是否继续当前任务？",
+        "runtime.max_loop.continue": "继续",
     },
     "en": {
         "tool.manager.not_found": "Tool '{tool_name}' was not found. Available tools: {available}",
@@ -335,6 +341,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "Question",
         "runtime.repeat_recovery.unanswered": "Not answered",
         "runtime.repeat_recovery.answer_separator": ": ",
+        "runtime.max_loop.title": "Task paused",
+        "runtime.max_loop.notice": (
+            "The maximum loop count for this turn ({max_loop_count}) has been "
+            "reached, so the task is paused."
+        ),
+        "runtime.max_loop.question": "Continue the current task?",
+        "runtime.max_loop.continue": "Continue",
     },
     "pt": {
         "tool.manager.not_found": "A ferramenta '{tool_name}' não foi encontrada. Ferramentas disponíveis: {available}",
@@ -513,6 +526,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "Pergunta",
         "runtime.repeat_recovery.unanswered": "Nao respondido",
         "runtime.repeat_recovery.answer_separator": ": ",
+        "runtime.max_loop.title": "Tarefa pausada",
+        "runtime.max_loop.notice": (
+            "O numero maximo de ciclos desta rodada ({max_loop_count}) foi "
+            "atingido, e a tarefa foi pausada."
+        ),
+        "runtime.max_loop.question": "Continuar a tarefa atual?",
+        "runtime.max_loop.continue": "Continuar",
     },
 }
 
