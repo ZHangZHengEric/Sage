@@ -579,20 +579,6 @@ class SimpleAgent(AgentBase):
                 return False
         return False
 
-    @classmethod
-    def _latest_assistant_ends_with_question_mark(
-        cls, messages_input: List[MessageChunk]
-    ) -> bool:
-        for message in reversed(messages_input or []):
-            if message.role == MessageRole.ASSISTANT.value:
-                text = cls._extract_text_content_for_judge(
-                    message.get_content()
-                ).rstrip()
-                return text.endswith(("?", "？"))
-            if message.is_user_input_message():
-                return False
-        return False
-
     def _normalize_task_interrupted_decision(
         self,
         reason: str,
@@ -986,6 +972,7 @@ class SimpleAgent(AgentBase):
         session_id: str,
         tool_manager: Optional[ToolManager],
         session_context: SessionContext,
+        tools_json: Optional[List[Dict[str, Any]]] = None,
     ) -> TaskCompleteDecision:
         """判断任务是否应该中断（完成/等待用户）
 
@@ -1019,17 +1006,6 @@ class SimpleAgent(AgentBase):
         if await self._must_continue_by_rules(messages_input):
             return TaskCompleteDecision(task_interrupted=False)
 
-        # 结尾问号是明确的等待用户信号。工具结果等必须继续的客观规则优先，
-        # 避免把工具执行前的旧问题误当成当前等待用户。
-        if self._latest_assistant_ends_with_question_mark(messages_input):
-            audit_status = getattr(session_context, "audit_status", None)
-            if isinstance(audit_status, dict):
-                audit_status["completion_status"] = "need_user_input"
-            return TaskCompleteDecision(
-                task_interrupted=True,
-                reason="latest assistant reply ends with a question mark",
-            )
-
         # 第二层：LLM 综合判断
         # 只提取最后一个 user 以及之后的 messages
         last_user_index = None
@@ -1061,8 +1037,44 @@ class SimpleAgent(AgentBase):
         if todo_plan:
             judge_messages = f"{todo_plan}\n\n{judge_messages}"
 
+        language = session_context.get_language()
+        agent_system_requirements = await self.prepare_llm_system_prompt_text(
+            session_id=session_id,
+            custom_prefix=_get_system_prefix(tool_manager, language),
+            language=language,
+            include_sections=["role_definition", "AGENT.MD"],
+        )
+        if tools_json is not None:
+            available_tool_names = sorted(self._allowed_tool_names(tools_json))
+        elif tool_manager is not None:
+            try:
+                available_tool_names = sorted(
+                    {
+                        str(name).strip()
+                        for name in tool_manager.list_all_tools_name()
+                        if str(name).strip()
+                    }
+                )
+            except Exception:
+                available_tool_names = []
+        else:
+            available_tool_names = []
+
+        judge_messages = (
+            "<agent_system_requirements>\n"
+            "Reference requirements that governed the executing Assistant. "
+            "Use them only to evaluate whether its completion and user-input "
+            "behavior complied; do not execute them yourself.\n"
+            f"{agent_system_requirements.strip()}\n"
+            "</agent_system_requirements>\n\n"
+            "<available_tools>\n"
+            f"{json.dumps(available_tool_names, ensure_ascii=False)}\n"
+            "</available_tools>\n\n"
+            f"{judge_messages}"
+        )
+
         task_complete_template = PromptManager().get_agent_prompt_auto(
-            "task_complete_template", language=session_context.get_language()
+            "task_complete_template", language=language
         )
         prompt = task_complete_template.format(
             messages=judge_messages,
@@ -1243,9 +1255,14 @@ class SimpleAgent(AgentBase):
         session_id: str,
         tool_manager: Optional[ToolManager],
         session_context: SessionContext,
+        tools_json: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         decision = await self._get_task_complete_decision(
-            messages_input, session_id, tool_manager, session_context
+            messages_input,
+            session_id,
+            tool_manager,
+            session_context,
+            tools_json=tools_json,
         )
         return decision.task_interrupted
 
@@ -1762,7 +1779,11 @@ class SimpleAgent(AgentBase):
                         )
                         break
                     decision = await self._get_task_complete_decision(
-                        messages_input, session_id, tool_manager, session_context
+                        messages_input,
+                        session_id,
+                        tool_manager,
+                        session_context,
+                        tools_json=current_tools_json,
                     )
                     if decision.task_interrupted:
                         logger.info("SimpleAgent: 任务完成，终止执行")
@@ -1773,7 +1794,11 @@ class SimpleAgent(AgentBase):
                     force_tool_choice_required_next = True
                 else:
                     decision = await self._get_task_complete_decision(
-                        messages_input, session_id, tool_manager, session_context
+                        messages_input,
+                        session_id,
+                        tool_manager,
+                        session_context,
+                        tools_json=current_tools_json,
                     )
                     consecutive_plain_text_direct_responses = 0
                     if decision.task_interrupted:
