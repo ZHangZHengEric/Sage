@@ -81,6 +81,7 @@
                 :message-id="message.message_id || message.id"
                 :agent-id="agentId"
                 :can-submit="false"
+                :with-preview="false"
               />
             </div>
             <!-- 折叠时底部渐隐遮罩，提示有更多内容 -->
@@ -339,13 +340,17 @@ import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
+import AsyncQuestionnaireCard from './AsyncQuestionnaireCard.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { textHasMarkdownImageRefForUrl } from '../../utils/multimodalContent.js'
 import { parseToolJsonValue } from '@/utils/safeParseToolJson.js'
 import { buildClipboardTextFromMessageContent, normalizeMessageContentForComposer } from '@/utils/composerFromMessageFlatten.js'
 import { open } from '@tauri-apps/plugin-shell'
 import { isAbsoluteLocalPath, isRelativeWorkspacePath, normalizeFileReference, resolveAgentWorkspacePath } from '@/utils/agentWorkspacePath'
-import { splitInlineQuestionnaireContent } from '@/utils/inlineQuestionnaire.js'
+import {
+  canSubmitQuestionnaireMessage,
+  splitInlineQuestionnaireContent,
+} from '@/utils/inlineQuestionnaire.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -354,6 +359,7 @@ const TOOL_COMPONENT_MAP = {
   sys_team_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
+  questionnaire_async: AsyncQuestionnaireCard,
 }
 
 const props = defineProps({
@@ -750,20 +756,11 @@ const isToolCallIncomplete = (toolCall) => (
 )
 
 const isLatestMessage = computed(() => {
-    // 如果readonly，所有消息都不是最新
-    if (props.readonly) return false
-    
-    // If it's the last message, it's definitely latest
-    if (props.messageIndex === props.messages.length - 1) return true
-    
-    // Check if there are any user messages after this one
-    // If no user message follows, it is considered the latest turn
-    for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
-        if (props.messages[i].role === 'user') {
-            return false
-        }
-    }
-    return true
+    return canSubmitQuestionnaireMessage(
+      props.messages,
+      props.messageIndex,
+      props.readonly
+    )
 })
 
 

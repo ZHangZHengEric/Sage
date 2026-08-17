@@ -32,6 +32,7 @@ from sagents.utils.completion_mode import (
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.i18n import t
 import json
+import yaml
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass
@@ -50,9 +51,15 @@ DEFAULT_REPEAT_PATTERN_MAX_HITS = 3
 REPEAT_PATTERN_MAX_HITS_ENV = "SAGE_REPEAT_PATTERN_MAX_HITS"
 REPEAT_RECOVERY_QUESTION_ID = "loop_recovery_action"
 REPEAT_RECOVERY_NOTICE = "repeat_pattern_questionnaire"
+MAX_LOOP_NOTICE = "max_loop_questionnaire"
 TASK_COMPLETE_TODO_FIELD_MAX_CHARS = 300
 OPEN_TODO_ALLOWED_DECISIONS = frozenset({"continue", "need_user_input", "blocked"})
 QUESTIONNAIRE_ASYNC_TOOL_NAME = "questionnaire_async"
+SAGE_QUESTIONNAIRE_RESPONSE_PATTERN = re.compile(
+    r"<(?P<tag>(?:sage-)?questionnaire-response)(?:\s[^>]*)?>"
+    r"(?P<payload>[\s\S]*?)<\\?/(?P=tag)\s*>",
+    re.IGNORECASE,
+)
 QUESTIONNAIRE_ASYNC_SUCCESS_STATUSES = frozenset({"validation_passed", "awaiting_user_input"})
 
 
@@ -276,7 +283,7 @@ class SimpleAgent(AgentBase):
             role=MessageRole.ASSISTANT.value,
             content=(
                 f"{notice}\n\n"
-                f"<movo-questionnaire>{json.dumps(payload, ensure_ascii=False)}</movo-questionnaire>"
+                f"<questionnaire>{json.dumps(payload, ensure_ascii=False)}</questionnaire>"
             ),
             message_type=MessageType.ASSISTANT_TEXT.value,
             agent_name=self.agent_name,
@@ -299,6 +306,45 @@ class SimpleAgent(AgentBase):
             },
         )
 
+    def _build_max_loop_questionnaire(
+        self, *, max_loop_count: int, language: str = "en"
+    ) -> MessageChunk:
+        notice = t(
+            "runtime.max_loop.notice",
+            language,
+            params={"max_loop_count": max_loop_count},
+        )
+        continue_label = t("runtime.max_loop.continue", language)
+        payload = {
+            "title": t("runtime.max_loop.title", language),
+            "questions": [
+                {
+                    "type": "single_choice",
+                    "text": t("runtime.max_loop.question", language),
+                    "options": [continue_label],
+                    "default": continue_label,
+                }
+            ],
+        }
+        questionnaire_yaml = yaml.safe_dump(
+            payload,
+            allow_unicode=True,
+            sort_keys=False,
+        ).strip()
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=f"{notice}\n\n```questionnaire\n{questionnaire_yaml}\n```",
+            message_type=MessageType.ASSISTANT_TEXT.value,
+            agent_name=self.agent_name,
+            metadata={
+                "runtime_generated": True,
+                "runtime_notice": MAX_LOOP_NOTICE,
+                "stop_reason": "max_loop_count",
+                "needs_user_input": True,
+                "max_loop_count": max_loop_count,
+            },
+        )
+
     @staticmethod
     def _latest_user_is_repeat_recovery_response(
         messages: List[MessageChunk],
@@ -309,11 +355,21 @@ class SimpleAgent(AgentBase):
             content = message.content
             if not isinstance(content, str):
                 return False
-            return (
-                "movo-questionnaire-response" in content
-                and f'"question_id":"{REPEAT_RECOVERY_QUESTION_ID}"'
-                in re.sub(r"\s+", "", content)
-            )
+            for match in SAGE_QUESTIONNAIRE_RESPONSE_PATTERN.finditer(content):
+                try:
+                    payload = json.loads(match.group("payload"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                answers = payload.get("answers") if isinstance(payload, dict) else None
+                if not isinstance(answers, list):
+                    continue
+                if any(
+                    isinstance(answer, dict)
+                    and answer.get("question_id") == REPEAT_RECOVERY_QUESTION_ID
+                    for answer in answers
+                ):
+                    return True
+            return False
         return False
 
     async def run_stream(
@@ -1435,16 +1491,12 @@ class SimpleAgent(AgentBase):
 
             if loop_count > max_loop_count:
                 logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
-                yield [
-                    MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=(
-                            f"The agent exceeded the maximum loop count ({max_loop_count}). "
-                            "The task is paused. Do you want to continue?"
-                        ),
-                        type=MessageType.ASSISTANT_TEXT.value,
-                    )
-                ]
+                questionnaire = self._build_max_loop_questionnaire(
+                    max_loop_count=max_loop_count,
+                    language=session_context.get_language(),
+                )
+                session_context.audit_status["completion_status"] = "need_user_input"
+                yield [questionnaire]
                 break
 
             # 先把上一轮 assistant/tool 结果合并进本轮请求视图。

@@ -7,7 +7,6 @@
         :content="part.content"
         :compact="compact"
         :message-id="messageId"
-        :agent-id="agentId"
       />
       <InlineQuestionnaireCard
         v-else-if="part.type === 'questionnaire'"
@@ -19,11 +18,12 @@
         v-else-if="part.type === 'questionnaire_response'"
         :response="part.payload"
       />
-      <InlineArtifactsCard
+      <component
         v-else-if="part.type === 'artifacts'"
-        :artifacts="part.payload"
+        :is="markdownRenderer"
+        :content="part.rawText"
+        :compact="compact"
         :message-id="messageId"
-        :agent-id="agentId"
       />
     </template>
   </div>
@@ -35,7 +35,6 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import InlineQuestionnaireCard from './InlineQuestionnaireCard.vue'
 import InlineQuestionnaireResponse from './InlineQuestionnaireResponse.vue'
-import InlineArtifactsCard from './InlineArtifactsCard.vue'
 import { splitInlineQuestionnaireContent } from '@/utils/inlineQuestionnaire.js'
 
 const props = defineProps({
@@ -48,10 +47,6 @@ const props = defineProps({
     default: false,
   },
   messageId: {
-    type: String,
-    default: '',
-  },
-  agentId: {
     type: String,
     default: '',
   },
@@ -69,7 +64,6 @@ const emit = defineEmits(['sendMessage'])
 const markdownRenderer = computed(() => (
   props.withPreview ? MarkdownRendererWithPreview : MarkdownRenderer
 ))
-
 const parts = computed(() => (
   splitInlineQuestionnaireContent(props.content, props.messageId || 'assistant_questionnaire')
 ))

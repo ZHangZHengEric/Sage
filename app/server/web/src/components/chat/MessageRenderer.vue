@@ -78,8 +78,11 @@
               class="overflow-hidden transition-[max-height] duration-200 ease-out"
               :class="{ 'max-h-[200px]': isUserContentCollapsed && isUserContentLong }"
             >
-              <MarkdownRenderer
+              <InlineQuestionnaireRenderer
                 :content="formatMessageContent(getTextContent(message.content))"
+                :message-id="message.message_id || message.id"
+                :can-submit="false"
+                :with-preview="false"
               />
             </div>
             <!-- 折叠时底部渐隐遮罩，提示有更多内容 -->
@@ -191,10 +194,12 @@
           <div
             v-if="getTextContent(message.content)"
             class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6">
-            <MarkdownRendererWithPreview
+            <InlineQuestionnaireRenderer
               :content="formatMessageContent(getTextContent(message.content))"
               :message-id="message.message_id || message.id"
-              />
+              :can-submit="!readonly && isLatestMessage"
+              @sendMessage="handleSendMessage"
+            />
           </div>
           <!-- 兜底：老消息没有 markdown 引用、image_url 单独成段时，把孤立图片以网格呈现 -->
           <div v-if="orphanImageUrls.length > 0" class="flex flex-wrap gap-2">
@@ -246,9 +251,11 @@
           v-if="getTextContent(message.content)"
           class="text-foreground/90 overflow-hidden break-words w-full font-sans text-sm leading-6"
         >
-          <MarkdownRendererWithPreview
+          <InlineQuestionnaireRenderer
             :content="formatMessageContent(getTextContent(message.content))"
             :message-id="message.message_id || message.id"
+            :can-submit="!readonly && isLatestMessage"
+            @sendMessage="handleSendMessage"
           />
         </div>
         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
@@ -298,8 +305,7 @@
 import { computed, ref, onMounted, watch } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
-import MarkdownRenderer from './MarkdownRenderer.vue'
-import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
+import InlineQuestionnaireRenderer from './InlineQuestionnaireRenderer.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Terminal, FileText, Search, Zap, Copy, Check, Image, SquarePen, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { getMessageLabel, isTokenUsageMessage as isTokenUsageMessageValue } from '@/utils/messageLabels'
@@ -313,6 +319,7 @@ import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import QuestionnaireCard from './tools/QuestionnaireCard.vue'
+import AsyncQuestionnaireCard from './AsyncQuestionnaireCard.vue'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import {
   getRenderableContentItems,
@@ -320,6 +327,7 @@ import {
 } from '@/utils/multimodalContent.js'
 import { parseToolJsonValue } from '@/utils/safeParseToolJson.js'
 import { buildClipboardTextFromMessageContent, normalizeMessageContentForComposer } from '@/utils/composerFromMessageFlatten.js'
+import { canSubmitQuestionnaireMessage } from '@/utils/inlineQuestionnaire.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -328,6 +336,7 @@ const TOOL_COMPONENT_MAP = {
   sys_team_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
   questionnaire: QuestionnaireCard,
+  questionnaire_async: AsyncQuestionnaireCard,
 }
 
 const props = defineProps({
@@ -641,8 +650,8 @@ const handleDownloadFile = (filePath) => {
   emit('downloadFile', filePath)
 }
 
-const handleSendMessage = (text) => {
-  emit('sendMessage', text)
+const handleSendMessage = (text, options) => {
+  emit('sendMessage', text, options)
 }
 
 const handleStartEditUserMessage = () => {
@@ -698,20 +707,11 @@ const isToolCallIncomplete = (toolCall) => (
 )
 
 const isLatestMessage = computed(() => {
-  // 如果readonly，所有消息都不是最新
-  if (props.readonly) return false
-
-  // If it's the last message, it's definitely latest
-  if (props.messageIndex === props.messages.length - 1) return true
-
-  // Check if there are any user messages after this one
-  // If no user message follows, it is considered the latest turn
-  for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
-    if (props.messages[i].role === 'user') {
-      return false
-    }
-  }
-  return true
+  return canSubmitQuestionnaireMessage(
+    props.messages,
+    props.messageIndex,
+    props.readonly
+  )
 })
 
 

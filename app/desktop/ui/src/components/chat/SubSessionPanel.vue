@@ -29,6 +29,7 @@
               :message="message"
               :messages="messages"
               :message-index="index"
+              :readonly="true"
               :is-loading="isLoading && index === messages.length - 1"
               :extract-workbench-items="extractWorkbenchItems"
               :agent-id="agentId"
