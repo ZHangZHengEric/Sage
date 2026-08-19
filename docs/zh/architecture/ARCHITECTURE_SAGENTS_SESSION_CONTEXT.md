@@ -134,6 +134,16 @@ flowchart TB
 - 完整请求 token 投影只是主动触发信号，并使用 Provider prompt usage 动态校准；不扣除最大输出 token。Provider 拒绝始终是权威结果。
 - 辅助 Agent 仍可构造临时的预算限长 prompt 视图，但不会回写主会话 ledger。
 
+### 3.3 持久摘要的输出预算与失败语义
+
+- 压缩请求继承当前模型配置的 `max_tokens`；o1/o3/o4/GPT-5 等需要 `max_completion_tokens` 的模型由统一请求兼容层完成映射。预算阶段先解析唯一的 provider-facing 输出字段：其他模型显式配置 `max_completion_tokens` 时同样计入预算，同时配置两个互相冲突的输出字段则直接失败。压缩工具不设置独立生成上限，也不会在配置缺失时臆造一个上限。压缩工具同时记录兼容层最终成功请求实际采用的输出字段，并要求字段和值与预算配置完全一致；若兼容回退移除了已配置的硬上限，整次压缩失败。
+- 七字段语义摘要的窗口目标为 `clamp(floor(max_model_len × 8%), 4000, 8192)`；模型已配置输出上限时，再收口到该上限的 80%，为 JSON 闭合保留余量。Prompt 和服务端结构化裁剪使用同一个目标。
+- 单批历史的名义上限仍为模型窗口的 35%，但实际请求还会计入压缩 Prompt、上一批滚动摘要和模型配置的输出预留；完整请求必须留在窗口的安全区内。完整 user turn 始终作为来源原子单元，超限时只拆分其临时压缩文本；安全预算触发再次拆分时使用稳定的层级 lineage（如 `1/3 > 2/2`），不改写 ledger 或 coverage。
+- 压缩流保留 `finish_reason` 和 provider usage，并在正常完成、校验失败或流式迭代异常后显式关闭。`length` 或明显未闭合 JSON（包括未闭合对象、数组和 fenced JSON）会以 75% 目标重试一次；显式长度截断会在解析与裁剪前进入重试，且正常、重试两种 Prompt 都必须预先通过窗口预算检查。再次截断则整次压缩失败。除 `stop`、`end_turn`、`eos`、`complete/completed` 和缺失原因外，`content_filter`、`safety`、`blocked`、`error`、`cancelled` 等非正常结束同样直接失败，拒绝文本不得包装成摘要；原历史继续保留且不生成有效 anchor。
+- Provider usage 总量只有在每次压缩请求都返回对应 usage 字段时才统计；部分请求缺失时总量记为 `null`，并用 observed count 标明实际覆盖请求数，避免把不完整采样误报为总量。
+- 正常结束且无法按 JSON 解析的文本仍可作为 `fallback_text` 兼容旧 provider，但合法 JSON 若不是 object 则属于 `invalid_json_schema`，不能降级为文本摘要。结构化结果必须包含非空字符串 `summary`。裁剪优先保留用户硬性要求、未完成任务和最高优先级关键错误；持久化前永不直接截断 JSON 字符串。
+- `compressed_tokens`、`compression_ratio` 和 `summary_characters` 使用同一个可复算的非自引用口径：序列化时保留 `compression_metrics_basis` 声明，但暂时移除这三个会改变自身长度的统计字段，再统一计算三项指标，避免浮点或位数变化造成循环定义。
+
 ## 4. 记忆：会话级 + 用户级
 
 ```mermaid

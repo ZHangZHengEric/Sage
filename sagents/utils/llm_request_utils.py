@@ -123,7 +123,7 @@ def uses_max_completion_tokens(model: Optional[str]) -> bool:
     m = (model or "").strip().lower()
     if not m:
         return False
-    if m.startswith("o1") or m.startswith("o3"):
+    if m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
         return True
     # GPT-5 家族（含 gpt-5.4-mini 等）
     if "gpt-5" in m:
@@ -930,6 +930,7 @@ async def create_chat_completion_with_fallback(
     model_config: Optional[Dict[str, Any]] = None,
     response_format: Optional[Dict[str, Any]] = None,
     request_observer: Optional[Callable[[Dict[str, Any]], None]] = None,
+    protected_request_parameters: Optional[Sequence[str]] = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -971,6 +972,9 @@ async def create_chat_completion_with_fallback(
 
     unknown_parameter_retry_count = 0
     structured_output_fallback_used = False
+    protected_parameters = {
+        str(parameter) for parameter in (protected_request_parameters or ())
+    }
     while True:
         try:
             if request_observer is not None:
@@ -1011,6 +1015,9 @@ async def create_chat_completion_with_fallback(
 
             unknown_param = _unknown_parameter_name(exc)
             if unknown_param and unknown_parameter_retry_count < 5:
+                unknown_candidates = {unknown_param, unknown_param.split(".")[-1]}
+                if unknown_candidates & protected_parameters:
+                    raise
                 retry_kwargs = dict(request_kwargs)
                 if _drop_unknown_request_parameter(retry_kwargs, unknown_param):
                     unknown_parameter_retry_count += 1
