@@ -22,6 +22,7 @@ from sagents.utils.llm_request_utils import (
         ("GPT-5", True),
         ("o1-preview", True),
         ("o3-mini", True),
+        ("o4-mini", True),
         ("gpt-4o", False),
         ("gpt-4.1-mini", False),
         ("", False),
@@ -578,6 +579,36 @@ async def test_create_chat_completion_drops_unknown_extra_body_params() -> None:
     assert "chat_template_kwargs" not in response["kwargs"]["extra_body"]
     assert "enable_thinking" not in response["kwargs"]["extra_body"]
     assert response["kwargs"]["extra_body"]["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_create_chat_completion_does_not_drop_protected_output_limit() -> None:
+    class RejectMaxTokensCompletions:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise _unknown_parameter_error("max_tokens")
+
+    completions = RejectMaxTokensCompletions()
+    client = type(
+        "Client",
+        (),
+        {"chat": type("Chat", (), {"completions": completions})()},
+    )()
+
+    with pytest.raises(BadRequestError):
+        await create_chat_completion_with_fallback(
+            client,
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=4096,
+            protected_request_parameters=("max_tokens", "max_completion_tokens"),
+        )
+
+    assert len(completions.calls) == 1
+    assert completions.calls[0]["max_tokens"] == 4096
 
 
 @pytest.mark.asyncio
