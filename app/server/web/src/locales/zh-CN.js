@@ -719,8 +719,6 @@ export default {
   'tools.downloadFileFromUrl': '下载文件',
   'tools.extractTextFromNonTextFile': '提取文件文本',
   'tools.executeShellCommand': '执行命令',
-  'tools.executePythonCode': '执行Python',
-  'tools.executeJavascriptCode': '执行JS',
   'tools.fetchWebpages': '抓取网页',
   'tools.browserGetContext': '获取浏览器上下文',
   'tools.browserNavigate': '浏览器导航',
