@@ -28,16 +28,13 @@ tool_suggestion_template = {
 6. 如果用户请求不明确，返回常用的基础工具
 
 ## 输出格式
-请严格返回 JSON 数组格式，包含推荐工具的序号：
+请严格返回 JSON 对象，其中 `tool_ids` 是包含推荐工具序号的数组：
 ```json
-[
-    1,
-    3,
-    5,
-    ...
-]
+{{
+    "tool_ids": [1, 3, 5]
+}}
 ```
-不要包含任何额外的文本或解释。只返回 JSON 数组。
+不要包含任何额外字段、文本或解释。只返回该 JSON 对象。
 """,
     "en": """By reviewing the user conversation history, current request, and your system requirements, recommend a tool combination that covers the task requirements.
 
@@ -58,16 +55,13 @@ Selection goal: prioritize recall of critical tools. If a tool may be needed to 
 6. If the user's request is unclear, return commonly used basic tools
 
 ## Output Format
-Please strictly return in JSON array format containing the recommended tool numbers:
+Please strictly return a JSON object whose `tool_ids` array contains the recommended tool numbers:
 ```json
-[
-    1,
-    3,
-    5,
-    ...
-]
+{{
+    "tool_ids": [1, 3, 5]
+}}
 ```
-Do not include any additional text or explanations. Only return the JSON array.""",
+Do not include any additional fields, text, or explanations. Only return this JSON object.""",
     "pt": """Ao revisar o histórico de conversas do usuário, a solicitação atual e os requisitos do sistema, recomende uma combinação de ferramentas que cubra os requisitos da tarefa.
 
 Objetivo de seleção: priorize a recuperação de ferramentas críticas. Se uma ferramenta pode ser necessária para concluir a tarefa, inclua-a. Uma pequena redundância é aceitável, mas não deixe de fora ferramentas críticas.
@@ -87,16 +81,13 @@ Objetivo de seleção: priorize a recuperação de ferramentas críticas. Se uma
 6. Se a solicitação do usuário não estiver clara, retorne ferramentas básicas comuns
 
 ## Formato de Saída
-Por favor, retorne estritamente no formato de array JSON contendo os números das ferramentas recomendadas:
+Retorne estritamente um objeto JSON cujo array `tool_ids` contenha os números das ferramentas recomendadas:
 ```json
-[
-    1,
-    3,
-    5,
-    ...
-]
+{{
+    "tool_ids": [1, 3, 5]
+}}
 ```
-Não inclua nenhum texto ou explicação adicional. Retorne apenas o array JSON.""",
+Não inclua campos, textos ou explicações adicionais. Retorne apenas esse objeto JSON.""",
 }
 
 # 工具推荐系统提示

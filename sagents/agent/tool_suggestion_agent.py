@@ -513,7 +513,7 @@ class ToolSuggestionAgent(AgentBase):
         llm_request_messages: List[MessageChunk],
         session_id: str,
         require_json: bool = True,
-    ) -> List[str]:
+    ) -> List[int]:
         """
         调用LLM获取工具建议
 
@@ -523,7 +523,7 @@ class ToolSuggestionAgent(AgentBase):
             require_json: 是否要求返回JSON格式，默认为True
 
         Returns:
-            List[str]: 建议工具ID列表
+            List[int]: 建议工具ID列表
         """
         logger.debug("ToolSuggestionAgent: 调用LLM获取工具建议")
 
@@ -552,14 +552,27 @@ class ToolSuggestionAgent(AgentBase):
 
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
-            suggested_tool_ids = json.loads(result_clean)
+            result = json.loads(result_clean)
+            if not isinstance(result, dict):
+                logger.warning(
+                    "ToolSuggestionAgent: 工具建议响应必须是JSON对象"
+                )
+                return []
+
+            suggested_tool_ids = result.get("tool_ids")
+            if not isinstance(suggested_tool_ids, list):
+                logger.warning(
+                    "ToolSuggestionAgent: 工具建议响应缺少合法的tool_ids数组"
+                )
+                return []
+
             # 过滤非数字项，确保返回数字列表
             suggested_tool_ids = [
                 int(item)
                 for item in suggested_tool_ids
                 if isinstance(item, (int, str)) and str(item).isdigit()
             ]
-            return suggested_tool_ids  # pyright: ignore[reportReturnType]
+            return suggested_tool_ids
         except json.JSONDecodeError:
             logger.warning("ToolSuggestionAgent: 解析工具建议响应时JSON解码错误")
             return []
