@@ -132,14 +132,6 @@
         />
       </template>
 
-      <template v-else-if="isCodeExecution">
-        <CodeExecutionToolRenderer
-          :tool-args="toolArgs"
-          :tool-result="toolResult"
-          :tool-name="toolName"
-        />
-      </template>
-
       <template v-else-if="isSearchWebPage">
         <SearchWebPageToolRenderer
           :tool-args="toolArgs"
@@ -281,7 +273,6 @@ import LoadSkillToolRenderer from './toolcall/LoadSkillToolRenderer.vue'
 import TodoWriteToolRenderer from './toolcall/TodoWriteToolRenderer.vue'
 import SysSpawnAgentToolRenderer from './toolcall/SysSpawnAgentToolRenderer.vue'
 import SysDelegateTaskToolRenderer from './toolcall/SysDelegateTaskToolRenderer.vue'
-import CodeExecutionToolRenderer from './toolcall/CodeExecutionToolRenderer.vue'
 import SearchWebPageToolRenderer from './toolcall/SearchWebPageToolRenderer.vue'
 import SearchImageFromWebToolRenderer from './toolcall/SearchImageFromWebToolRenderer.vue'
 import CompressHistoryToolRenderer from './toolcall/CompressHistoryToolRenderer.vue'
@@ -391,7 +382,6 @@ const isLoadSkill = computed(() => toolName.value === 'load_skill')
 const isFileRead = computed(() => toolName.value === 'file_read')
 const isFileWrite = computed(() => toolName.value === 'file_write')
 const isFileUpdate = computed(() => toolName.value === 'file_update')
-const isCodeExecution = computed(() => toolName.value === 'execute_python_code' || toolName.value === 'execute_javascript_code')
 const isTodoWrite = computed(() => toolName.value === 'todo_write')
 const isSysSpawnAgent = computed(() => toolName.value === 'sys_spawn_agent')
 const isSysDelegateTask = computed(() => ['sys_delegate_task', 'sys_team_delegate_task'].includes(toolName.value))
@@ -487,33 +477,6 @@ watch(() => props.item?.id, (newId, oldId) => {
     skillError.value = ''
     agentListLoaded.value = false
     agentList.value = []
-  }
-})
-
-const executionLanguage = computed(() => {
-  if (toolName.value === 'execute_python_code') return 'python'
-  if (toolName.value === 'execute_javascript_code') return 'javascript'
-  return 'text'
-})
-const executedCode = computed(() => toolArgs.value.code || '')
-const executionResult = computed(() => {
-  if (!toolResult.value) return ''
-  const content = toolResult.value.content
-  try {
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    return parsed.result || parsed.output || parsed.stdout || content
-  } catch {
-    return content
-  }
-})
-const executionError = computed(() => {
-  if (!toolResult.value) return ''
-  const content = toolResult.value.content
-  try {
-    const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    return parsed.error || parsed.stderr
-  } catch {
-    return toolResult.value.is_error ? content : ''
   }
 })
 

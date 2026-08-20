@@ -116,8 +116,6 @@ const toolIconMap = {
   extract_text_from_non_text_file: FileText,
   search_codebase: Search,
   execute_shell_command: Terminal,
-  execute_python_code: Code,
-  execute_javascript_code: Code,
   run_command: Terminal,
   fetch_webpages: Globe,
   web_search: Globe,

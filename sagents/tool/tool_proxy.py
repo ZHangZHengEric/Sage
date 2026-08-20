@@ -328,7 +328,6 @@ class ToolProxyFactory:
             "factorial",
             "file_read",
             "file_write",
-            "execute_python_code",
             "complete_task",
             "todo_write",
             "todo_read",
@@ -346,7 +345,6 @@ class ToolProxyFactory:
         "batch_operation": [
             "file_read",
             "file_write",
-            "execute_python_code",
             "batch_process",
             "complete_task",
             "todo_write",

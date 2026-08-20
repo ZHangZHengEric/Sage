@@ -787,8 +787,6 @@ export default {
   'tools.extractTextFromNonTextFile': 'Extract File Text',
   // Command Execution Tools
   'tools.executeShellCommand': 'Execute Command',
-  'tools.executePythonCode': 'Execute Python',
-  'tools.executeJavascriptCode': 'Execute JS',
   // Web Fetcher Tools
   'tools.fetchWebpages': 'Fetch Webpages',
   'tools.browserGetContext': 'Get Browser Context',

@@ -567,9 +567,6 @@ class AgentClient:
                 if len(args.get("command", "")) > 30
                 else f"执行命令 `{args.get('command', '未知命令')}`"
             ),
-            "execute_python_code": lambda: (
-                f"执行 Python 代码 ({len(args.get('code', ''))} 字符)"
-            ),
             "search_web_page": lambda: f"搜索: {args.get('keyword', '未知关键词')}",
             "fetch_webpages": lambda: (
                 f"获取网页: {args.get('url', '未知URL')[:40]}..."

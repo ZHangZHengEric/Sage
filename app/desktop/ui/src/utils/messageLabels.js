@@ -70,8 +70,6 @@ export const toolLabelKeys = {
   'extract_text_from_non_text_file': 'tools.extractTextFromNonTextFile',
   // 命令执行工具
   'execute_shell_command': 'tools.executeShellCommand',
-  'execute_python_code': 'tools.executePythonCode',
-  'execute_javascript_code': 'tools.executeJavascriptCode',
   // 网页抓取工具
   'fetch_webpages': 'tools.fetchWebpages',
   'browser_get_context': 'tools.browserGetContext',
@@ -167,8 +165,6 @@ export const toolLabels = {
   'extract_text_from_non_text_file': '提取文件文本',
   // 命令执行工具
   'execute_shell_command': '执行命令',
-  'execute_python_code': '执行Python',
-  'execute_javascript_code': '执行JS',
   // 网页抓取工具
   'fetch_webpages': '抓取网页',
   'browser_get_context': '获取浏览器上下文',
@@ -240,7 +236,6 @@ export const toolLabels = {
   'sys_team_delegate_task': 'Team 任务委派',
   'compress_conversation_history': '压缩历史消息',
   'generate_image': '生成图片',
-  'execute_python_code': '执行Python',
   'fetch_webpage': '抓取网页',
   'web_fetcher': '网页抓取',
   'todo_write': '待办任务',

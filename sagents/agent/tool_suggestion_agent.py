@@ -463,8 +463,6 @@ class ToolSuggestionAgent(AgentBase):
             if sm is not None and sm.list_skills():
                 necessary_tools = [
                     "file_read",
-                    "execute_python_code",
-                    "execute_javascript_code",
                     "execute_shell_command",
                     "file_write",
                     "file_update",

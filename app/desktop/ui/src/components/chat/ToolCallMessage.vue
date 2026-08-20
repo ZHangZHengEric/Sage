@@ -134,8 +134,6 @@ const toolIconMap = {
   // 代码相关
   'search_codebase': Search,
   'execute_shell_command': Terminal,
-  'execute_python_code': Code,
-  'execute_javascript_code': Code,
   'run_command': Terminal,
   // 网页相关
   'fetch_webpages': Globe,

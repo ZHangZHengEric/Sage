@@ -339,8 +339,6 @@ const createDefaultAgent = async (providerId) => {
         'todo_write', 
         'todo_read', 
         'execute_shell_command', 
-        'execute_python_code', 
-        'execute_javascript_code', 
         'file_read', 
         'file_write', 
         'download_file_from_url', 

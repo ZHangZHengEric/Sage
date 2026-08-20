@@ -2608,8 +2608,7 @@ const skillDimensionFilter = ref('all')
 const selectedGroupSource = ref('')
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
-  'file_read', 'execute_python_code', 'execute_javascript_code',
-  'execute_shell_command', 'file_write', 'file_update', 'load_skill'
+  'file_read', 'execute_shell_command', 'file_write', 'file_update', 'load_skill'
 ]
 
 // 记忆类型为用户时必需的工具

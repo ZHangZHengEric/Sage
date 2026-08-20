@@ -787,8 +787,6 @@ export default {
   'tools.extractTextFromNonTextFile': '提取文件文本',
   // 命令执行工具
   'tools.executeShellCommand': '执行命令',
-  'tools.executePythonCode': '执行Python',
-  'tools.executeJavascriptCode': '执行JS',
   // 网页抓取工具
   'tools.fetchWebpages': '抓取网页',
   'tools.browserGetContext': '获取浏览器上下文',

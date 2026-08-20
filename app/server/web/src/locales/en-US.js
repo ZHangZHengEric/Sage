@@ -668,8 +668,6 @@ export default {
   'tools.downloadFileFromUrl': 'Download File',
   'tools.extractTextFromNonTextFile': 'Extract File Text',
   'tools.executeShellCommand': 'Execute Command',
-  'tools.executePythonCode': 'Execute Python',
-  'tools.executeJavascriptCode': 'Execute JS',
   'tools.fetchWebpages': 'Fetch Webpages',
   'tools.browserGetContext': 'Get Browser Context',
   'tools.browserNavigate': 'Browser Navigate',

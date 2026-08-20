@@ -1340,8 +1340,7 @@ const skillDimensionFilter = ref('all')
 const selectedGroupSource = ref('')
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
-  'file_read', 'execute_python_code', 'execute_javascript_code', 
-  'execute_shell_command', 'file_write', 'file_update', 'load_skill'
+  'file_read', 'execute_shell_command', 'file_write', 'file_update', 'load_skill'
 ]
 const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task']
 const REQUIRED_TOOLS_FOR_TEAM = ['sys_team_delegate_task']

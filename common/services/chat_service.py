@@ -751,7 +751,6 @@ def _inject_skill_tools(request: StreamRequest) -> None:
     if _is_desktop_mode():
         need_tools = [
             "load_skill",
-            "execute_python_code",
             "execute_shell_command",
             "file_write",
             "file_update",
@@ -759,8 +758,6 @@ def _inject_skill_tools(request: StreamRequest) -> None:
     else:
         need_tools = [
             "file_read",
-            "execute_python_code",
-            "execute_javascript_code",
             "execute_shell_command",
             "file_write",
             "file_update",
