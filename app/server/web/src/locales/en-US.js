@@ -63,7 +63,7 @@ export default {
   'profile.passwordChangeFailed': 'Password change failed',
   'auth.login': 'Login',
   'auth.logout': 'Logout',
-  'auth.logoAlt': 'Sage Logo',
+  'auth.logoAlt': 'Speakly AI Logo',
   'auth.account': 'Account',
   'auth.username': 'Username',
   'auth.accountPlaceholder': 'Your username',

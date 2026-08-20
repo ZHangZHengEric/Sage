@@ -1,0 +1,77 @@
+name: Publish Prod Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'prod-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: prod-docker-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
+  SAGE_API_BASE_URL: ${{ vars.SAGE_API_BASE_URL }}
+  SAGE_TRACE_WEB_URL: ${{ vars.SAGE_TRACE_WEB_URL }}
+  SAGE_WEB_BASE_PATH: ${{ vars.SAGE_WEB_BASE_PATH || '/sage/' }}
+
+jobs:
+  publish:
+    name: Build and Push Prod Images
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: sage-server
+            dockerfile: deploy/images/Dockerfile.server
+            image: sage-server
+            build_args: ''
+          - service: sage-web
+            dockerfile: deploy/images/Dockerfile.web
+            image: sage-web
+            build_args: |
+              NGINX_CONF=deploy/prod/nginx/nginx.conf
+              VITE_SAGE_API_BASE_URL=${{ vars.SAGE_API_BASE_URL }}
+              VITE_SAGE_TRACE_WEB_URL=${{ vars.SAGE_TRACE_WEB_URL }}
+              VITE_SAGE_WEB_BASE_PATH=${{ vars.SAGE_WEB_BASE_PATH || '/sage/' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: image-tag
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and Push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.image-tag.outputs.tag }}

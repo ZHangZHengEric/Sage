@@ -204,9 +204,11 @@
     <div class="relative z-10 border-t border-white/10 px-3 pb-3 pt-2.5 dark:border-white/10">
       <div class="flex items-center gap-2.5" :class="isCollapsed ? 'justify-center' : ''">
         <div class="flex items-center gap-3 overflow-hidden">
-          <img :src="logoUrl" alt="Sage Logo" class="h-9 w-9 shrink-0 rounded-xl" />
+          <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+            <img :src="logoUrl" alt="Speakly AI" class="h-9 w-9 object-contain scale-[1.3]" />
+          </div>
           <div v-if="!isCollapsed" class="min-w-0">
-            <p class="truncate text-[14px] font-semibold tracking-[0.01em] text-foreground">Sage</p>
+            <p class="truncate text-[14px] font-semibold tracking-[0.01em] text-foreground">Speakly AI</p>
           </div>
         </div>
         <Button
@@ -390,11 +392,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['new-chat', 'collapse-change'])
-const logoUrl = computed(() => {
-  const logoName = themeStore.isDark ? 'sage_logo.svg' : 'sage_logo_white.svg'
-  return getAssetUrl(logoName)
-})
+const logoUrl = computed(() => `${import.meta.env.BASE_URL}speaklyai_logo.svg`)
 const grafanaUrl = getGrafanaUrl()
+const observabilityProxyUrl = '/jaeger/'
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
