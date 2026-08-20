@@ -48,7 +48,14 @@ def test_sandbox_lifecycle_syncs_skill_and_executes_python(tmp_path, mode):
                 workdir=sandbox.workspace_path,
             )
 
+            # 懒加载：sync 只登记/广告技能，不把文件落地到工作区
             assert sandbox_skills.list_skills() == ["e2e-skill"]
+            assert not await sandbox.file_exists(
+                f"{sandbox.workspace_path}/skills/e2e-skill/SKILL.md"
+            )
+            # 按需落地（load_skill 触发的动作）后，技能文件才出现在工作区
+            materialized = await sandbox_skills.ensure_materialized("e2e-skill")
+            assert materialized is not None
             assert await sandbox.file_exists(
                 f"{sandbox.workspace_path}/skills/e2e-skill/SKILL.md"
             )
