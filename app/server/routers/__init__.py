@@ -9,6 +9,7 @@ __all__ = [
 
 
 def register_routes(app):
+    from .agui_v2 import agui_v2_router
     from .agent import agent_router
     from .auth import auth_router
     from .chat import chat_router
@@ -28,6 +29,7 @@ def register_routes(app):
     from .version import version_router as version_router
 
     app.include_router(mcp_router)
+    app.include_router(agui_v2_router)
     app.include_router(auth_router)
     app.include_router(agent_router)
     app.include_router(conversation_router)

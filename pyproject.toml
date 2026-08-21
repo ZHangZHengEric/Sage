@@ -18,6 +18,7 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
+  "ag-ui-protocol==0.1.19",
   "gradio>=4.0.0",
   "openai>=1.0.0",
   "requests>=2.31.0",
