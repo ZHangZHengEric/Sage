@@ -17,6 +17,20 @@ import pytest
 from sagents.utils.sandbox import _fs_safety
 
 
+def test_sandbox_import_does_not_require_ctypes():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['ctypes'] = None; import sagents.utils.sandbox",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 # --- dedupe_roots -------------------------------------------------------------
 
 

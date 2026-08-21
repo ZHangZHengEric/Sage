@@ -14,7 +14,6 @@ follow-up work.
 
 from __future__ import annotations
 
-import ctypes
 import os
 import stat
 import sys
@@ -112,6 +111,8 @@ def _darwin_copyfile() -> Optional[Any]:
     """Return macOS copyfile(3) for builds without os.*xattr."""
     if sys.platform != "darwin":
         return None
+
+    import ctypes
 
     try:
         libc = ctypes.CDLL(None, use_errno=True)
