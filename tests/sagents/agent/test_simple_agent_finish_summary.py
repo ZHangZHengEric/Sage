@@ -231,7 +231,9 @@ def test_non_status_only_turn_status_response_keeps_user_visible_text(monkeypatc
     assert any(chunk.content == "普通回复正文。" for chunk in chunks)
 
 
-def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
+def test_status_only_text_without_tool_call_is_hidden_and_requests_recovery(
+    monkeypatch,
+):
     monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "turn_status")
     agent = _agent()
     messages = _base_messages()
@@ -264,8 +266,11 @@ def test_status_only_text_without_tool_call_is_hidden_and_errors(monkeypatch):
     assert saved_content == []
     assert all(chunk.content != "这句也不应该展示。" for chunk in chunks)
     assert len(chunks) == 1
-    assert chunks[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
-    assert "模型未按协议调用 turn_status" in chunks[0].content
+    assert chunks[0].message_type == MessageType.ASSISTANT_TEXT.value
+    assert "Agent is stuck in a loop" in chunks[0].content
+    assert "<questionnaire>" in chunks[0].content
+    assert chunks[0].metadata["needs_user_input"] is True
+    assert chunks[0].metadata["stop_reason"] == "turn_status_protocol_loop"
 
 
 def test_returns_true_when_recent_assistant_text_exists():
@@ -2592,6 +2597,8 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
         agent, "_get_task_complete_decision", _fake_get_task_complete_decision
     )
 
+    session_context = _loop_session_context()
+
     async def _collect():
         chunks = []
         async for yielded_chunks in agent._execute_loop(
@@ -2599,7 +2606,7 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
             tools_json=[],
             tool_manager=None,
             session_id="s1",
-            session_context=_loop_session_context(),  # pyright: ignore[reportArgumentType]
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
         ):
             chunks.extend(yielded_chunks)
         return chunks
@@ -2613,11 +2620,16 @@ def test_llm_judge_stops_after_three_plain_text_direct_responses(monkeypatch):
         True,
         True,
     ]
-    assert [chunk.content for chunk in chunks] == [
+    assert [chunk.content for chunk in chunks[:3]] == [
         "纯文本回答 1",
         "纯文本回答 2",
         "纯文本回答 3",
     ]
+    assert len(chunks) == 4
+    assert "Agent 已陷入循环" in chunks[-1].content
+    assert "<questionnaire>" in chunks[-1].content
+    assert chunks[-1].metadata["stop_reason"] == "plain_text_no_progress"
+    assert session_context.audit_status["completion_status"] == "need_user_input"
 
 
 def test_third_plain_text_questionnaire_still_sets_need_user_input(monkeypatch):
@@ -2752,9 +2764,9 @@ def test_llm_judge_forces_required_after_incomplete_plain_text(monkeypatch):
         '{"ok": true}',
     ]
     questionnaire = chunks[-1]
-    assert "已达到本轮最大循环次数（2），任务已暂停。" in questionnaire.content
+    assert "当前 Agent 已达到本轮最大循环次数（2）并陷入执行循环" in questionnaire.content
     assert "```questionnaire" in questionnaire.content
-    assert "title: 任务已暂停" in questionnaire.content
+    assert "title: Agent 已陷入循环" in questionnaire.content
     assert "text: 是否继续当前任务？" in questionnaire.content
     assert "options:\n  - 继续" in questionnaire.content
     assert "default: 继续" in questionnaire.content
@@ -2776,10 +2788,12 @@ def test_max_loop_questionnaire_uses_session_language():
         language="pt-BR",
     )
 
-    assert "The maximum loop count for this turn (50)" in english.content
+    assert "maximum loop count for this turn (50)" in english.content
+    assert "Agent is stuck in a loop" in english.content
     assert "text: Continue the current task?" in english.content
     assert "options:\n  - Continue" in english.content
-    assert "O numero maximo de ciclos desta rodada (50)" in portuguese.content
+    assert "numero maximo de ciclos desta rodada (50)" in portuguese.content
+    assert "O Agent entrou em um ciclo" in portuguese.content
     assert "text: Continuar a tarefa atual?" in portuguese.content
     assert "options:\n  - Continuar" in portuguese.content
     assert "```questionnaire" in english.content
@@ -3406,13 +3420,112 @@ def test_repeat_pattern_break_after_tool_emits_recovery_questionnaire(monkeypatc
     assert "<questionnaire>" in questionnaire.content
     assert "movo-questionnaire" not in questionnaire.content
     assert '"id": "loop_recovery_action"' in questionnaire.content
-    assert "执行路径正在重复" in questionnaire.content
+    assert "Agent 已陷入循环" in questionnaire.content
     assert "请说明你希望我接下来如何处理" in questionnaire.content
     assert '"type": "free_text"' in questionnaire.content
     assert '"options"' not in questionnaire.content
     assert questionnaire.metadata["needs_user_input"] is True
     assert questionnaire.metadata["runtime_notice"] == ("repeat_pattern_questionnaire")
     assert questionnaire.metadata["stop_reason"] == "repeat_pattern"
+
+
+def test_repeat_pattern_break_after_assistant_text_emits_recovery_questionnaire(
+    monkeypatch,
+):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    agent.max_repeat_pattern_hits = 1
+    direct_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="仍在尝试相同路径。",
+                    message_type=MessageType.ASSISTANT_TEXT.value,
+                )
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    session_context = _loop_session_context()
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-repeat-assistant-break",
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    assert [chunk.role for chunk in chunks] == ["assistant", "assistant", "assistant"]
+    questionnaire = chunks[-1]
+    assert "Agent 已陷入循环" in questionnaire.content
+    assert "<questionnaire>" in questionnaire.content
+    assert questionnaire.metadata["stop_reason"] == "repeat_pattern"
+    assert session_context.audit_status["completion_status"] == "need_user_input"
+
+
+def test_consecutive_execution_error_emits_recovery_questionnaire(monkeypatch):
+    monkeypatch.setenv("SAGE_TASK_COMPLETION_MODE", "no_tool_call")
+    agent = _agent()
+    direct_calls = []
+
+    async def _fake_call_llm_and_process_response(**kwargs):
+        direct_calls.append(kwargs)
+        yield (
+            [
+                MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="工具参数错误：缺少 path",
+                    message_type=MessageType.AGENT_EXECUTION_ERROR.value,
+                )
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(agent, "_should_abort_due_to_session", lambda *args: False)
+    monkeypatch.setattr(
+        agent, "_call_llm_and_process_response", _fake_call_llm_and_process_response
+    )
+    session_context = _loop_session_context()
+
+    async def _collect():
+        chunks = []
+        async for yielded_chunks in agent._execute_loop(
+            messages_input=_base_messages(),
+            tools_json=[],
+            tool_manager=None,
+            session_id="s-consecutive-error-break",
+            session_context=session_context,  # pyright: ignore[reportArgumentType]
+        ):
+            chunks.extend(yielded_chunks)
+        return chunks
+
+    chunks = asyncio.run(_collect())
+
+    assert len(direct_calls) == 2
+    questionnaire = chunks[-1]
+    assert questionnaire.message_type == MessageType.ASSISTANT_TEXT.value
+    assert "Agent 已陷入循环" in questionnaire.content
+    assert "<questionnaire>" in questionnaire.content
+    assert questionnaire.metadata["stop_reason"] == "consecutive_execution_error"
+    assert questionnaire.metadata["error_category"] == "INVALID_ARGS"
+    assert questionnaire.metadata["consecutive_error_hits"] == 2
+    assert session_context.audit_status["completion_status"] == "need_user_input"
 
 
 def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
@@ -3425,7 +3538,7 @@ def test_repeat_recovery_questionnaire_stays_unchanged_in_llm_history():
     assert "<questionnaire>" in questionnaire.content
     assert len(inference) == 1
     assert inference[0].content == questionnaire.content
-    assert "Execution path is repeating" in inference[0].content
+    assert "Agent is stuck in a loop" in inference[0].content
     assert "Please describe how you want me to proceed" in inference[0].content
 
 
@@ -3442,9 +3555,9 @@ def test_repeat_recovery_questionnaire_uses_session_language():
         language="pt-BR",
     )
 
-    assert "执行路径正在重复" in chinese.content
+    assert "Agent 已陷入循环" in chinese.content
     assert "补充新的策略、约束或停止要求" in chinese.content
-    assert "O caminho de execucao esta se repetindo" in portuguese.content
+    assert "O Agent entrou em um ciclo" in portuguese.content
     assert "Descreva como voce deseja que eu prossiga" in portuguese.content
     assert '"type": "free_text"' in portuguese.content
     assert '"answer_title": "Respostas do questionario"' in portuguese.content
