@@ -23,7 +23,7 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 
 ### Relation to OpenAPI
 
-**OpenAPI 3** is the usual machine-readable contract (exportable from FastAPI; it can live next to this hand-maintained page). What follows is a **layer → module → router file** text index, not a diagram. **Layers are for cataloguing only**—not a required call order. The **Endpoint index** is authoritative for every path; the seven subpages are narrative.
+**OpenAPI 3** is the usual machine-readable contract (exportable from FastAPI; it can live next to this hand-maintained page). What follows is a **layer → module → router file** text index, not a diagram. **Layers are for cataloguing only**—not a required call order. The **Endpoint index** is authoritative for every path; the subpages are narrative.
 
 ### Layer 1: access and identity
 
@@ -40,7 +40,7 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 
 | Module               | Router                          | Main paths / family                                                                                                                                           |
 | -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Streaming and input  | `chat.py`                       | `POST /api/chat` / `stream` / `web-stream`; `…/chat/optimize-input`; `GET …/stream/resume`*, `/stream/active_sessions`                                        |
+| Streaming and input  | `chat.py`, `agui_v2.py`         | Existing Sage streams plus additive `POST /api/v2/agent/chat` using AG-UI HTTP/SSE                                                                            |
 | Sessions and sharing | `conversation.py`               | `/api/conversations`*, `…/share/…/messages`, `…/interrupt`, `…/tasks_status`, `…/edit-last-user-message`, `…/rerun-stream`                                    |
 | Agent and workspace  | `agent.py`                      | `/api/agent/…` CRUD, `auto-generate*`, `system-prompt*`, `abilities`, `auth`, `file_workspace*`, `GET/POST /api/agent/tasks/…` async jobs, `workspace/delete` |
 | Knowledge (RAG)      | `kdb.py`                        | Prefix `/api/knowledge-base/…` (kdb + `/doc/*` pipelines)                                                                                                     |
@@ -65,10 +65,11 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 
 ## Deep-dive subpages
 
-**Suggested reading for integrators:** start with [Auth and users](HTTP_API_AUTH_USER.md), then [Chat, streaming, and message edits](HTTP_API_CHAT.md) or your business domain, then [Platform, storage, and observability](HTTP_API_PLATFORM.md) for model keys and health checks.
+**Suggested reading for integrators:** start with [Auth and users](HTTP_API_AUTH_USER.md), then [Chat, streaming, and message edits](HTTP_API_CHAT.md) or [AG-UI V2 chat](HTTP_API_AG_UI_V2.md), then [Platform, storage, and observability](HTTP_API_PLATFORM.md) for model keys and health checks.
 
 - [Auth and users](HTTP_API_AUTH_USER.md): deployment modes, sessions, admin APIs, and how this differs from OAuth2 tokens alone.
 - [Chat, streaming, and message editing](HTTP_API_CHAT.md): `optimize-input`, `rerun-stream`, and the three stream POST entry points.
+- [AG-UI V2 chat](HTTP_API_AG_UI_V2.md): native `RunAgentInput`, standard AG-UI SSE events, idempotency, and process-local replay limits.
 - [Agent: extra capabilities](HTTP_API_AGENT.md): async `submit`, ability cards, `/api/agent/tasks/`*, workspace, authz.
 - [Knowledge base (RAG)](HTTP_API_KNOWLEDGE_BASE.md): CRUD, ingest, retrieval, and `availableKnowledgeBases` on agents.
 - [Tools, skills, and MCP](HTTP_API_TOOLS_MCP.md): `exec`, skill sync options, registering MCP servers.
@@ -84,7 +85,7 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Base URL                  | For example `http://127.0.0.1:8000`                                                                                                                                                                               |
 | Main response shape       | Most `/api/`* routes return `BaseResponse[T]`. The **planner/scheduler** module is mounted at `/tasks` (not `/api/tasks`) and usually returns Pydantic models or plain JSON, without a top-level `code` field     |
-| Streaming endpoints       | `/api/chat`, `/api/chat/optimize-input/stream`, `/api/stream`, `/api/web-stream`, `POST /api/conversations/{id}/rerun-stream`, `/api/stream/resume/`*, `/api/stream/active_sessions` do not return `BaseResponse` |
+| Streaming endpoints       | `/api/chat`, `/api/chat/optimize-input/stream`, `/api/stream`, `/api/web-stream`, `/api/v2/agent/chat`, `POST /api/conversations/{id}/rerun-stream`, `/api/stream/resume/`*, `/api/stream/active_sessions` do not return `BaseResponse` |
 | File download             | `/api/agent/{agent_id}/file_workspace/download` returns a file response                                                                                                                                           |
 | OAuth2 protocol endpoints | `/oauth2/`* and `/api/oauth2/*` return OAuth2-standard payloads                                                                                                                                                   |
 | Liveness                  | `GET /active` returns plain text (no `BaseResponse`, no `/api` prefix)                                                                                                                                            |
@@ -178,6 +179,7 @@ These are still present mostly for backward compatibility and are largely equiva
 | POST   | `/api/chat`                                    | `ChatRequest`              | `text/plain` stream | Chat stream that requires `agent_id`                                                         |
 | POST   | `/api/stream`                                  | `StreamRequest`            | `text/plain` stream | More generic stream; behavior resolved from stored agent / optional `agent_id` (see subpage) |
 | POST   | `/api/web-stream`                              | `StreamRequest`            | `text/plain` stream | Web-managed stream; same-session re-entry interrupts the old run first                       |
+| POST   | `/api/v2/agent/chat`                          | AG-UI `RunAgentInput`      | `text/event-stream` | Additive native AG-UI V2 stream; existing Sage stream endpoints remain unchanged             |
 | GET    | `/api/stream/resume/{session_id}`              | Query: `last_index`        | `text/plain` stream | Resume an interrupted subscription                                                           |
 | GET    | `/api/stream/active_sessions`                  | none                       | `text/event-stream` | Subscribe to active streaming sessions                                                       |
 | POST   | `/api/conversations/{session_id}/rerun-stream` | `RerunStreamRequest`       | `text/plain` stream | Re-run from the last user message under the web stream manager                               |
