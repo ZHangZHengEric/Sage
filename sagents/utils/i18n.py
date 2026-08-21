@@ -153,9 +153,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.tool.error.arguments_not_object": "工具参数格式错误: 参数必须是JSON对象",
         "runtime.tool.error.execution_failed": "工具 {tool_name} 执行失败: {message}",
         "runtime.tool.error.execution_cancelled": "工具 {tool_name} 已取消",
-        "runtime.repeat_recovery.title": "执行路径正在重复",
+        "runtime.repeat_recovery.title": "Agent 已陷入循环",
         "runtime.repeat_recovery.notice": (
-            "检测到重复执行步骤，已暂停以避免在没有进展的情况下继续。请说明后续处理要求。"
+            "当前 Agent 已陷入无法自动恢复的执行循环，现已暂停。"
+            "请通过下面的问卷提供后续指令。"
         ),
         "runtime.repeat_recovery.question": (
             "请说明你希望我接下来如何处理，也可以补充新的策略、约束或停止要求。"
@@ -164,9 +165,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "问题",
         "runtime.repeat_recovery.unanswered": "未填写",
         "runtime.repeat_recovery.answer_separator": "：",
-        "runtime.max_loop.title": "任务已暂停",
+        "runtime.max_loop.title": "Agent 已陷入循环",
         "runtime.max_loop.notice": (
-            "已达到本轮最大循环次数（{max_loop_count}），任务已暂停。"
+            "当前 Agent 已达到本轮最大循环次数（{max_loop_count}）并陷入执行循环，"
+            "现已暂停。请通过下面的问卷确认是否继续。"
         ),
         "runtime.max_loop.question": "是否继续当前任务？",
         "runtime.max_loop.continue": "继续",
@@ -328,10 +330,11 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "runtime.tool.error.execution_failed": "Tool {tool_name} failed: {message}",
         "runtime.tool.error.execution_cancelled": "Tool {tool_name} was cancelled",
-        "runtime.repeat_recovery.title": "Execution path is repeating",
+        "runtime.repeat_recovery.title": "Agent is stuck in a loop",
         "runtime.repeat_recovery.notice": (
-            "I detected repeated execution steps and paused to avoid continuing "
-            "without progress. Please tell me how I should proceed."
+            "The agent is stuck in an execution loop that it cannot recover from "
+            "automatically, so execution has been paused. Please use the questionnaire "
+            "below to provide the next instruction."
         ),
         "runtime.repeat_recovery.question": (
             "Please describe how you want me to proceed. You may include a new "
@@ -341,10 +344,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "Question",
         "runtime.repeat_recovery.unanswered": "Not answered",
         "runtime.repeat_recovery.answer_separator": ": ",
-        "runtime.max_loop.title": "Task paused",
+        "runtime.max_loop.title": "Agent is stuck in a loop",
         "runtime.max_loop.notice": (
-            "The maximum loop count for this turn ({max_loop_count}) has been "
-            "reached, so the task is paused."
+            "The agent reached the maximum loop count for this turn "
+            "({max_loop_count}) and is stuck in an execution loop, so execution "
+            "has been paused. Please use the questionnaire below to confirm "
+            "whether to continue."
         ),
         "runtime.max_loop.question": "Continue the current task?",
         "runtime.max_loop.continue": "Continue",
@@ -513,10 +518,11 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.tool.error.execution_cancelled": (
             "A ferramenta {tool_name} foi cancelada"
         ),
-        "runtime.repeat_recovery.title": "O caminho de execucao esta se repetindo",
+        "runtime.repeat_recovery.title": "O Agent entrou em um ciclo",
         "runtime.repeat_recovery.notice": (
-            "Detectei etapas de execucao repetidas e pausei para evitar continuar "
-            "sem progresso. Diga como devo prosseguir."
+            "O Agent entrou em um ciclo de execucao do qual nao consegue se recuperar "
+            "automaticamente, por isso a execucao foi pausada. Use o questionario "
+            "abaixo para fornecer a proxima instrucao."
         ),
         "runtime.repeat_recovery.question": (
             "Descreva como voce deseja que eu prossiga. Voce pode incluir uma "
@@ -526,10 +532,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "runtime.repeat_recovery.question_fallback": "Pergunta",
         "runtime.repeat_recovery.unanswered": "Nao respondido",
         "runtime.repeat_recovery.answer_separator": ": ",
-        "runtime.max_loop.title": "Tarefa pausada",
+        "runtime.max_loop.title": "O Agent entrou em um ciclo",
         "runtime.max_loop.notice": (
-            "O numero maximo de ciclos desta rodada ({max_loop_count}) foi "
-            "atingido, e a tarefa foi pausada."
+            "O Agent atingiu o numero maximo de ciclos desta rodada "
+            "({max_loop_count}) e entrou em um ciclo de execucao, por isso a "
+            "execucao foi pausada. Use o questionario abaixo para confirmar se "
+            "deseja continuar."
         ),
         "runtime.max_loop.question": "Continuar a tarefa atual?",
         "runtime.max_loop.continue": "Continuar",

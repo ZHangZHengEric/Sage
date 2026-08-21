@@ -242,18 +242,13 @@ class SimpleAgent(AgentBase):
         except Exception:
             return _build_self_correction_message_util(pattern)
 
-    @staticmethod
-    def _last_meaningful_chunk_is_tool(chunks: List[MessageChunk]) -> bool:
-        for chunk in reversed(chunks or []):
-            if chunk.matches_message_types(
-                [MessageType.EMPTY.value, MessageType.REASONING_CONTENT.value]
-            ):
-                continue
-            return chunk.role == MessageRole.TOOL.value
-        return False
-
     def _build_repeat_recovery_questionnaire(
-        self, *, pattern: Dict[str, int], language: str = "en"
+        self,
+        *,
+        pattern: Optional[Dict[str, int]] = None,
+        language: str = "en",
+        stop_reason: str = "repeat_pattern",
+        recovery_metadata: Optional[Dict[str, Any]] = None,
     ) -> MessageChunk:
         title = t("runtime.repeat_recovery.title", language)
         notice = t("runtime.repeat_recovery.notice", language)
@@ -279,6 +274,27 @@ class SimpleAgent(AgentBase):
                 }
             ],
         }
+        metadata: Dict[str, Any] = {
+            "runtime_generated": True,
+            "runtime_notice": REPEAT_RECOVERY_NOTICE,
+            "stop_reason": stop_reason,
+            "needs_user_input": True,
+        }
+        if pattern:
+            metadata["repeat_pattern"] = {
+                key: pattern[key]
+                for key in (
+                    "mode",
+                    "period",
+                    "cycles",
+                    "partial",
+                    "suffix_duplicate",
+                )
+                if key in pattern
+            }
+        if recovery_metadata:
+            metadata.update(recovery_metadata)
+
         return MessageChunk(
             role=MessageRole.ASSISTANT.value,
             content=(
@@ -287,24 +303,13 @@ class SimpleAgent(AgentBase):
             ),
             message_type=MessageType.ASSISTANT_TEXT.value,
             agent_name=self.agent_name,
-            metadata={
-                "runtime_generated": True,
-                "runtime_notice": REPEAT_RECOVERY_NOTICE,
-                "stop_reason": "repeat_pattern",
-                "needs_user_input": True,
-                "repeat_pattern": {
-                    key: pattern[key]
-                    for key in (
-                        "mode",
-                        "period",
-                        "cycles",
-                        "partial",
-                        "suffix_duplicate",
-                    )
-                    if key in pattern
-                },
-            },
+            metadata=metadata,
         )
+
+    @staticmethod
+    def _mark_loop_recovery_pending(session_context: SessionContext) -> None:
+        session_context.audit_status["completion_status"] = "need_user_input"
+        session_context.audit_status["repeat_recovery_pending"] = True
 
     def _build_max_loop_questionnaire(
         self, *, max_loop_count: int, language: str = "en"
@@ -1512,7 +1517,7 @@ class SimpleAgent(AgentBase):
                     max_loop_count=max_loop_count,
                     language=session_context.get_language(),
                 )
-                session_context.audit_status["completion_status"] = "need_user_input"
+                self._mark_loop_recovery_pending(session_context)
                 yield [questionnaire]
                 break
 
@@ -1614,17 +1619,12 @@ class SimpleAgent(AgentBase):
                     logger.warning(
                         "SimpleAgent: turn_status-only 阶段模型仍未调用 turn_status，暂停避免循环"
                     )
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=(
-                                "模型未按协议调用 turn_status 工具来报告本轮状态，已暂停以避免重复循环。"
-                                "请重试或切换支持 tool_choice=required 的模型配置。"
-                            ),
-                            type=MessageType.AGENT_EXECUTION_ERROR.value,
-                            agent_name=self.agent_name,
-                        )
-                    ]
+                    questionnaire = self._build_repeat_recovery_questionnaire(
+                        language=session_context.get_language(),
+                        stop_reason="turn_status_protocol_loop",
+                    )
+                    self._mark_loop_recovery_pending(session_context)
+                    yield [questionnaire]
                     break
                 turn_status_only_next = True
 
@@ -1663,17 +1663,16 @@ class SimpleAgent(AgentBase):
                         f"SimpleAgent: [{error_category}] 连续 {consecutive_error_hits} 轮出现相同错误，熔断停止。"
                         f"错误摘要: {error_key[:80]}"
                     )
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=(
-                                f"检测到连续相同错误（类型：{error_category}，已出现 {consecutive_error_hits} 次），"
-                                "已自动暂停以避免无效循环。请检查工具配置或提供新的指令。"
-                            ),
-                            type=MessageType.LOOP_BREAK.value,
-                            agent_name=self.agent_name,
-                        )
-                    ]
+                    questionnaire = self._build_repeat_recovery_questionnaire(
+                        language=session_context.get_language(),
+                        stop_reason="consecutive_execution_error",
+                        recovery_metadata={
+                            "error_category": error_category,
+                            "consecutive_error_hits": consecutive_error_hits,
+                        },
+                    )
+                    self._mark_loop_recovery_pending(session_context)
+                    yield [questionnaire]
                     break
             else:
                 consecutive_error_key = None
@@ -1705,20 +1704,15 @@ class SimpleAgent(AgentBase):
 
                 if repeat_pattern_hits >= self.max_repeat_pattern_hits:
                     logger.warning(
-                        "SimpleAgent: 重复循环已达到熔断上限，停止执行；"
-                        "根据当前消息末尾决定是否请求用户选择恢复方式。"
+                        "SimpleAgent: 重复循环已达到熔断上限，停止执行并请求用户提供恢复指令。"
                     )
-                    if self._last_meaningful_chunk_is_tool(all_new_response_chunks):
-                        questionnaire = self._build_repeat_recovery_questionnaire(
-                            pattern=pattern,
-                            language=session_context.get_language(),
-                        )
-                        all_new_response_chunks.append(questionnaire)
-                        session_context.audit_status["completion_status"] = (
-                            "need_user_input"
-                        )
-                        session_context.audit_status["repeat_recovery_pending"] = True
-                        yield [questionnaire]
+                    questionnaire = self._build_repeat_recovery_questionnaire(
+                        pattern=pattern,
+                        language=session_context.get_language(),
+                    )
+                    all_new_response_chunks.append(questionnaire)
+                    self._mark_loop_recovery_pending(session_context)
+                    yield [questionnaire]
                     break
 
                 # 记录纠偏提示，但只允许它进入紧接着的一次 LLM 请求。
@@ -1777,6 +1771,12 @@ class SimpleAgent(AgentBase):
                         logger.info(
                             "SimpleAgent: 连续三轮 direct LLM 纯文本无工具调用，终止执行"
                         )
+                        questionnaire = self._build_repeat_recovery_questionnaire(
+                            language=session_context.get_language(),
+                            stop_reason="plain_text_no_progress",
+                        )
+                        self._mark_loop_recovery_pending(session_context)
+                        yield [questionnaire]
                         break
                     decision = await self._get_task_complete_decision(
                         messages_input,
@@ -2121,20 +2121,16 @@ class SimpleAgent(AgentBase):
                 logger.warning(
                     "SimpleAgent: turn_status-only 阶段模型只返回了自然语言，已隐藏该文本并暂停避免循环"
                 )
-            yield (
-                [
-                    MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=(
-                            "模型未按协议调用 turn_status 工具来报告本轮状态，已暂停以避免重复循环。"
-                            "请重试或切换支持 tool_choice=required 的模型配置。"
-                        ),
-                        type=MessageType.AGENT_EXECUTION_ERROR.value,
-                        agent_name=self.agent_name,
-                    )
-                ],
-                True,
+            live_context = self._get_live_session_context(session_id)
+            questionnaire = self._build_repeat_recovery_questionnaire(
+                language=(
+                    live_context.get_language() if live_context is not None else "en"
+                ),
+                stop_reason="turn_status_protocol_loop",
             )
+            if live_context is not None:
+                self._mark_loop_recovery_pending(live_context)
+            yield ([questionnaire], True)
             return
 
         # 处理工具调用
