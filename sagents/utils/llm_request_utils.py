@@ -51,6 +51,10 @@ def _is_deepseek_model_name(model: Optional[str]) -> bool:
     )
 
 
+def _is_minimax_model_name(model: Optional[str]) -> bool:
+    return str(model or "").strip().lower().startswith("minimax-")
+
+
 def _provider_base_url(
     client: Any = None,
     model_config: Optional[Mapping[str, Any]] = None,
@@ -85,6 +89,24 @@ def _uses_deepseek_native_protocol(
         return False
     parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
     return (parsed.hostname or "").lower() == "api.deepseek.com"
+
+
+def _uses_minimax_native_protocol(
+    model: Optional[str],
+    *,
+    client: Any = None,
+    model_config: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    if not _is_minimax_model_name(model):
+        return False
+    base_url = _provider_base_url(client=client, model_config=model_config)
+    if not base_url:
+        return False
+    parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
+    return (parsed.hostname or "").lower() in {
+        "api.minimaxi.com",
+        "api.minimax.io",
+    }
 
 
 def normalize_chat_completions_model(
@@ -472,6 +494,7 @@ def coalesce_reasoning_content_messages(
     messages: Any,
     *,
     preserve_tool_reasoning: bool,
+    preserve_tool_reasoning_details: bool = False,
 ) -> Any:
     """Fold legacy streamed assistant chunks into provider-facing messages.
 
@@ -486,6 +509,7 @@ def coalesce_reasoning_content_messages(
 
     output: list[Any] = []
     pending_reasoning: list[str] = []
+    pending_reasoning_details: Optional[list[Any]] = None
     pending_assistant_messages: list[dict[str, Any]] = []
     pending_response_id: Optional[str] = None
 
@@ -500,10 +524,11 @@ def coalesce_reasoning_content_messages(
         return pending_response_id == current_response_id
 
     def flush_pending_assistant_messages() -> None:
-        nonlocal pending_response_id
+        nonlocal pending_reasoning_details, pending_response_id
         output.extend(pending_assistant_messages)
         pending_assistant_messages.clear()
         pending_reasoning.clear()
+        pending_reasoning_details = None
         pending_response_id = None
 
     def pending_visible_content() -> str:
@@ -537,6 +562,9 @@ def coalesce_reasoning_content_messages(
                 flush_pending_assistant_messages()
             pending_response_id = response_id(message)
             pending_reasoning.append(reasoning)
+            details = message.get("reasoning_details")
+            if isinstance(details, list) and details:
+                pending_reasoning_details = deepcopy(details)
             continue
 
         if message.get("role") == "assistant":
@@ -566,7 +594,15 @@ def coalesce_reasoning_content_messages(
                 message["reasoning_content"] = "".join(pending_reasoning) + (
                     existing if isinstance(existing, str) else ""
                 )
+            if (
+                preserve_tool_reasoning_details
+                and has_tool_calls
+                and pending_reasoning_details
+                and not message.get("reasoning_details")
+            ):
+                message["reasoning_details"] = deepcopy(pending_reasoning_details)
             pending_reasoning = []
+            pending_reasoning_details = None
             pending_response_id = None
             if (
                 not preserve_tool_reasoning
@@ -580,6 +616,10 @@ def coalesce_reasoning_content_messages(
 
         if not (preserve_tool_reasoning and message.get("tool_calls")):
             message.pop("reasoning_content", None)
+        if not (
+            preserve_tool_reasoning_details and message.get("tool_calls")
+        ):
+            message.pop("reasoning_details", None)
         output.append(message)
 
     flush_pending_assistant_messages()
@@ -602,9 +642,13 @@ def prepare_chat_completion_messages(
     use_deepseek_protocol = _uses_deepseek_native_protocol(
         model, client=client, model_config=model_config
     )
+    use_minimax_protocol = _uses_minimax_native_protocol(
+        model, client=client, model_config=model_config
+    )
     prepared = coalesce_reasoning_content_messages(
         messages,
-        preserve_tool_reasoning=use_deepseek_protocol,
+        preserve_tool_reasoning=use_deepseek_protocol or use_minimax_protocol,
+        preserve_tool_reasoning_details=use_minimax_protocol,
     )
     if use_deepseek_protocol:
         return sanitize_deepseek_tool_history(
@@ -615,6 +659,27 @@ def prepare_chat_completion_messages(
             model_config=model_config,
         )
 
+    if use_minimax_protocol:
+        if not isinstance(prepared, list):
+            return prepared
+        minimax_messages: list[Any] = []
+        for raw in prepared:
+            if not isinstance(raw, Mapping):
+                minimax_messages.append(raw)
+                continue
+            message = dict(raw)
+            is_tool_turn = (
+                message.get("role") == "assistant" and message.get("tool_calls")
+            )
+            if is_tool_turn:
+                if message.get("content") is None:
+                    message["content"] = ""
+            else:
+                message.pop("reasoning_content", None)
+                message.pop("reasoning_details", None)
+            minimax_messages.append(message)
+        return minimax_messages
+
     if not isinstance(prepared, list):
         return prepared
     generic_messages: list[Any] = []
@@ -624,6 +689,7 @@ def prepare_chat_completion_messages(
             continue
         message = dict(raw)
         message.pop("reasoning_content", None)
+        message.pop("reasoning_details", None)
         if message.get("role") == "assistant" and message.get("tool_calls"):
             message.pop("content", None)
         generic_messages.append(message)

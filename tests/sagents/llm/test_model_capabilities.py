@@ -6,6 +6,8 @@ from sagents.llm.model_capabilities import (
     get_default_thinking_level,
     get_supported_thinking_levels,
     is_deepseek_model,
+    is_official_minimax_endpoint,
+    is_minimax_model,
     is_openai_reasoning_model,
     normalize_reasoning_effort,
     resolve_reasoning_effort,
@@ -156,6 +158,33 @@ class TestBuildLlmExtraBody(unittest.TestCase):
         self.assertEqual(body["thinking"], {"type": "enabled"})
         self.assertNotIn("enable_thinking", body)
         self.assertNotIn("chat_template_kwargs", body)
+
+    def test_minimax_native_api_splits_reasoning_without_generic_flags(self):
+        body = build_llm_extra_body(
+            "MiniMax-M2.7",
+            base_url="https://api.minimaxi.com/v1",
+            enable_thinking=False,
+            step_name="task_execution",
+        )
+
+        self.assertTrue(is_minimax_model("MiniMax-M2.7-highspeed"))
+        self.assertTrue(
+            is_official_minimax_endpoint("https://api.minimax.io/v1")
+        )
+        self.assertEqual(
+            body,
+            {"_step_name": "task_execution", "reasoning_split": True},
+        )
+
+    def test_minimax_slug_on_third_party_endpoint_stays_generic(self):
+        body = build_llm_extra_body(
+            "MiniMax-M2.7",
+            base_url="https://gateway.example/v1",
+            enable_thinking=False,
+        )
+
+        self.assertNotIn("reasoning_split", body)
+        self.assertFalse(body["enable_thinking"])
 
     def test_deepseek_uses_accepted_low_high_max_levels(self):
         self.assertTrue(is_deepseek_model("DeepSeek-V4-Pro"))

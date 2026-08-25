@@ -432,6 +432,46 @@ def test_prepare_generic_view_strips_reasoning_and_keeps_visible_tool_text_once(
     assert messages[0]["reasoning_content"] == "need weather"
 
 
+def test_prepare_minimax_view_replays_structured_reasoning_with_tool_turn() -> None:
+    reasoning_details = [
+        {"type": "reasoning.text", "text": "need weather"}
+    ]
+    messages = [
+        {
+            "role": "assistant",
+            "reasoning_content": "need weather",
+            "reasoning_details": reasoning_details,
+        },
+        {"role": "assistant", "content": "Checking."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "sunny"},
+    ]
+
+    out = prepare_chat_completion_messages(
+        messages,
+        request_kwargs={"extra_body": {"reasoning_split": True}},
+        model="MiniMax-M2.7",
+        model_config={"base_url": "https://api.minimaxi.com/v1"},
+    )
+
+    assert len(out) == 2
+    assert out[0]["content"] == "Checking."
+    assert out[0]["reasoning_content"] == "need weather"
+    assert out[0]["reasoning_details"] == reasoning_details
+    assert out[0]["tool_calls"][0]["id"] == "call-1"
+    assert messages[0]["reasoning_details"] == reasoning_details
+
+
 def test_sanitize_keeps_reasoning_effort_when_tool_choice_auto() -> None:
     out = sanitize_model_request_kwargs(
         {
