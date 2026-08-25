@@ -456,6 +456,11 @@ class SAgent:
                     )
                     if redacted is None:
                         continue
+                    # Provider-specific structured reasoning is durable replay
+                    # state, not a client-facing stream field. Ling consumes the
+                    # normalized reasoning_content signal instead.
+                    if redacted.reasoning_details is not None:
+                        redacted = replace(redacted, reasoning_details=None)
                     if _should_suppress_chunk_from_client_stream(redacted):
                         logger.info(
                             "SAgent: suppressed hidden runtime context chunk "

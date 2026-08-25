@@ -129,6 +129,19 @@ def _patch_common(monkeypatch, providers):
     return captured, fake_client
 
 
+def test_direct_minimax_request_always_enables_reasoning_split() -> None:
+    body = service._build_thinking_extra_body(
+        existing_extra_body=None,
+        model="MiniMax-M2.7",
+        base_url="https://api.minimaxi.com/v1",
+        task="direct_test",
+        deep_thinking=None,
+        thinking_level=None,
+    )
+
+    assert body == {"_step_name": "direct_test", "reasoning_split": True}
+
+
 @pytest.mark.asyncio
 async def test_provider_id_takes_priority_and_request_stays_openai_shaped(monkeypatch):
     providers = {

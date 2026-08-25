@@ -16,6 +16,38 @@ def test_reasoning_only_message_chunk_round_trips() -> None:
     assert restored.reasoning_content == "先分析，再行动。"
 
 
+def test_minimax_reasoning_details_round_trip_and_keep_latest_snapshot() -> None:
+    message_id = "minimax-response"
+    manager = MessageManager()
+    manager.add_messages(
+        MessageChunk(
+            role="assistant",
+            reasoning_content="先分析",
+            reasoning_details=[{"type": "reasoning.text", "text": "先分析"}],
+            message_id=message_id,
+            message_type=MessageType.REASONING_CONTENT.value,
+        )
+    )
+    manager.add_messages(
+        MessageChunk(
+            role="assistant",
+            reasoning_content="，再回答",
+            reasoning_details=[
+                {"type": "reasoning.text", "text": "先分析，再回答"}
+            ],
+            message_id=message_id,
+            message_type=MessageType.REASONING_CONTENT.value,
+        )
+    )
+
+    restored = MessageChunk.from_dict(manager.messages[0].to_dict())
+
+    assert restored.reasoning_content == "先分析，再回答"
+    assert restored.reasoning_details == [
+        {"type": "reasoning.text", "text": "先分析，再回答"}
+    ]
+
+
 def test_token_estimate_counts_content_and_reasoning_content(monkeypatch) -> None:
     monkeypatch.setattr(
         MessageManager,

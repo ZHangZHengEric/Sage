@@ -30,6 +30,7 @@ from sagents.utils.completion_mode import (
     is_turn_status_mode,
 )
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
+from sagents.llm.minimax import serialize_reasoning_details
 from sagents.utils.i18n import t
 import json
 import yaml
@@ -1990,6 +1991,9 @@ class SimpleAgent(AgentBase):
 
                 # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
                 # 这里不需要重复让权，减少不必要的调度开销
+                reasoning_details = serialize_reasoning_details(
+                    getattr(chunk.choices[0].delta, "reasoning_details", None)
+                )
 
                 if chunk.choices[0].delta.tool_calls:
                     self._handle_tool_calls_chunk(
@@ -2015,6 +2019,7 @@ class SimpleAgent(AgentBase):
                                 MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
                                     tool_calls=chunk.choices[0].delta.tool_calls,
+                                    reasoning_details=reasoning_details,
                                     message_id=response_message_id,
                                     message_type=MessageType.TOOL_CALL.value,
                                     agent_name=self.agent_name,
@@ -2034,6 +2039,7 @@ class SimpleAgent(AgentBase):
                             MessageChunk(
                                 role="assistant",
                                 content=content_piece,
+                                reasoning_details=reasoning_details,
                                 message_id=response_message_id,
                                 message_type=MessageType.DO_SUBTASK_RESULT.value,
                                 agent_name=self.agent_name,
@@ -2052,6 +2058,7 @@ class SimpleAgent(AgentBase):
                                 reasoning_content=chunk.choices[
                                     0
                                 ].delta.reasoning_content,
+                                reasoning_details=reasoning_details,
                                 message_id=response_message_id,
                                 message_type=MessageType.REASONING_CONTENT.value,
                                 agent_name=self.agent_name,

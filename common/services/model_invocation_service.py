@@ -24,6 +24,7 @@ from sagents.llm.model_capabilities import (
     resolve_reasoning_effort,
     uses_aliyun_model_studio_protocol,
     uses_deepseek_native_protocol,
+    uses_minimax_native_protocol,
     uses_zhipu_native_protocol,
 )
 from sagents.utils.llm_request_utils import (
@@ -241,6 +242,16 @@ def _build_thinking_extra_body(
                 env_value=None,
                 default_off="medium",
             )
+        return extra_body
+
+    if uses_minimax_native_protocol(model, base_url):
+        extra_body["reasoning_split"] = True
+        if model.strip().lower().startswith("minimax-m3") and (
+            deep_thinking is not None or thinking_level is not None
+        ):
+            extra_body["thinking"] = {
+                "type": "adaptive" if enable_thinking else "disabled"
+            }
         return extra_body
 
     if deep_thinking is None and thinking_level is None:

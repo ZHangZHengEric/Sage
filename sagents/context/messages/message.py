@@ -113,6 +113,9 @@ class MessageChunk:
     content: Optional[Union[str, List[Dict[str, Any]]]] = None  # 消息内容
     # 模型原生 thinking 内容。它与 content 同级，不能降级为普通 assistant 文本。
     reasoning_content: Optional[str] = None
+    # MiniMax 等供应商返回的结构化 reasoning 数据。保留原始结构用于工具调用回放；
+    # reasoning_content 仍是 Sage 对展示/状态层提供的统一文本视图。
+    reasoning_details: Optional[List[Dict[str, Any]]] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None  # 工具调用列表（OpenAI格式）
 
     # 消息标识

@@ -82,6 +82,24 @@ def uses_deepseek_native_protocol(
     return is_deepseek_model(model_name) and is_official_deepseek_endpoint(base_url)
 
 
+def is_minimax_model(model_name: str) -> bool:
+    """Return whether the provider-facing model slug is a MiniMax model."""
+    return str(model_name or "").strip().lower().startswith("minimax-")
+
+
+def is_official_minimax_endpoint(base_url: Optional[str]) -> bool:
+    """Return whether ``base_url`` is a MiniMax first-party API endpoint."""
+    hostname = _endpoint_hostname(base_url)
+    return hostname in {"api.minimaxi.com", "api.minimax.io"}
+
+
+def uses_minimax_native_protocol(
+    model_name: str, base_url: Optional[str]
+) -> bool:
+    """Whether the request should use MiniMax's native OpenAI extensions."""
+    return is_minimax_model(model_name) and is_official_minimax_endpoint(base_url)
+
+
 def _endpoint_hostname(base_url: Optional[str]) -> str:
     if not base_url:
         return ""
@@ -255,6 +273,15 @@ def build_llm_extra_body(
                 default_off=default_off,
             )
         )
+    elif uses_minimax_native_protocol(model_name, base_url):
+        # MiniMax's OpenAI-compatible API otherwise embeds thinking inside
+        # content as <think>...</think>. Split it into structured fields so Sage
+        # can keep private reasoning separate from the visible answer.
+        extra_body["reasoning_split"] = True
+        if str(model_name or "").strip().lower().startswith("minimax-m3"):
+            extra_body["thinking"] = {
+                "type": "adaptive" if enable_thinking else "disabled"
+            }
     elif uses_deepseek_native_protocol(model_name, base_url):
         # The first-party Chat Completions API only documents these native
         # fields. Do not mix in local-engine compatibility switches such as

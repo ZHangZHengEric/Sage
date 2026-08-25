@@ -43,7 +43,11 @@ from sagents.context.messages.token_accounting import (
 )
 from sagents.llm.sage_openai import SageAsyncOpenAI
 from sagents.llm.capabilities import create_chat_completion_with_fallback
-from sagents.llm.model_capabilities import build_llm_extra_body
+from sagents.llm.minimax import MiniMaxStreamNormalizer
+from sagents.llm.model_capabilities import (
+    build_llm_extra_body,
+    uses_minimax_native_protocol,
+)
 from sagents.utils.llm_request_utils import (
     coalesce_reasoning_content_messages,
     format_api_error_details,
@@ -1781,6 +1785,7 @@ class AgentBase(ABC):
                                 "tool_calls",
                                 "tool_call_id",
                                 "reasoning_content",
+                                "reasoning_details",
                                 "_sage_message_id",
                                 "_sage_llm_response_id",
                                 "_sage_context_protected",
@@ -2015,7 +2020,14 @@ class AgentBase(ABC):
                     extra_body=extra_body,
                     **final_config,
                 )
+                minimax_stream_normalizer = (
+                    MiniMaxStreamNormalizer()
+                    if uses_minimax_native_protocol(model_name, active_base_url)
+                    else None
+                )
                 async for chunk in stream:
+                    if minimax_stream_normalizer is not None:
+                        chunk = minimax_stream_normalizer.normalize(chunk)
                     # print(chunk)
                     # 记录首token时间
                     if first_token_time is None:
