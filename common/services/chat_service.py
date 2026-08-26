@@ -10,7 +10,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Awaitable, Dict, List, Optional, Tuple, TypeVar
 from urllib.parse import unquote, urlparse
 
 from loguru import logger
@@ -49,6 +49,8 @@ from common.services.chat_utils import (
 )
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
 
+_T = TypeVar("_T")
+
 
 def _get_cfg() -> config.StartupConfig:
     cfg = config.get_startup_config()
@@ -66,6 +68,41 @@ def _chat_exception(message_key: str) -> SageHTTPException:
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return SageHTTPException(**kwargs)
+
+
+def log_chat_startup_stage(
+    session_id: Optional[str],
+    stage: str,
+    started_at: float,
+    *,
+    status: str = "success",
+) -> None:
+    duration_ms = max((time.perf_counter() - started_at) * 1000.0, 0.0)
+    logger.bind(
+        session_id=session_id,
+        stage=stage,
+        duration_ms=round(duration_ms, 3),
+        status=status,
+    ).info(
+        f"chat_startup_stage_completed stage={stage} "
+        f"duration_ms={duration_ms:.3f} status={status}"
+    )
+
+
+async def _run_chat_startup_stage(
+    session_id: Optional[str],
+    stage: str,
+    operation: Awaitable[_T],
+) -> _T:
+    started_at = time.perf_counter()
+    status = "success"
+    try:
+        return await operation
+    except BaseException:
+        status = "error"
+        raise
+    finally:
+        log_chat_startup_stage(session_id, stage, started_at, status=status)
 
 
 def _sandbox_approval_event_from_tool_result(
@@ -298,6 +335,84 @@ def _get_provider_api_key(provider: Any) -> Optional[str]:
         api_keys = getattr(provider, "api_keys", None) or []
         return ",".join(api_keys) if api_keys else None
     return getattr(provider, "api_key", None)
+
+
+def _apply_main_provider(
+    request: StreamRequest,
+    provider: Any,
+    *,
+    fill_missing_only: bool,
+) -> None:
+    assignments = {
+        "base_url": provider.base_url,
+        "api_key": _get_provider_api_key(provider),
+        "model": provider.model,
+        "max_tokens": provider.max_tokens,
+        "temperature": provider.temperature,
+        "top_p": provider.top_p,
+        "presence_penalty": provider.presence_penalty,
+        "max_model_len": provider.max_model_len,
+        "supports_multimodal": provider.supports_multimodal,
+        "supports_structured_output": provider.supports_structured_output,
+    }
+    for key, value in assignments.items():
+        if key == "max_tokens" and value is None:
+            continue
+        if fill_missing_only and request.llm_model_config.get(key) is not None:
+            continue
+        request.llm_model_config[key] = value
+
+
+def _apply_fast_provider(request: StreamRequest, provider: Any) -> None:
+    request.llm_model_config["fast_api_key"] = _get_provider_api_key(provider)
+    request.llm_model_config["fast_base_url"] = provider.base_url
+    request.llm_model_config["fast_model_name"] = provider.model
+
+
+async def _copy_desktop_agent_docs(request: StreamRequest) -> None:
+    sage_home = os.path.join(Path.home(), ".sage")
+    agent_workspace = os.path.join(sage_home, "agents", request.agent_id)
+    await _copy_sage_usage_docs_to_agent_workspace(
+        request.agent_id,
+        os.path.join(sage_home, "agents"),
+    )
+    await asyncio.to_thread(_copy_docs_to_agent_workspace, agent_workspace)
+
+
+async def _apply_desktop_im_tools(request: StreamRequest) -> None:
+    try:
+        all_im_configs = await IMChannelConfigDao().get_all_configs()
+        im_enabled = any(
+            config.get("enabled", False) for config in all_im_configs.values()
+        )
+        if im_enabled and "send_message_through_im" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
+            request.available_tools = list(request.available_tools) + [  # pyright: ignore[reportArgumentType]
+                "send_message_through_im"
+            ]
+            logger.info(
+                "[Chat] Added send_message_through_im tool (IM provider enabled)"
+            )
+    except Exception as e:
+        logger.warning(f"[Chat] Failed to check IM config: {e}")
+
+
+async def _apply_knowledge_bases(request: StreamRequest) -> None:
+    kdb_dao = KdbDao()
+    kdbs, _ = await kdb_dao.get_kdbs_paginated(
+        kdb_ids=request.available_knowledge_bases,
+        data_type=None,  # pyright: ignore[reportArgumentType]
+        query_name=None,  # pyright: ignore[reportArgumentType]
+        page=1,
+        page_size=1000,
+    )
+    if not kdbs:
+        return
+    kdb_context = {
+        f"{kdb.name}数据库的index_name": kdb.get_index_name() for kdb in kdbs
+    }
+    _merge_dict(request, "system_context", kdb_context)
+    if "retrieve_on_zavixai_db" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
+        request.available_tools.append("retrieve_on_zavixai_db")  # pyright: ignore[reportOptionalMemberAccess]
 
 
 def mark_request_execution(
@@ -862,11 +977,16 @@ async def populate_request_from_agent_config(
     require_agent_id: bool = False,
 ) -> None:
     agent = None
+    should_load_all_agents = False
     if request.agent_id is None:
         if require_agent_id:
             raise _chat_exception("chat.agent_id_required")
     else:
-        agent = await AgentConfigDao().get_by_id(request.agent_id)
+        agent = await _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.agent_lookup",
+            AgentConfigDao().get_by_id(request.agent_id),
+        )
         if not agent or not agent.config:
             if require_agent_id:
                 raise _chat_exception("chat.agent_not_found")
@@ -944,12 +1064,7 @@ async def populate_request_from_agent_config(
             if selection_mode is None:
                 selection_mode = "manual" if configured_ids else "auto_all"
             if selection_mode == "auto_all":
-                all_agents = await AgentConfigDao().get_all()
-                request.available_sub_agent_ids = [
-                    a.agent_id
-                    for a in all_agents
-                    if a.agent_id and a.agent_id != request.agent_id
-                ]
+                should_load_all_agents = True
 
     if request.agent_name is None:
         request.agent_name = "Sage Assistant"
@@ -962,70 +1077,74 @@ async def populate_request_from_agent_config(
     provider_id = request_provider_id or (
         agent_config.get("llm_provider_id") if agent_config else None
     )
-    if provider_id:
-        provider = await provider_dao.get_by_id(provider_id)
-        if provider is None:
-            raise ValueError(f"LLM provider not found: {provider_id}")
-        request.llm_model_config["base_url"] = provider.base_url
-        request.llm_model_config["api_key"] = _get_provider_api_key(provider)
-        request.llm_model_config["model"] = provider.model
-        if provider.max_tokens is not None:
-            request.llm_model_config["max_tokens"] = provider.max_tokens
-        request.llm_model_config["temperature"] = provider.temperature
-        request.llm_model_config["top_p"] = provider.top_p
-        request.llm_model_config["presence_penalty"] = provider.presence_penalty
-        request.llm_model_config["max_model_len"] = provider.max_model_len
-        request.llm_model_config["supports_multimodal"] = provider.supports_multimodal
-        request.llm_model_config["supports_structured_output"] = (
-            provider.supports_structured_output
-        )
-    else:
-        provider = await provider_dao.get_default()
-        if provider is None:
-            raise ValueError("Default LLM provider not found")
-        if request.llm_model_config.get("base_url") is None:
-            request.llm_model_config["base_url"] = provider.base_url
-        if request.llm_model_config.get("api_key") is None:
-            request.llm_model_config["api_key"] = _get_provider_api_key(provider)
-        if request.llm_model_config.get("model") is None:
-            request.llm_model_config["model"] = provider.model
-        if (
-            request.llm_model_config.get("max_tokens") is None
-            and provider.max_tokens is not None
-        ):
-            request.llm_model_config["max_tokens"] = provider.max_tokens
-        if request.llm_model_config.get("temperature") is None:
-            request.llm_model_config["temperature"] = provider.temperature
-        if request.llm_model_config.get("top_p") is None:
-            request.llm_model_config["top_p"] = provider.top_p
-        if request.llm_model_config.get("presence_penalty") is None:
-            request.llm_model_config["presence_penalty"] = provider.presence_penalty
-        if request.llm_model_config.get("max_model_len") is None:
-            request.llm_model_config["max_model_len"] = provider.max_model_len
-        if request.llm_model_config.get("supports_multimodal") is None:
-            request.llm_model_config["supports_multimodal"] = (
-                provider.supports_multimodal
-            )
-        if request.llm_model_config.get("supports_structured_output") is None:
-            request.llm_model_config["supports_structured_output"] = (
-                provider.supports_structured_output
-            )
-
-    # 处理快速模型配置
     request_fast_provider_id = str(
         getattr(request, "fast_provider_id", "") or ""
     ).strip()
     fast_provider_id = request_fast_provider_id or (
         agent_config.get("fast_llm_provider_id") if agent_config else None
     )
-    if fast_provider_id:
-        fast_provider = await provider_dao.get_by_id(fast_provider_id)
-        if fast_provider:
-            request.llm_model_config["fast_api_key"] = _get_provider_api_key(
-                fast_provider
+
+    if provider_id:
+        main_provider_lookup = provider_dao.get_by_id(provider_id)
+    else:
+        main_provider_lookup = provider_dao.get_default()
+    provider_task = asyncio.create_task(
+        _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.main_provider_lookup",
+            main_provider_lookup,
+        )
+    )
+    fast_provider_task = None
+    if fast_provider_id and fast_provider_id != provider_id:
+        fast_provider_task = asyncio.create_task(
+            _run_chat_startup_stage(
+                request.session_id,
+                "populate_agent_config.fast_provider_lookup",
+                provider_dao.get_by_id(fast_provider_id),
             )
-            request.llm_model_config["fast_base_url"] = fast_provider.base_url
-            request.llm_model_config["fast_model_name"] = fast_provider.model
+        )
+    all_agents_task = None
+    if should_load_all_agents:
+        all_agents_task = asyncio.create_task(
+            _run_chat_startup_stage(
+                request.session_id,
+                "populate_agent_config.all_agents_lookup",
+                AgentConfigDao().get_all(),
+            )
+        )
+
+    dependency_tasks: List[asyncio.Task[Any]] = [provider_task]
+    if fast_provider_task is not None:
+        dependency_tasks.append(fast_provider_task)
+    if all_agents_task is not None:
+        dependency_tasks.append(all_agents_task)
+    await asyncio.gather(*dependency_tasks)
+
+    provider = provider_task.result()
+    if provider is None:
+        if provider_id:
+            raise ValueError(f"LLM provider not found: {provider_id}")
+        raise ValueError("Default LLM provider not found")
+    _apply_main_provider(
+        request,
+        provider,
+        fill_missing_only=not bool(provider_id),
+    )
+
+    if fast_provider_id:
+        fast_provider = (
+            provider if fast_provider_task is None else fast_provider_task.result()
+        )
+        if fast_provider:
+            _apply_fast_provider(request, fast_provider)
+
+    if all_agents_task is not None:
+        request.available_sub_agent_ids = [
+            candidate.agent_id
+            for candidate in all_agents_task.result()
+            if candidate.agent_id and candidate.agent_id != request.agent_id
+        ]
 
     if request.max_loop_count is None:
         raise SageHTTPException(
@@ -1044,27 +1163,37 @@ async def populate_request_from_agent_config(
     _fill_if_none(request, "available_knowledge_bases", [])
     _fill_if_none(request, "available_sub_agent_ids", [])
 
-    await _merge_agent_workspace_skills(request)
-
     # 共享配置中的 skills 由 Agent create/update 同步到 workspace；当前用户在
     # workspace 自建的 skills 已在上方合并到本次请求。运行时只按需补齐缺失目录，
     # 不覆盖 Agent workspace 里的已有内容。
+    post_config_tasks: List[Awaitable[Any]] = [
+        _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.workspace_skills",
+            _merge_agent_workspace_skills(request),
+        ),
+        _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.custom_sub_agents",
+            _populate_custom_sub_agents(request),
+        ),
+    ]
+    if _is_desktop_mode() and request.agent_id and agent:
+        post_config_tasks.append(
+            _run_chat_startup_stage(
+                request.session_id,
+                "populate_agent_config.desktop_docs",
+                _copy_desktop_agent_docs(request),
+            )
+        )
+    await asyncio.gather(*post_config_tasks)
 
     if _is_desktop_mode():
-        try:
-            all_im_configs = await IMChannelConfigDao().get_all_configs()
-            im_enabled = any(
-                config.get("enabled", False) for config in all_im_configs.values()
-            )
-            if im_enabled and "send_message_through_im" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
-                request.available_tools = list(request.available_tools) + [  # pyright: ignore[reportArgumentType]
-                    "send_message_through_im"
-                ]
-                logger.info(
-                    "[Chat] Added send_message_through_im tool (IM provider enabled)"
-                )
-        except Exception as e:
-            logger.warning(f"[Chat] Failed to check IM config: {e}")
+        await _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.im_tools",
+            _apply_desktop_im_tools(request),
+        )
     else:
         _merge_dict(
             request,
@@ -1074,39 +1203,22 @@ async def populate_request_from_agent_config(
 
     if request.agent_id and agent:
         _merge_dict(request, "system_context", {"当前AgentId": request.agent_id})
-        if _is_desktop_mode():
-            sage_home = os.path.join(Path.home(), ".sage")
-            agent_workspace = os.path.join(sage_home, "agents", request.agent_id)
-            # 复制 sage-usage-docs
-            await _copy_sage_usage_docs_to_agent_workspace(
-                request.agent_id,
-                os.path.join(sage_home, "agents"),
-            )
-            # 复制项目 docs 到 agent workspace
-            await asyncio.to_thread(_copy_docs_to_agent_workspace, agent_workspace)
 
     if not _is_desktop_mode() and request.available_knowledge_bases:
-        kdb_dao = KdbDao()
-        kdbs, _ = await kdb_dao.get_kdbs_paginated(
-            kdb_ids=request.available_knowledge_bases,
-            data_type=None,  # pyright: ignore[reportArgumentType]
-            query_name=None,  # pyright: ignore[reportArgumentType]
-            page=1,
-            page_size=1000,
+        await _run_chat_startup_stage(
+            request.session_id,
+            "populate_agent_config.knowledge_bases",
+            _apply_knowledge_bases(request),
         )
-        if kdbs:
-            kdb_context = {
-                f"{kdb.name}数据库的index_name": kdb.get_index_name() for kdb in kdbs
-            }
-            _merge_dict(request, "system_context", kdb_context)
-            if "retrieve_on_zavixai_db" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
-                request.available_tools.append("retrieve_on_zavixai_db")  # pyright: ignore[reportOptionalMemberAccess]
 
     _inject_skill_tools(request)
     _strip_skill_tools_when_unavailable(request)
-    await _populate_custom_sub_agents(request)
     request.context_budget_config = _build_context_budget_config(request)
-    await _register_extra_mcp_tools(request)
+    await _run_chat_startup_stage(
+        request.session_id,
+        "populate_agent_config.extra_mcp_tools",
+        _register_extra_mcp_tools(request),
+    )
 
 
 class SageStreamService:
@@ -1186,21 +1298,46 @@ class SageStreamService:
             )
 
     async def initialize_workspace_assets(self) -> None:
+        started_at = time.perf_counter()
+        status = "success"
+        try:
+            await self._initialize_workspace_assets()
+        except BaseException:
+            status = "error"
+            raise
+        finally:
+            log_chat_startup_stage(
+                getattr(self.request, "session_id", None),
+                "initialize_workspace_assets",
+                started_at,
+                status=status,
+            )
+
+    async def _initialize_workspace_assets(self) -> None:
         if _is_desktop_mode():
             return
 
+        session_id = getattr(self.request, "session_id", None)
         if (not self._workspace_existed) and self.request.agent_id:
             inherit_service = importlib.import_module(
                 "app.server.services.agent_inherit"
             )
-            await asyncio.to_thread(
-                inherit_service.copy_agent_inherit_to_workspace,
-                self.request.agent_id,
-                self.agent_workspace,
+            await _run_chat_startup_stage(
+                session_id,
+                "initialize_workspace_assets.workspace_inherit",
+                asyncio.to_thread(
+                    inherit_service.copy_agent_inherit_to_workspace,
+                    self.request.agent_id,
+                    self.agent_workspace,
+                ),
             )
 
-        await asyncio.to_thread(
-            _cleanup_server_workspace_sage_docs, self.agent_workspace
+        await _run_chat_startup_stage(
+            session_id,
+            "initialize_workspace_assets.workspace_cleanup",
+            asyncio.to_thread(
+                _cleanup_server_workspace_sage_docs, self.agent_workspace
+            ),
         )
 
     async def process_stream(self):
@@ -1212,7 +1349,11 @@ class SageStreamService:
                 message_dict["message_id"] = str(uuid.uuid4())
             messages.append(message_dict)
 
-        await _ensure_conversation(self.request)
+        await _run_chat_startup_stage(
+            session_id,
+            "process_stream.ensure_conversation",
+            _ensure_conversation(self.request),
+        )
         try:
             from sagents.utils.sandbox.config import VolumeMount
 
@@ -1363,7 +1504,11 @@ async def prepare_session(
 
     try:
         stream_service = SageStreamService(request)
-        await stream_service.initialize_workspace_assets()
+        await _run_chat_startup_stage(
+            session_id,
+            "prepare_session.workspace_assets",
+            stream_service.initialize_workspace_assets(),
+        )
         return stream_service, lock  # pyright: ignore[reportReturnType]
     except Exception as e:
         if acquired:
@@ -1521,7 +1666,6 @@ async def _ensure_conversation(request: StreamRequest) -> None:
         agent_id=request.agent_id or "default_agent",
         agent_name=request.agent_name or "Sage Assistant",
         title=await create_conversation_title(request),
-        messages=[],
     )
 
 

@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -16,26 +15,6 @@ async def list_sessions(
     from common.models.conversation import ConversationDao
     from common.schemas.conversation import ConversationInfo
 
-    def _normalize_messages(raw_messages: Any) -> List[Dict[str, Any]]:
-        if isinstance(raw_messages, str):
-            try:
-                raw_messages = json.loads(raw_messages)
-            except Exception:
-                return []
-        return raw_messages if isinstance(raw_messages, list) else []
-
-    def _build_last_message_preview(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        for message in reversed(messages):
-            role = (message or {}).get("role")
-            content = ((message or {}).get("content") or "").strip()
-            if role and content:
-                return {
-                    "role": role,
-                    "content": content,
-                    "type": (message or {}).get("type"),
-                }
-        return {}
-
     resolved_user_id = user_id or get_default_cli_user_id()
     dao = ConversationDao()
     conversations, total_count = await dao.get_conversations_paginated(
@@ -50,8 +29,6 @@ async def list_sessions(
     items: List[Dict[str, Any]] = []
     for conv in conversations:
         message_count = conv.get_message_count()
-        messages = _normalize_messages(conv.messages)
-        last_message = _build_last_message_preview(messages)
         items.append(
             {
                 **ConversationInfo(
@@ -60,14 +37,13 @@ async def list_sessions(
                     agent_id=conv.agent_id,
                     agent_name=conv.agent_name,
                     title=conv.title,
-                    message_count=message_count.get("user_count", 0)
-                    + message_count.get("agent_count", 0),
+                    message_count=int(conv.message_count or 0),
                     user_count=message_count.get("user_count", 0),
                     agent_count=message_count.get("agent_count", 0),
                     created_at=conv.created_at.isoformat() if conv.created_at else "",
                     updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
                 ).model_dump(),
-                "last_message": last_message or None,
+                "last_message": None,
             }
         )
 
@@ -305,7 +281,7 @@ async def get_session_summary(
         "agent_id": conversation.agent_id,
         "agent_name": conversation.agent_name,
         "title": conversation.title,
-        "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
+        "message_count": int(conversation.message_count or 0),
         "user_count": counts.get("user_count", 0),
         "agent_count": counts.get("agent_count", 0),
         "created_at": conversation.created_at.isoformat()
@@ -326,14 +302,6 @@ async def inspect_session(
     message_limit: int = 5,
 ) -> Dict[str, Any]:
     from common.models.conversation import ConversationDao
-
-    def _normalize_messages(raw_messages: Any) -> List[Dict[str, Any]]:
-        if isinstance(raw_messages, str):
-            try:
-                raw_messages = json.loads(raw_messages)
-            except Exception:
-                return []
-        return raw_messages if isinstance(raw_messages, list) else []
 
     def _find_last_message(
         messages: List[Dict[str, Any]], *, role: Optional[str] = None
@@ -397,8 +365,10 @@ async def inspect_session(
             ],
         )
 
+    from common.services.conversation_service import _load_session_raw_messages
+
     counts = conversation.get_message_count()
-    messages = _normalize_messages(conversation.messages or [])
+    messages = _load_session_raw_messages(conversation.session_id)
 
     normalized_limit = max(0, int(message_limit))
     preview_messages = []
@@ -420,7 +390,7 @@ async def inspect_session(
         "agent_id": conversation.agent_id,
         "agent_name": conversation.agent_name,
         "title": conversation.title,
-        "message_count": counts.get("user_count", 0) + counts.get("agent_count", 0),
+        "message_count": int(conversation.message_count or 0),
         "user_count": counts.get("user_count", 0),
         "agent_count": counts.get("agent_count", 0),
         "created_at": conversation.created_at.isoformat()

@@ -68,5 +68,8 @@ def test_sync_database_schema_adds_conversation_list_indexes():
         index_names = {idx["name"] for idx in inspect(conn).get_indexes("conversations")}
 
     assert "message_count" in columns
+    assert "user_count" in columns
+    assert "agent_count" in columns
+    assert "messages" not in columns
     assert "idx_conversations_updated_session" in index_names
     assert "idx_conversations_user_updated_session" in index_names

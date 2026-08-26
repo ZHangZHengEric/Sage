@@ -7,7 +7,10 @@ from importlib import import_module
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect, text
 
-from common.core.client.db import sync_missing_indexes
+from common.core.client.db import (
+    migrate_legacy_conversation_messages_column,
+    sync_missing_indexes,
+)
 from common.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -170,8 +173,11 @@ def sync_database_schema(sync_conn):
             logger.debug(f"[DB] 表 '{table_name}' 结构正常")
 
         unused_columns = actual_columns - expected_columns
+        if table_name == "conversations":
+            unused_columns.discard("messages")
         if sync_conn.dialect.name == "sqlite" and unused_columns:
             logger.info(f"[DB] 检测到表 '{table_name}' 存在无用列: {unused_columns}")
             _drop_unused_sqlite_columns(sync_conn, table_name, unused_columns)
 
+    migrate_legacy_conversation_messages_column(sync_conn)
     sync_missing_indexes(sync_conn, Base.metadata)

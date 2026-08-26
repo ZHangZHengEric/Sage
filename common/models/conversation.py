@@ -3,28 +3,31 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import json
-from sqlalchemy import Index, Integer, JSON, String, Text, func, or_, select, update
-from sqlalchemy.orm import Mapped, load_only, mapped_column
+from sqlalchemy import Index, Integer, String, Text, func, or_, select, update
+from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
 
 
-def _stored_message_count(messages: Any) -> int:
-    if isinstance(messages, str):
-        try:
-            messages = json.loads(messages)
-        except Exception:  # noqa: BLE001
-            return 0
+def count_conversation_messages(messages: Any) -> tuple[int, int, int]:
+    """Return (total, user_count, agent_count) for a session message list."""
     if not isinstance(messages, list):
-        return 0
-    return len(messages)
+        return 0, 0, 0
+    user_count = 0
+    agent_count = 0
+    for message in messages:
+        role = (message or {}).get("role")
+        if role == "user":
+            user_count += 1
+        elif role in ("assistant", "agent"):
+            agent_count += 1
+    return len(messages), user_count, agent_count
 
 
 class Conversation(Base):
     __tablename__ = "conversations"
     # 长 pytest 进程中模型可能被多次 import，避免重复注册同一张表。
-    # 覆盖索引必须包含 session_id，避免 SQLite 回表读取巨大 messages JSON。
+    # 覆盖索引必须包含 session_id，避免 SQLite 回表读取历史大列。
     __table_args__ = (
         Index(
             "idx_conversations_user_updated_session",
@@ -68,8 +71,9 @@ class Conversation(Base):
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    messages: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, nullable=False)
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    user_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    agent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(default=get_local_now)
     updated_at: Mapped[datetime] = mapped_column(
         default=get_local_now, onupdate=get_local_now
@@ -82,47 +86,28 @@ class Conversation(Base):
         agent_id: str,
         agent_name: str,
         title: str,
-        messages: List[Dict[str, Any]],
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
-        message_count: Optional[int] = None,
+        message_count: int = 0,
+        user_count: int = 0,
+        agent_count: int = 0,
     ):
         self.user_id = user_id
         self.session_id = session_id
         self.agent_id = agent_id
         self.agent_name = agent_name
         self.title = title
-        self.messages = messages or []
-        self.message_count = (
-            message_count
-            if message_count is not None
-            else _stored_message_count(self.messages)
-        )
+        self.message_count = int(message_count or 0)
+        self.user_count = int(user_count or 0)
+        self.agent_count = int(agent_count or 0)
         self.created_at = created_at or get_local_now()
         self.updated_at = updated_at or get_local_now()
 
     def get_message_count(self) -> Dict[str, int]:
-        """统计消息数量，区分用户与代理（assistant/agent）。"""
-        user_count = 0
-        agent_count = 0
-        msgs: List[Dict[str, Any]] = []
-        try:
-            if isinstance(self.messages, str):
-                msgs = json.loads(self.messages)
-            else:
-                msgs = self.messages or []
-        except Exception:  # noqa: BLE001
-            msgs = self.messages if isinstance(self.messages, list) else []
-
-        for m in msgs:
-            role = (m or {}).get("role")
-            if role == "user":
-                user_count += 1
-            elif role in ("assistant", "agent"):
-                agent_count += 1
+        """返回已落库的用户/助手消息数。"""
         return {
-            "user_count": user_count,
-            "agent_count": agent_count,
+            "user_count": int(self.user_count or 0),
+            "agent_count": int(self.agent_count or 0),
         }
 
     @classmethod
@@ -133,9 +118,11 @@ class Conversation(Base):
             agent_id=data["agent_id"],
             agent_name=data["agent_name"],
             title=data["title"],
-            messages=data.get("messages", []),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
+            message_count=int(data.get("message_count") or 0),
+            user_count=int(data.get("user_count") or 0),
+            agent_count=int(data.get("agent_count") or 0),
         )
 
 
@@ -149,7 +136,6 @@ class ConversationDao(BaseDao):
         agent_id: str,
         agent_name: str,
         title: str,
-        messages: List[Dict[str, Any]],
     ) -> bool:
         conversation = Conversation(
             user_id=user_id,
@@ -157,7 +143,6 @@ class ConversationDao(BaseDao):
             agent_id=agent_id,
             agent_name=agent_name,
             title=title,
-            messages=messages or [],
         )
         conversation.updated_at = get_local_now()
         return await BaseDao.save(self, conversation)
@@ -193,7 +178,6 @@ class ConversationDao(BaseDao):
         search: Optional[str] = None,
         agent_id: Optional[str] = None,
         sort_by: str = "date",
-        include_messages: bool = True,
     ) -> tuple[List[Conversation], int]:
         where = []
         if user_id:
@@ -238,19 +222,6 @@ class ConversationDao(BaseDao):
                 return [], total
 
             data_stmt = select(Conversation).where(Conversation.session_id.in_(ids))
-            if not include_messages:
-                data_stmt = data_stmt.options(
-                    load_only(
-                        Conversation.session_id,
-                        Conversation.user_id,
-                        Conversation.agent_id,
-                        Conversation.agent_name,
-                        Conversation.title,
-                        Conversation.message_count,
-                        Conversation.created_at,
-                        Conversation.updated_at,
-                    )
-                )
             res = await session.execute(data_stmt)
             items = list(res.scalars().all())
             order_index = {sid: idx for idx, sid in enumerate(ids)}
@@ -260,18 +231,19 @@ class ConversationDao(BaseDao):
     async def delete_conversation(self, session_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Conversation, session_id)
 
-    async def update_conversation_messages(
+    async def update_conversation_counts(
         self, session_id: str, messages: List[Dict[str, Any]]
     ) -> bool:
+        total, user_count, agent_count = count_conversation_messages(messages)
         db = await self._get_db()
         async with db.get_session() as session:  # type: ignore[attr-defined]
-            payload = messages or []
             stmt = (
                 update(Conversation)
                 .where(Conversation.session_id == session_id)
                 .values(
-                    messages=payload,
-                    message_count=_stored_message_count(payload),
+                    message_count=total,
+                    user_count=user_count,
+                    agent_count=agent_count,
                     updated_at=get_local_now(),
                 )
             )
