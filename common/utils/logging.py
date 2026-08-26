@@ -185,7 +185,7 @@ class SafeStdout:
 def init_logging_base(
     *,
     log_name: str = "app",
-    log_level: str = "DEBUG",
+    log_level: str = "INFO",
     log_path: str = "./logs",
     get_request_id: Optional[Callable[[], Optional[str]]] = None,
     use_safe_stdout: bool = False,
@@ -265,7 +265,7 @@ def init_logging_base(
         "format": "{message}",
     }
 
-    logger.add(log_dir / f"{log_name}_debug.log", level="DEBUG", **params)
+    logger.add(log_dir / f"{log_name}_debug.log", level=log_level, **params)
     logger.add(log_dir / f"{log_name}_info.log", level="INFO", **params)
     logger.add(log_dir / f"{log_name}_error.log", level="ERROR", **params)
 

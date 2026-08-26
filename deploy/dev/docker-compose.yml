@@ -25,7 +25,7 @@ services:
       SAGE_WEB_BASE_PATH: ${SAGE_WEB_BASE_PATH:-/sage}
       SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL:-http://sage-jaeger:4317}
       SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30151/jaeger}
-      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-DEBUG}
+      SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-INFO}
       SAGE_SESSION_DIR: /app/sessions
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
     labels: *sage-observability-labels
