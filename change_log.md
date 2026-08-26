@@ -1,5 +1,9 @@
 # Change Log
 
+- **2026-08-26 15:35** 聊天启动并行查 provider/技能/子 Agent，并打 stage 耗时日志以降首包。
+
+- **2026-08-26 15:20** 会话表拆掉 messages JSON，只留条数；消息改从 session store 读取。
+
 - **2026-08-26 14:50** 修复历史列表首页慢查询：补覆盖索引与 message_count，避免扫巨大 messages JSON。
 
 - **2026-07-29 18:40** 复用已 completed 的 `*_sub_*` 时，watcher 仅在观察到本轮 RUNNING、新 request ID 或新持久化 revision 后接受终态；磁盘 fallback 通过本轮唯一标记隔离旧历史。

@@ -288,7 +288,7 @@ async def persist_session_state(session_id: str) -> None:
     messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
     dao = ConversationDao()
     if messages:
-        await dao.update_conversation_messages(session_id, messages)
+        await dao.update_conversation_counts(session_id, messages)
         logger.bind(session_id=session_id).info(
             f"会话状态已同步到 conversations 表，message_count={len(messages)}"
         )
@@ -369,7 +369,6 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
-    include_messages: bool = True,
 ) -> Tuple[List[Conversation], int]:
     dao = ConversationDao()
     return await dao.get_conversations_paginated(
@@ -379,7 +378,6 @@ async def get_conversations_paginated(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
-        include_messages=include_messages,
     )
 
 
@@ -397,11 +395,9 @@ def build_conversation_list_result(
     for conv in conversations:
         if include_message_counts:
             message_count = conv.get_message_count()
-            total_messages = message_count.get("user_count", 0) + message_count.get(
-                "agent_count", 0
-            )
             user_count = message_count.get("user_count", 0)
             agent_count = message_count.get("agent_count", 0)
+            total_messages = int(getattr(conv, "message_count", 0) or 0)
         else:
             total_messages = 0
             user_count = 0
@@ -628,7 +624,7 @@ def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:
                 return [message.to_dict() for message in raw_messages]
         except Exception as exc:
             logger.bind(session_id=session_id).warning(
-                f"读取 session 原始消息失败，回退数据库: {exc}"
+                f"读取 session 原始消息失败: {exc}"
             )
     return []
 
@@ -780,7 +776,6 @@ async def edit_last_user_message(
     await _get_stream_manager().stop_session(session_id)
 
     source_messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
-    source_messages = source_messages or list(conversation.messages or [])
     truncated_messages, last_user_message = _truncate_messages_after_last_user(
         source_messages,
         cleaned_content,
@@ -796,7 +791,7 @@ async def edit_last_user_message(
         or t("conversation.new_title", locale=get_request_locale())
     )
 
-    await dao.update_conversation_messages(session_id, truncated_messages)
+    await dao.update_conversation_counts(session_id, truncated_messages)
     await dao.update_title(
         session_id,
         title_source[:50] + "..." if len(title_source) > 50 else title_source,
@@ -856,7 +851,6 @@ async def get_rerun_conversation_payload(
         )
 
     source_messages = await asyncio.to_thread(_load_session_raw_messages, session_id)
-    source_messages = source_messages or list(conversation.messages or [])
     last_user_index = _find_last_user_message_index(source_messages)
     if last_user_index < 0:
         raise SageHTTPException(

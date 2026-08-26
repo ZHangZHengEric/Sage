@@ -129,7 +129,6 @@ async def build_list_conversations_response(
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
-        include_messages=include_message_counts,
     )
     return conversation_service.build_conversation_list_result(
         conversations=conversations,
