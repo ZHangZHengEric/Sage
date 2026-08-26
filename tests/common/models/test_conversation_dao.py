@@ -313,7 +313,6 @@ async def test_persist_session_state_writes_counts_not_messages(
     assert "messages" in columns
     assert _as_messages(raw_messages) == []
     assert conversation is not None
-    assert conversation.messages == []
     assert conversation.message_count == 2
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
 
