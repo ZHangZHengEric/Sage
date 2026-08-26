@@ -93,6 +93,35 @@ def sync_database_schema(sync_conn, Base):
         else:
             logger.debug(f"[DB] 表 '{table_name}' 结构正常")
 
+    sync_missing_indexes(sync_conn, Base.metadata)
+
+
+def sync_missing_indexes(sync_conn, metadata) -> None:
+    """为已存在的表补齐 ORM 中声明、但库里还没有的索引。"""
+    inspector = inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+
+    for table_name, table in metadata.tables.items():
+        if table_name not in existing_tables:
+            continue
+
+        existing_names = {
+            idx.get("name")
+            for idx in inspector.get_indexes(table_name)
+            if idx.get("name")
+        }
+        for index in table.indexes:
+            if not index.name or index.name in existing_names:
+                continue
+            try:
+                logger.info(f"[DB] 创建缺失索引: {table_name}.{index.name}")
+                index.create(sync_conn)
+                existing_names.add(index.name)
+            except Exception as e:
+                logger.error(
+                    f"[DB] 无法创建索引 '{index.name}' on '{table_name}': {e}"
+                )
+
 
 def db_retry(max_retries: int = 3, delay: float = 1.0):
     def decorator(func):

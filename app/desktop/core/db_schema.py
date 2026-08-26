@@ -7,6 +7,7 @@ from importlib import import_module
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect, text
 
+from common.core.client.db import sync_missing_indexes
 from common.models.base import Base
 
 logger = logging.getLogger(__name__)
@@ -172,3 +173,5 @@ def sync_database_schema(sync_conn):
         if sync_conn.dialect.name == "sqlite" and unused_columns:
             logger.info(f"[DB] 检测到表 '{table_name}' 存在无用列: {unused_columns}")
             _drop_unused_sqlite_columns(sync_conn, table_name, unused_columns)
+
+    sync_missing_indexes(sync_conn, Base.metadata)

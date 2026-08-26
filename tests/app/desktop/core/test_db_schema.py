@@ -40,3 +40,33 @@ def test_sync_database_schema_adds_missing_and_drops_unused_sqlite_columns():
         columns = {col["name"] for col in inspect(conn).get_columns("agent_configs")}
         assert "is_default" in columns
         assert "legacy_prompt" not in columns
+
+
+def test_sync_database_schema_adds_conversation_list_indexes():
+    engine = create_engine("sqlite:///:memory:")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE conversations (
+                    session_id VARCHAR(255) PRIMARY KEY,
+                    user_id VARCHAR(255) NOT NULL,
+                    agent_id VARCHAR(255) NOT NULL,
+                    agent_name TEXT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    messages JSON NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        ensure_desktop_models_registered()
+        sync_database_schema(conn)
+        columns = {col["name"] for col in inspect(conn).get_columns("conversations")}
+        index_names = {idx["name"] for idx in inspect(conn).get_indexes("conversations")}
+
+    assert "message_count" in columns
+    assert "idx_conversations_updated_session" in index_names
+    assert "idx_conversations_user_updated_session" in index_names

@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-08-26 14:50** 修复历史列表首页慢查询：补覆盖索引与 message_count，避免扫巨大 messages JSON。
+
 - **2026-07-29 18:40** 复用已 completed 的 `*_sub_*` 时，watcher 仅在观察到本轮 RUNNING、新 request ID 或新持久化 revision 后接受终态；磁盘 fallback 通过本轮唯一标记隔离旧历史。
 
 - **2026-07-29 17:43** 委派流结果仅记录 batch 数量，不再无界保留完整子流 payload。

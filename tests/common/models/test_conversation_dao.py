@@ -115,6 +115,102 @@ async def test_conversation_list_can_skip_message_counts_without_loading_message
 
     assert total == 1
     assert "messages" not in conversations[0].__dict__
+    assert conversations[0].message_count == 2
     assert result["list"][0]["message_count"] == 0
     assert result["list"][0]["user_count"] == 0
     assert result["list"][0]["agent_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_conversation_pagination_orders_by_updated_at_without_loading_messages(
+    conversation_db,
+):
+    dao = ConversationDao()
+    for index in range(3):
+        await dao.save_conversation(
+            user_id="user-1",
+            session_id=f"session-{index}",
+            agent_id="agent-1",
+            agent_name="Agent One",
+            title=f"Chat {index}",
+            messages=[{"role": "user", "content": "x" * 2000}],
+        )
+
+    first_page, total = await dao.get_conversations_paginated(
+        user_id="user-1",
+        page=1,
+        page_size=2,
+        include_messages=False,
+    )
+    second_page, _ = await dao.get_conversations_paginated(
+        user_id="user-1",
+        page=2,
+        page_size=2,
+        include_messages=False,
+    )
+
+    assert total == 3
+    assert [item.session_id for item in first_page] == ["session-2", "session-1"]
+    assert [item.session_id for item in second_page] == ["session-0"]
+    assert all("messages" not in item.__dict__ for item in first_page + second_page)
+
+
+@pytest.mark.asyncio
+async def test_conversation_sort_by_messages_uses_stored_count(conversation_db):
+    dao = ConversationDao()
+    await dao.save_conversation(
+        user_id="user-1",
+        session_id="short",
+        agent_id="agent-1",
+        agent_name="Agent One",
+        title="Short",
+        messages=[{"role": "user", "content": "a"}],
+    )
+    await dao.save_conversation(
+        user_id="user-1",
+        session_id="long",
+        agent_id="agent-1",
+        agent_name="Agent One",
+        title="Long",
+        messages=[
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": "c"},
+        ],
+    )
+
+    conversations, total = await dao.get_conversations_paginated(
+        user_id="user-1",
+        sort_by="messages",
+        include_messages=False,
+    )
+
+    assert total == 2
+    assert [item.session_id for item in conversations] == ["long", "short"]
+    assert [item.message_count for item in conversations] == [3, 1]
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_messages_refreshes_message_count(conversation_db):
+    dao = ConversationDao()
+    await dao.save_conversation(
+        user_id="user-1",
+        session_id="session-1",
+        agent_id="agent-1",
+        agent_name="Agent One",
+        title="Chat",
+        messages=[],
+    )
+
+    updated = await dao.update_conversation_messages(
+        "session-1",
+        [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ],
+    )
+    conversation = await dao.get_by_session_id("session-1")
+
+    assert updated is True
+    assert conversation is not None
+    assert conversation.message_count == 2
