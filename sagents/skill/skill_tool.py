@@ -21,7 +21,7 @@ class SkillTool:
             }
         },
     )
-    def load_skill(self, skill_name: str, session_id: str = None) -> str:  # pyright: ignore[reportArgumentType]
+    async def load_skill(self, skill_name: str, session_id: str = None) -> str:  # pyright: ignore[reportArgumentType]
         """
         Load a skill into the current context.
         加载一个技能到当前上下文中。
@@ -55,8 +55,15 @@ class SkillTool:
         else:
             raise ValueError(tool_t("skill.error.manager_unavailable"))
 
-        # 检查技能是否存在
-        if skill_name not in skill_manager.skills:
+        # 懒加载：确保技能已落地到沙箱（首次调用会现拷），再读取其文件信息。
+        # 未落地的系统技能不占用启动时间，只有真正 load 的才拷进工作区。
+        ensure = getattr(skill_manager, "ensure_materialized", None)
+        if callable(ensure):
+            skill = await ensure(skill_name)
+        else:
+            # 兼容不支持懒加载的旧管理器
+            skill = skill_manager.skills.get(skill_name)
+        if skill is None:
             return tool_t(
                 "skill.error.not_found",
                 params={
@@ -64,9 +71,6 @@ class SkillTool:
                     "available": ", ".join(skill_manager.list_skills()),
                 },
             )
-
-        # 获取技能信息
-        skill = skill_manager.skills[skill_name]
 
         # 获取沙箱虚拟路径（通过统一接口）
         sandbox_virtual_path = "/sage-workspace"  # 默认值

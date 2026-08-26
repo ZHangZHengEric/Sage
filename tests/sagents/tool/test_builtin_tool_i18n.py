@@ -193,7 +193,10 @@ async def test_tool_language_context_is_isolated_between_concurrent_tasks():
     assert get_tool_language() == "en"
 
 
-def test_load_skill_localizes_sage_headings_but_preserves_skill_content(monkeypatch):
+@pytest.mark.asyncio
+async def test_load_skill_localizes_sage_headings_but_preserves_skill_content(
+    monkeypatch,
+):
     skill = SimpleNamespace(
         name="demo-skill",
         file_list="- SKILL.md\n- scripts/run.py",
@@ -213,7 +216,7 @@ def test_load_skill_localizes_sage_headings_but_preserves_skill_content(monkeypa
     )
 
     with tool_language("pt-BR"):
-        result = SkillTool().load_skill("demo-skill", session_id="session-1")
+        result = await SkillTool().load_skill("demo-skill", session_id="session-1")
 
     injected = context.system_context["active_skills"][0]["skill_content"]
     assert "Caminho da pasta do skill" in injected
