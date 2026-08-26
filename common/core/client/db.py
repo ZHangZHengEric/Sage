@@ -41,10 +41,11 @@ def _track_session_close_task(task: asyncio.Task) -> None:
 
 
 def migrate_legacy_conversation_messages_column(sync_conn) -> None:
-    """Backfill message_count from the old JSON column, then drop it.
+    """Leave leftover messages JSON unused.
 
-    Message bodies live in the session store. The conversations table only
-    keeps list metadata after this migration.
+    Startup must not UPDATE/DROP that column: both rewrite tens of thousands of
+    wide rows and can stall boot for minutes. Message bodies already live in
+    the session store; list queries no longer read this column.
     """
     inspector = inspect(sync_conn)
     if "conversations" not in inspector.get_table_names():
@@ -54,28 +55,9 @@ def migrate_legacy_conversation_messages_column(sync_conn) -> None:
     if "messages" not in columns:
         return
 
-    if "message_count" in columns:
-        length_expr = (
-            "JSON_LENGTH(messages)"
-            if sync_conn.dialect.name == "mysql"
-            else "json_array_length(messages)"
-        )
-        try:
-            sync_conn.execute(
-                text(
-                    "UPDATE conversations "
-                    f"SET message_count = COALESCE({length_expr}, message_count) "
-                    "WHERE messages IS NOT NULL"
-                )
-            )
-        except Exception as e:
-            logger.warning(f"[DB] 从 conversations.messages 回填 message_count 失败: {e}")
-
-    try:
-        sync_conn.execute(text("ALTER TABLE conversations DROP COLUMN messages"))
-        logger.info("[DB] 已删除 conversations.messages，消息改由 session store 提供")
-    except Exception as e:
-        logger.error(f"[DB] 无法删除 conversations.messages: {e}")
+    logger.info(
+        "[DB] conversations.messages 仍保留，启动时跳过回填和删列，避免全表重写"
+    )
 
 
 def sync_database_schema(sync_conn, Base):
@@ -191,6 +173,7 @@ def sync_missing_indexes(sync_conn, metadata) -> None:
                 logger.info(f"[DB] 创建缺失索引: {table_name}.{index.name}")
                 index.create(sync_conn)
                 existing_names.add(index.name)
+                logger.info(f"[DB] 索引创建完成: {table_name}.{index.name}")
             except Exception as e:
                 logger.error(
                     f"[DB] 无法创建索引 '{index.name}' on '{table_name}': {e}"

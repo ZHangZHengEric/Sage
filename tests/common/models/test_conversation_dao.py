@@ -302,7 +302,7 @@ async def test_persist_session_state_writes_counts_not_messages(
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
 
 
-def test_sync_database_schema_drops_messages_and_backfills_count():
+def test_sync_database_schema_keeps_legacy_messages_column_without_rewrite():
     from sqlalchemy import create_engine
 
     engine = create_engine("sqlite:///:memory:")
@@ -345,8 +345,10 @@ def test_sync_database_schema_drops_messages_and_backfills_count():
             )
         ).one()
 
-    assert "messages" not in columns
+    assert "messages" in columns
     assert "message_count" in columns
     assert "user_count" in columns
     assert "agent_count" in columns
-    assert row.message_count == 3
+    assert row.message_count == 0
+    assert row.user_count == 0
+    assert row.agent_count == 0

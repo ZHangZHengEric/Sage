@@ -5,6 +5,7 @@ from sqlalchemy import Column, Index, Integer, MetaData, String, Table, create_e
 from common.core.client import db
 from common.core.client.db import (
     drop_obsolete_conversation_indexes,
+    migrate_legacy_conversation_messages_column,
     sync_database_schema,
     sync_missing_indexes,
 )
@@ -83,11 +84,41 @@ def test_sync_database_schema_adds_conversation_list_indexes():
     assert "message_count" in columns
     assert "user_count" in columns
     assert "agent_count" in columns
-    assert "messages" not in columns
+    assert "messages" in columns
     assert "idx_conversations_updated_session" in index_names
     assert "idx_conversations_user_updated_session" in index_names
     assert "idx_conversations_user_msgcount_session" not in index_names
     assert "idx_conversations_title_session" not in index_names
+
+
+def test_legacy_messages_column_is_left_in_place_at_startup():
+    engine = create_engine("sqlite:///:memory:")
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE conversations (
+                    session_id VARCHAR(255) PRIMARY KEY,
+                    user_id VARCHAR(255) NOT NULL,
+                    messages JSON NOT NULL,
+                    message_count INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO conversations (session_id, user_id, messages, message_count) "
+                "VALUES ('s1', 'u1', json('[]'), 0)"
+            )
+        )
+        migrate_legacy_conversation_messages_column(conn)
+        columns = {col["name"] for col in inspect(conn).get_columns("conversations")}
+        count = conn.execute(text("SELECT message_count FROM conversations WHERE session_id = 's1'")).scalar()
+
+    assert "messages" in columns
+    assert count == 0
 
 
 def test_drop_obsolete_conversation_indexes():
