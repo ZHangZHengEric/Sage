@@ -1,6 +1,9 @@
 import logging
+import sys
 
-from common.utils.logging import _should_suppress_log_record
+from loguru import logger
+
+from common.utils.logging import _should_suppress_log_record, init_logging_base
 
 
 def _uvicorn_access_record(path: str, status: int = 200) -> logging.LogRecord:
@@ -54,3 +57,21 @@ def test_keeps_internal_task_error_uvicorn_access_log():
 
 def test_keeps_regular_uvicorn_access_log():
     assert not _should_suppress_log_record(_uvicorn_access_record("/api/chat"))
+
+
+def test_info_level_filters_debug_from_file_sink(tmp_path):
+    init_logging_base(
+        log_name="test-app",
+        log_level="INFO",
+        log_path=str(tmp_path),
+    )
+    try:
+        logger.debug("debug-must-not-be-written")
+        logger.info("info-must-be-written")
+
+        contents = (tmp_path / "test-app_debug.log").read_text(encoding="utf-8")
+        assert "debug-must-not-be-written" not in contents
+        assert "info-must-be-written" in contents
+    finally:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
