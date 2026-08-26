@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-08-26 16:18** 会话列表只保留 user/updated_at 两条覆盖索引，启动时清理多余索引。
+
 - **2026-08-26 15:35** 聊天启动并行查 provider/技能/子 Agent，并打 stage 耗时日志以降首包。
 
 - **2026-08-26 15:20** 会话表拆掉 messages JSON，只留条数；消息改从 session store 读取。

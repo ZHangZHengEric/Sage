@@ -8,6 +8,7 @@ from importlib import import_module
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, inspect, text
 
 from common.core.client.db import (
+    drop_obsolete_conversation_indexes,
     migrate_legacy_conversation_messages_column,
     sync_missing_indexes,
 )
@@ -181,3 +182,4 @@ def sync_database_schema(sync_conn):
 
     migrate_legacy_conversation_messages_column(sync_conn)
     sync_missing_indexes(sync_conn, Base.metadata)
+    drop_obsolete_conversation_indexes(sync_conn)
