@@ -8,6 +8,7 @@
 保证 Agent 工作区里手动改过的 SKILL.md 不会被无脑覆盖。
 """
 
+import asyncio
 import os
 from typing import Any, Dict, List, Optional
 import yaml
@@ -34,7 +35,14 @@ class SandboxSkillManager:
         """
         self.sandbox = sandbox
         self.skills_dir = skills_dir
+        # 已落地：已拷进沙箱并从沙箱 SKILL.md 完整加载的技能（含沙箱路径/文件树）。
         self._skills_cache: Dict[str, SkillSchema] = {}
+        # 已知：宿主声明可用、但尚未落地到沙箱的技能元数据（name/description，
+        # path 为宿主源路径，供 load 时按需拷贝）。用于向模型广告全部技能，
+        # 而不必在会话初始化时把每个技能都拷进（PVC 场景下很慢的）用户工作区。
+        self._known_skills: Dict[str, SkillSchema] = {}
+        # 每技能落地锁：串行化"同一技能"的按需拷贝，避免并行 load_skill 竞态。
+        self._materialize_locks: Dict[str, asyncio.Lock] = {}
         self._cache_valid = False
 
     async def _read_file(self, path: str) -> str:
@@ -155,21 +163,27 @@ class SandboxSkillManager:
 
         return "\n".join(filter(None, lines))
 
+    def _merged_skills(self) -> Dict[str, SkillSchema]:
+        """已知 ∪ 已落地，已落地（沙箱视图）优先。"""
+        merged = dict(self._known_skills)
+        merged.update(self._skills_cache)
+        return merged
+
     def list_skills(self) -> List[str]:
-        """列出所有技能名称"""
-        return list(self._skills_cache.keys())
+        """列出所有技能名称（已落地 + 已知未落地）"""
+        return sorted(set(self._known_skills) | set(self._skills_cache))
 
     def get_skill(self, name: str) -> Optional[SkillSchema]:
-        """获取技能"""
-        return self._skills_cache.get(name)
+        """获取技能（已落地优先，否则返回已知元数据）"""
+        return self._skills_cache.get(name) or self._known_skills.get(name)
 
     @property
     def skills(self) -> Dict[str, SkillSchema]:
-        """获取所有技能字典"""
-        return self._skills_cache.copy()
+        """获取所有技能字典（已知 ∪ 已落地）"""
+        return self._merged_skills()
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
-        skill = self._skills_cache.get(name)
+        skill = self._skills_cache.get(name) or self._known_skills.get(name)
         if not skill:
             return None
         return {
@@ -193,87 +207,131 @@ class SandboxSkillManager:
         return lines
 
     def list_skill_info(self) -> List[SkillSchema]:
-        """与 SkillManager.list_skill_info 对齐，供 system prompt 等使用。"""
-        return list(self._skills_cache.values())
+        """与 SkillManager.list_skill_info 对齐，供 system prompt 等使用。
+        返回已知 ∪ 已落地（已落地优先），保证广告到全部可用技能。"""
+        return list(self._merged_skills().values())
 
     async def sync_from_host(self, host_skill_manager) -> None:
         """
-        按宿主 SkillProxy / SkillManager 给出的技能名称对齐沙箱内技能：
+        按宿主 SkillProxy / SkillManager 给出的可用技能对齐沙箱技能视图（懒加载）。
 
-        1. 沙箱 ``skills_dir/<name>/SKILL.md`` 已存在 → 直接以沙箱内容为准加载
-           （保留用户在 Agent workspace 里的手改）。
-        2. 沙箱里没有该技能目录，但宿主有对应 SkillSchema.path → 一次性
-           ``copy_from_host`` 拷到沙箱后再加载（按需补齐，不覆盖已有）。
-        3. 宿主也没有 → 记 warning 跳过。
+        会话初始化时**不**再把技能文件逐个拷进沙箱，只做两件轻量的事：
+
+        1. 登记全部"已知技能"元数据（name/description + 宿主源路径），供向模型
+           广告可用技能；真正把技能拷进 ``<sandbox>/skills/<name>/`` 的动作推迟到
+           ``ensure_materialized``（由 load_skill 在需要读取技能文件时触发）。
+        2. 加载沙箱里**已存在**（用户在 Agent workspace 手动加/改过）的技能，
+           使其优先生效、且手改不被覆盖。
+
+        这样新用户（尤其挂载 PVC 的远端沙箱）不必在启动时逐个拷贝并索引全部
+        系统技能——那是慢的根因；只有真正被 load 的技能才落地到工作区。
 
         Args:
             host_skill_manager: 宿主侧 SkillManager / SkillProxy
         """
         self._skills_cache.clear()
+        self._known_skills.clear()
         allowed_names = list(host_skill_manager.list_skills())
         if not allowed_names:
             logger.debug("沙箱技能：宿主未声明可用技能，跳过加载")
             return
 
-        # 沙箱根目录不存在时主动建一次（首次会话场景）
-        if not await self._file_exists(self.skills_dir):
-            try:
+        host_skills = getattr(host_skill_manager, "skills", {}) or {}
+
+        # 1) 登记"已知技能"元数据（不拷文件）
+        for skill_name in allowed_names:
+            host_skill = host_skills.get(skill_name)
+            if host_skill is not None:
+                self._known_skills[skill_name] = host_skill
+            else:
+                logger.warning(f"宿主未提供技能 '{skill_name}' 的元数据，跳过")
+
+        # 2) 加载沙箱内已存在的技能（用户手改优先，不覆盖）
+        if await self._file_exists(self.skills_dir):
+            for skill_name in allowed_names:
+                skill_path = os.path.join(self.skills_dir, skill_name)
+                skill_md_path = os.path.join(skill_path, "SKILL.md")
+                if await self._file_exists(skill_md_path):
+                    skill = await self._load_skill_from_dir(skill_path)
+                    if skill:
+                        self._skills_cache[skill_name] = skill
+                    else:
+                        logger.warning(
+                            f"沙箱已存在 SKILL.md 但解析失败，保留现状: {skill_md_path}"
+                        )
+
+        logger.debug(
+            f"沙箱技能视图就绪：已知 {len(self._known_skills)} 个，"
+            f"已落地 {list(self._skills_cache.keys())}"
+        )
+
+    async def ensure_materialized(self, skill_name: str) -> Optional[SkillSchema]:
+        """确保技能已落地到沙箱，并返回其（沙箱内的）SkillSchema。
+
+        懒加载的落地点，由 load_skill 在真正需要读取技能文件时调用：
+
+        - 已落地 → 直接返回缓存；
+        - 已知但未落地 → 现在从宿主源路径 ``copy_from_host`` 到
+          ``<sandbox>/skills/<name>/``，再从沙箱加载、缓存后返回；
+        - 未知 → 返回 None。
+        """
+        existing = self._skills_cache.get(skill_name)
+        if existing is not None:
+            return existing
+
+        known = self._known_skills.get(skill_name)
+        if known is None:
+            return None
+
+        host_path = getattr(known, "path", None)
+        if not host_path or not os.path.isdir(host_path):
+            logger.warning(
+                f"技能 '{skill_name}' 无有效宿主源路径，无法落地: {host_path}"
+            )
+            return None
+
+        # 串行化"同一技能"的落地：并行 load_skill 可能对同一目录并发拷贝
+        # （local 的 copy 会先 rmtree 目标），必须避免竞态。dict.setdefault 在
+        # 事件循环里不含 await，可原子地为每个技能创建一把锁。
+        lock = self._materialize_locks.setdefault(skill_name, asyncio.Lock())
+        async with lock:
+            # 双检：等锁期间可能已被其它协程落地
+            existing = self._skills_cache.get(skill_name)
+            if existing is not None:
+                return existing
+
+            # 沙箱根目录按需建一次
+            if not await self._file_exists(self.skills_dir):
                 ensure_dir = getattr(self.sandbox, "ensure_directory", None)
                 if callable(ensure_dir):
                     await ensure_dir(self.skills_dir)  # pyright: ignore[reportGeneralTypeIssues]
-                    logger.info(f"沙箱技能目录已创建: {self.skills_dir}")
                 else:
                     logger.warning(
                         f"沙箱技能目录不存在且无法创建（缺少 ensure_directory）: {self.skills_dir}"
                     )
-                    return
-            except Exception as e:
-                logger.warning(f"沙箱技能目录创建失败 {self.skills_dir}: {e}")
-                return
+                    return None
 
-        host_skills = getattr(host_skill_manager, "skills", {}) or {}
-
-        for skill_name in allowed_names:
             skill_path = os.path.join(self.skills_dir, skill_name)
             skill_md_path = os.path.join(skill_path, "SKILL.md")
-
-            # 1) 沙箱已存在 → 直接加载，不动手
-            if await self._file_exists(skill_md_path):
-                skill = await self._load_skill_from_dir(skill_path)
-                if skill:
-                    self._skills_cache[skill_name] = skill
-                    continue
-                # SKILL.md 存在但解析失败：不再覆盖，只记 warning
+            try:
+                # 各 provider 返回值不统一，用 SKILL.md 是否落地作为最终判定依据。
+                await self.sandbox.copy_from_host(host_path, skill_path)
+            except Exception as e:
                 logger.warning(
-                    f"沙箱已存在 SKILL.md 但解析失败，保留现状: {skill_md_path}"
+                    f"技能按需落地失败 {skill_name}: {host_path} -> {skill_path}: {e}"
                 )
-                continue
+                return None
 
-            # 2) 沙箱缺失 → 尝试从宿主 SkillSchema.path 一次性拷贝
-            host_skill = host_skills.get(skill_name)
-            host_path = getattr(host_skill, "path", None) if host_skill else None
-            if host_path and os.path.isdir(host_path):
-                try:
-                    # 各 provider 返回值不统一（local/remote 返回 bool，passthrough
-                    # 不返回），用 SKILL.md 是否落地作为最终判定依据。
-                    await self.sandbox.copy_from_host(host_path, skill_path)
-                except Exception as e:
-                    logger.warning(
-                        f"沙箱补齐技能失败 {skill_name}: {host_path} -> {skill_path}: {e}"
-                    )
-                    continue
-                if not await self._file_exists(skill_md_path):
-                    logger.warning(f"沙箱补齐后未发现 SKILL.md: {skill_md_path}")
-                    continue
-                logger.info(f"沙箱技能补齐: {skill_name} ({host_path} -> {skill_path})")
-                skill = await self._load_skill_from_dir(skill_path)
-                if skill:
-                    self._skills_cache[skill_name] = skill
-                else:
-                    logger.warning(f"沙箱技能补齐后仍无法加载 SKILL.md: {skill_path}")
-                continue
+            if not await self._file_exists(skill_md_path):
+                logger.warning(f"技能落地后未发现 SKILL.md: {skill_md_path}")
+                return None
 
-            # 3) 宿主也没有该技能
-            logger.warning(f"沙箱与宿主均未提供技能 '{skill_name}'，跳过")
-
-        logger.debug(f"沙箱技能已就绪: {list(self._skills_cache.keys())}")
+            skill = await self._load_skill_from_dir(skill_path)
+            if skill:
+                self._skills_cache[skill_name] = skill
+                logger.info(
+                    f"技能按需落地: {skill_name} ({host_path} -> {skill_path})"
+                )
+            else:
+                logger.warning(f"技能落地后仍无法加载 SKILL.md: {skill_path}")
+            return skill
