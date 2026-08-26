@@ -1,5 +1,9 @@
 # Change Log
 
+- **2026-08-26 19:21** conversations 重新带上 messages 字段，新建会话固定写入空数组 []，避免 MySQL NOT NULL 插入失败。
+
+- **2026-08-26 19:15** 启动不再预加载飞书/钉钉 SDK；工具发现跳过 providers，避免冷启动卡数分钟。
+
 - **2026-08-26 18:52** 流式/历史出参恢复 tool 结果为对象；入账和入模仍把 dict 收成 string，避免续聊 400。
 
 - **2026-08-26 16:25** 启动不再回填或删除 conversations.messages，避免几万条 JSON 全表重写卡住启动。

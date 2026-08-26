@@ -476,12 +476,15 @@ class ToolManager:
         )
         import importlib
 
-        # 遍历 .py 文件
+        # 遍历 .py 文件。providers/ 是通道实现，不是 @sage_mcp_tool 入口；
+        # 启动时 import 会把 lark-oapi / dingtalk-stream 整包拉起来，冷启动可卡数分钟。
         for py_file in package_path.rglob("*.py"):
             if py_file.name.startswith(("test_", "__")):
                 continue
             # 相对路径 + 模块名
             rel_parts = py_file.relative_to(package_path).with_suffix("").parts
+            if "providers" in rel_parts:
+                continue
             module_name = ".".join([full_package_name, *rel_parts])
             try:
                 importlib.import_module(module_name)
