@@ -1,5 +1,7 @@
 # Change Log
 
+- **2026-08-26 16:25** 启动不再回填或删除 conversations.messages，避免几万条 JSON 全表重写卡住启动。
+
 - **2026-08-26 16:18** 会话列表只保留 user/updated_at 两条覆盖索引，启动时清理多余索引。
 
 - **2026-08-26 15:35** 聊天启动并行查 provider/技能/子 Agent，并打 stage 耗时日志以降首包。
