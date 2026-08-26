@@ -23,7 +23,7 @@ def test_clean_content_preserves_assistant_content_with_reasoning_and_tool_calls
     assert cleaned is not original
 
 
-def test_clean_content_returns_tool_content_as_object():
+def test_clean_content_keeps_tool_content_as_json_string():
     original = {
         "role": "tool",
         "content": json.dumps(
@@ -43,14 +43,15 @@ def test_clean_content_returns_tool_content_as_object():
     cleaned = ContentProcessor.clean_content(source)
 
     assert source == original
-    assert cleaned["content"] == {
+    assert isinstance(cleaned["content"], str)
+    assert json.loads(cleaned["content"]) == {
         "status": "success",
         "query": "kitten",
         "results": [],
     }
 
 
-def test_clean_content_keeps_already_dict_tool_content():
+def test_clean_content_stringifies_already_dict_tool_content():
     cleaned = ContentProcessor.clean_content(
         {
             "role": "tool",
@@ -59,4 +60,5 @@ def test_clean_content_keeps_already_dict_tool_content():
         }
     )
 
-    assert cleaned["content"] == {"status": "success", "summary": "ok"}
+    assert isinstance(cleaned["content"], str)
+    assert json.loads(cleaned["content"]) == {"status": "success", "summary": "ok"}
