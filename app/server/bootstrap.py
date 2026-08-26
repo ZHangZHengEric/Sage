@@ -382,6 +382,7 @@ async def shutdown_clients():
 async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from common.models.base import Base
+    from common.models.conversation import Conversation  # noqa: F401
     from common.models.llm_provider import LLMProvider, LLMProviderDao
     from common.models.token_usage import TokenUsage  # noqa: F401
     from common.models.system import SystemInfoDao
