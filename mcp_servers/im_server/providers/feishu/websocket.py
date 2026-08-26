@@ -1,14 +1,23 @@
 """Feishu WebSocket client using official lark-oapi SDK."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
-from typing import Optional, Callable, Dict, Any
-
-import lark_oapi as lark  # pyright: ignore[reportMissingImports]
-from lark_oapi.api.im.v1 import P2ImMessageReceiveV1  # pyright: ignore[reportMissingImports]
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger("FeishuWebSocket")
+
+
+def _load_lark_sdk():
+    """Import lark-oapi only when a Feishu channel is actually started."""
+    import lark_oapi as lark  # pyright: ignore[reportMissingImports]
+    from lark_oapi.api.im.v1 import (  # pyright: ignore[reportMissingImports]
+        P2ImMessageReceiveV1,
+    )
+
+    return lark, P2ImMessageReceiveV1
 
 
 class FeishuWebSocketClient:
@@ -31,10 +40,10 @@ class FeishuWebSocketClient:
         self.app_id = app_id
         self.app_secret = app_secret
         self.message_handler = message_handler
-        self.client: Optional[lark.ws.Client] = None
+        self.client: Any = None
         self._thread: Optional[threading.Thread] = None
 
-    def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
+    def _handle_message(self, data: Any) -> None:
         """Handle incoming message event."""
         try:
             import json
@@ -114,6 +123,8 @@ class FeishuWebSocketClient:
             """Run client with its own event loop."""
             import asyncio
 
+            lark, _ = _load_lark_sdk()
+
             # CRITICAL: 确保线程有干净的事件循环
             # 清除任何已存在的事件循环状态
             try:
@@ -146,7 +157,7 @@ class FeishuWebSocketClient:
 
             # Start client - SDK will use the event loop we just created
             try:
-                self.client.start()  # pyright: ignore[reportOptionalMemberAccess]
+                self.client.start()
             except RuntimeError as e:
                 if "already running" in str(e):
                     logger.warning(f"[Feishu] Event loop issue (SDK will retry): {e}")

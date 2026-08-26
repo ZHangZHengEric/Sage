@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,10 @@ async def conversation_db():
 
 def _conversation_columns(sync_conn):
     return {col["name"] for col in inspect(sync_conn).get_columns("conversations")}
+
+
+def _as_messages(value):
+    return json.loads(value) if isinstance(value, str) else value
 
 
 @pytest.mark.asyncio
@@ -81,7 +86,7 @@ async def test_conversation_search_still_matches_title(conversation_db):
 
 
 @pytest.mark.asyncio
-async def test_conversation_table_does_not_store_messages(conversation_db):
+async def test_save_conversation_inserts_empty_messages(conversation_db):
     dao = ConversationDao()
     await dao.save_conversation(
         user_id="user-1",
@@ -104,8 +109,8 @@ async def test_conversation_table_does_not_store_messages(conversation_db):
         row = (
             await conn.execute(
                 text(
-                    "SELECT message_count, user_count, agent_count FROM conversations "
-                    "WHERE session_id = :session_id"
+                    "SELECT messages, message_count, user_count, agent_count "
+                    "FROM conversations WHERE session_id = :session_id"
                 ),
                 {"session_id": "session_with_counts"},
             )
@@ -113,10 +118,12 @@ async def test_conversation_table_does_not_store_messages(conversation_db):
 
     conversation = await dao.get_by_session_id("session_with_counts")
 
-    assert "messages" not in columns
-    assert "messages" not in Conversation.__table__.columns
-    assert row == (3, 1, 1)
+    assert "messages" in columns
+    assert "messages" in Conversation.__table__.columns
+    assert _as_messages(row.messages) == []
+    assert row[1:] == (3, 1, 1)
     assert conversation is not None
+    assert conversation.messages == []
     assert conversation.message_count == 3
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
 
@@ -295,9 +302,19 @@ async def test_persist_session_state_writes_counts_not_messages(
 
     async with conversation_db._engine.begin() as conn:
         columns = await conn.run_sync(_conversation_columns)
+        raw_messages = (
+            await conn.execute(
+                text(
+                    "SELECT messages FROM conversations WHERE session_id = :session_id"
+                ),
+                {"session_id": "session-1"},
+            )
+        ).scalar()
 
-    assert "messages" not in columns
+    assert "messages" in columns
+    assert _as_messages(raw_messages) == []
     assert conversation is not None
+    assert conversation.messages == []
     assert conversation.message_count == 2
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
 

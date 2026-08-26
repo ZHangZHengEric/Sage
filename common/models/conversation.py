@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Index, Integer, String, Text, func, or_, select, update
+from sqlalchemy import JSON, Index, Integer, String, Text, func, or_, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from common.models.base import Base, BaseDao, get_local_now
@@ -44,6 +44,9 @@ class Conversation(Base):
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    messages: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, deferred=True
+    )
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     user_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -70,6 +73,7 @@ class Conversation(Base):
         self.agent_id = agent_id
         self.agent_name = agent_name
         self.title = title
+        self.messages = []
         self.message_count = int(message_count or 0)
         self.user_count = int(user_count or 0)
         self.agent_count = int(agent_count or 0)
