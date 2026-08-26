@@ -7,6 +7,7 @@ import pytest
 from sagents.context.session_context import SessionContext
 from sagents.utils.sandbox.environment import (
     DESKTOP_PROCESS_MARKER,
+    SERVER_PLAYWRIGHT_BROWSERS_PATH,
     SERVER_PROCESS_MARKER,
     build_agent_environment,
 )
@@ -35,6 +36,19 @@ def test_server_agent_environment_uses_allowlist(tmp_path):
     assert env["HOME"] == str(tmp_path)
     assert "SAGE_DEFAULT_LLM_API_KEY" not in env
     assert "SAGE_MYSQL_PASSWORD" not in env
+
+
+def test_server_agent_environment_uses_fixed_global_playwright_browsers(tmp_path):
+    env = build_agent_environment(
+        {"PLAYWRIGHT_BROWSERS_PATH": str(tmp_path / "agent-cache")},
+        home_dir=str(tmp_path),
+        parent_env={
+            SERVER_PROCESS_MARKER: "1",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+        },
+    )
+
+    assert env["PLAYWRIGHT_BROWSERS_PATH"] == SERVER_PLAYWRIGHT_BROWSERS_PATH
 
 
 def test_explicit_tool_environment_is_forwarded(tmp_path):
@@ -186,6 +200,132 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
     assert captured["env"]["PATH"] != str(workspace)
     assert "LD_PRELOAD" not in captured["env"]
     assert "LD_PRELOAD" in captured["command"]
+
+
+async def test_server_bwrap_removes_input_and_output_payloads(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    runtime = workspace / ".sandbox"
+    workspace.mkdir()
+    runtime.mkdir()
+    isolation = BwrapIsolation(
+        venv_dir=str(workspace / ".venv"),
+        sandbox_agent_workspace=str(workspace),
+        sandbox_runtime_dir=str(runtime),
+        cleanup_output_payload=True,
+    )
+    removed = []
+
+    monkeypatch.setattr(
+        bwrap_module,
+        "_prepare_payload_files_sync",
+        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_load_pickle_output_sync",
+        lambda path: {"status": "success", "result": "ok"},
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_remove_file_if_exists_sync",
+        removed.append,
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "run_with_streaming_stdout",
+        lambda *args, **kwargs: (0, "", ""),
+    )
+
+    result = await isolation.execute(
+        {"mode": "shell", "command": "true", "env_vars": {}},
+        cwd=str(workspace),
+    )
+
+    assert result == "ok"
+    assert removed == ["input.pkl", "output.pkl"]
+
+
+async def test_default_bwrap_preserves_output_payload_for_non_server_callers(
+    monkeypatch, tmp_path
+):
+    workspace = tmp_path / "workspace"
+    runtime = workspace / ".sandbox"
+    workspace.mkdir()
+    runtime.mkdir()
+    isolation = BwrapIsolation(
+        venv_dir=str(workspace / ".venv"),
+        sandbox_agent_workspace=str(workspace),
+        sandbox_runtime_dir=str(runtime),
+    )
+    removed = []
+
+    monkeypatch.setattr(
+        bwrap_module,
+        "_prepare_payload_files_sync",
+        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_load_pickle_output_sync",
+        lambda path: {"status": "success", "result": "ok"},
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_remove_file_if_exists_sync",
+        removed.append,
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "run_with_streaming_stdout",
+        lambda *args, **kwargs: (0, "", ""),
+    )
+
+    await isolation.execute(
+        {"mode": "shell", "command": "true", "env_vars": {}},
+        cwd=str(workspace),
+    )
+
+    assert removed == ["input.pkl"]
+
+
+async def test_server_bwrap_removes_output_payload_after_execution_failure(
+    monkeypatch, tmp_path
+):
+    workspace = tmp_path / "workspace"
+    runtime = workspace / ".sandbox"
+    workspace.mkdir()
+    runtime.mkdir()
+    isolation = BwrapIsolation(
+        venv_dir=str(workspace / ".venv"),
+        sandbox_agent_workspace=str(workspace),
+        sandbox_runtime_dir=str(runtime),
+        cleanup_output_payload=True,
+    )
+    removed = []
+
+    monkeypatch.setattr(
+        bwrap_module,
+        "_prepare_payload_files_sync",
+        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_remove_file_if_exists_sync",
+        removed.append,
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "run_with_streaming_stdout",
+        lambda *args, **kwargs: (1, "", "failed"),
+    )
+
+    with pytest.raises(Exception, match="Bwrap execution failed"):
+        await isolation.execute(
+            {"mode": "shell", "command": "false", "env_vars": {}},
+            cwd=str(workspace),
+        )
+
+    assert removed == ["input.pkl", "output.pkl"]
 
 
 async def test_server_rejects_passthrough_mode(monkeypatch, tmp_path):

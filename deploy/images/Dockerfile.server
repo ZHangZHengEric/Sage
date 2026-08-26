@@ -3,6 +3,7 @@ FROM docker.m.daocloud.io/python:3.11-slim-trixie
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
+    PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright \
     PIP_CACHE_DIR=/root/.cache/pip \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     npm_config_registry=https://registry.npmmirror.com
@@ -48,6 +49,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Server-only immutable browser runtime. Bubblewrap exposes /usr read-only, so
+# every Agent reuses these files instead of downloading into its workspace HOME.
+RUN npm install -g playwright@1.58.0 \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
+
 # -------------------------
 # pip 国内源
 # -------------------------
@@ -68,6 +75,7 @@ RUN pip install --no-cache-dir \
     elasticsearch==8.19.0 \
     "minio>=7.2.0" \
     "apscheduler>=3.10.4" \
+    "uv==0.12.5" \
     opensandbox \
     opensandbox-code-interpreter
 

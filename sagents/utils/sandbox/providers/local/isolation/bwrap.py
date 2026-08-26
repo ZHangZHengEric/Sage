@@ -35,6 +35,7 @@ class BwrapIsolation:
         sandbox_runtime_dir: Optional[str] = None,
         volume_mounts: Optional[List[VolumeMount]] = None,
         limits: Optional[Dict[str, Any]] = None,
+        cleanup_output_payload: bool = False,
     ):
         self.venv_dir = venv_dir
         self.sandbox_agent_workspace = sandbox_agent_workspace
@@ -45,6 +46,7 @@ class BwrapIsolation:
         )
         self.volume_mounts = volume_mounts or []
         self.limits = limits or {}
+        self.cleanup_output_payload = cleanup_output_payload
 
     def _build_base_command(
         self,
@@ -166,6 +168,11 @@ class BwrapIsolation:
                 await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
             except Exception:
                 pass
+            if self.cleanup_output_payload:
+                try:
+                    await asyncio.to_thread(_remove_file_if_exists_sync, output_pkl)
+                except Exception:
+                    pass
 
     def execute_background(
         self, command: str, cwd: Optional[str] = None

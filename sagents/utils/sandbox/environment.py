@@ -44,6 +44,7 @@ AGENT_PARENT_ENV_ALLOWLIST = frozenset(
 
 DESKTOP_PROCESS_MARKER = "SAGE_INTERNAL_DESKTOP_PROCESS"
 SERVER_PROCESS_MARKER = "SAGE_INTERNAL_SERVER_PROCESS"
+SERVER_PLAYWRIGHT_BROWSERS_PATH = "/usr/local/share/ms-playwright"
 
 
 def is_desktop_process(
@@ -96,5 +97,10 @@ def build_agent_environment(
 
     if extra_env:
         env.update({str(name): str(value) for name, value in extra_env.items()})
+
+    # Sage Server owns an immutable browser runtime. Agent-provided variables
+    # must not redirect Playwright back into a per-workspace download cache.
+    if is_server_process(source):
+        env["PLAYWRIGHT_BROWSERS_PATH"] = SERVER_PLAYWRIGHT_BROWSERS_PATH
 
     return env
