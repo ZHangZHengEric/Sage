@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.environment import is_server_process
 from sagents.utils.common_utils import (
     get_system_python_path,
     resolve_python_venv_dir,
@@ -208,6 +209,8 @@ class Sandbox:
 
     def _ensure_uv_in_venv(self, venv_dir: str):
         """在 venv 内预装 uv（失败不阻塞）。"""
+        if is_server_process():
+            return
         if not venv_dir:
             return
         venv_python = (
@@ -277,6 +280,7 @@ class Sandbox:
                 sandbox_agent_workspace=self.sandbox_agent_workspace,
                 sandbox_runtime_dir=self.sandbox_dir,
                 limits=self.limits,
+                cleanup_output_payload=is_server_process(),
             )
         else:
             logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")

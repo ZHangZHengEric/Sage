@@ -214,6 +214,7 @@ class LocalSandboxProvider(ISandboxHandle):
                         "cpu_time": self._cpu_time_limit,
                         "memory": self._memory_limit_mb * 1024 * 1024,
                     },
+                    cleanup_output_payload=is_server_process(),
                 )
 
     def _get_venv_python(self) -> Optional[str]:
@@ -332,6 +333,11 @@ class LocalSandboxProvider(ISandboxHandle):
     async def _ensure_uv_in_venv(self):
         """在 venv 中安装 uv，便于后续按需使用。"""
         import subprocess
+
+        # Server images provide a pinned global uv under /usr/local/bin. Keep
+        # workspace-local installation for Desktop and CLI compatibility.
+        if is_server_process():
+            return
 
         venv_python = self._get_venv_python()
         if not venv_python:
