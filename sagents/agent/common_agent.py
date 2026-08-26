@@ -8,6 +8,7 @@ from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
+from sagents.llm.minimax import serialize_reasoning_details
 
 # 通用可自定义agent
 
@@ -149,6 +150,9 @@ class CommonAgent(AgentBase):
             # print(chunk)
             if len(chunk.choices) == 0:
                 continue
+            reasoning_details = serialize_reasoning_details(
+                getattr(chunk.choices[0].delta, "reasoning_details", None)
+            )
             if chunk.choices[0].delta.tool_calls:
                 self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)  # pyright: ignore[reportArgumentType]
                 # 更新last_tool_call_id
@@ -164,6 +168,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             tool_calls=chunk.choices[0].delta.tool_calls,
+                            reasoning_details=reasoning_details,
                             message_id=response_message_id,
                             message_type=MessageType.TOOL_CALL.value,
                         )
@@ -181,6 +186,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content=chunk.choices[0].delta.content,
+                            reasoning_details=reasoning_details,
                             message_id=response_message_id,
                             message_type=MessageType.DO_SUBTASK_RESULT.value,
                         )
@@ -196,6 +202,7 @@ class CommonAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             reasoning_content=chunk.choices[0].delta.reasoning_content,
+                            reasoning_details=reasoning_details,
                             message_id=response_message_id,
                             message_type=MessageType.REASONING_CONTENT.value,
                         )

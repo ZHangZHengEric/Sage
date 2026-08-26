@@ -92,9 +92,14 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                 "role",
                 "tool_calls",
             }:
-                message_extras[key] = merge_stream_value(
-                    message_extras.get(key), value
-                )
+                if key == "reasoning_details":
+                    # MiniMax emits cumulative structured snapshots; retain the
+                    # latest complete value instead of concatenating snapshots.
+                    message_extras[key] = deepcopy(value)
+                else:
+                    message_extras[key] = merge_stream_value(
+                        message_extras.get(key), value
+                    )
 
         for tc in delta.tool_calls or []:
             idx = tc.index

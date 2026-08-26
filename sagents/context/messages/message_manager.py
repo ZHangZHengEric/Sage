@@ -850,6 +850,14 @@ class MessageManager:
                     existing_message.reasoning_content or ""
                 ) + new_message.reasoning_content
 
+            if new_message.reasoning_details is not None:
+                # MiniMax streams cumulative reasoning snapshots. The latest
+                # structured value replaces the previous one; the normalized
+                # reasoning_content above remains incremental.
+                existing_message.reasoning_details = deepcopy(
+                    new_message.reasoning_details
+                )
+
             # reasoning/content/tool_calls are fields of one assistant response.
             # The first streamed chunk may be reasoning-only; once visible content
             # or tool calls arrive, keep the same message and promote its display
@@ -2400,6 +2408,7 @@ class MessageManager:
             "role": msg.role,
             "content": MessageManager._wrap_runtime_error_content_for_request(msg),
             "reasoning_content": msg.reasoning_content,
+            "reasoning_details": msg.reasoning_details,
             "tool_call_id": msg.tool_call_id,
             "tool_calls": tool_calls_dict,
         }
