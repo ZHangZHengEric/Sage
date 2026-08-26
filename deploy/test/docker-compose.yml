@@ -4,6 +4,7 @@ x-sage-observability-labels: &sage-observability-labels
 services:
   sage-server-test:
     restart: always
+    init: true
     build:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server

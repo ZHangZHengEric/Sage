@@ -278,9 +278,32 @@ class HostBackgroundRunner:
             return False
 
     def cleanup(self, task_id: str) -> None:
-        info = self._tasks.pop(task_id, None)
+        info = self._tasks.get(task_id)
         if not info:
             return
+        proc = info.get("process")
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    self.kill(task_id, force=False)
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        self.kill(task_id, force=True)
+                        proc.wait(timeout=2.0)
+                else:
+                    proc.wait(timeout=0)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"HostBackgroundRunner: cleanup 等待进程退出超时 "
+                    f"task_id={task_id} pid={proc.pid}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"HostBackgroundRunner: cleanup 回收进程失败 "
+                    f"task_id={task_id} error={exc}"
+                )
+        self._tasks.pop(task_id, None)
         try:
             info["log_fh"].close()
         except Exception:
