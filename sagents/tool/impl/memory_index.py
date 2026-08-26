@@ -144,8 +144,8 @@ class MemoryIndex:
         ".pl",
     ]
     DEFAULT_FILE_PROCESS_CONCURRENCY = 8
-    INDEX_SCHEMA_VERSION = 2
-    FTS_SCHEMA_VERSION = 3
+    INDEX_SCHEMA_VERSION = 3
+    FTS_SCHEMA_VERSION = 4
     DEFAULT_CHUNK_SIZE = 1200
     DEFAULT_CHUNK_OVERLAP = 200
     DEFAULT_FILE_SEARCH_LIMIT_MULTIPLIER = 4
@@ -178,11 +178,13 @@ class MemoryIndex:
         logger.debug(
             f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}"
         )
-        # In-memory data
+        # In-memory data. File bodies live only in SQLite FTS. The pickle sidecar
+        # contains lightweight metadata used by incremental scans.
         self.bm25 = None
-        self.documents: Dict[int, FileDocument] = {}
-        self.path_to_doc_ids: Dict[str, List[int]] = {}
-        self._next_doc_id = 0
+        self._file_metadata: Dict[str, Dict[str, Any]] = {}
+        self._pending_documents: Dict[str, List[FileDocument]] = {}
+        self._legacy_documents: Optional[Dict[int, FileDocument]] = None
+        self._legacy_path_to_doc_ids: Dict[str, List[int]] = {}
         self._path_token_cache: Dict[
             str, tuple[Set[str], Set[str], Set[str], Set[str]]
         ] = {}
@@ -204,16 +206,28 @@ class MemoryIndex:
         self._load_index()
         self._ensure_fts_schema()
         fts_has_documents = self._fts_has_documents()
-        if bool(self.documents) != fts_has_documents:
-            # Keep the sidecar metadata and the FTS store in sync. This also clears
-            # stale FTS rows left behind by older layouts or interrupted rebuilds.
-            self._rebuild_fts_index()
+        if self._legacy_documents:
+            if not fts_has_documents:
+                self._rebuild_fts_from_documents(
+                    self._legacy_documents, self._legacy_path_to_doc_ids
+                )
+                fts_has_documents = self._fts_has_documents()
+            self._legacy_documents = None
+            self._legacy_path_to_doc_ids = {}
+            self._save_index()
+
+        if bool(self._file_metadata) != fts_has_documents:
+            if fts_has_documents:
+                self._clear_fts_rows()
+            self._file_metadata = {}
+            self._dir_mtime_cache = {}
+            self._save_index()
 
         elapsed = time.time() - start_time
         logger.info(f"MemoryIndex: Initialized in {elapsed:.3f}s")
 
     def _load_index(self) -> bool:
-        """Load saved index from single pkl file"""
+        """Load lightweight metadata, migrating legacy content sidecars once."""
         start_time = time.time()
 
         try:
@@ -221,75 +235,92 @@ class MemoryIndex:
                 with open(self.index_path, "rb") as f:
                     data = pickle.load(f)
 
-                self.bm25 = None
-                self.documents = data.get("documents", {})
                 self._dir_mtime_cache = data.get("dir_mtime_cache", {})
                 schema_version = data.get("schema_version", 1)
-                if schema_version != self.INDEX_SCHEMA_VERSION:
+                if schema_version == self.INDEX_SCHEMA_VERSION:
+                    raw_files = data.get("files", {})
+                    self._file_metadata = {
+                        str(path): {
+                            "mtime": float(metadata.get("mtime", 0)),
+                            "size": int(metadata.get("size", 0)),
+                            "chunk_count": int(metadata.get("chunk_count", 0)),
+                        }
+                        for path, metadata in raw_files.items()
+                        if isinstance(metadata, dict)
+                    }
+                elif schema_version == 2:
+                    legacy_documents = data.get("documents", {})
+                    legacy_paths = data.get("path_to_doc_ids", {})
+                    self._legacy_documents = legacy_documents
+                    self._legacy_path_to_doc_ids = legacy_paths
+                    for path, doc_ids in legacy_paths.items():
+                        docs = [
+                            legacy_documents[doc_id]
+                            for doc_id in doc_ids
+                            if doc_id in legacy_documents
+                        ]
+                        if not docs:
+                            continue
+                        self._file_metadata[str(path)] = {
+                            "mtime": float(docs[0].mtime),
+                            "size": int(docs[0].size),
+                            "chunk_count": len(docs),
+                        }
+                    logger.info(
+                        f"MemoryIndex: Migrating {len(self._file_metadata)} files "
+                        "from legacy content sidecar"
+                    )
+                else:
                     logger.info(
                         f"MemoryIndex: Index schema {schema_version} != {self.INDEX_SCHEMA_VERSION}, clearing cached index for rebuild"
                     )
-                    self.bm25 = None
-                    self.documents = {}
-                    self.path_to_doc_ids = {}
-                    self._next_doc_id = 0
+                    self._file_metadata = {}
                     self._dir_mtime_cache = {}
                     return False
 
-                self.path_to_doc_ids = (
-                    data.get("path_to_doc_ids") or self._rebuild_path_to_doc_ids()
-                )
-
-                # Calculate next doc_id
-                if self.documents:
-                    self._next_doc_id = max(self.documents.keys()) + 1
-
                 elapsed = time.time() - start_time
                 logger.info(
-                    f"MemoryIndex: Loaded {len(self.documents)} documents from {self.index_path} in {elapsed:.3f}s"
+                    f"MemoryIndex: Loaded metadata for {len(self._file_metadata)} "
+                    f"files from {self.index_path} in {elapsed:.3f}s"
                 )
 
-                # If documents is empty but mtime cache exists, clear mtime cache to force rescan
-                if not self.documents and self._dir_mtime_cache:
+                if not self._file_metadata and self._dir_mtime_cache:
                     logger.info(
-                        "MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan"
+                        "MemoryIndex: File metadata empty but mtime cache exists, "
+                        "clearing mtime cache to force rescan"
                     )
                     self._dir_mtime_cache = {}
 
                 return True
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to load index: {e}")
-            self.bm25 = None
-            self.documents = {}
-            self.path_to_doc_ids = {}
-            self._next_doc_id = 0
+            self._file_metadata = {}
+            self._legacy_documents = None
+            self._legacy_path_to_doc_ids = {}
             self._dir_mtime_cache = {}
 
         return False
 
-    def _rebuild_path_to_doc_ids(self) -> Dict[str, List[int]]:
-        path_to_doc_ids: Dict[str, List[int]] = {}
-        for doc_id in sorted(self.documents.keys()):
-            doc = self.documents[doc_id]
-            path_to_doc_ids.setdefault(doc.path, []).append(doc_id)
-        return path_to_doc_ids
-
     def _save_index(self) -> bool:
-        """Save index to single pkl file"""
+        """Persist only incremental-scan metadata, never indexed file bodies."""
         start_time = time.time()
 
         try:
             data = {
                 "schema_version": self.INDEX_SCHEMA_VERSION,
-                "bm25": None,
-                "documents": self.documents,
-                "path_to_doc_ids": self.path_to_doc_ids,
+                "files": self._file_metadata,
                 "dir_mtime_cache": self._dir_mtime_cache,
-                "document_count": len(self.documents),
+                "document_count": sum(
+                    metadata["chunk_count"] for metadata in self._file_metadata.values()
+                ),
             }
 
-            with open(self.index_path, "wb") as f:
+            temporary_path = self.index_path.with_suffix(
+                self.index_path.suffix + ".tmp"
+            )
+            with open(temporary_path, "wb") as f:
                 pickle.dump(data, f)
+            os.replace(temporary_path, self.index_path)
 
             elapsed = time.time() - start_time
             logger.debug(
@@ -506,7 +537,6 @@ class MemoryIndex:
                 USING fts5(
                     path UNINDEXED,
                     search_text,
-                    content UNINDEXED,
                     tokenize='unicode61'
                 )
                 """
@@ -539,7 +569,7 @@ class MemoryIndex:
             return False
 
     def has_search_index(self) -> bool:
-        return bool(self.documents) and self._fts_has_documents()
+        return bool(self._file_metadata) and self._fts_has_documents()
 
     def _build_chunk_search_text(self, doc: FileDocument) -> str:
         filename = os.path.basename(doc.path)
@@ -558,6 +588,13 @@ class MemoryIndex:
             conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             conn.commit()
 
+    def _clear_fts_rows(self) -> None:
+        self._ensure_fts_schema()
+        with self._fts_connection() as conn:
+            conn.execute("DELETE FROM memory_fts")
+            conn.execute("DELETE FROM memory_file_fts")
+            conn.commit()
+
     def _invalidate_path_caches(self, filepath: str) -> None:
         self._path_token_cache.pop(filepath, None)
         stale_row_keys = [key for key in self._row_token_cache if key[0] == filepath]
@@ -566,17 +603,14 @@ class MemoryIndex:
 
     def _sync_file_to_fts(self, filepath: str) -> None:
         self._ensure_fts_schema()
-        doc_ids = self.path_to_doc_ids.get(filepath, [])
+        docs = self._pending_documents.get(filepath, [])
         self._invalidate_path_caches(filepath)
         with self._fts_connection() as conn:
             conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
             conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             rows = []
             file_content_parts: List[str] = []
-            for doc_id in doc_ids:
-                doc = self.documents.get(doc_id)
-                if not doc:
-                    continue
+            for doc in docs:
                 file_content_parts.append(doc.content)
                 rows.append(
                     (
@@ -600,18 +634,29 @@ class MemoryIndex:
                 full_content = "\n".join(file_content_parts)
                 conn.execute(
                     """
-                    INSERT INTO memory_file_fts(path, search_text, content)
-                    VALUES (?, ?, ?)
+                    INSERT INTO memory_file_fts(path, search_text)
+                    VALUES (?, ?)
                     """,
                     (
                         filepath,
                         self._build_file_search_text(filepath, full_content),
-                        full_content,
                     ),
                 )
             conn.commit()
+        if docs:
+            self._file_metadata[filepath] = {
+                "mtime": float(docs[0].mtime),
+                "size": int(docs[0].size),
+                "chunk_count": len(docs),
+            }
+        self._pending_documents.pop(filepath, None)
 
-    def _rebuild_fts_index(self) -> None:
+    def _rebuild_fts_from_documents(
+        self,
+        documents: Dict[int, FileDocument],
+        path_to_doc_ids: Dict[str, List[int]],
+    ) -> None:
+        """One-time v2 migration path when the SQLite index is unavailable."""
         start_time = time.time()
         self._ensure_fts_schema()
         with self._fts_connection() as conn:
@@ -619,13 +664,9 @@ class MemoryIndex:
             conn.execute("DELETE FROM memory_file_fts")
             rows = []
             file_rows = []
-            for filepath in sorted(self.path_to_doc_ids.keys()):
-                doc_ids = self.path_to_doc_ids[filepath]
-                docs = [
-                    self.documents[doc_id]
-                    for doc_id in doc_ids
-                    if doc_id in self.documents
-                ]
+            for filepath in sorted(path_to_doc_ids.keys()):
+                doc_ids = path_to_doc_ids[filepath]
+                docs = [documents[doc_id] for doc_id in doc_ids if doc_id in documents]
                 if not docs:
                     continue
                 full_content = "\n".join(doc.content for doc in docs)
@@ -633,11 +674,10 @@ class MemoryIndex:
                     (
                         filepath,
                         self._build_file_search_text(filepath, full_content),
-                        full_content,
                     )
                 )
-            for doc_id in sorted(self.documents.keys()):
-                doc = self.documents[doc_id]
+            for doc_id in sorted(documents.keys()):
+                doc = documents[doc_id]
                 rows.append(
                     (
                         doc.path,
@@ -659,8 +699,8 @@ class MemoryIndex:
             if file_rows:
                 conn.executemany(
                     """
-                    INSERT INTO memory_file_fts(path, search_text, content)
-                    VALUES (?, ?, ?)
+                    INSERT INTO memory_file_fts(path, search_text)
+                    VALUES (?, ?)
                     """,
                     file_rows,
                 )
@@ -723,7 +763,7 @@ class MemoryIndex:
             # But we still need to collect files from this directory from existing index
             # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
             # Collect files from existing index that belong to this directory
-            for filepath in self.path_to_doc_ids.keys():
+            for filepath in self._file_metadata.keys():
                 if filepath.startswith(dir_path + "/") or filepath == dir_path:
                     current_files.add(filepath)
             return
@@ -777,13 +817,12 @@ class MemoryIndex:
             size = entry.size or 0
 
             try:
-                if filepath in self.path_to_doc_ids:
+                if filepath in self._file_metadata:
                     # File exists in index, check if modified
-                    existing_doc_ids = self.path_to_doc_ids[filepath]
-                    old_doc = self.documents[existing_doc_ids[0]]
+                    metadata = self._file_metadata[filepath]
 
                     # Quick check: compare mtime and size
-                    if old_doc.mtime == mtime and old_doc.size == size:
+                    if metadata["mtime"] == mtime and metadata["size"] == size:
                         stats["unchanged"] += 1
                         return
 
@@ -810,10 +849,6 @@ class MemoryIndex:
     def _replace_file_documents(
         self, filepath: str, content: str, mtime: float, size: int
     ) -> None:
-        existing_doc_ids = self.path_to_doc_ids.pop(filepath, [])
-        for doc_id in existing_doc_ids:
-            self.documents.pop(doc_id, None)
-
         chunks = self._split_into_chunks(content)
         if not chunks:
             chunks = [
@@ -824,24 +859,22 @@ class MemoryIndex:
                 }
             ]
 
-        new_doc_ids: List[int] = []
+        documents: List[FileDocument] = []
         for chunk_index, chunk in enumerate(chunks):
-            doc_id = self._next_doc_id
-            self._next_doc_id += 1
-            self.documents[doc_id] = FileDocument(
-                path=filepath,
-                content=chunk["content"],
-                mtime=mtime,
-                size=size,
-                hash="",
-                doc_id=doc_id,
-                chunk_index=chunk_index,
-                line_start=chunk["line_start"],
-                line_end=chunk["line_end"],
+            documents.append(
+                FileDocument(
+                    path=filepath,
+                    content=chunk["content"],
+                    mtime=mtime,
+                    size=size,
+                    hash="",
+                    doc_id=chunk_index,
+                    chunk_index=chunk_index,
+                    line_start=chunk["line_start"],
+                    line_end=chunk["line_end"],
+                )
             )
-            new_doc_ids.append(doc_id)
-
-        self.path_to_doc_ids[filepath] = new_doc_ids
+        self._pending_documents[filepath] = documents
 
     async def update_index(
         self, file_extensions: Optional[List[str]] = None, force: bool = False
@@ -880,8 +913,12 @@ class MemoryIndex:
         current_files: Set[str] = set()
 
         if force:
-            # Force full scan: clear mtime cache
+            # Force full scan: clear metadata and FTS rows before rebuilding.
             self._dir_mtime_cache = {}
+            self._file_metadata = {}
+            self._pending_documents = {}
+            async with self._fts_write_lock:
+                await asyncio.to_thread(self._clear_fts_rows)
 
         # Start recursive scan from workspace root
         logger.debug(
@@ -891,16 +928,16 @@ class MemoryIndex:
             self.workspace_path, file_extensions, stats, current_files
         )
 
-        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_doc_ids)} indexed files")
+        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self._file_metadata)} indexed files")
 
         # Check for deleted files
-        indexed_paths = set(self.path_to_doc_ids.keys())
+        indexed_paths = set(self._file_metadata.keys())
         deleted_paths = indexed_paths - current_files
 
         for filepath in deleted_paths:
             try:
-                for doc_id in self.path_to_doc_ids.pop(filepath, []):
-                    self.documents.pop(doc_id, None)
+                self._file_metadata.pop(filepath, None)
+                self._pending_documents.pop(filepath, None)
                 self._invalidate_path_caches(filepath)
                 async with self._fts_write_lock:
                     await asyncio.to_thread(self._delete_file_from_fts, filepath)
@@ -911,15 +948,11 @@ class MemoryIndex:
 
         stats["scan_time"] = time.time() - scan_start
 
-        # Persist metadata if the file set changed. The FTS rows are updated inline
-        # during file processing and full rebuild is only needed on force refresh.
+        # Persist metadata if the file set changed. FTS rows are updated inline.
         build_start = time.time()
         has_changes = stats["added"] > 0 or stats["updated"] > 0 or stats["removed"] > 0
 
         if has_changes or force:
-            if force:
-                async with self._fts_write_lock:
-                    await asyncio.to_thread(self._rebuild_fts_index)
             stats["build_time"] = time.time() - build_start
 
             save_start = time.time()
@@ -1430,13 +1463,23 @@ class MemoryIndex:
                 chunk_content, query, line_start
             )
         else:
-            doc_ids = self.path_to_doc_ids.get(path, [])
-            if doc_ids:
-                first_doc = self.documents.get(doc_ids[0])
-                if first_doc:
-                    preview, line_number = self._build_result_preview(
-                        first_doc.content or "", query, first_doc.line_start
-                    )
+            with self._fts_connection() as conn:
+                first_row = conn.execute(
+                    """
+                    SELECT content, line_start
+                    FROM memory_fts
+                    WHERE path = ?
+                    ORDER BY CAST(chunk_index AS INTEGER)
+                    LIMIT 1
+                    """,
+                    (path,),
+                ).fetchone()
+            if first_row:
+                preview, line_number = self._build_result_preview(
+                    first_row["content"] or "",
+                    query,
+                    int(first_row["line_start"] or 1),
+                )
 
         return SearchResult(
             path=path,
@@ -1573,7 +1616,7 @@ class MemoryIndex:
         """
         start_time = time.time()
 
-        if not self.documents or not self._fts_has_documents():
+        if not self._file_metadata or not self._fts_has_documents():
             logger.warning("MemoryIndex: Index is empty, please update index first")
             return []
 
@@ -1710,16 +1753,15 @@ class MemoryIndex:
 
     def get_document_count(self) -> int:
         """Get document count"""
-        return len(self.documents)
+        return sum(metadata["chunk_count"] for metadata in self._file_metadata.values())
 
     def clear_index(self) -> None:
         """Clear index"""
         start_time = time.time()
 
         self.bm25 = None
-        self.documents = {}
-        self.path_to_doc_ids = {}
-        self._next_doc_id = 0
+        self._file_metadata = {}
+        self._pending_documents = {}
         self._dir_mtime_cache = {}
         self._path_token_cache = {}
         self._row_token_cache = {}

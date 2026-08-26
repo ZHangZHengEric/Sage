@@ -57,6 +57,72 @@ class TestMemoryIndexFTS(unittest.TestCase):
             self.assertEqual(results[0].line_number, 4)
             self.assertIn("P2ChunkUniqueOmega", results[0].content)
 
+    def test_sidecar_persists_only_metadata_and_reload_searches_sqlite(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
+            content = "SidecarMustNotContainThisUniqueBody"
+            idx._replace_file_documents(
+                "/workspace/lightweight.txt", content, 12.5, len(content)
+            )
+            idx._sync_file_to_fts("/workspace/lightweight.txt")
+            idx._save_index()
+
+            sidecar_bytes = index_path.read_bytes()
+            sidecar = pickle.loads(sidecar_bytes)
+            self.assertNotIn(b"SidecarMustNotContainThisUniqueBody", sidecar_bytes)
+            self.assertNotIn("documents", sidecar)
+            self.assertEqual(
+                sidecar["files"]["/workspace/lightweight.txt"],
+                {"mtime": 12.5, "size": len(content), "chunk_count": 1},
+            )
+
+            reloaded = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
+            results = reloaded.search("SidecarMustNotContainThisUniqueBody", top_k=3)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].path, "/workspace/lightweight.txt")
+
+    def test_init_migrates_v2_sidecar_and_recovers_missing_sqlite(self):
+        with TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "memory_index.pkl"
+            idx = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
+            content = "LegacySidecarRecoveryUniqueBody"
+            document = self.module.FileDocument(
+                path="/workspace/legacy.txt",
+                content=content,
+                mtime=7.0,
+                size=len(content),
+                hash="",
+                doc_id=4,
+            )
+            with open(index_path, "wb") as stream:
+                pickle.dump(
+                    {
+                        "schema_version": 2,
+                        "documents": {4: document},
+                        "path_to_doc_ids": {"/workspace/legacy.txt": [4]},
+                        "dir_mtime_cache": {"/workspace": 7.0},
+                    },
+                    stream,
+                )
+            idx.fts_index_path.unlink()
+
+            migrated = self.MemoryIndex(
+                sandbox=None, workspace_path="/workspace", index_path=str(index_path)
+            )
+
+            self.assertEqual(len(migrated.search("LegacySidecarRecoveryUniqueBody")), 1)
+            sidecar = pickle.loads(index_path.read_bytes())
+            self.assertEqual(sidecar["schema_version"], 3)
+            self.assertNotIn("documents", sidecar)
+
     def test_init_clears_stale_fts_rows_when_sidecar_is_empty(self):
         with TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "memory_index.pkl"
