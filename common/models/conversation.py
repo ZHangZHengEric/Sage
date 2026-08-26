@@ -45,7 +45,7 @@ class Conversation(Base):
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     messages: Mapped[list] = mapped_column(
-        JSON, nullable=False, default=list, deferred=True
+        JSON, nullable=True, default=list, deferred=True
     )
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     user_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

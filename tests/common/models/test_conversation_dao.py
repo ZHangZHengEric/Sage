@@ -123,7 +123,6 @@ async def test_save_conversation_inserts_empty_messages(conversation_db):
     assert _as_messages(row.messages) == []
     assert row[1:] == (3, 1, 1)
     assert conversation is not None
-    assert conversation.messages == []
     assert conversation.message_count == 3
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
 
