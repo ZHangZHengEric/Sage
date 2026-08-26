@@ -133,6 +133,41 @@ def sync_database_schema(sync_conn, Base):
 
     migrate_legacy_conversation_messages_column(sync_conn)
     sync_missing_indexes(sync_conn, Base.metadata)
+    drop_obsolete_conversation_indexes(sync_conn)
+
+
+_OBSOLETE_CONVERSATION_INDEXES = (
+    "idx_conversations_user_agent_updated_session",
+    "idx_conversations_agent_updated_session",
+    "idx_conversations_user_title_session",
+    "idx_conversations_title_session",
+    "idx_conversations_user_msgcount_session",
+    "idx_conversations_msgcount_session",
+)
+
+
+def drop_obsolete_conversation_indexes(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    if "conversations" not in inspector.get_table_names():
+        return
+
+    existing_names = {
+        idx.get("name")
+        for idx in inspector.get_indexes("conversations")
+        if idx.get("name")
+    }
+    for name in _OBSOLETE_CONVERSATION_INDEXES:
+        if name not in existing_names:
+            continue
+        try:
+            if sync_conn.dialect.name == "mysql":
+                sql = f"DROP INDEX `{name}` ON conversations"
+            else:
+                sql = f"DROP INDEX IF EXISTS {name}"
+            sync_conn.execute(text(sql))
+            logger.info(f"[DB] 已删除多余索引: conversations.{name}")
+        except Exception as e:
+            logger.error(f"[DB] 无法删除索引 '{name}': {e}")
 
 
 def sync_missing_indexes(sync_conn, metadata) -> None:

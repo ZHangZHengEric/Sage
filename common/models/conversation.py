@@ -27,7 +27,7 @@ def count_conversation_messages(messages: Any) -> tuple[int, int, int]:
 class Conversation(Base):
     __tablename__ = "conversations"
     # 长 pytest 进程中模型可能被多次 import，避免重复注册同一张表。
-    # 覆盖索引必须包含 session_id，避免 SQLite 回表读取历史大列。
+    # 只保留默认按时间列表的覆盖索引，避免回表并控制写入成本。
     __table_args__ = (
         Index(
             "idx_conversations_user_updated_session",
@@ -36,33 +36,6 @@ class Conversation(Base):
             "session_id",
         ),
         Index("idx_conversations_updated_session", "updated_at", "session_id"),
-        Index(
-            "idx_conversations_user_agent_updated_session",
-            "user_id",
-            "agent_id",
-            "updated_at",
-            "session_id",
-        ),
-        Index(
-            "idx_conversations_agent_updated_session",
-            "agent_id",
-            "updated_at",
-            "session_id",
-        ),
-        Index(
-            "idx_conversations_user_title_session",
-            "user_id",
-            "title",
-            "session_id",
-        ),
-        Index("idx_conversations_title_session", "title", "session_id"),
-        Index(
-            "idx_conversations_user_msgcount_session",
-            "user_id",
-            "message_count",
-            "session_id",
-        ),
-        Index("idx_conversations_msgcount_session", "message_count", "session_id"),
         {"extend_existing": True},
     )
 

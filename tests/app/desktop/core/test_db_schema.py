@@ -73,3 +73,4 @@ def test_sync_database_schema_adds_conversation_list_indexes():
     assert "messages" not in columns
     assert "idx_conversations_updated_session" in index_names
     assert "idx_conversations_user_updated_session" in index_names
+    assert "idx_conversations_user_msgcount_session" not in index_names
