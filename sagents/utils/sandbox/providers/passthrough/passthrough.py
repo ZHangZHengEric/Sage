@@ -320,7 +320,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         return self._bg_runner.kill(task_id, force=force)
 
     async def cleanup_background(self, task_id: str) -> None:
-        self._bg_runner.cleanup(task_id)
+        await asyncio.to_thread(self._bg_runner.cleanup, task_id)
 
     def add_allowed_paths(self, paths: List[str]) -> None:
         """添加允许访问的路径列表"""

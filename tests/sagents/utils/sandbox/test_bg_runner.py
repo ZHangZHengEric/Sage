@@ -85,6 +85,17 @@ def test_kill_force_after_terminate(runner):
     runner.cleanup(task_id)
 
 
+def test_cleanup_terminates_and_reaps_running_process(runner):
+    info = runner.start(_python_q("import time; time.sleep(20)"))
+    task_id = info["task_id"]
+    process = runner.get(task_id)["process"]
+
+    runner.cleanup(task_id)
+
+    assert process.poll() is not None
+    assert runner.get(task_id) is None
+
+
 def test_unknown_task_id_returns_safe_defaults(runner):
     assert runner.read_tail("nope") == ""
     assert runner.is_alive("nope") is False
