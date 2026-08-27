@@ -57,13 +57,13 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_AUTH_MODE`       | `native`              | 服务端认证模式 |
 | `SAGE_LOG_LEVEL`       | `info`                | 服务端日志级别 |
 | `SAGE_PORT`            | `8001`（server）/ 桌面端动态 | 服务端口                          |
-| `SAGE_ROOT`            | `~/.sage`             | 全局根目录，下设 sessions/agents/logs |
-| `SAGE_SESSION_DIR`     | `$SAGE_ROOT/sessions` | server / terminal 会话目录 |
-| `SAGE_LOGS_DIR_PATH`   | `$SAGE_ROOT/logs`     | 日志目录 |
-| `SAGE_AGENTS_DIR`      | `$SAGE_ROOT/agents`   | server / terminal Agent 目录 |
-| `SAGE_USER_DIR`        | `$SAGE_ROOT/users`    | 用户数据目录 |
-| `SAGE_DB_FILE`         | `$SAGE_ROOT/sage.db`  | SQLite / file 数据库路径 |
-| `SAGE_SKILL_WORKSPACE` | `$SAGE_ROOT/skills`   | Skill 工作区目录 |
+| `SAGE_ROOT`            | `./data`（Compose 示例） | Compose 宿主机持久化卷根目录；Python server 不直接读取 |
+| `SAGE_SESSION_DIR`     | server: `<project>/.sage/sessions`；desktop/CLI: `~/.sage/sessions` | 会话目录 |
+| `SAGE_LOGS_DIR_PATH`   | server: `<project>/.sage/logs`；desktop/CLI: `~/.sage/logs` | 日志目录 |
+| `SAGE_AGENTS_DIR`      | server: `<project>/.sage/agents`；desktop/CLI: `~/.sage/agents` | Agent 目录 |
+| `SAGE_USER_DIR`        | server: `<project>/.sage/users`；desktop/CLI: `~/.sage/users` | 用户数据目录 |
+| `SAGE_DB_FILE`         | server: `<project>/.sage/sage.db`；desktop/CLI: `~/.sage/sage.db` | SQLite / file 数据库路径 |
+| `SAGE_SKILL_WORKSPACE` | server: `<project>/.sage/skills`；desktop/CLI: `~/.sage/skills` | Skill 工作区目录 |
 | `SAGE_SESSIONS_PATH`   | `$SAGE_ROOT/sessions` | 会话持久化目录                       |
 | `SAGE_AGENTS_PATH`     | `$SAGE_ROOT/agents`   | Agent 配置目录                    |
 | `SAGE_MCP_CONFIG_PATH` | `$SAGE_ROOT/mcp.json` | MCP 服务配置文件路径                  |

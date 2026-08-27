@@ -27,6 +27,10 @@ services:
       SAGE_TRACE_JAEGER_PUBLIC_URL: ${SAGE_TRACE_JAEGER_PUBLIC_URL:-http://127.0.0.1:30051/jaeger}
       SAGE_LOG_LEVEL: ${SAGE_LOG_LEVEL:-INFO}
       SAGE_SESSION_DIR: /app/sessions
+      SAGE_LOGS_DIR_PATH: /app/logs
+      SAGE_AGENTS_DIR: /app/agents
+      SAGE_SKILL_WORKSPACE: /app/skills
+      SAGE_USER_DIR: /app/users
       SAGE_LOCAL_LINUX_ISOLATION: bwrap
     labels: *sage-observability-labels
     cap_add:

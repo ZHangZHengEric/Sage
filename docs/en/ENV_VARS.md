@@ -55,13 +55,13 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_AUTH_MODE` | `native` | Server auth mode |
 | `SAGE_LOG_LEVEL` | `info` | Server log level |
 | `SAGE_PORT` | `8001` (server) / dynamic (desktop) | Service port |
-| `SAGE_ROOT` | `~/.sage` | Root for sessions/agents/logs |
-| `SAGE_SESSION_DIR` | `$SAGE_ROOT/sessions` | Server/terminal session directory |
-| `SAGE_LOGS_DIR_PATH` | `$SAGE_ROOT/logs` | Log directory |
-| `SAGE_AGENTS_DIR` | `$SAGE_ROOT/agents` | Server/terminal agent directory |
-| `SAGE_USER_DIR` | `$SAGE_ROOT/users` | User data directory |
-| `SAGE_DB_FILE` | `$SAGE_ROOT/sage.db` | SQLite/file database path |
-| `SAGE_SKILL_WORKSPACE` | `$SAGE_ROOT/skills` | Skill workspace directory |
+| `SAGE_ROOT` | `./data` (Compose example) | Host persistence root used by Compose; the Python server does not read it directly |
+| `SAGE_SESSION_DIR` | server: `<project>/.sage/sessions`; desktop/CLI: `~/.sage/sessions` | Session directory |
+| `SAGE_LOGS_DIR_PATH` | server: `<project>/.sage/logs`; desktop/CLI: `~/.sage/logs` | Log directory |
+| `SAGE_AGENTS_DIR` | server: `<project>/.sage/agents`; desktop/CLI: `~/.sage/agents` | Agent directory |
+| `SAGE_USER_DIR` | server: `<project>/.sage/users`; desktop/CLI: `~/.sage/users` | User data directory |
+| `SAGE_DB_FILE` | server: `<project>/.sage/sage.db`; desktop/CLI: `~/.sage/sage.db` | SQLite/file database path |
+| `SAGE_SKILL_WORKSPACE` | server: `<project>/.sage/skills`; desktop/CLI: `~/.sage/skills` | Skill workspace directory |
 | `SAGE_SESSIONS_PATH` | `$SAGE_ROOT/sessions` | Session persistence directory |
 | `SAGE_AGENTS_PATH` | `$SAGE_ROOT/agents` | Agent config directory |
 | `SAGE_MCP_CONFIG_PATH` | `$SAGE_ROOT/mcp.json` | MCP server config file |

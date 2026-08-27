@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import json
 import os
 import random
@@ -1158,7 +1157,6 @@ class SageStreamService:
         if _is_desktop_mode():
             self.sessions_root = Path(get_sessions_root())
             self.sessions_root.mkdir(parents=True, exist_ok=True)
-            self._workspace_existed = True
             self.agent_workspace_root = get_agent_workspace_root(
                 self.runtime_agent_id,
                 app_mode="desktop",
@@ -1172,7 +1170,6 @@ class SageStreamService:
                 app_mode="server",
                 ensure_exists=False,
             )
-            self._workspace_existed = workspace_root.exists()
             workspace_root.mkdir(parents=True, exist_ok=True)
             self.agent_workspace_root = workspace_root
             self.agent_workspace = str(self.agent_workspace_root)
@@ -1222,16 +1219,6 @@ class SageStreamService:
     async def _initialize_workspace_assets(self) -> None:
         if _is_desktop_mode():
             return
-
-        if (not self._workspace_existed) and self.request.agent_id:
-            inherit_service = importlib.import_module(
-                "app.server.services.agent_inherit"
-            )
-            await asyncio.to_thread(
-                inherit_service.copy_agent_inherit_to_workspace,
-                self.request.agent_id,
-                self.agent_workspace,
-            )
 
         await asyncio.to_thread(
             _cleanup_server_workspace_sage_docs, self.agent_workspace

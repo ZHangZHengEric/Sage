@@ -24,6 +24,7 @@ from common.models.base import get_local_now
 from common.models.conversation import Conversation, ConversationDao
 from common.schemas.conversation import ConversationInfo
 from common.services.chat_processor import ContentProcessor
+from common.services.chat_stream_manager import StreamManager
 from common.services.chat_utils import get_sessions_root
 
 _SESSION_PERSISTENCE_TASKS: Dict[str, asyncio.Task] = {}
@@ -234,29 +235,13 @@ async def interrupt_session(
 
     await persist_session_state_with_cancel_protection(session_id)
 
-    stream_managers = []
     try:
-        if _is_desktop_mode():
-            from app.desktop.core.services.chat.stream_manager import (
-                StreamManager as DesktopStreamManager,
-            )
-
-            stream_managers.append(DesktopStreamManager.get_instance())
-    except Exception as e:
-        logger.bind(session_id=session_id).debug(f"无法加载 desktop StreamManager: {e}")
-
-    try:
-        from common.services.chat_stream_manager import (
-            StreamManager as CommonStreamManager,
-        )
-
-        stream_managers.append(CommonStreamManager.get_instance())
+        stream_manager = StreamManager.get_instance()
     except Exception as e:
         logger.bind(session_id=session_id).debug(f"无法加载 common StreamManager: {e}")
-
-    for manager in stream_managers:
+    else:
         try:
-            await manager.stop_session(session_id)
+            await stream_manager.stop_session(session_id)
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"停止流式会话失败: {e}")
 
@@ -605,14 +590,7 @@ async def update_server_conversation_title(
 
 
 def _get_stream_manager():
-    stream_manager_module = (
-        "app.desktop.core.services.chat.stream_manager"
-        if _is_desktop_mode()
-        else "app.server.services.chat.stream_manager"
-    )
-    return __import__(
-        stream_manager_module, fromlist=["StreamManager"]
-    ).StreamManager.get_instance()
+    return StreamManager.get_instance()
 
 
 def _load_session_raw_messages(session_id: str) -> List[Dict[str, Any]]:

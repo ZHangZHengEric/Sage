@@ -16,7 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
-mkdir -p logs
+
+RUNTIME_LOG_DIR="${SAGE_LOGS_DIR_PATH:-$PROJECT_ROOT/.sage/logs}"
+SERVER_LOG="$RUNTIME_LOG_DIR/server.log"
+mkdir -p "$RUNTIME_LOG_DIR"
 
 PYTHON_SOURCE=""
 USE_UV="${USE_UV:-0}"
@@ -202,7 +205,7 @@ echo ""
 
 # 7. Start backend service (background)
 echo "🚀 Starting backend service..."
-"${SERVER_CMD[@]}" > logs/server.log 2>&1 &
+"${SERVER_CMD[@]}" > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Wait for backend process to start
@@ -210,7 +213,7 @@ sleep 2
 
 # Check if backend process is still running
 if ! kill -0 $SERVER_PID 2>/dev/null; then
-    echo -e "${RED}❌ Backend startup failed, check logs: logs/server.log${NC}"
+    echo -e "${RED}❌ Backend startup failed, check logs: $SERVER_LOG${NC}"
     exit 1
 fi
 
@@ -234,7 +237,7 @@ done
 echo ""
 
 if [ $WAIT_COUNT -eq $MAX_WAIT ]; then
-    echo -e "${RED}❌ Backend startup timeout, check logs: logs/server.log${NC}"
+    echo -e "${RED}❌ Backend startup timeout, check logs: $SERVER_LOG${NC}"
     kill $SERVER_PID 2>/dev/null
     exit 1
 fi
@@ -247,7 +250,7 @@ echo "================================"
 echo ""
 echo "Backend service:"
 echo "  - URL: http://127.0.0.1:${BACKEND_PORT}"
-echo "  - Logs: logs/server.log"
+echo "  - Logs: $SERVER_LOG"
 echo "  - PID: $SERVER_PID"
 echo ""
 echo "Starting frontend service..."

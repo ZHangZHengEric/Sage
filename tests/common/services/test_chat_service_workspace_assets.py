@@ -9,37 +9,25 @@ from common.services import chat_service, chat_utils
 
 def _server_stream_service(
     workspace: Path,
-    *,
-    workspace_existed: bool,
-    agent_id: str = "agent_demo",
 ):
     service = object.__new__(chat_service.SageStreamService)
     service.agent_workspace = str(workspace)
-    service._workspace_existed = workspace_existed
-    service.request = SimpleNamespace(agent_id=agent_id)
     return service
 
 
-def test_server_new_workspace_does_not_create_sage_docs_and_repeats_cleanly(
+def test_server_new_workspace_does_not_inherit_files_or_create_sage_docs(
     tmp_path, monkeypatch
 ):
+    monkeypatch.chdir(tmp_path)
+    inherit_dir = tmp_path / "data" / "inherit" / "agent_demo"
+    inherit_dir.mkdir(parents=True)
+    (inherit_dir / "legacy-inherited.txt").write_text("legacy", encoding="utf-8")
+
     workspace = tmp_path / "agent_workspace"
     workspace.mkdir()
-    service = _server_stream_service(workspace, workspace_existed=False)
-
-    def copy_inherit(_agent_id, target_workspace):
-        (Path(target_workspace) / "inherited.txt").write_text(
-            "kept", encoding="utf-8"
-        )
+    service = _server_stream_service(workspace)
 
     monkeypatch.setattr(chat_service, "_is_desktop_mode", lambda: False)
-    monkeypatch.setattr(
-        chat_service.importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(
-            copy_agent_inherit_to_workspace=copy_inherit
-        ),
-    )
     monkeypatch.setattr(
         chat_service,
         "_copy_sage_usage_docs_to_workspace",
@@ -51,7 +39,7 @@ def test_server_new_workspace_does_not_create_sage_docs_and_repeats_cleanly(
     asyncio.run(service.initialize_workspace_assets())
     asyncio.run(service.initialize_workspace_assets())
 
-    assert (workspace / "inherited.txt").read_text(encoding="utf-8") == "kept"
+    assert not (workspace / "legacy-inherited.txt").exists()
     assert not (workspace / ".sage-docs").exists()
     assert not (workspace / "sage_usage_docs").exists()
 
@@ -73,7 +61,7 @@ def test_server_existing_workspace_cleans_exact_historical_directories(
     nested_docs = workspace / "project" / ".sage-docs"
     nested_docs.mkdir(parents=True)
     (nested_docs / "user-guide.md").write_text("keep", encoding="utf-8")
-    service = _server_stream_service(workspace, workspace_existed=True)
+    service = _server_stream_service(workspace)
 
     monkeypatch.setattr(chat_service, "_is_desktop_mode", lambda: False)
 

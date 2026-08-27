@@ -50,7 +50,6 @@ flowchart TB
         SChat[chat]
         SAuth[auth]
         SUser[user.py]
-        SAgent[agent_inherit.py]
         SOss[oss.py]
     end
 
@@ -62,9 +61,7 @@ flowchart TB
     Main --> Life
     Main --> RChat
     RChat --> SChat
-    RAgent --> SAgent
     RAuth --> SAuth
-    SChat --> SAgent
     Life --> Boot
     Boot --> AdminBoot
 ```
