@@ -7,6 +7,13 @@ from common.schemas.agent import AgentConfigDTO
 from common.schemas.chat import StreamRequest
 
 
+def _module_is_removed(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is None
+    except ModuleNotFoundError:
+        return True
+
+
 def test_server_knowledge_base_modules_are_removed():
     removed_modules = (
         "app.server.routers.kdb",
@@ -19,7 +26,7 @@ def test_server_knowledge_base_modules_are_removed():
     )
 
     for module_name in removed_modules:
-        assert importlib.util.find_spec(module_name) is None
+        assert _module_is_removed(module_name)
 
 
 def test_server_contracts_do_not_expose_knowledge_base_or_embedding_settings():
