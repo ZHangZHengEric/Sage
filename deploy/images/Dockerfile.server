@@ -49,13 +49,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Server-only immutable browser runtime. Bubblewrap exposes /usr read-only, so
-# every Agent reuses these files instead of downloading into its workspace HOME.
-ENV PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
-
-RUN npm install -g playwright@1.58.0 \
-    && playwright install --with-deps chromium \
-    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
+# Keep the Node client aligned with the Python client below. The shared browser
+# runtime is downloaded once after the final Python dependency set is resolved.
+RUN npm install -g playwright@1.61.0
 
 # -------------------------
 # pip 国内源
@@ -84,7 +80,7 @@ COPY requirements.txt .
 RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|nest-asyncio|undetected-playwright|streamlit|weasyprint|pyinstaller|lark-oapi|dingtalk-stream|python-socks)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
     && pip install --no-cache-dir -r requirements.server.txt \
     && python -c "from importlib.metadata import version; import fastmcp, mcp; assert version('fastmcp') == '3.4.2'; assert version('mcp') == '1.28.1'; print('MCP dependencies verified:', version('mcp'), version('fastmcp'))" \
-    && python -m playwright install --with-deps chromium \
+    && PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright python -m playwright install --with-deps chromium \
     && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 # 复制代码
