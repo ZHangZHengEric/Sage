@@ -294,7 +294,7 @@ async def ensure_system_init(cfg: StartupConfig):
     db = await get_global_db()
     async with db._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
         await conn.run_sync(Base.metadata.create_all)
-        # Sync schema: add missing columns to existing tables
+        # Sync schema from ORM metadata only.
         await conn.run_sync(sync_database_schema, Base)
     logger.debug("数据库自动建表完成")
 

@@ -25,7 +25,7 @@ async def initialize_db_connection():
             async with db_client._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
                 # Create all tables
                 await conn.run_sync(Base.metadata.create_all)
-                # Check and update schema for existing tables
+                # Sync schema from ORM metadata only.
                 await conn.run_sync(sync_database_schema)
 
             await migrate_desktop_default_user_id()

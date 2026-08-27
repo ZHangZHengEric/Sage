@@ -65,7 +65,9 @@ def test_sync_database_schema_adds_conversation_list_indexes():
         ensure_desktop_models_registered()
         sync_database_schema(conn)
         columns = {col["name"] for col in inspect(conn).get_columns("conversations")}
-        index_names = {idx["name"] for idx in inspect(conn).get_indexes("conversations")}
+        index_names = {
+            idx["name"] for idx in inspect(conn).get_indexes("conversations")
+        }
 
     assert "message_count" in columns
     assert "user_count" in columns
