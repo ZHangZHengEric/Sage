@@ -2,7 +2,6 @@
 中间件模块
 """
 
-import ipaddress
 import re
 from typing import Tuple
 
@@ -30,24 +29,9 @@ WHITELIST_API_PATHS = frozenset(
         "/api/health",
         "/api/system/info",
         "/api/auth/register",
-        "/api/auth/register/send-code",
         "/api/auth/login",
-        "/api/auth/providers",
-        "/api/auth/upstream/login",
-        "/api/auth/upstream/login/{provider_id}",
-        "/api/auth/upstream/callback/{provider_id}",
         "/api/user/login",
         "/api/user/register",
-        "/api/user/register/send-code",
-        "/api/user/auth-providers",
-        "/api/user/oauth/login",
-        "/api/user/oauth/login/{provider_id}",
-        "/api/user/oauth/callback",
-        "/api/user/oauth/callback/{provider_id}",
-        "/api/oauth2/metadata",
-        "/api/oauth2/authorize",
-        "/api/oauth2/token",
-        "/api/oauth2/userinfo",
         "/api/observability/jaeger",
         "/api/observability/jaeger/login",
         "/api/observability/jaeger/auth",
@@ -95,32 +79,6 @@ def _should_record_prometheus_http_metrics(path: str) -> bool:
     return path not in PROMETHEUS_HTTP_METRICS_IGNORED_PATHS
 
 
-def _is_trusted_identity_proxy(
-    host: str | None, trusted_proxy_ips: list[str] | None
-) -> bool:
-    """Trust identity passthrough only from configured proxy IPs/CIDRs."""
-    if not host:
-        return False
-    if not trusted_proxy_ips:
-        return False
-
-    try:
-        host_ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-
-    for entry in trusted_proxy_ips:
-        try:
-            if "/" in entry:
-                if host_ip in ipaddress.ip_network(entry, strict=False):
-                    return True
-            elif host_ip == ipaddress.ip_address(entry):
-                return True
-        except ValueError:
-            continue
-    return False
-
-
 async def _unauthorized_response(
     request: Request,
     status_code: int,
@@ -166,10 +124,6 @@ def register_middlewares(app):
         if path.startswith("/api"):
             if request.method == "OPTIONS":
                 return await call_next(request)
-            client_host = request.client.host if request.client else None
-            is_trusted_proxy_client = _is_trusted_identity_proxy(
-                client_host, cfg.trusted_identity_proxy_ips
-            )
             is_whitelisted = _is_whitelisted(path)
             auth = request.headers.get("Authorization", "")
             auth_error = None
@@ -192,22 +146,6 @@ def register_middlewares(app):
                 session_claims = get_session_claims(request)
                 if session_claims:
                     request.state.user_claims = session_claims
-
-            internal_user_id = request.headers.get("X-Sage-Internal-UserId")
-            if (
-                not getattr(request.state, "user_claims", None)
-                and internal_user_id
-                and is_trusted_proxy_client
-            ):
-                userid = internal_user_id.strip()
-                if userid:
-                    request.state.user_claims = {
-                        "userid": userid,
-                        "username": userid,
-                        "nickname": userid,
-                        "role": "user",
-                    }
-                return await call_next(request)
 
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
                 if auth_error:

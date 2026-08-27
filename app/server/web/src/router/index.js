@@ -156,7 +156,7 @@ const router = createRouter({
 })
 
 const shouldUseBrowserNavigation = (path) => (
-  typeof path === 'string' && (path.startsWith('/jaeger/') || path.startsWith('/api/') || path.startsWith('/oauth2/'))
+  typeof path === 'string' && (path.startsWith('/jaeger/') || path.startsWith('/api/'))
 )
 
 // 路由守卫 - 设置页面标题

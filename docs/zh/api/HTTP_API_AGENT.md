@@ -47,7 +47,7 @@ ref: http-api-agent
 ## 文件工作区与授权
 
 - `file_workspace` 系列为沙箱/会话目录下列文件、下载、删除；`session_id` 用于区分多会话工作目录。
-- `GET/POST .../auth` 管理「哪些 user_id 能使用该 Agent」；与 OAuth 的「谁登录」是两层概念：前者是 **Agent 级授权列表**，后者是 **账户登录**。
+- `GET/POST .../auth` 管理「哪些 user_id 能使用该 Agent」；这是 **Agent 级授权列表**，与本地账户登录是不同边界。
 
 ## 删除用户侧 workspace
 

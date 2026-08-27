@@ -67,11 +67,6 @@ RUN mkdir -p /etc/pip \
 RUN pip install --no-cache-dir \
     "PyJWT>=2.9.0" \
     "itsdangerous>=2.2.0" \
-    "Authlib>=1.6.0" \
-    alibabacloud_dm20151123 \
-    alibabacloud_credentials \
-    alibabacloud_tea_openapi \
-    alibabacloud_tea_util \
     elasticsearch==8.19.0 \
     "minio>=7.2.0" \
     "apscheduler>=3.10.4" \

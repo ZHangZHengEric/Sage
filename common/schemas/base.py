@@ -191,25 +191,17 @@ class RegisterPayload(BaseModel):
     phonenum: Optional[str] = None
 
 
-class RegisterRequest(RegisterPayload):
-    verification_code: str
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
 
 
 class RegisterResponse(BaseModel):
     user_id: str
 
 
-class RegisterVerificationCodeRequest(BaseModel):
-    email: str
-
-
-class RegisterVerificationCodeResponse(BaseModel):
-    expires_in: int
-    retry_after: int
-
-
 class LoginRequest(BaseModel):
-    username_or_email: str
+    username: str
     password: str
 
 
@@ -496,8 +488,6 @@ __all__ = [
     "RegisterPayload",
     "RegisterRequest",
     "RegisterResponse",
-    "RegisterVerificationCodeRequest",
-    "RegisterVerificationCodeResponse",
     "LoginRequest",
     "LoginResponse",
     "UserInfoResponse",

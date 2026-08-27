@@ -19,18 +19,6 @@ async def close_db_client():
     return await _close_db_client()
 
 
-async def init_eml_client(cfg: StartupConfig):
-    from common.core.client.eml import init_eml_client as _init_eml_client
-
-    return await _init_eml_client(cfg)
-
-
-async def close_eml_client():
-    from common.core.client.eml import close_eml_client as _close_eml_client
-
-    return await _close_eml_client()
-
-
 async def init_embed_client(*, api_key=None, base_url=None, model_name="", dims=1024):
     from common.core.client.embed import init_embed_client as _init_embed_client
 
@@ -104,13 +92,6 @@ async def initialize_db_connection(cfg: StartupConfig):
 
 
 async def initialize_global_clients(cfg: StartupConfig):
-    try:
-        eml_client = await init_eml_client(cfg)
-        if eml_client is not None:
-            logger.info("邮件客户端已初始化")
-    except Exception as e:
-        logger.error(f"邮件客户端初始化失败: {e}")
-
     try:
         s3_client = await init_s3_client(cfg)
         if s3_client is not None:
@@ -358,10 +339,6 @@ async def shutdown_clients():
     """关闭所有第三方客户端"""
     # 关闭第三方客户端
     try:
-        await close_eml_client()
-    finally:
-        logger.info("邮件客户端 已关闭")
-    try:
         await close_s3_client()
     finally:
         logger.info("RustFS客户端 已关闭")
@@ -387,8 +364,7 @@ async def ensure_system_init(cfg: StartupConfig):
     from common.models.token_usage import TokenUsage  # noqa: F401
     from common.models.system import SystemInfoDao
     from common.models.user import User, UserDao
-    from common.services.oauth.helpers import hash_password
-    from common.services.oauth.provider import sync_oauth2_clients
+    from common.services.auth import hash_password
     from common.utils.id import gen_id
     from common.core.client.db import get_global_db, sync_database_schema
 
@@ -424,9 +400,6 @@ async def ensure_system_init(cfg: StartupConfig):
             )
             await user_dao.save(admin_user)
             logger.info(format_bootstrap_admin_log(bootstrap_admin))
-
-    await sync_oauth2_clients()
-    logger.debug("OAuth2 Clients 配置同步完成")
 
     dao = LLMProviderDao()
     default_provider = await dao.get_default()

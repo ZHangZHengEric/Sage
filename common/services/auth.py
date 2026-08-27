@@ -24,7 +24,8 @@ def build_user_claims(user: User) -> Dict[str, str]:
     }
 
 
-__all__ = [
-    "build_user_claims",
-    "hash_password",
-]
+def clear_auth_session(request) -> None:
+    request.session.pop("user_claims", None)
+
+
+__all__ = ["build_user_claims", "clear_auth_session", "hash_password"]

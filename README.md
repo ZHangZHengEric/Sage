@@ -58,7 +58,7 @@
 - 🧰 **Unified Tooling System**: Combine built-in tools, Skills, MCP servers, browser automation, search, and image generation in one execution stack.
 - 🛡️ **Sandboxed Execution**: Local, passthrough, and remote sandbox options for safer agent runtime isolation.
 - 🛠️ **Visual Workbench**: Inspect files, tool outputs, code, charts, Mermaid, Draw.io, audio, video, and remote previews in one workspace.
-- 🏢 **Enterprise-Ready Foundation**: OAuth2, configurable auth and CORS, shared service architecture, CI coverage, and deployable multi-platform packaging.
+- 🏢 **Enterprise-Ready Foundation**: Local account authentication, configurable CORS, shared service architecture, CI coverage, and deployable multi-platform packaging.
 
 ---
 
@@ -218,7 +218,7 @@ graph TD
 
 ### 🛡️ **Platform & Infrastructure**
 
-- **Enterprise Readiness**: Added OAuth2, email verification, and stronger auth/CORS/security controls
+- **Enterprise Readiness**: Added local account authentication and stronger auth/CORS/security controls
 - **Sandbox & Runtime**: Refactored local/passthrough/remote sandbox support and improved Node runtime/sidecar packaging
 - **Shared Architecture**: Extracted reusable `common/` services, models, and schemas across desktop and server
 - **Documentation & CI**: Rebuilt the docs structure, added CLI guides, and expanded CI/test coverage

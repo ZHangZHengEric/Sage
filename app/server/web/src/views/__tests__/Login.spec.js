@@ -26,7 +26,6 @@ vi.mock('@/api/system.js', () => ({
 vi.mock('@/utils/auth.js', () => ({
   loginAPI: vi.fn(),
   registerAPI: vi.fn(),
-  sendRegisterVerificationCodeAPI: vi.fn(),
 }))
 
 vi.mock('@/utils/i18n.js', () => ({
@@ -148,5 +147,17 @@ describe('Login view', () => {
 
     expect(wrapper.text()).not.toContain('auth.registrationDisabledTitle')
     expect(wrapper.find('a[href="https://zavixai.com/html/sage.html"]').exists()).toBe(false)
+  })
+
+  it('keeps self-registration limited to username and password', async () => {
+    getSystemInfo.mockResolvedValue({ allow_registration: true })
+    const wrapper = await mountComponent()
+
+    await wrapper.findAll('button').find((button) => button.text() === 'auth.signUp').trigger('click')
+
+    expect(wrapper.text()).not.toContain('auth.email')
+    expect(wrapper.text()).not.toContain('auth.verificationCode')
+    expect(wrapper.find('#registerEmail').exists()).toBe(false)
+    expect(wrapper.find('#verificationCode').exists()).toBe(false)
   })
 })

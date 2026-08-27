@@ -54,7 +54,6 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | ---------------------- | --------------------- | ----------------------------- |
 | `SAGE_HOST`            | —                     | 部署对外访问域名/IP，主要用于 K8s 地址派生；不是服务端监听地址 |
 | `SAGE_ENV`             | `development`         | 应用环境名 |
-| `SAGE_AUTH_MODE`       | `native`              | 服务端认证模式 |
 | `SAGE_LOG_LEVEL`       | `info`                | 服务端日志级别 |
 | `SAGE_PORT`            | `8001`（server）/ 桌面端动态 | 服务端口                          |
 | `SAGE_ROOT`            | `./data`（Compose 示例） | Compose 宿主机持久化卷根目录；Python server 不直接读取 |
@@ -84,8 +83,6 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SAGE_AUTH_PROVIDERS` | — | 上游认证 provider JSON 数组 |
-| `SAGE_TRUSTED_IDENTITY_PROXY_IPS` | — | 可信身份代理 IP，逗号分隔 |
 | `SAGE_BOOTSTRAP_ADMIN_USERNAME` | `admin` | 初始管理员用户名 |
 | `SAGE_BOOTSTRAP_ADMIN_PASSWORD` | — | 初始管理员密码 |
 | `SAGE_JWT_KEY` | — | JWT 签名密钥 |
@@ -170,9 +167,6 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 | `SAGE_GRAFANA_PUBLIC_URL` | — | 部署环境对外 Grafana 地址 |
 | `SAGE_LOKI_PUSH_URL` | — | Loki push endpoint |
 | `SAGE_KB_MCP_URL` / `SAGE_KB_MCP_API_KEY` | — | 知识库 MCP 集成 |
-| `SAGE_OAUTH2_CLIENTS` / `SAGE_OAUTH2_ISSUER` / `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN` | — | 内置 OAuth2 provider 配置 |
-| `SAGE_EML_ENDPOINT` / `SAGE_EML_ACCESS_KEY_ID` / `SAGE_EML_ACCESS_KEY_SECRET` / `SAGE_EML_SECURITY_TOKEN` | — | 邮件 provider 凭据 |
-| `SAGE_EML_ACCOUNT_NAME` / `SAGE_EML_TEMPLATE_ID` / `SAGE_EML_REGISTER_SUBJECT` / `SAGE_EML_ADDRESS_TYPE` / `SAGE_EML_REPLY_TO_ADDRESS` | — | 邮件发送账号 / 模板默认值 |
 
 
 ## 5. Agent 主循环 & Prompt Cache

@@ -42,9 +42,9 @@ export const loginAPI = async (username, password) => {
   }
 }
 
-export const registerAPI = async (username, password, email = '', phonenum = '') => {
+export const registerAPI = async (username, password) => {
   try {
-    await userAPI.register(username, password, email, phonenum)
+    await userAPI.register(username, password)
     const loginRes = await loginAPI(username, password)
     return loginRes
   } catch (error) {

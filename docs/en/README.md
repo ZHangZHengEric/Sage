@@ -54,7 +54,6 @@ Read:
 1. [Applications](applications/README.md)
 2. [Configuration](CONFIGURATION.md)
 3. [API documentation](api/README.md) (includes [HTTP API Reference](api/HTTP_API_REFERENCE.md) and the legacy Python notes)
-4. [OAuth2 Lage Integration Guide](OAUTH2_LAGE_INTEGRATION.md)
 
 ## Documentation Map
 
@@ -78,7 +77,6 @@ Read:
 - [Memory](memory/README.md): memory, retrieval, and memory-search workstream
 - [Questionnaire Delivery Methods](QUESTIONNAIRE_FORMATS.md): Inline Questionnaires, historical XML+JSON, `questionnaire_async`, and client compatibility
 - [Solution Playbooks](solutions/README.md): presales documents for concrete business scenarios
-- [OAuth2 Lage Integration Guide](OAUTH2_LAGE_INTEGRATION.md): restored OAuth2 integration guide from historical docs
 - [Development](DEVELOPMENT.md): contributor workflow and source locations
 - [Troubleshooting](TROUBLESHOOTING.md): common startup and environment issues
 

@@ -3,7 +3,7 @@ layout: default
 title: 平台、存储与可观测
 parent: HTTP API 参考
 nav_order: 7
-description: "LLM Provider、系统、版本、OSS、Jaeger、探活、OAuth2 与外链"
+description: "LLM Provider、系统、版本、OSS、Jaeger、探活与外链"
 lang: zh
 ref: http-api-platform
 ---
@@ -22,7 +22,7 @@ ref: http-api-platform
 
 ## 系统与统计
 
-- `GET /api/system/info`：前端首屏/登录页会用来展示是否开放注册、可用登录方式等（**公开侧**能看到的字段以代码为准，勿假设包含密钥）。
+- `GET /api/system/info`：前端首屏/登录页会用来展示是否开放自注册（**公开侧**能看到的字段以代码为准，勿假设包含密钥）。
 - `POST /api/system/update_settings`：**仅 admin**，改 `allow_registration` 等。
 - `POST /api/system/agent/usage-stats`：带 `days` 与可选 `agent_id` 的用量统计，用于仪表盘类页面。
 
@@ -37,15 +37,10 @@ ref: http-api-platform
 
 ## 可观测与 Jaeger
 
-- `/api/observability/jaeger`*  为 **重定向/鉴权** 入口，并不要求你在业务 JSON 里解析 trace；**admin** 才能通过本地登录式跳转。详见主表与代码中的 `SageHTTPException` 分支（例如未启用本地登录时可能 503）。
+- `/api/observability/jaeger`*  为 **重定向/鉴权** 入口，并不要求你在业务 JSON 里解析 trace；**admin** 通过本地账号登录后访问。
 
 ## 根探活 `GET /active`
 
 - 纯文本，用于负载均衡或 k8s 外层的存活检查；**不要**和 `GET /api/health`（JSON 包一层）混在同一监控项里不区分解析。
-
-## OAuth2 与 `/api/auth` 的分工
-
-- 本节 **不重复** 每种 grant 的报文。对外暴露 discovery（`/.well-known/oauth-authorization-server` 及别名 metadata）、`authorize`、`token`、`userinfo` 是 **标准 OAuth2/OIDC 行为**，适合「我们的 Server 当授权服务器、第三方要接 token」的集成方。
-- 与 **网页里账户密码登录** 是两条故事线：一个读 [认证与用户](HTTP_API_AUTH_USER.md)，一个读仓库内 [OAUTH2_LAGE_INTEGRATION.md](OAUTH2_LAGE_INTEGRATION.md) 及你的客户端注册信息。
 
 [返回 HTTP API 参考](HTTP_API_REFERENCE.md)

@@ -40,7 +40,7 @@ flowchart TB
         RSkill[skill]
         RKdb[kdb]
         RLLM[llm_provider]
-        RAuth[auth / oauth2 / user]
+        RAuth[auth / user]
         ROss[oss]
         RObs[observability]
         RSys[system / version]
@@ -111,7 +111,7 @@ Each router maps to one HTTP resource group; services hold the business orchestr
 | `skill` | Skill packages |
 | `kdb` | Knowledge base |
 | `llm_provider` | Model provider configuration |
-| `auth` / `oauth2` / `user` | Login, users, third-party OAuth2 (e.g. Lage) |
+| `auth` / `user` | Local account login, registration, sessions, and user management |
 | `oss` | Object storage |
 | `observability` | Observability data |
 | `system` / `version` | System info, version |

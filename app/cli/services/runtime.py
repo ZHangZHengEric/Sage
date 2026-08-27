@@ -750,11 +750,6 @@ def collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
             "If you only need local development, consider setting SAGE_DB_TYPE=file."
         )
 
-    if cfg.auth_mode != "native":
-        warnings.append(
-            f"Current auth mode is {cfg.auth_mode}. CLI currently works best with native/local setups."
-        )
-
     return {
         "errors": errors,
         "warnings": warnings,

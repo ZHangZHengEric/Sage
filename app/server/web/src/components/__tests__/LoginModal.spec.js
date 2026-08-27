@@ -16,7 +16,6 @@ vi.mock('../../api/system.js', () => ({
 vi.mock('../../utils/auth.js', () => ({
   loginAPI: vi.fn(),
   registerAPI: vi.fn(),
-  sendRegisterVerificationCodeAPI: vi.fn(),
 }))
 
 const mountComponent = async () => {
@@ -122,5 +121,17 @@ describe('LoginModal', () => {
     expect(wrapper.text()).toContain('用户登录')
     expect(wrapper.text()).toContain('用户名')
     expect(wrapper.text()).toContain('密码')
+  })
+
+  it('does not render email verification fields for self-registration', async () => {
+    getSystemInfo.mockResolvedValue({ allow_registration: true })
+    const wrapper = await mountComponent()
+
+    await wrapper.findAll('a').find((link) => link.text() === '去注册').trigger('click')
+
+    expect(wrapper.text()).not.toContain('邮箱')
+    expect(wrapper.text()).not.toContain('验证码')
+    expect(wrapper.find('#reg_email').exists()).toBe(false)
+    expect(wrapper.find('#reg_verification_code').exists()).toBe(false)
   })
 })

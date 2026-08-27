@@ -19,7 +19,6 @@ def register_routes(app):
     from .mcp import mcp_router
     from .model import model_router
     from .observability import observability_router
-    from .oauth2 import oauth2_router
     from .oss import oss_router
     from .skill import skill_router
     from .system import system_router
@@ -45,4 +44,3 @@ def register_routes(app):
     app.include_router(skill_router)
     app.include_router(llm_provider_router)
     app.include_router(observability_router)
-    app.include_router(oauth2_router)

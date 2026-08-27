@@ -22,10 +22,6 @@
           <p :class="subheadlineClass">{{ subheadline }}</p>
         </div>
 
-        <div v-if="errorMessage && !localProvider" class="mb-5 p-3 text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg">
-          {{ errorMessage }}
-        </div>
-
         <div
           v-if="showRegistrationDisabledNotice"
           class="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100"
@@ -110,47 +106,6 @@
               </div>
             </div>
 
-            <div v-if="localMode === 'register'" :class="fieldClass">
-              <Label for="registerEmail" class="text-sm font-medium">
-                {{ t('auth.email') }} <span class="text-destructive">*</span>
-              </Label>
-              <Input
-                id="registerEmail"
-                v-model="registerEmail"
-                type="email"
-                :placeholder="t('auth.emailPlaceholder')"
-                autocomplete="email"
-                required
-                :class="inputClass"
-              />
-            </div>
-
-            <div v-if="localMode === 'register'" :class="fieldClass">
-              <Label for="verificationCode" class="text-sm font-medium">{{ t('auth.verificationCode') }}</Label>
-              <div class="flex gap-2">
-                <Input
-                  id="verificationCode"
-                  v-model="verificationCode"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="6"
-                  :placeholder="t('auth.verificationCodePlaceholder')"
-                  required
-                  :class="inputClass"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  :class="sendCodeButtonClass"
-                  :disabled="isLoading || isSendingCode || !registerEmail || sendCodeCountdown > 0"
-                  @click="handleSendVerificationCode"
-                >
-                  {{ sendCodeLabel }}
-                </Button>
-              </div>
-              <p class="text-[11px] leading-4 text-muted-foreground">{{ t('auth.codeSentHint') }}</p>
-            </div>
-
             <div v-if="localMode === 'register'" :class="passwordGroupClass">
               <div :class="fieldClass">
                 <Label for="password" class="text-sm font-medium">{{ t('auth.password') }}</Label>
@@ -226,35 +181,6 @@
           </form>
         </div>
 
-        <div v-if="externalProviders.length" :class="cn('mt-6', !localProvider && 'mt-0')">
-          <div v-if="localProvider" class="relative my-6">
-            <div class="absolute inset-0 flex items-center">
-              <span class="w-full border-t border-border/60" />
-            </div>
-            <div class="relative flex justify-center text-xs uppercase tracking-[0.28em] text-muted-foreground">
-              <span class="bg-background px-3">{{ t('auth.providers') }}</span>
-            </div>
-          </div>
-
-          <div class="space-y-3">
-            <Button
-              v-for="provider in externalProviders"
-              :key="provider.id"
-              variant="outline"
-              class="w-full h-12 bg-background border-border/60 hover:bg-accent justify-between"
-              type="button"
-              :disabled="isLoading"
-              @click="handleProviderLogin(provider)"
-            >
-              <span class="flex items-center gap-2">
-                <component :is="resolveProviderIcon(provider.icon)" class="size-5" />
-                {{ getProviderButtonLabel(provider) }}
-              </span>
-              <ArrowRight class="size-4 opacity-70" />
-            </Button>
-          </div>
-        </div>
-
         <div v-if="localProvider" :class="footerSwitchClass">
           <template v-if="localMode === 'login' && allowRegistration">
             {{ t('auth.noAccount') }}
@@ -294,9 +220,9 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Building2, Eye, EyeOff, Github, Info, KeyRound, Mail, ShieldCheck } from 'lucide-vue-next'
+import { Eye, EyeOff, Info } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 import AnimatedCharactersStage from '@/components/auth/AnimatedCharactersStage.vue'
@@ -305,7 +231,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { systemAPI } from '@/api/system.js'
-import { buildOAuthLoginUrl, loginAPI, registerAPI, sendRegisterVerificationCodeAPI } from '@/utils/auth.js'
+import { loginAPI, registerAPI } from '@/utils/auth.js'
 import { cn } from '@/utils/cn'
 import { useLanguage } from '@/utils/i18n.js'
 import { getAssetUrl } from '@/config/runtime.js'
@@ -315,7 +241,6 @@ const route = useRoute()
 const { toggleLanguage, isZhCN, t } = useLanguage()
 const logoUrl = getAssetUrl('sage_logo.svg')
 
-const authProviders = ref([])
 const allowRegistration = ref(true)
 const loginPasswordVisible = ref(false)
 const registerPasswordVisible = ref(false)
@@ -323,26 +248,19 @@ const confirmPasswordVisible = ref(false)
 const account = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const registerEmail = ref('')
-const verificationCode = ref('')
 const errorMessage = ref('')
 const isLoading = ref(false)
-const isSendingCode = ref(false)
-const sendCodeCountdown = ref(0)
 const isTyping = ref(false)
 const localMode = ref('login')
-let sendCodeTimer = null
 const isRegisterMode = computed(() => localMode.value === 'register')
 
 const safeNextPath = computed(() => {
   const nextPath = typeof route.query.next === 'string' ? route.query.next : '/agent/chat'
   return nextPath.startsWith('/') ? nextPath : '/agent/chat'
 })
-const localOnlyMode = computed(() => String(route.query.local_only || '') === '1')
 const shouldUseBrowserNavigation = (targetPath) => (
   targetPath.startsWith('/jaeger/')
   || targetPath.startsWith('/api/')
-  || targetPath.startsWith('/oauth2/')
 )
 
 const navigateAfterAuth = async (targetPath) => {
@@ -353,16 +271,9 @@ const navigateAfterAuth = async (targetPath) => {
   await router.replace(targetPath)
 }
 
-const isLocalAuthProvider = (provider) => provider?.type === 'native' || provider?.id === 'native'
-
-const localProvider = computed(() => authProviders.value.find((provider) => isLocalAuthProvider(provider)) || null)
+const localProvider = true
 const showRegistrationDisabledNotice = computed(() => (
-  Boolean(localProvider.value) && !allowRegistration.value && localMode.value === 'login'
-))
-const externalProviders = computed(() => (
-  localOnlyMode.value
-    ? []
-    : authProviders.value.filter((provider) => !isLocalAuthProvider(provider))
+  !allowRegistration.value && localMode.value === 'login'
 ))
 const accountLabel = computed(() => (localMode.value === 'login' ? t('auth.account') : t('auth.username')))
 const accountPlaceholder = computed(() => (localMode.value === 'login' ? t('auth.accountPlaceholder') : t('auth.usernamePlaceholder')))
@@ -403,7 +314,6 @@ const formClass = computed(() => (isRegisterMode.value ? 'space-y-4' : 'space-y-
 const fieldClass = computed(() => (isRegisterMode.value ? 'space-y-1.5' : 'space-y-2'))
 const inputClass = computed(() => 'h-12 bg-background border-border/60 focus:border-primary')
 const passwordInputClass = computed(() => 'h-12 pr-10 bg-background border-border/60 focus:border-primary')
-const sendCodeButtonClass = computed(() => 'h-12 shrink-0')
 const passwordGroupClass = computed(() => 'space-y-3')
 const submitButtonClass = computed(() => 'w-full h-12 text-base font-medium')
 const footerSwitchClass = computed(() => cn(
@@ -414,42 +324,16 @@ const mobileLinksClass = computed(() => cn(
   'flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground lg:hidden',
   isRegisterMode.value ? 'mt-6' : 'mt-6'
 ))
-const sendCodeLabel = computed(() => {
-  if (isSendingCode.value) return t('auth.sendingCode')
-  if (sendCodeCountdown.value > 0) return t('auth.resendCodeIn', { seconds: sendCodeCountdown.value })
-  return t('auth.sendCode')
-})
-
 const headline = computed(() => {
-  if (localProvider.value) {
-    return localMode.value === 'login' ? t('auth.welcomeBack') : t('auth.registerHeadline')
-  }
-  if (externalProviders.value.length === 1) {
-    return t('auth.continueWith', { provider: externalProviders.value[0].name })
-  }
-  return t('auth.chooseProvider')
+  return localMode.value === 'login' ? t('auth.welcomeBack') : t('auth.registerHeadline')
 })
 
 const subheadline = computed(() => {
-  if (localProvider.value) {
-    return localMode.value === 'login' ? t('auth.enterDetails') : t('auth.registerSubheadline')
-  }
-  return t('auth.providerSessionHint')
+  return localMode.value === 'login' ? t('auth.enterDetails') : t('auth.registerSubheadline')
 })
 
 const primaryActionLabel = computed(() => (localMode.value === 'login' ? t('auth.logIn') : t('auth.createAccount')))
 const loadingLabel = computed(() => (localMode.value === 'login' ? t('auth.signingIn') : t('auth.creatingAccount')))
-
-const iconMap = {
-  mail: Mail,
-  github: Github,
-  building2: Building2,
-  'key-round': KeyRound,
-  'shield-check': ShieldCheck,
-}
-
-const resolveProviderIcon = (iconName) => iconMap[iconName] || Mail
-const getProviderButtonLabel = (provider) => provider.button_text || t('auth.continueWith', { provider: provider.name })
 
 const toggleLoginPasswordVisibility = () => {
   loginPasswordVisible.value = !loginPasswordVisible.value
@@ -466,48 +350,16 @@ const toggleConfirmPasswordVisibility = () => {
 const switchMode = (mode) => {
   errorMessage.value = ''
   confirmPassword.value = ''
-  registerEmail.value = ''
-  verificationCode.value = ''
   loginPasswordVisible.value = false
   registerPasswordVisible.value = false
   confirmPasswordVisible.value = false
   localMode.value = mode
 }
 
-const clearSendCodeTimer = () => {
-  if (sendCodeTimer) {
-    clearInterval(sendCodeTimer)
-    sendCodeTimer = null
-  }
-}
-
-const startSendCodeCountdown = (seconds = 30) => {
-  clearSendCodeTimer()
-  sendCodeCountdown.value = seconds
-  sendCodeTimer = window.setInterval(() => {
-    if (sendCodeCountdown.value <= 1) {
-      clearSendCodeTimer()
-      sendCodeCountdown.value = 0
-      return
-    }
-    sendCodeCountdown.value -= 1
-  }, 1000)
-}
-
 const loadAuthConfig = async () => {
   try {
     const info = await systemAPI.getSystemInfo()
     allowRegistration.value = info.allow_registration !== false
-    authProviders.value = Array.isArray(info.auth_providers) ? info.auth_providers : []
-
-    if (localOnlyMode.value && !authProviders.value.some((provider) => isLocalAuthProvider(provider))) {
-      errorMessage.value = t('auth.noProviderConfigured')
-      return
-    }
-
-    if (!authProviders.value.length) {
-      errorMessage.value = t('auth.noProviderConfigured')
-    }
   } catch (error) {
     console.error('Failed to load auth config:', error)
     errorMessage.value = t('auth.loadProvidersFailed')
@@ -525,10 +377,6 @@ const handleLocalSubmit = async () => {
       errorMessage.value = t('auth.registrationDisabled')
       return
     }
-    if (!registerEmail.value || !verificationCode.value) {
-      errorMessage.value = t('auth.requiredFields')
-      return
-    }
     if (password.value !== confirmPassword.value) {
       errorMessage.value = t('auth.passwordsMismatch')
       return
@@ -540,7 +388,7 @@ const handleLocalSubmit = async () => {
   try {
     const result = localMode.value === 'login'
       ? await loginAPI(account.value, password.value)
-      : await registerAPI(account.value, password.value, registerEmail.value, '', verificationCode.value)
+      : await registerAPI(account.value, password.value)
 
     if (!result.success) {
       errorMessage.value = result.message || t('auth.authFailed')
@@ -557,49 +405,7 @@ const handleLocalSubmit = async () => {
   }
 }
 
-const handleSendVerificationCode = async () => {
-  if (!allowRegistration.value) {
-    errorMessage.value = t('auth.registrationDisabled')
-    return
-  }
-  if (!registerEmail.value) {
-    errorMessage.value = t('auth.emailRequiredForRegistration')
-    return
-  }
-
-  isSendingCode.value = true
-  errorMessage.value = ''
-  try {
-    const result = await sendRegisterVerificationCodeAPI(registerEmail.value)
-    if (!result.success) {
-      errorMessage.value = result.message || t('auth.authFailed')
-      return
-    }
-    toast.success(t('auth.codeSent'))
-    startSendCodeCountdown(result.data?.retry_after || 30)
-  } catch (error) {
-    console.error('Failed to send verification code:', error)
-    errorMessage.value = t('auth.authRetry')
-  } finally {
-    isSendingCode.value = false
-  }
-}
-
-const handleProviderLogin = (provider) => {
-  if (isLocalAuthProvider(provider)) {
-    errorMessage.value = ''
-    localMode.value = 'login'
-    return
-  }
-  errorMessage.value = ''
-  window.location.href = buildOAuthLoginUrl(provider.id, safeNextPath.value)
-}
-
 onMounted(() => {
   loadAuthConfig()
-})
-
-onBeforeUnmount(() => {
-  clearSendCodeTimer()
 })
 </script>
