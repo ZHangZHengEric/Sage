@@ -24,7 +24,6 @@ vi.mock('@/api/system.js', () => ({
 }))
 
 vi.mock('@/utils/auth.js', () => ({
-  buildOAuthLoginUrl: vi.fn((providerId) => `/oauth/${providerId}`),
   loginAPI: vi.fn(),
   registerAPI: vi.fn(),
   sendRegisterVerificationCodeAPI: vi.fn(),
@@ -84,6 +83,22 @@ describe('Login view', () => {
     expect(wrapper.find('form').exists()).toBe(true)
     expect(wrapper.text()).toContain('auth.welcomeBack')
     expect(wrapper.text()).not.toContain('Continue with 账号密码')
+  })
+
+  it('always renders local login when legacy oauth providers are returned', async () => {
+    getSystemInfo.mockResolvedValue({
+      allow_registration: false,
+      auth_mode: 'oauth',
+      auth_providers: [
+        { id: 'corp-sso', type: 'oidc', name: 'Corp SSO' },
+      ],
+    })
+
+    const wrapper = await mountComponent()
+
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.text()).toContain('auth.welcomeBack')
+    expect(wrapper.text()).not.toContain('Continue with Corp SSO')
   })
 
   it('falls back to native id when provider type is missing', async () => {

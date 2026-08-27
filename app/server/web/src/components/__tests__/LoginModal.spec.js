@@ -14,7 +14,6 @@ vi.mock('../../api/system.js', () => ({
 }))
 
 vi.mock('../../utils/auth.js', () => ({
-  buildOAuthLoginUrl: vi.fn(() => '/api/auth/upstream/login/corp-sso'),
   loginAPI: vi.fn(),
   registerAPI: vi.fn(),
   sendRegisterVerificationCodeAPI: vi.fn(),
@@ -49,7 +48,7 @@ describe('LoginModal', () => {
     getSystemInfo.mockReset()
   })
 
-  it('renders trusted proxy guidance with admin login when auth mode is trusted_proxy', async () => {
+  it('always renders the local account form when legacy proxy settings are returned', async () => {
     getSystemInfo.mockResolvedValue({
       allow_registration: false,
       auth_mode: 'trusted_proxy',
@@ -62,14 +61,13 @@ describe('LoginModal', () => {
 
     const wrapper = await mountComponent()
 
-    expect(wrapper.text()).toContain('企业身份接入')
-    expect(wrapper.text()).toContain('企业身份代理模式')
-    expect(wrapper.text()).toContain('管理员登录')
+    expect(wrapper.text()).toContain('用户登录')
     expect(wrapper.text()).toContain('用户名')
     expect(wrapper.text()).toContain('密码')
+    expect(wrapper.text()).not.toContain('企业身份代理模式')
   })
 
-  it('renders oauth login flow when auth mode is oauth', async () => {
+  it('always renders the local account form when legacy oauth settings are returned', async () => {
     getSystemInfo.mockResolvedValue({
       allow_registration: false,
       auth_mode: 'oauth',
@@ -82,9 +80,10 @@ describe('LoginModal', () => {
 
     const wrapper = await mountComponent()
 
-    expect(wrapper.text()).toContain('统一登录')
-    expect(wrapper.text()).toContain('使用Corp SSO登录')
-    expect(wrapper.text()).not.toContain('企业身份代理模式')
+    expect(wrapper.text()).toContain('用户登录')
+    expect(wrapper.text()).toContain('用户名')
+    expect(wrapper.text()).toContain('密码')
+    expect(wrapper.text()).not.toContain('统一登录')
   })
 
   it('renders native login form when auth mode is native', async () => {

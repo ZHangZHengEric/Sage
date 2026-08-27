@@ -183,8 +183,8 @@ OBSERVABILITY_SERVICES=(sage-prometheus sage-grafana sage-cadvisor sage-loki sag
 
 case "$DEPLOY_ENV" in
   prod)
-    ENV_SERVICES=(sage-server sage-web sage-mysql sage-es)
-    ENV_SERVICE_ORDER=(sage-mysql sage-es sage-server sage-web)
+    ENV_SERVICES=(sage-server sage-web sage-mysql)
+    ENV_SERVICE_ORDER=(sage-mysql sage-server sage-web)
     ;;
   dev|test)
     ENV_SERVICES=("sage-server-$DEPLOY_ENV" "sage-web-$DEPLOY_ENV" "sage-mysql-$DEPLOY_ENV")

@@ -435,7 +435,12 @@ class ToolManager:
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
 
-    def _discover_import_path(self, path=None, root_package="sagents"):
+    def _discover_import_path(
+        self,
+        path=None,
+        root_package="sagents",
+        excluded_module_prefixes=(),
+    ):
         package_path = Path(path) if path else Path(__file__).parent
         package_path = package_path.resolve()
 
@@ -486,6 +491,11 @@ class ToolManager:
             if "providers" in rel_parts:
                 continue
             module_name = ".".join([full_package_name, *rel_parts])
+            if any(
+                module_name == prefix or module_name.startswith(f"{prefix}.")
+                for prefix in excluded_module_prefixes
+            ):
+                continue
             try:
                 importlib.import_module(module_name)
             except Exception as e:
@@ -493,8 +503,17 @@ class ToolManager:
 
     def discover_builtin_mcp_tools_from_path(self, path: Optional[str] = None):
         """Discover and register built-in MCP tools from mcp_servers directory"""
+        excluded_module_prefixes = (
+            ("mcp_servers.im_server",)
+            if os.environ.get("SAGE_INTERNAL_SERVER_PROCESS") == "1"
+            else ()
+        )
         if path:
-            self._discover_import_path(path=path, root_package="mcp_servers")
+            self._discover_import_path(
+                path=path,
+                root_package="mcp_servers",
+                excluded_module_prefixes=excluded_module_prefixes,
+            )
         else:
             root_path = Path(__file__).parent.parent.parent
             mcp_servers_path = root_path / "mcp_servers"
@@ -502,12 +521,19 @@ class ToolManager:
                 logger.warning(f"mcp_servers path not found: {mcp_servers_path}")
             else:
                 self._discover_import_path(
-                    path=mcp_servers_path, root_package="mcp_servers"
+                    path=mcp_servers_path,
+                    root_package="mcp_servers",
+                    excluded_module_prefixes=excluded_module_prefixes,
                 )
 
         # Register discovered tools
         count = 0
         for module_name, funcs in _DISCOVERED_MCP_TOOLS.items():
+            if any(
+                module_name == prefix or module_name.startswith(f"{prefix}.")
+                for prefix in excluded_module_prefixes
+            ):
+                continue
             for func in funcs:
                 if hasattr(func, "_mcp_tool_spec"):
                     self.register_tool(func._mcp_tool_spec)
