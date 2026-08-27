@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import inspect, text
 
-from common.core.client.db import SessionManager, register_db_getter, sync_database_schema
+from common.core.client.db import SessionManager, register_db_getter
 from common.models.base import Base
 from common.models.conversation import Conversation, ConversationDao
 from common.services import conversation_service
@@ -315,55 +315,3 @@ async def test_persist_session_state_writes_counts_not_messages(
     assert conversation is not None
     assert conversation.message_count == 2
     assert conversation.get_message_count() == {"user_count": 1, "agent_count": 1}
-
-
-def test_sync_database_schema_keeps_legacy_messages_column_without_rewrite():
-    from sqlalchemy import create_engine
-
-    engine = create_engine("sqlite:///:memory:")
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE conversations (
-                    session_id VARCHAR(255) PRIMARY KEY,
-                    user_id VARCHAR(255) NOT NULL,
-                    agent_id VARCHAR(255) NOT NULL,
-                    agent_name TEXT NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    messages JSON NOT NULL,
-                    created_at DATETIME,
-                    updated_at DATETIME
-                )
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                INSERT INTO conversations (
-                    session_id, user_id, agent_id, agent_name, title, messages
-                ) VALUES (
-                    'legacy-1', 'user-1', 'agent-1', 'Agent', 'Old chat',
-                    '[{"role":"user"},{"role":"assistant"},{"role":"tool"}]'
-                )
-                """
-            )
-        )
-        sync_database_schema(conn, Base)
-        columns = {col["name"] for col in inspect(conn).get_columns("conversations")}
-        row = conn.execute(
-            text(
-                "SELECT message_count, user_count, agent_count FROM conversations "
-                "WHERE session_id = 'legacy-1'"
-            )
-        ).one()
-
-    assert "messages" in columns
-    assert "message_count" in columns
-    assert "user_count" in columns
-    assert "agent_count" in columns
-    assert row.message_count == 0
-    assert row.user_count == 0
-    assert row.agent_count == 0

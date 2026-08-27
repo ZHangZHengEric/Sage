@@ -167,7 +167,7 @@ async def validate_and_disable_mcp_servers():
         server_config = srv.config
         success = await tm.register_mcp_server(srv.name, srv.config)
         if success:
-            logger.info(f"MCP server {srv.name} 刷新成功")
+            logger.debug(f"MCP server {srv.name} 刷新成功")
             server_config["disabled"] = False
             await mcp_dao.save_mcp_server(name=srv.name, config=server_config)
             registered_count += 1
@@ -294,7 +294,7 @@ async def ensure_system_init(cfg: StartupConfig):
     db = await get_global_db()
     async with db._engine.begin() as conn:  # pyright: ignore[reportOptionalMemberAccess]
         await conn.run_sync(Base.metadata.create_all)
-        # Sync schema: add missing columns to existing tables
+        # Sync schema from ORM metadata only.
         await conn.run_sync(sync_database_schema, Base)
     logger.debug("数据库自动建表完成")
 

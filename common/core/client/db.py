@@ -40,27 +40,8 @@ def _track_session_close_task(task: asyncio.Task) -> None:
     task.add_done_callback(_consume_result)
 
 
-def migrate_legacy_conversation_messages_column(sync_conn) -> None:
-    """Leave leftover messages JSON unused.
-
-    Startup must not UPDATE/DROP that column: both rewrite tens of thousands of
-    wide rows and can stall boot for minutes. Message bodies already live in
-    the session store; list queries no longer read this column.
-    """
-    inspector = inspect(sync_conn)
-    if "conversations" not in inspector.get_table_names():
-        return
-
-    columns = {col["name"] for col in inspector.get_columns("conversations")}
-    if "messages" not in columns:
-        return
-
-    logger.info(
-        "[DB] conversations.messages 仍保留，启动时跳过回填和删列，避免全表重写"
-    )
-
-
 def sync_database_schema(sync_conn, Base):
+    """Align existing tables with ORM metadata without table-specific rules."""
     inspector = inspect(sync_conn)
     existing_tables = set(inspector.get_table_names())
 
@@ -70,90 +51,56 @@ def sync_database_schema(sync_conn, Base):
 
         actual_columns = {col["name"] for col in inspector.get_columns(table_name)}
         expected_columns_map = {col.name: col for col in table.columns}
-        expected_columns = set(expected_columns_map.keys())
-        missing_columns = expected_columns - actual_columns
+        missing_columns = set(expected_columns_map) - actual_columns
 
-        if missing_columns:
-            logger.info(f"[DB] 检测到表 '{table_name}' 缺少列: {missing_columns}")
-
-            for col_name in missing_columns:
-                col = expected_columns_map[col_name]
-                try:
-                    col_type = col.type.compile(sync_conn.dialect)
-                    default_clause = ""
-
-                    if not col.nullable:
-                        if isinstance(col.type, (String, Text)):
-                            default_clause = " DEFAULT ''"
-                        elif isinstance(col.type, Integer):
-                            default_clause = " DEFAULT 0"
-                        elif isinstance(col.type, Boolean):
-                            default_clause = " DEFAULT 0"
-                        elif isinstance(col.type, Float):
-                            default_clause = " DEFAULT 0.0"
-                        elif isinstance(col.type, DateTime):
-                            if sync_conn.dialect.name == "mysql":
-                                default_clause = " DEFAULT CURRENT_TIMESTAMP"
-                            else:
-                                import datetime
-
-                                now_str = datetime.datetime.now().strftime(
-                                    "%Y-%m-%d %H:%M:%S"
-                                )
-                                default_clause = f" DEFAULT '{now_str}'"
-
-                    sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}{default_clause}"
-                    logger.info(f"[DB] 尝试添加列: {sql}")
-                    sync_conn.execute(text(sql))
-                    logger.info(f"[DB] 成功添加列 '{col_name}' 到表 '{table_name}'")
-                except Exception as e:
-                    logger.error(
-                        f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}"
-                    )
-        else:
+        if not missing_columns:
             logger.debug(f"[DB] 表 '{table_name}' 结构正常")
-
-    migrate_legacy_conversation_messages_column(sync_conn)
-    sync_missing_indexes(sync_conn, Base.metadata)
-    drop_obsolete_conversation_indexes(sync_conn)
-
-
-_OBSOLETE_CONVERSATION_INDEXES = (
-    "idx_conversations_user_agent_updated_session",
-    "idx_conversations_agent_updated_session",
-    "idx_conversations_user_title_session",
-    "idx_conversations_title_session",
-    "idx_conversations_user_msgcount_session",
-    "idx_conversations_msgcount_session",
-)
-
-
-def drop_obsolete_conversation_indexes(sync_conn) -> None:
-    inspector = inspect(sync_conn)
-    if "conversations" not in inspector.get_table_names():
-        return
-
-    existing_names = {
-        idx.get("name")
-        for idx in inspector.get_indexes("conversations")
-        if idx.get("name")
-    }
-    for name in _OBSOLETE_CONVERSATION_INDEXES:
-        if name not in existing_names:
             continue
-        try:
-            if sync_conn.dialect.name == "mysql":
-                sql = f"DROP INDEX `{name}` ON conversations"
-            else:
-                sql = f"DROP INDEX IF EXISTS {name}"
-            sync_conn.execute(text(sql))
-            logger.info(f"[DB] 已删除多余索引: conversations.{name}")
-        except Exception as e:
-            logger.error(f"[DB] 无法删除索引 '{name}': {e}")
+
+        logger.info(f"[DB] 检测到表 '{table_name}' 缺少列: {missing_columns}")
+        for col_name in missing_columns:
+            col = expected_columns_map[col_name]
+            try:
+                col_type = col.type.compile(sync_conn.dialect)
+                default_clause = ""
+                if not col.nullable:
+                    if isinstance(col.type, (String, Text)):
+                        default_clause = " DEFAULT ''"
+                    elif isinstance(col.type, Integer):
+                        default_clause = " DEFAULT 0"
+                    elif isinstance(col.type, Boolean):
+                        default_clause = " DEFAULT 0"
+                    elif isinstance(col.type, Float):
+                        default_clause = " DEFAULT 0.0"
+                    elif isinstance(col.type, DateTime):
+                        if sync_conn.dialect.name == "mysql":
+                            default_clause = " DEFAULT CURRENT_TIMESTAMP"
+                        else:
+                            import datetime
+
+                            now_str = datetime.datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+                            default_clause = f" DEFAULT '{now_str}'"
+
+                sql = (
+                    f"ALTER TABLE {table_name} ADD COLUMN "
+                    f"{col_name} {col_type}{default_clause}"
+                )
+                logger.info(f"[DB] 尝试添加列: {sql}")
+                sync_conn.execute(text(sql))
+                logger.info(f"[DB] 成功添加列 '{col_name}' 到表 '{table_name}'")
+            except Exception as e:
+                logger.error(
+                    f"[DB] 无法自动添加列 '{col_name}' 到表 '{table_name}': {e}"
+                )
+
+    sync_missing_indexes(sync_conn, Base.metadata)
+    drop_undeclared_indexes(sync_conn, Base.metadata)
 
 
 def sync_missing_indexes(sync_conn, metadata) -> None:
-    """为已存在的表补齐 ORM 中声明、但库里还没有的索引。"""
+    """Create ORM-declared indexes missing from existing tables."""
     inspector = inspect(sync_conn)
     existing_tables = set(inspector.get_table_names())
 
@@ -175,8 +122,38 @@ def sync_missing_indexes(sync_conn, metadata) -> None:
                 existing_names.add(index.name)
                 logger.info(f"[DB] 索引创建完成: {table_name}.{index.name}")
             except Exception as e:
+                logger.error(f"[DB] 无法创建索引 '{index.name}' on '{table_name}': {e}")
+
+
+def drop_undeclared_indexes(sync_conn, metadata) -> None:
+    """Drop non-unique indexes that are not declared in ORM metadata."""
+    inspector = inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+    preparer = sync_conn.dialect.identifier_preparer
+
+    for table_name, table in metadata.tables.items():
+        if table_name not in existing_tables:
+            continue
+
+        declared_names = {index.name for index in table.indexes if index.name}
+        for index in inspector.get_indexes(table_name):
+            index_name = index.get("name")
+            if not index_name or index_name in declared_names or index.get("unique"):
+                continue
+
+            quoted_index = preparer.quote(index_name)
+            quoted_table = preparer.quote(table_name)
+            try:
+                if sync_conn.dialect.name == "mysql":
+                    sql = f"DROP INDEX {quoted_index} ON {quoted_table}"
+                else:
+                    sql = f"DROP INDEX IF EXISTS {quoted_index}"
+                sync_conn.execute(text(sql))
+                logger.info(f"[DB] 已删除 ORM 未声明索引: {table_name}.{index_name}")
+            except Exception as e:
                 logger.error(
-                    f"[DB] 无法创建索引 '{index.name}' on '{table_name}': {e}"
+                    f"[DB] 无法删除 ORM 未声明索引 "
+                    f"'{index_name}' on '{table_name}': {e}"
                 )
 
 
