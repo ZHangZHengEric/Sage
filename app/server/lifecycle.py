@@ -75,7 +75,7 @@ async def _ensure_default_anytool_server_ready():
         try:
             await asyncio.sleep(2 if attempt == 0 else 3)
             await ensure_default_anytool_server(register_tool_manager=True)
-            logger.info("默认 AnyTool MCP server 已激活")
+            logger.debug("默认 AnyTool MCP server 已激活")
             return
         except Exception as exc:
             logger.warning(
@@ -91,7 +91,7 @@ async def _start_task_scheduler():
         )
 
         started = ensure_scheduler_started()
-        logger.info(f"Sage：TaskScheduler {'已启动' if started else '已存在'}")
+        logger.debug(f"Sage：TaskScheduler {'已启动' if started else '已存在'}")
     except Exception as exc:
         logger.warning(f"Sage：TaskScheduler 启动失败: {exc}")
 

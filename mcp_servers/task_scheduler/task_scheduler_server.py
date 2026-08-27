@@ -9,18 +9,7 @@ import httpx
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
-# Initialize logger first (before any imports that might use it)
 logger = logging.getLogger("TaskScheduler")
-
-# Configure logging if not already configured
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.debug("TaskScheduler logger initialized")
 
 # Try to import croniter, fallback to simple implementation if not available
 try:
@@ -568,7 +557,7 @@ def ensure_scheduler_started() -> bool:
             name="TaskSchedulerLoop",
         )
         _scheduler_thread.start()
-        logger.info("[SCHEDULER] Scheduler thread started explicitly")
+        logger.debug("[SCHEDULER] Scheduler thread started explicitly")
         return True
 
 
@@ -1495,4 +1484,8 @@ async def update_task(
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     mcp.run()
