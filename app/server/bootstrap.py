@@ -167,7 +167,7 @@ async def validate_and_disable_mcp_servers():
         server_config = srv.config
         success = await tm.register_mcp_server(srv.name, srv.config)
         if success:
-            logger.info(f"MCP server {srv.name} 刷新成功")
+            logger.debug(f"MCP server {srv.name} 刷新成功")
             server_config["disabled"] = False
             await mcp_dao.save_mcp_server(name=srv.name, config=server_config)
             registered_count += 1

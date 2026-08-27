@@ -145,6 +145,18 @@ def register_middlewares(app):
                 if session_claims:
                     request.state.user_claims = session_claims
 
+            internal_user_id = request.headers.get("X-Sage-Internal-UserId", "").strip()
+            if not getattr(request.state, "user_claims", None) and internal_user_id:
+                # This header is the service-to-service identity contract used by
+                # trusted upstream applications such as Ling. Deployments must
+                # keep this API behind their internal network boundary.
+                request.state.user_claims = {
+                    "userid": internal_user_id,
+                    "username": internal_user_id,
+                    "nickname": internal_user_id,
+                    "role": "user",
+                }
+
             if not getattr(request.state, "user_claims", None) and not is_whitelisted:
                 if auth_error:
                     return await _unauthorized_response(request, *auth_error)

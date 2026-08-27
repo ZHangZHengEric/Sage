@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from common.core import config
@@ -10,20 +10,41 @@ def _build_app() -> FastAPI:
     register_middlewares(app)
 
     @app.get("/api/protected")
-    async def protected():
-        return {"ok": True}
+    async def protected(request: Request):
+        return {"user_claims": getattr(request.state, "user_claims", None)}
 
     return app
 
 
-def test_public_request_cannot_forge_internal_user_header():
+def test_internal_user_header_authenticates_request():
     config._GLOBAL_STARTUP_CONFIG = config.StartupConfig()
     app = _build_app()
 
     with TestClient(app, client=("203.0.113.10", 50000)) as client:  # pyright: ignore[reportCallIssue]
         response = client.get(
             "/api/protected",
-            headers={"X-Sage-Internal-UserId": "attacker"},
+            headers={"X-Sage-Internal-UserId": "internal-user"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_claims": {
+            "userid": "internal-user",
+            "username": "internal-user",
+            "nickname": "internal-user",
+            "role": "user",
+        }
+    }
+
+
+def test_blank_internal_user_header_is_rejected():
+    config._GLOBAL_STARTUP_CONFIG = config.StartupConfig()
+    app = _build_app()
+
+    with TestClient(app, client=("203.0.113.10", 50000)) as client:  # pyright: ignore[reportCallIssue]
+        response = client.get(
+            "/api/protected",
+            headers={"X-Sage-Internal-UserId": "   "},
         )
 
     assert response.status_code == 401

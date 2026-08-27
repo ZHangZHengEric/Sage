@@ -775,7 +775,7 @@ class ToolManager:
                     f"Removed MCP tool '{tool_name}' from server '{server_name}'"
                 )
             if not removed:
-                logger.warning(
+                logger.debug(
                     f"No MCP tools found for server '{server_name}' to remove"
                 )
                 removed = True
