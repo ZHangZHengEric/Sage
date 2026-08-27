@@ -36,10 +36,7 @@ def test_spawn_due_recurring_tasks_creates_only_one_catch_up_task(monkeypatch):
     )
 
     service.dao.get_enabled_recurring_tasks = AsyncMock(return_value=[recurring_task])
-    service.dao.advance_recurring_task_cursor = AsyncMock(return_value=True)
-    service.dao.has_active_task_instance = AsyncMock(return_value=False)
-    service.dao.get_list = AsyncMock(return_value=[])
-    service.dao.create_one_time_task = AsyncMock(side_effect=lambda task: task)
+    service.dao.spawn_recurring_task_instance = AsyncMock(return_value=True)
 
     spawned = asyncio.run(service.spawn_due_recurring_tasks(user_id="user-1"))
 
@@ -48,9 +45,9 @@ def test_spawn_due_recurring_tasks_creates_only_one_catch_up_task(monkeypatch):
     assert created_task.recurring_task_id == recurring_task.id
     # execute_at 为 cron 上一触发点，由 croniter 计算，不强行等于「当前时间」
     assert created_task.execute_at is not None
-    service.dao.advance_recurring_task_cursor.assert_awaited_once()
-    cargs, ckwargs = service.dao.advance_recurring_task_cursor.call_args
-    assert cargs[0] == recurring_task.id
+    service.dao.spawn_recurring_task_instance.assert_awaited_once()
+    cargs, ckwargs = service.dao.spawn_recurring_task_instance.call_args
+    assert cargs[0] is created_task
     assert ckwargs.get("expected_last_executed") == recurring_task.last_executed_at
     assert ckwargs.get("user_id") == recurring_task.user_id
 
@@ -68,17 +65,12 @@ def test_spawn_due_recurring_tasks_does_not_backfill_when_pending_exists(monkeyp
     )
 
     service.dao.get_enabled_recurring_tasks = AsyncMock(return_value=[recurring_task])
-    service.dao.advance_recurring_task_cursor = AsyncMock(return_value=True)
-    service.dao.has_active_task_instance = AsyncMock(return_value=True)
-    service.dao.get_list = AsyncMock(return_value=[object()])
-    service.dao.create_one_time_task = AsyncMock()
+    service.dao.spawn_recurring_task_instance = AsyncMock(return_value=False)
 
     spawned = asyncio.run(service.spawn_due_recurring_tasks(user_id="user-1"))
 
     assert spawned == []
-    service.dao.create_one_time_task.assert_not_awaited()
-    # 已有进行中的 one-time 实例时直接跳过，不推进游标、不创建
-    service.dao.advance_recurring_task_cursor.assert_not_awaited()
+    service.dao.spawn_recurring_task_instance.assert_awaited_once()
 
 
 @pytest.mark.skipif(
@@ -102,13 +94,9 @@ def test_spawn_due_recurring_tasks_does_not_spawn_early_within_one_minute(monkey
     )
 
     service.dao.get_enabled_recurring_tasks = AsyncMock(return_value=[recurring_task])
-    service.dao.advance_recurring_task_cursor = AsyncMock()
-    service.dao.has_active_task_instance = AsyncMock()
-    service.dao.create_one_time_task = AsyncMock()
+    service.dao.spawn_recurring_task_instance = AsyncMock()
 
     spawned = asyncio.run(service.spawn_due_recurring_tasks(user_id="default_user"))
 
     assert spawned == []
-    service.dao.advance_recurring_task_cursor.assert_not_awaited()
-    service.dao.has_active_task_instance.assert_not_awaited()
-    service.dao.create_one_time_task.assert_not_awaited()
+    service.dao.spawn_recurring_task_instance.assert_not_awaited()

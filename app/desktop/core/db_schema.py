@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 _DESKTOP_MODEL_MODULES = (
     "common.models.agent",
     "common.models.conversation",
-    "common.models.file",
     "common.models.im_channel",
     "common.models.llm_provider",
     "common.models.mcp_server",

@@ -113,30 +113,29 @@ class TaskService:
             f"[TaskService] update_one_time_task START | task_id={task_id} | user_id={user_id}"
         )
 
-        task = await self.dao.get_one_time_task(task_id)
-        if (
-            not task
-            or task.recurring_task_id != 0
-            or (user_id and task.user_id and task.user_id != user_id)
-        ):
-            logger.warning(
-                f"[TaskService] update_one_time_task FAILED | task_id={task_id} | error=Task not found"
-            )
-            raise SageHTTPException(status_code=404, message_key="task.not_found")
-
+        values: dict[str, object] = {}
         if data.name is not None:
-            task.name = data.name
+            values["name"] = data.name
         if data.description is not None:
-            task.description = data.description
+            values["description"] = data.description
         if data.agent_id is not None:
-            task.agent_id = data.agent_id
+            values["agent_id"] = data.agent_id
         if data.execute_at is not None:
             execute_at = data.execute_at
             if execute_at.tzinfo is None:
                 execute_at = execute_at.astimezone()
-            task.execute_at = execute_at
+            values["execute_at"] = execute_at
 
-        result = await self.dao.update_one_time_task(task)
+        result = await self.dao.update_one_time_task(
+            task_id,
+            user_id=user_id or None,
+            values=values,
+        )
+        if not result:
+            logger.warning(
+                f"[TaskService] update_one_time_task FAILED | task_id={task_id} | error=Task not found"
+            )
+            raise SageHTTPException(status_code=404, message_key="task.not_found")
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] update_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -149,17 +148,15 @@ class TaskService:
             f"[TaskService] delete_one_time_task START | task_id={task_id} | user_id={user_id}"
         )
 
-        task = await self.dao.get_one_time_task(task_id)
-        if (
-            not task
-            or task.recurring_task_id != 0
-            or (user_id and task.user_id and task.user_id != user_id)
-        ):
+        result = await self.dao.delete_one_time_task(
+            task_id,
+            user_id=user_id or None,
+        )
+        if not result:
             logger.warning(
                 f"[TaskService] delete_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-        result = await self.dao.delete_one_time_task(task_id)
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] delete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -177,25 +174,28 @@ class TaskService:
             f"[TaskService] update_recurring_task START | task_id={task_id} | user_id={user_id}"
         )
 
-        task = await self.dao.get_recurring_task(task_id)
-        if not task or (user_id and task.user_id and task.user_id != user_id):
+        values: dict[str, object] = {}
+        if data.name is not None:
+            values["name"] = data.name
+        if data.description is not None:
+            values["description"] = data.description
+        if data.agent_id is not None:
+            values["agent_id"] = data.agent_id
+        if data.cron_expression is not None:
+            values["cron_expression"] = data.cron_expression
+        if data.enabled is not None:
+            values["enabled"] = data.enabled
+
+        result = await self.dao.update_recurring_task(
+            task_id,
+            user_id=user_id or None,
+            values=values,
+        )
+        if not result:
             logger.warning(
                 f"[TaskService] update_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-
-        if data.name is not None:
-            task.name = data.name
-        if data.description is not None:
-            task.description = data.description
-        if data.agent_id is not None:
-            task.agent_id = data.agent_id
-        if data.cron_expression is not None:
-            task.cron_expression = data.cron_expression
-        if data.enabled is not None:
-            task.enabled = data.enabled
-
-        result = await self.dao.update_recurring_task(task)
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] update_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -208,13 +208,15 @@ class TaskService:
             f"[TaskService] delete_recurring_task START | task_id={task_id} | user_id={user_id}"
         )
 
-        task = await self.dao.get_recurring_task(task_id)
-        if not task or (user_id and task.user_id and task.user_id != user_id):
+        result = await self.dao.delete_recurring_task(
+            task_id,
+            user_id=user_id or None,
+        )
+        if not result:
             logger.warning(
                 f"[TaskService] delete_recurring_task FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-        result = await self.dao.delete_recurring_task(task_id)
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] delete_recurring_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -228,14 +230,16 @@ class TaskService:
         logger.info(
             f"[TaskService] toggle_task_status START | task_id={task_id} | enabled={enabled} | user_id={user_id}"
         )
-        task = await self.dao.get_recurring_task(task_id)
-        if not task or (user_id and task.user_id and task.user_id != user_id):
+        result = await self.dao.update_recurring_task(
+            task_id,
+            user_id=user_id or None,
+            values={"enabled": enabled},
+        )
+        if not result:
             logger.warning(
                 f"[TaskService] toggle_task_status FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-        task.enabled = enabled
-        result = await self.dao.update_recurring_task(task)
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] toggle_task_status SUCCESS | task_id={task_id} | enabled={enabled} | time={elapsed:.3f}s"
@@ -371,13 +375,16 @@ class TaskService:
         logger.info(
             f"[TaskService] complete_one_time_task START | task_id={task_id} | user_id={user_id}"
         )
-        task = await self.dao.complete_one_time_task(task_id, user_id=user_id or None)
+        task = await self.dao.complete_one_time_task(
+            task_id,
+            user_id=user_id or None,
+            response=response,
+        )
         if not task:
             logger.warning(
                 f"[TaskService] complete_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-        await self.dao.add_task_history(task_id, status="completed", response=response)
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] complete_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -395,21 +402,16 @@ class TaskService:
         logger.info(
             f"[TaskService] fail_one_time_task START | task_id={task_id} | user_id={user_id}"
         )
-        task = await self.get_one_time_task(task_id, user_id=user_id)
-        retry = int(task.retry_count or 0) < int(task.max_retries or 0)
         updated = await self.dao.fail_one_time_task(
             task_id,
             user_id=user_id or None,
-            retry=retry,
+            error_message=error_message,
         )
         if not updated:
             logger.warning(
                 f"[TaskService] fail_one_time_task FAILED | task_id={task_id} | error=Task not found"
             )
             raise SageHTTPException(status_code=404, message_key="task.not_found")
-        await self.dao.add_task_history(
-            task_id, status="failed", error_message=error_message
-        )
         elapsed = time.perf_counter() - start_time
         logger.info(
             f"[TaskService] fail_one_time_task SUCCESS | task_id={task_id} | time={elapsed:.3f}s"
@@ -427,9 +429,10 @@ class TaskService:
         logger.info(
             f"[TaskService] complete_recurring_task START | task_id={task_id} | user_id={user_id}"
         )
-        task = await self.get_recurring_task(task_id, user_id=user_id)
         updated = await self.dao.update_recurring_task_last_executed(
-            task.id, executed_at=executed_at
+            task_id,
+            executed_at=executed_at,
+            user_id=user_id or None,
         )
         if not updated:
             logger.warning(
@@ -491,26 +494,6 @@ class TaskService:
                 if prev_run <= last_executed:
                     continue
 
-                active_instances = await self.dao.get_list(
-                    Task,
-                    where=[
-                        Task.recurring_task_id == recurring_task.id,
-                        Task.status.in_(("pending", "processing")),
-                    ],
-                    limit=1,
-                )
-                if active_instances:
-                    continue
-
-                claimed = await self.dao.advance_recurring_task_cursor(
-                    recurring_task.id,
-                    expected_last_executed=last_executed,
-                    executed_at=prev_run,
-                    user_id=recurring_task.user_id or None,
-                )
-                if not claimed:
-                    continue
-
                 task = Task(
                     user_id=recurring_task.user_id,
                     name=recurring_task.name,
@@ -521,7 +504,14 @@ class TaskService:
                     recurring_task_id=recurring_task.id,
                     status="pending",
                 )
-                await self.dao.create_one_time_task(task)
+                spawned_instance = await self.dao.spawn_recurring_task_instance(
+                    task,
+                    expected_last_executed=last_executed,
+                    executed_at=prev_run,
+                    user_id=recurring_task.user_id or None,
+                )
+                if not spawned_instance:
+                    continue
                 spawned.append(task)
             except Exception as e:
                 logger.error(
