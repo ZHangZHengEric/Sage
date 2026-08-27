@@ -11,8 +11,6 @@
 - `sage-rustfs`: S3 兼容对象存储，端口 `9000` / `9001`
 - `sage-jaeger`: Jaeger all-in-one，OTLP `4317` / `4318`，查询 UI `16686`
 
-Elasticsearch 不再由这套 Kubernetes 清单内置部署。需要知识库检索能力时，请在 `.env` 中通过 `SAGE_ELASTICSEARCH_URL` 等变量接入外部 Elasticsearch。
-
 ## 前置条件
 
 - 可用 Kubernetes 集群
@@ -48,9 +46,7 @@ cp deploy/k8s/env/test.env.example deploy/k8s/env/test.env
 - `ENABLE_INGRESS`: 是否创建 Ingress，默认 `false`
 - `SAGE_WEB_NODE_PORT`: Web NodePort，默认 `30080`
 - `SAGE_WIKI_NODE_PORT`: Wiki NodePort，默认 `30081`
-- `SAGE_DEFAULT_LLM_API_KEY`
 - `SAGE_MYSQL_PASSWORD`
-- `SAGE_ELASTICSEARCH_URL`: 可选，外部 Elasticsearch 地址；留空则跳过 ES 初始化
 - `SAGE_S3_SECRET_KEY`
 - `SAGE_JWT_KEY`
 - `SAGE_REFRESH_TOKEN_SECRET`

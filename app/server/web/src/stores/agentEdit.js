@@ -36,7 +36,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     systemContext: {},
     availableTools: [],
     availableSkills: [],
-    availableKnowledgeBases: [],
     availableWorkflows: {},
     availableSubAgentIds: [],
     subAgentSelectionMode: 'auto_all'
@@ -124,14 +123,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     else list.splice(index, 1)
   }
 
-  const toggleKnowledgeBase = (id) => {
-    if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
-    const list = formData.value.availableKnowledgeBases
-    const index = list.indexOf(id)
-    if (index === -1) list.push(id)
-    else list.splice(index, 1)
-  }
-
   const initForm = (agentData = null, options = {}) => {
     const { preserveStep = false } = options
 
@@ -151,7 +142,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       }
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
-      if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
       if (!Array.isArray(formData.value.availableSubAgentIds)) formData.value.availableSubAgentIds = []
       if (!formData.value.subAgentSelectionMode) {
         formData.value.subAgentSelectionMode =
@@ -278,7 +268,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     removeWorkflowStep,
     updateWorkflowStep,
     toggleTool,
-    toggleSkill,
-    toggleKnowledgeBase
+    toggleSkill
   }
 })

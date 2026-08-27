@@ -82,8 +82,6 @@ SAGE_ENV=development
 
 Grafana 默认管理员账号可通过 `SAGE_GRAFANA_ADMIN_USER` / `SAGE_GRAFANA_ADMIN_PASSWORD` 覆盖。仓库不再提交默认 datasource provisioning；Prometheus、Loki、Jaeger 数据源属于部署现场配置，请在展示机器的 Grafana UI 或本机未提交的 provisioning 文件中配置机器 A / 机器 B 的数据源。Dashboard 通过 datasource 变量选择要查看的机器，并通过 `environment` 变量区分 dev/prod/test。
 
-Sage 的 Compose 和 Kubernetes 部署均不内置或维护 Elasticsearch。需要知识库检索能力时，由部署环境提供外部 Elasticsearch，并通过 `SAGE_ELASTICSEARCH_URL` 等应用变量接入。
-
 ## Kubernetes
 
 Kubernetes 使用同一套资源模板，按 `DEPLOY_ENV` 读取对应环境变量：

@@ -24,12 +24,12 @@ ref: env_vars
 | 类型 | 变量 |
 | --- | --- |
 | 环境与入口 | `SAGE_ENV`、`SAGE_ROOT` |
-| 密钥与账号 | `SAGE_JWT_KEY`、`SAGE_REFRESH_TOKEN_SECRET`、`SAGE_SESSION_SECRET`、MySQL/S3/Grafana 密码、LLM/Embedding/视频分析 API Key、邮件 AK/SK |
-| 外部地址 | `SAGE_TRACE_JAEGER_PUBLIC_URL`、`SAGE_GRAFANA_PUBLIC_URL`、`SAGE_S3_PUBLIC_BASE_URL`、`SAGE_ELASTICSEARCH_URL` |
+| 密钥与账号 | `SAGE_JWT_KEY`、`SAGE_REFRESH_TOKEN_SECRET`、`SAGE_SESSION_SECRET`、MySQL/S3/Grafana 密码、LLM/视频分析 API Key、邮件 AK/SK |
+| 外部地址 | `SAGE_TRACE_JAEGER_PUBLIC_URL`、`SAGE_GRAFANA_PUBLIC_URL`、`SAGE_S3_PUBLIC_BASE_URL` |
 
 Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`IMAGE_REGISTRY`、`IMAGE_PULL_POLICY`、`K8S_IMAGE_TARGET`、`CTR_BIN`、`CTR_NAMESPACE`、`STORAGE_CLASS`、`INGRESS_CLASS_NAME`、`TLS_SECRET_NAME`、`ENABLE_INGRESS`、`SAGE_WEB_SERVICE_TYPE`、`SAGE_WIKI_SERVICE_TYPE`、`SAGE_WEB_NODE_PORT`、`SAGE_WIKI_NODE_PORT`。
 
-高级可覆盖变量不放入 `.env.example`，除非部署确实需要覆盖。常见项包括 Compose 项目名和端口覆盖、`SAGE_WEB_BASE_PATH`、`SAGE_TRACE_JAEGER_URL`、`SAGE_LOKI_PUSH_URL`、`SAGE_MCP_*`、`OPENSANDBOX_IMAGE`、`OPENSANDBOX_TIMEOUT`、`SAGE_OPENSANDBOX_APPEND_MAX_BYTES`、默认 LLM/Embedding 模型参数、视频分析模型参数、邮件固定默认项。
+高级可覆盖变量不放入 `.env.example`，除非部署确实需要覆盖。常见项包括 Compose 项目名和端口覆盖、`SAGE_WEB_BASE_PATH`、`SAGE_TRACE_JAEGER_URL`、`SAGE_LOKI_PUSH_URL`、`SAGE_MCP_*`、`OPENSANDBOX_IMAGE`、`OPENSANDBOX_TIMEOUT`、`SAGE_OPENSANDBOX_APPEND_MAX_BYTES`、默认 LLM 模型参数、视频分析模型参数、邮件固定默认项。
 
 ## 1. LLM 与默认模型
 
@@ -142,16 +142,7 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 | `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`    | `262144` | append 接口单次最大字节数 |
 | `SAGE_APPEND_PATH` / `SAGE_APPEND_B64` | —   | append 工具内部传参    |
 
-## 4.2 Embedding 默认
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `SAGE_EMBEDDING_API_KEY` | — | Embedding API Key |
-| `SAGE_EMBEDDING_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | Embedding base URL |
-| `SAGE_EMBEDDING_MODEL` | `text-embedding-v4` | Embedding 模型 |
-| `SAGE_EMBEDDING_DIMS` | `1024` | 向量维度 |
-
-## 4.3 存储、可观测性与集成
+## 4.2 存储、可观测性与集成
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -160,13 +151,11 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 | `SAGE_S3_BUCKET_NAME` | — | 对象存储 bucket |
 | `SAGE_S3_PUBLIC_BASE_URL` | — | 对象公开访问 base URL |
 | `SAGE_MYSQL_HOST` / `SAGE_MYSQL_PORT` / `SAGE_MYSQL_USER` / `SAGE_MYSQL_PASSWORD` / `SAGE_MYSQL_DATABASE` | — | MySQL 连接配置 |
-| `SAGE_ELASTICSEARCH_URL` / `SAGE_ELASTICSEARCH_API_KEY` / `SAGE_ELASTICSEARCH_USERNAME` / `SAGE_ELASTICSEARCH_PASSWORD` | — | Elasticsearch 连接配置 |
 | `SAGE_TRACE_JAEGER_URL` | — | 内部 Jaeger 查询地址 |
 | `SAGE_TRACE_JAEGER_ENDPOINT` | — | Jaeger OTLP endpoint |
 | `SAGE_TRACE_JAEGER_PUBLIC_URL` | `http://127.0.0.1:30051/jaeger` | 对外 Jaeger 地址 |
 | `SAGE_GRAFANA_PUBLIC_URL` | — | 部署环境对外 Grafana 地址 |
 | `SAGE_LOKI_PUSH_URL` | — | Loki push endpoint |
-| `SAGE_KB_MCP_URL` / `SAGE_KB_MCP_API_KEY` | — | 知识库 MCP 集成 |
 
 
 ## 5. Agent 主循环 & Prompt Cache
@@ -230,7 +219,6 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 | 变量                        | 默认值     | 说明               |
 | ------------------------- | ------- | ---------------- |
 | `SAGE_HOST_PID`           | —       | 父进程 PID（用于桌面壳监控） |
-| `SAGE_UPDATE_URL`         | —       | 桌面端自动更新地址        |
 | `SAGE_INTERNAL_DESKTOP_PROCESS` | — | 桌面端内部进程标记 |
 | `SAGE_TERMINAL_BIN` | — | Terminal 二进制覆盖 |
 | `SAGE_TERMINAL_CLI` | — | Terminal launcher CLI 覆盖 |

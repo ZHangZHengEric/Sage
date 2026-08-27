@@ -58,7 +58,7 @@ async def test_populate_looks_up_main_and_fast_providers_in_parallel(monkeypatch
             await asyncio.sleep(0.05)
             return _provider(provider_id)
 
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             raise AssertionError("default provider should not be used")
 
     async def noop(_request):
@@ -109,7 +109,7 @@ async def test_populate_runs_workspace_skills_and_sub_agents_in_parallel(
             )
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return _provider("default")
 
     async def slow_merge(request):

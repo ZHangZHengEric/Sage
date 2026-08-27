@@ -31,17 +31,6 @@
             <div class="space-y-2">
               <p class="font-medium text-amber-100">{{ t('auth.registrationDisabledTitle') }}</p>
               <p class="text-amber-100/90">
-                {{ t('auth.registrationDisabledIntro') }}
-                <a
-                  href="https://zavixai.com/html/sage.html"
-                  target="_blank"
-                  rel="noreferrer"
-                  class="font-medium text-amber-200 underline underline-offset-2 hover:text-amber-100"
-                >
-                  {{ t('auth.registrationDisabledDesktopLink') }}
-                </a>
-              </p>
-              <p class="text-amber-100/90">
                 {{ t('auth.registrationDisabledSelfHostIntro') }}
                 <a
                   href="https://github.com/ZHangZHengEric/Sage"

@@ -12,7 +12,7 @@ ref: web-app
 
 # Web Application
 
-The **Web** product is the FastAPI server (`app/server/`) plus the Vue 3 client (`app/server/web/`). Use it when you need the full in-browser experience: auth, agents, tools, knowledge base, and the visual workbench.
+The **Web** product is the FastAPI server (`app/server/`) plus the Vue 3 client (`app/server/web/`). Use it when you need the full in-browser experience: auth, agents, tools, and the visual workbench.
 
 
 | Path                                                                 | Best for                                                              |
@@ -27,9 +27,6 @@ The **Web** product is the FastAPI server (`app/server/`) plus the Vue 3 client 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ./scripts/dev-up.sh
 ```
 
@@ -38,6 +35,8 @@ After startup (defaults):
 - **Web UI (Vite dev):** [http://localhost:5173](http://localhost:5173)
 - **Backend API:** [http://localhost:8080](http://localhost:8080)
 - **Health:** [http://localhost:8080/api/health](http://localhost:8080/api/health)
+
+After signing in, add a model provider in Model Source Management, then create or configure an Agent. Server startup does not require default LLM environment variables.
 
 The script may offer **Minimal** (SQLite) vs **Full** dependencies — choose Minimal for the fastest first run. For generated `.env` layout and env vars, see [Getting Started — Configuration](GETTING_STARTED.md#configuration-files) and [Configuration](../CONFIGURATION.md).
 
@@ -55,7 +54,6 @@ cd app/server/web && npm install && cd ../../..
 1. **Backend**
 
 ```bash
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 # plus other env from .env if needed
 python -m app.server.main
 ```
@@ -73,7 +71,7 @@ npm run dev
 
 ## Docker Compose (full stack)
 
-`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts the Sage platform services: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode). Sage does not bundle or operate Elasticsearch; configure an externally managed endpoint when knowledge-base search needs it.
+`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts the Sage platform services: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode).
 
 **What gets exposed (defaults in the compose file):**
 
@@ -91,7 +89,7 @@ npm run dev
 
 - Docker with **Compose v2** (`docker compose`)
 - Sufficient host resources (the compose file sets a **16G** memory limit on `sage-server`; adjust in `deploy/prod/docker-compose.yml` if needed)
-- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least **LLM**, database, and object-storage variables. If knowledge-base search is enabled, also configure an externally managed Elasticsearch endpoint.
+- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least database and object-storage variables.
 
 `SAGE_ROOT` must point to a directory on the host used for **persistent volumes** (MySQL data, `sage-server` sessions/agents/logs, RustFS data, etc.).
 
@@ -100,7 +98,7 @@ npm run dev
 ```bash
 cd /path/to/Sage
 cp deploy/prod/.env.example deploy/prod/.env
-# edit deploy/prod/.env: SAGE_DEFAULT_LLM_API_KEY, secrets, SAGE_MYSQL_PASSWORD, SAGE_S3_* as needed
+# edit deploy/prod/.env: secrets, SAGE_MYSQL_PASSWORD, SAGE_S3_* as needed
 deploy/compose.sh prod up -d --build
 ```
 

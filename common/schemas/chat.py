@@ -70,8 +70,6 @@ class StreamRequest(BaseChatRequest):
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
-    # server 独有：知识库列表
-    available_knowledge_bases: Optional[List[str]] = None
     available_sub_agent_ids: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     # server/desktop 都有 memory_type，server 命名为 canonical

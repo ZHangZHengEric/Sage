@@ -54,22 +54,6 @@ const routes = [
     }
   },
   {
-    path: '/agent/knowledge-base',
-    name: 'KnowledgeBase',
-    component: () => import('../views/KnowledgeBaseList.vue'),
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
-    path: '/agent/knowledge-base/:kdbId',
-    name: 'KnowledgeBaseDetail',
-    component: () => import('../views/KnowledgeBaseDetail.vue'),
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
     path: '/agent/skills',
     name: 'Skills',
     component: () => import('../views/SkillList.vue'),
@@ -111,14 +95,6 @@ const routes = [
     }
   },
   {
-    path: '/system/versions',
-    name: 'VersionList',
-    component: () => import('../views/VersionList.vue'),
-    meta: {
-      title: 'system.versionManagement'
-    }
-  },
-  {
     path: '/personal/model-providers',
     name: 'ModelProviderList',
     component: () => import('../views/ModelProviderList.vue'),
@@ -132,15 +108,6 @@ const routes = [
     component: () => import('../views/MobileMe.vue'),
     meta: {
       title: 'sidebar.userProfile'
-    }
-  },
-  {
-    path: '/download',
-    name: 'Download',
-    component: () => import('../views/Download.vue'),
-    meta: {
-      title: 'download.title',
-      public: true
     }
   },
   // 重定向根路径到聊天页面

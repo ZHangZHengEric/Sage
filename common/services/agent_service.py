@@ -1412,12 +1412,12 @@ async def generate_agent_abilities(
     from common.services.chat_utils import create_model_client
     from common.services.skill_service import list_skills_for_agent
 
-    logger.info(f"开始为 Desktop Agent 生成能力列表: {agent_id}")
+    logger.info(f"开始为 Agent 生成能力列表: {agent_id}")
 
     agent = await get_agent(agent_id, user_id)
     agent_config: Dict[str, Any] = agent.config or {}
 
-    startup_cfg = config.get_startup_config()
+    startup_cfg = _get_cfg()
     llm_provider_id = agent_config.get("llm_provider_id")
     llm_provider_dao = LLMProviderDao()
     provider = (
@@ -1439,12 +1439,17 @@ async def generate_agent_abilities(
             "supports_multimodal": provider.supports_multimodal,
             "supports_structured_output": provider.supports_structured_output,
         }
-    else:
+    elif startup_cfg.app_mode == "desktop":
         llm_config = {
             "api_key": startup_cfg.default_llm_api_key,
             "base_url": startup_cfg.default_llm_api_base_url,
             "model": startup_cfg.default_llm_model_name,
         }
+    else:
+        raise SageHTTPException(
+            message_key="agent.provider_missing",
+            error_detail=f"agent '{agent_id}' has no llm provider",
+        )
 
     client = create_model_client(llm_config)
     model_name = llm_config["model"]

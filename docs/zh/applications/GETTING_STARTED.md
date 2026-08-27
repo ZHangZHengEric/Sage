@@ -23,12 +23,7 @@ ref: getting-started
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 
-# 2. 配置 LLM API Key
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-
-# 3. 运行启动脚本
+# 2. 运行启动脚本
 ./scripts/dev-up.sh
 ```
 
@@ -45,6 +40,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - 前端访问：http://localhost:5173
 - 后端 API：http://localhost:8080
 - 健康检查：http://localhost:8080/api/health
+- 登录后在“模型源管理”中添加模型 Provider
 
 ## 配置文件说明
 
@@ -59,7 +55,6 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - **用途：** Python 后端服务配置
 - **关键配置项：**
   - `SAGE_DB_TYPE` - 数据库类型（sqlite/mysql）
-  - `SAGE_DEFAULT_LLM_API_KEY` - LLM API 密钥（必填）
   - `SAGE_PORT` - 后端端口（默认 8080）
 
 ### 前端配置
@@ -83,7 +78,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 - Python 3.10 或更高版本
 - 运行 Web 客户端和部分桌面流程所需的 Node.js
-- 你计划使用的模型供应商对应的有效 LLM API Key
+- 登录后手动添加模型 Provider 所需的有效 API Key
 
 在仓库根目录安装 Python 依赖：
 
@@ -95,13 +90,7 @@ pip install -r requirements.txt
 
 ## 最小环境变量
 
-只配置默认 LLM 相关设置时，Sage 就可以启动：
-
-```bash
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-```
+Server 启动不需要默认 LLM 环境变量。登录后在“模型源管理”中添加模型 Provider；未添加前，依赖模型的功能会提示缺少 Provider。
 
 如果你使用本地 `.env` 文件，`app/server/main.py` 和 `app/desktop/core/main.py` 都会自动加载它。
 

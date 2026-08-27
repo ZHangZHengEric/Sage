@@ -15,65 +15,41 @@
             </p>
           </div>
         </div>
-        <div class="hidden items-center gap-2 rounded-full border border-border/70 bg-muted/25 px-3 py-1.5 text-[11px] text-muted-foreground md:flex">
-          <span class="h-2 w-2 rounded-full bg-emerald-500/80" />
-          {{ t('system.currentVersion') }}: {{ currentVersion }}
-        </div>
       </div>
 
       <div class="space-y-5">
-        <section class="space-y-2">
+        <section v-if="supportsAutomaticUpdates" class="space-y-2">
           <div class="flex items-center gap-2.5">
             <DownloadCloud class="h-3.5 w-3.5 text-muted-foreground" />
             <h2 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{{ t('system.update') }}</h2>
           </div>
 
-          <div class="overflow-hidden rounded-[18px] border border-border/60 bg-muted/5">
-            <div class="flex flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:justify-between">
-              <div class="flex items-center gap-2">
-                <p class="text-sm font-medium text-foreground">{{ t('system.updateDesc') }}</p>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <button type="button" class="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:text-foreground">
-                        <CircleHelp class="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{{ t('system.updateIdle') }}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+          <div class="rounded-[18px] border border-border/60 bg-muted/5 px-4 py-3">
+            <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div class="text-sm font-medium text-foreground">
+                {{ t('system.currentVersion') }}: {{ currentVersion || '—' }}
               </div>
-              <div class="flex flex-col items-start gap-2 md:items-end">
-                <template v-if="downloading">
-                  <div class="w-full min-w-[220px] max-w-[260px] space-y-2">
-                    <Progress
-                      :model-value="totalBytes > 0 ? downloadProgress : 100"
-                      class="h-2 bg-background/70"
-                      :class="{ 'animate-pulse': totalBytes === 0 }"
-                    />
-                    <div class="flex justify-between text-[11px] text-muted-foreground">
-                      <span>{{ formatBytes(downloadedBytes) }}</span>
-                      <span v-if="totalBytes > 0">{{ downloadProgress }}%</span>
-                    </div>
-                  </div>
-                </template>
-                <template v-else>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
-                    @click="checkForUpdates"
-                    :disabled="checking"
-                  >
-                    <Loader2 v-if="checking" class="mr-2 h-4 w-4 animate-spin" />
-                    <DownloadCloud v-else class="mr-2 h-4 w-4" />
-                    {{ checking ? t('system.checking') : t('system.checkNow') }}
-                  </Button>
-                </template>
+              <div class="flex items-center gap-3">
+                <Progress
+                  v-if="installing"
+                  :model-value="downloadProgress"
+                  class="h-2 w-44 bg-background/70"
+                />
+                <Button
+                  v-else
+                  variant="outline"
+                  size="sm"
+                  class="h-8.5 rounded-full border-border/70 bg-background/90 px-3.5 text-[13px] shadow-none hover:bg-muted/30"
+                  :disabled="checking"
+                  @click="checkForUpdates"
+                >
+                  <Loader2 v-if="checking" class="mr-2 h-4 w-4 animate-spin" />
+                  <DownloadCloud v-else class="mr-2 h-4 w-4" />
+                  {{ checking ? t('system.checking') : t('system.checkNow') }}
+                </Button>
               </div>
             </div>
+            <p v-if="updateStatus" class="mt-2 text-xs text-muted-foreground">{{ updateStatus }}</p>
           </div>
         </section>
 
@@ -502,17 +478,16 @@ const { t, language, setLanguage } = useLanguage()
 const themeStore = useThemeStore()
 const userStore = useUserStore()
 const updaterStore = useUpdaterStore()
-
+const supportsAutomaticUpdates = computed(() => (
+  typeof navigator === 'undefined' || !/linux/i.test(navigator.platform || '')
+))
 const {
   currentVersion,
   checking,
-  downloading,
+  installing,
   downloadProgress,
-  downloadedBytes,
-  totalBytes,
-  updateStatus
+  updateStatus,
 } = storeToRefs(updaterStore)
-
 const showEnvDialog = ref(false)
 const showRestartDialog = ref(false)
 const envVars = ref([])
@@ -557,15 +532,6 @@ const localizedPresetEnvVars = computed(() => presetEnvVars.map((preset) => ({
   ...preset,
   description: t(preset.descriptionKey),
 })))
-
-const formatBytes = (bytes, decimals = 2) => {
-  if (!+bytes) return '0 B'
-  const k = 1024
-  const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-}
 
 // 解析环境变量内容为对象数组
 const parseEnvContent = (content) => {

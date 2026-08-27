@@ -71,13 +71,10 @@
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ./scripts/dev-up.sh
 ```
 
-浏览器打开 [http://localhost:5173](http://localhost:5173)。首次可能提示**最小模式**（SQLite）与**完整模式**等选择，想最快跑通选最小模式即可。可选：`PYTHON_BIN=...` 或 `USE_UV=1 ./scripts/dev-up.sh` 指定解释器或用 [uv](https://github.com/astral-sh/uv) 装依赖。
+浏览器打开 [http://localhost:5173](http://localhost:5173)。登录后在“模型源管理”中添加模型 Provider，再创建或配置 Agent。首次可能提示**最小模式**（SQLite）与**完整模式**等选择，想最快跑通选最小模式即可。可选：`PYTHON_BIN=...` 或 `USE_UV=1 ./scripts/dev-up.sh` 指定解释器或用 [uv](https://github.com/astral-sh/uv) 装依赖。
 
 **详细文档：** [Web 应用](docs/zh/applications/WEB.md)（手工起前后端、Docker Compose 全栈、端口等）
 
@@ -192,7 +189,6 @@ graph TD
         Sandbox --> Remote[远程]
         AppLayer <--> Common[🧱 共享 Common 服务层]
         Common <--> DB[(SQL 数据库)]
-        Memory <--> ES[(Elasticsearch)]
         Workbench <--> FS[(RustFS / 本地文件)]
         Runtime -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
     end

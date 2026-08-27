@@ -12,7 +12,7 @@ ref: architecture-app-server
 
 # Server & Web App Architecture
 
-`app/server/` is the main, productized entry of Sage. It owns multi-user, web, agent management, knowledge base, observability and the rest of the platform surface. It is not a demo.
+`app/server/` is the main, productized entry of Sage. It owns multi-user, web, agent management, observability and the rest of the platform surface. It is not a demo.
 
 ## Module Composition
 
@@ -38,7 +38,6 @@ flowchart TB
         RTask[task]
         RTool[tool / mcp]
         RSkill[skill]
-        RKdb[kdb]
         RLLM[llm_provider]
         RAuth[auth / user]
         ROss[oss]
@@ -109,7 +108,6 @@ Each router maps to one HTTP resource group; services hold the business orchestr
 | `task` | Long-running / async tasks |
 | `tool` / `mcp` | Tool and MCP server registration |
 | `skill` | Skill packages |
-| `kdb` | Knowledge base |
 | `llm_provider` | Model provider configuration |
 | `auth` / `user` | Local account login, registration, sessions, and user management |
 | `oss` | Object storage |

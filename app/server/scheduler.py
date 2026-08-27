@@ -12,14 +12,6 @@ def get_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
-def add_doc_build_jobs():
-    """注册文档构建任务"""
-    from common.services.knowledge_base import add_doc_build_jobs as _add_doc_build_jobs
-
-    sched = get_scheduler()
-    _add_doc_build_jobs(sched)
-
-
 def add_session_log_cleanup_job(sessions_root: str) -> None:
     from common.services.session_log_cleanup import cleanup_old_llm_request_logs
 

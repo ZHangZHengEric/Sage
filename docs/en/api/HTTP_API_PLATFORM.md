@@ -3,7 +3,7 @@ layout: default
 title: Platform, storage, and observability
 parent: HTTP API Reference
 nav_order: 7
-description: "LLM providers, system, versions, OSS, Jaeger, liveness and links"
+description: "LLM providers, system, OSS, Jaeger, liveness and links"
 lang: en
 ref: http-api-platform
 ---
@@ -12,7 +12,7 @@ ref: http-api-platform
 
 # Platform, storage, and observability
 
-Routers: `llm_provider.py`, `system.py`, `oss.py`, `version.py`, `observability.py`. The root liveness `GET /active` is registered in `app/server/main.py`, not under `/api`.
+Routers: `llm_provider.py`, `system.py`, `oss.py`, `observability.py`. The root liveness `GET /active` is registered in `app/server/main.py`, not under `/api`.
 
 ## LLM provider (`/api/llm-provider/...`)
 
@@ -25,11 +25,6 @@ Routers: `llm_provider.py`, `system.py`, `oss.py`, `version.py`, `observability.
 - `GET /api/system/info` is used by the SPA to decide whether self-registration is enabled—do not assume it exposes secret keys.
 - `POST /api/system/update_settings` is **admin**-only.
 - `POST /api/system/agent/usage-stats` is per-user usage with `days` and optional `agent_id`.
-
-## Version endpoints (`/api/system/version*`)
-
-- `.../check` and `.../latest` are for different client surfaces (desktop vs web) with different response models.
-- `POST/GET/DELETE` for version records are product metadata, not a guarantee of image tags in your cluster.
 
 ## OSS upload
 

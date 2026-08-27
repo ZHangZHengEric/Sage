@@ -71,13 +71,10 @@
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ./scripts/dev-up.sh
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The first run may ask for **Minimal** (SQLite) vs **Full** stacks — Minimal is the quickest. Optional: `PYTHON_BIN=...` or `USE_UV=1 ./scripts/dev-up.sh` if you use a custom Python or [uv](https://github.com/astral-sh/uv).
+Open [http://localhost:5173](http://localhost:5173). After signing in, add a model provider in Model Source Management, then create or configure an Agent. The first run may ask for **Minimal** (SQLite) vs **Full** stacks — Minimal is the quickest. Optional: `PYTHON_BIN=...` or `USE_UV=1 ./scripts/dev-up.sh` if you use a custom Python or [uv](https://github.com/astral-sh/uv).
 
 **Detailed documentation:** [Web Application](docs/en/applications/WEB.md) — manual backend + Vite, Docker Compose, and port notes.
 
@@ -192,7 +189,6 @@ graph TD
         Sandbox --> Remote[Remote]
         AppLayer <--> Common[🧱 Shared Common Services]
         Common <--> DB[(SQL Database)]
-        Memory <--> ES[(Elasticsearch)]
         Workbench <--> FS[(RustFS / Local Files)]
         Runtime -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
     end

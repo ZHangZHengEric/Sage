@@ -112,7 +112,6 @@ if [ ! -f .env ]; then
     echo "  2) Full (MySQL + RustFS)"
     echo "     Template: .env.example"
     echo "     - Requires MySQL and RustFS"
-    echo "     - Configure an externally managed Elasticsearch endpoint if needed"
     echo "     - Best for production-like environment"
     echo ""
     read -p "Choose [1/2, default 1]: " mode

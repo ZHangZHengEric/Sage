@@ -42,7 +42,6 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 | Streaming and input  | `chat.py`, `agui_v2.py`         | Existing Sage streams plus additive `POST /api/v2/agent/chat` using AG-UI HTTP/SSE                                                                            |
 | Sessions and sharing | `conversation.py`               | `/api/conversations`*, `…/share/…/messages`, `…/interrupt`, `…/tasks_status`, `…/edit-last-user-message`, `…/rerun-stream`                                    |
 | Agent and workspace  | `agent.py`                      | `/api/agent/…` CRUD, `auto-generate*`, `system-prompt*`, `abilities`, `auth`, `file_workspace*`, `GET/POST /api/agent/tasks/…` async jobs, `workspace/delete` |
-| Knowledge (RAG)      | `kdb.py`                        | Prefix `/api/knowledge-base/…` (kdb + `/doc/*` pipelines)                                                                                                     |
 | Planner              | `task.py`                       | Prefix `/tasks/…` (**not** `/api/tasks`), including `internal/…` — [not the same as agent async tasks](HTTP_API_TASKS.md#planner-vs-agent-async)              |
 | Tools / skills / MCP | `tool.py`, `skill.py`, `mcp.py` | `/api/tools`, `/api/skills`, `/api/mcp` (incl. `exec`, sync, refresh)                                                                                         |
 
@@ -55,7 +54,6 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 | Model providers     | `llm_provider.py`  | `/api/llm-provider/…` verify*, list, create, update, delete                                       |
 | System and stats    | `system.py`        | `/api/system/info`, `/api/health`, `/api/system/update_settings`, `/api/system/agent/usage-stats` |
 | File upload         | `oss.py`           | `POST /api/oss/upload`                                                                            |
-| Versions / releases | `version.py`       | `/api/system/version/…` (see main index)                                                          |
 | Observability       | `observability.py` | `/api/observability/jaeger`* (incl. login/auth redirects)                                         |
 | Root liveness       | `main.py`          | `GET /active` plain text, **no** `/api` prefix (unlike `GET /api/health`)                         |
 
@@ -70,10 +68,9 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 - [Chat, streaming, and message editing](HTTP_API_CHAT.md): `optimize-input`, `rerun-stream`, and the three stream POST entry points.
 - [AG-UI V2 chat](HTTP_API_AG_UI_V2.md): native `RunAgentInput`, standard AG-UI SSE events, idempotency, and process-local replay limits.
 - [Agent: extra capabilities](HTTP_API_AGENT.md): async `submit`, ability cards, `/api/agent/tasks/`*, workspace, authz.
-- [Knowledge base (RAG)](HTTP_API_KNOWLEDGE_BASE.md): CRUD, ingest, retrieval, and `availableKnowledgeBases` on agents.
 - [Tools, skills, and MCP](HTTP_API_TOOLS_MCP.md): `exec`, skill sync options, registering MCP servers.
 - [Scheduled tasks and `/tasks](HTTP_API_TASKS.md)`: one-time and recurring jobs, internal routes, not async agent tasks.
-- [Platform, storage, and observability](HTTP_API_PLATFORM.md): LLM providers, system settings, versions, OSS, Jaeger, and liveness.
+- [Platform, storage, and observability](HTTP_API_PLATFORM.md): LLM providers, system settings, OSS, Jaeger, and liveness.
 
 **Are subpages “complete”?** The **index tables** are the exhaustive path list for `app/server`. Subpages cover **per-domain** scenarios and confusions. **Not yet a dedicated subpage (could be added or generated):** an **OpenAPI** export, a unified **error code** matrix, a **middleware allowlist** dump, DTO field-by-field docs for *every* model, a protocol spec for **stream line JSON / SSE** payloads, and a **security & idempotency** guide. For hard integrations, treat this repo’s routers as ground truth, with these docs as a map.
 
@@ -225,28 +222,6 @@ Defined in `app/server/routers/task.py`. Most responses are **Pydantic models** 
 | POST   | `/api/agent/tasks/{task_id}/cancel`             | none                                      | task                 | Request cancellation                                          |
 
 
-### Knowledge base
-
-
-| Method | Path                                      | Request                                                                     | `data` response             | Purpose                       |
-| ------ | ----------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | ----------------------------- |
-| POST   | `/api/knowledge-base/add`                 | `KdbAddRequest`                                                             | `{"kdb_id","user_id"}`      | Create knowledge base         |
-| POST   | `/api/knowledge-base/update`              | `KdbUpdateRequest`                                                          | `{"success","user_id"}`     | Update knowledge base         |
-| GET    | `/api/knowledge-base/info`                | Query: `kdb_id`                                                             | `KdbInfoResponse`           | Read knowledge base details   |
-| POST   | `/api/knowledge-base/retrieve`            | `KdbRetrieveRequest`                                                        | `{"results":[],"user_id"}`  | Retrieve matching content     |
-| GET    | `/api/knowledge-base/list`                | Query: `query_name`,`type`,`page`,`page_size`                               | `KdbListResponse`           | List knowledge bases          |
-| DELETE | `/api/knowledge-base/delete/{kdb_id}`     | none                                                                        | `{"success","user_id"}`     | Delete knowledge base         |
-| POST   | `/api/knowledge-base/clear`               | `{"kdb_id"}`                                                                | `{"success","user_id"}`     | Clear knowledge base contents |
-| POST   | `/api/knowledge-base/redo_all`            | `{"kdb_id"}`                                                                | `{"success","user_id"}`     | Re-run all tasks              |
-| GET    | `/api/knowledge-base/doc/list`            | Query: `kdb_id`,`query_name`,`query_status`,`task_id`,`page_no`,`page_size` | `KdbDocListResponse`        | List documents                |
-| GET    | `/api/knowledge-base/doc/info/{doc_id}`   | none                                                                        | `KdbDocInfoResponse         | null`                         |
-| POST   | `/api/knowledge-base/doc/add_by_files`    | `multipart/form-data`                                                       | `{"taskId","user_id"}`      | Upload files into a KDB       |
-| DELETE | `/api/knowledge-base/doc/delete/{doc_id}` | none                                                                        | `{"success","user_id"}`     | Delete document               |
-| PUT    | `/api/knowledge-base/doc/redo/{doc_id}`   | none                                                                        | `{"success","user_id"}`     | Re-run one document           |
-| GET    | `/api/knowledge-base/doc/task_process`    | Query: `kdb_id`,`task_id`                                                   | `KdbDocTaskProcessResponse` | Read task progress            |
-| POST   | `/api/knowledge-base/doc/task_redo`       | `{"kdb_id","task_id"}`                                                      | `{"success","user_id"}`     | Re-run one task               |
-
-
 ### Tools, skills, MCP
 
 
@@ -270,7 +245,7 @@ Defined in `app/server/routers/task.py`. Most responses are **Pydantic models** 
 | POST   | `/api/mcp/{server_name}/refresh`       | none                                           | `{"server_name","status"}` | Refresh MCP server                                                                                        |
 
 
-### Providers, system, storage, versions, observability
+### Providers, system, storage, and observability
 
 
 | Method | Path                                     | Request                  | Response                                            | Purpose                                                     |
@@ -289,12 +264,6 @@ Defined in `app/server/routers/task.py`. Most responses are **Pydantic models** 
 | GET    | `/active`                                | none                     | plain text                                          | Uvicorn root liveness, not JSON-wrapped                     |
 | POST   | `/api/agent/workspace/delete`            | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | Delete a user's personal agent workspace                    |
 | POST   | `/api/oss/upload`                        | `multipart/form-data`    | `{"url"}`                                           | Upload file to object storage                               |
-| GET    | `/api/system/version/check`              | none                     | Tauri update response                               | Desktop auto-update                                         |
-| GET    | `/api/system/version/latest`             | none                     | latest version                                      | Web download page                                           |
-| POST   | `/api/system/version/import_github`      | none                     | version record                                      | Import latest GitHub release                                |
-| POST   | `/api/system/version`                    | `CreateVersionRequest`   | version record                                      | Create version manually                                     |
-| GET    | `/api/system/version`                    | none                     | version list                                        | List versions                                               |
-| DELETE | `/api/system/version/{version_str}`      | none                     | `{"success":true}`                                  | Delete version                                              |
 | GET    | `/api/observability/jaeger/login`        | Query: `next?`           | 302 or error                                        | Gate entry into Jaeger                                      |
 | GET    | `/api/observability/jaeger/auth`         | none                     | 204/401/403                                         | Check current Jaeger access                                 |
 | GET    | `/api/observability/jaeger`              | none                     | 307                                                 | Redirect to Jaeger root                                     |
@@ -384,7 +353,6 @@ Used by `/api/chat`, and it requires `agent_id`:
 - `system_prefix`
 - `available_tools`
 - `available_skills`
-- `available_knowledge_bases`
 - `available_sub_agent_ids`
 - `force_summary`
 - `memory_type`
@@ -435,7 +403,6 @@ Used by `POST /api/chat/optimize-input` and `.../stream`.
   "availableTools": ["web_search"],
   "availableSubAgentIds": [],
   "availableSkills": ["market-research"],
-  "availableKnowledgeBases": [],
   "memoryType": "session",
   "maxLoopCount": 10,
   "deepThinking": false,
@@ -443,38 +410,6 @@ Used by `POST /api/chat/optimize-input` and `.../stream`.
   "enableMultimodal": false,
   "agentMode": "team",
   "description": "Handles market research"
-}
-```
-
-### Common knowledge-base payloads
-
-Create a KDB:
-
-```json
-{
-  "name": "Product Docs",
-  "type": "rag",
-  "intro": "Internal product documents",
-  "language": "en"
-}
-```
-
-Retrieve from a KDB:
-
-```json
-{
-  "kdb_id": "kdb_xxx",
-  "query": "How does login work?",
-  "top_k": 10
-}
-```
-
-Redo one task:
-
-```json
-{
-  "kdb_id": "kdb_xxx",
-  "task_id": "task_xxx"
 }
 ```
 
@@ -526,7 +461,6 @@ Constraint:
 | `availableTools`          | string[] | Allowed tools             | Restrict or grant tool usage           |
 | `availableSubAgentIds`    | string[] | Allowed sub-agent IDs     | Multi-agent orchestration              |
 | `availableSkills`         | string[] | Allowed skills            | When the agent should use skills       |
-| `availableKnowledgeBases` | string[] | Allowed KDB IDs           | When the agent should access retrieval |
 | `memoryType`              | string   | Memory mode               | Usually `session`                      |
 | `maxLoopCount`            | integer  | Loop upper bound          | Limit runtime depth/cost               |
 | `deepThinking`            | boolean  | Deeper reasoning mode     | Complex reasoning runs                 |
@@ -551,50 +485,12 @@ Constraint:
 | `system_prefix`             | string   | Temporary system prompt        | Change only one request              |
 | `available_tools`           | string[] | Temporary tool list            | Narrow or broaden allowed tools      |
 | `available_skills`          | string[] | Temporary skill list           | Narrow or broaden allowed skills     |
-| `available_knowledge_bases` | string[] | Temporary KDB list             | Limit one request to some KDBs       |
 | `available_sub_agent_ids`   | string[] | Temporary sub-agent list       | Control which sub-agents may run     |
 | `force_summary`             | boolean  | Force a summary                | Require a closing summary            |
 | `memory_type`               | string   | Temporary memory mode          | Override memory strategy             |
 | `custom_sub_agents`         | array    | Inline sub-agent configs       | Use ad-hoc sub-agents                |
 | `context_budget_config`     | object   | Context budget settings        | Control request budgeting; main history is compacted only by persistent model summaries |
 | `extra_mcp_config`          | object   | Extra MCP config               | Attach MCP config per request        |
-
-
-### Knowledge-base document query fields
-
-`GET /api/knowledge-base/doc/list`:
-
-
-| Param          | Type    | Meaning                     |
-| -------------- | ------- | --------------------------- |
-| `kdb_id`       | string  | Knowledge-base ID, required |
-| `query_name`   | string  | Filter by document name     |
-| `query_status` | int[]   | Filter by task status       |
-| `task_id`      | string  | Filter by task ID           |
-| `page_no`      | integer | Page number starting from 1 |
-| `page_size`    | integer | Page size                   |
-
-
-`GET /api/knowledge-base/doc/task_process`:
-
-
-| Param     | Type   | Meaning           |
-| --------- | ------ | ----------------- |
-| `kdb_id`  | string | Knowledge-base ID |
-| `task_id` | string | Task ID           |
-
-
-Response fields:
-
-
-| Field         | Meaning                    |
-| ------------- | -------------------------- |
-| `success`     | Count of successful items  |
-| `fail`        | Count of failed items      |
-| `inProgress`  | Count currently processing |
-| `waiting`     | Count waiting in queue     |
-| `total`       | Total count                |
-| `taskProcess` | Progress ratio             |
 
 
 ### `LLMProviderCreate` field table
@@ -811,28 +707,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
   }'
 ```
 
-### 6. Retrieve from a knowledge base
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "kdb_id":"kdb_xxx",
-    "query":"How does login work?",
-    "top_k":5
-  }'
-```
-
-### 7. Upload a document into a knowledge base
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_files \
-  -F 'kdb_id=kdb_xxx' \
-  -F 'override=false' \
-  -F 'files=@./README.md'
-```
-
-### 8. Execute a tool
+### 6. Execute a tool
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
@@ -843,7 +718,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
   }'
 ```
 
-### 9. Import a skill from URL
+### 7. Import a skill from URL
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
@@ -856,7 +731,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
   }'
 ```
 
-### 9.1 Bulk sync agent workspace skills
+### 7.1 Bulk sync agent workspace skills
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
@@ -869,7 +744,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-works
 
 When `skill_names` is omitted, the server syncs every skill listed in the agent's `availableSkills` / `available_skills` into all existing `agents/{user_id}/{agent_id}` workspaces.
 
-### 10. Upload a file to OSS
+### 8. Upload a file to OSS
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/oss/upload \

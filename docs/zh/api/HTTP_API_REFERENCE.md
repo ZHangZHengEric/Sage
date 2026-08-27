@@ -42,7 +42,6 @@ ref: http-api-reference
 | 流式与输入优化       | `chat.py`                     | `POST /api/chat` / `stream` / `web-stream`；`…/chat/optimize-input`；`GET …/stream/resume/`*、`/stream/active_sessions`                                    |
 | 会话、分享与中断      | `conversation.py`             | `GET/POST/DELETE /api/conversations*`，`…/share/…/messages`；`POST /api/sessions/…/interrupt`、tasks_status；`…/edit-last-user-message`、`/rerun-stream`     |
 | Agent 与工作区    | `agent.py`                    | `/api/agent/…`：CRUD、auto-generate*、system-prompt*、abilities、多用户 `auth`；`file_workspace`*；`GET/POST /api/agent/tasks/…` 异步大任务与 cancel；`workspace/delete` |
-| 知识库 RAG       | `kdb.py`                      | 统一前缀 `/api/knowledge-base/…`：库、retrieve、`/doc/`* 上传与任务进度等                                                                                               |
 | 计划调度          | `task.py`                     | 前缀 `/tasks/…`（**不是** `/api/tasks`）：一次性/周期任务及 `internal/…`；与上表「Agent 异步 tasks」[不是同一套](HTTP_API_TASKS.md#planner-vs-agent-async)                          |
 | 工具 / 技能 / MCP | `tool.py`、`skill.py`、`mcp.py` | 分别为 `/api/tools`、`/api/skills`、`/api/mcp`（含 `exec`、各类 sync、refresh 等）                                                                                   |
 
@@ -55,7 +54,6 @@ ref: http-api-reference
 | 模型与校验       | `llm_provider.py`  | `/api/llm-provider/…`：verify*、list、create、update、delete                                        |
 | 系统与统计       | `system.py`        | `/api/system/info`、`/api/health`、`/api/system/update_settings`、`/api/system/agent/usage-stats` |
 | 文件上传        | `oss.py`           | `POST /api/oss/upload`                                                                         |
-| 版本与发布       | `version.py`       | `/api/system/version/…`（含 check、latest、import_github 等，见主表）                                    |
 | 可观测与 Jaeger | `observability.py` | `/api/observability/jaeger*（含 login/auth/重定向）`                                                 |
 | 根探活         | `main.py`          | `GET /active`：无 `/api` 前缀的纯文本探活（与 `GET /api/health` 不同）                                        |
 
@@ -67,10 +65,9 @@ ref: http-api-reference
 - [认证与用户](HTTP_API_AUTH_USER.md)：本地账号 session、注册与管理员接口。
 - [对话、流式与消息编辑](HTTP_API_CHAT.md)：`optimize-input`、`rerun-stream`、与三种流式入口的差异。
 - [Agent 补充能力](HTTP_API_AGENT.md)：异步 `submit`、能力卡片、`/api/agent/tasks/`*、工作区与授权。
-- [知识库 RAG](HTTP_API_KNOWLEDGE_BASE.md)：创建、检索、文档管线、与 Agent 的 `availableKnowledgeBases`。
 - [工具、技能与 MCP](HTTP_API_TOOLS_MCP.md)：`/api/tools/exec`、技能同步、MCP 注册与刷新。
 - [计划任务与 `/tasks` 接口](HTTP_API_TASKS.md)：一次性/周期任务、内部调度、与 Agent 异步任务区别。
-- [平台、存储与可观测](HTTP_API_PLATFORM.md)：LLM Provider、系统设置、版本、OSS、Jaeger 与探活。
+- [平台、存储与可观测](HTTP_API_PLATFORM.md)：LLM Provider、系统设置、OSS、Jaeger 与探活。
 
 **二级文档是否「全」**：主表是**全量端点速览**；子文档覆盖 `app/server` 下 8 类路由的**使用场景与易混点**。**仍未单独成文、但可补充的内容**包括：从代码生成的 **OpenAPI 契约**、**错误码/异常**统一表、**中间件白名单**全列表、**每个 DTO 字段**级参考（现分散在主表样例中）、**流式行协议/事件 JSON** 的逐字段说明、以及 **安全与幂等** 约定。有深度对接需求时，建议以仓库路由代码 + 主表为准，子文档为导读。
 
@@ -225,28 +222,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 | POST   | `/api/agent/tasks/{task_id}/cancel`             | 无                                         | 任务信息               | 取消上述异步任务                                                 |
 
 
-### 知识库
-
-
-| Method | Path                                      | 请求                                                                          | 返回 `data`                   | 用途       |
-| ------ | ----------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | -------- |
-| POST   | `/api/knowledge-base/add`                 | `KdbAddRequest`                                                             | `{"kdb_id","user_id"}`      | 创建知识库    |
-| POST   | `/api/knowledge-base/update`              | `KdbUpdateRequest`                                                          | `{"success","user_id"}`     | 更新知识库    |
-| GET    | `/api/knowledge-base/info`                | Query: `kdb_id`                                                             | `KdbInfoResponse`           | 获取知识库详情  |
-| POST   | `/api/knowledge-base/retrieve`            | `KdbRetrieveRequest`                                                        | `{"results":[],"user_id"}`  | 检索知识库内容  |
-| GET    | `/api/knowledge-base/list`                | Query: `query_name`,`type`,`page`,`page_size`                               | `KdbListResponse`           | 知识库列表    |
-| DELETE | `/api/knowledge-base/delete/{kdb_id}`     | 无                                                                           | `{"success","user_id"}`     | 删除知识库    |
-| POST   | `/api/knowledge-base/clear`               | `{"kdb_id"}`                                                                | `{"success","user_id"}`     | 清空知识库内容  |
-| POST   | `/api/knowledge-base/redo_all`            | `{"kdb_id"}`                                                                | `{"success","user_id"}`     | 重跑全部任务   |
-| GET    | `/api/knowledge-base/doc/list`            | Query: `kdb_id`,`query_name`,`query_status`,`task_id`,`page_no`,`page_size` | `KdbDocListResponse`        | 文档列表     |
-| GET    | `/api/knowledge-base/doc/info/{doc_id}`   | 无                                                                           | `KdbDocInfoResponse         | null`    |
-| POST   | `/api/knowledge-base/doc/add_by_files`    | `multipart/form-data`                                                       | `{"taskId","user_id"}`      | 上传文档到知识库 |
-| DELETE | `/api/knowledge-base/doc/delete/{doc_id}` | 无                                                                           | `{"success","user_id"}`     | 删除文档     |
-| PUT    | `/api/knowledge-base/doc/redo/{doc_id}`   | 无                                                                           | `{"success","user_id"}`     | 重跑单文档    |
-| GET    | `/api/knowledge-base/doc/task_process`    | Query: `kdb_id`,`task_id`                                                   | `KdbDocTaskProcessResponse` | 查询任务进度   |
-| POST   | `/api/knowledge-base/doc/task_redo`       | `{"kdb_id","task_id"}`                                                      | `{"success","user_id"}`     | 重跑单任务    |
-
-
 ### Tools、Skills、MCP
 
 
@@ -270,7 +245,7 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 | POST   | `/api/mcp/{server_name}/refresh`       | 无                                             | `{"server_name","status"}`                                  | 刷新 MCP Server                                           |
 
 
-### Provider、系统、存储、版本、可观测性
+### Provider、系统、存储与可观测性
 
 
 | Method | Path                                     | 请求                       | 返回                                                  | 用途                             |
@@ -289,12 +264,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 | GET    | `/active`                                | 无                        | 纯文本                                                 | Uvicorn 根探活，非 JSON 包裹          |
 | POST   | `/api/agent/workspace/delete`            | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | 删除指定用户个人工作空间下的 Agent workspace |
 | POST   | `/api/oss/upload`                        | `multipart/form-data`    | `{"url"}`                                           | 上传文件到对象存储                      |
-| GET    | `/api/system/version/check`              | 无                        | Tauri 更新响应                                          | 桌面端自动更新                        |
-| GET    | `/api/system/version/latest`             | 无                        | 最新版本                                                | Web 下载页                        |
-| POST   | `/api/system/version/import_github`      | 无                        | 版本记录                                                | 从 GitHub 导入最新版本                |
-| POST   | `/api/system/version`                    | `CreateVersionRequest`   | 版本记录                                                | 手动创建版本                         |
-| GET    | `/api/system/version`                    | 无                        | 版本记录列表                                              | 获取所有版本                         |
-| DELETE | `/api/system/version/{version_str}`      | 无                        | `{"success":true}`                                  | 删除版本                           |
 | GET    | `/api/observability/jaeger/login`        | Query: `next?`           | 302 或错误                                             | 进入 Jaeger 前鉴权                  |
 | GET    | `/api/observability/jaeger/auth`         | 无                        | 204/401/403                                         | 探测当前用户是否可访问 Jaeger             |
 | GET    | `/api/observability/jaeger`              | 无                        | 307                                                 | 重定向到 Jaeger 根地址                |
@@ -386,7 +355,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 - `system_prefix`
 - `available_tools`
 - `available_skills`
-- `available_knowledge_bases`
 - `available_sub_agent_ids`
 - `force_summary`
 - `memory_type`
@@ -437,7 +405,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
   "availableTools": ["web_search"],
   "availableSubAgentIds": [],
   "availableSkills": ["market-research"],
-  "availableKnowledgeBases": [],
   "memoryType": "session",
   "maxLoopCount": 10,
   "deepThinking": false,
@@ -445,38 +412,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
   "enableMultimodal": false,
   "agentMode": "team",
   "description": "Handles market research"
-}
-```
-
-### 知识库常用模型
-
-创建知识库：
-
-```json
-{
-  "name": "Product Docs",
-  "type": "rag",
-  "intro": "Internal product documents",
-  "language": "en"
-}
-```
-
-检索知识库：
-
-```json
-{
-  "kdb_id": "kdb_xxx",
-  "query": "How does login work?",
-  "top_k": 10
-}
-```
-
-重跑单任务：
-
-```json
-{
-  "kdb_id": "kdb_xxx",
-  "task_id": "task_xxx"
 }
 ```
 
@@ -528,7 +463,6 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 | `availableTools`          | string[] | 允许使用的工具       | 控制 Agent 工具权限       |
 | `availableSubAgentIds`    | string[] | 可调度子 Agent 列表 | 需要多 Agent 协作时       |
 | `availableSkills`         | string[] | 可用 Skill 列表   | 希望 Agent 使用 Skill 时 |
-| `availableKnowledgeBases` | string[] | 可用知识库 ID 列表   | 需要接知识库检索时           |
 | `memoryType`              | string   | 记忆模式          | 通常用 `session`       |
 | `maxLoopCount`            | integer  | 推理/工具循环上限     | 控制最长运行步数            |
 | `deepThinking`            | boolean  | 更深推理模式        | 复杂推理场景可开启           |
@@ -553,50 +487,12 @@ Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 | `system_prefix`             | string   | 临时 system prompt | 不改 Agent 配置，只改单次请求 |
 | `available_tools`           | string[] | 临时工具列表           | 缩小或扩大单次可用工具        |
 | `available_skills`          | string[] | 临时技能列表           | 缩小或扩大单次可用技能        |
-| `available_knowledge_bases` | string[] | 临时知识库列表          | 单次请求只允许某些知识库       |
 | `available_sub_agent_ids`   | string[] | 临时子 Agent 列表     | 单次请求允许哪些子 Agent    |
 | `force_summary`             | boolean  | 强制总结             | 想在结束时强制输出总结        |
 | `memory_type`               | string   | 单次记忆模式           | 临时切换记忆策略           |
 | `custom_sub_agents`         | array    | 内联子 Agent 配置     | 不依赖已保存子 Agent      |
 | `context_budget_config`     | object   | 上下文预算配置          | 控制请求预算；主历史只使用大模型持久摘要压缩 |
 | `extra_mcp_config`          | object   | 额外 MCP 配置        | 临时挂接 MCP server 参数 |
-
-
-### 知识库文档查询字段
-
-`GET /api/knowledge-base/doc/list`：
-
-
-| 参数             | 类型      | 含义        |
-| -------------- | ------- | --------- |
-| `kdb_id`       | string  | 知识库 ID，必填 |
-| `query_name`   | string  | 按文档名搜索    |
-| `query_status` | int[]   | 按任务状态过滤   |
-| `task_id`      | string  | 按任务 ID 过滤 |
-| `page_no`      | integer | 页码，从 1 开始 |
-| `page_size`    | integer | 每页数量      |
-
-
-`GET /api/knowledge-base/doc/task_process`：
-
-
-| 参数        | 类型     | 含义     |
-| --------- | ------ | ------ |
-| `kdb_id`  | string | 知识库 ID |
-| `task_id` | string | 任务 ID  |
-
-
-返回字段：
-
-
-| 字段            | 含义    |
-| ------------- | ----- |
-| `success`     | 成功条数  |
-| `fail`        | 失败条数  |
-| `inProgress`  | 处理中条数 |
-| `waiting`     | 排队中条数 |
-| `total`       | 总条数   |
-| `taskProcess` | 进度比例  |
 
 
 ### `LLMProviderCreate` 字段表
@@ -813,28 +709,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
   }'
 ```
 
-### 6. 检索知识库
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "kdb_id":"kdb_xxx",
-    "query":"How does login work?",
-    "top_k":5
-  }'
-```
-
-### 7. 上传知识库文档
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_files \
-  -F 'kdb_id=kdb_xxx' \
-  -F 'override=false' \
-  -F 'files=@./README.md'
-```
-
-### 8. 执行工具
+### 6. 执行工具
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
@@ -845,7 +720,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
   }'
 ```
 
-### 9. 导入 Skill
+### 7. 导入 Skill
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
@@ -858,7 +733,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
   }'
 ```
 
-### 9.1 批量同步 Agent workspace skills
+### 7.1 批量同步 Agent workspace skills
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
@@ -871,7 +746,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-works
 
 不传 `skill_names` 时，会按 Agent 配置中的 `availableSkills` / `available_skills` 批量同步到所有现存 `agents/{user_id}/{agent_id}` workspace。
 
-### 10. 上传对象存储文件
+### 8. 上传对象存储文件
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/oss/upload \

@@ -151,3 +151,9 @@ chmod +x app/desktop/scripts/build.sh
 **构建产物位置：**
 - macOS: `app/desktop/tauri/target/release/bundle/macos/` (或 `.dmg`)
 - Windows: `app/desktop/tauri/target/release/bundle/msi/`
+
+## 4. 桌面端更新发布
+
+推送 `desktop-v*` tag 后，`.github/workflows/release-desktop.yml` 会把 macOS、Windows 和 Linux 安装包发布到 GitHub Release。macOS 与 Windows 的签名更新制品全部上传完成后，流水线再生成并上传 `latest.json`；桌面端直接从 GitHub Release 读取该文件，不依赖 Sage Server。
+
+发布前必须配置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。缺少任一 macOS/Windows 更新制品或 `.sig` 签名时，`latest.json` 生成会失败。Linux 当前继续通过 Release 中的 `.deb` 手动更新。

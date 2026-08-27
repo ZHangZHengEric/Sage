@@ -38,7 +38,6 @@ export const buildImportedAgentDraft = (importedConfig, importSuffix = '') => {
     maxLoopCount: importedConfig.maxLoopCount ?? null,
     availableTools: importedConfig.availableTools || [],
     availableSkills: importedConfig.availableSkills || [],
-    availableKnowledgeBases: importedConfig.availableKnowledgeBases || [],
     systemContext: importedConfig.systemContext || {},
     availableWorkflows: importedConfig.availableWorkflows || {},
     llmConfig: importedConfig.llmConfig || {},

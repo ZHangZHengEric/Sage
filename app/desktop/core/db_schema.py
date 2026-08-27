@@ -21,7 +21,6 @@ _DESKTOP_MODEL_MODULES = (
     "common.models.conversation",
     "common.models.file",
     "common.models.im_channel",
-    "common.models.kdb",
     "common.models.llm_provider",
     "common.models.mcp_server",
     "common.models.questionnaire",

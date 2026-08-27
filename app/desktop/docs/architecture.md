@@ -8,7 +8,7 @@ Sage 桌面客户端旨在提供与其智能代理交互的无缝本地体验。
 
 ### 关键约束与决策
 - **无 MySQL**: 被 SQLite 取代。
-- **无 Redis/ES**: 被本地替代方案取代（内存锁、本地文件存储、ChromaDB/LanceDB 用于向量存储）。
+- **无 Redis/ES**: 被本地替代方案取代（内存锁与本地文件存储）。
 - **跨平台**: 支持 macOS (Intel/Apple Silicon) 和 Windows (x64)。
 - **部署**: 带有嵌入式 Python 环境的单可执行文件/安装程序。
 
@@ -49,12 +49,10 @@ app/
     - 运行 Sage 智能代理逻辑。
     - 管理数据持久化 (SQLite)。
     - 处理文件存储 (本地文件系统)。
-    - 处理向量搜索 (ChromaDB/LanceDB)。
 - **修改**:
     - **入口点**: `app/desktop/core/run_desktop.py`，它会加载 `app/desktop/core` 中的核心逻辑。
     - **数据库**: 配置为使用 SQLite (`sqlite+aiosqlite:///...`)。
     - **存储**: 配置为使用本地目录而非 S3。
-    - **向量存储**: 配置为使用本地向量存储而非 Elasticsearch。
 
 ### 3.3. 进程间通信 (IPC)
 1.  **启动**:

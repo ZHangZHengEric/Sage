@@ -25,12 +25,12 @@ Variables intentionally kept in the examples:
 | Type | Variables |
 | --- | --- |
 | Environment and entrypoint | `SAGE_ENV`, `SAGE_ROOT` |
-| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/Embedding/video-analysis API keys, email AK/SK |
-| External URLs | `SAGE_TRACE_JAEGER_PUBLIC_URL`, `SAGE_GRAFANA_PUBLIC_URL`, `SAGE_S3_PUBLIC_BASE_URL`, `SAGE_ELASTICSEARCH_URL` |
+| Secrets and accounts | `SAGE_JWT_KEY`, `SAGE_REFRESH_TOKEN_SECRET`, `SAGE_SESSION_SECRET`, MySQL/S3/Grafana passwords, LLM/video-analysis API keys, email AK/SK |
+| External URLs | `SAGE_TRACE_JAEGER_PUBLIC_URL`, `SAGE_GRAFANA_PUBLIC_URL`, `SAGE_S3_PUBLIC_BASE_URL` |
 
 Kubernetes templates separately keep `NAMESPACE`, `SAGE_HOST`, `SAGE_PUBLIC_URL`, `IMAGE_REGISTRY`, `IMAGE_PULL_POLICY`, `K8S_IMAGE_TARGET`, `CTR_BIN`, `CTR_NAMESPACE`, `STORAGE_CLASS`, `INGRESS_CLASS_NAME`, `TLS_SECRET_NAME`, `ENABLE_INGRESS`, `SAGE_WEB_SERVICE_TYPE`, `SAGE_WIKI_SERVICE_TYPE`, `SAGE_WEB_NODE_PORT`, and `SAGE_WIKI_NODE_PORT`.
 
-Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM/Embedding model parameters, video-analysis model parameters, and fixed email defaults.
+Advanced overrides are not listed in `.env.example` unless a deployment needs to change them. Common examples include Compose project/port overrides, `SAGE_WEB_BASE_PATH`, `SAGE_TRACE_JAEGER_URL`, `SAGE_LOKI_PUSH_URL`, `SAGE_MCP_*`, `OPENSANDBOX_IMAGE`, `OPENSANDBOX_TIMEOUT`, `SAGE_OPENSANDBOX_APPEND_MAX_BYTES`, default LLM model parameters, video-analysis model parameters, and fixed email defaults.
 
 ## 1. LLM defaults
 
@@ -135,16 +135,7 @@ single-user environment inheritance for compatibility.
 | `SAGE_OPENSANDBOX_APPEND_MAX_BYTES` | `262144` | Max bytes per append call |
 | `SAGE_APPEND_PATH` / `SAGE_APPEND_B64` | — | Internal append-tool plumbing |
 
-## 4.2 Embedding defaults
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `SAGE_EMBEDDING_API_KEY` | — | Embedding API key |
-| `SAGE_EMBEDDING_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1/` | Embedding base URL |
-| `SAGE_EMBEDDING_MODEL` | `text-embedding-v4` | Embedding model |
-| `SAGE_EMBEDDING_DIMS` | `1024` | Embedding dimensions |
-
-## 4.3 Storage, observability & integrations
+## 4.2 Storage, observability & integrations
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -153,13 +144,11 @@ single-user environment inheritance for compatibility.
 | `SAGE_S3_BUCKET_NAME` | — | Object storage bucket |
 | `SAGE_S3_PUBLIC_BASE_URL` | — | Public base URL for stored objects |
 | `SAGE_MYSQL_HOST` / `SAGE_MYSQL_PORT` / `SAGE_MYSQL_USER` / `SAGE_MYSQL_PASSWORD` / `SAGE_MYSQL_DATABASE` | — | MySQL connection settings |
-| `SAGE_ELASTICSEARCH_URL` / `SAGE_ELASTICSEARCH_API_KEY` / `SAGE_ELASTICSEARCH_USERNAME` / `SAGE_ELASTICSEARCH_PASSWORD` | — | Elasticsearch connection settings |
 | `SAGE_TRACE_JAEGER_URL` | — | Internal Jaeger query URL |
 | `SAGE_TRACE_JAEGER_ENDPOINT` | — | Jaeger OTLP endpoint |
 | `SAGE_TRACE_JAEGER_PUBLIC_URL` | `http://127.0.0.1:30051/jaeger` | Public Jaeger URL |
 | `SAGE_GRAFANA_PUBLIC_URL` | — | Public Grafana URL used by deployments |
 | `SAGE_LOKI_PUSH_URL` | — | Loki push endpoint |
-| `SAGE_KB_MCP_URL` / `SAGE_KB_MCP_API_KEY` | — | Knowledge-base MCP integration |
 
 ## 5. Agent loop & prompt cache
 
@@ -216,7 +205,6 @@ single-user environment inheritance for compatibility.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SAGE_HOST_PID` | — | Parent process PID (desktop shell watcher) |
-| `SAGE_UPDATE_URL` | — | Desktop auto-updater URL |
 | `SAGE_INTERNAL_DESKTOP_PROCESS` | — | Internal desktop process marker |
 | `SAGE_TERMINAL_BIN` | — | Terminal binary override |
 | `SAGE_TERMINAL_CLI` | — | Terminal launcher CLI override |

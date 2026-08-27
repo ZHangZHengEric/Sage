@@ -3,7 +3,7 @@ layout: default
 title: 平台、存储与可观测
 parent: HTTP API 参考
 nav_order: 7
-description: "LLM Provider、系统、版本、OSS、Jaeger、探活与外链"
+description: "LLM Provider、系统、OSS、Jaeger、探活与外链"
 lang: zh
 ref: http-api-platform
 ---
@@ -12,7 +12,7 @@ ref: http-api-platform
 
 # 平台、存储与可观测
 
-对应路由：`llm_provider.py`、`system.py`、`oss.py`、`version.py`、`observability.py`，根路径 `GET /active` 在 `app/server/main.py` 中挂在应用根上。
+对应路由：`llm_provider.py`、`system.py`、`oss.py`、`observability.py`，根路径 `GET /active` 在 `app/server/main.py` 中挂在应用根上。
 
 ## LLM Provider（ `/api/llm-provider/...`）
 
@@ -25,11 +25,6 @@ ref: http-api-platform
 - `GET /api/system/info`：前端首屏/登录页会用来展示是否开放自注册（**公开侧**能看到的字段以代码为准，勿假设包含密钥）。
 - `POST /api/system/update_settings`：**仅 admin**，改 `allow_registration` 等。
 - `POST /api/system/agent/usage-stats`：带 `days` 与可选 `agent_id` 的用量统计，用于仪表盘类页面。
-
-## 版本与包（`/api/system/version`*）
-
-- `.../check`、`.../latest` 分别面向 Tauri/桌面与 Web 下载场景（响应模型不同，见主表）。
-- 版本列表的 `POST/GET/DELETE` 供运营或脚本维护发布记录；与容器镜像 tag **无自动绑定**，属于产品元数据层。
 
 ## 对象存储 `POST /api/oss/upload`
 

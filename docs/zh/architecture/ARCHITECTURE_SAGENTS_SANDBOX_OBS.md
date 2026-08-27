@@ -130,12 +130,10 @@ flowchart LR
 flowchart TB
     SAOAI[SageAsyncOpenAI · 双客户端封装]
     Chat[chat.py · 流式调用 + 工具调用拼装]
-    Embed[embedding.py · 向量化封装]
     Cap[capabilities.py · 请求净化 sanitize_model_request_kwargs]
     MCap[model_capabilities.py · 启动期能力探针]
 
     SAOAI -->|standard / fast| Chat
-    SAOAI --> Embed
     SAOAI -.携带.-> Cap
     MCap -.探测后注入.-> SAOAI
 ```

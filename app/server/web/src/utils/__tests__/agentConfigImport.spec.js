@@ -14,8 +14,6 @@ availableTools:
   - web_search
 availableSkills:
   - researcher
-availableKnowledgeBases:
-  - kb-1
 llmConfig:
   temperature: 0.2
 systemContext:
@@ -36,7 +34,6 @@ availableWorkflows:
       maxLoopCount: 12,
       availableTools: ['web_search'],
       availableSkills: ['researcher'],
-      availableKnowledgeBases: ['kb-1'],
       llmConfig: { temperature: 0.2 },
       systemContext: { team: 'growth' },
       availableWorkflows: { triage: { enabled: true } },

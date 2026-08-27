@@ -582,8 +582,13 @@ if (Test-Path $LocalTauriCmd) {
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
-# Skip updater artifact signing when no private key is available (pubkey in tauri.conf.json is for runtime verify only)
-$env:TAURI_SKIP_SIGNATURE = "true"
+# Local unsigned builds may skip updater artifacts. CI releases provide the signing
+# key and must produce a signature that the installed app can verify.
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+    $env:TAURI_SKIP_SIGNATURE = "true"
+} else {
+    Remove-Item Env:TAURI_SKIP_SIGNATURE -ErrorAction SilentlyContinue
+}
 
 Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
 
