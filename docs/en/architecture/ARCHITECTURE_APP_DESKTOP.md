@@ -96,7 +96,7 @@ sequenceDiagram
 | Browser automation | Headless by default              | Headed by default (`AGENT_BROWSER_HEADED=1`)                    |
 | Skills             | Platform-managed                 | `skill_sync.py` syncs built-in skills to the user dir, editable |
 | Entry              | `app/server/main.py`             | `app/desktop/entry.py` → `app/desktop/core/main.py`             |
-| Auth middleware    | Full OAuth/JWT                   | `inject_desktop_user_context` single-user injection             |
+| Auth middleware    | Local account JWT/session        | `inject_desktop_user_context` single-user injection             |
 
 
 Both call the same `sagents/` runtime; the differences come from sandbox configuration (desktop prefers `local`), the registered tool/skill set, and where model config comes from (desktop typically reads user-provided API keys from local DB).
@@ -154,4 +154,3 @@ Packaging gotchas:
 - `sagents/prompts/` must be explicitly collected (the safety import in `main.py` covers this).
 - Built-in `app/skills/` need to be bundled and copied to the user dir via `skill_sync.py`.
 - Cert paths must work under the `_MEIPASS` temp dir (handled by `entry.py`).
-

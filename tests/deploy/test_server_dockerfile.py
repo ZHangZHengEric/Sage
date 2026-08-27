@@ -34,3 +34,13 @@ def test_server_prunes_desktop_only_im_dependencies():
     assert "dingtalk-stream" in requirements_filter
     assert "python-socks" in requirements_filter
     assert "RUN rm -rf /app/mcp_servers/im_server" in dockerfile
+
+
+def test_server_does_not_install_removed_auth_or_verification_dependencies():
+    repo_root = Path(__file__).resolve().parents[2]
+    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Authlib" not in dockerfile
+    assert "alibabacloud_dm20151123" not in dockerfile

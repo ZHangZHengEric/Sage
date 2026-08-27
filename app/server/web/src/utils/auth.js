@@ -12,24 +12,6 @@ export function removeCookie(key) {
 
 
 import { userAPI } from '../api/user.js'
-import { getApiPrefix } from '../config/runtime.js'
-
-export { getApiPrefix }
-
-export const buildOAuthLoginUrl = (providerId, nextPath = null) => {
-  const apiPrefix = getApiPrefix()
-  const nextUrl = nextPath || (
-    typeof window !== 'undefined'
-      ? `${window.location.pathname}${window.location.search}${window.location.hash}`
-      : '/agent/chat'
-  )
-  const redirectUri = typeof window !== 'undefined'
-    ? `${window.location.origin}${apiPrefix}/api/auth/upstream/callback/${providerId}`
-    : `${apiPrefix}/api/auth/upstream/callback/${providerId}`
-
-  return `${apiPrefix}/api/auth/upstream/login/${encodeURIComponent(providerId)}?next=${encodeURIComponent(nextUrl)}&redirect_uri=${encodeURIComponent(redirectUri)}`
-}
-
 // 登录 API - 不再检查前端 cookie
 export const loginAPI = async (username, password) => {
   try {
@@ -62,18 +44,9 @@ export const loginAPI = async (username, password) => {
   }
 }
 
-export const sendRegisterVerificationCodeAPI = async (email) => {
+export const registerAPI = async (username, password) => {
   try {
-    const res = await userAPI.sendRegisterVerificationCode(email)
-    return { success: true, data: res }
-  } catch (error) {
-    return { success: false, message: error.message || '验证码发送失败，请稍后重试' }
-  }
-}
-
-export const registerAPI = async (username, password, email = '', phonenum = '', verificationCode = '') => {
-  try {
-    await userAPI.register(username, password, email, phonenum, verificationCode)
+    await userAPI.register(username, password)
     const loginRes = await loginAPI(username, password)
     return loginRes
   } catch (error) {

@@ -67,9 +67,6 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 
 ## Authentication and Session
 
-- `SAGE_AUTH_MODE`
-- `SAGE_AUTH_PROVIDERS`
-- `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
 - `SAGE_BOOTSTRAP_ADMIN_USERNAME`
 - `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
 - `SAGE_JWT_KEY`
@@ -86,22 +83,8 @@ These control where Sage writes runtime state, sessions, agents, and skill works
 - `SAGE_CORS_EXPOSE_HEADERS`
 - `SAGE_CORS_MAX_AGE`
 - `SAGE_WEB_BASE_PATH`
-- `SAGE_OAUTH2_CLIENTS`
-- `SAGE_OAUTH2_ISSUER`
-- `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN`
 
-You can ignore this entire section until you enable login, external auth providers, or OAuth2 flows.
-
-Supported deployment modes are intentionally narrowed to three values:
-
-- `SAGE_AUTH_MODE=trusted_proxy`
-  Use a trusted identity proxy mode. Sage still exposes built-in local username/password login, but only for administrators. Regular business-user identity is expected to come from an upstream system and be passed through Sage by a trusted proxy.
-- `SAGE_AUTH_MODE=oauth`
-  Use upstream OAuth/OIDC login for Sage itself. Configure providers through `SAGE_AUTH_PROVIDERS`.
-- `SAGE_AUTH_MODE=native`
-  Use Sage's built-in username/password authentication for local password login. This is an auth mode name, not a local-development flag.
-
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` accepts a comma-separated list of proxy source IPs or CIDR ranges. Its only job is to decide whether a request source can be treated as a trusted identity proxy. Sage accepts the optional `X-Sage-Internal-UserId` passthrough header only when the caller IP matches this allowlist, and then uses it as request user context with the default role `user`.
+Sage uses built-in local accounts. Login and self-registration both use only a username and password.
 
 Sage keeps CORS configurable with safe defaults:
 
@@ -134,18 +117,6 @@ The default shape is public CORS with `*` and no browser credentials. If you ena
 - `SAGE_S3_PUBLIC_BASE_URL`
 
 You only need these when you enable knowledge-base, search, embedding, or object-storage-backed features.
-
-## Email
-
-- `SAGE_EML_ENDPOINT`
-- `SAGE_EML_ACCESS_KEY_ID`
-- `SAGE_EML_ACCESS_KEY_SECRET`
-- `SAGE_EML_SECURITY_TOKEN`
-- `SAGE_EML_ACCOUNT_NAME`
-- `SAGE_EML_TEMPLATE_ID`
-- `SAGE_EML_REGISTER_SUBJECT`
-- `SAGE_EML_ADDRESS_TYPE`
-- `SAGE_EML_REPLY_TO_ADDRESS`
 
 ## Observability
 
@@ -182,30 +153,15 @@ The web client also reads frontend-specific Vite variables:
 
 ```env
 SAGE_PORT=8080
-SAGE_AUTH_MODE=trusted_proxy
 SAGE_DEFAULT_LLM_API_KEY=your-api-key
 SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
 SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 SAGE_DB_TYPE=file
 SAGE_SESSION_DIR=sessions
 SAGE_AGENTS_DIR=agents
-SAGE_TRUSTED_IDENTITY_PROXY_IPS=10.0.0.0/8,127.0.0.1/32
 SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
 SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
 SAGE_SANDBOX_MODE=local
-```
-
-OAuth deployment example:
-
-```env
-SAGE_AUTH_MODE=oauth
-SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
-```
-
-Native auth deployment example:
-
-```env
-SAGE_AUTH_MODE=native
 ```
 
 ## Recommendation

@@ -54,7 +54,6 @@ ref: home
 1. [应用入口](applications/README.md)
 2. [配置](CONFIGURATION.md)
 3. [API 文档](api/README.md)（入口含 [HTTP API 参考](api/HTTP_API_REFERENCE.md) 与历史 Python 参考）
-4. [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)
 
 ## 文档地图
 
@@ -78,7 +77,6 @@ ref: home
 - [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
 - [问卷提供方式](QUESTIONNAIRE_FORMATS.md)：Inline Questionnaire、历史 XML+JSON、`questionnaire_async` 与前端兼容规范
 - [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
-- [OAuth2 对接指南（Lage）](OAUTH2_LAGE_INTEGRATION.md)：恢复自历史提交的 OAuth2 对接文档
 - [开发](DEVELOPMENT.md)：贡献流程和源码位置
 - [故障排查](TROUBLESHOOTING.md)：常见启动和环境问题
 

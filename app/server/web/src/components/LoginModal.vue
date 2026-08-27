@@ -9,77 +9,13 @@
       </DialogHeader>
       
       <div class="px-6 py-4 overflow-y-auto">
-        <div v-if="isOAuthMode" class="grid gap-4">
-          <div class="text-sm text-muted-foreground bg-muted/50 p-4 rounded-lg leading-6 border">
-            当前实例已启用 {{ oauthProviderName || 'OAuth2' }} 登录。点击下方按钮后会跳转到统一身份认证页面。
-          </div>
-
-          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
-            {{ errorMessage }}
-          </div>
-
-          <Button type="button" class="w-full" :disabled="isLoading || !oauthEnabled" @click="handleOAuthLogin">
-            <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-            {{ isLoading ? '跳转中...' : (oauthEnabled ? `使用${oauthProviderName || 'OAuth2'}登录` : 'OAuth2 未完成配置') }}
-          </Button>
-        </div>
-
-        <div v-else-if="isTrustedProxyMode" class="grid gap-4">
-          <div class="text-sm text-muted-foreground bg-muted/50 p-4 rounded-lg leading-6 border">
-            当前实例使用企业身份代理模式。白名单网段内的业务请求会直接放行；如需管理系统配置，请使用下方管理员账号登录。
-          </div>
-
-          <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
-            {{ errorMessage }}
-          </div>
-
-          <div class="rounded-lg border bg-background p-4 grid gap-4">
-            <div class="grid gap-1">
-              <div class="text-sm font-medium">管理员登录</div>
-              <div class="text-xs text-muted-foreground">
-                仅管理员账号可通过用户名密码登录，普通用户无需在 Sage 内单独认证。
-              </div>
-            </div>
-
-            <form @submit.prevent="handleLogin" class="grid gap-4">
-              <div class="grid gap-2">
-                <Label for="trusted_proxy_username">用户名</Label>
-                <Input
-                  id="trusted_proxy_username"
-                  v-model="loginForm.username"
-                  placeholder="请输入管理员用户名或邮箱"
-                  required
-                  :disabled="isLoading"
-                />
-              </div>
-
-              <div class="grid gap-2">
-                <Label for="trusted_proxy_password">密码</Label>
-                <Input
-                  type="password"
-                  id="trusted_proxy_password"
-                  v-model="loginForm.password"
-                  placeholder="请输入管理员密码"
-                  required
-                  :disabled="isLoading"
-                />
-              </div>
-
-              <Button type="submit" class="w-full" :disabled="isLoading || !loginForm.username || !loginForm.password">
-                <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-                {{ isLoading ? '登录中...' : '管理员登录' }}
-              </Button>
-            </form>
-          </div>
-        </div>
-
-        <form v-else-if="mode === 'login'" @submit.prevent="handleLogin" class="grid gap-4">
+        <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="grid gap-4">
           <div class="grid gap-2">
             <Label for="username">用户名</Label>
             <Input 
               id="username"
               v-model="loginForm.username"
-              placeholder="请输入用户名或邮箱"
+              placeholder="请输入用户名"
               required
               :disabled="isLoading"
             />
@@ -119,46 +55,6 @@
             />
           </div>
 
-          <div class="grid gap-2">
-            <Label for="reg_email">
-              邮箱 <span class="text-destructive">*</span>
-            </Label>
-            <Input
-              id="reg_email"
-              v-model="registerForm.email"
-              type="email"
-              placeholder="请输入邮箱地址"
-              required
-              :disabled="isLoading"
-            />
-          </div>
-
-          <div class="grid gap-2">
-            <Label for="reg_verification_code">邮箱验证码</Label>
-            <div class="flex gap-2">
-              <Input
-                id="reg_verification_code"
-                v-model="registerForm.verificationCode"
-                inputmode="numeric"
-                maxlength="6"
-                placeholder="请输入6位验证码"
-                required
-                :disabled="isLoading"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                class="shrink-0"
-                :disabled="isLoading || isSendingCode || !registerForm.email || sendCodeCountdown > 0"
-                @click="handleSendVerificationCode"
-              >
-                <Loader v-if="isSendingCode" class="mr-2 h-4 w-4 animate-spin" />
-                {{ sendCodeButtonText }}
-              </Button>
-            </div>
-            <p class="text-xs text-muted-foreground">验证码 5 分钟内有效，30 秒内只能发送一次。</p>
-          </div>
-
           <div class="grid gap-3">
             <div class="grid gap-2">
               <Label for="reg_password">密码</Label>
@@ -185,10 +81,6 @@
             </div>
           </div>
 
-          <div v-if="successMessage" class="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-lg">
-            {{ successMessage }}
-          </div>
-
           <div v-if="errorMessage" class="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-lg">
             {{ errorMessage }}
           </div>
@@ -196,7 +88,7 @@
           <Button
             type="submit"
             class="w-full"
-            :disabled="isLoading || !registerForm.username || !registerForm.email || !registerForm.verificationCode || !registerForm.password || !registerForm.confirmPassword"
+            :disabled="isLoading || !registerForm.username || !registerForm.password || !registerForm.confirmPassword"
           >
             <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             {{ isLoading ? '注册中...' : '注册并登录' }}
@@ -204,7 +96,7 @@
         </form>
       </div>
 
-      <div v-if="!isOAuthMode && !isTrustedProxyMode" class="bg-muted/50 p-4 flex justify-center border-t">
+      <div class="bg-muted/50 p-4 flex justify-center border-t">
         <div class="text-sm text-muted-foreground">
           <span v-if="mode === 'login'">
             <span v-if="allowRegistration">
@@ -221,8 +113,8 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, onBeforeUnmount, onMounted } from 'vue'
-import { buildOAuthLoginUrl, loginAPI, registerAPI, sendRegisterVerificationCodeAPI } from '../utils/auth.js'
+import { computed, ref, reactive, onMounted } from 'vue'
+import { loginAPI, registerAPI } from '../utils/auth.js'
 import { systemAPI } from '../api/system.js'
 import { Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -250,47 +142,16 @@ const props = defineProps({
 const emit = defineEmits(['close', 'login-success'])
 
 const isLoading = ref(false)
-const isSendingCode = ref(false)
-const sendCodeCountdown = ref(0)
 const errorMessage = ref('')
-const successMessage = ref('')
 const mode = ref('login')
 const allowRegistration = ref(true)
-const authMode = ref('trusted_proxy')
-const authProviders = ref([])
-const oauthProviderName = ref('OAuth2')
-const oauthEnabled = ref(false)
-let sendCodeTimer = null
-const defaultOauthProviderId = computed(() => authProviders.value.find((provider) => provider.type === 'oidc')?.id || null)
-const isLocalAuthProvider = (provider) => provider?.type === 'native' || provider?.id === 'native'
-const hasNativeProvider = computed(() => authProviders.value.some((provider) => isLocalAuthProvider(provider)))
-const isTrustedProxyMode = computed(() => authMode.value === 'trusted_proxy')
-const isOAuthMode = computed(() => authMode.value === 'oauth' && oauthEnabled.value)
-const dialogTitle = computed(() => {
-  if (isOAuthMode.value) return '统一登录'
-  if (isTrustedProxyMode.value) return '企业身份接入'
-  return mode.value === 'login' ? (hasNativeProvider.value ? '用户登录' : '登录') : '创建账号'
-})
-const dialogDescription = computed(() => {
-  if (isOAuthMode.value) return '跳转到身份提供商完成认证'
-  if (isTrustedProxyMode.value) return '通过受信任代理透传用户身份'
-  return mode.value === 'login' ? '登录您的账户以继续' : '填写邮箱验证码并设置密码'
-})
-const sendCodeButtonText = computed(() => {
-  if (isSendingCode.value) return '发送中...'
-  if (sendCodeCountdown.value > 0) return `${sendCodeCountdown.value}s 后重发`
-  return '发送验证码'
-})
+const dialogTitle = computed(() => mode.value === 'login' ? '用户登录' : '创建账号')
+const dialogDescription = computed(() => mode.value === 'login' ? '登录您的账户以继续' : '设置用户名和密码')
 
 onMounted(async () => {
   try {
     const res = await systemAPI.getSystemInfo()
     allowRegistration.value = res.allow_registration
-    authMode.value = res.auth_mode || 'trusted_proxy'
-    authProviders.value = Array.isArray(res.auth_providers) ? res.auth_providers : []
-    oauthProviderName.value = res.oauth_provider_name || 'OAuth2'
-    oauthEnabled.value = res.oauth_enabled === true || authProviders.value.some((provider) => provider.type === 'oidc')
-
   } catch (e) {
     console.error('Failed to get system info', e)
   }
@@ -302,42 +163,11 @@ const loginForm = reactive({
 })
 const registerForm = reactive({
   username: '',
-  email: '',
-  verificationCode: '',
-  phonenum: '',
   password: '',
   confirmPassword: ''
 })
 
-const clearSendCodeTimer = () => {
-  if (sendCodeTimer) {
-    clearInterval(sendCodeTimer)
-    sendCodeTimer = null
-  }
-}
-
-const startSendCodeCountdown = (seconds = 30) => {
-  clearSendCodeTimer()
-  sendCodeCountdown.value = seconds
-  sendCodeTimer = window.setInterval(() => {
-    if (sendCodeCountdown.value <= 1) {
-      clearSendCodeTimer()
-      sendCodeCountdown.value = 0
-      return
-    }
-    sendCodeCountdown.value -= 1
-  }, 1000)
-}
-
-onBeforeUnmount(() => {
-  clearSendCodeTimer()
-})
-
 const handleLogin = async () => {
-  if (isOAuthMode.value) {
-    handleOAuthLogin()
-    return
-  }
   if (!loginForm.username || !loginForm.password) {
     errorMessage.value = '请输入用户名和密码'
     return
@@ -370,88 +200,24 @@ const handleLogin = async () => {
   }
 }
 
-const handleSendVerificationCode = async () => {
-  if (isOAuthMode.value) {
-    errorMessage.value = '当前实例已启用 OAuth2 登录，不支持本地注册'
-    successMessage.value = ''
-    return
-  }
-  if (isTrustedProxyMode.value) {
-    errorMessage.value = '企业身份代理模式不开放自助注册'
-    successMessage.value = ''
-    return
-  }
-  if (!allowRegistration.value) {
-    errorMessage.value = '当前未开放注册'
-    successMessage.value = ''
-    return
-  }
-  if (!registerForm.email) {
-    errorMessage.value = '请输入邮箱地址'
-    successMessage.value = ''
-    return
-  }
-
-  isSendingCode.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const result = await sendRegisterVerificationCodeAPI(registerForm.email)
-    if (result.success) {
-      successMessage.value = '验证码已发送，请查收邮箱'
-      startSendCodeCountdown(result.data?.retry_after || 30)
-    } else {
-      errorMessage.value = result.message || '验证码发送失败'
-    }
-  } catch (error) {
-    console.error('发送验证码失败:', error)
-    errorMessage.value = '验证码发送失败，请重试'
-  } finally {
-    isSendingCode.value = false
-  }
-}
-
 const handleRegister = async () => {
-  if (isOAuthMode.value) {
-    errorMessage.value = '当前实例已启用 OAuth2 登录，不支持本地注册'
-    successMessage.value = ''
-    return
-  }
-  if (isTrustedProxyMode.value) {
-    errorMessage.value = '企业身份代理模式不开放自助注册'
-    successMessage.value = ''
-    return
-  }
-  if (!registerForm.username || !registerForm.email || !registerForm.verificationCode || !registerForm.password || !registerForm.confirmPassword) {
+  if (!registerForm.username || !registerForm.password || !registerForm.confirmPassword) {
     errorMessage.value = '请填写完整注册信息'
-    successMessage.value = ''
     return
   }
   if (registerForm.password !== registerForm.confirmPassword) {
     errorMessage.value = '两次输入的密码不一致'
-    successMessage.value = ''
     return
   }
   isLoading.value = true
   errorMessage.value = ''
-  successMessage.value = ''
   try {
-    const result = await registerAPI(
-      registerForm.username,
-      registerForm.password,
-      registerForm.email,
-      registerForm.phonenum,
-      registerForm.verificationCode
-    )
+    const result = await registerAPI(registerForm.username, registerForm.password)
     if (result.success) {
       emit('login-success', result.data)
       registerForm.username = ''
-      registerForm.email = ''
-      registerForm.verificationCode = ''
-      registerForm.phonenum = ''
       registerForm.password = ''
       registerForm.confirmPassword = ''
-      successMessage.value = ''
       emit('close')
     } else {
       errorMessage.value = result.message || '注册失败'
@@ -464,35 +230,13 @@ const handleRegister = async () => {
   }
 }
 
-const handleOAuthLogin = () => {
-  if (!oauthEnabled.value) {
-    errorMessage.value = 'OAuth2 登录尚未配置完成，请联系管理员'
-    return
-  }
-  if (!defaultOauthProviderId.value) {
-    errorMessage.value = '未找到可用的 OAuth Provider'
-    return
-  }
-  errorMessage.value = ''
-  isLoading.value = true
-  try {
-    window.location.href = buildOAuthLoginUrl(defaultOauthProviderId.value)
-  } catch (error) {
-    console.error('OAuth login redirect failed:', error)
-    errorMessage.value = '跳转登录失败，请重试'
-    isLoading.value = false
-  }
-}
-
 const switchToRegister = () => {
   if (!allowRegistration.value) return
   errorMessage.value = ''
-  successMessage.value = ''
   mode.value = 'register'
 }
 const switchToLogin = () => {
   errorMessage.value = ''
-  successMessage.value = ''
   mode.value = 'login'
 }
 

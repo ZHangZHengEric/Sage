@@ -52,7 +52,6 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | --- | --- | --- |
 | `SAGE_HOST` | — | Public deployment hostname/IP, mainly used by K8s URL derivation; not the server bind address |
 | `SAGE_ENV` | `development` | Application environment name |
-| `SAGE_AUTH_MODE` | `native` | Server auth mode |
 | `SAGE_LOG_LEVEL` | `info` | Server log level |
 | `SAGE_PORT` | `8001` (server) / dynamic (desktop) | Service port |
 | `SAGE_ROOT` | `./data` (Compose example) | Host persistence root used by Compose; the Python server does not read it directly |
@@ -80,8 +79,6 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SAGE_AUTH_PROVIDERS` | — | JSON array of enabled upstream auth providers |
-| `SAGE_TRUSTED_IDENTITY_PROXY_IPS` | — | Comma-separated trusted proxy IPs for identity headers |
 | `SAGE_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Initial admin username |
 | `SAGE_BOOTSTRAP_ADMIN_PASSWORD` | — | Initial admin password |
 | `SAGE_JWT_KEY` | — | JWT signing secret |
@@ -163,9 +160,6 @@ single-user environment inheritance for compatibility.
 | `SAGE_GRAFANA_PUBLIC_URL` | — | Public Grafana URL used by deployments |
 | `SAGE_LOKI_PUSH_URL` | — | Loki push endpoint |
 | `SAGE_KB_MCP_URL` / `SAGE_KB_MCP_API_KEY` | — | Knowledge-base MCP integration |
-| `SAGE_OAUTH2_CLIENTS` / `SAGE_OAUTH2_ISSUER` / `SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN` | — | Built-in OAuth2 provider settings |
-| `SAGE_EML_ENDPOINT` / `SAGE_EML_ACCESS_KEY_ID` / `SAGE_EML_ACCESS_KEY_SECRET` / `SAGE_EML_SECURITY_TOKEN` | — | Email provider credentials |
-| `SAGE_EML_ACCOUNT_NAME` / `SAGE_EML_TEMPLATE_ID` / `SAGE_EML_REGISTER_SUBJECT` / `SAGE_EML_ADDRESS_TYPE` / `SAGE_EML_REPLY_TO_ADDRESS` | — | Email sender/template defaults |
 
 ## 5. Agent loop & prompt cache
 

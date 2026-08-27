@@ -25,7 +25,6 @@ import app.cli.service as cli_service
 
 class _StubConfig:
     app_mode = "server"
-    auth_mode = "native"
     port = 8080
     db_type = "file"
     default_llm_api_base_url = "https://example.com/v1"

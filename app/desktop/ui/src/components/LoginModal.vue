@@ -15,7 +15,7 @@
             <Input 
               id="username"
               v-model="loginForm.username"
-              placeholder="请输入用户名或邮箱"
+              placeholder="请输入用户名"
               required
               :disabled="isLoading"
             />
@@ -156,8 +156,6 @@ const loginForm = reactive({
 })
 const registerForm = reactive({
   username: '',
-  email: '',
-  phonenum: '',
   password: '',
   confirmPassword: ''
 })
@@ -207,12 +205,10 @@ const handleRegister = async () => {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const result = await registerAPI(registerForm.username, registerForm.password, registerForm.email, registerForm.phonenum)
+    const result = await registerAPI(registerForm.username, registerForm.password)
     if (result.success) {
       emit('login-success', result.data)
       registerForm.username = ''
-      registerForm.email = ''
-      registerForm.phonenum = ''
       registerForm.password = ''
       registerForm.confirmPassword = ''
       emit('close')

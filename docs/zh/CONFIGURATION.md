@@ -51,9 +51,6 @@ ref: configuration
 
 ## 认证与启动管理员
 
-- `SAGE_AUTH_MODE`
-- `SAGE_AUTH_PROVIDERS`
-- `SAGE_TRUSTED_IDENTITY_PROXY_IPS`
 - `SAGE_BOOTSTRAP_ADMIN_USERNAME`
 - `SAGE_BOOTSTRAP_ADMIN_PASSWORD`
 - `SAGE_JWT_KEY`
@@ -70,16 +67,7 @@ ref: configuration
 - `SAGE_CORS_EXPOSE_HEADERS`
 - `SAGE_CORS_MAX_AGE`
 
-当前支持的部署模式先收敛为三种：
-
-- `SAGE_AUTH_MODE=trusted_proxy`
-  使用受信任代理接入模式。Sage 仍保留本地用户名密码登录，但只允许管理员登录；普通业务用户通常由上游系统完成认证，再通过受信任代理把身份透传给 Sage。
-- `SAGE_AUTH_MODE=oauth`
-  Sage 自身走上游 OAuth/OIDC 登录。通过 `SAGE_AUTH_PROVIDERS` 配置 OIDC provider。
-- `SAGE_AUTH_MODE=native`
-  使用 Sage 原生的用户名密码认证，支持本地密码登录。这里的 `native` 表示认证方式，不是“本地开发环境”。
-
-`SAGE_TRUSTED_IDENTITY_PROXY_IPS` 支持逗号分隔的 IP 或 CIDR 白名单。它的作用是校验请求来源是否可以被视为受信任身份代理。只有来源命中该白名单时，Sage 才会接受可选的 `X-Sage-Internal-UserId` 并写入请求上下文，默认角色是 `user`。
+Sage 只使用内置本地账号，登录与自注册都只需要用户名和密码。
 
 Sage 现在把主要 CORS 维度都开放成可配置项，并保留默认值：
 
@@ -110,27 +98,12 @@ Sage 现在把主要 CORS 维度都开放成可配置项，并保留默认值：
 
 ```env
 SAGE_PORT=8080
-SAGE_AUTH_MODE=trusted_proxy
 SAGE_DEFAULT_LLM_API_KEY=your-api-key
 SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
 SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 SAGE_DB_TYPE=file
 SAGE_SESSION_DIR=sessions
 SAGE_AGENTS_DIR=agents
-SAGE_TRUSTED_IDENTITY_PROXY_IPS=10.0.0.0/8,127.0.0.1/32
 SAGE_BOOTSTRAP_ADMIN_USERNAME=admin
 SAGE_BOOTSTRAP_ADMIN_PASSWORD=change-this-before-first-run
-```
-
-OAuth 模式示例：
-
-```env
-SAGE_AUTH_MODE=oauth
-SAGE_AUTH_PROVIDERS=[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]
-```
-
-Native 模式示例：
-
-```env
-SAGE_AUTH_MODE=native
 ```

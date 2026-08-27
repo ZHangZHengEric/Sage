@@ -5,13 +5,11 @@ from common.models.agent import AgentConfigDao
 from common.models.llm_provider import LLMProviderDao
 from common.models.system import SystemInfoDao
 from common.services import conversation_service
-from common.services.oauth.upstream import get_auth_public_config
 
 
 async def get_system_info_data(
     *,
     user_id: Optional[str] = None,
-    include_auth_config: bool = False,
     include_desktop_flags: bool = False,
 ) -> Dict[str, Any]:
     sys_dao = SystemInfoDao()
@@ -19,9 +17,6 @@ async def get_system_info_data(
     data: Dict[str, Any] = {
         "allow_registration": allow_reg != "false",
     }
-
-    if include_auth_config:
-        data.update(get_auth_public_config())
 
     if include_desktop_flags:
         llm_dao = LLMProviderDao()

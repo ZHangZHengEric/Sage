@@ -3,7 +3,7 @@ layout: default
 title: Platform, storage, and observability
 parent: HTTP API Reference
 nav_order: 7
-description: "LLM providers, system, versions, OSS, Jaeger, liveness, OAuth2 and links"
+description: "LLM providers, system, versions, OSS, Jaeger, liveness and links"
 lang: en
 ref: http-api-platform
 ---
@@ -22,7 +22,7 @@ Routers: `llm_provider.py`, `system.py`, `oss.py`, `version.py`, `observability.
 
 ## System and usage stats
 
-- `GET /api/system/info` is used by the SPA to decide registration/login options—do not assume it exposes secret keys.
+- `GET /api/system/info` is used by the SPA to decide whether self-registration is enabled—do not assume it exposes secret keys.
 - `POST /api/system/update_settings` is **admin**-only.
 - `POST /api/system/agent/usage-stats` is per-user usage with `days` and optional `agent_id`.
 
@@ -37,14 +37,10 @@ Routers: `llm_provider.py`, `system.py`, `oss.py`, `version.py`, `observability.
 
 ## Jaeger and observability
 
-- `/api/observability/jaeger* ` routes handle redirects and auth; expect HTML flows for admins and possible `503` when local login is not available.
+- `/api/observability/jaeger* ` routes handle redirects and local administrator authentication.
 
 ## Liveness: `GET /active` vs `GET /api/health`
 
 - `/active` is **plain text**; `/api/health` returns a JSON `BaseResponse`. Use them for different kinds of checks (LB vs in-app health).
-
-## OAuth2 vs `/api/auth`
-
-- The OAuth2 surface (`/oauth2/*` and `/api/oauth2/*`) is for **standards-based clients** (metadata, `authorize`, `token`, `userinfo`). Your browser’s username/password form is a different path—see [Auth and users](HTTP_API_AUTH_USER.md) and, for a full third-party example, the repo’s [OAuth2 Lage integration guide](../OAUTH2_LAGE_INTEGRATION.md).
 
 [Back to HTTP API Reference](HTTP_API_REFERENCE.md)

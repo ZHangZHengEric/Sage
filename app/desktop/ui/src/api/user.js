@@ -2,18 +2,16 @@ import request from '../utils/request.js'
 
 // 用户 API 接口
 export const userAPI = {
-  login: async (usernameOrEmail, password) => {
+  login: async (username, password) => {
     return await request.post('/api/auth/login', {
-      username_or_email: usernameOrEmail,
+      username,
       password
     })
   },
-  register: async (username, password, email = '', phonenum = '') => {
+  register: async (username, password) => {
     return await request.post('/api/auth/register', {
       username,
-      password,
-      email,
-      phonenum
+      password
     })
   },
   checkLogin: async () => {

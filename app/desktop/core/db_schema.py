@@ -24,7 +24,6 @@ _DESKTOP_MODEL_MODULES = (
     "common.models.kdb",
     "common.models.llm_provider",
     "common.models.mcp_server",
-    "common.models.oauth2",
     "common.models.questionnaire",
     "common.models.system",
     "common.models.task",

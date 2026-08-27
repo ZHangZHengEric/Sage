@@ -77,7 +77,7 @@ rules:
     execute: allow_in_sandbox_only
   - when: { path_glob: ".env*" }
     read: deny
-# overrides: 组织 OIDC / 管理台注入，优先级更高
+# overrides: 管理台注入，优先级更高
 ```
 
 **优先级建议**：`ORG > REPO > USER > 产品内置默认`。

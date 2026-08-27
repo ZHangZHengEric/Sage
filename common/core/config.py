@@ -46,7 +46,6 @@ class StartupConfig:
     app_mode: str = "server"
 
     env: str = "development"
-    auth_mode: str = "native"
     log_level: str = "INFO"
     port: int = 8080
     logs_dir: str = "logs"
@@ -83,8 +82,6 @@ class StartupConfig:
     context_compression_threshold: float = 0.85
     context_recent_turns: int = 0
 
-    auth_providers_json: Optional[str] = None
-    trusted_identity_proxy_ips: list[str] | None = None
     bootstrap_admin_username: str = ""
     bootstrap_admin_password: str = ""
     jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
@@ -101,19 +98,6 @@ class StartupConfig:
     cors_expose_headers: list[str] = field(default_factory=list)
     cors_max_age: int = 600
     web_base_path: str = "/sage"
-    oauth2_clients_json: Optional[str] = None
-    oauth2_issuer: Optional[str] = None
-    oauth2_access_token_expires_in: int = 3600
-    eml_endpoint: str = "dm.aliyuncs.com"
-    eml_access_key_id: Optional[str] = None
-    eml_access_key_secret: Optional[str] = None
-    eml_security_token: Optional[str] = None
-    eml_account_name: Optional[str] = None
-    eml_template_id: Optional[str] = None
-    eml_register_subject: str = "Sage 安全验证，请确认您的邮箱"
-    eml_address_type: int = 1
-    eml_reply_to_address: bool = False
-
     embed_api_key: Optional[str] = None
     embed_base_url: Optional[str] = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
     embed_model: str = "text-embedding-v4"
@@ -137,7 +121,6 @@ class StartupConfig:
 
 class ENV:
     APP_ENV = "SAGE_ENV"
-    AUTH_MODE = "SAGE_AUTH_MODE"
 
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
@@ -178,8 +161,6 @@ class ENV:
     KB_MCP_URL = "SAGE_KB_MCP_URL"
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
 
-    AUTH_PROVIDERS = "SAGE_AUTH_PROVIDERS"
-    TRUSTED_IDENTITY_PROXY_IPS = "SAGE_TRUSTED_IDENTITY_PROXY_IPS"
     BOOTSTRAP_ADMIN_USERNAME = "SAGE_BOOTSTRAP_ADMIN_USERNAME"
     BOOTSTRAP_ADMIN_PASSWORD = "SAGE_BOOTSTRAP_ADMIN_PASSWORD"
     JWT_KEY = "SAGE_JWT_KEY"
@@ -196,18 +177,6 @@ class ENV:
     CORS_EXPOSE_HEADERS = "SAGE_CORS_EXPOSE_HEADERS"
     CORS_MAX_AGE = "SAGE_CORS_MAX_AGE"
     WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
-    OAUTH2_CLIENTS = "SAGE_OAUTH2_CLIENTS"
-    OAUTH2_ISSUER = "SAGE_OAUTH2_ISSUER"
-    OAUTH2_ACCESS_TOKEN_EXPIRES_IN = "SAGE_OAUTH2_ACCESS_TOKEN_EXPIRES_IN"
-    EML_ENDPOINT = "SAGE_EML_ENDPOINT"
-    EML_ACCESS_KEY_ID = "SAGE_EML_ACCESS_KEY_ID"
-    EML_ACCESS_KEY_SECRET = "SAGE_EML_ACCESS_KEY_SECRET"
-    EML_SECURITY_TOKEN = "SAGE_EML_SECURITY_TOKEN"
-    EML_ACCOUNT_NAME = "SAGE_EML_ACCOUNT_NAME"
-    EML_TEMPLATE_ID = "SAGE_EML_TEMPLATE_ID"
-    EML_REGISTER_SUBJECT = "SAGE_EML_REGISTER_SUBJECT"
-    EML_ADDRESS_TYPE = "SAGE_EML_ADDRESS_TYPE"
-    EML_REPLY_TO_ADDRESS = "SAGE_EML_REPLY_TO_ADDRESS"
     MYSQL_HOST = "SAGE_MYSQL_HOST"
     MYSQL_PORT = "SAGE_MYSQL_PORT"
     MYSQL_USER = "SAGE_MYSQL_USER"
@@ -294,12 +263,6 @@ def is_production_like(cfg: StartupConfig) -> bool:
 def validate_startup_config(cfg: StartupConfig) -> None:
     if cfg.app_mode != "server":
         return
-
-    auth_mode = (cfg.auth_mode or "").strip().lower()
-    if auth_mode not in {"trusted_proxy", "oauth", "native"}:
-        raise ValueError(
-            "Unsupported auth mode. Expected trusted_proxy, oauth, or native."
-        )
 
     if not is_production_like(cfg):
         if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
@@ -453,8 +416,6 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
     cfg = StartupConfig(
         app_mode="server",
         env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
-        auth_mode=env_str(ENV.AUTH_MODE, StartupConfig.auth_mode)
-        or StartupConfig.auth_mode,
         log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level)
         or StartupConfig.log_level,
         port=env_int(ENV.PORT, StartupConfig.port),
@@ -514,10 +475,6 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         context_recent_turns=env_int(
             ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
         ),
-        auth_providers_json=env_str(
-            ENV.AUTH_PROVIDERS, StartupConfig.auth_providers_json
-        ),
-        trusted_identity_proxy_ips=env_csv(ENV.TRUSTED_IDENTITY_PROXY_IPS),
         bootstrap_admin_username=env_str(
             ENV.BOOTSTRAP_ADMIN_USERNAME, StartupConfig.bootstrap_admin_username
         )
@@ -563,36 +520,6 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         ),
         cors_max_age=env_int(ENV.CORS_MAX_AGE, StartupConfig.cors_max_age),
         web_base_path=env_str(ENV.WEB_BASE_PATH, StartupConfig.web_base_path),  # pyright: ignore[reportArgumentType]
-        oauth2_clients_json=env_str(
-            ENV.OAUTH2_CLIENTS, StartupConfig.oauth2_clients_json
-        ),
-        oauth2_issuer=env_str(ENV.OAUTH2_ISSUER, StartupConfig.oauth2_issuer),
-        oauth2_access_token_expires_in=env_int(
-            ENV.OAUTH2_ACCESS_TOKEN_EXPIRES_IN,
-            StartupConfig.oauth2_access_token_expires_in,
-        ),
-        eml_endpoint=env_str(ENV.EML_ENDPOINT, StartupConfig.eml_endpoint)
-        or StartupConfig.eml_endpoint,
-        eml_access_key_id=env_str(
-            ENV.EML_ACCESS_KEY_ID, StartupConfig.eml_access_key_id
-        ),
-        eml_access_key_secret=env_str(
-            ENV.EML_ACCESS_KEY_SECRET, StartupConfig.eml_access_key_secret
-        ),
-        eml_security_token=env_str(
-            ENV.EML_SECURITY_TOKEN, StartupConfig.eml_security_token
-        ),
-        eml_account_name=env_str(ENV.EML_ACCOUNT_NAME, StartupConfig.eml_account_name),
-        eml_template_id=env_str(ENV.EML_TEMPLATE_ID, StartupConfig.eml_template_id),
-        eml_register_subject=env_str(
-            ENV.EML_REGISTER_SUBJECT, StartupConfig.eml_register_subject
-        )
-        or StartupConfig.eml_register_subject,
-        eml_address_type=env_int(ENV.EML_ADDRESS_TYPE, StartupConfig.eml_address_type)
-        or StartupConfig.eml_address_type,
-        eml_reply_to_address=env_bool(
-            ENV.EML_REPLY_TO_ADDRESS, StartupConfig.eml_reply_to_address
-        ),
         embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
         embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
         or StartupConfig.embed_base_url,

@@ -40,7 +40,7 @@ flowchart TB
         RSkill[skill]
         RKdb[kdb]
         RLLM[llm_provider]
-        RAuth[auth / oauth2 / user]
+        RAuth[auth / user]
         ROss[oss]
         RObs[observability]
         RSys[system / version]
@@ -111,7 +111,7 @@ flowchart LR
 | `skill` | 技能包管理 |
 | `kdb` | 知识库（Knowledge Base） |
 | `llm_provider` | 模型供应商配置 |
-| `auth` / `oauth2` / `user` | 登录、用户、第三方 OAuth2（如 Lage） |
+| `auth` / `user` | 本地账号登录、注册、会话与用户管理 |
 | `oss` | 对象存储 |
 | `observability` | 可观测性数据查询 |
 | `system` / `version` | 系统信息、版本 |

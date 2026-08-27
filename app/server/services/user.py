@@ -10,14 +10,9 @@ from common.core import config
 from common.core.exceptions import SageHTTPException
 from common.models.system import SystemInfoDao
 from common.models.user import User, UserDao
-from common.services.oauth.helpers import (
+from common.services.auth import (
     build_user_claims as shared_build_user_claims,
     hash_password as shared_hash_password,
-)
-from .auth.email_verification import (
-    normalize_email,
-    send_register_email_code,
-    verify_register_email_code,
 )
 from common.utils.id import gen_id
 
@@ -71,9 +66,6 @@ def build_user_claims(user: User) -> Dict[str, str]:
 async def register_user(
     username: str,
     password: str,
-    email: Optional[str] = None,
-    phonenum: Optional[str] = None,
-    verification_code: Optional[str] = None,
 ) -> str:
     # Check if registration is allowed
     sys_dao = SystemInfoDao()
@@ -85,83 +77,32 @@ async def register_user(
             error_detail="registration disabled",
         )
 
-    email = normalize_email(email)
-    if not email:
-        raise SageHTTPException(
-            status_code=400,
-            message_key="user.register_email_required",
-            error_detail="email is required",
-        )
-
     dao = UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
             status_code=500, message_key="user.username_exists", error_detail=username
         )
-    if email:
-        existing_email = await dao.get_by_email(email)
-        if existing_email:
-            raise SageHTTPException(
-                status_code=500, message_key="user.email_exists", error_detail=email
-            )
-
-    await verify_register_email_code(email, verification_code or "")
-
     user_id = gen_id()
     password_hash = _hash_password(password)
     user = User(
         user_id=user_id,
         username=username,
         password_hash=password_hash,
-        email=email,
-        phonenum=phonenum,
     )
     await dao.save(user)
     logger.info(f"用户注册成功: {username}")
     return user_id
 
 
-async def send_register_verification_code(email: str) -> tuple[int, int]:
-    sys_dao = SystemInfoDao()
-    allow_reg = await sys_dao.get_by_key("allow_registration")
-    if allow_reg == "false":
-        raise SageHTTPException(
-            status_code=500,
-            message_key="user.registration_disabled",
-            error_detail="registration disabled",
-        )
-
-    normalized_email = normalize_email(email)
-    if not normalized_email:
-        raise SageHTTPException(
-            status_code=400,
-            message_key="user.email_required",
-            error_detail="email is required",
-        )
-
-    dao = UserDao()
-    existing_email = await dao.get_by_email(normalized_email)
-    if existing_email:
-        raise SageHTTPException(
-            status_code=500,
-            message_key="user.email_exists",
-            error_detail=normalized_email,
-        )
-
-    return await send_register_email_code(normalized_email)
-
-
-async def login_user(username_or_email: str, password: str) -> Tuple[str, str, int]:
-    user = await authenticate_user(username_or_email, password)
+async def login_user(username: str, password: str) -> Tuple[str, str, int]:
+    user = await authenticate_user(username, password)
     return create_login_tokens(user)
 
 
-async def authenticate_user(username_or_email: str, password: str) -> User:
+async def authenticate_user(username: str, password: str) -> User:
     dao = UserDao()
-    user = await dao.get_by_username(username_or_email)
-    if not user and "@" in username_or_email:
-        user = await dao.get_by_email(username_or_email)
+    user = await dao.get_by_username(username)
 
     if not user or not _verify_password(password, user.password_hash):
         raise SageHTTPException(
@@ -226,7 +167,7 @@ async def add_user(
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
 ) -> str:
-    email = normalize_email(email) or None
+    email = (email or "").strip().lower() or None
     dao = UserDao()
     existing = await dao.get_by_username(username)
     if existing:

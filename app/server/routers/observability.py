@@ -72,18 +72,9 @@ async def login_jaeger(request: Request):
             )
         return RedirectResponse(url=next_path, status_code=302)
 
-    from common.services.oauth.upstream import is_local_auth_enabled
-
-    if is_local_auth_enabled():
-        return RedirectResponse(
-            url=_build_web_login_path(cfg, next_path),
-            status_code=302,
-        )
-
-    raise SageHTTPException(
-        status_code=503,
-        message_key="observability.local_admin_required",
-        error_detail="local auth required for observability",
+    return RedirectResponse(
+        url=_build_web_login_path(cfg, next_path),
+        status_code=302,
     )
 
 

@@ -91,7 +91,7 @@ sequenceDiagram
 | 浏览器自动化 | 默认 headless | 默认 headed（`AGENT_BROWSER_HEADED=1`） |
 | 技能 | 平台级管理 | `skill_sync.py` 把内置技能同步到用户目录，可被用户编辑 |
 | 启动入口 | `app/server/main.py` | `app/desktop/entry.py` → `app/desktop/core/main.py` |
-| 鉴权中间件 | 完整 OAuth/JWT | `inject_desktop_user_context` 单用户注入 |
+| 鉴权中间件 | 本地账号 JWT/session | `inject_desktop_user_context` 单用户注入 |
 
 但两者最终都调用同一个 `sagents/` 运行时，行为差异主要来自：沙箱配置（桌面更倾向 `local`）、工具/技能注册集合不同、模型配置来源不同（桌面通常从本地 DB 读取用户填写的 API Key）。
 

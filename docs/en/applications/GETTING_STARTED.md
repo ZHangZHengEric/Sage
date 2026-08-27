@@ -59,7 +59,6 @@ The startup script will automatically create these configuration files:
 - **Purpose:** Python backend service configuration
 - **Key settings:**
   - `SAGE_DB_TYPE` - Database type (sqlite/mysql)
-  - `SAGE_AUTH_MODE` - Authentication mode (native/trusted_proxy/oauth)
   - `SAGE_DEFAULT_LLM_API_KEY` - LLM API key (required)
   - `SAGE_PORT` - Backend port (default 8080)
 
@@ -106,33 +105,9 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main.py` load it automatically.
 
-## Choose an Auth Deployment Mode
+## Authentication
 
-Current supported authentication deployments are intentionally narrowed to three modes:
-
-- `trusted_proxy`: business requests coming from `SAGE_TRUSTED_IDENTITY_PROXY_IPS` bypass Sage end-user auth, admins can still log in with built-in credentials, and an upstream proxy may optionally pass `X-Sage-Internal-UserId`
-- `oauth`: Sage redirects users to an upstream OAuth/OIDC provider configured through `SAGE_AUTH_PROVIDERS`
-- `native`: Sage uses its built-in username/password login
-
-Minimal trusted proxy example:
-
-```bash
-export SAGE_AUTH_MODE="trusted_proxy"
-export SAGE_TRUSTED_IDENTITY_PROXY_IPS="10.0.0.0/8,127.0.0.1/32"
-```
-
-Minimal OAuth example:
-
-```bash
-export SAGE_AUTH_MODE="oauth"
-export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
-```
-
-Minimal native auth example:
-
-```bash
-export SAGE_AUTH_MODE="native"
-```
+Sage uses built-in local accounts. Sign-in and self-registration both require only a username and password.
 
 For local development, the default `SAGE_ENV` is `development`. If you set `SAGE_ENV=production` or `SAGE_ENV=staging`, you must also provide explicit values for:
 

@@ -30,9 +30,8 @@ ref: http-api-reference
 
 | 模块          | 路由源         | 主要路径 / 族                                                                              |
 | ----------- | ----------- | ------------------------------------------------------------------------------------- |
-| 账户与上游登录     | `auth.py`   | `/api/auth/…`：注册/验证码、登录、session、providers、`upstream` 登录与回调 302                        |
+| 本地账号         | `auth.py`   | `/api/auth/…`：用户名密码注册、登录、session 与退出登录                                               |
 | 用户与兼容       | `user.py`   | `/api/user/…`：config、list/add/delete、options、change-password；以及旧版 `check_login` 等兼容入口 |
-| OAuth2 授权服务 | `oauth2.py` | `/.well-known/…`；`/oauth2/`* 与 `/api/oauth2/`* 双前缀：metadata、authorize、token、userinfo  |
 
 
 ### 第 2 层：核心业务
@@ -65,13 +64,13 @@ ref: http-api-reference
 
 ## 深入阅读（二级文档）
 
-- [认证与用户](HTTP_API_AUTH_USER.md)：部署模式、session、管理员接口、与 OAuth2 的边界。
+- [认证与用户](HTTP_API_AUTH_USER.md)：本地账号 session、注册与管理员接口。
 - [对话、流式与消息编辑](HTTP_API_CHAT.md)：`optimize-input`、`rerun-stream`、与三种流式入口的差异。
 - [Agent 补充能力](HTTP_API_AGENT.md)：异步 `submit`、能力卡片、`/api/agent/tasks/`*、工作区与授权。
 - [知识库 RAG](HTTP_API_KNOWLEDGE_BASE.md)：创建、检索、文档管线、与 Agent 的 `availableKnowledgeBases`。
 - [工具、技能与 MCP](HTTP_API_TOOLS_MCP.md)：`/api/tools/exec`、技能同步、MCP 注册与刷新。
 - [计划任务与 `/tasks` 接口](HTTP_API_TASKS.md)：一次性/周期任务、内部调度、与 Agent 异步任务区别。
-- [平台、存储与可观测](HTTP_API_PLATFORM.md)：LLM Provider、系统设置、版本、OSS、Jaeger、探活、OAuth2 元数据与外链。
+- [平台、存储与可观测](HTTP_API_PLATFORM.md)：LLM Provider、系统设置、版本、OSS、Jaeger 与探活。
 
 **二级文档是否「全」**：主表是**全量端点速览**；子文档覆盖 `app/server` 下 8 类路由的**使用场景与易混点**。**仍未单独成文、但可补充的内容**包括：从代码生成的 **OpenAPI 契约**、**错误码/异常**统一表、**中间件白名单**全列表、**每个 DTO 字段**级参考（现分散在主表样例中）、**流式行协议/事件 JSON** 的逐字段说明、以及 **安全与幂等** 约定。有深度对接需求时，建议以仓库路由代码 + 主表为准，子文档为导读。
 
@@ -86,7 +85,6 @@ ref: http-api-reference
 | 主响应格式       | 大多数 `/api/`* 接口返回 `BaseResponse[T]`；**计划任务**模块路径前缀为 `/tasks`（非 `/api/tasks`），且多数字段直接为 Pydantic 响应体，无外层 `code`                                                                                |
 | 流式接口        | `/api/chat`、`/api/chat/optimize-input/stream`、`/api/stream`、`/api/web-stream`、`/api/conversations/{id}/rerun-stream`、`/api/stream/resume/`*、`/api/stream/active_sessions` 不返回 `BaseResponse` |
 | 文件下载        | `/api/agent/{agent_id}/file_workspace/download` 返回文件流                                                                                                                                        |
-| OAuth2 协议接口 | `/oauth2/`* 与 `/api/oauth2/`* 返回 OAuth2 标准响应                                                                                                                                                 |
 | 探活          | `GET /active` 返回纯文本，**无** `BaseResponse` 包裹，也无 `/api` 前缀                                                                                                                                     |
 | 登录态         | 当前产品接口大多依赖服务端 session；只拿到 `access_token` 不等于能直接访问所有产品接口                                                                                                                                      |
 
@@ -117,19 +115,14 @@ ref: http-api-reference
 
 ### 认证与用户
 
-当前支持的部署模式是 `trusted_proxy`、`oauth` 和 `native`。下面列出的用户名密码登录接口在 `native` 和 `trusted_proxy` 模式下可用；其中 `trusted_proxy` 模式只允许管理员登录，注册接口仅在 `native` 模式下可用。
+Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
 
 
 | Method | Path                                        | 请求                                | 返回 `data`                                       | 用途                 |
 | ------ | ------------------------------------------- | --------------------------------- | ----------------------------------------------- | ------------------ |
-| POST   | `/api/auth/register/send-code`              | `{"email"}`                       | `{"expires_in","retry_after"}`                  | 注册前发邮箱验证码          |
 | POST   | `/api/auth/register`                        | `RegisterRequest`                 | `{"user_id"}`                                   | 本地账号注册             |
 | POST   | `/api/auth/login`                           | `LoginRequest`                    | `{"access_token","refresh_token","expires_in"}` | 本地账号登录             |
 | GET    | `/api/auth/session`                         | 无                                 | `UserInfoResponse`                              | 读取当前登录用户与初始化状态     |
-| GET    | `/api/auth/providers`                       | 无                                 | provider 列表                                     | 获取上游登录提供方          |
-| GET    | `/api/auth/upstream/login/{provider_id}`    | Query: `next`,`redirect_uri`      | 302                                             | 发起指定 OAuth/OIDC 登录 |
-| GET    | `/api/auth/upstream/login`                  | Query: `next`,`redirect_uri`      | 302                                             | 发起默认 OAuth/OIDC 登录 |
-| GET    | `/api/auth/upstream/callback/{provider_id}` | Query: `code`,`state`             | 302                                             | OAuth/OIDC 登录回调    |
 | POST   | `/api/auth/logout`                          | 无                                 | `{}`                                            | 退出登录               |
 | GET    | `/api/user/options`                         | 无                                 | 用户选项列表                                          | 用户下拉选择器            |
 | POST   | `/api/user/change-password`                 | `{"old_password","new_password"}` | `{}`                                            | 修改当前用户密码           |
@@ -142,33 +135,12 @@ ref: http-api-reference
 
 兼容旧路径：
 
-- `/api/user/register/send-code`
 - `/api/user/register`
 - `/api/user/login`
-- `/api/user/auth-providers`
-- `/api/user/oauth/login/{provider_id}`
-- `/api/user/oauth/login`
-- `/api/user/oauth/callback/{provider_id}`
 - `/api/user/logout`
 - `/api/user/check_login`
 
 这几条和 `/api/auth/*` 对应接口语义基本一致，主要是兼容保留。
-
-### OAuth2 授权服务器
-
-
-| Method   | Path                                      | 请求                                  | 返回               | 用途                           |
-| -------- | ----------------------------------------- | ----------------------------------- | ---------------- | ---------------------------- |
-| GET      | `/.well-known/oauth-authorization-server` | 无                                   | OAuth2 metadata  | 元数据发现                        |
-| GET      | `/api/oauth2/metadata`                    | 无                                   | OAuth2 metadata  | 元数据别名                        |
-| GET      | `/oauth2/metadata`                        | 无                                   | OAuth2 metadata  | 元数据别名                        |
-| GET      | `/api/oauth2/authorize`                   | Query: OAuth2 authorize 参数          | 302 或错误体         | 发起授权码流程                      |
-| GET      | `/oauth2/authorize`                       | Query: OAuth2 authorize 参数          | 302 或错误体         | 发起授权码流程                      |
-| POST     | `/api/oauth2/token`                       | `application/x-www-form-urlencoded` | OAuth2 token 响应  | code 换 token / refresh token |
-| POST     | `/oauth2/token`                           | `application/x-www-form-urlencoded` | OAuth2 token 响应  | code 换 token / refresh token |
-| GET/POST | `/api/oauth2/userinfo`                    | Bearer Token                        | userinfo payload | 读取当前 token 对应用户信息            |
-| GET/POST | `/oauth2/userinfo`                        | Bearer Token                        | userinfo payload | 读取当前 token 对应用户信息            |
-
 
 ### Chat 与流式
 
@@ -338,10 +310,7 @@ ref: http-api-reference
 ```json
 {
   "username": "alice",
-  "password": "StrongPassword123",
-  "email": "user@example.com",
-  "phonenum": "13800000000",
-  "verification_code": "123456"
+  "password": "StrongPassword123"
 }
 ```
 
@@ -349,7 +318,7 @@ ref: http-api-reference
 
 ```json
 {
-  "username_or_email": "alice",
+  "username": "alice",
   "password": "StrongPassword123"
 }
 ```
@@ -703,13 +672,11 @@ ref: http-api-reference
 }
 ```
 
-### 本地注册或本地登录未开启
+### 本地注册未开启
 
 常见于：
 
-- `POST /api/auth/register/send-code`
 - `POST /api/auth/register`
-- `POST /api/auth/login`
 - 对应 `/api/user/*` 兼容接口
 
 示例：
@@ -799,29 +766,21 @@ ref: http-api-reference
 
 ## 常用调用示例
 
-### 1. 发送注册验证码
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/auth/register/send-code \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"user@example.com"}'
-```
-
-### 2. 登录并保存 cookie
+### 1. 登录并保存 cookie
 
 ```bash
 curl -c cookies.txt -X POST http://127.0.0.1:8000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username_or_email":"alice","password":"StrongPassword123"}'
+  -d '{"username":"alice","password":"StrongPassword123"}'
 ```
 
-### 3. 读取当前登录态
+### 2. 读取当前登录态
 
 ```bash
 curl -b cookies.txt http://127.0.0.1:8000/api/auth/session
 ```
 
-### 4. 发起流式对话
+### 3. 发起流式对话
 
 ```bash
 curl -N -b cookies.txt -X POST http://127.0.0.1:8000/api/chat \
@@ -833,13 +792,13 @@ curl -N -b cookies.txt -X POST http://127.0.0.1:8000/api/chat \
   }'
 ```
 
-### 5. 断线重连继续订阅
+### 4. 断线重连继续订阅
 
 ```bash
 curl -N http://127.0.0.1:8000/api/stream/resume/sess_123?last_index=15
 ```
 
-### 6. 创建 Agent
+### 5. 创建 Agent
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
@@ -854,7 +813,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
   }'
 ```
 
-### 7. 检索知识库
+### 6. 检索知识库
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
@@ -866,7 +825,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
   }'
 ```
 
-### 8. 上传知识库文档
+### 7. 上传知识库文档
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_files \
@@ -875,7 +834,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_
   -F 'files=@./README.md'
 ```
 
-### 9. 执行工具
+### 8. 执行工具
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
@@ -886,7 +845,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
   }'
 ```
 
-### 10. 导入 Skill
+### 9. 导入 Skill
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
@@ -899,7 +858,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
   }'
 ```
 
-### 10.1 批量同步 Agent workspace skills
+### 9.1 批量同步 Agent workspace skills
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
@@ -912,26 +871,12 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-works
 
 不传 `skill_names` 时，会按 Agent 配置中的 `availableSkills` / `available_skills` 批量同步到所有现存 `agents/{user_id}/{agent_id}` workspace。
 
-### 11. 上传对象存储文件
+### 10. 上传对象存储文件
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/oss/upload \
   -F 'file=@./example.png' \
   -F 'path=uploads/images'
-```
-
-### 12. 获取 OAuth2 元数据
-
-```bash
-curl http://127.0.0.1:8000/.well-known/oauth-authorization-server
-```
-
-### 13. 用授权码换 token
-
-```bash
-curl -X POST http://127.0.0.1:8000/oauth2/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'grant_type=authorization_code&code=AUTH_CODE&redirect_uri=https%3A%2F%2Fclient.example.com%2Fcallback&code_verifier=PKCE_VERIFIER'
 ```
 
 ## 备注

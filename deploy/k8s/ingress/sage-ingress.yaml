@@ -25,13 +25,6 @@ spec:
                 name: sage-web
                 port:
                   name: http
-          - path: /api/user/oauth
-            pathType: Prefix
-            backend:
-              service:
-                name: sage-web
-                port:
-                  name: http
           - path: /jaeger
             pathType: Prefix
             backend:

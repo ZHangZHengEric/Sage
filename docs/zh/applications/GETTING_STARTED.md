@@ -59,7 +59,6 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - **用途：** Python 后端服务配置
 - **关键配置项：**
   - `SAGE_DB_TYPE` - 数据库类型（sqlite/mysql）
-  - `SAGE_AUTH_MODE` - 认证模式（native/trusted_proxy/oauth）
   - `SAGE_DEFAULT_LLM_API_KEY` - LLM API 密钥（必填）
   - `SAGE_PORT` - 后端端口（默认 8080）
 
@@ -106,33 +105,9 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 
 如果你使用本地 `.env` 文件，`app/server/main.py` 和 `app/desktop/core/main.py` 都会自动加载它。
 
-## 选择认证部署模式
+## 认证
 
-当前支持的认证部署模式先收敛为三种：
-
-- `trusted_proxy`：企业网关或反向代理位于 `SAGE_TRUSTED_IDENTITY_PROXY_IPS` 白名单内时，业务请求无需用户在 Sage 内再次登录；管理员仍可使用原生账号密码登录，且上游可选透传 `X-Sage-Internal-UserId`
-- `oauth`：Sage 自身跳转到上游 OAuth/OIDC Provider，配置来源是 `SAGE_AUTH_PROVIDERS`
-- `native`：Sage 自身使用原生用户名密码登录
-
-透传模式最小示例：
-
-```bash
-export SAGE_AUTH_MODE="trusted_proxy"
-export SAGE_TRUSTED_IDENTITY_PROXY_IPS="10.0.0.0/8,127.0.0.1/32"
-```
-
-OAuth 模式最小示例：
-
-```bash
-export SAGE_AUTH_MODE="oauth"
-export SAGE_AUTH_PROVIDERS='[{"id":"corp-sso","type":"oidc","name":"Corp SSO","discovery_url":"https://sso.example.com/.well-known/openid-configuration","client_id":"sage","client_secret":"secret"}]'
-```
-
-Native 模式最小示例：
-
-```bash
-export SAGE_AUTH_MODE="native"
-```
+Sage 只使用内置本地账号，登录与自注册都只需要用户名和密码。
 
 本地开发默认使用 `SAGE_ENV=development`。如果你将 `SAGE_ENV` 设为 `production` 或 `staging`，还必须显式提供以下 secret：
 

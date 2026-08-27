@@ -30,9 +30,8 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 
 | Module                 | Router      | Main paths / family                                                                                    |
 | ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------ |
-| Local/upstream account | `auth.py`   | `/api/auth/…` registration, login, `session`, `providers`, `upstream` login and callback (302)         |
+| Local account          | `auth.py`   | `/api/auth/…` registration, username/password login, session, and logout                              |
 | Users and compat       | `user.py`   | `/api/user/…` config, admin list/add/delete, options, `change-password`, and legacy `check_login` etc. |
-| OAuth2 AS              | `oauth2.py` | `/.well-known/…`；dual-prefix `/oauth2/`* and `/api/oauth2/*`: metadata, authorize, token, userinfo     |
 
 
 ### Layer 2: core product
@@ -67,14 +66,14 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 
 **Suggested reading for integrators:** start with [Auth and users](HTTP_API_AUTH_USER.md), then [Chat, streaming, and message edits](HTTP_API_CHAT.md) or [AG-UI V2 chat](HTTP_API_AG_UI_V2.md), then [Platform, storage, and observability](HTTP_API_PLATFORM.md) for model keys and health checks.
 
-- [Auth and users](HTTP_API_AUTH_USER.md): deployment modes, sessions, admin APIs, and how this differs from OAuth2 tokens alone.
+- [Auth and users](HTTP_API_AUTH_USER.md): local account sessions, registration, and admin APIs.
 - [Chat, streaming, and message editing](HTTP_API_CHAT.md): `optimize-input`, `rerun-stream`, and the three stream POST entry points.
 - [AG-UI V2 chat](HTTP_API_AG_UI_V2.md): native `RunAgentInput`, standard AG-UI SSE events, idempotency, and process-local replay limits.
 - [Agent: extra capabilities](HTTP_API_AGENT.md): async `submit`, ability cards, `/api/agent/tasks/`*, workspace, authz.
 - [Knowledge base (RAG)](HTTP_API_KNOWLEDGE_BASE.md): CRUD, ingest, retrieval, and `availableKnowledgeBases` on agents.
 - [Tools, skills, and MCP](HTTP_API_TOOLS_MCP.md): `exec`, skill sync options, registering MCP servers.
 - [Scheduled tasks and `/tasks](HTTP_API_TASKS.md)`: one-time and recurring jobs, internal routes, not async agent tasks.
-- [Platform, storage, and observability](HTTP_API_PLATFORM.md): LLM providers, system settings, versions, OSS, Jaeger, liveness, OAuth2 discovery pointers.
+- [Platform, storage, and observability](HTTP_API_PLATFORM.md): LLM providers, system settings, versions, OSS, Jaeger, and liveness.
 
 **Are subpages “complete”?** The **index tables** are the exhaustive path list for `app/server`. Subpages cover **per-domain** scenarios and confusions. **Not yet a dedicated subpage (could be added or generated):** an **OpenAPI** export, a unified **error code** matrix, a **middleware allowlist** dump, DTO field-by-field docs for *every* model, a protocol spec for **stream line JSON / SSE** payloads, and a **security & idempotency** guide. For hard integrations, treat this repo’s routers as ground truth, with these docs as a map.
 
@@ -87,7 +86,6 @@ For embedding the Python runtime (`SAgent`, `run_stream`, tools), see [API Refer
 | Main response shape       | Most `/api/`* routes return `BaseResponse[T]`. The **planner/scheduler** module is mounted at `/tasks` (not `/api/tasks`) and usually returns Pydantic models or plain JSON, without a top-level `code` field     |
 | Streaming endpoints       | `/api/chat`, `/api/chat/optimize-input/stream`, `/api/stream`, `/api/web-stream`, `/api/v2/agent/chat`, `POST /api/conversations/{id}/rerun-stream`, `/api/stream/resume/`*, `/api/stream/active_sessions` do not return `BaseResponse` |
 | File download             | `/api/agent/{agent_id}/file_workspace/download` returns a file response                                                                                                                                           |
-| OAuth2 protocol endpoints | `/oauth2/`* and `/api/oauth2/*` return OAuth2-standard payloads                                                                                                                                                   |
 | Liveness                  | `GET /active` returns plain text (no `BaseResponse`, no `/api` prefix)                                                                                                                                            |
 | Login state               | Most product-facing endpoints depend on server-side session state, not only on the returned `access_token`                                                                                                        |
 
@@ -116,19 +114,14 @@ Standard response envelope:
 
 ### Authentication and user
 
-Current supported deployment modes are `trusted_proxy`, `oauth`, and `native`. The username/password login endpoint below is active in `native` and `trusted_proxy`; in `trusted_proxy` it is admin-only, while registration remains `native`-only.
+Sage uses local accounts. Login and self-registration both accept only a username and password.
 
 
 | Method | Path                                        | Request                           | `data` response                                 | Purpose                                                |
 | ------ | ------------------------------------------- | --------------------------------- | ----------------------------------------------- | ------------------------------------------------------ |
-| POST   | `/api/auth/register/send-code`              | `{"email"}`                       | `{"expires_in","retry_after"}`                  | Send email verification code before local registration |
 | POST   | `/api/auth/register`                        | `RegisterRequest`                 | `{"user_id"}`                                   | Local account registration                             |
 | POST   | `/api/auth/login`                           | `LoginRequest`                    | `{"access_token","refresh_token","expires_in"}` | Local login                                            |
 | GET    | `/api/auth/session`                         | none                              | `UserInfoResponse`                              | Read current login session and onboarding status       |
-| GET    | `/api/auth/providers`                       | none                              | provider list                                   | Fetch upstream auth providers                          |
-| GET    | `/api/auth/upstream/login/{provider_id}`    | Query: `next`,`redirect_uri`      | 302                                             | Start provider-specific OAuth/OIDC login               |
-| GET    | `/api/auth/upstream/login`                  | Query: `next`,`redirect_uri`      | 302                                             | Start default OAuth/OIDC login                         |
-| GET    | `/api/auth/upstream/callback/{provider_id}` | Query: `code`,`state`             | 302                                             | OAuth/OIDC callback                                    |
 | POST   | `/api/auth/logout`                          | none                              | `{}`                                            | Logout                                                 |
 | GET    | `/api/user/options`                         | none                              | user option list                                | User dropdown selector                                 |
 | POST   | `/api/user/change-password`                 | `{"old_password","new_password"}` | `{}`                                            | Change current user's password                         |
@@ -141,33 +134,12 @@ Current supported deployment modes are `trusted_proxy`, `oauth`, and `native`. T
 
 Compatibility paths:
 
-- `/api/user/register/send-code`
 - `/api/user/register`
 - `/api/user/login`
-- `/api/user/auth-providers`
-- `/api/user/oauth/login/{provider_id}`
-- `/api/user/oauth/login`
-- `/api/user/oauth/callback/{provider_id}`
 - `/api/user/logout`
 - `/api/user/check_login`
 
 These are still present mostly for backward compatibility and are largely equivalent to the corresponding `/api/auth/*` endpoints.
-
-### OAuth2 authorization server
-
-
-| Method   | Path                                      | Request                             | Response              | Purpose                        |
-| -------- | ----------------------------------------- | ----------------------------------- | --------------------- | ------------------------------ |
-| GET      | `/.well-known/oauth-authorization-server` | none                                | OAuth2 metadata       | Discovery metadata             |
-| GET      | `/api/oauth2/metadata`                    | none                                | OAuth2 metadata       | Metadata alias                 |
-| GET      | `/oauth2/metadata`                        | none                                | OAuth2 metadata       | Metadata alias                 |
-| GET      | `/api/oauth2/authorize`                   | OAuth2 authorize query params       | 302 or error body     | Start authorization code flow  |
-| GET      | `/oauth2/authorize`                       | OAuth2 authorize query params       | 302 or error body     | Start authorization code flow  |
-| POST     | `/api/oauth2/token`                       | `application/x-www-form-urlencoded` | OAuth2 token response | Exchange code or refresh token |
-| POST     | `/oauth2/token`                           | `application/x-www-form-urlencoded` | OAuth2 token response | Exchange code or refresh token |
-| GET/POST | `/api/oauth2/userinfo`                    | Bearer token                        | userinfo payload      | Read current token subject     |
-| GET/POST | `/oauth2/userinfo`                        | Bearer token                        | userinfo payload      | Read current token subject     |
-
 
 ### Chat and streaming
 
@@ -338,10 +310,7 @@ Registration:
 ```json
 {
   "username": "alice",
-  "password": "StrongPassword123",
-  "email": "user@example.com",
-  "phonenum": "13800000000",
-  "verification_code": "123456"
+  "password": "StrongPassword123"
 }
 ```
 
@@ -349,7 +318,7 @@ Login:
 
 ```json
 {
-  "username_or_email": "alice",
+  "username": "alice",
   "password": "StrongPassword123"
 }
 ```
@@ -701,13 +670,11 @@ Example:
 }
 ```
 
-### Local registration or login disabled
+### Local registration disabled
 
 Common on:
 
-- `POST /api/auth/register/send-code`
 - `POST /api/auth/register`
-- `POST /api/auth/login`
 - matching compatibility endpoints under `/api/user/*`
 
 Examples:
@@ -797,29 +764,21 @@ These cases raise business exceptions such as "消息列表不能为空".
 
 ## Common `curl` examples
 
-### 1. Send registration code
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/auth/register/send-code \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"user@example.com"}'
-```
-
-### 2. Login and save cookies
+### 1. Login and save cookies
 
 ```bash
 curl -c cookies.txt -X POST http://127.0.0.1:8000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username_or_email":"alice","password":"StrongPassword123"}'
+  -d '{"username":"alice","password":"StrongPassword123"}'
 ```
 
-### 3. Read current session state
+### 2. Read current session state
 
 ```bash
 curl -b cookies.txt http://127.0.0.1:8000/api/auth/session
 ```
 
-### 4. Start a streaming chat
+### 3. Start a streaming chat
 
 ```bash
 curl -N -b cookies.txt -X POST http://127.0.0.1:8000/api/chat \
@@ -831,13 +790,13 @@ curl -N -b cookies.txt -X POST http://127.0.0.1:8000/api/chat \
   }'
 ```
 
-### 5. Resume a stream
+### 4. Resume a stream
 
 ```bash
 curl -N http://127.0.0.1:8000/api/stream/resume/sess_123?last_index=15
 ```
 
-### 6. Create an agent
+### 5. Create an agent
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
@@ -852,7 +811,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
   }'
 ```
 
-### 7. Retrieve from a knowledge base
+### 6. Retrieve from a knowledge base
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
@@ -864,7 +823,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/retrieve \
   }'
 ```
 
-### 8. Upload a document into a knowledge base
+### 7. Upload a document into a knowledge base
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_files \
@@ -873,7 +832,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/knowledge-base/doc/add_by_
   -F 'files=@./README.md'
 ```
 
-### 9. Execute a tool
+### 8. Execute a tool
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
@@ -884,7 +843,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
   }'
 ```
 
-### 10. Import a skill from URL
+### 9. Import a skill from URL
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
@@ -897,7 +856,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
   }'
 ```
 
-### 10.1 Bulk sync agent workspace skills
+### 9.1 Bulk sync agent workspace skills
 
 ```bash
 curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
@@ -910,26 +869,12 @@ curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-works
 
 When `skill_names` is omitted, the server syncs every skill listed in the agent's `availableSkills` / `available_skills` into all existing `agents/{user_id}/{agent_id}` workspaces.
 
-### 11. Upload a file to OSS
+### 10. Upload a file to OSS
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/oss/upload \
   -F 'file=@./example.png' \
   -F 'path=uploads/images'
-```
-
-### 12. Fetch OAuth2 metadata
-
-```bash
-curl http://127.0.0.1:8000/.well-known/oauth-authorization-server
-```
-
-### 13. Exchange an authorization code for tokens
-
-```bash
-curl -X POST http://127.0.0.1:8000/oauth2/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'grant_type=authorization_code&code=AUTH_CODE&redirect_uri=https%3A%2F%2Fclient.example.com%2Fcallback&code_verifier=PKCE_VERIFIER'
 ```
 
 ## Notes

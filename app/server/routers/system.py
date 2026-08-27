@@ -18,7 +18,7 @@ system_router = APIRouter(prefix="/api", tags=["System"])
 @system_router.get("/system/info")
 async def get_system_info():
     return await Response.succ(
-        data=await system_service.get_system_info_data(include_auth_config=True),
+        data=await system_service.get_system_info_data(),
         message="system.info_loaded",
     )
 
