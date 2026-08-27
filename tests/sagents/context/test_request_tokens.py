@@ -1,4 +1,4 @@
-"""SessionContext per-request tokens 统计测试。
+"""SessionContext request usage 聚合测试。
 
 只验证 start_request / add_llm_request / end_request 三件套的核心流转，
 不依赖沙箱与异步初始化。
@@ -43,7 +43,7 @@ def _fake_request(step="exec", model="m1", prompt=10, completion=5, cached=0):
     }
 
 
-def test_single_request_writes_file_with_total(tmp_path):
+def test_desktop_single_request_writes_file_with_total(tmp_path):
     async def _run():
         ctx = _make_session(tmp_path)
         rid = ctx.start_request({"agent_mode": "simple", "model": "m1"})
@@ -68,7 +68,7 @@ def test_single_request_writes_file_with_total(tmp_path):
     asyncio.run(_run())
 
 
-def test_multiple_serial_requests_each_have_own_file(tmp_path):
+def test_desktop_multiple_serial_requests_each_have_own_file(tmp_path):
     async def _run():
         ctx = _make_session(tmp_path)
         files = []
@@ -79,8 +79,8 @@ def test_multiple_serial_requests_each_have_own_file(tmp_path):
             files.append(ctx.end_request("completed"))
 
         assert len(files) == 2 and files[0] != files[1]
-        for f in files:
-            assert os.path.exists(f)
+        for file_path in files:
+            assert file_path and os.path.exists(file_path)
 
     asyncio.run(_run())
 
@@ -289,6 +289,28 @@ def test_nested_start_finalizes_previous_as_interrupted(tmp_path):
         assert prev["status"] == "interrupted"
 
         ctx.end_request("completed")
+
+    asyncio.run(_run())
+
+
+def test_server_nested_start_does_not_write_request_usage_files(tmp_path, monkeypatch):
+    async def _run():
+        monkeypatch.setenv("SAGE_INTERNAL_SERVER_PROCESS", "1")
+        ctx = _make_session(tmp_path)
+        rid1 = ctx.start_request({})
+        req, resp = _fake_request()
+        ctx.add_llm_request(req, resp)
+        rid2 = ctx.start_request({})
+
+        assert not os.path.exists(
+            os.path.join(ctx.session_workspace, "tokens_usage", f"{rid1}.json")
+        )
+
+        ctx.end_request("completed")
+
+        assert not os.path.exists(
+            os.path.join(ctx.session_workspace, "tokens_usage", f"{rid2}.json")
+        )
 
     asyncio.run(_run())
 

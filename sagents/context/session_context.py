@@ -1739,7 +1739,7 @@ class SessionContext:
                     skill_name = match.strip()
                     if skill_name:
                         found_skills[skill_name] = {"skill_name": skill_name}
-                        logger.info(f"SessionContext: Found skill tag: {skill_name}")
+                        logger.debug(f"SessionContext: Found skill tag: {skill_name}")
 
             # Check for load_skill tool call
             if msg.role == "assistant" and msg.tool_calls:
@@ -1756,7 +1756,7 @@ class SessionContext:
                             skill_name = arguments.get("skill_name")
                             if skill_name:
                                 found_skills[skill_name] = arguments
-                                logger.info(
+                                logger.debug(
                                     f"SessionContext: Found skill tool call: {skill_name}"
                                 )
 
@@ -1769,7 +1769,7 @@ class SessionContext:
 
             for skill_name, arguments in found_skills.items():
                 try:
-                    logger.info(
+                    logger.debug(
                         f"SessionContext: Loading skill '{skill_name}' via ToolManager..."
                     )
                     # 移除 arguments 中的 session_id，避免重复传递
@@ -2038,11 +2038,10 @@ class SessionContext:
     def add_llm_request(
         self, request: Dict[str, Any], response: Optional[Dict[str, Any]]
     ):
-        """添加LLM请求并异步保存到文件。
+        """添加 LLM 请求，并在当前 request 窗口内累计 usage / 时延。
 
-        若处于 ``start_request`` / ``end_request`` 之间，会同时把本次 LLM 调用
-        的 usage / 时延累加到 ``self._current_request``，最终在 ``end_request``
-        时序列化到 ``<session_workspace>/tokens_usage/<request_id>.json``。
+        Desktop 会在 request 结束时保留 usage 诊断文件；Server 只使用最终的
+        数据库统计，避免为同一份 usage 额外写会话文件。
         """
 
         if self._log_writer_closed:
@@ -2313,10 +2312,11 @@ class SessionContext:
             return request_id
 
     def end_request(self, status: str = "completed") -> Optional[str]:
-        """结束当前 request 窗口，把累加器序列化到 tokens_usage 目录。
+        """结束当前 request 窗口。
 
         Returns:
-            落盘文件路径；若没有活跃 request 则返回 None。
+            Desktop 返回 usage 文件路径，Server 返回 request_id；若没有活跃
+            request 则返回 None。
         """
         with self._request_lock:
             return self._finalize_current_request(status)
@@ -2329,25 +2329,29 @@ class SessionContext:
         cur["ended_at"] = time.time()
         cur["duration_sec"] = max(0.0, cur["ended_at"] - cur["started_at"])
         cur["status"] = status
-        try:
-            self._bind_storage_workspace()
-            payload = make_serializable(cur)
-            file_path = self.storage.save_request_usage(
-                self.session_id, cur["request_id"], payload
-            )
-            logger.info(
-                f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
-                f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
-            )
-            if self._has_mcp_calls_for_request(cur["request_id"]):
-                try:
-                    self._save_mcp_calls_sync(cur["request_id"])
-                except Exception as exc:
-                    logger.error(f"SessionContext: 落盘 mcp_calls 失败: {exc}")
-            return file_path
-        except Exception as exc:
-            logger.error(f"SessionContext: 落盘 tokens_usage 失败: {exc}")
-            return None
+        server_process = is_server_process()
+        file_path: Optional[str] = None
+        if not server_process:
+            try:
+                self._bind_storage_workspace()
+                payload = make_serializable(cur)
+                file_path = self.storage.save_request_usage(
+                    self.session_id, cur["request_id"], payload
+                )
+                logger.info(
+                    f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
+                    f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
+                )
+            except Exception as exc:
+                logger.error(f"SessionContext: 落盘 tokens_usage 失败: {exc}")
+                return None
+
+        if self._has_mcp_calls_for_request(cur["request_id"]):
+            try:
+                self._save_mcp_calls_sync(cur["request_id"])
+            except Exception as exc:
+                logger.error(f"SessionContext: 落盘 mcp_calls 失败: {exc}")
+        return str(cur["request_id"]) if server_process else file_path
 
     def _accumulate_request_usage(
         self,
@@ -2646,7 +2650,8 @@ class SessionContext:
                 )
 
             # 3. 保存 session_context.json (仅保存最新状态)
-            # 包含 system_context, audit_status, token_usage, 基本元数据
+            # 包含 system_context、audit_status 和基本元数据；Server 不重复写
+            # token usage，最终统计由数据库负责。
             try:
                 context_data = {
                     "session_id": self.session_id,
@@ -2662,7 +2667,6 @@ class SessionContext:
                     # 关键状态
                     "system_context": make_serializable(self.system_context),
                     "audit_status": make_serializable(self.audit_status),
-                    "tokens_usage_info": self.get_tokens_usage_info(),
                     "execution_timeline_events": make_serializable(
                         self.execution_timeline_events
                     ),
@@ -2678,6 +2682,8 @@ class SessionContext:
                     # Agent 配置
                     "agent_config": make_serializable(self.agent_config),
                 }
+                if not is_server_process():
+                    context_data["tokens_usage_info"] = self.get_tokens_usage_info()
 
                 self.storage.save_session_snapshot(self.session_id, context_data)
 
@@ -2692,7 +2698,17 @@ class SessionContext:
                 for msg in self.message_manager.messages:
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
-                            tool_name = tool_call.get("function", {}).get("name")
+                            tool_call_data = make_serializable(tool_call)
+                            function = (
+                                tool_call_data.get("function", {})
+                                if isinstance(tool_call_data, dict)
+                                else {}
+                            )
+                            tool_name = (
+                                function.get("name")
+                                if isinstance(function, dict)
+                                else None
+                            )
                             if tool_name:
                                 tools_usage[tool_name] = (
                                     tools_usage.get(tool_name, 0) + 1

@@ -10,7 +10,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
-from typing import Any, AsyncGenerator, Awaitable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, AsyncGenerator, Awaitable, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from loguru import logger
@@ -49,7 +49,7 @@ from common.services.chat_utils import (
 )
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
 
-_T = TypeVar("_T")
+TOKEN_USAGE_PERSIST_TIMEOUT_SECONDS = 30.0
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -68,41 +68,6 @@ def _chat_exception(message_key: str) -> SageHTTPException:
     if _is_desktop_mode():
         kwargs["status_code"] = 500
     return SageHTTPException(**kwargs)
-
-
-def log_chat_startup_stage(
-    session_id: Optional[str],
-    stage: str,
-    started_at: float,
-    *,
-    status: str = "success",
-) -> None:
-    duration_ms = max((time.perf_counter() - started_at) * 1000.0, 0.0)
-    logger.bind(
-        session_id=session_id,
-        stage=stage,
-        duration_ms=round(duration_ms, 3),
-        status=status,
-    ).info(
-        f"chat_startup_stage_completed stage={stage} "
-        f"duration_ms={duration_ms:.3f} status={status}"
-    )
-
-
-async def _run_chat_startup_stage(
-    session_id: Optional[str],
-    stage: str,
-    operation: Awaitable[_T],
-) -> _T:
-    started_at = time.perf_counter()
-    status = "success"
-    try:
-        return await operation
-    except BaseException:
-        status = "error"
-        raise
-    finally:
-        log_chat_startup_stage(session_id, stage, started_at, status=status)
 
 
 def _sandbox_approval_event_from_tool_result(
@@ -982,11 +947,7 @@ async def populate_request_from_agent_config(
         if require_agent_id:
             raise _chat_exception("chat.agent_id_required")
     else:
-        agent = await _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.agent_lookup",
-            AgentConfigDao().get_by_id(request.agent_id),
-        )
+        agent = await AgentConfigDao().get_by_id(request.agent_id)
         if not agent or not agent.config:
             if require_agent_id:
                 raise _chat_exception("chat.agent_not_found")
@@ -1088,31 +1049,15 @@ async def populate_request_from_agent_config(
         main_provider_lookup = provider_dao.get_by_id(provider_id)
     else:
         main_provider_lookup = provider_dao.get_default()
-    provider_task = asyncio.create_task(
-        _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.main_provider_lookup",
-            main_provider_lookup,
-        )
-    )
+    provider_task = asyncio.create_task(main_provider_lookup)
     fast_provider_task = None
     if fast_provider_id and fast_provider_id != provider_id:
         fast_provider_task = asyncio.create_task(
-            _run_chat_startup_stage(
-                request.session_id,
-                "populate_agent_config.fast_provider_lookup",
-                provider_dao.get_by_id(fast_provider_id),
-            )
+            provider_dao.get_by_id(fast_provider_id)
         )
     all_agents_task = None
     if should_load_all_agents:
-        all_agents_task = asyncio.create_task(
-            _run_chat_startup_stage(
-                request.session_id,
-                "populate_agent_config.all_agents_lookup",
-                AgentConfigDao().get_all(),
-            )
-        )
+        all_agents_task = asyncio.create_task(AgentConfigDao().get_all())
 
     dependency_tasks: List[asyncio.Task[Any]] = [provider_task]
     if fast_provider_task is not None:
@@ -1167,33 +1112,15 @@ async def populate_request_from_agent_config(
     # workspace 自建的 skills 已在上方合并到本次请求。运行时只按需补齐缺失目录，
     # 不覆盖 Agent workspace 里的已有内容。
     post_config_tasks: List[Awaitable[Any]] = [
-        _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.workspace_skills",
-            _merge_agent_workspace_skills(request),
-        ),
-        _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.custom_sub_agents",
-            _populate_custom_sub_agents(request),
-        ),
+        _merge_agent_workspace_skills(request),
+        _populate_custom_sub_agents(request),
     ]
     if _is_desktop_mode() and request.agent_id and agent:
-        post_config_tasks.append(
-            _run_chat_startup_stage(
-                request.session_id,
-                "populate_agent_config.desktop_docs",
-                _copy_desktop_agent_docs(request),
-            )
-        )
+        post_config_tasks.append(_copy_desktop_agent_docs(request))
     await asyncio.gather(*post_config_tasks)
 
     if _is_desktop_mode():
-        await _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.im_tools",
-            _apply_desktop_im_tools(request),
-        )
+        await _apply_desktop_im_tools(request)
     else:
         _merge_dict(
             request,
@@ -1205,20 +1132,12 @@ async def populate_request_from_agent_config(
         _merge_dict(request, "system_context", {"当前AgentId": request.agent_id})
 
     if not _is_desktop_mode() and request.available_knowledge_bases:
-        await _run_chat_startup_stage(
-            request.session_id,
-            "populate_agent_config.knowledge_bases",
-            _apply_knowledge_bases(request),
-        )
+        await _apply_knowledge_bases(request)
 
     _inject_skill_tools(request)
     _strip_skill_tools_when_unavailable(request)
     request.context_budget_config = _build_context_budget_config(request)
-    await _run_chat_startup_stage(
-        request.session_id,
-        "populate_agent_config.extra_mcp_tools",
-        _register_extra_mcp_tools(request),
-    )
+    await _register_extra_mcp_tools(request)
 
 
 class SageStreamService:
@@ -1298,46 +1217,24 @@ class SageStreamService:
             )
 
     async def initialize_workspace_assets(self) -> None:
-        started_at = time.perf_counter()
-        status = "success"
-        try:
-            await self._initialize_workspace_assets()
-        except BaseException:
-            status = "error"
-            raise
-        finally:
-            log_chat_startup_stage(
-                getattr(self.request, "session_id", None),
-                "initialize_workspace_assets",
-                started_at,
-                status=status,
-            )
+        await self._initialize_workspace_assets()
 
     async def _initialize_workspace_assets(self) -> None:
         if _is_desktop_mode():
             return
 
-        session_id = getattr(self.request, "session_id", None)
         if (not self._workspace_existed) and self.request.agent_id:
             inherit_service = importlib.import_module(
                 "app.server.services.agent_inherit"
             )
-            await _run_chat_startup_stage(
-                session_id,
-                "initialize_workspace_assets.workspace_inherit",
-                asyncio.to_thread(
-                    inherit_service.copy_agent_inherit_to_workspace,
-                    self.request.agent_id,
-                    self.agent_workspace,
-                ),
+            await asyncio.to_thread(
+                inherit_service.copy_agent_inherit_to_workspace,
+                self.request.agent_id,
+                self.agent_workspace,
             )
 
-        await _run_chat_startup_stage(
-            session_id,
-            "initialize_workspace_assets.workspace_cleanup",
-            asyncio.to_thread(
-                _cleanup_server_workspace_sage_docs, self.agent_workspace
-            ),
+        await asyncio.to_thread(
+            _cleanup_server_workspace_sage_docs, self.agent_workspace
         )
 
     async def process_stream(self):
@@ -1349,11 +1246,7 @@ class SageStreamService:
                 message_dict["message_id"] = str(uuid.uuid4())
             messages.append(message_dict)
 
-        await _run_chat_startup_stage(
-            session_id,
-            "process_stream.ensure_conversation",
-            _ensure_conversation(self.request),
-        )
+        await _ensure_conversation(self.request)
         try:
             from sagents.utils.sandbox.config import VolumeMount
 
@@ -1504,11 +1397,7 @@ async def prepare_session(
 
     try:
         stream_service = SageStreamService(request)
-        await _run_chat_startup_stage(
-            session_id,
-            "prepare_session.workspace_assets",
-            stream_service.initialize_workspace_assets(),
-        )
+        await stream_service.initialize_workspace_assets()
         return stream_service, lock  # pyright: ignore[reportReturnType]
     except Exception as e:
         if acquired:
@@ -1534,8 +1423,22 @@ async def execute_chat_session(
     session_id = stream_service.request.session_id
     request = stream_service.request
     stream_counter = 0
-    token_usage_persisted = False
+    stream_end_emitted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
+
+    def build_stream_end() -> str:
+        return (
+            json.dumps(
+                {
+                    "type": "stream_end",
+                    "session_id": session_id,
+                    "timestamp": time.time(),
+                    "total_stream_count": stream_counter,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
 
     progress_queue: asyncio.Queue = asyncio.Queue()
     register_progress_queue(session_id, progress_queue)  # pyright: ignore[reportArgumentType]
@@ -1552,10 +1455,10 @@ async def execute_chat_session(
                 continue
 
             result = payload
+            current_token_usage = None
             if result.get("session_id") == session_id:
-                token_usage_payload = (
-                    _extract_token_usage_payload(result) or token_usage_payload
-                )
+                current_token_usage = _extract_token_usage_payload(result)
+                token_usage_payload = current_token_usage or token_usage_payload
 
             yield_result = result.copy()
             yield_result.pop("message_type", None)
@@ -1563,31 +1466,19 @@ async def execute_chat_session(
             yield_result.pop("is_chunk", None)
             yield_result.pop("chunk_id", None)
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+            if current_token_usage is not None and not stream_end_emitted:
+                stream_end_emitted = True
+                yield build_stream_end()
 
-        token_usage_persisted = await _persist_token_usage_if_available(
+        if not stream_end_emitted:
+            stream_end_emitted = True
+            yield build_stream_end()
+    finally:
+        unregister_progress_queue(session_id)  # pyright: ignore[reportArgumentType]
+        await _persist_token_usage_if_available(
             stream_service,
             token_usage_payload=token_usage_payload,
         )
-
-        yield (
-            json.dumps(
-                {
-                    "type": "stream_end",
-                    "session_id": session_id,
-                    "timestamp": time.time(),
-                    "total_stream_count": stream_counter,
-                },
-                ensure_ascii=False,
-            )
-            + "\n"
-        )
-    finally:
-        unregister_progress_queue(session_id)  # pyright: ignore[reportArgumentType]
-        if not token_usage_persisted:
-            await _persist_token_usage_if_available(
-                stream_service,
-                token_usage_payload=token_usage_payload,
-            )
         await _finalize_session_end(request)
 
 
@@ -1621,7 +1512,7 @@ async def _persist_token_usage_if_available(
     if not request:
         return False
 
-    try:
+    async def _persist() -> bool:
         if token_usage_payload:
             return await token_usage_service.record_execution_payload(
                 token_usage=token_usage_payload,
@@ -1647,6 +1538,17 @@ async def _persist_token_usage_if_available(
             started_at=request.execution_started_at,
             finished_at=get_local_now(),
         )
+
+    try:
+        return await asyncio.wait_for(
+            _persist(), timeout=TOKEN_USAGE_PERSIST_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.bind(session_id=request.session_id or "").error(
+            "token_usage 落库超时: "
+            f"timeout_seconds={TOKEN_USAGE_PERSIST_TIMEOUT_SECONDS:.3f}"
+        )
+        return False
     except Exception as e:
         logger.bind(session_id=request.session_id or "").error(
             f"token_usage 落库失败: {e}"

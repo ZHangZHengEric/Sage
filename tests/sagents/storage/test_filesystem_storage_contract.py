@@ -9,6 +9,9 @@ import json
 import os
 import sqlite3
 import time
+from typing import Any, cast
+
+from openai.types.chat import chat_completion_chunk
 
 from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.session_context import MESSAGE_JOURNAL_FILE, SessionContext
@@ -64,8 +67,49 @@ def test_session_save_preserves_filesystem_layout_and_payloads(tmp_path):
     assert snapshot["session_id"] == "session-a"
     assert snapshot["session_root_space"] == str(tmp_path)
     assert snapshot["session_workspace"] == str(workspace)
+    assert "tokens_usage_info" in snapshot
     assert tools_usage == {"search": 1}
     assert (workspace / MESSAGE_JOURNAL_FILE).read_text("utf-8") == ""
+
+
+def test_server_session_snapshot_omits_token_usage_info(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_INTERNAL_SERVER_PROCESS", "1")
+    context = _context(tmp_path)
+
+    context.save()
+
+    snapshot = json.loads(
+        (tmp_path / "session-a" / "session_context.json").read_text("utf-8")
+    )
+    assert "tokens_usage_info" not in snapshot
+
+
+def test_session_save_counts_openai_tool_call_objects(tmp_path):
+    context = _context(tmp_path)
+    tool_call = chat_completion_chunk.ChoiceDeltaToolCall(
+        index=0,
+        id="call-1",
+        type="function",
+        function=chat_completion_chunk.ChoiceDeltaToolCallFunction(
+            name="todo_write",
+            arguments="{}",
+        ),
+    )
+    context.add_messages(
+        MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            tool_calls=cast(
+                list[dict[str, Any]],
+                [tool_call],
+            ),
+        )
+    )
+
+    context.save()
+
+    workspace = tmp_path / "session-a"
+    tools_usage = json.loads((workspace / "tools_usage.json").read_text("utf-8"))
+    assert tools_usage == {"todo_write": 1}
 
 
 def test_message_ledger_loads_snapshot_then_replays_journal(tmp_path):

@@ -29,42 +29,6 @@ def _provider(name: str) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_run_chat_startup_stage_logs_success_and_reraises(monkeypatch):
-    events = []
-
-    def capture(session_id, stage, started_at, *, status="success"):
-        events.append((session_id, stage, status, started_at))
-
-    monkeypatch.setattr(chat_service, "log_chat_startup_stage", capture)
-
-    assert (
-        await chat_service._run_chat_startup_stage(
-            "sess-1", "demo.ok", asyncio.sleep(0, result="ok")
-        )
-        == "ok"
-    )
-    assert events == [("sess-1", "demo.ok", "success", events[0][3])]
-
-
-@pytest.mark.asyncio
-async def test_run_chat_startup_stage_marks_error(monkeypatch):
-    events = []
-
-    def capture(session_id, stage, started_at, *, status="success"):
-        events.append((session_id, stage, status))
-
-    async def boom():
-        raise ValueError("failed")
-
-    monkeypatch.setattr(chat_service, "log_chat_startup_stage", capture)
-
-    with pytest.raises(ValueError, match="failed"):
-        await chat_service._run_chat_startup_stage("sess-1", "demo.err", boom())
-
-    assert events == [("sess-1", "demo.err", "error")]
-
-
-@pytest.mark.asyncio
 async def test_populate_looks_up_main_and_fast_providers_in_parallel(monkeypatch):
     monkeypatch.setattr(
         config, "_GLOBAL_STARTUP_CONFIG", _server_cfg(), raising=False

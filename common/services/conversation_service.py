@@ -713,10 +713,13 @@ def _write_session_files(session_id: str, messages: List[Dict[str, Any]]) -> Non
         context_data["updated_at"] = get_local_now().timestamp()
         context_data["child_session_ids"] = []
         context_data["audit_status"] = {}
-        context_data["tokens_usage_info"] = {
-            "total_info": {},
-            "per_step_info": [],
-        }
+        if _is_desktop_mode():
+            context_data["tokens_usage_info"] = {
+                "total_info": {},
+                "per_step_info": [],
+            }
+        else:
+            context_data.pop("tokens_usage_info", None)
         context_data["prompt_token_checkpoints"] = {}
         system_context = context_data.get("system_context")
         if isinstance(system_context, dict):

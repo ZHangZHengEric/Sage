@@ -173,6 +173,6 @@ class SkillTool:
         )
         session_context.system_context["active_skill_instruction"] = all_instructions
 
-        logger.info(
+        logger.debug(
             f"Updated active_skills in session_context. Active skills: {', '.join([s.get('skill_name', 'Unknown') for s in active_skills])}"
         )
