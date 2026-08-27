@@ -12,7 +12,7 @@ ref: architecture-app-server
 
 # 服务端与 Web 应用架构
 
-`app/server/` 是 Sage 的主应用入口，承载多用户、Web、智能体管理、知识库、可观测性等完整能力。它是真正“产品级”的入口，而不是演示。
+`app/server/` 是 Sage 的主应用入口，承载多用户、Web、智能体管理、可观测性等完整能力。它是真正“产品级”的入口，而不是演示。
 
 ## 模块组成
 
@@ -38,7 +38,6 @@ flowchart TB
         RTask[task]
         RTool[tool / mcp]
         RSkill[skill]
-        RKdb[kdb]
         RLLM[llm_provider]
         RAuth[auth / user]
         ROss[oss]
@@ -109,7 +108,6 @@ flowchart LR
 | `task` | 长任务/异步任务相关接口 |
 | `tool` / `mcp` | 工具与 MCP Server 注册管理 |
 | `skill` | 技能包管理 |
-| `kdb` | 知识库（Knowledge Base） |
 | `llm_provider` | 模型供应商配置 |
 | `auth` / `user` | 本地账号登录、注册、会话与用户管理 |
 | `oss` | 对象存储 |

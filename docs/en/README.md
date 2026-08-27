@@ -71,9 +71,8 @@ Read:
 - [MCP Servers](MCP_SERVERS.md): built-in MCP servers and how they fit into the platform
 - [API documentation](api/README.md): navigation hub for HTTP vs legacy Python API
   - [HTTP API Reference](api/HTTP_API_REFERENCE.md): backend endpoints aligned with `register_routes`; the sidebar lists subpages
-    - Subpages: [Auth and users](api/HTTP_API_AUTH_USER.md) · [Chat and streaming](api/HTTP_API_CHAT.md) · [Agent extras](api/HTTP_API_AGENT.md) · [Knowledge base (RAG)](api/HTTP_API_KNOWLEDGE_BASE.md) · [Tools, skills, and MCP](api/HTTP_API_TOOLS_MCP.md) · [Planner /tasks](api/HTTP_API_TASKS.md) · [Platform and observability](api/HTTP_API_PLATFORM.md)
+    - Subpages: [Auth and users](api/HTTP_API_AUTH_USER.md) · [Chat and streaming](api/HTTP_API_CHAT.md) · [Agent extras](api/HTTP_API_AGENT.md) · [Tools, skills, and MCP](api/HTTP_API_TOOLS_MCP.md) · [Planner /tasks](api/HTTP_API_TASKS.md) · [Platform and observability](api/HTTP_API_PLATFORM.md)
   - [Python runtime API](api/API_REFERENCE.md): `SAgent` and related types aligned with `sagents/`, not the main HTTP app
-- [Knowledge Base Guide](KNOWLEDGE_BASE.md): knowledge base module architecture, ingestion, retrieval, and Agent integration
 - [Memory](memory/README.md): memory, retrieval, and memory-search workstream
 - [Questionnaire Delivery Methods](QUESTIONNAIRE_FORMATS.md): Inline Questionnaires, historical XML+JSON, `questionnaire_async`, and client compatibility
 - [Solution Playbooks](solutions/README.md): presales documents for concrete business scenarios

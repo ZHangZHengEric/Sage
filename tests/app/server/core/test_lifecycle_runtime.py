@@ -49,13 +49,11 @@ def test_shutdown_clients_does_not_reference_missing_chat_client(monkeypatch):
         calls.append(name)
 
     monkeypatch.setattr(bootstrap, "close_s3_client", lambda: _close("s3"))
-    monkeypatch.setattr(bootstrap, "close_embed_client", lambda: _close("embed"))
-    monkeypatch.setattr(bootstrap, "close_es_client", lambda: _close("es"))
     monkeypatch.setattr(bootstrap, "close_db_client", lambda: _close("db"))
 
     asyncio.run(bootstrap.shutdown_clients())
 
-    assert calls == ["s3", "embed", "es", "db"]
+    assert calls == ["s3", "db"]
 
 
 def test_initialize_db_connection_raises_on_db_init_failure(monkeypatch):

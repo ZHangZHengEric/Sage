@@ -23,12 +23,7 @@ ref: getting-started
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 
-# 2. Configure LLM API Key
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-
-# 3. Run the startup script
+# 2. Run the startup script
 ./scripts/dev-up.sh
 ```
 
@@ -37,7 +32,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - **Minimal mode** (recommended for beginners): SQLite, no external dependencies
   - Template: `.env.example.minimal`
   - Best for: Quick local development
-- **Full mode**: MySQL + Elasticsearch + RustFS
+- **Full mode**: MySQL + RustFS
   - Template: `.env.example`
   - Best for: Production-like environment
 
@@ -45,6 +40,7 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8080
 - Health check: http://localhost:8080/api/health
+- After signing in, add a model provider in Model Source Management
 
 ## Configuration Files
 
@@ -59,7 +55,6 @@ The startup script will automatically create these configuration files:
 - **Purpose:** Python backend service configuration
 - **Key settings:**
   - `SAGE_DB_TYPE` - Database type (sqlite/mysql)
-  - `SAGE_DEFAULT_LLM_API_KEY` - LLM API key (required)
   - `SAGE_PORT` - Backend port (default 8080)
 
 ### Frontend Configuration
@@ -83,7 +78,7 @@ If you need manual control over the development startup process, follow these st
 
 - Python 3.10 or newer
 - Node.js for the web client and some desktop workflows
-- A valid LLM API key for the model provider you plan to use
+- A valid API key for the model provider you will add after signing in
 
 Install Python dependencies from the repository root:
 
@@ -95,13 +90,7 @@ If you plan to run the web client, install Node.js dependencies separately under
 
 ## Minimum Environment
 
-Sage can start with only the default LLM settings configured:
-
-```bash
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-```
+Server startup does not require default LLM environment variables. Add a model provider in Model Source Management after signing in; model-dependent features report a missing Provider until then.
 
 If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main.py` load it automatically.
 

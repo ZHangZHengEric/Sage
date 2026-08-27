@@ -19,35 +19,6 @@ async def close_db_client():
     return await _close_db_client()
 
 
-async def init_embed_client(*, api_key=None, base_url=None, model_name="", dims=1024):
-    from common.core.client.embed import init_embed_client as _init_embed_client
-
-    return await _init_embed_client(
-        api_key=api_key,
-        base_url=base_url,
-        model_name=model_name,
-        dims=dims,
-    )
-
-
-async def close_embed_client():
-    from common.core.client.embed import close_embed_client as _close_embed_client
-
-    return await _close_embed_client()
-
-
-async def init_es_client(cfg: StartupConfig):
-    from common.core.client.es import init_es_client as _init_es_client
-
-    return await _init_es_client(cfg)
-
-
-async def close_es_client():
-    from common.core.client.es import close_es_client as _close_es_client
-
-    return await _close_es_client()
-
-
 async def init_s3_client(cfg: StartupConfig):
     from common.core.client.s3 import init_s3_client as _init_s3_client
 
@@ -64,12 +35,6 @@ def get_scheduler():
     from .scheduler import get_scheduler as _get_scheduler
 
     return _get_scheduler()
-
-
-def add_doc_build_jobs():
-    from .scheduler import add_doc_build_jobs as _add_doc_build_jobs
-
-    return _add_doc_build_jobs()
 
 
 def add_session_log_cleanup_job(sessions_root: str):
@@ -98,29 +63,6 @@ async def initialize_global_clients(cfg: StartupConfig):
             logger.info("RustFS 客户端已初始化")
     except Exception as e:
         logger.error(f"RustFS 初始化失败: {e}")
-
-    try:
-        api_key = cfg.embed_api_key or cfg.default_llm_api_key
-        base_url = cfg.embed_base_url or cfg.default_llm_api_base_url
-        model = (
-            cfg.embed_model or cfg.default_llm_model_name or "text-embedding-3-large"
-        )
-        dims = int(cfg.embed_dims or 1024)
-
-        embed_client = await init_embed_client(
-            api_key=api_key, base_url=base_url, model_name=model, dims=dims
-        )
-        if embed_client is not None:
-            logger.info("Embedding 客户端已初始化")
-    except Exception as e:
-        logger.error(f"Embedding 初始化失败: {e}")
-
-    try:
-        es_client = await init_es_client(cfg)
-        if es_client is not None:
-            logger.info("Elasticsearch 客户端已初始化")
-    except Exception as e:
-        logger.error(f"Elasticsearch 初始化失败: {e}")
 
 
 async def initialize_tool_manager():
@@ -304,16 +246,6 @@ async def initialize_scheduler(cfg: StartupConfig):
         logger.error("LLM request 日志清理任务初始化失败")
         raise
 
-    # 3) 启动调度器（需在 DB 连接后）
-    if cfg and cfg.es_url:
-        try:
-            add_doc_build_jobs()
-        except Exception:
-            logger.error("文档构建任务初始化失败")
-            raise
-    else:
-        logger.info("未配置 Elasticsearch (es_url)，跳过文档构建任务")
-
     # 尝试启动调度器（如果有任务）
     """启动 scheduler"""
     sched = get_scheduler()
@@ -343,14 +275,6 @@ async def shutdown_clients():
     finally:
         logger.info("RustFS客户端 已关闭")
     try:
-        await close_embed_client()
-    finally:
-        logger.info("Embedding客户端 已关闭")
-    try:
-        await close_es_client()
-    finally:
-        logger.info("Elasticsearch客户端 已关闭")
-    try:
         await close_db_client()
     finally:
         logger.info("数据库客户端 已关闭")
@@ -360,7 +284,6 @@ async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from common.models.base import Base
     from common.models.conversation import Conversation  # noqa: F401
-    from common.models.llm_provider import LLMProvider, LLMProviderDao
     from common.models.token_usage import TokenUsage  # noqa: F401
     from common.models.system import SystemInfoDao
     from common.models.user import User, UserDao
@@ -400,61 +323,3 @@ async def ensure_system_init(cfg: StartupConfig):
             )
             await user_dao.save(admin_user)
             logger.info(format_bootstrap_admin_log(bootstrap_admin))
-
-    dao = LLMProviderDao()
-    default_provider = await dao.get_default()
-    if not cfg.default_llm_api_key or not cfg.default_llm_api_base_url:
-        logger.warning(
-            "Environment variables for default LLM provider missing. Skipping default provider creation."
-        )
-        return
-    api_key = cfg.default_llm_api_key.strip()
-    if not api_key:
-        logger.warning(
-            "Default LLM API key is empty after trimming. Skipping default provider creation."
-        )
-        return
-    # Models
-    model = cfg.default_llm_model_name or "gpt-4o"
-    base_url = cfg.default_llm_api_base_url or "https://api.openai.com/v1"
-    max_tokens = cfg.default_llm_max_tokens
-    temperature = cfg.default_llm_temperature or 0.7
-    max_model_len = cfg.default_llm_max_model_len or 64000
-    top_p = cfg.default_llm_top_p or 0.9
-    presence_penalty = cfg.default_llm_presence_penalty or 0.0
-    if not default_provider:
-        import uuid
-
-        provider_id = str(uuid.uuid4())
-        provider = LLMProvider(
-            id=provider_id,
-            name="Default LLM Provider",
-            base_url=base_url,
-            api_keys=[api_key],
-            model=model,
-            is_default=True,
-            user_id="",
-            temperature=temperature,
-            top_p=top_p,
-            presence_penalty=presence_penalty,
-            max_model_len=max_model_len,
-        )
-        if max_tokens is not None:
-            provider.max_tokens = int(max_tokens)
-        await dao.save(provider)
-        logger.debug("Initialized default LLM Provider from environment variables.")
-    else:
-        logger.debug("Default LLM Provider already exists. need update.")
-        default_provider.base_url = base_url
-        default_provider.api_keys = [api_key]
-        default_provider.model = model
-        default_provider.max_tokens = (  # pyright: ignore[reportAttributeAccessIssue]
-            int(max_tokens) if max_tokens is not None else None
-        )
-        default_provider.temperature = temperature
-        default_provider.top_p = top_p
-        default_provider.presence_penalty = presence_penalty
-        default_provider.max_model_len = max_model_len
-
-        await dao.save(default_provider)
-        logger.debug("Default LLM Provider updated.")

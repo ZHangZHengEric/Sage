@@ -1052,15 +1052,6 @@ def build_run_request(
         )
         or None,
         available_skills=merged_skills or None,
-        available_knowledge_bases=_agent_config_list(
-            _agent_config_value(
-                agent_config,
-                "availableKnowledgeBases",
-                "available_knowledge_bases",
-            ),
-            "availableKnowledgeBases",
-        )
-        or None,
         available_sub_agent_ids=_agent_config_list(
             _agent_config_value(
                 agent_config,

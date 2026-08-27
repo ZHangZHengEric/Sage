@@ -99,16 +99,8 @@ The default shape is public CORS with `*` and no browser credentials. If you ena
 
 `SAGE_BOOTSTRAP_ADMIN_USERNAME` and `SAGE_BOOTSTRAP_ADMIN_PASSWORD` are both optional, but they now work as an explicit opt-in pair. If either one is missing, Sage will not create a bootstrap admin user during startup.
 
-## Embeddings, Search, and Object Storage
+## Object Storage
 
-- `SAGE_EMBEDDING_API_KEY`
-- `SAGE_EMBEDDING_BASE_URL`
-- `SAGE_EMBEDDING_MODEL`
-- `SAGE_EMBEDDING_DIMS`
-- `SAGE_ELASTICSEARCH_URL`
-- `SAGE_ELASTICSEARCH_API_KEY`
-- `SAGE_ELASTICSEARCH_USERNAME`
-- `SAGE_ELASTICSEARCH_PASSWORD`
 - `SAGE_S3_ENDPOINT`
 - `SAGE_S3_ACCESS_KEY`
 - `SAGE_S3_SECRET_KEY`
@@ -116,7 +108,7 @@ The default shape is public CORS with `*` and no browser credentials. If you ena
 - `SAGE_S3_BUCKET_NAME`
 - `SAGE_S3_PUBLIC_BASE_URL`
 
-You only need these when you enable knowledge-base, search, embedding, or object-storage-backed features.
+You only need these when you enable object-storage-backed features.
 
 ## Observability
 
@@ -166,4 +158,4 @@ SAGE_SANDBOX_MODE=local
 
 ## Recommendation
 
-Start with the model variables, `SAGE_PORT`, and local storage directories. Add auth, database, object storage, embedding, or observability settings only when those subsystems are actually in use.
+Start with the model variables, `SAGE_PORT`, and local storage directories. Add auth, database, object storage, or observability settings only when those subsystems are actually in use.

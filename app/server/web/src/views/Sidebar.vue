@@ -172,35 +172,6 @@
       </div>
     </ScrollArea>
 
-    <div class="relative z-10 px-2.5 pb-2">
-      <div v-if="isCollapsed" class="group/item relative flex justify-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          :title="t('sidebar.downloadClient')"
-          :class="[
-            'h-9 w-9 rounded-[14px] transition-all duration-200',
-            isCurrentService('Download', true) ? 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.10)] dark:bg-[rgba(255,255,255,0.07)]' : 'text-muted-foreground hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]'
-          ]"
-          @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
-        >
-          <Download class="h-4 w-4" />
-        </Button>
-      </div>
-      <Button
-        v-else
-        variant="ghost"
-        class="mb-0.5 h-9.5 w-full justify-start rounded-[16px] px-2.5 font-medium text-muted-foreground transition-all duration-200 hover:bg-[rgba(255,255,255,0.07)] hover:text-foreground dark:hover:bg-[rgba(255,255,255,0.06)]"
-        :class="cn(
-          isCurrentService('Download', true) && 'bg-[rgba(255,255,255,0.10)] text-foreground shadow-[0_6px_16px_rgba(15,23,42,0.08)] dark:bg-[rgba(255,255,255,0.07)]'
-        )"
-        @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
-      >
-        <Download class="mr-2 h-4 w-4" />
-        <span class="flex-1 text-left truncate">{{ t('sidebar.downloadClient') }}</span>
-      </Button>
-    </div>
-
     <div class="relative z-10 border-t border-white/10 px-3 pb-3 pt-2.5 dark:border-white/10">
       <div class="flex items-center gap-2.5" :class="isCollapsed ? 'justify-center' : ''">
         <div class="flex items-center gap-3 overflow-hidden">
@@ -309,7 +280,6 @@ import {
   Bot,
   Wrench,
   Zap,
-  Book,
   Clock,
   Code,
   Globe,
@@ -328,8 +298,7 @@ import {
   LoaderCircle,
   CircleCheckBig,
   CircleX,
-  Activity,
-  Download
+  Activity
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { useThemeStore } from '../stores/theme.js'
@@ -519,8 +488,7 @@ const predefinedServices = computed(() => {
       children: [
         { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
-        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
-        { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
+        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true }
       ]
     },
     {
@@ -540,8 +508,7 @@ const predefinedServices = computed(() => {
       nameKey: 'sidebar.systemManagement',
       children: [
         { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
-        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true },
-        { id: 'svc_version_list', nameKey: 'system.versionManagement', url: 'VersionList', isInternal: true }
+        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
       ]
     })
 
@@ -560,7 +527,6 @@ const predefinedServices = computed(() => {
 const expandedCategories = ref({
   new_chat: true,
   agent_capabilities: false,
-  knowledge_base: false,
   history: false,
   api_reference: false,
   skills: false,
@@ -574,12 +540,10 @@ const getCategoryIcon = (key) => {
     personal_center: Users,
     agent_capabilities: Wrench,
     skills: Zap,
-    knowledge_base: Book,
     history: Clock,
     api_reference: Code,
     system_management: Settings,
-    grafana: Activity,
-    download_client: Download
+    grafana: Activity
   }
   return map[key] || LayoutGrid
 }
@@ -604,7 +568,7 @@ const isCurrentService = (url, isInternal, query = {}) => {
     if (url === 'Chat' && query?.session_id) {
       return route.name === 'Chat' && route.query.session_id === query.session_id
     }
-    return route.name === url || (route.name === 'KnowledgeBaseDetail' && url === 'KnowledgeBase')
+    return route.name === url
   }
   return false
 }
@@ -630,11 +594,6 @@ const handleMenuClick = (url, name, isInternal, query = {}) => {
         name: url,
         query: { ...route.query, refresh: Date.now() }
       })
-      return
-    }
-
-    if (url === 'Download') {
-      router.push({ name: 'Download' })
       return
     }
 

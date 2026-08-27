@@ -295,3 +295,57 @@ def test_explicit_provider_override_takes_priority(monkeypatch):
     assert request.llm_model_config["fast_base_url"] == "http://fast-request.local"
     assert request.llm_model_config["fast_api_key"] == "fast-request-key"
     assert request.llm_model_config["fast_model_name"] == "fast-request-model"
+
+
+def test_server_default_provider_lookup_is_scoped_to_agent_owner(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "_GLOBAL_STARTUP_CONFIG",
+        config.StartupConfig(app_mode="server"),
+        raising=False,
+    )
+    agent = SimpleNamespace(
+        name="Agent",
+        user_id="owner_user",
+        config={"availableTools": [], "availableSkills": [], "maxLoopCount": 3},
+    )
+    provider = SimpleNamespace(
+        base_url="http://owner.local",
+        api_key="owner-key",
+        model="owner-model",
+        max_tokens=None,
+        temperature=0.2,
+        top_p=0.8,
+        presence_penalty=0.0,
+        max_model_len=64000,
+        supports_multimodal=False,
+        supports_structured_output=False,
+    )
+    requested_user_ids = []
+
+    class FakeAgentConfigDao:
+        async def get_by_id(self, agent_id):
+            return agent
+
+    class FakeLLMProviderDao:
+        async def get_default(self, user_id=None):
+            requested_user_ids.append(user_id)
+            return provider
+
+    async def noop(request):
+        return None
+
+    monkeypatch.setattr(chat_service, "AgentConfigDao", FakeAgentConfigDao)
+    monkeypatch.setattr(chat_service, "LLMProviderDao", FakeLLMProviderDao)
+    monkeypatch.setattr(chat_service, "_register_extra_mcp_tools", noop)
+    monkeypatch.setattr(chat_service, "_populate_custom_sub_agents", noop)
+
+    request = StreamRequest(
+        messages=[Message(role="user", content="hi")],
+        user_id="request_user",
+        agent_id="agent_1",
+    )
+
+    asyncio.run(chat_service.populate_request_from_agent_config(request))
+
+    assert requested_user_ids == ["owner_user"]

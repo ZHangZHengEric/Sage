@@ -98,16 +98,6 @@ class StartupConfig:
     cors_expose_headers: list[str] = field(default_factory=list)
     cors_max_age: int = 600
     web_base_path: str = "/sage"
-    embed_api_key: Optional[str] = None
-    embed_base_url: Optional[str] = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
-    embed_model: str = "text-embedding-v4"
-    embed_dims: int = 1024
-
-    es_url: Optional[str] = None
-    es_api_key: Optional[str] = None
-    es_username: Optional[str] = None
-    es_password: Optional[str] = None
-
     s3_endpoint: Optional[str] = None
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
@@ -158,9 +148,6 @@ class ENV:
     S3_PUBLIC_BASE_URL = "SAGE_S3_PUBLIC_BASE_URL"
 
     SKILL_DIR = "SAGE_SKILL_WORKSPACE"
-    KB_MCP_URL = "SAGE_KB_MCP_URL"
-    KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
-
     BOOTSTRAP_ADMIN_USERNAME = "SAGE_BOOTSTRAP_ADMIN_USERNAME"
     BOOTSTRAP_ADMIN_PASSWORD = "SAGE_BOOTSTRAP_ADMIN_PASSWORD"
     JWT_KEY = "SAGE_JWT_KEY"
@@ -182,16 +169,6 @@ class ENV:
     MYSQL_USER = "SAGE_MYSQL_USER"
     MYSQL_PASSWORD = "SAGE_MYSQL_PASSWORD"
     MYSQL_DATABASE = "SAGE_MYSQL_DATABASE"
-
-    EMBEDDING_API_KEY = "SAGE_EMBEDDING_API_KEY"
-    EMBEDDING_BASE_URL = "SAGE_EMBEDDING_BASE_URL"
-    EMBEDDING_MODEL = "SAGE_EMBEDDING_MODEL"
-    EMBEDDING_DIMS = "SAGE_EMBEDDING_DIMS"
-
-    ES_URL = "SAGE_ELASTICSEARCH_URL"
-    ES_API_KEY = "SAGE_ELASTICSEARCH_API_KEY"
-    ES_USERNAME = "SAGE_ELASTICSEARCH_USERNAME"
-    ES_PASSWORD = "SAGE_ELASTICSEARCH_PASSWORD"
 
     PRESET_MCP_CONFIG = "SAGE_MCP_CONFIG_PATH"
     PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
@@ -395,12 +372,6 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
                 ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
             )
             or StartupConfig.refresh_token_secret,
-            embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-            embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
-            or StartupConfig.embed_base_url,
-            embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model)
-            or StartupConfig.embed_model,
-            embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
             s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
             s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
             s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
@@ -432,9 +403,7 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         mysql_password=env_str(ENV.MYSQL_PASSWORD, StartupConfig.mysql_password),  # pyright: ignore[reportArgumentType]
         mysql_database=env_str(ENV.MYSQL_DATABASE, StartupConfig.mysql_database),  # pyright: ignore[reportArgumentType]
         mysql_charset=StartupConfig.mysql_charset,
-        default_llm_api_key=env_str(  # pyright: ignore[reportArgumentType]
-            ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key
-        ),
+        default_llm_api_key="",
         default_llm_api_base_url=env_str(
             ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
         )
@@ -520,16 +489,6 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         ),
         cors_max_age=env_int(ENV.CORS_MAX_AGE, StartupConfig.cors_max_age),
         web_base_path=env_str(ENV.WEB_BASE_PATH, StartupConfig.web_base_path),  # pyright: ignore[reportArgumentType]
-        embed_api_key=env_str(ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key),
-        embed_base_url=env_str(ENV.EMBEDDING_BASE_URL, StartupConfig.embed_base_url)
-        or StartupConfig.embed_base_url,
-        embed_model=env_str(ENV.EMBEDDING_MODEL, StartupConfig.embed_model)
-        or StartupConfig.embed_model,
-        embed_dims=env_int(ENV.EMBEDDING_DIMS, StartupConfig.embed_dims),
-        es_url=env_str(ENV.ES_URL, StartupConfig.es_url),
-        es_api_key=env_str(ENV.ES_API_KEY, StartupConfig.es_api_key),
-        es_username=env_str(ENV.ES_USERNAME, StartupConfig.es_username),
-        es_password=env_str(ENV.ES_PASSWORD, StartupConfig.es_password),
         s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
         s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
         s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),

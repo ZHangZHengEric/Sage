@@ -120,12 +120,10 @@ flowchart LR
 flowchart TB
     SAOAI[SageAsyncOpenAI · dual-client wrapper]
     Chat[chat.py · stream + tool-call assembly]
-    Embed[embedding.py · embedding wrapper]
     Cap[capabilities.py · sanitize_model_request_kwargs]
     MCap[model_capabilities.py · startup capability probe]
 
     SAOAI -->|standard / fast| Chat
-    SAOAI --> Embed
     SAOAI -.uses.-> Cap
     MCap -.injects after probing.-> SAOAI
 ```

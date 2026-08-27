@@ -25,9 +25,6 @@ ref: web-app
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 ./scripts/dev-up.sh
 ```
 
@@ -36,6 +33,8 @@ export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
 - **Web 界面（Vite 开发服）：** http://localhost:5173
 - **后端 API：** http://localhost:8080
 - **健康检查：** http://localhost:8080/api/health
+
+登录后在“模型源管理”中添加模型 Provider，再创建或配置 Agent。Server 启动不需要默认 LLM 环境变量。
 
 脚本可能提示 **最小模式**（SQLite）与 **完整依赖** 等，首次想最快跑通选最小模式。配置文件与变量说明见 [快速开始 - 配置说明](GETTING_STARTED.md#配置文件说明) 与 [配置说明](../CONFIGURATION.md)。
 
@@ -53,7 +52,6 @@ cd app/server/web && npm install && cd ../../..
 2. **启动后端**
 
 ```bash
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
 # 其它变量见根目录 .env
 python -m app.server.main
 ```
@@ -71,7 +69,7 @@ npm run dev
 
 ## Docker Compose 全栈
 
-[`deploy/prod/docker-compose.yml`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml) 会拉起 Sage 平台服务：`sage-server`、静态资源 `sage-web`、可选 `sage-wiki`，以及 MySQL、RustFS（S3 兼容）、Jaeger 等。偏 **类生产/整合演示**；若只是一般本地开发，更轻量的是「一键脚本 + 最小模式」。Sage 不内置或运维 Elasticsearch；知识库检索需要时，应配置外部托管的 Elasticsearch 地址。
+[`deploy/prod/docker-compose.yml`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml) 会拉起 Sage 平台服务：`sage-server`、静态资源 `sage-web`、可选 `sage-wiki`，以及 MySQL、RustFS（S3 兼容）、Jaeger 等。偏 **类生产/整合演示**；若只是一般本地开发，更轻量的是「一键脚本 + 最小模式」。
 
 **与 compose 中常见端口（映射到宿主机）对应关系：**
 
@@ -87,7 +85,7 @@ npm run dev
 
 - 已安装 **Docker** 与 **Compose v2**（`docker compose`）
 - 宿主机资源充足（`deploy/prod/docker-compose.yml` 中对 `sage-server` 等设了较大内存限制，可按需调小）
-- 为目标环境提供 `.env`，例如 `deploy/prod/.env`。可复制 `deploy/prod/.env.example` 后修改，至少配置 **LLM**、数据库和对象存储；如启用知识库检索，再配置外部托管的 Elasticsearch 地址。
+- 为目标环境提供 `.env`，例如 `deploy/prod/.env`。可复制 `deploy/prod/.env.example` 后修改，至少配置数据库和对象存储。
 
 `SAGE_ROOT` 指向宿主机上用于**持久化卷**的目录（MySQL 数据、会话/日志、RustFS 等）。
 
@@ -96,7 +94,7 @@ npm run dev
 ```bash
 cd /path/to/Sage
 cp deploy/prod/.env.example deploy/prod/.env
-# 编辑 deploy/prod/.env：SAGE_DEFAULT_LLM_API_KEY、各类密码、SAGE_MYSQL_PASSWORD、SAGE_S3_* 等
+# 编辑 deploy/prod/.env：各类密码、SAGE_MYSQL_PASSWORD、SAGE_S3_* 等
 deploy/compose.sh prod up -d --build
 ```
 

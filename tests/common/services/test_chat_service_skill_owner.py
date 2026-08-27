@@ -118,7 +118,7 @@ def test_populate_request_records_agent_owner_user_id(tmp_path, monkeypatch):
             return agent
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):
@@ -185,7 +185,7 @@ def test_populate_request_merges_only_current_user_workspace_skills(
             return agent
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):
@@ -253,7 +253,7 @@ def test_populate_request_preserves_team_manual_empty_sub_agents(tmp_path, monke
             raise AssertionError("manual empty selection must not auto-populate")
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):
@@ -321,7 +321,7 @@ def test_populate_request_auto_all_populates_team_sub_agents(tmp_path, monkeypat
             ]
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):
@@ -429,7 +429,7 @@ def test_populate_request_prefers_agent_response_language_over_request(
             return agent
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):
@@ -493,7 +493,7 @@ def test_populate_request_uses_agent_response_language_when_request_omits_it(
             return agent
 
     class FakeLLMProviderDao:
-        async def get_default(self):
+        async def get_default(self, user_id=None):
             return provider
 
     async def fake_register_extra_mcp_tools(request):

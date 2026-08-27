@@ -115,7 +115,7 @@ describe('Login view', () => {
     expect(wrapper.text()).not.toContain('Continue with 账号密码')
   })
 
-  it('shows the registration-disabled notice with desktop and contact info when registration is off', async () => {
+  it('shows the registration-disabled notice with self-hosting and contact info when registration is off', async () => {
     getSystemInfo.mockResolvedValue({
       allow_registration: false,
       auth_providers: [
@@ -126,11 +126,8 @@ describe('Login view', () => {
     const wrapper = await mountComponent()
 
     expect(wrapper.text()).toContain('auth.registrationDisabledTitle')
-    expect(wrapper.text()).toContain('auth.registrationDisabledIntro')
     expect(wrapper.text()).toContain('auth.registrationDisabledContactWeChat1')
     expect(wrapper.text()).toContain('auth.registrationDisabledContactWeChat2')
-    const desktopLink = wrapper.find('a[href="https://zavixai.com/html/sage.html"]')
-    expect(desktopLink.exists()).toBe(true)
     const repoLink = wrapper.find('a[href="https://github.com/ZHangZHengEric/Sage"]')
     expect(repoLink.exists()).toBe(true)
   })
@@ -146,7 +143,6 @@ describe('Login view', () => {
     const wrapper = await mountComponent()
 
     expect(wrapper.text()).not.toContain('auth.registrationDisabledTitle')
-    expect(wrapper.find('a[href="https://zavixai.com/html/sage.html"]').exists()).toBe(false)
   })
 
   it('keeps self-registration limited to username and password', async () => {

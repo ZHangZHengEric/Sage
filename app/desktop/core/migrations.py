@@ -5,7 +5,6 @@ from common.core.client.db import get_global_db
 from common.models.agent import Agent, AgentAuthorization
 from common.models.conversation import Conversation
 from common.models.im_channel import IMChannelConfig
-from common.models.kdb import Kdb
 from common.models.llm_provider import LLMProvider
 from common.models.mcp_server import MCPServer
 from common.models.task import RecurringTask, Task
@@ -44,13 +43,6 @@ async def migrate_desktop_default_user_id() -> None:
             .values(user_id=DEFAULT_DESKTOP_USER_ID)
         )
         migrated["mcp_servers"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
-
-        result = await session.execute(
-            update(Kdb)
-            .where(or_(Kdb.user_id == "", Kdb.user_id.is_(None)))
-            .values(user_id=DEFAULT_DESKTOP_USER_ID)
-        )
-        migrated["kdb"] = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]
 
         result = await session.execute(
             update(AgentAuthorization)

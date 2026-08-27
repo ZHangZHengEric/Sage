@@ -30,7 +30,6 @@ from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.models.base import get_local_now
 from common.models.conversation import ConversationDao
-from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
 from common.services import token_usage_service
@@ -208,7 +207,6 @@ def _summarize_chat_request(request: StreamRequest) -> Dict[str, Any]:
         "max_loop_count": request.max_loop_count,
         "available_tools_count": len(request.available_tools or []),
         "available_skills": request.available_skills or [],
-        "available_knowledge_bases_count": len(request.available_knowledge_bases or []),
         "available_sub_agent_ids_count": len(request.available_sub_agent_ids or []),
         "custom_sub_agents_count": len(request.custom_sub_agents or []),
         "memory_type": request.memory_type,
@@ -359,25 +357,6 @@ async def _apply_desktop_im_tools(request: StreamRequest) -> None:
             )
     except Exception as e:
         logger.warning(f"[Chat] Failed to check IM config: {e}")
-
-
-async def _apply_knowledge_bases(request: StreamRequest) -> None:
-    kdb_dao = KdbDao()
-    kdbs, _ = await kdb_dao.get_kdbs_paginated(
-        kdb_ids=request.available_knowledge_bases,
-        data_type=None,  # pyright: ignore[reportArgumentType]
-        query_name=None,  # pyright: ignore[reportArgumentType]
-        page=1,
-        page_size=1000,
-    )
-    if not kdbs:
-        return
-    kdb_context = {
-        f"{kdb.name}数据库的index_name": kdb.get_index_name() for kdb in kdbs
-    }
-    _merge_dict(request, "system_context", kdb_context)
-    if "retrieve_on_zavixai_db" not in request.available_tools:  # pyright: ignore[reportOperatorIssue]
-        request.available_tools.append("retrieve_on_zavixai_db")  # pyright: ignore[reportOptionalMemberAccess]
 
 
 def mark_request_execution(
@@ -1002,10 +981,6 @@ async def populate_request_from_agent_config(
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
             request.memory_type = agent_config.get("memoryType")
-        if agent_config.get("availableKnowledgeBases") is not None:
-            request.available_knowledge_bases = agent_config.get(
-                "availableKnowledgeBases"
-            )
         if (
             agent_config.get("availableSubAgentIds") is not None
             and request.available_sub_agent_ids is None
@@ -1047,8 +1022,13 @@ async def populate_request_from_agent_config(
 
     if provider_id:
         main_provider_lookup = provider_dao.get_by_id(provider_id)
-    else:
+    elif _is_desktop_mode():
         main_provider_lookup = provider_dao.get_default()
+    else:
+        provider_owner_user_id = request.agent_owner_user_id or request.user_id
+        main_provider_lookup = provider_dao.get_default(
+            user_id=provider_owner_user_id or None
+        )
     provider_task = asyncio.create_task(main_provider_lookup)
     fast_provider_task = None
     if fast_provider_id and fast_provider_id != provider_id:
@@ -1105,7 +1085,6 @@ async def populate_request_from_agent_config(
     _merge_dict(request, "system_context", {})
     _fill_if_none(request, "system_prefix", "")
     _fill_if_none(request, "memory_type", "session")
-    _fill_if_none(request, "available_knowledge_bases", [])
     _fill_if_none(request, "available_sub_agent_ids", [])
 
     # 共享配置中的 skills 由 Agent create/update 同步到 workspace；当前用户在
@@ -1130,9 +1109,6 @@ async def populate_request_from_agent_config(
 
     if request.agent_id and agent:
         _merge_dict(request, "system_context", {"当前AgentId": request.agent_id})
-
-    if not _is_desktop_mode() and request.available_knowledge_bases:
-        await _apply_knowledge_bases(request)
 
     _inject_skill_tools(request)
     _strip_skill_tools_when_unavailable(request)

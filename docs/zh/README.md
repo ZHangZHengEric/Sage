@@ -71,9 +71,8 @@ ref: home
 - [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
 - [API 文档](api/README.md)：HTTP 与历史 Python API 的导航入口
   - [HTTP API 参考](api/HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
-    - 子文档：[认证与用户](api/HTTP_API_AUTH_USER.md) · [对话与流式](api/HTTP_API_CHAT.md) · [Agent 补充](api/HTTP_API_AGENT.md) · [知识库 RAG](api/HTTP_API_KNOWLEDGE_BASE.md) · [工具 / 技能 / MCP](api/HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](api/HTTP_API_TASKS.md) · [平台与可观测](api/HTTP_API_PLATFORM.md)
+    - 子文档：[认证与用户](api/HTTP_API_AUTH_USER.md) · [对话与流式](api/HTTP_API_CHAT.md) · [Agent 补充](api/HTTP_API_AGENT.md) · [工具 / 技能 / MCP](api/HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](api/HTTP_API_TASKS.md) · [平台与可观测](api/HTTP_API_PLATFORM.md)
   - [Python 运行时 API](api/API_REFERENCE.md)：与 `sagents` 源码一致，主站对外 HTTP 请见上条
-- [知识库指南](KNOWLEDGE_BASE.md)：知识库模块架构、入库、检索与 Agent 接入
 - [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
 - [问卷提供方式](QUESTIONNAIRE_FORMATS.md)：Inline Questionnaire、历史 XML+JSON、`questionnaire_async` 与前端兼容规范
 - [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合

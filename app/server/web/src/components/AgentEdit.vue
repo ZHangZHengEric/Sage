@@ -636,84 +636,6 @@
             </div>
           </section>
 
-          <!-- Knowledge Bases Section -->
-          <section id="knowledgeBases" class="scroll-mt-6">
-            <div class="flex items-center gap-2 mb-5">
-              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Database class="h-4 w-4 text-primary" />
-              </div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold">{{ t('agent.availableKnowledgeBases') }}</h2>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <button class="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs hover:bg-muted/80 transition-colors">
-                        ?
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p class="text-xs">{{ t('agentEdit.knowledgeTooltip') }}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <div class="ml-auto flex items-center gap-2">
-                <span class="text-xs text-muted-foreground">({{ store.formData.availableKnowledgeBases?.length || 0 }})</span>
-              </div>
-            </div>
-            <div class="pl-10 space-y-4">
-              <div class="h-[350px] border rounded-lg overflow-hidden bg-muted/5">
-                <div class="p-3 border-b flex items-center justify-between gap-3">
-                  <div class="relative flex-1">
-                    <Search class="absolute left-2 top-2 h-4 w-4 text-muted-foreground/70" />
-                    <Input v-model="searchQueries.knowledgeBases" :placeholder="t('agentEdit.searchKnowledgeBases')" class="pl-8 h-9" />
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      class="h-8 text-xs px-2"
-                      @click="selectAllKnowledgeBases"
-                      :disabled="filteredKnowledgeBases.length === 0"
-                    >
-                      {{ t('agentEdit.selectAll') }}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      class="h-8 text-xs px-2"
-                      @click="deselectAllKnowledgeBases"
-                      :disabled="store.formData.availableKnowledgeBases?.length === 0"
-                    >
-                      {{ t('agentEdit.deselectAll') }}
-                    </Button>
-                  </div>
-                </div>
-                <ScrollArea class="h-[calc(350px-57px)]">
-                  <div class="p-4 space-y-2">
-                    <div v-for="kb in filteredKnowledgeBases" :key="kb.id" 
-                      class="flex items-start gap-3 p-3 rounded-lg border border-muted/50 hover:bg-accent/5 transition-colors cursor-pointer"
-                      @click="toggleKnowledgeBase(kb.id)"
-                    >
-                      <Checkbox 
-                        :id="`kb-${kb.id}`" 
-                        :checked="store.formData.availableKnowledgeBases?.includes(kb.id)" 
-                        @update:checked="() => toggleKnowledgeBase(kb.id)" 
-                        class="mt-0.5 pointer-events-none"
-                      />
-                      <div class="flex-1 min-w-0">
-                        <label :for="`kb-${kb.id}`" class="text-sm font-medium cursor-pointer pointer-events-none">
-                          {{ kb.name }}
-                        </label>
-                        <p v-if="kb.intro" class="text-xs text-muted-foreground line-clamp-2 mt-1">{{ kb.intro }}</p>
-                      </div>
-                    </div>
-                  </div>
-                </ScrollArea>
-              </div>
-            </div>
-          </section>
-
           <!-- System Context Section -->
           <section id="context" class="scroll-mt-6">
             <div class="flex items-center gap-2 mb-5">
@@ -896,7 +818,7 @@ import { THINKING_LEVEL_OPTIONS } from '@/utils/modelCapabilities.js'
 import { toast } from 'vue-sonner'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
-  Sparkles, Bot, Wrench, Search, Server, Code, User, Cpu, Database, Workflow,
+  Sparkles, Bot, Wrench, Search, Server, Code, User, Cpu, Workflow,
   FileText, X, Image as ImageIcon, RefreshCw, Shield, Globe
 } from 'lucide-vue-next'
 
@@ -919,8 +841,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   agent: { type: Object, default: null },
   tools: { type: Array, default: () => [] },
-  skills: { type: Array, default: () => [] },
-  knowledgeBases: { type: Array, default: () => [] }
+  skills: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['update:visible', 'save'])
@@ -1028,7 +949,6 @@ const sections = computed(() => {
     { id: 'model', label: t('agent.modelProvider'), icon: Server },
     { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
     { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
-    { id: 'knowledgeBases', label: t('agent.availableKnowledgeBases'), icon: Database },
     { id: 'context', label: t('agent.systemContext'), icon: FileText },
     { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
   ]
@@ -1334,7 +1254,7 @@ onBeforeUnmount(() => {
 })
 
 // Tools logic
-const searchQueries = reactive({ tools: '', skills: '', knowledgeBases: '' })
+const searchQueries = reactive({ tools: '', skills: '' })
 /** 技能来源筛选：全部 | 系统 | 我的（含 user/agent 维度） */
 const skillDimensionFilter = ref('all')
 const selectedGroupSource = ref('')
@@ -1565,42 +1485,6 @@ const deselectAllSkills = () => {
   })
 }
 
-// Knowledge Bases logic
-const filteredKnowledgeBases = computed(() => {
-  if (!searchQueries.knowledgeBases) return props.knowledgeBases
-  const query = searchQueries.knowledgeBases.toLowerCase()
-  return props.knowledgeBases.filter(kb => 
-    kb.name.toLowerCase().includes(query) || 
-    (kb.intro && kb.intro.toLowerCase().includes(query))
-  )
-})
-
-const toggleKnowledgeBase = (id) => {
-  if (!Array.isArray(store.formData.availableKnowledgeBases)) {
-    store.formData.availableKnowledgeBases = []
-  }
-  const index = store.formData.availableKnowledgeBases.indexOf(id)
-  if (index === -1) {
-    store.formData.availableKnowledgeBases.push(id)
-  } else {
-    store.formData.availableKnowledgeBases.splice(index, 1)
-  }
-}
-
-const selectAllKnowledgeBases = () => {
-  filteredKnowledgeBases.value.forEach(kb => {
-    if (!store.formData.availableKnowledgeBases?.includes(kb.id)) {
-      toggleKnowledgeBase(kb.id)
-    }
-  })
-}
-
-const deselectAllKnowledgeBases = () => {
-  const currentKBs = [...(store.formData.availableKnowledgeBases || [])]
-  currentKBs.forEach(id => {
-    toggleKnowledgeBase(id)
-  })
-}
 </script>
 
 <style scoped>

@@ -907,13 +907,11 @@ class TestCliJsonContracts(unittest.TestCase):
             user_id="user-demo",
             agent_config={
                 "availableTools": " grep ",
-                "availableKnowledgeBases": "kb-demo",
                 "availableSubAgentIds": "agent-reviewer",
             },
         )
 
         self.assertEqual(request.available_tools, ["grep"])
-        self.assertEqual(request.available_knowledge_bases, ["kb-demo"])
         self.assertEqual(request.available_sub_agent_ids, ["agent-reviewer"])
 
     def test_agent_config_string_list_fields_reject_invalid_items(self):

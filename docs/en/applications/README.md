@@ -44,7 +44,6 @@ Use `app/server/main.py` with `app/server/web/` when you need the primary multi-
 - authentication
 - agent management
 - tool and skill administration
-- knowledge base integration
 - observability endpoints
 - browser-based chat experience
 
@@ -59,7 +58,7 @@ Use `app/desktop/entry.py` and the desktop source tree when you need a packaged 
 - `app/server/services/`: application service layer
 - `app/server/web/src/`: Vue application source
 
-The web client contains views for agents, chat, knowledge bases, tools, skills, versions, model providers, and system settings.
+The web client contains views for agents, chat, tools, skills, versions, model providers, and system settings.
 
 ## Desktop Application Structure
 
