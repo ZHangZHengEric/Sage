@@ -64,6 +64,60 @@ def _stdio_params():
 
 
 class TestMcpStdioConnectionPool(unittest.IsolatedAsyncioTestCase):
+    async def test_stdio_stack_is_closed_by_owner_task(self):
+        entered_by = []
+        exited_by = []
+
+        class FakeTransport:
+            async def __aenter__(self):
+                entered_by.append(asyncio.current_task())
+                return object(), object()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                exited_by.append(asyncio.current_task())
+
+        class FakeSession:
+            def __init__(self, read, write):
+                self.read = read
+                self.write = write
+
+            async def __aenter__(self):
+                entered_by.append(asyncio.current_task())
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                exited_by.append(asyncio.current_task())
+
+            async def initialize(self):
+                return None
+
+        connection = McpPooledConnection("server", _stdio_params())
+
+        async def open_connection():
+            await connection.open()
+            return asyncio.current_task()
+
+        async def close_connection():
+            await connection.close()
+            return asyncio.current_task()
+
+        with (
+            patch(
+                "sagents.tool.mcp_connection_pool.stdio_client",
+                return_value=FakeTransport(),
+            ),
+            patch("sagents.tool.mcp_connection_pool.ClientSession", FakeSession),
+        ):
+            opener = asyncio.create_task(open_connection())
+            opener_task = await opener
+            closer_task = await asyncio.create_task(close_connection())
+
+        self.assertIsNotNone(connection._owner_task)
+        self.assertEqual(entered_by[0], connection._owner_task)
+        self.assertEqual(entered_by[1], connection._owner_task)
+        self.assertEqual(exited_by, [connection._owner_task, connection._owner_task])
+        self.assertIsNot(opener_task, closer_task)
+
     async def test_101_concurrent_calls_expand_to_second_connection(self):
         pool = McpConnectionPool()
         release = asyncio.Event()

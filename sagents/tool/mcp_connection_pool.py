@@ -292,9 +292,24 @@ class McpPooledConnection:
         self.last_used_at = time.monotonic()
         self.closed = False
         self._stack = AsyncExitStack()
+        self._owner_task: Optional[asyncio.Task] = None
+        self._owner_ready: Optional[asyncio.Future] = None
+        self._owner_stop: Optional[asyncio.Event] = None
 
     async def open(self) -> "McpPooledConnection":
         protocol = _server_protocol(self.server_params)
+        if isinstance(self.server_params, StdioServerParameters):
+            loop = asyncio.get_running_loop()
+            self._owner_ready = loop.create_future()
+            self._owner_stop = asyncio.Event()
+            self._owner_task = asyncio.create_task(self._run_stdio_owner())
+            try:
+                await self._owner_ready
+            except BaseException:
+                await self.close()
+                raise
+            return self
+
         if isinstance(self.server_params, SseServerParameters):
             headers = self._headers(getattr(self.server_params, "api_key", None))
             read, write = await self._stack.enter_async_context(
@@ -304,10 +319,6 @@ class McpPooledConnection:
             headers = self._headers(getattr(self.server_params, "api_key", None))
             read, write, _ = await self._stack.enter_async_context(
                 streamablehttp_client(self.server_params.url, headers=headers)
-            )
-        elif isinstance(self.server_params, StdioServerParameters):
-            read, write = await self._stack.enter_async_context(
-                stdio_client(self.server_params)
             )
         else:
             raise ValueError(
@@ -323,6 +334,28 @@ class McpPooledConnection:
             f"protocol={protocol}, server_generation={self.server_generation or '-'}"
         )
         return self
+
+    async def _run_stdio_owner(self) -> None:
+        assert self._owner_ready is not None
+        assert self._owner_stop is not None
+        stack = AsyncExitStack()
+        self._stack = stack
+        try:
+            read, write = await stack.enter_async_context(
+                stdio_client(cast(StdioServerParameters, self.server_params))
+            )
+            self.session = await stack.enter_async_context(ClientSession(read, write))
+            initialize_result = await self.session.initialize()
+            self.server_generation = _extract_server_generation(initialize_result)
+            self.last_used_at = time.monotonic()
+            if not self._owner_ready.done():
+                self._owner_ready.set_result(None)
+            await self._owner_stop.wait()
+        except BaseException as exc:
+            if not self._owner_ready.done():
+                self._owner_ready.set_exception(exc)
+        finally:
+            await stack.aclose()
 
     @staticmethod
     def _headers(api_key: Optional[str]) -> Optional[Dict[str, str]]:
@@ -344,6 +377,11 @@ class McpPooledConnection:
         if self.closed:
             return
         self.closed = True
+        if self._owner_task is not None:
+            if self._owner_stop is not None:
+                self._owner_stop.set()
+            await asyncio.gather(self._owner_task, return_exceptions=True)
+            return
         try:
             await self._stack.aclose()
         except Exception as exc:
