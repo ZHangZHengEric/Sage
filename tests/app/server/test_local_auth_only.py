@@ -9,6 +9,8 @@ from app.server.routers.user import user_router
 from app.server.services import user as user_service
 from common.core import config
 from common.core.exceptions import SageHTTPException
+from common.models import user as user_models
+from common.models.base import Base
 from common.schemas.base import LoginRequest, RegisterRequest
 
 
@@ -123,3 +125,9 @@ def test_oauth_and_proxy_environment_settings_are_not_supported():
     assert not hasattr(startup_config, "eml_template_id")
     assert not hasattr(config.ENV, "EML_ENDPOINT")
     assert not hasattr(config.ENV, "EML_ACCESS_KEY_ID")
+
+
+def test_external_identity_storage_is_removed():
+    assert not hasattr(user_models, "UserExternalIdentity")
+    assert not hasattr(user_models, "UserExternalIdentityDao")
+    assert "user_external_identities" not in Base.metadata.tables

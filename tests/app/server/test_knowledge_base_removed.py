@@ -11,6 +11,7 @@ def test_server_knowledge_base_modules_are_removed():
     removed_modules = (
         "app.server.routers.kdb",
         "common.services.knowledge_base.kdb",
+        "common.models.file",
         "common.models.kdb",
         "common.core.client.embed",
         "common.core.client.es",
