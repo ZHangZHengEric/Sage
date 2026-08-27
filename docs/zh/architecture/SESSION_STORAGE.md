@@ -11,7 +11,8 @@
 - Catalog：Session 定位、存在性和父子关系。
 - Authoritative state：Session snapshot、message snapshot 和 message event。
 - Derived state：compact manifest 和 tools usage。
-- Telemetry：Session log、LLM request、request token usage 和 MCP calls。CLI 只能
+- Telemetry：Session log、LLM request、Desktop request token usage 和 MCP calls。
+  Token usage 的实时事件与数据库统计均保留，Server 只跳过重复的文件写入。CLI 只能
   通过 Store 读取近期 Session log、查询后端健康状态，不得解析日志或 catalog 路径。
 
 Message snapshot 与 event journal 共同构成消息账本。后端必须先持久化 snapshot，
@@ -30,7 +31,7 @@ FilesystemStore 保持已有目录结构、JSON 字段、缩进、文件命名�
 <session_root>/<session_id>/compact_manifest.json
 <session_root>/<session_id>/tools_usage.json
 <session_root>/<session_id>/llm_request/*.json
-<session_root>/<session_id>/tokens_usage/<request_id>.json
+<session_root>/<session_id>/tokens_usage/<request_id>.json  # Desktop only
 <session_root>/<session_id>/mcp_calls/<request_id>.json
 <session_root>/<session_id>/session_<session_id>.log
 ```

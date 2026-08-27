@@ -124,6 +124,38 @@ def test_record_session_execution_persists_valid_usage():
     asyncio.run(_run())
 
 
+def test_record_session_execution_still_persists_in_server_process(monkeypatch):
+    monkeypatch.setenv("SAGE_INTERNAL_SERVER_PROCESS", "1")
+
+    async def _run():
+        await _reset_test_db()
+        ctx = _FakeSessionContext(
+            usage={
+                "total_info": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "per_step_info": [
+                    {"step_name": "direct_execution", "usage": {"total_tokens": 15}}
+                ],
+            }
+        )
+
+        saved = await token_usage_service.record_session_execution(
+            session_context=ctx,
+            request_source="api/chat",
+        )
+        records = await _list_records()
+
+        assert saved is True
+        assert len(records) == 1
+        assert records[0].total_tokens == 15
+        await close_db_client()
+
+    asyncio.run(_run())
+
+
 def test_session_stats_aggregate_multiple_executions_without_time_range():
     async def _run():
         await _reset_test_db()

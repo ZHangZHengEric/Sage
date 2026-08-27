@@ -159,6 +159,84 @@ def test_execute_chat_session_persists_token_usage_when_generator_closes_early(
     assert calls[1] == "finalize"
 
 
+def test_execute_chat_session_yields_stream_end_before_token_persistence(monkeypatch):
+    async def _run():
+        persist_started = asyncio.Event()
+        release_persist = asyncio.Event()
+
+        async def _blocking_persist(stream_service, *, token_usage_payload=None):
+            persist_started.set()
+            await release_persist.wait()
+            return True
+
+        async def _fake_finalize(request):
+            return None
+
+        monkeypatch.setattr(
+            chat_service, "_persist_token_usage_if_available", _blocking_persist
+        )
+        monkeypatch.setattr(chat_service, "_finalize_session_end", _fake_finalize)
+
+        generator = chat_service.execute_chat_session(_FakeStreamService())  # pyright: ignore[reportArgumentType]
+        await generator.__anext__()
+        await generator.__anext__()
+        await generator.__anext__()
+
+        stream_end_task = asyncio.create_task(generator.__anext__())
+        returned_before_persist = True
+        try:
+            stream_end = await asyncio.wait_for(
+                asyncio.shield(stream_end_task), timeout=0.05
+            )
+        except asyncio.TimeoutError:
+            returned_before_persist = False
+            stream_end = ""
+        finally:
+            release_persist.set()
+            if not stream_end_task.done():
+                stream_end = await stream_end_task
+
+        assert returned_before_persist is True
+        assert '"type": "stream_end"' in stream_end
+        assert persist_started.is_set() is False
+
+        await generator.aclose()
+        assert persist_started.is_set() is True
+
+    asyncio.run(_run())
+
+
+def test_persist_token_usage_times_out_instead_of_hanging(monkeypatch):
+    async def _blocking_record(**kwargs):
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        chat_service.token_usage_service,
+        "record_execution_payload",
+        _blocking_record,
+    )
+    monkeypatch.setattr(
+        chat_service, "TOKEN_USAGE_PERSIST_TIMEOUT_SECONDS", 0.01
+    )
+
+    async def _run():
+        started_at = asyncio.get_running_loop().time()
+        saved = await chat_service._persist_token_usage_if_available(
+            _FakeStreamService(),  # pyright: ignore[reportArgumentType]
+            token_usage_payload={
+                "total_info": {"total_tokens": 15},
+                "per_step_info": [],
+            },
+        )
+        elapsed = asyncio.get_running_loop().time() - started_at
+        return saved, elapsed
+
+    saved, elapsed = asyncio.run(_run())
+
+    assert saved is False
+    assert elapsed < 0.5
+
+
 def test_stream_manager_stop_session_closes_background_generator():
     manager = StreamManager.get_instance()
     closed = False
