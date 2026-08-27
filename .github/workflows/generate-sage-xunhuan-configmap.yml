@@ -1,0 +1,106 @@
+name: Generate Sage Xunhuan ConfigMap
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: "Environment under deploy/<env>"
+        required: false
+        default: "prod"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sage-xunhuan-configmap-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate ConfigMap
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.deploy_env || 'prod' }}
+      OUTPUT_FILE: deploy/k8s/configmaps/sage_xunhuan_configmap.yaml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate sage_xunhuan_configmap.yaml
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          deploy_env = os.environ.get("DEPLOY_ENV") or "prod"
+          env_file = Path("deploy") / deploy_env / ".env.example"
+          output_file = Path(os.environ["OUTPUT_FILE"])
+
+          def load_env(path):
+              values = []
+              if not path.exists():
+                  raise SystemExit(f"Env example file not found: {path}")
+              seen = set()
+              for raw in path.read_text(encoding="utf-8").splitlines():
+                  line = raw.strip()
+                  if not line or line.startswith("#") or "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  key = key.strip()
+                  if key in seen:
+                      continue
+                  seen.add(key)
+                  values.append((key, value))
+              return values
+
+          def env_override(key, fallback):
+              value = os.environ.get(key)
+              if value is None:
+                  return fallback
+              return value
+
+          env_values = load_env(env_file)
+          final_data = {key: env_override(key, value) for key, value in env_values}
+
+          if not final_data:
+              raise SystemExit(f"No KEY=value pairs found in {env_file}")
+
+          lines = [
+              "apiVersion: v1",
+              "kind: ConfigMap",
+              "metadata:",
+              "  name: sage_xunhuan_configmap",
+              "  labels:",
+              "    app.kubernetes.io/name: sage",
+              "    app.kubernetes.io/part-of: sage",
+              "    app.kubernetes.io/generated-by: github-actions",
+              "data:",
+          ]
+          for key, _value in env_values:
+              lines.append(f"  {key}: {json.dumps(str(final_data[key]), ensure_ascii=False)}")
+
+          output_file.parent.mkdir(parents=True, exist_ok=True)
+          output_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Commit generated ConfigMap
+        run: |
+          if [ -z "$(git status --porcelain -- "$OUTPUT_FILE")" ]; then
+            echo "No ConfigMap changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OUTPUT_FILE"
+          git commit -m "chore: generate sage xunhuan configmap"
+          git push

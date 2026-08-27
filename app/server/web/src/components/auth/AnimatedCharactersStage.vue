@@ -3,9 +3,9 @@
     <div class="relative z-20">
       <div class="flex items-center gap-2 text-lg font-semibold">
         <div class="size-8 rounded-lg bg-primary-foreground/10 backdrop-blur-sm flex items-center justify-center p-1">
-          <img :src="logoUrl" alt="Sage Logo" class="size-full object-contain" />
+          <img :src="logoUrl" alt="Speakly AI" class="size-full object-contain" />
         </div>
-        <span>Sage</span>
+        <span>Speakly AI</span>
       </div>
     </div>
 
@@ -134,7 +134,7 @@ import Pupil from './Pupil.vue'
 import { useLanguage } from '@/utils/i18n.js'
 import { getAssetUrl } from '@/config/runtime.js'
 
-const logoUrl = getAssetUrl('sage_logo.svg')
+const logoUrl = `${import.meta.env.BASE_URL}speaklyai_logo.svg`
 const { t } = useLanguage()
 
 const props = defineProps({
