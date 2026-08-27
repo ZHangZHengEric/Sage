@@ -51,6 +51,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 
 # Server-only immutable browser runtime. Bubblewrap exposes /usr read-only, so
 # every Agent reuses these files instead of downloading into its workspace HOME.
+ENV PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+
 RUN npm install -g playwright@1.58.0 \
     && playwright install --with-deps chromium \
     && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"

@@ -20,6 +20,24 @@ def test_server_installs_browsers_after_final_playwright_version_is_resolved():
     assert "PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright" in dockerfile
 
 
+def test_server_downloads_playwright_browsers_from_domestic_mirror():
+    repo_root = Path(__file__).resolve().parents[2]
+    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+        encoding="utf-8"
+    )
+
+    mirror_setting = (
+        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="
+        "https://cdn.npmmirror.com/binaries/playwright"
+    )
+    node_setup = dockerfile.index("RUN curl -fsSL https://deb.nodesource.com/setup_20.x")
+    mirror_position = dockerfile.index(mirror_setting)
+    browser_install = dockerfile.index("npm install -g playwright@1.58.0")
+
+    assert dockerfile.count(mirror_setting) == 1
+    assert node_setup < mirror_position < browser_install
+
+
 def test_server_prunes_desktop_only_im_dependencies():
     repo_root = Path(__file__).resolve().parents[2]
     dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
