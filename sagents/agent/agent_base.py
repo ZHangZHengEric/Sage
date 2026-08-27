@@ -475,7 +475,7 @@ class AgentBase(ABC):
     ) -> List[Dict[str, Any]]:
         return coalesce_reasoning_content_messages(
             messages,
-            preserve_tool_reasoning=preserve_reasoning,
+            preserve_reasoning=preserve_reasoning,
         )
 
     async def _process_multimodal_content(self, msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -1694,6 +1694,8 @@ class AgentBase(ABC):
                                 continue
                             if msg.message_id:
                                 msg_dict["_sage_message_id"] = msg.message_id
+                            if msg.agent_name:
+                                msg_dict["_sage_agent_name"] = str(msg.agent_name)
                             if isinstance(msg.metadata, dict):
                                 llm_response_id = msg.metadata.get("llm_response_id")
                                 if llm_response_id:
@@ -1733,6 +1735,10 @@ class AgentBase(ABC):
                             raw_message_id = raw_message.message_id
                             if raw_message_id:
                                 msg_copy["_sage_message_id"] = raw_message_id
+                            if raw_message.agent_name:
+                                msg_copy["_sage_agent_name"] = str(
+                                    raw_message.agent_name
+                                )
                             if isinstance(raw_message.metadata, dict):
                                 llm_response_id = raw_message.metadata.get(
                                     "llm_response_id"
@@ -1783,6 +1789,7 @@ class AgentBase(ABC):
                                 "reasoning_content",
                                 "_sage_message_id",
                                 "_sage_llm_response_id",
+                                "_sage_agent_name",
                                 "_sage_context_protected",
                             ]
                         }
@@ -1981,8 +1988,6 @@ class AgentBase(ABC):
                         f"conservative={request_token_projection.conservative_estimate}"
                     )
                     for msg in serializable_messages:
-                        msg.pop("_sage_message_id", None)
-                        msg.pop("_sage_llm_response_id", None)
                         msg.pop("_sage_context_protected", None)
                     request_messages_snapshot = deepcopy(serializable_messages)
 
@@ -2338,7 +2343,11 @@ class AgentBase(ABC):
                             "step_name": step_name,
                             "model_config": model_config_for_record,
                             "model": model_name,
-                            "messages": serializable_messages,
+                            "messages": deepcopy(
+                                provider_request_attempts[-1].get("messages", [])
+                            )
+                            if provider_request_attempts
+                            else [],
                             "prompt_cache_observation": prompt_cache_observation,
                             "prompt_token_projection": (
                                 request_token_projection.to_dict()

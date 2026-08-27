@@ -1423,39 +1423,72 @@ class MessageManager:
     def _coalesce_reasoning_for_inference(
         messages: List[MessageChunk],
     ) -> List[MessageChunk]:
-        """Attach reasoning only to the assistant tool call that produced it.
+        """Attach reasoning to the matching assistant response.
 
         Current durable messages keep reasoning beside content/tool_calls;
         legacy sessions may still contain a dedicated reasoning display chunk.
-        DeepSeek requires reasoning beside the matching assistant ``tool_calls``
-        message, while reasoning for a normal/final answer should not enter later
-        request context.
+        Keep the complete response in this provider-neutral view; provider-specific
+        request preparation decides whether ``reasoning_content`` is supported.
         """
         output: List[MessageChunk] = []
         pending_reasoning: List[str] = []
         pending_assistant_messages: List[MessageChunk] = []
         pending_response_id: Optional[str] = None
         pending_agent_name: Optional[str] = None
+        message_id_counts: Dict[str, int] = {}
+        for message in messages:
+            if message.role != MessageRole.ASSISTANT.value or not message.message_id:
+                continue
+            message_id_counts[message.message_id] = (
+                message_id_counts.get(message.message_id, 0) + 1
+            )
 
         def response_id(message: MessageChunk) -> Optional[str]:
             metadata = message.metadata if isinstance(message.metadata, dict) else {}
             value = metadata.get("llm_response_id")
-            return str(value) if value else None
+            if value:
+                return str(value)
+            if message.message_id and message_id_counts.get(message.message_id, 0) > 1:
+                return str(message.message_id)
+            return None
 
         def belongs_to_pending_response(message: MessageChunk) -> bool:
+            if (
+                pending_agent_name
+                and message.agent_name
+                and pending_agent_name != message.agent_name
+            ):
+                return False
             current_response_id = response_id(message)
             if pending_response_id is None and current_response_id is None:
                 # Legacy sessions have no response identity; retain adjacency
-                # fallback only when both sides are legacy messages. When agent
-                # ownership exists, it still must match.
-                if pending_agent_name and message.agent_name:
-                    return pending_agent_name == message.agent_name
+                # fallback only when both sides are legacy messages.
                 return True
             return pending_response_id == current_response_id
 
         def flush_pending_assistant_messages() -> None:
             nonlocal pending_agent_name, pending_response_id
-            output.extend(pending_assistant_messages)
+            if pending_reasoning and pending_assistant_messages:
+                primary = pending_assistant_messages[0]
+                contents = [item.content for item in pending_assistant_messages]
+                if all(
+                    content is None or isinstance(content, str) for content in contents
+                ):
+                    primary.content = "".join(
+                        content for content in contents if isinstance(content, str)
+                    )
+                    primary.reasoning_content = "".join(pending_reasoning) + "".join(
+                        item.reasoning_content or ""
+                        for item in pending_assistant_messages
+                    )
+                    output.append(primary)
+                else:
+                    primary.reasoning_content = "".join(pending_reasoning) + (
+                        primary.reasoning_content or ""
+                    )
+                    output.extend(pending_assistant_messages)
+            else:
+                output.extend(pending_assistant_messages)
             pending_assistant_messages.clear()
             pending_reasoning.clear()
             pending_response_id = None
@@ -1491,10 +1524,15 @@ class MessageManager:
                 ) and not belongs_to_pending_response(message):
                     flush_pending_assistant_messages()
                 if pending_reasoning and not message.tool_calls:
-                    message.reasoning_content = None
+                    if pending_agent_name is None and message.agent_name:
+                        pending_agent_name = message.agent_name
                     pending_assistant_messages.append(message)
                     continue
                 if message.tool_calls:
+                    buffered_reasoning = "".join(
+                        item.reasoning_content or ""
+                        for item in pending_assistant_messages
+                    )
                     buffered_content = pending_visible_content()
                     if buffered_content:
                         current_content = (
@@ -1502,12 +1540,10 @@ class MessageManager:
                         )
                         message.content = buffered_content + current_content
                     pending_assistant_messages.clear()
-                    combined = "".join(pending_reasoning)
+                    combined = "".join(pending_reasoning) + buffered_reasoning
                     if message.reasoning_content:
                         combined += message.reasoning_content
                     message.reasoning_content = combined or None
-                else:
-                    message.reasoning_content = None
                 pending_reasoning = []
                 pending_response_id = None
                 pending_agent_name = None

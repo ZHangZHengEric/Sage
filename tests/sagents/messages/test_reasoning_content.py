@@ -149,6 +149,191 @@ def test_inference_view_fuses_reasoning_with_matching_tool_call() -> None:
     assert result[1].tool_calls[0]["id"] == "call-1"
 
 
+def test_inference_view_fuses_reasoning_with_matching_final_answer() -> None:
+    messages = [
+        MessageChunk(role="user", content="weather"),
+        MessageChunk(
+            role="assistant",
+            reasoning_content="compose answer",
+            message_id="response-1",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(
+            role="assistant",
+            content="sunny",
+            message_id="response-1",
+        ),
+        MessageChunk(role="user", content="and tomorrow?"),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert len(result) == 3
+    assert result[1].content == "sunny"
+    assert result[1].reasoning_content == "compose answer"
+
+
+def test_inference_view_keeps_all_known_final_answer_reasoning() -> None:
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="legacy ",
+            message_id="response-1",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(role="assistant", content="sun", message_id="response-1"),
+        MessageChunk(
+            role="assistant",
+            content="ny",
+            reasoning_content="canonical",
+            message_id="response-1",
+        ),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert result[0].content == "sunny"
+    assert result[0].reasoning_content == "legacy canonical"
+
+
+def test_inference_view_keeps_all_known_tool_call_reasoning() -> None:
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="legacy ",
+            message_id="response-1",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(
+            role="assistant",
+            content="checking",
+            reasoning_content="canonical ",
+            message_id="response-1",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="",
+            reasoning_content="tool",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            message_id="response-1",
+        ),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert result[0].content == "checking"
+    assert result[0].reasoning_content == "legacy canonical tool"
+
+
+def test_inference_view_does_not_move_reasoning_between_agents_with_same_message_id() -> (
+    None
+):
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="agent a reasoning",
+            message_id="shared-response",
+            message_type=MessageType.REASONING_CONTENT.value,
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="agent b answer",
+            message_id="shared-response",
+            agent_name="agent-b",
+        ),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert len(result) == 1
+    assert result[0].content == "agent b answer"
+    assert result[0].reasoning_content is None
+
+
+def test_inference_view_adopts_visible_agent_for_ownerless_reasoning() -> None:
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="legacy reasoning",
+            message_id="shared-response",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(
+            role="assistant",
+            content="agent a answer",
+            message_id="shared-response",
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            message_id="shared-response",
+            agent_name="agent-b",
+        ),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert len(result) == 2
+    assert result[0].content == "agent a answer"
+    assert result[0].reasoning_content == "legacy reasoning"
+    assert result[1].tool_calls[0]["id"] == "call-b"
+    assert result[1].reasoning_content is None
+
+
+def test_inference_view_uses_repeated_message_id_as_response_identity() -> None:
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="response a reasoning",
+            message_id="response-a",
+            message_type=MessageType.REASONING_CONTENT.value,
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="response a answer",
+            message_id="response-a",
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            message_id="response-b",
+            agent_name="agent-a",
+        ),
+    ]
+
+    result = MessageManager.build_inference_view(messages)
+
+    assert len(result) == 2
+    assert result[0].content == "response a answer"
+    assert result[0].reasoning_content == "response a reasoning"
+    assert result[1].tool_calls[0]["id"] == "call-b"
+    assert result[1].reasoning_content is None
+
+
 def test_inference_view_does_not_move_reasoning_between_model_responses() -> None:
     messages = [
         MessageChunk(role="user", content="weather"),
@@ -188,6 +373,7 @@ def test_inference_view_does_not_move_reasoning_between_model_responses() -> Non
         "",
     ]
     assert result[2].tool_calls[0]["id"] == "call-b"
+    assert result[1].reasoning_content == "agent a reasoning"
     assert result[2].reasoning_content is None
 
 
@@ -250,13 +436,17 @@ def test_provider_coalescing_respects_model_response_identity() -> None:
         messages, preserve_reasoning=True
     )
 
-    assert result[0] == {"role": "assistant", "content": "response a text"}
+    assert result[0] == {
+        "role": "assistant",
+        "content": "response a text",
+        "reasoning_content": "response a reasoning",
+    }
     assert result[1]["tool_calls"][0]["id"] == "call-b"
     assert "reasoning_content" not in result[1]
     assert all("_sage_llm_response_id" not in message for message in result)
 
 
-def test_deepseek_drops_reasoning_from_final_assistant_message() -> None:
+def test_deepseek_keeps_reasoning_on_final_assistant_message() -> None:
     messages = [
         {"role": "assistant", "reasoning_content": "final thought"},
         {"role": "assistant", "content": "answer"},
@@ -266,7 +456,77 @@ def test_deepseek_drops_reasoning_from_final_assistant_message() -> None:
         messages, preserve_reasoning=True
     )
 
-    assert result == [{"role": "assistant", "content": "answer"}]
+    assert result == [
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "final thought",
+        }
+    ]
+
+
+def test_deepseek_keeps_all_known_final_answer_reasoning() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "reasoning_content": "legacy ",
+            "_sage_message_id": "response-1",
+        },
+        {
+            "role": "assistant",
+            "content": "ans",
+            "_sage_message_id": "response-1",
+        },
+        {
+            "role": "assistant",
+            "content": "wer",
+            "reasoning_content": "canonical",
+            "_sage_message_id": "response-1",
+        },
+    ]
+
+    result = AgentBase._coalesce_reasoning_content_messages(
+        messages, preserve_reasoning=True
+    )
+
+    assert result[0]["content"] == "answer"
+    assert result[0]["reasoning_content"] == "legacy canonical"
+
+
+def test_deepseek_keeps_all_known_tool_call_reasoning() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "reasoning_content": "legacy ",
+            "_sage_message_id": "response-1",
+        },
+        {
+            "role": "assistant",
+            "content": "checking",
+            "reasoning_content": "canonical ",
+            "_sage_message_id": "response-1",
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "tool",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            "_sage_message_id": "response-1",
+        },
+    ]
+
+    result = AgentBase._coalesce_reasoning_content_messages(
+        messages, preserve_reasoning=True
+    )
+
+    assert result[0]["content"] == "checking"
+    assert result[0]["reasoning_content"] == "legacy canonical tool"
 
 
 def test_non_deepseek_keeps_visible_text_when_reasoning_precedes_tool_call() -> None:

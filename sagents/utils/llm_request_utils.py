@@ -422,10 +422,10 @@ def sanitize_deepseek_tool_history(
     client: Any = None,
     model_config: Optional[Mapping[str, Any]] = None,
 ) -> Any:
-    """Fill required DeepSeek tool-call replay fields in the outbound view.
+    """Fill required DeepSeek assistant replay fields in the outbound view.
 
-    Old sessions and non-thinking turns may contain a valid tool call without
-    ``reasoning_content``. DeepSeek requires that field when replaying tool-call
+    Old sessions and non-thinking turns may contain assistant responses without
+    ``reasoning_content``. DeepSeek requires that field when replaying thinking
     history, so send a neutral marker without changing the durable message.
     """
     if not _uses_deepseek_native_protocol(
@@ -441,27 +441,24 @@ def sanitize_deepseek_tool_history(
     filled_count = 0
     sanitized_messages: list[Any] = []
     for message in messages:
-        if isinstance(message, Mapping):
-            if message.get("role") == "assistant" and message.get("tool_calls"):
-                message_copy = dict(message)
-                if message_copy.get("content") is None:
-                    message_copy["content"] = ""
-                    changed = True
-                reasoning = message_copy.get("reasoning_content")
-                if not isinstance(reasoning, str) or not reasoning.strip():
-                    message_copy["reasoning_content"] = (
-                        DEFAULT_TOOL_REASONING_CONTENT
-                    )
-                    changed = True
-                    filled_count += 1
-                sanitized_messages.append(message_copy)
-                continue
+        if isinstance(message, Mapping) and message.get("role") == "assistant":
+            message_copy = dict(message)
+            if message_copy.get("tool_calls") and message_copy.get("content") is None:
+                message_copy["content"] = ""
+                changed = True
+            reasoning = message_copy.get("reasoning_content")
+            if not isinstance(reasoning, str) or not reasoning.strip():
+                message_copy["reasoning_content"] = DEFAULT_TOOL_REASONING_CONTENT
+                changed = True
+                filled_count += 1
+            sanitized_messages.append(message_copy)
+            continue
         sanitized_messages.append(message)
 
     if not changed:
         return messages
     logger.warning(
-        "DeepSeek Chat Completions history filled missing tool reasoning: "
+        "DeepSeek Chat Completions history filled missing assistant reasoning: "
         f"assistant_turns={filled_count}",
         session_id="NO_SESSION",
     )
@@ -471,7 +468,7 @@ def sanitize_deepseek_tool_history(
 def coalesce_reasoning_content_messages(
     messages: Any,
     *,
-    preserve_tool_reasoning: bool,
+    preserve_reasoning: bool,
 ) -> Any:
     """Fold legacy streamed assistant chunks into provider-facing messages.
 
@@ -488,23 +485,71 @@ def coalesce_reasoning_content_messages(
     pending_reasoning: list[str] = []
     pending_assistant_messages: list[dict[str, Any]] = []
     pending_response_id: Optional[str] = None
+    pending_agent_name: Optional[str] = None
+    message_id_counts: dict[str, int] = {}
+    for message in messages:
+        if not isinstance(message, Mapping) or message.get("role") != "assistant":
+            continue
+        message_id = message.get("_sage_message_id")
+        if message_id:
+            key = str(message_id)
+            message_id_counts[key] = message_id_counts.get(key, 0) + 1
 
     def response_id(message: Mapping[str, Any]) -> Optional[str]:
         value = message.get("_sage_llm_response_id")
+        if value:
+            return str(value)
+        message_id = message.get("_sage_message_id")
+        if message_id and message_id_counts.get(str(message_id), 0) > 1:
+            return str(message_id)
+        return None
+
+    def agent_name(message: Mapping[str, Any]) -> Optional[str]:
+        value = message.get("_sage_agent_name")
         return str(value) if value else None
 
     def belongs_to_pending_response(message: Mapping[str, Any]) -> bool:
+        current_agent_name = agent_name(message)
+        if (
+            pending_agent_name
+            and current_agent_name
+            and pending_agent_name != current_agent_name
+        ):
+            return False
         current_response_id = response_id(message)
         if pending_response_id is None and current_response_id is None:
             return True
         return pending_response_id == current_response_id
 
     def flush_pending_assistant_messages() -> None:
-        nonlocal pending_response_id
-        output.extend(pending_assistant_messages)
+        nonlocal pending_agent_name, pending_response_id
+        if preserve_reasoning and pending_reasoning and pending_assistant_messages:
+            primary = pending_assistant_messages[0]
+            contents = [item.get("content") for item in pending_assistant_messages]
+            if all(
+                content is None or isinstance(content, str) for content in contents
+            ):
+                primary["content"] = "".join(
+                    content for content in contents if isinstance(content, str)
+                )
+                primary["reasoning_content"] = "".join(pending_reasoning) + "".join(
+                    reasoning
+                    for item in pending_assistant_messages
+                    if isinstance((reasoning := item.get("reasoning_content")), str)
+                )
+                output.append(primary)
+            else:
+                existing = primary.get("reasoning_content")
+                primary["reasoning_content"] = "".join(pending_reasoning) + (
+                    existing if isinstance(existing, str) else ""
+                )
+                output.extend(pending_assistant_messages)
+        else:
+            output.extend(pending_assistant_messages)
         pending_assistant_messages.clear()
         pending_reasoning.clear()
         pending_response_id = None
+        pending_agent_name = None
 
     def pending_visible_content() -> str:
         return "".join(
@@ -536,6 +581,7 @@ def coalesce_reasoning_content_messages(
             ):
                 flush_pending_assistant_messages()
             pending_response_id = response_id(message)
+            pending_agent_name = agent_name(message)
             pending_reasoning.append(reasoning)
             continue
 
@@ -547,11 +593,18 @@ def coalesce_reasoning_content_messages(
                 flush_pending_assistant_messages()
             has_tool_calls = bool(message.get("tool_calls"))
             if pending_reasoning and not has_tool_calls:
-                message.pop("reasoning_content", None)
+                current_agent_name = agent_name(message)
+                if pending_agent_name is None and current_agent_name:
+                    pending_agent_name = current_agent_name
                 pending_assistant_messages.append(message)
                 continue
             if has_tool_calls and pending_reasoning:
-                if preserve_tool_reasoning:
+                buffered_reasoning = "".join(
+                    reasoning
+                    for item in pending_assistant_messages
+                    if isinstance((reasoning := item.get("reasoning_content")), str)
+                )
+                if preserve_reasoning:
                     buffered_content = pending_visible_content()
                     if buffered_content:
                         current_content = message.get("content")
@@ -561,15 +614,18 @@ def coalesce_reasoning_content_messages(
                 else:
                     output.extend(pending_assistant_messages)
                 pending_assistant_messages.clear()
-            if preserve_tool_reasoning and has_tool_calls and pending_reasoning:
+            if preserve_reasoning and has_tool_calls and pending_reasoning:
                 existing = message.get("reasoning_content")
-                message["reasoning_content"] = "".join(pending_reasoning) + (
-                    existing if isinstance(existing, str) else ""
+                message["reasoning_content"] = (
+                    "".join(pending_reasoning)
+                    + buffered_reasoning
+                    + (existing if isinstance(existing, str) else "")
                 )
             pending_reasoning = []
             pending_response_id = None
+            pending_agent_name = None
             if (
-                not preserve_tool_reasoning
+                not preserve_reasoning
                 and has_tool_calls
                 and isinstance(message.get("content"), str)
                 and message.get("content")
@@ -578,7 +634,7 @@ def coalesce_reasoning_content_messages(
         elif pending_reasoning or pending_assistant_messages:
             flush_pending_assistant_messages()
 
-        if not (preserve_tool_reasoning and message.get("tool_calls")):
+        if not preserve_reasoning:
             message.pop("reasoning_content", None)
         output.append(message)
 
@@ -587,6 +643,7 @@ def coalesce_reasoning_content_messages(
         if isinstance(message, dict):
             message.pop("_sage_llm_response_id", None)
             message.pop("_sage_message_id", None)
+            message.pop("_sage_agent_name", None)
     return output
 
 
@@ -604,7 +661,7 @@ def prepare_chat_completion_messages(
     )
     prepared = coalesce_reasoning_content_messages(
         messages,
-        preserve_tool_reasoning=use_deepseek_protocol,
+        preserve_reasoning=use_deepseek_protocol,
     )
     if use_deepseek_protocol:
         return sanitize_deepseek_tool_history(
