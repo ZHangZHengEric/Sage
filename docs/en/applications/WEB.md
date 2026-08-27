@@ -19,7 +19,7 @@ The **Web** product is the FastAPI server (`app/server/`) plus the Vue 3 client 
 | -------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [One-command startup](#one-command-startup)                          | Local development (same as [Getting Started](GETTING_STARTED.md))     |
 | [Manual: backend + Vite dev server](#manual-start-backend--frontend) | Split terminals, custom ports, or debugging one side only             |
-| [Docker Compose](#docker-compose-full-stack)                         | Containerized full stack (MySQL, Elasticsearch, RustFS, Jaeger, etc.) |
+| [Docker Compose](#docker-compose-full-stack)                         | Containerized Sage services (MySQL, RustFS, Jaeger, etc.)              |
 
 
 ## One-command startup
@@ -73,7 +73,7 @@ npm run dev
 
 ## Docker Compose (full stack)
 
-`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts a **full** platform profile: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, Elasticsearch, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode).
+`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts the Sage platform services: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode). Sage does not bundle or operate Elasticsearch; configure an externally managed endpoint when knowledge-base search needs it.
 
 **What gets exposed (defaults in the compose file):**
 
@@ -84,7 +84,6 @@ npm run dev
 | `sage-web`    | 30051 → 80                   | Pre-built web assets behind nginx in image |
 | `sage-wiki`   | 30057 → 80                   | Wiki front-end (depends on API)            |
 | `sage-mysql`  | 30052 → 3306                 |                                            |
-| `sage-es`     | 30053 → 9200                 |                                            |
 | `sage-rustfs` | 30054 (API), 30055 (console) |                                            |
 
 
@@ -92,16 +91,16 @@ npm run dev
 
 - Docker with **Compose v2** (`docker compose`)
 - Sufficient host resources (the compose file sets a **16G** memory limit on `sage-server`; adjust in `deploy/prod/docker-compose.yml` if needed)
-- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least **LLM** and **DB/ES/S3**-related variables. The example file is aligned with **in-cluster** hostnames: `sage-mysql`, `sage-es`, `sage-rustfs`, etc.
+- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least **LLM**, database, and object-storage variables. If knowledge-base search is enabled, also configure an externally managed Elasticsearch endpoint.
 
-`SAGE_ROOT` must point to a directory on the host used for **persistent volumes** (MySQL data, `sage-server` sessions/agents/logs, ES data, RustFS data, etc.).
+`SAGE_ROOT` must point to a directory on the host used for **persistent volumes** (MySQL data, `sage-server` sessions/agents/logs, RustFS data, etc.).
 
 ### Run
 
 ```bash
 cd /path/to/Sage
 cp deploy/prod/.env.example deploy/prod/.env
-# edit deploy/prod/.env: SAGE_DEFAULT_LLM_API_KEY, secrets, SAGE_MYSQL_PASSWORD, SAGE_ELASTICSEARCH_PASSWORD, SAGE_S3_* as needed
+# edit deploy/prod/.env: SAGE_DEFAULT_LLM_API_KEY, secrets, SAGE_MYSQL_PASSWORD, SAGE_S3_* as needed
 deploy/compose.sh prod up -d --build
 ```
 

@@ -18,3 +18,19 @@ def test_server_installs_browsers_after_final_playwright_version_is_resolved():
 
     assert node_package < python_pin < final_requirements < python_browser_install
     assert "PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright" in dockerfile
+
+
+def test_server_prunes_desktop_only_im_dependencies():
+    repo_root = Path(__file__).resolve().parents[2]
+    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+        encoding="utf-8"
+    )
+
+    requirements_filter = dockerfile.split(
+        "requirements.txt > requirements.server.txt", maxsplit=1
+    )[0]
+
+    assert "lark-oapi" in requirements_filter
+    assert "dingtalk-stream" in requirements_filter
+    assert "python-socks" in requirements_filter
+    assert "RUN rm -rf /app/mcp_servers/im_server" in dockerfile

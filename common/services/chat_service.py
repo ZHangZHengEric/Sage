@@ -30,7 +30,6 @@ from common.core.i18n import t
 from common.models.agent import AgentConfigDao
 from common.models.base import get_local_now
 from common.models.conversation import ConversationDao
-from common.models.im_channel import IMChannelConfigDao
 from common.models.kdb import KdbDao
 from common.models.llm_provider import LLMProviderDao
 from common.services.chat_processor import ContentProcessor
@@ -345,6 +344,8 @@ async def _copy_desktop_agent_docs(request: StreamRequest) -> None:
 
 async def _apply_desktop_im_tools(request: StreamRequest) -> None:
     try:
+        from common.models.im_channel import IMChannelConfigDao
+
         all_im_configs = await IMChannelConfigDao().get_all_configs()
         im_enabled = any(
             config.get("enabled", False) for config in all_im_configs.values()

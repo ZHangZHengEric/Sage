@@ -70,7 +70,7 @@ deploy/compose.sh up -d sage-redis
 deploy/compose.sh up -d sage-rustfs
 ```
 
-`dev`、`prod`、`test` 的 `.env.example` 只保留应用启动通常必须改的值，例如 `SAGE_ROOT`、`SAGE_ENV`、密钥和外部服务地址。Docker Compose 项目名由 `deploy/compose.sh` 按环境自动设置为 `sage_dev`、`sage_prod` 或 `sage_test`，不再放进业务环境模板；确需覆盖时可在 shell 中设置 `SAGE_COMPOSE_PROJECT_NAME`。Kubernetes 专属配置不放在这些环境模板里，统一放在 `deploy/k8s/env/*.env.example`。共享服务默认端口为 Wiki `30057`、RustFS `30054` / `30055`、Redis `30056`、Jaeger OTLP `4317` / `4318`、Prometheus `30090`、Loki `30091`、Alloy `30092`、Grafana `30093`；需要覆盖时仍可在 `.env` 中显式设置 `SAGE_SERVER_PORT`、`SAGE_WEB_PORT`、`SAGE_MYSQL_PUBLISHED_PORT`、`SAGE_ELASTICSEARCH_PUBLISHED_PORT`、`SAGE_WIKI_PORT`、`SAGE_RUSTFS_API_PORT`、`SAGE_RUSTFS_CONSOLE_PORT`、`SAGE_REDIS_PORT`、`SAGE_REDIS_PASSWORD`、`SAGE_JAEGER_OTLP_GRPC_PORT`、`SAGE_JAEGER_OTLP_HTTP_PORT`、`SAGE_PROMETHEUS_PORT`、`SAGE_LOKI_PORT`、`SAGE_ALLOY_PORT`、`SAGE_GRAFANA_PORT`、`SAGE_GRAFANA_PUBLIC_URL`。
+`dev`、`prod`、`test` 的 `.env.example` 只保留应用启动通常必须改的值，例如 `SAGE_ROOT`、`SAGE_ENV`、密钥和外部服务地址。Docker Compose 项目名由 `deploy/compose.sh` 按环境自动设置为 `sage_dev`、`sage_prod` 或 `sage_test`，不再放进业务环境模板；确需覆盖时可在 shell 中设置 `SAGE_COMPOSE_PROJECT_NAME`。Kubernetes 专属配置不放在这些环境模板里，统一放在 `deploy/k8s/env/*.env.example`。共享服务默认端口为 Wiki `30057`、RustFS `30054` / `30055`、Redis `30056`、Jaeger OTLP `4317` / `4318`、Prometheus `30090`、Loki `30091`、Alloy `30092`、Grafana `30093`；需要覆盖时仍可在 `.env` 中显式设置 `SAGE_SERVER_PORT`、`SAGE_WEB_PORT`、`SAGE_MYSQL_PUBLISHED_PORT`、`SAGE_WIKI_PORT`、`SAGE_RUSTFS_API_PORT`、`SAGE_RUSTFS_CONSOLE_PORT`、`SAGE_REDIS_PORT`、`SAGE_REDIS_PASSWORD`、`SAGE_JAEGER_OTLP_GRPC_PORT`、`SAGE_JAEGER_OTLP_HTTP_PORT`、`SAGE_PROMETHEUS_PORT`、`SAGE_LOKI_PORT`、`SAGE_ALLOY_PORT`、`SAGE_GRAFANA_PORT`、`SAGE_GRAFANA_PUBLIC_URL`。
 
 Prometheus 会通过 Docker discovery 动态抓取当前运行的 `sage-server*` 容器 `/api/observability/metrics`，并抓取 `sage-cadvisor:8080` 的容器指标。服务容器会写入 Docker labels，Prometheus 和 Alloy 会统一转成 `environment` 观测标签：
 
@@ -82,7 +82,7 @@ SAGE_ENV=development
 
 Grafana 默认管理员账号可通过 `SAGE_GRAFANA_ADMIN_USER` / `SAGE_GRAFANA_ADMIN_PASSWORD` 覆盖。仓库不再提交默认 datasource provisioning；Prometheus、Loki、Jaeger 数据源属于部署现场配置，请在展示机器的 Grafana UI 或本机未提交的 provisioning 文件中配置机器 A / 机器 B 的数据源。Dashboard 通过 datasource 变量选择要查看的机器，并通过 `environment` 变量区分 dev/prod/test。
 
-Elasticsearch 默认不随 `deploy/compose.sh prod up -d` 启动。需要内置 ES 时，使用 `deploy/compose.sh prod --profile es up -d`，或显式指定 `deploy/compose.sh prod up -d sage-es`。
+Sage 的 Compose 和 Kubernetes 部署均不内置或维护 Elasticsearch。需要知识库检索能力时，由部署环境提供外部 Elasticsearch，并通过 `SAGE_ELASTICSEARCH_URL` 等应用变量接入。
 
 ## Kubernetes
 
