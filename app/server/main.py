@@ -113,7 +113,7 @@ def main():
         init_logging_base(
             log_name="sage-server",
             log_level=getattr(cfg, "log_level", "INFO"),
-            log_path="./logs",
+            log_path=cfg.logs_dir,
             get_request_id=get_request_id,
             use_safe_stdout=True,
         )

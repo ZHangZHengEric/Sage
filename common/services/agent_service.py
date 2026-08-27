@@ -463,27 +463,12 @@ async def create_agent(
         user_id=user_id,
     )
     await dao.save(orm_obj)
-    try:
-        from app.server.services.agent_inherit import ensure_agent_inherit_dir
-
-        ensure_agent_inherit_dir(agent_id)
-        await sync_selected_skills_to_workspace(
-            agent_id,
-            normalized_config,
-            user_id=user_id,
-            role="user",
-        )
-    except Exception as e:
-        logger.error(f"Agent {agent_id} inherit 目录初始化失败: {e}")
-        try:
-            await dao.delete_by_id(agent_id)
-            logger.info(f"Agent {agent_id} 已回滚删除")
-        except Exception as rollback_error:
-            logger.error(f"Agent {agent_id} 回滚删除失败: {rollback_error}")
-        raise SageHTTPException(
-            message_key="agent.inherit_init_failed",
-            error_detail=str(e),
-        )
+    await sync_selected_skills_to_workspace(
+        agent_id,
+        normalized_config,
+        user_id=user_id,
+        role="user",
+    )
 
     logger.info(f"Agent {agent_id} 创建成功")
     return orm_obj

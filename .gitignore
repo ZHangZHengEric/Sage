@@ -100,6 +100,7 @@ docs/vendor/
 .pybuilder/
 target/
 .sage-terminal-state/
+.sage/
 
 # Jupyter Notebook
 .ipynb_checkpoints
