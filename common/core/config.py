@@ -438,6 +438,7 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         )
         return _normalize_paths(cfg)
 
+    local_defaults = get_local_storage_defaults()
     cfg = StartupConfig(
         app_mode="server",
         env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
@@ -446,13 +447,13 @@ def build_startup_config(mode: str = "server") -> StartupConfig:
         log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level)
         or StartupConfig.log_level,
         port=env_int(ENV.PORT, StartupConfig.port),
-        logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),  # pyright: ignore[reportArgumentType]
-        session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),  # pyright: ignore[reportArgumentType]
-        agents_dir=env_str(ENV.AGENTS_DIR, StartupConfig.agents_dir),  # pyright: ignore[reportArgumentType]
-        skill_dir=env_str(ENV.SKILL_DIR, StartupConfig.skill_dir),  # pyright: ignore[reportArgumentType]
-        user_dir=env_str(ENV.USER_DIR, StartupConfig.user_dir),  # pyright: ignore[reportArgumentType]
+        logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"]),  # pyright: ignore[reportArgumentType]
+        session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"]),  # pyright: ignore[reportArgumentType]
+        agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"]),  # pyright: ignore[reportArgumentType]
+        skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"]),  # pyright: ignore[reportArgumentType]
+        user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"]),  # pyright: ignore[reportArgumentType]
         db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type),  # pyright: ignore[reportArgumentType]
-        db_file=env_str(ENV.DB_FILE, StartupConfig.db_file),  # pyright: ignore[reportArgumentType]
+        db_file=env_str(ENV.DB_FILE, local_defaults["db_file"]),  # pyright: ignore[reportArgumentType]
         mysql_host=env_str(ENV.MYSQL_HOST, StartupConfig.mysql_host),  # pyright: ignore[reportArgumentType]
         mysql_port=env_int(ENV.MYSQL_PORT, StartupConfig.mysql_port),
         mysql_user=env_str(ENV.MYSQL_USER, StartupConfig.mysql_user),  # pyright: ignore[reportArgumentType]

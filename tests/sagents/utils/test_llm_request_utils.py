@@ -343,6 +343,26 @@ def test_deepseek_history_sanitizer_fills_missing_reasoning_without_mutation() -
     assert "reasoning_content" not in messages[1]
 
 
+def test_deepseek_history_sanitizer_fills_plain_assistant_reasoning_without_mutation() -> (
+    None
+):
+    messages = [
+        {"role": "user", "content": "weather"},
+        {"role": "assistant", "content": "It is sunny."},
+        {"role": "user", "content": "and tomorrow?"},
+    ]
+
+    out = sanitize_deepseek_tool_history(
+        messages,
+        request_kwargs={"extra_body": {"thinking": {"type": "enabled"}}},
+        model="deepseek-v4-flash",
+        model_config={"base_url": "https://api.deepseek.com"},
+    )
+
+    assert out[1]["reasoning_content"] == DEFAULT_TOOL_REASONING_CONTENT
+    assert "reasoning_content" not in messages[1]
+
+
 def test_deepseek_history_sanitizer_also_fills_when_thinking_off() -> (
     None
 ):

@@ -140,7 +140,7 @@ class DummyObservabilityManager:
 
 
 @pytest.mark.asyncio
-async def test_deepseek_tool_request_replays_only_tool_call_reasoning():
+async def test_deepseek_tool_request_replays_tool_and_final_answer_reasoning():
     client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
     agent = DummyAgent(
         model=client,
@@ -188,12 +188,176 @@ async def test_deepseek_tool_request_replays_only_tool_call_reasoning():
     assert assistant_tool_call["content"] == "checking"
     assert assistant_tool_call["reasoning_content"] == "need tool"
     assert assistant_tool_call["tool_calls"][0]["id"] == "call-1"
-    assert all(
-        "reasoning_content" not in message
+    final_answer = next(
+        message
         for message in request["messages"]
-        if not message.get("tool_calls")
+        if message.get("role") == "assistant"
+        and message.get("content") == "sunny"
+        and not message.get("tool_calls")
     )
+    assert final_answer["reasoning_content"] == "compose answer"
     assert "tool_choice" not in request
+
+
+@pytest.mark.asyncio
+async def test_deepseek_request_keeps_message_identity_and_records_provider_view():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    session_context = _RecordingSessionContext()
+    agent._get_live_session_context = lambda session_id: session_context
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="response a reasoning",
+            message_id="response-a",
+            message_type=MessageType.REASONING_CONTENT.value,
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="response a answer",
+            message_id="response-a",
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            message_id="response-b",
+            agent_name="agent-a",
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-b"),
+    ]
+
+    async for _ in agent._call_llm_streaming(
+        messages,
+        session_id="response-identity-session",
+        enable_thinking=True,
+    ):
+        pass
+
+    request_messages = client.chat.completions.requests[0]["messages"]
+    final_answer = next(
+        message
+        for message in request_messages
+        if message.get("content") == "response a answer"
+    )
+    tool_call = next(
+        message for message in request_messages if message.get("tool_calls")
+    )
+    assert final_answer["reasoning_content"] == "response a reasoning"
+    assert tool_call["reasoning_content"] == "no thinking"
+    assert all(
+        not any(key.startswith("_sage_") for key in message)
+        for message in request_messages
+    )
+    recorded_messages = session_context.llm_requests_logs[0]["request"]["messages"]
+    assert recorded_messages == request_messages
+
+
+@pytest.mark.asyncio
+async def test_deepseek_request_does_not_move_reasoning_between_agents_with_same_message_id():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="agent a reasoning",
+            message_id="shared-response",
+            message_type=MessageType.REASONING_CONTENT.value,
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="agent b answer",
+            message_id="shared-response",
+            agent_name="agent-b",
+        ),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request_messages = client.chat.completions.requests[0]["messages"]
+    final_answer = next(
+        message
+        for message in request_messages
+        if message.get("content") == "agent b answer"
+    )
+    assert final_answer["reasoning_content"] == "no thinking"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_request_adopts_visible_agent_for_ownerless_reasoning():
+    client = FakeClient(attempts=[_attempt_yields(_content_chunk("ok"))])
+    agent = DummyAgent(
+        model=client,
+        model_config={
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        },
+    )
+    messages = [
+        MessageChunk(
+            role="assistant",
+            reasoning_content="legacy reasoning",
+            message_id="shared-response",
+            message_type=MessageType.REASONING_CONTENT.value,
+        ),
+        MessageChunk(
+            role="assistant",
+            content="agent a answer",
+            message_id="shared-response",
+            agent_name="agent-a",
+        ),
+        MessageChunk(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {"name": "weather", "arguments": "{}"},
+                }
+            ],
+            message_id="shared-response",
+            agent_name="agent-b",
+        ),
+        MessageChunk(role="tool", content="sunny", tool_call_id="call-b"),
+    ]
+
+    async for _ in agent._call_llm_streaming(messages, enable_thinking=True):
+        pass
+
+    request_messages = client.chat.completions.requests[0]["messages"]
+    final_answer = next(
+        message
+        for message in request_messages
+        if message.get("content") == "agent a answer"
+    )
+    tool_call = next(
+        message for message in request_messages if message.get("tool_calls")
+    )
+    assert final_answer["reasoning_content"] == "legacy reasoning"
+    assert tool_call["reasoning_content"] == "no thinking"
 
 
 @pytest.mark.asyncio
@@ -271,6 +435,13 @@ async def test_deepseek_thinking_fills_legacy_tool_turn_without_reasoning():
     )
     assert tool_call_message["reasoning_content"] == "no thinking"
     assert tool_call_message["content"] == "checking"
+    final_answer = next(
+        message
+        for message in request_messages
+        if message.get("role") == "assistant"
+        and message.get("content") == "It is sunny."
+    )
+    assert final_answer["reasoning_content"] == "no thinking"
     assert [message.get("content") for message in request_messages] == [
         "weather",
         "checking",
