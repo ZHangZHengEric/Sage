@@ -296,6 +296,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _createAgent() async {
+    setState(() => _saving = true);
+    try {
+      final created = await widget.controller.createAgent(
+        context.l10n.text('settings.newAgent'),
+      );
+      if (!mounted) return;
+      setState(() {
+        _settingsAgentId = created.id;
+        _syncedAgentId = '';
+        _editingAgent = true;
+      });
+    } on Object {
+      // WorkspaceController exposes the backend error in the shared banner.
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   void _saveAgentTextLater(String field, TextEditingController controller) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 650), () {
@@ -560,14 +579,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: context.l10n.text('settings.agent'),
       status: _saving,
       fillRemaining: true,
-      action: _SettingsActionButton(
-        key: const ValueKey('settings-agent-edit'),
-        onTap: _saving || loadingSelection ? null : _toggleAgentEditing,
-        icon: Icon(
-          _editingAgent ? CupertinoIcons.checkmark : CupertinoIcons.pencil,
-          size: 15,
-        ),
-        label: context.l10n.text(_editingAgent ? 'common.save' : 'common.edit'),
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-add'),
+            onTap: _saving || loadingSelection || _editingAgent
+                ? null
+                : _createAgent,
+            icon: const Icon(CupertinoIcons.add, size: 15),
+            label: context.l10n.text('common.add'),
+          ),
+          const SizedBox(width: 10),
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-edit'),
+            onTap: _saving || loadingSelection ? null : _toggleAgentEditing,
+            icon: Icon(
+              _editingAgent ? CupertinoIcons.checkmark : CupertinoIcons.pencil,
+              size: 15,
+            ),
+            label: context.l10n.text(
+              _editingAgent ? 'common.save' : 'common.edit',
+            ),
+          ),
+        ],
       ),
       children: [
         _SettingsMasterDetail(
@@ -1121,6 +1156,8 @@ class _ComponentSettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final componentName = _runtimeComponentName(component, context.l10n);
+    final componentValue = _runtimeComponentValue(component, context.l10n);
     final selectable = component.selectionMode == 'user';
     final available = [
       for (final plugin in component.plugins)
@@ -1130,8 +1167,12 @@ class _ComponentSettingsCard extends StatelessWidget {
     return Semantics(
       container: true,
       label: context.l10n.text('component.current', {
-        'name': component.name,
-        'implementation': component.implementation,
+        'name': componentName,
+        'implementation': _runtimePluginName(
+          component.activePluginId ?? '',
+          component.implementation,
+          context.l10n,
+        ),
       }),
       child: GlassCard(
         key: ValueKey('settings-component-${component.id}'),
@@ -1148,14 +1189,14 @@ class _ComponentSettingsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      component.name,
+                      componentName,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      component.value,
+                      componentValue,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: colors.onSurfaceVariant,
                         height: 1.35,
@@ -1172,7 +1213,14 @@ class _ComponentSettingsCard extends StatelessWidget {
                         width: 250,
                         options: [
                           for (final plugin in available)
-                            _PickerOption(value: plugin.id, label: plugin.name),
+                            _PickerOption(
+                              value: plugin.id,
+                              label: _runtimePluginName(
+                                plugin.id,
+                                plugin.name,
+                                context.l10n,
+                              ),
+                            ),
                         ],
                         onChanged: onSelect,
                       )
@@ -1184,7 +1232,11 @@ class _ComponentSettingsCard extends StatelessWidget {
                                   context.l10n,
                                 ),
                               })
-                            : component.implementation,
+                            : _runtimePluginName(
+                                component.activePluginId ?? '',
+                                component.implementation,
+                                context.l10n,
+                              ),
                       );
                 if (constraints.maxWidth < 620) {
                   return Column(
@@ -1209,7 +1261,10 @@ class _ComponentSettingsCard extends StatelessWidget {
               children: [
                 _SettingsTag(
                   label: context.l10n.text('component.scope', {
-                    'scope': component.scope,
+                    'scope': _componentScopeLabel(
+                      component.scope,
+                      context.l10n,
+                    ),
                   }),
                 ),
                 _SettingsTag(
@@ -1245,13 +1300,21 @@ class _ComponentSettingsCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          plugin.name,
+                          _runtimePluginName(
+                            plugin.id,
+                            plugin.name,
+                            context.l10n,
+                          ),
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          plugin.value,
+                          _runtimePluginValue(
+                            plugin.id,
+                            plugin.value,
+                            context.l10n,
+                          ),
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: colors.onSurfaceVariant,
@@ -1295,6 +1358,69 @@ String _applyModeLabel(String value, SageLocalizations l10n) => switch (value) {
   'restart' => l10n.text('component.apply.restart'),
   _ => l10n.text('component.apply.unavailable'),
 };
+
+String _runtimeComponentName(
+  ComponentSummary component,
+  SageLocalizations l10n,
+) => switch (component.id) {
+  'context.token-estimator' => l10n.text('component.tokenEstimator.name'),
+  'context.reducer' => l10n.text('component.reducer.name'),
+  _ => component.name,
+};
+
+String _runtimeComponentValue(
+  ComponentSummary component,
+  SageLocalizations l10n,
+) => switch (component.id) {
+  'context.token-estimator' => l10n.text('component.tokenEstimator.value'),
+  'context.reducer' => l10n.text('component.reducer.value'),
+  _ => component.value,
+};
+
+String _runtimePluginName(
+  String pluginId,
+  String fallback,
+  SageLocalizations l10n,
+) => switch (pluginId) {
+  'sage.context.token-estimator.json-heuristic' ||
+  'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.name'),
+  'sage.context.token-estimator.unicode-heuristic' ||
+  'unicode-heuristic' => l10n.text('component.plugin.unicodeHeuristic.name'),
+  'sage.context.token-estimator.tiktoken' ||
+  'tiktoken' => l10n.text('component.plugin.tiktoken.name'),
+  'sage.context.reducer.persistent-summary' ||
+  'persistent-summary' => l10n.text('component.plugin.persistentSummary.name'),
+  'sage.context.reducer.window' ||
+  'window' => l10n.text('component.plugin.window.name'),
+  _ => fallback,
+};
+
+String _runtimePluginValue(
+  String pluginId,
+  String fallback,
+  SageLocalizations l10n,
+) => switch (pluginId) {
+  'sage.context.token-estimator.json-heuristic' ||
+  'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.value'),
+  'sage.context.token-estimator.unicode-heuristic' ||
+  'unicode-heuristic' => l10n.text('component.plugin.unicodeHeuristic.value'),
+  'sage.context.token-estimator.tiktoken' ||
+  'tiktoken' => l10n.text('component.plugin.tiktoken.value'),
+  'sage.context.reducer.persistent-summary' ||
+  'persistent-summary' => l10n.text('component.plugin.persistentSummary.value'),
+  'sage.context.reducer.window' ||
+  'window' => l10n.text('component.plugin.window.value'),
+  _ => fallback,
+};
+
+String _componentScopeLabel(String value, SageLocalizations l10n) =>
+    switch (value) {
+      'process' => l10n.text('component.scope.process'),
+      'tenant' => l10n.text('component.scope.tenant'),
+      'agent' => l10n.text('component.scope.agent'),
+      'run' => l10n.text('component.scope.run'),
+      _ => value,
+    };
 
 class _ArchivedConversationSettings extends StatelessWidget {
   const _ArchivedConversationSettings({required this.controller});
@@ -2763,78 +2889,6 @@ class _AssignmentItem extends StatelessWidget {
   }
 }
 
-class _ModelCapabilityButton extends StatelessWidget {
-  const _ModelCapabilityButton({
-    required this.checking,
-    required this.verified,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final bool checking;
-  final bool verified;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = context.l10n.text(
-      checking
-          ? 'common.validating'
-          : verified
-          ? 'common.applied'
-          : 'common.validateApply',
-    );
-    final interactive = enabled && !checking && !verified;
-    final colors = Theme.of(context).colorScheme;
-    return Semantics(
-      button: true,
-      enabled: interactive,
-      label: label,
-      child: IgnorePointer(
-        ignoring: !interactive,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 160),
-          opacity: interactive || checking || verified ? 1 : 0.45,
-          child: GlassButton.custom(
-            key: const ValueKey('settings-model-capability-check'),
-            width: 168,
-            height: 38,
-            label: label,
-            onTap: onTap,
-            shape: const LiquidRoundedRectangle(borderRadius: 10),
-            settings: _glass(context),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (checking)
-                  const CupertinoActivityIndicator(radius: 7)
-                else
-                  Icon(
-                    verified
-                        ? CupertinoIcons.checkmark_circle_fill
-                        : CupertinoIcons.checkmark_shield,
-                    size: 16,
-                    color: verified ? colors.primary : null,
-                  ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ModelSettings extends StatefulWidget {
   const _ModelSettings({required this.controller});
   final WorkspaceController controller;
@@ -3092,7 +3146,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
       if (mounted) {
         setState(() {
           _dirty = false;
-          _detected = true;
+          _detected = false;
+          _editing = false;
+          _creating = false;
+          _syncedId = '';
         });
       }
     } on Object {
@@ -3253,36 +3310,45 @@ class _ModelSettingsState extends State<_ModelSettings> {
             const SizedBox(width: 12),
           ],
           if (_editing) ...[
-            _ModelCapabilityButton(
-              checking: _saving,
-              verified: _detected,
-              enabled: _dirty && !_saving,
-              onTap: _verifyAndApply,
+            _SettingsActionButton(
+              key: const ValueKey('settings-model-cancel'),
+              onTap: _saving ? null : _toggleEditing,
+              icon: const Icon(CupertinoIcons.xmark, size: 15),
+              label: context.l10n.text('common.cancel'),
             ),
             const SizedBox(width: 10),
-          ],
-          _SettingsActionButton(
-            key: const ValueKey('settings-model-add'),
-            onTap: _saving || _editing ? null : _startCreating,
-            icon: const Icon(CupertinoIcons.add, size: 15),
-            label: context.l10n.text('common.add'),
-          ),
-          const SizedBox(width: 10),
-          _SettingsActionButton(
-            key: const ValueKey('settings-model-edit'),
-            onTap: _saving || (_editing && _dirty) ? null : _toggleEditing,
-            icon: Icon(
-              _editing ? CupertinoIcons.checkmark : CupertinoIcons.pencil,
-              size: 15,
+            _SettingsActionButton(
+              key: const ValueKey('settings-model-save'),
+              onTap: _saving || !_dirty ? null : _verifyAndApply,
+              icon: const Icon(CupertinoIcons.checkmark, size: 15),
+              label: context.l10n.text('common.save'),
             ),
-            label: context.l10n.text(_editing ? 'common.save' : 'common.edit'),
-          ),
+          ] else ...[
+            _SettingsActionButton(
+              key: const ValueKey('settings-model-add'),
+              onTap: _saving ? null : _startCreating,
+              icon: const Icon(CupertinoIcons.add, size: 15),
+              label: context.l10n.text('common.add'),
+            ),
+            const SizedBox(width: 10),
+            _SettingsActionButton(
+              key: const ValueKey('settings-model-edit'),
+              onTap: _saving ? null : _toggleEditing,
+              icon: const Icon(CupertinoIcons.pencil, size: 15),
+              label: context.l10n.text('common.edit'),
+            ),
+          ],
         ],
       ),
       children: [
         _SettingsMasterDetail(
           selectorKey: const ValueKey('settings-model-picker'),
           items: [
+            if (_creating)
+              _SettingsChoice(
+                id: '__new_model__',
+                label: context.l10n.text('settings.newModel'),
+              ),
             for (final value in widget.controller.modelProviders)
               _SettingsChoice(
                 id: value.id,
@@ -3294,7 +3360,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
                 removeKeyPrefix: 'settings-model-delete',
               ),
           ],
-          selectedId: _selectedId,
+          selectedId: _creating ? '__new_model__' : _selectedId,
           onSelected: (value) => setState(() {
             _creating = false;
             _selectedId = value;

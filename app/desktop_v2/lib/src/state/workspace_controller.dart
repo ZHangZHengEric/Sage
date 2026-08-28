@@ -599,6 +599,20 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<AgentConfiguration> createAgent(String name) async {
+    try {
+      final created = await _api.createAgent(name);
+      agents = [...agents, AgentSummary(id: created.id, name: created.name)];
+      agentConfiguration = created;
+      notifyListeners();
+      return created;
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<String> deleteAgent(String agentId) async {
     try {
       agents = await _api.deleteAgent(agentId);

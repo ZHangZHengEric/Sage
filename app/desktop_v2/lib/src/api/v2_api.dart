@@ -56,6 +56,12 @@ class V2ApiClient {
         : const [];
   }
 
+  Future<AgentConfiguration> createAgent(String name) async =>
+      AgentConfiguration.fromJson(
+        (await _json('POST', '/api/v2/agents', body: {'name': name}) as Map)
+            .cast<String, Object?>(),
+      );
+
   Future<List<SkillSummary>> listSkills(String agentId) async {
     final value = await _json(
       'GET',

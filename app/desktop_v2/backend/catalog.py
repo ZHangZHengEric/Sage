@@ -19,6 +19,37 @@ from pydantic import Field
 from sagents.v2.contracts.common import StrictModel, utc_now
 
 
+def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, Any]:
+    """Return the independent, runnable template for a newly created Agent."""
+
+    return {
+        "systemPrefix": "You are a helpful Sage agent.",
+        "systemContext": {},
+        "agentMode": "simple",
+        "maxLoopCount": 48,
+        "deepThinking": False,
+        "thinkingLevel": "medium",
+        "llm_provider_id": model_provider_id,
+        "availableTools": [
+            "file_read",
+            "grep",
+            "glob",
+            "list_dir",
+            "file_write",
+            "file_update",
+            "apply_patch",
+            "execute_shell_command",
+            "await_shell",
+            "kill_shell",
+            "todo_write",
+            "todo_read",
+            "turn_status",
+            "load_skill",
+        ],
+        "availableSkills": [],
+    }
+
+
 class DesktopAgentRecord(StrictModel):
     agent_id: str
     user_id: str
@@ -113,29 +144,7 @@ class JsonDesktopCatalogStore:
                                 user_id=user_id,
                                 name="Sage",
                                 is_default=True,
-                                config={
-                                    "systemPrefix": "You are a helpful Sage agent.",
-                                    "agentMode": "simple",
-                                    "maxLoopCount": 48,
-                                    "llm_provider_id": "model_main",
-                                    "availableTools": [
-                                        "file_read",
-                                        "grep",
-                                        "glob",
-                                        "list_dir",
-                                        "file_write",
-                                        "file_update",
-                                        "apply_patch",
-                                        "execute_shell_command",
-                                        "await_shell",
-                                        "kill_shell",
-                                        "todo_write",
-                                        "todo_read",
-                                        "turn_status",
-                                        "load_skill",
-                                    ],
-                                    "availableSkills": [],
-                                },
+                                config=default_agent_config(),
                             ),
                         )
                     }
