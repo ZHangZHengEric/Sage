@@ -20,6 +20,7 @@ import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 
 class _FakeApi extends V2ApiClient {
   Map<String, Object?>? lastAgentPatch;
+  String? lastCreatedAgentName;
   Map<String, Object?>? lastModelPatch;
   Map<String, Object?>? lastModelCreate;
   DesktopSettings? lastSettings;
@@ -93,6 +94,24 @@ class _FakeApi extends V2ApiClient {
       thinkingLevel: patch['thinking_level']?.toString() ?? 'medium',
       availableTools: const ['read_file'],
       availableSkills: const ['code-review'],
+    );
+  }
+
+  @override
+  Future<AgentConfiguration> createAgent(String name) async {
+    lastCreatedAgentName = name;
+    return AgentConfiguration(
+      id: 'agent_created',
+      name: name,
+      systemPrefix: 'You are a helpful Sage agent.',
+      systemContext: const {},
+      agentMode: 'simple',
+      maxLoopCount: 48,
+      deepThinking: false,
+      thinkingLevel: 'medium',
+      llmProviderId: 'model_main',
+      availableTools: const ['read_file'],
+      availableSkills: const [],
     );
   }
 
@@ -240,15 +259,15 @@ Inspect the complete diff before reporting findings.
       selectionMode: 'user',
       applyMode: 'next_run',
       scope: 'tenant',
-      activePluginId: 'persistent-summary',
+      activePluginId: 'sage.context.reducer.persistent-summary',
       plugins: [
         ComponentPluginSummary(
-          id: 'persistent-summary',
+          id: 'sage.context.reducer.persistent-summary',
           name: 'Persistent summary',
           value: 'Summarizes old complete message units.',
         ),
         ComponentPluginSummary(
-          id: 'window',
+          id: 'sage.context.reducer.window',
           name: 'Window reducer',
           value: 'Drops old complete message units.',
         ),
@@ -1741,11 +1760,9 @@ void main() {
           find.byKey(const ValueKey('settings-component-context.reducer')),
           findsOneWidget,
         );
-        expect(
-          find.text('Keeps requests inside model limits.'),
-          findsOneWidget,
-        );
-        expect(find.text('Persistent summary'), findsWidgets);
+        expect(find.text('上下文压缩'), findsOneWidget);
+        expect(find.text('在请求超过模型窗口前精简历史消息'), findsOneWidget);
+        expect(find.text('持久摘要'), findsWidgets);
         expect(
           find.byKey(
             const ValueKey('settings-component-picker-model.protocol'),
@@ -1759,10 +1776,10 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Window reducer').last);
+        await tester.tap(find.text('窗口裁剪').last);
         await tester.pumpAndSettle();
         expect(api.lastSelectedComponent, 'context.reducer');
-        expect(api.lastSelectedComponentPlugin, 'window');
+        expect(api.lastSelectedComponentPlugin, 'sage.context.reducer.window');
       },
     );
   }
@@ -2052,6 +2069,38 @@ void main() {
     expect(find.byKey(const ValueKey('agent-name-field')), findsNothing);
     expect(find.byKey(const ValueKey('settings-save-button')), findsNothing);
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'adding an agent creates defaults and enters editing in ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final api = _FakeApi();
+        final controller = await _controller(api: api);
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('智能体').first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-agent-add')));
+        await tester.pumpAndSettle();
+
+        expect(api.lastCreatedAgentName, '新建智能体');
+        expect(controller.agentConfiguration?.id, 'agent_created');
+        expect(controller.agentConfiguration?.agentMode, 'simple');
+        expect(find.byKey(const ValueKey('agent-name-field')), findsOneWidget);
+        expect(find.text('新建智能体'), findsWidgets);
+      },
+    );
+  }
 
   for (final brightness in Brightness.values) {
     testWidgets(
@@ -2354,7 +2403,7 @@ void main() {
     expect(find.text('显示运行事件'), findsNothing);
   });
 
-  testWidgets('model draft is applied only after explicit route validation', (
+  testWidgets('model draft is applied only after explicit save', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1200, 800);
@@ -2388,20 +2437,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.lastModelPatch, isNull);
+    expect(find.byKey(const ValueKey('settings-model-save')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('settings-model-capability-check')),
-      findsOneWidget,
+      findsNothing,
     );
-    await tester.tap(
-      find.byKey(const ValueKey('settings-model-capability-check')),
-    );
+    await tester.tap(find.byKey(const ValueKey('settings-model-save')));
     await tester.pumpAndSettle();
 
     expect(api.lastModelPatch?['model'], 'next-model');
     expect(api.lastModelPatch?['base_url'], 'https://next.example.test/v1');
     expect(api.lastModelPatch?['protocol'], 'openai-responses');
-    await tester.tap(find.byKey(const ValueKey('settings-model-edit')));
-    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings-model-id-field')), findsNothing);
     expect(find.byKey(const ValueKey('settings-save-button')), findsNothing);
   });
@@ -2437,9 +2483,7 @@ void main() {
           find.byKey(const ValueKey('settings-model-id-field')),
           'created-model',
         );
-        await tester.tap(
-          find.byKey(const ValueKey('settings-model-capability-check')),
-        );
+        await tester.tap(find.byKey(const ValueKey('settings-model-save')));
         await tester.pumpAndSettle();
 
         expect(api.lastModelCreate?['model'], 'created-model');
@@ -2487,59 +2531,69 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Anthropic Messages').last);
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('settings-model-capability-check')),
-    );
+    await tester.tap(find.byKey(const ValueKey('settings-model-save')));
     await tester.pumpAndSettle();
 
     expect(api.lastModelPatch?['protocol'], 'anthropic-messages');
   });
 
-  testWidgets('model save stays disabled until the changed draft is checked', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1200, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    SharedPreferences.setMockInitialValues({});
-    final api = _FakeApi();
-    final controller = WorkspaceController(
-      api: api,
-      preferencesLoader: SharedPreferences.getInstance,
-    );
-    addTearDown(controller.dispose);
+  testWidgets(
+    'model save enables after changes and cancel discards the draft',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
 
-    await tester.pumpWidget(SageDesktopV2App(controller: controller));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('settings-button')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('settings-model-edit')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('settings-model-id-field')),
-      'unchecked-model',
-    );
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-model-edit')));
+      await tester.pumpAndSettle();
+      var savePointer = tester.widget<IgnorePointer>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('settings-model-save')),
+              matching: find.byType(IgnorePointer),
+            )
+            .first,
+      );
+      expect(savePointer.ignoring, isTrue);
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-model-id-field')),
+        'unchecked-model',
+      );
+      await tester.pumpAndSettle();
 
-    expect(api.lastModelPatch, isNull);
-    final savePointer = tester.widget<IgnorePointer>(
-      find
-          .descendant(
-            of: find.byKey(const ValueKey('settings-model-edit')),
-            matching: find.byType(IgnorePointer),
-          )
-          .first,
-    );
-    expect(savePointer.ignoring, isTrue);
-    expect(
-      find.byKey(const ValueKey('settings-model-id-field')),
-      findsOneWidget,
-    );
-    expect(api.lastModelPatch, isNull);
-  });
+      expect(api.lastModelPatch, isNull);
+      savePointer = tester.widget<IgnorePointer>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('settings-model-save')),
+              matching: find.byType(IgnorePointer),
+            )
+            .first,
+      );
+      expect(savePointer.ignoring, isFalse);
+      await tester.tap(find.byKey(const ValueKey('settings-model-cancel')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('settings-model-id-field')),
+        findsNothing,
+      );
+      expect(api.lastModelPatch, isNull);
+    },
+  );
 
   testWidgets('model API key is revealed only on demand and can be hidden', (
     tester,

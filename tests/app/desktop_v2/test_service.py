@@ -10,6 +10,7 @@ import pytest
 
 from app.desktop_v2.backend.catalog import DesktopMcpRecord
 from app.desktop_v2.backend.service import (
+    AgentCreate,
     ComponentSelectionRequest,
     DesktopV2Settings,
     DesktopV2Service,
@@ -246,23 +247,28 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
 ):
     service = DesktopV2Service(tmp_path)
     inventory = await service.component_inventory("user_1")
-    by_id = {value["plugin_id"]: value for value in inventory}
+    by_id = {value["component"]["component_id"]: value for value in inventory}
 
+    assert set(by_id) == {"context.token-estimator", "context.reducer"}
+    assert by_id["context.reducer"]["active"]["plugin_id"] == (
+        "sage.context.reducer.persistent-summary"
+    )
     assert {
-        "sage.session.filesystem",
-        "sage.session.ephemeral",
-        "sage.memory.noop",
-        "sage.model.openai-responses",
-    } <= by_id.keys()
-    assert by_id["sage.session.filesystem"]["capabilities"] == {
-        "durable": True,
-        "global_session_index": False,
-        "multi_process_writes": False,
+        value["plugin_id"] for value in by_id["context.token-estimator"]["plugins"]
+    } >= {
+        "sage.context.token-estimator.json-heuristic",
+        "sage.context.token-estimator.unicode-heuristic",
     }
-    with pytest.raises(SageV2Error) as unavailable:
+    with pytest.raises(ValueError, match="not user configurable"):
         await service.select_component(
             "model.provider",
             ComponentSelectionRequest(plugin_id="unregistered.model"),
+            "user_1",
+        )
+    with pytest.raises(SageV2Error) as unavailable:
+        await service.select_component(
+            "context.reducer",
+            ComponentSelectionRequest(plugin_id="unregistered.reducer"),
             "user_1",
         )
     assert unavailable.value.info.code == "extension.not_found"
@@ -285,7 +291,11 @@ async def test_extension_inventory_is_not_a_dynamic_desktop_tool_catalog(
     )
 
     inventory = await service.component_inventory("user_1")
-    assert not any(value["plugin_id"] == "native-mcp" for value in inventory)
+    assert not any(
+        plugin["plugin_id"] == "native-mcp"
+        for component in inventory
+        for plugin in component["plugins"]
+    )
     await service.session_store.close()
 
 
@@ -323,16 +333,48 @@ async def test_user_component_selection_is_persisted_with_apply_semantics(
 ):
     service = DesktopV2Service(tmp_path)
     selection = await service.select_component(
-        "session.store",
-        ComponentSelectionRequest(plugin_id="sage.session.ephemeral"),
+        "context.reducer",
+        ComponentSelectionRequest(plugin_id="sage.context.reducer.window"),
         "user_1",
     )
 
-    assert selection["plugin_id"] == "sage.session.ephemeral"
-    assert selection["pending_restart"] is True
+    assert selection["plugin_id"] == "sage.context.reducer.window"
+    assert selection["pending_restart"] is False
     settings = await service.get_settings()
     assert settings.component_selections == {
-        "session.store": "sage.session.ephemeral",
+        "context.reducer": "sage.context.reducer.window",
+    }
+    inventory = await service.component_inventory("user_1")
+    reducer = next(
+        value
+        for value in inventory
+        if value["component"]["component_id"] == "context.reducer"
+    )
+    assert reducer["active"]["plugin_id"] == "sage.context.reducer.window"
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_create_agent_uses_independent_runnable_defaults(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    created = await service.create_agent(
+        AgentCreate(name="Research"),
+        "user_1",
+    )
+
+    assert created["id"] != "sage"
+    assert created["name"] == "Research"
+    assert created["llm_provider_id"] == "model_main"
+    assert created["agent_mode"] == "simple"
+    assert created["max_loop_count"] == 48
+    assert created["available_tools"]
+    assert created["available_skills"] == []
+    assert created["is_default"] is False
+    assert {value["id"] for value in await service.list_agents("user_1")} == {
+        "sage",
+        created["id"],
     }
     await service.session_store.close()
 

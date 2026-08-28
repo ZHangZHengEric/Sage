@@ -13,6 +13,7 @@ from sagents.v2.contracts.session_commit import SessionMergeStrategy
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 
 from app.desktop_v2.backend.service import (
+    AgentCreate,
     AgentSettingsPatch,
     ComponentSelectionRequest,
     DesktopRunRequest,
@@ -137,6 +138,14 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
     async def list_agents(request: Request):
         return _success(
             await _safe(runtime_service.list_agents(get_desktop_user_id(request)))
+        )
+
+    @app.post("/api/v2/agents")
+    async def create_agent(value: AgentCreate, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.create_agent(value, get_desktop_user_id(request))
+            )
         )
 
     @app.get("/api/v2/agents/{agent_id}/skills")

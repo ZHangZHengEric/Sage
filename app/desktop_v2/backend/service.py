@@ -21,6 +21,7 @@ from app.desktop_v2.backend.catalog import (
     DesktopMcpRecord,
     DesktopModelProviderRecord,
     JsonDesktopCatalogStore,
+    default_agent_config,
 )
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from app.desktop_v2.backend.legacy_import import read_legacy_desktop_settings
@@ -187,6 +188,35 @@ class ComponentSelectionRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+_DESKTOP_COMPONENT_DEFAULTS = {
+    "context.token-estimator": "sage.context.token-estimator.json-heuristic",
+    "context.reducer": "sage.context.reducer.persistent-summary",
+}
+
+
+def _runtime_component_id(capability: str, plugin_id: str) -> str:
+    """Translate stable extension IDs to the legacy constructor IDs in v2 context."""
+
+    prefixes = {
+        "context.token-estimator": "sage.context.token-estimator.",
+        "context.reducer": "sage.context.reducer.",
+    }
+    prefix = prefixes[capability]
+    return plugin_id.removeprefix(prefix)
+
+
+def _stable_component_id(capability: str, plugin_id: str) -> str:
+    """Accept settings written before Desktop exposed stable extension IDs."""
+
+    if plugin_id.startswith("sage."):
+        return plugin_id
+    prefixes = {
+        "context.token-estimator": "sage.context.token-estimator.",
+        "context.reducer": "sage.context.reducer.",
+    }
+    return prefixes[capability] + plugin_id
+
+
 class AgentSettingsPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=500)
@@ -203,6 +233,13 @@ class AgentSettingsPatch(BaseModel):
     available_tools: list[str] | None = None
     available_skills: list[str] | None = None
 
+    model_config = {"extra": "forbid"}
+
+
+class AgentCreate(BaseModel):
+    """Create an independently persisted Agent from the default template."""
+
+    name: str = Field(min_length=1, max_length=255)
     model_config = {"extra": "forbid"}
 
 
@@ -579,6 +616,31 @@ class DesktopV2Service:
             }
             for value in values
         ]
+
+    async def create_agent(
+        self, request: AgentCreate, user_id: str
+    ) -> dict[str, Any]:
+        """Create a usable Agent with no inherited configuration or runtime state."""
+
+        await self._initialize_user(user_id)
+        name = request.name.strip()
+        if not name:
+            raise ValueError("agent name cannot be empty")
+        providers = await self.catalog.list_model_providers(user_id)
+        provider = next((value for value in providers if value.is_default), None)
+        provider = provider or (providers[0] if providers else None)
+        config = default_agent_config(
+            model_provider_id=provider.id if provider is not None else "model_main"
+        )
+        config["name"] = name
+        created = DesktopAgentRecord(
+            agent_id=new_id("agent"),
+            user_id=user_id,
+            name=name,
+            config=config,
+        )
+        await self.catalog.save_agent(created)
+        return await self.get_agent_settings(created.agent_id, user_id)
 
     async def list_skills(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
         agent = await self._agent(agent_id, user_id)
@@ -1005,7 +1067,58 @@ class DesktopV2Service:
 
     async def component_inventory(self, user_id: str) -> list[dict[str, Any]]:
         del user_id
-        return list(self.extensions.inventory())
+        settings = await self.get_settings()
+        result = []
+        for capability, default_plugin_id in _DESKTOP_COMPONENT_DEFAULTS.items():
+            plugins = []
+            for registration in self.extensions.registrations():
+                descriptor = registration.descriptor
+                if capability not in {
+                    offer.capability for offer in descriptor.provides
+                }:
+                    continue
+                plugins.append(
+                    {
+                        "plugin_id": descriptor.plugin_id,
+                        "name": descriptor.name,
+                        "value": descriptor.description,
+                        "available": descriptor.availability.available,
+                        "built_in": descriptor.built_in,
+                        "dependencies": [
+                            dependency.capability
+                            for dependency in descriptor.dependencies
+                            if not dependency.optional
+                        ],
+                    }
+                )
+            selected = settings.component_selections.get(
+                capability, default_plugin_id
+            )
+            selected = _stable_component_id(capability, selected)
+            result.append(
+                {
+                    "component": {
+                        "component_id": capability,
+                        "name": capability,
+                        "value": capability,
+                        "selection_mode": "user",
+                        "apply_mode": "next_run",
+                        "scope": "tenant",
+                    },
+                    "plugins": plugins,
+                    "active": {
+                        "plugin_id": selected,
+                        "source": (
+                            "user"
+                            if capability in settings.component_selections
+                            else "default"
+                        ),
+                        "config": {},
+                        "pending_restart": False,
+                    },
+                }
+            )
+        return result
 
     async def select_component(
         self,
@@ -1014,6 +1127,8 @@ class DesktopV2Service:
         user_id: str,
     ) -> dict[str, Any]:
         del user_id
+        if component_id not in _DESKTOP_COMPONENT_DEFAULTS:
+            raise ValueError(f"component {component_id!r} is not user configurable")
         registration = self.extensions.get(request.plugin_id)
         capabilities = {offer.capability for offer in registration.descriptor.provides}
         if component_id not in capabilities:
@@ -1030,7 +1145,7 @@ class DesktopV2Service:
             "component_id": component_id,
             "plugin_id": request.plugin_id,
             "config": request.config,
-            "pending_restart": True,
+            "pending_restart": False,
         }
 
     async def get_settings(self) -> DesktopV2Settings:
@@ -1457,10 +1572,19 @@ class DesktopV2Service:
         resolved = CompositionResolver().resolve(manifest)
         settings = await self.get_settings()
         estimator_id = settings.component_selections.get(
-            "context.token-estimator", "json-heuristic"
+            "context.token-estimator",
+            _DESKTOP_COMPONENT_DEFAULTS["context.token-estimator"],
         )
         reducer_id = settings.component_selections.get(
-            "context.reducer", "persistent-summary"
+            "context.reducer", _DESKTOP_COMPONENT_DEFAULTS["context.reducer"]
+        )
+        estimator_id = _runtime_component_id(
+            "context.token-estimator",
+            _stable_component_id("context.token-estimator", estimator_id),
+        )
+        reducer_id = _runtime_component_id(
+            "context.reducer",
+            _stable_component_id("context.reducer", reducer_id),
         )
         # Desktop compression uses the configured route itself. The summary is
         # derived state in SummaryStore; canonical Session events remain intact.
