@@ -396,13 +396,8 @@ class SandboxPolicyGateway:
         "> /dev/nvme",
     )
 
-    _PIPE_EXEC_RE = re.compile(
-        r"\b(curl|wget|fetch)\b[^|;&]+?\|\s*(sudo\s+)?(ba)?sh\b",
-        re.IGNORECASE,
-    )
     _STDOUT_REDIRECT_RE = re.compile(r"(^|[^\d])>>?(?![&])")
     _STDOUT_REDIRECT_TARGET_RE = re.compile(r"(^|[^\d])>>?(?![&])\s*(\S+)")
-    _SEGMENT_SPLIT_RE = re.compile(r"[|;&]+")
 
     def __init__(self, approval_mode: Optional[str] = None, command_policy: Any = None):
         self.approval_mode = (
@@ -438,7 +433,8 @@ class SandboxPolicyGateway:
                     next_step="Use a narrower command, or ask the user to run this manually.",
                 )
 
-        if self._PIPE_EXEC_RE.search(command):
+        segments, operators = self._split_shell_segments(command)
+        if self._contains_download_exec_pipeline(segments, operators):
             return SandboxPolicyDecision(
                 action="deny",
                 category="download_exec",
@@ -446,7 +442,6 @@ class SandboxPolicyGateway:
                 next_step="Download the script, inspect it, then run explicit commands if needed.",
             )
 
-        segments = [s.strip() for s in self._SEGMENT_SPLIT_RE.split(command)]
         nonempty_segments = [segment for segment in segments if segment]
         for segment in segments:
             decision = self._evaluate_segment(segment, sandbox_mode=sandbox_mode)
@@ -494,6 +489,79 @@ class SandboxPolicyGateway:
             category="default_allow",
             reason="no sandbox policy rule matched",
         )
+
+    @staticmethod
+    def _split_shell_segments(command: str) -> tuple[list[str], list[str]]:
+        """Split on shell operators while preserving quoted and escaped text."""
+        segments: list[str] = []
+        operators: list[str] = []
+        current: list[str] = []
+        quote: Optional[str] = None
+        escaped = False
+
+        for char in command:
+            if escaped:
+                current.append(char)
+                escaped = False
+                continue
+
+            if char == "\\" and quote != "'":
+                current.append(char)
+                escaped = True
+                continue
+
+            if quote is not None:
+                current.append(char)
+                if char == quote:
+                    quote = None
+                continue
+
+            if char in {"'", '"'}:
+                current.append(char)
+                quote = char
+                continue
+
+            if char in "|;&":
+                if current or not segments:
+                    segments.append("".join(current).strip())
+                    current = []
+                    operators.append(char)
+                else:
+                    operators[-1] += char
+                continue
+
+            current.append(char)
+
+        segments.append("".join(current).strip())
+        return segments, operators
+
+    @staticmethod
+    def _contains_download_exec_pipeline(
+        segments: list[str], operators: list[str]
+    ) -> bool:
+        download_commands = {"curl", "fetch", "wget"}
+        shell_commands = {"bash", "sh"}
+
+        for index, operator in enumerate(operators):
+            if operator != "|":
+                continue
+            try:
+                left = shlex.split(segments[index])
+                right = shlex.split(segments[index + 1])
+            except ValueError:
+                continue
+            if not left or not right:
+                continue
+            if not any(
+                part.split("/")[-1].lower() in download_commands for part in left
+            ):
+                continue
+            if right[0].split("/")[-1].lower() == "sudo":
+                right = right[1:]
+            if right and right[0].split("/")[-1].lower() in shell_commands:
+                return True
+
+        return False
 
     def _evaluate_configured_policy(
         self, command: str, parts: Optional[list[str]]

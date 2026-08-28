@@ -818,7 +818,6 @@ class LocalSandboxProvider(ISandboxHandle):
                     )
             except Exception as e:
                 if server_isolation is not None:
-                    logger.error(f"Server isolation execution failed closed: {e}")
                     return CommandResult(
                         success=False,
                         stdout="",

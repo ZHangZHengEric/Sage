@@ -102,6 +102,7 @@ def start_server(cfg: config.StartupConfig):
         reload=getattr(cfg, "reload", False),
         factory=True,
         forwarded_allow_ips="*",
+        loop="uvloop",
     )
     server = uvicorn.Server(config=un_cfg)
     server.run()

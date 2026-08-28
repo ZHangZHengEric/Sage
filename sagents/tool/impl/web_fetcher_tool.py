@@ -11,6 +11,7 @@ Scrapling 特性：
 
 import asyncio
 import json
+import logging
 import os
 import re
 import aiohttp
@@ -636,6 +637,11 @@ class WebFetcherTool:
         """Fetch an HTML page with Scrapling's class-level async fetcher API."""
         from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
 
+        # Scrapling installs its own console handler and bypasses Sage's session-aware
+        # log formatting. Keep the dependency quiet and record the request outcome at
+        # this integration boundary instead.
+        logging.getLogger("scrapling").disabled = True
+
         page = await asyncio.wait_for(
             AsyncFetcher.get(
                 url,
@@ -647,6 +653,7 @@ class WebFetcherTool:
         )
         if not 200 <= page.status < 300:
             raise _HttpStatusError(page.status, page.reason)
+        logger.info(f"WebFetcher: Fetched ({page.status}) <GET {url}>")
         return page
 
     def _clean_content(self, text: str) -> str:

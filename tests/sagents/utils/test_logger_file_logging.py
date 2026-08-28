@@ -57,6 +57,35 @@ def test_logger_keeps_framework_file_handlers_by_default(monkeypatch, tmp_path):
     logger_module.Logger._instance = None
 
 
+def test_logger_error_can_suppress_traceback_for_handled_exception(
+    monkeypatch, tmp_path
+):
+    logger_module = _load_logger_module(monkeypatch)
+    logger = logger_module.Logger(log_dir=str(tmp_path))
+    recorded = []
+    monkeypatch.setattr(
+        logger,
+        "_log",
+        lambda level, message, session_id=None, **kwargs: recorded.append(
+            (level, message, session_id, kwargs)
+        ),
+    )
+
+    try:
+        raise ValueError("provider rejected request")
+    except ValueError:
+        logger.error("handled provider rejection", exc_info=False)
+
+    assert recorded == [
+        ("error", "handled provider rejection", None, {}),
+    ]
+
+    logger.stop_periodic_cleanup()
+    logger_module.Logger._close_handlers(logger.logger)
+    logger_module.Logger._initialized = False
+    logger_module.Logger._instance = None
+
+
 def test_session_logger_is_unregistered_and_cannot_be_recreated_after_close(
     monkeypatch, tmp_path
 ):
