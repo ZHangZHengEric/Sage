@@ -9,6 +9,8 @@ from sagents.utils.i18n import tool_t
 
 
 class ToolExpansionTool:
+    TOOL_CATEGORY = "system"
+
     """Expand the current LLM-visible tool set within the agent's allowed tools."""
 
     @tool(

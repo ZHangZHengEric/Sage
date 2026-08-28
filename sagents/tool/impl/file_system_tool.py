@@ -13,6 +13,8 @@ from sagents.utils.agent_session_helper import (
 
 
 class FileSystemTool:
+    TOOL_CATEGORY = "files"
+
     """文件系统操作工具集 - 通过沙箱执行"""
 
     @staticmethod

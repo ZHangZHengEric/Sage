@@ -396,6 +396,8 @@ class SessionHistoryRetriever:
 
 
 class MemoryTool:
+    TOOL_CATEGORY = "memory"
+
     """
     Agent memory tool - BM25 index search based on file system and session history
 

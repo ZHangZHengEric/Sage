@@ -117,12 +117,16 @@ class BwrapIsolation:
         """
         使用 bwrap 执行 payload。
         """
+        if payload.get("mode") == "shell" and not payload.get("background", False):
+            return await self._execute_shell(payload, cwd=cwd)
+
         run_id = str(uuid.uuid4())
         sandbox_dir = self.sandbox_runtime_dir
         input_pkl: Optional[str] = None
         output_pkl: Optional[str] = None
         returncode: Optional[int] = None
 
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
         try:
             input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
                 _prepare_payload_files_sync,
@@ -147,7 +151,7 @@ class BwrapIsolation:
                 env=build_agent_environment(
                     home_dir=cwd or self.sandbox_agent_workspace
                 ),
-                timeout=300,
+                timeout=timeout_seconds,
             )
 
             if returncode != 0:
@@ -186,6 +190,43 @@ class BwrapIsolation:
                     await asyncio.to_thread(_remove_file_if_exists_sync, output_pkl)
                 except Exception:
                     pass
+
+    async def _execute_shell(
+        self, payload: Dict[str, Any], cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute a shell command directly inside bubblewrap."""
+        actual_cwd = cwd or self.sandbox_agent_workspace
+        command = self.build_shell_command(
+            str(payload.get("command", "")),
+            cwd=actual_cwd,
+            env_vars=payload.get("env_vars"),
+        )
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
+        returncode, stdout_text, stderr_text = await asyncio.to_thread(
+            run_with_streaming_stdout,
+            command,
+            cwd=actual_cwd,
+            env=build_agent_environment(home_dir=actual_cwd),
+            timeout=timeout_seconds,
+        )
+        if returncode != 0 and stderr_text.lstrip().startswith("bwrap:"):
+            error = RuntimeError(f"Bwrap execution failed: {stderr_text}")
+            logger.error(
+                "[BwrapIsolation] 执行失败: "
+                f"command={payload.get('command')!r}, "
+                f"return_code={returncode}, error={error}"
+            )
+            raise error
+        logger.info(
+            "[BwrapIsolation] 执行完成: "
+            f"command={payload.get('command')!r}, return_code={returncode}"
+        )
+        return {
+            "success": returncode == 0,
+            "output": stdout_text,
+            "stderr": stderr_text,
+            "return_code": returncode,
+        }
 
     def execute_background(
         self, command: str, cwd: Optional[str] = None

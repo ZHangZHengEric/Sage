@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 from loguru import logger
+from common.core.config import get_default_sage_home
 
 from .bootstrap import (
     close_observability,
@@ -31,15 +32,18 @@ _browser_capability_coordinator = None
 
 def _setup_memory_root_path():
     """设置 MEMORY_ROOT_PATH 环境变量为 ~/.sage/memory"""
-    user_home = Path.home()
-    sage_home = user_home / ".sage"
-    memory_path = sage_home / "memory"
+    configured = str(os.environ.get("MEMORY_ROOT_PATH") or "").strip()
+    memory_path = (
+        Path(configured).expanduser()
+        if configured
+        else get_default_sage_home() / "memory"
+    )
     memory_path.mkdir(parents=True, exist_ok=True)
     os.environ["MEMORY_ROOT_PATH"] = str(memory_path)
     logger.info(f"MEMORY_ROOT_PATH 已设置为: {memory_path}")
 
 
-async def initialize_system():
+async def initialize_system(*, enable_legacy_services: bool = True):
     logger.info("sage-desktop：开始初始化")
     _setup_memory_root_path()
     _start_host_watchdog()
@@ -52,27 +56,33 @@ async def initialize_system():
     await initialize_skill_manager()
     await copy_wiki_docs()  # 复制 wiki 文档到用户目录
     await initialize_session_manager()
-    await initialize_im_service()
-    StreamManager.get_instance()
-    logger.info("sage-desktop：StreamManager 已预初始化")
+    if enable_legacy_services:
+        await initialize_im_service()
+        StreamManager.get_instance()
+        logger.info("sage-desktop：StreamManager 已预初始化")
     logger.info("sage-desktop：初始化完成")
-    _start_memory_reporter()
+    if enable_legacy_services:
+        _start_memory_reporter()
 
 
-def post_initialize_task():
+def post_initialize_task(*, start_task_scheduler: bool = True):
     """
     服务启动完成后执行一次的后置任务
     """
     logger.info("sage-desktop：启动的后置任务...")
-    return create_safe_task(_post_initialize(), name="post_initialize")
+    return create_safe_task(
+        _post_initialize(start_task_scheduler=start_task_scheduler),
+        name="post_initialize",
+    )
 
 
-async def _post_initialize():
+async def _post_initialize(*, start_task_scheduler: bool = True):
     await validate_and_disable_mcp_servers()
     create_safe_task(
         _ensure_default_anytool_server_ready(), name="ensure_default_anytool_server"
     )
-    await _start_task_scheduler()
+    if start_task_scheduler:
+        await _start_task_scheduler()
 
 
 async def _ensure_default_anytool_server_ready():

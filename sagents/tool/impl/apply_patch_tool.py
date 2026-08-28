@@ -66,6 +66,8 @@ class _CommitJournal:
 
 
 class ApplyPatchTool:
+    TOOL_CATEGORY = "files"
+
     """Apply a preflighted text patch through the active session sandbox."""
 
     def _get_sandbox(self, session_id: str) -> Any:

@@ -26,6 +26,8 @@ _VALID_STATUSES = {"task_done", "need_user_input", "blocked", "continue_work"}
 
 
 class TurnStatusTool:
+    TOOL_CATEGORY = "system"
+
     """显式报告本轮是否结束或继续的标记工具。"""
 
     @tool(

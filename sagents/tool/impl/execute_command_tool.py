@@ -37,7 +37,7 @@ from sagents.utils.agent_session_helper import (
 )
 
 
-_BG_DIR = "~/.sage/bg"
+_BG_DIR = os.environ.get("SAGE_BG_DIR", "~/.sage/bg")
 
 # completion event 的 tail 最大字节数。reminder 只是"知会"通知，agent 想看完整结果应调
 # await_shell。保持小一些可以避免长会话里 reminder 累积失控。
@@ -131,6 +131,8 @@ def _suggest_next_block_ms(running_ms: int) -> int:
 
 
 class ExecuteCommandTool:
+    TOOL_CATEGORY = "shell"
+
     """命令执行工具 - 通过沙箱执行命令。两段式 + 后台进程注册表 + 完成事件队列。"""
 
     # 进程级注册表：task_id -> {session_id, pid, log_path, exit_path, command, started_at}

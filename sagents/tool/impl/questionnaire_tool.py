@@ -33,6 +33,8 @@ class DesktopBackendClient:
 
 
 class QuestionnaireTool:
+    TOOL_CATEGORY = "interaction"
+
     """问卷工具 - 向用户展示问卷表单并收集答案"""
 
     QUESTIONNAIRE_MARKDOWN_TYPES = {

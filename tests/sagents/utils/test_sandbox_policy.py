@@ -254,6 +254,17 @@ def test_untrusted_mode_allows_known_safe_probe():
     assert decision.action == "allow"
 
 
+def test_untrusted_mode_preserves_quoted_shell_operators():
+    decision = SandboxPolicyGateway(
+        approval_mode="untrusted",
+        command_policy={},
+    ).evaluate_shell_command(
+        'env | grep -i -E "session|agent" | head -20; echo "---"; pwd; ls'
+    )
+
+    assert decision.action == "allow"
+
+
 def test_untrusted_mode_allows_safe_git_global_options():
     gateway = SandboxPolicyGateway(approval_mode="untrusted")
 

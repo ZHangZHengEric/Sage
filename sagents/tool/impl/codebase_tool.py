@@ -58,6 +58,8 @@ def _truncate(items: List[Any], head_limit: Optional[int]) -> Tuple[List[Any], b
 
 
 class CodebaseTool:
+    TOOL_CATEGORY = "code_search"
+
     """代码库认知三件套：grep / glob / list_dir。"""
 
     # ==================== 基础设施 ====================

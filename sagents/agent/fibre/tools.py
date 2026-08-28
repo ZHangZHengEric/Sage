@@ -5,6 +5,8 @@ from sagents.utils.i18n import tool_t
 
 
 class FibreTools:
+    TOOL_CATEGORY = "multi_agent"
+
     """
     System-level tools for Fibre Agents.
     """

@@ -35,6 +35,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!app/desktop_v2/lib/
+!app/desktop_v2/lib/**
 parts/
 sdist/
 var/

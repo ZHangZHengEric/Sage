@@ -42,6 +42,17 @@ MAX_TOOL_RESULT_TOKENS_ENV = "SAGE_MAX_TOOL_RESULT_TOKENS"
 # locale (tools.source.*) 翻译显示文案。新增工具组时在这里登记一行即可。
 _CATEGORY_SOURCE_LABELS: Dict[str, str] = {
     "browser": "浏览器扩展",
+    "code_quality": "代码质量",
+    "code_search": "代码检索",
+    "files": "文件",
+    "image": "图像",
+    "interaction": "交互",
+    "memory": "记忆",
+    "multi_agent": "多智能体",
+    "planning": "任务规划",
+    "shell": "终端",
+    "system": "系统",
+    "web": "网页",
 }
 
 

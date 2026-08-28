@@ -13,6 +13,9 @@ _GLOBAL_STARTUP_CONFIG: Any
 
 
 def get_default_sage_home() -> Path:
+    configured = str(os.environ.get("SAGE_LOCAL_DATA_ROOT") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
     return Path.home() / ".sage"
 
 

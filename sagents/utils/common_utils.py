@@ -128,14 +128,22 @@ def get_shared_python_env_dir() -> str:
     custom_path = os.environ.get("SAGE_SHARED_PYTHON_ENV_DIR")
     if custom_path:
         return os.path.abspath(os.path.expanduser(custom_path))
-    return os.path.join(os.path.expanduser("~"), ".sage", ".sage_py_env")
+    data_root = os.environ.get("SAGE_LOCAL_DATA_ROOT") or os.path.join(
+        os.path.expanduser("~"), ".sage"
+    )
+    return os.path.join(os.path.abspath(os.path.expanduser(data_root)), ".sage_py_env")
 
 
 def get_shared_sandbox_runtime_root() -> str:
     custom_path = os.environ.get("SAGE_SHARED_SANDBOX_RUNTIME_DIR")
     if custom_path:
         return os.path.abspath(os.path.expanduser(custom_path))
-    return os.path.join(os.path.expanduser("~"), ".sage", ".sandbox_runtime")
+    data_root = os.environ.get("SAGE_LOCAL_DATA_ROOT") or os.path.join(
+        os.path.expanduser("~"), ".sage"
+    )
+    return os.path.join(
+        os.path.abspath(os.path.expanduser(data_root)), ".sandbox_runtime"
+    )
 
 
 def resolve_python_venv_dir(workspace_path: Optional[str]) -> Optional[str]:
