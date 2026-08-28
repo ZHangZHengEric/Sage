@@ -11,6 +11,7 @@ from sagents.utils.sandbox.environment import (
     SERVER_PROCESS_MARKER,
     build_agent_environment,
 )
+from sagents.utils.sandbox.providers.local import local as local_module
 from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
 from sagents.utils.sandbox.providers.local.isolation import bwrap as bwrap_module
 from sagents.utils.sandbox.providers.local.isolation.bwrap import BwrapIsolation
@@ -159,6 +160,8 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
         sandbox_runtime_dir=str(runtime),
     )
     captured = {}
+    info_messages = []
+    error_messages = []
 
     monkeypatch.setattr(
         bwrap_module,
@@ -182,6 +185,8 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
         return 0, "", ""
 
     monkeypatch.setattr(bwrap_module, "run_with_streaming_stdout", run)
+    monkeypatch.setattr(bwrap_module.logger, "info", info_messages.append)
+    monkeypatch.setattr(bwrap_module.logger, "error", error_messages.append)
 
     result = await isolation.execute(
         {
@@ -200,6 +205,10 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
     assert captured["env"]["PATH"] != str(workspace)
     assert "LD_PRELOAD" not in captured["env"]
     assert "LD_PRELOAD" in captured["command"]
+    assert info_messages == [
+        "[BwrapIsolation] 执行完成: command='env', return_code=0"
+    ]
+    assert error_messages == []
 
 
 async def test_server_bwrap_removes_input_and_output_payloads(monkeypatch, tmp_path):
@@ -302,6 +311,8 @@ async def test_server_bwrap_removes_output_payload_after_execution_failure(
         cleanup_output_payload=True,
     )
     removed = []
+    info_messages = []
+    error_messages = []
 
     monkeypatch.setattr(
         bwrap_module,
@@ -318,6 +329,8 @@ async def test_server_bwrap_removes_output_payload_after_execution_failure(
         "run_with_streaming_stdout",
         lambda *args, **kwargs: (1, "", "failed"),
     )
+    monkeypatch.setattr(bwrap_module.logger, "info", info_messages.append)
+    monkeypatch.setattr(bwrap_module.logger, "error", error_messages.append)
 
     with pytest.raises(Exception, match="Bwrap execution failed"):
         await isolation.execute(
@@ -326,6 +339,93 @@ async def test_server_bwrap_removes_output_payload_after_execution_failure(
         )
 
     assert removed == ["input.pkl", "output.pkl"]
+    assert info_messages == []
+    assert error_messages == [
+        "[BwrapIsolation] 执行失败: command='false', return_code=1, "
+        "error=Bwrap execution failed: failed"
+    ]
+
+
+async def test_bwrap_payload_failure_logs_once(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    runtime = workspace / ".sandbox"
+    workspace.mkdir()
+    runtime.mkdir()
+    isolation = BwrapIsolation(
+        venv_dir=str(workspace / ".venv"),
+        sandbox_agent_workspace=str(workspace),
+        sandbox_runtime_dir=str(runtime),
+        cleanup_output_payload=True,
+    )
+    info_messages = []
+    error_messages = []
+
+    monkeypatch.setattr(
+        bwrap_module,
+        "_prepare_payload_files_sync",
+        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_load_pickle_output_sync",
+        lambda path: {"status": "error", "error": "Command failed with code 127"},
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "_remove_file_if_exists_sync",
+        lambda path: None,
+    )
+    monkeypatch.setattr(
+        bwrap_module,
+        "run_with_streaming_stdout",
+        lambda *args, **kwargs: (0, "", ""),
+    )
+    monkeypatch.setattr(bwrap_module.logger, "info", info_messages.append)
+    monkeypatch.setattr(bwrap_module.logger, "error", error_messages.append)
+
+    with pytest.raises(Exception, match="Command failed with code 127"):
+        await isolation.execute(
+            {"mode": "shell", "command": "missing-command", "env_vars": {}},
+            cwd=str(workspace),
+        )
+
+    assert info_messages == []
+    assert error_messages == [
+        "[BwrapIsolation] 执行失败: command='missing-command', return_code=0, "
+        "error=Error in bwrap: Command failed with code 127"
+    ]
+
+
+async def test_server_isolation_failure_does_not_repeat_bwrap_error(
+    monkeypatch, tmp_path
+):
+    class FailingIsolation:
+        async def execute(self, payload, cwd=None):
+            raise Exception("Error in bwrap: Command failed with code 127")
+
+    provider = LocalSandboxProvider(
+        sandbox_id="sandbox",
+        sandbox_agent_workspace=str(tmp_path),
+    )
+    provider._isolation = FailingIsolation()
+    error_messages = []
+
+    async def noop():
+        return None
+
+    monkeypatch.setattr(provider, "_ensure_initialized_async", noop)
+    monkeypatch.setattr(provider, "_ensure_venv", noop)
+    monkeypatch.setattr(provider, "_get_venv_python", lambda: None)
+    monkeypatch.setattr(
+        provider, "_get_server_bwrap_isolation", lambda: provider._isolation
+    )
+    monkeypatch.setattr(local_module.logger, "error", error_messages.append)
+
+    result = await provider.execute_command("missing-command", workdir=str(tmp_path))
+
+    assert result.success is False
+    assert result.return_code == -1
+    assert error_messages == []
 
 
 async def test_server_rejects_passthrough_mode(monkeypatch, tmp_path):

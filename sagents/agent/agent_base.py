@@ -46,7 +46,6 @@ from sagents.llm.capabilities import create_chat_completion_with_fallback
 from sagents.llm.model_capabilities import build_llm_extra_body
 from sagents.utils.llm_request_utils import (
     coalesce_reasoning_content_messages,
-    format_api_error_details,
     is_unsupported_input_format_error,
     normalize_chat_completions_model,
     redact_base64_data_urls_in_value,
@@ -80,7 +79,6 @@ import time
 import os
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
-from openai.types.chat import chat_completion_chunk
 
 TOOL_CALL_CONCURRENCY_LIMIT = 10
 
@@ -2147,34 +2145,7 @@ class AgentBase(ABC):
                     retrying_logical_request = True
                 else:
                     # 非可重试错误或已达到最大重试次数
-                    if isinstance(e, APIError):
-                        logger.error(
-                            f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
-                        )
-                    else:
-                        logger.error(
-                            f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}"
-                        )
-                    all_chunks.append(
-                        chat_completion_chunk.ChatCompletionChunk(
-                            id="",
-                            object="chat.completion.chunk",
-                            created=0,
-                            model="",
-                            choices=[
-                                chat_completion_chunk.Choice(
-                                    index=0,
-                                    delta=chat_completion_chunk.ChoiceDelta(
-                                        content=traceback.format_exc(),
-                                        tool_calls=None,
-                                    ),
-                                    finish_reason="stop",
-                                )
-                            ],
-                            usage=None,
-                        )
-                    )
-                    raise e
+                    raise
 
             except Exception as e:
                 # 其他非API错误，检查是否是网络相关错误
@@ -2252,34 +2223,7 @@ class AgentBase(ABC):
                     continue  # 继续重试循环
                 else:
                     # 非网络错误或已达到最大重试次数
-                    if isinstance(e, APIError):
-                        logger.error(
-                            f"{self.__class__.__name__}: LLM流式调用失败: {format_api_error_details(e)}\n{traceback.format_exc()}"
-                        )
-                    else:
-                        logger.error(
-                            f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}"
-                        )
-                    all_chunks.append(
-                        chat_completion_chunk.ChatCompletionChunk(
-                            id="",
-                            object="chat.completion.chunk",
-                            created=0,
-                            model="",
-                            choices=[
-                                chat_completion_chunk.Choice(
-                                    index=0,
-                                    delta=chat_completion_chunk.ChoiceDelta(
-                                        content=traceback.format_exc(),
-                                        tool_calls=None,
-                                    ),
-                                    finish_reason="stop",
-                                )
-                            ],
-                            usage=None,
-                        )
-                    )
-                    raise e
+                    raise
             finally:
                 if (
                     pending_next_request_message_ids

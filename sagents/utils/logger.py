@@ -474,23 +474,30 @@ class Logger:
     def bind(self, **kwargs):
         return BoundLogger(self, kwargs)
 
-    def error(self, message, session_id: Optional[str] = None, **kwargs):
+    def error(
+        self,
+        message,
+        session_id: Optional[str] = None,
+        exc_info: bool = True,
+        **kwargs,
+    ):
         # 在错误日志中自动添加traceback
-        try:
-            # 获取当前异常信息
-            exc_info = sys.exc_info()
-            if exc_info[0] is not None:
-                # 如果当前有异常，添加traceback
-                tb_str = "".join(traceback.format_exception(*exc_info))
-                message = f"{message}\nTraceback:\n{tb_str}"
-        except Exception:
-            # 如果获取traceback失败，不影响日志记录
-            pass
+        if exc_info:
+            try:
+                # 获取当前异常信息
+                current_exc_info = sys.exc_info()
+                if current_exc_info[0] is not None:
+                    # 如果当前有异常，添加traceback
+                    tb_str = "".join(traceback.format_exception(*current_exc_info))
+                    message = f"{message}\nTraceback:\n{tb_str}"
+            except Exception:
+                # 如果获取traceback失败，不影响日志记录
+                pass
 
         self._log("error", message, session_id, **kwargs)
 
     def exception(self, message, session_id: Optional[str] = None, **kwargs):
-        self.error(message, session_id=session_id, **kwargs)
+        self.error(message, session_id=session_id, exc_info=True, **kwargs)
 
     def success(self, message, session_id: Optional[str] = None, **kwargs):
         self.info(message, session_id=session_id, **kwargs)

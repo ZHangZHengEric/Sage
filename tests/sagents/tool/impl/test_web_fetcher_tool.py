@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import sys
 import types
@@ -151,6 +152,52 @@ def test_fetch_html_page_uses_async_fetcher_class_api(monkeypatch):
     ]
 
 
+def test_fetch_html_page_replaces_scrapling_console_log_with_sage_log(
+    monkeypatch, capsys
+):
+    scrapling_logger = logging.getLogger("scrapling")
+    original_disabled = scrapling_logger.disabled
+    original_handlers = list(scrapling_logger.handlers)
+    original_level = scrapling_logger.level
+    original_propagate = scrapling_logger.propagate
+    scrapling_logger.disabled = False
+    scrapling_logger.handlers = [logging.StreamHandler()]
+    scrapling_logger.setLevel(logging.INFO)
+    scrapling_logger.propagate = False
+
+    class FakeAsyncFetcher:
+        @classmethod
+        async def get(cls, url, **kwargs):
+            scrapling_logger.info("THIRD PARTY FETCH LOG")
+            return FakePage("Example", {}, status=200)
+
+    scrapling_module = types.ModuleType("scrapling")
+    fetchers_module = types.ModuleType("scrapling.fetchers")
+    fetchers_module.AsyncFetcher = FakeAsyncFetcher
+    scrapling_module.fetchers = fetchers_module
+    sage_messages = []
+
+    monkeypatch.setitem(sys.modules, "scrapling", scrapling_module)
+    monkeypatch.setitem(sys.modules, "scrapling.fetchers", fetchers_module)
+    monkeypatch.setattr(
+        "sagents.tool.impl.web_fetcher_tool.logger.info", sage_messages.append
+    )
+
+    try:
+        asyncio.run(WebFetcherTool()._fetch_html_page("https://example.com", 7))
+        captured = capsys.readouterr()
+    finally:
+        scrapling_logger.disabled = original_disabled
+        scrapling_logger.handlers = original_handlers
+        scrapling_logger.setLevel(original_level)
+        scrapling_logger.propagate = original_propagate
+
+    assert "THIRD PARTY FETCH LOG" not in captured.err
+    assert sage_messages == [
+        "WebFetcher: Fetched (200) <GET https://example.com>"
+    ]
+
+
 def test_fetch_html_page_rejects_non_success_http_status(monkeypatch):
     class FakeAsyncFetcher:
         @classmethod
@@ -164,9 +211,15 @@ def test_fetch_html_page_rejects_non_success_http_status(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "scrapling", scrapling_module)
     monkeypatch.setitem(sys.modules, "scrapling.fetchers", fetchers_module)
+    sage_messages = []
+    monkeypatch.setattr(
+        "sagents.tool.impl.web_fetcher_tool.logger.info", sage_messages.append
+    )
 
     with pytest.raises(_HttpStatusError, match="HTTP 404 Not Found"):
         asyncio.run(WebFetcherTool()._fetch_html_page("https://example.com/missing", 7))
+
+    assert sage_messages == []
 
 
 def test_fetch_failures_localize_sage_wrapper_and_preserve_raw_error(

@@ -54,3 +54,27 @@ def test_server_main_initializes_logging_in_configured_directory(monkeypatch, tm
 
     assert server_main.main() == 0
     assert logging_calls[0]["log_path"] == cfg.logs_dir
+
+
+def test_server_start_uses_uvloop(monkeypatch):
+    from app.server import main as server_main
+
+    captured_config = {}
+
+    class StubUvicornConfig:
+        def __init__(self, **kwargs):
+            captured_config.update(kwargs)
+
+    class StubUvicornServer:
+        def __init__(self, *, config):
+            self.config = config
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(server_main.uvicorn, "Config", StubUvicornConfig)
+    monkeypatch.setattr(server_main.uvicorn, "Server", StubUvicornServer)
+
+    server_main.start_server(config.StartupConfig())
+
+    assert captured_config["loop"] == "uvloop"
