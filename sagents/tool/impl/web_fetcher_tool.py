@@ -38,6 +38,8 @@ class _HttpStatusError(Exception):
 
 
 class WebFetcherTool:
+    TOOL_CATEGORY = "web"
+
     """基于 Scrapling 的网页抓取工具，支持网页内容提取和文件下载"""
 
     # 总返回内容的最大token数限制
@@ -305,8 +307,9 @@ class WebFetcherTool:
                 logger.warning(f"通过 session_context 获取路径失败: {e}")
 
         # 退化为默认下载目录
-        user_home = os.path.expanduser("~")
-        workspace = os.path.join(user_home, ".sage", "downloads")
+        workspace = os.environ.get("SAGE_DOWNLOADS_DIR") or os.path.join(
+            os.path.expanduser("~"), ".sage", "downloads"
+        )
         os.makedirs(workspace, exist_ok=True)
         return workspace
 

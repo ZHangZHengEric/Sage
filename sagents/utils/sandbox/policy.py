@@ -327,6 +327,7 @@ class SandboxPolicyGateway:
         "cat",
         "date",
         "du",
+        "echo",
         "env",
         "grep",
         "head",

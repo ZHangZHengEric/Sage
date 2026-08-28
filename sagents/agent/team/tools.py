@@ -6,6 +6,8 @@ from sagents.utils.i18n import tool_t
 
 
 class TeamTools:
+    TOOL_CATEGORY = "multi_agent"
+
     """System-level tools for Team mode.
 
     Team mode intentionally exposes only delegation. Members complete work in

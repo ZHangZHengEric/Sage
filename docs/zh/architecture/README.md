@@ -96,9 +96,10 @@ flowchart LR
 4. [工具与技能（Tool & Skill）系统](ARCHITECTURE_SAGENTS_TOOL_SKILL.md)：`ToolManager` / `ToolProxy`、内置工具、MCP 代理、`SkillManager` / `SkillProxy`、沙箱内技能
 5. [沙箱、LLM 适配与可观测性](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)：`SandboxProviderFactory` 三种沙箱、`SageAsyncOpenAI` 模型层与 OpenTelemetry 链路
 
-### 设计与方案草案（待落地）
+### 设计与方案
 
 1. [权限与确认设计方案](DESIGN_PERMISSIONS_AND_CONFIRMATION.md)：面向工具、沙箱与多入口的权限分级、确认流与策略模型（当前未在代码中全面实现）
+2. [sagents v2 重构设计](DESIGN_SAGENTS_V2_REFACTOR.md)：已落地独立 v2 参考内核；记录小内核、能力插件、事件事实源、AgentPackage、多协议 Adapter 与后续生产迁移边界
 
 ## 阅读建议
 
@@ -118,4 +119,3 @@ flowchart TD
     Want --> D[做桌面打包]
     D --> D1[桌面应用架构] --> D2[app/desktop/scripts]
 ```
-

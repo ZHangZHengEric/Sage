@@ -254,9 +254,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
         """同步宿主技能到直通沙箱工作区。"""
         from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 
-        manager = SandboxSkillManager(
-            self, os.path.join(self.workspace_path, "skills")
-        )
+        manager = SandboxSkillManager(self, os.path.join(self.workspace_path, "skills"))
         await manager.sync_from_host(host_skill_manager)
         return manager
 
@@ -445,7 +443,9 @@ class PassthroughSandboxProvider(ISandboxHandle):
         cwd = self._validate_host_path_allowed(cwd, operation="read")
 
         # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
-        npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
+        npm_cache_dir = os.environ.get("SAGE_NPM_CACHE_DIR") or os.path.join(
+            os.path.expanduser("~"), ".sage", ".npm-cache"
+        )
         try:
             os.makedirs(npm_cache_dir, exist_ok=True)
         except Exception as e:

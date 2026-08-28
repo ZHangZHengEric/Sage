@@ -233,6 +233,7 @@ async def update_provider(
     *,
     user_id: str,
     allow_system_default_update: bool,
+    verified_capabilities: Optional[Dict[str, Any]] = None,
 ) -> LLMProvider:
     dao = LLMProviderDao()
     provider = await _get_editable_provider_or_raise(
@@ -245,12 +246,13 @@ async def update_provider(
         _merge_provider_update_config(provider, data)
     )
 
-    await _probe_provider_or_raise(
-        api_keys=effective_api_keys,
-        base_url=effective_base_url,
-        model=effective_model,
-        action="update provider",
-    )
+    if verified_capabilities is None:
+        await _probe_provider_or_raise(
+            api_keys=effective_api_keys,
+            base_url=effective_base_url,
+            model=effective_model,
+            action="update provider",
+        )
 
     if data.name is not None:
         provider.name = data.name

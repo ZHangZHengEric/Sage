@@ -139,6 +139,9 @@ class SeatbeltIsolation:
         """
         logger.info("[SeatbeltIsolation] 开始执行")
 
+        if payload.get("mode") == "shell" and not payload.get("background", False):
+            return await self._execute_shell(payload, cwd=cwd)
+
         run_id = str(uuid.uuid4())
         input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
             _prepare_payload_files_sync,
@@ -179,6 +182,7 @@ class SeatbeltIsolation:
 
         logger.info(f"[SeatbeltIsolation] 执行命令: {' '.join(cmd[:4])}...")
 
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
         try:
             try:
                 # 用流式 helper：launcher 内部跑命令时实时把 stdout 转发到本进程
@@ -191,12 +195,12 @@ class SeatbeltIsolation:
                         payload.get("env_vars"),
                         home_dir=cwd or self.sandbox_dir,
                     ),
-                    timeout=300,
+                    timeout=timeout_seconds,
                 )
             except subprocess.TimeoutExpired as te:
                 # 超时通常意味着 sandbox profile 缺权限导致 Python 启动卡死
                 logger.error(
-                    f"[SeatbeltIsolation] 执行超时(300s)，profile 保留以便排查: {profile_path}\n"
+                    f"[SeatbeltIsolation] 执行超时({timeout_seconds:g}s)，profile 保留以便排查: {profile_path}\n"
                     f"stderr(部分): {(te.stderr or '')[:500]!r}"
                 )
                 # 保留 profile 不删，便于人工 cat 查看
@@ -225,6 +229,59 @@ class SeatbeltIsolation:
                 await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
             except Exception:
                 pass
+            try:
+                await asyncio.to_thread(_remove_file_if_exists_sync, profile_path)
+            except Exception:
+                pass
+
+    async def _execute_shell(
+        self, payload: Dict[str, Any], cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute a shell command directly under seatbelt.
+
+        Shell commands do not need the generic Python/pickle launcher. Avoiding
+        that extra process tree removes a large startup cost and, more
+        importantly, prevents a completed child command from being hidden
+        behind a stalled launcher process.
+        """
+        actual_cwd = cwd or self.sandbox_dir
+        profile_path = await asyncio.to_thread(
+            self._generate_profile,
+            "",
+            additional_write_paths=[actual_cwd],
+        )
+        cmd = [
+            "sandbox-exec",
+            "-f",
+            profile_path,
+            "/bin/sh",
+            "-c",
+            str(payload.get("command", "")),
+        ]
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
+        try:
+            returncode, stdout_text, stderr_text = await asyncio.to_thread(
+                run_with_streaming_stdout,
+                cmd,
+                cwd=actual_cwd,
+                env=build_agent_environment(
+                    payload.get("env_vars"),
+                    home_dir=actual_cwd,
+                ),
+                timeout=timeout_seconds,
+            )
+            if returncode != 0 and (
+                "sandbox-exec:" in stderr_text
+                or "operation not permitted" in stderr_text.lower()
+            ):
+                raise RuntimeError(f"Seatbelt execution failed: {stderr_text}")
+            return {
+                "success": returncode == 0,
+                "output": stdout_text,
+                "stderr": stderr_text,
+                "return_code": returncode,
+            }
+        finally:
             try:
                 await asyncio.to_thread(_remove_file_if_exists_sync, profile_path)
             except Exception:

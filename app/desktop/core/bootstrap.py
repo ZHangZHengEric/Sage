@@ -1,10 +1,12 @@
+import os
+
 from loguru import logger
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, get_tool_manager, set_tool_manager
 
 from common.core.client.chat import close_chat_client, init_chat_client
 from common.core.client.db import close_db_client, init_db_client
-from common.core.config import get_startup_config
+from common.core.config import get_default_sage_home, get_startup_config
 from common.services.mcp_service import ensure_default_anytool_server
 from .migrations import migrate_desktop_default_user_id
 from .user_context import DEFAULT_DESKTOP_USER_ID
@@ -96,8 +98,12 @@ async def initialize_skill_manager():
         # 检查并添加 sage_home/skills 目录
         from pathlib import Path
 
-        user_home = Path.home()
-        sage_skills_dir = user_home / ".sage" / "skills"
+        cfg = get_startup_config()
+        sage_skills_dir = (
+            Path(cfg.skill_dir)
+            if cfg and cfg.skill_dir
+            else get_default_sage_home() / "skills"
+        )
         sage_skills_dir.mkdir(parents=True, exist_ok=True)
 
         # 添加到 skill manager（内置/同步至 ~/.sage/skills，与 cfg.skill_dir 一致）
@@ -105,7 +111,6 @@ async def initialize_skill_manager():
         logger.info(f"已添加技能目录: {sage_skills_dir}")
 
         # 用户导入的技能目录（与 server 的 user_dir/<userId>/skills 一致，便于 list_skills 区分「我的」）
-        cfg = get_startup_config()
         if cfg:
             user_skills_dir = Path(cfg.user_dir) / DEFAULT_DESKTOP_USER_ID / "skills"
             user_skills_dir.mkdir(parents=True, exist_ok=True)
@@ -126,9 +131,7 @@ def get_session_root_space() -> str:
     if os.environ.get("SAGE_SESSIONS_PATH"):
         sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))  # pyright: ignore[reportArgumentType]
     else:
-        user_home = Path.home()
-        sage_home = user_home / ".sage"
-        sessions_root = sage_home / "sessions"
+        sessions_root = get_default_sage_home() / "sessions"
 
     sessions_root.mkdir(parents=True, exist_ok=True)
     return str(sessions_root)
@@ -229,8 +232,12 @@ async def copy_default_skills():
             return False
 
         # 用户 skills 目录
-        user_home = Path.home()
-        user_skills_dir = user_home / ".sage" / "skills"
+        cfg = get_startup_config()
+        user_skills_dir = (
+            Path(cfg.skill_dir)
+            if cfg and cfg.skill_dir
+            else get_default_sage_home() / "skills"
+        )
         user_skills_dir.mkdir(parents=True, exist_ok=True)
 
         # 获取打包的默认 skills 目录
@@ -239,7 +246,6 @@ async def copy_default_skills():
 
         # 尝试从 tauri 资源目录获取
         try:
-            import os
             import sys
 
             # 检查是否在 tauri 环境中
@@ -334,8 +340,12 @@ async def copy_wiki_docs():
                 return False
 
         # 用户 sage 使用说明文档目录
-        user_home = Path.home()
-        user_docs_dir = user_home / ".sage" / "sage-usage-docs"
+        configured_docs_dir = os.environ.get("SAGE_DESKTOP_DOCS_DIR")
+        user_docs_dir = (
+            Path(configured_docs_dir).expanduser()
+            if configured_docs_dir
+            else get_default_sage_home() / "sage-usage-docs"
+        )
         user_docs_dir.mkdir(parents=True, exist_ok=True)
 
         # 获取打包的 wiki 文档目录
@@ -343,7 +353,6 @@ async def copy_wiki_docs():
 
         # 尝试从 tauri 资源目录获取
         try:
-            import os
             import sys
 
             # 检查是否在 tauri 环境中

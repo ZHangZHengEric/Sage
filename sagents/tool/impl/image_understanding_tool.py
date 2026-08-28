@@ -42,6 +42,8 @@ class ImageUnderstandingError(Exception):
 
 
 class ImageUnderstandingTool:
+    TOOL_CATEGORY = "image"
+
     """图片理解工具 - 将图片加入当前会话的原生多模态上下文"""
 
     def __init__(self):

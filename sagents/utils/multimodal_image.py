@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,11 +74,13 @@ def resolve_local_sage_url(url: str) -> Optional[str]:
         if not agent_id or not filename or "/" in filename or "\\" in filename:
             return None
 
-        user_home = Path.home()
+        sage_home = Path(
+            os.environ.get("SAGE_LOCAL_DATA_ROOT") or Path.home() / ".sage"
+        )
         if agent_id == "_default":
-            base_dir = user_home / ".sage" / "files"
+            base_dir = sage_home / "files"
         else:
-            base_dir = user_home / ".sage" / "agents" / agent_id / "upload_files"
+            base_dir = sage_home / "agents" / agent_id / "upload_files"
         file_path = (base_dir / filename).resolve()
         try:
             file_path.relative_to(base_dir.resolve())

@@ -163,22 +163,6 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
     info_messages = []
     error_messages = []
 
-    monkeypatch.setattr(
-        bwrap_module,
-        "_prepare_payload_files_sync",
-        lambda *args: ("input.pkl", "output.pkl", "launcher.py"),
-    )
-    monkeypatch.setattr(
-        bwrap_module,
-        "_load_pickle_output_sync",
-        lambda path: {"status": "success", "result": "ok"},
-    )
-    monkeypatch.setattr(
-        bwrap_module,
-        "_remove_file_if_exists_sync",
-        lambda path: None,
-    )
-
     def run(command, **kwargs):
         captured["command"] = command
         captured.update(kwargs)
@@ -200,7 +184,12 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
         cwd=str(workspace),
     )
 
-    assert result == "ok"
+    assert result == {
+        "success": True,
+        "output": "",
+        "stderr": "",
+        "return_code": 0,
+    }
     assert os.path.isabs(captured["command"][0])
     assert captured["env"]["PATH"] != str(workspace)
     assert "LD_PRELOAD" not in captured["env"]
@@ -246,7 +235,7 @@ async def test_server_bwrap_removes_input_and_output_payloads(monkeypatch, tmp_p
     )
 
     result = await isolation.execute(
-        {"mode": "shell", "command": "true", "env_vars": {}},
+        {"mode": "python", "command": "true", "env_vars": {}},
         cwd=str(workspace),
     )
 
@@ -290,7 +279,7 @@ async def test_default_bwrap_preserves_output_payload_for_non_server_callers(
     )
 
     await isolation.execute(
-        {"mode": "shell", "command": "true", "env_vars": {}},
+        {"mode": "python", "command": "true", "env_vars": {}},
         cwd=str(workspace),
     )
 
@@ -334,7 +323,7 @@ async def test_server_bwrap_removes_output_payload_after_execution_failure(
 
     with pytest.raises(Exception, match="Bwrap execution failed"):
         await isolation.execute(
-            {"mode": "shell", "command": "false", "env_vars": {}},
+            {"mode": "python", "command": "false", "env_vars": {}},
             cwd=str(workspace),
         )
 
@@ -385,7 +374,7 @@ async def test_bwrap_payload_failure_logs_once(monkeypatch, tmp_path):
 
     with pytest.raises(Exception, match="Command failed with code 127"):
         await isolation.execute(
-            {"mode": "shell", "command": "missing-command", "env_vars": {}},
+            {"mode": "python", "command": "missing-command", "env_vars": {}},
             cwd=str(workspace),
         )
 
