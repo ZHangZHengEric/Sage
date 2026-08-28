@@ -674,6 +674,16 @@ Future<WorkspaceController> _controller({_FakeApi? api}) async {
   return value;
 }
 
+Future<TestGesture> _hoverFileTreeRow(WidgetTester tester, String path) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  await mouse.moveTo(
+    tester.getCenter(find.byKey(ValueKey('file-tree-row:$path'))),
+  );
+  await tester.pump(const Duration(milliseconds: 160));
+  return mouse;
+}
+
 Map<String, Object?> _persistedSuspendedConversation() => {
   'id': 'conversation-suspended',
   'title': '暂停任务',
@@ -1241,6 +1251,19 @@ void main() {
     expect(find.byKey(const ValueKey('file-preview-empty')), findsOneWidget);
     expect(find.text('Sage v2 workspace'), findsNothing);
 
+    final projectsReferenceVisibility = find.byKey(
+      const ValueKey('file-tree-reference-visibility:projects'),
+    );
+    expect(
+      tester.widget<AnimatedOpacity>(projectsReferenceVisibility).opacity,
+      0,
+    );
+    final projectsMouse = await _hoverFileTreeRow(tester, 'projects');
+    addTearDown(projectsMouse.removePointer);
+    expect(
+      tester.widget<AnimatedOpacity>(projectsReferenceVisibility).opacity,
+      1,
+    );
     await tester.tap(
       find.byKey(const ValueKey('file-tree-reference:projects')),
     );
@@ -1337,6 +1360,13 @@ void main() {
         );
         expect(find.byKey(const ValueKey('file-preview-mode')), findsOneWidget);
 
+        final referenceVisibility = find.byKey(
+          const ValueKey('file-tree-reference-visibility:README.md'),
+        );
+        expect(tester.widget<AnimatedOpacity>(referenceVisibility).opacity, 0);
+        final mouse = await _hoverFileTreeRow(tester, 'README.md');
+        addTearDown(mouse.removePointer);
+        expect(tester.widget<AnimatedOpacity>(referenceVisibility).opacity, 1);
         await tester.tap(
           find.byKey(const ValueKey('file-tree-reference:README.md')),
         );
@@ -1399,7 +1429,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-      'sidebar creation icons and project disclosure work in ${brightness.name} mode',
+      'project conversations only collapse explicitly in ${brightness.name} mode',
       (tester) async {
         tester.view.physicalSize = const Size(1440, 900);
         tester.view.devicePixelRatio = 1;
@@ -1476,6 +1506,21 @@ void main() {
           ),
           findsOneWidget,
         );
+
+        // Moving to Agent Workspace changes selection, but does not collapse
+        // the project's conversation list.
+        await tester.tap(recentNewConversation);
+        await tester.pumpAndSettle();
+        expect(
+          controller.selectedGroupId,
+          WorkspaceController.agentWorkspaceId,
+        );
+        expect(conversationTile, findsOneWidget);
+
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-header:project_demo')),
+        );
+        await tester.pumpAndSettle();
 
         await tester.tap(disclosure);
         await tester.pumpAndSettle();

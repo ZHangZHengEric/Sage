@@ -339,8 +339,10 @@ class _ProjectRail extends StatefulWidget {
 class _ProjectRailState extends State<_ProjectRail> {
   final Set<String> _collapsedProjectIds = <String>{};
 
+  // Project conversations stay open while the user moves between projects or
+  // Agent Workspace. Only an explicit disclosure-button click may collapse a
+  // project; changing the current selection must not rewrite navigation state.
   bool _isExpanded(WorkspaceGroup group) =>
-      group.id == widget.controller.selectedGroupId &&
       !_collapsedProjectIds.contains(group.id);
 
   void _selectProject(WorkspaceGroup group) {
@@ -3756,73 +3758,17 @@ class _FileTreeOverlay extends StatelessWidget {
                       final referenced = controller.isWorkspaceNodeReferenced(
                         node,
                       );
-                      return InkWell(
-                        key: ValueKey('file-tree-row:${node.path}'),
-                        borderRadius: BorderRadius.circular(7),
+                      return _FileTreeRow(
+                        node: node,
+                        depth: value.depth,
+                        selected: selected,
+                        expanded: expanded,
+                        referenced: referenced,
                         onTap: node.isDirectory
                             ? () => onToggleDirectory(node.path)
                             : () => controller.openFile(node),
-                        child: Container(
-                          height: 29,
-                          padding: EdgeInsets.only(
-                            left: 7 + value.depth * 14,
-                            right: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? colors.onSurface.withValues(alpha: 0.095)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 13,
-                                child: node.isDirectory
-                                    ? Icon(
-                                        expanded
-                                            ? CupertinoIcons.chevron_down
-                                            : CupertinoIcons.chevron_right,
-                                        size: 11,
-                                        color: colors.onSurfaceVariant,
-                                      )
-                                    : null,
-                              ),
-                              const SizedBox(width: 3),
-                              Icon(
-                                node.isDirectory
-                                    ? CupertinoIcons.folder
-                                    : _workspaceFileIcon(node.name),
-                                size: 15,
-                                color: node.isDirectory
-                                    ? colors.onSurfaceVariant
-                                    : _workspaceFileColor(node.name, colors),
-                              ),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Text(
-                                  node.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(
-                                        fontSize: 12.5,
-                                        fontWeight: selected
-                                            ? FontWeight.w600
-                                            : FontWeight.w400,
-                                      ),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              _TreeReferenceButton(
-                                node: node,
-                                referenced: referenced,
-                                onTap: () =>
-                                    controller.referenceWorkspaceNode(node),
-                              ),
-                            ],
-                          ),
-                        ),
+                        onReference: () =>
+                            controller.referenceWorkspaceNode(node),
                       );
                     },
                   ),
@@ -3833,52 +3779,174 @@ class _FileTreeOverlay extends StatelessWidget {
   }
 }
 
-class _TreeReferenceButton extends StatelessWidget {
+class _FileTreeRow extends StatefulWidget {
+  const _FileTreeRow({
+    required this.node,
+    required this.depth,
+    required this.selected,
+    required this.expanded,
+    required this.referenced,
+    required this.onTap,
+    required this.onReference,
+  });
+
+  final WorkspaceFileNode node;
+  final int depth;
+  final bool selected;
+  final bool expanded;
+  final bool referenced;
+  final VoidCallback onTap;
+  final VoidCallback onReference;
+
+  @override
+  State<_FileTreeRow> createState() => _FileTreeRowState();
+}
+
+class _FileTreeRowState extends State<_FileTreeRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final node = widget.node;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: InkWell(
+        key: ValueKey('file-tree-row:${node.path}'),
+        borderRadius: BorderRadius.circular(7),
+        onTap: widget.onTap,
+        child: Container(
+          height: 29,
+          padding: EdgeInsets.only(left: 7 + widget.depth * 14, right: 7),
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? colors.onSurface.withValues(alpha: 0.095)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 13,
+                child: node.isDirectory
+                    ? Icon(
+                        widget.expanded
+                            ? CupertinoIcons.chevron_down
+                            : CupertinoIcons.chevron_right,
+                        size: 11,
+                        color: colors.onSurfaceVariant,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 3),
+              Icon(
+                node.isDirectory
+                    ? CupertinoIcons.folder
+                    : _workspaceFileIcon(node.name),
+                size: 15,
+                color: node.isDirectory
+                    ? colors.onSurfaceVariant
+                    : _workspaceFileColor(node.name, colors),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  node.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: 12.5,
+                    fontWeight: widget.selected
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              _TreeReferenceButton(
+                node: node,
+                referenced: widget.referenced,
+                rowHovered: _hovered,
+                onTap: widget.onReference,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TreeReferenceButton extends StatefulWidget {
   const _TreeReferenceButton({
     required this.node,
     required this.referenced,
+    required this.rowHovered,
     required this.onTap,
   });
 
   final WorkspaceFileNode node;
   final bool referenced;
+  final bool rowHovered;
   final VoidCallback onTap;
+
+  @override
+  State<_TreeReferenceButton> createState() => _TreeReferenceButtonState();
+}
+
+class _TreeReferenceButtonState extends State<_TreeReferenceButton> {
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final visible = widget.rowHovered || _focused;
     final label = context.l10n.text(
-      referenced ? 'workspace.referencedNode' : 'workspace.referenceNode',
+      widget.referenced
+          ? 'workspace.referencedNode'
+          : 'workspace.referenceNode',
       {
         'kind': context.l10n.text(
-          node.isDirectory ? 'workspace.folder' : 'workspace.file',
+          widget.node.isDirectory ? 'workspace.folder' : 'workspace.file',
         ),
       },
     );
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        enabled: !referenced,
-        label: label,
-        child: InkWell(
-          key: ValueKey('file-tree-reference:${node.path}'),
-          onTap: referenced ? null : onTap,
-          borderRadius: BorderRadius.circular(7),
-          child: Container(
-            width: 22,
-            height: 22,
-            decoration: referenced
-                ? BoxDecoration(
-                    color: colors.onSurface.withValues(alpha: 0.09),
-                    borderRadius: BorderRadius.circular(7),
-                  )
-                : null,
-            child: Icon(
-              CupertinoIcons.at,
-              size: 13,
-              color: colors.onSurfaceVariant.withValues(
-                alpha: referenced ? 0.9 : 0.66,
+    // Keep the action's width reserved so labels do not shift on hover. The
+    // same action becomes visible on keyboard focus for non-pointer users.
+    return AnimatedOpacity(
+      key: ValueKey('file-tree-reference-visibility:${widget.node.path}'),
+      opacity: visible ? 1 : 0,
+      duration: const Duration(milliseconds: 140),
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: Tooltip(
+          message: label,
+          child: Semantics(
+            button: true,
+            enabled: !widget.referenced,
+            label: label,
+            child: InkWell(
+              key: ValueKey('file-tree-reference:${widget.node.path}'),
+              onFocusChange: (focused) => setState(() => _focused = focused),
+              onTap: widget.referenced ? null : widget.onTap,
+              borderRadius: BorderRadius.circular(7),
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: widget.referenced
+                    ? BoxDecoration(
+                        color: colors.onSurface.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(7),
+                      )
+                    : null,
+                child: Icon(
+                  CupertinoIcons.at,
+                  size: 13,
+                  color: colors.onSurfaceVariant.withValues(
+                    alpha: widget.referenced ? 0.9 : 0.66,
+                  ),
+                ),
               ),
             ),
           ),
