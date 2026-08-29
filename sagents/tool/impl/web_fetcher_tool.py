@@ -11,6 +11,7 @@ Scrapling 特性：
 
 import asyncio
 import json
+import logging
 import os
 import re
 import aiohttp
@@ -37,6 +38,8 @@ class _HttpStatusError(Exception):
 
 
 class WebFetcherTool:
+    TOOL_CATEGORY = "web"
+
     """基于 Scrapling 的网页抓取工具，支持网页内容提取和文件下载"""
 
     # 总返回内容的最大token数限制
@@ -304,8 +307,9 @@ class WebFetcherTool:
                 logger.warning(f"通过 session_context 获取路径失败: {e}")
 
         # 退化为默认下载目录
-        user_home = os.path.expanduser("~")
-        workspace = os.path.join(user_home, ".sage", "downloads")
+        workspace = os.environ.get("SAGE_DOWNLOADS_DIR") or os.path.join(
+            os.path.expanduser("~"), ".sage", "downloads"
+        )
         os.makedirs(workspace, exist_ok=True)
         return workspace
 
@@ -636,6 +640,11 @@ class WebFetcherTool:
         """Fetch an HTML page with Scrapling's class-level async fetcher API."""
         from scrapling.fetchers import AsyncFetcher  # pyright: ignore[reportMissingImports]
 
+        # Scrapling installs its own console handler and bypasses Sage's session-aware
+        # log formatting. Keep the dependency quiet and record the request outcome at
+        # this integration boundary instead.
+        logging.getLogger("scrapling").disabled = True
+
         page = await asyncio.wait_for(
             AsyncFetcher.get(
                 url,
@@ -647,6 +656,7 @@ class WebFetcherTool:
         )
         if not 200 <= page.status < 300:
             raise _HttpStatusError(page.status, page.reason)
+        logger.info(f"WebFetcher: Fetched ({page.status}) <GET {url}>")
         return page
 
     def _clean_content(self, text: str) -> str:

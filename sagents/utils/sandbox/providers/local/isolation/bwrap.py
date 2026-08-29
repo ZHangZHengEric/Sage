@@ -117,27 +117,31 @@ class BwrapIsolation:
         """
         使用 bwrap 执行 payload。
         """
-        logger.info("[BwrapIsolation] 开始执行")
+        if payload.get("mode") == "shell" and not payload.get("background", False):
+            return await self._execute_shell(payload, cwd=cwd)
 
         run_id = str(uuid.uuid4())
         sandbox_dir = self.sandbox_runtime_dir
-        input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
-            _prepare_payload_files_sync,
-            sandbox_dir,
-            run_id,
-            payload,
-        )
+        input_pkl: Optional[str] = None
+        output_pkl: Optional[str] = None
+        returncode: Optional[int] = None
 
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-        bwrap_cmd, agent_env = self._build_base_command(
-            cwd=cwd,
-            env_vars=payload.get("env_vars"),
-        )
-        bwrap_cmd.extend([python_bin, launcher_path, input_pkl, output_pkl])
-
-        logger.info(f"[BwrapIsolation] 执行命令: {' '.join(bwrap_cmd[:5])}...")
-
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
         try:
+            input_pkl, output_pkl, launcher_path = await asyncio.to_thread(
+                _prepare_payload_files_sync,
+                sandbox_dir,
+                run_id,
+                payload,
+            )
+
+            python_bin = os.path.join(self.venv_dir, "bin", "python")
+            bwrap_cmd, agent_env = self._build_base_command(
+                cwd=cwd,
+                env_vars=payload.get("env_vars"),
+            )
+            bwrap_cmd.extend([python_bin, launcher_path, input_pkl, output_pkl])
+
             # 流式执行：launcher 内部跑命令时，stdout 实时转发到本进程 stdout
             # （受 SAGE_ECHO_SHELL_OUTPUT 控制），stderr 完整捕获用于报错
             returncode, stdout_text, stderr_text = await asyncio.to_thread(
@@ -147,32 +151,82 @@ class BwrapIsolation:
                 env=build_agent_environment(
                     home_dir=cwd or self.sandbox_agent_workspace
                 ),
-                timeout=300,
+                timeout=timeout_seconds,
             )
 
-            logger.info(f"[BwrapIsolation] 返回码: {returncode}")
-
             if returncode != 0:
-                logger.error(f"[BwrapIsolation] 执行失败: {stderr_text[:500]}")
                 raise Exception(f"Bwrap execution failed: {stderr_text}")
 
             res = await asyncio.to_thread(_load_pickle_output_sync, output_pkl)
 
             if res["status"] == "success":
+                logger.info(
+                    "[BwrapIsolation] 执行完成: "
+                    f"command={payload.get('command')!r}, return_code={returncode}"
+                )
                 return res["result"]
             else:
                 raise Exception(f"Error in bwrap: {res.get('error')}")
 
+        except Exception as exc:
+            rendered_returncode = (
+                str(returncode) if returncode is not None else "unknown"
+            )
+            logger.error(
+                "[BwrapIsolation] 执行失败: "
+                f"command={payload.get('command')!r}, "
+                f"return_code={rendered_returncode}, error={exc}"
+            )
+            raise
+
         finally:
-            try:
-                await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
-            except Exception:
-                pass
-            if self.cleanup_output_payload:
+            if input_pkl is not None:
+                try:
+                    await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
+                except Exception:
+                    pass
+            if self.cleanup_output_payload and output_pkl is not None:
                 try:
                     await asyncio.to_thread(_remove_file_if_exists_sync, output_pkl)
                 except Exception:
                     pass
+
+    async def _execute_shell(
+        self, payload: Dict[str, Any], cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute a shell command directly inside bubblewrap."""
+        actual_cwd = cwd or self.sandbox_agent_workspace
+        command = self.build_shell_command(
+            str(payload.get("command", "")),
+            cwd=actual_cwd,
+            env_vars=payload.get("env_vars"),
+        )
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
+        returncode, stdout_text, stderr_text = await asyncio.to_thread(
+            run_with_streaming_stdout,
+            command,
+            cwd=actual_cwd,
+            env=build_agent_environment(home_dir=actual_cwd),
+            timeout=timeout_seconds,
+        )
+        if returncode != 0 and stderr_text.lstrip().startswith("bwrap:"):
+            error = RuntimeError(f"Bwrap execution failed: {stderr_text}")
+            logger.error(
+                "[BwrapIsolation] 执行失败: "
+                f"command={payload.get('command')!r}, "
+                f"return_code={returncode}, error={error}"
+            )
+            raise error
+        logger.info(
+            "[BwrapIsolation] 执行完成: "
+            f"command={payload.get('command')!r}, return_code={returncode}"
+        )
+        return {
+            "success": returncode == 0,
+            "output": stdout_text,
+            "stderr": stderr_text,
+            "return_code": returncode,
+        }
 
     def execute_background(
         self, command: str, cwd: Optional[str] = None

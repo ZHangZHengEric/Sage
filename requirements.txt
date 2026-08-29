@@ -35,7 +35,9 @@ ruff==0.15.14
 ag-ui-protocol==0.1.19
 fastapi>=0.104.0
 uvicorn[standard]>=0.38.0
+uvloop>=0.21.0; sys_platform != "win32"
 pydantic>=2.5.0
+jsonschema>=4.20.0
 
 ##############################
 # 多模型协同（MCP + 工具）

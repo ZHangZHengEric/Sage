@@ -13,6 +13,7 @@ import pickle
 import uuid
 from typing import Dict, Any, Optional, List
 from sagents.utils.logger import logger
+from sagents.utils.sandbox._stdout_echo import run_with_streaming_stdout
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.utils.common_utils import resolve_sandbox_runtime_dir
@@ -416,6 +417,9 @@ class SubprocessIsolation:
         logger.info(f"  venv_dir: {self.venv_dir}")
         logger.info(f"  cwd: {cwd}")
 
+        if payload.get("mode") == "shell" and not payload.get("background", False):
+            return await self._execute_shell(payload, cwd=cwd)
+
         # 创建临时文件
         run_id = str(uuid.uuid4())
         sandbox_dir = self.sandbox_runtime_dir
@@ -457,6 +461,7 @@ class SubprocessIsolation:
 
         logger.info(f"[SubprocessIsolation] 执行命令: {' '.join(cmd[:3])}...")
 
+        timeout_seconds = float(payload.get("timeout_seconds", 300))
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -465,7 +470,7 @@ class SubprocessIsolation:
                 text=True,
                 cwd=cwd or self.sandbox_agent_workspace,
                 env=env,
-                timeout=300,  # 5分钟超时
+                timeout=timeout_seconds,
             )
 
             logger.info(f"[SubprocessIsolation] 返回码: {result.returncode}")
@@ -489,6 +494,46 @@ class SubprocessIsolation:
                 await asyncio.to_thread(_remove_file_if_exists_sync, input_pkl)
             except Exception:
                 pass
+
+    async def _execute_shell(
+        self, payload: Dict[str, Any], cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute shell payloads without the generic pickle launcher."""
+        actual_cwd = cwd or self.sandbox_agent_workspace
+        env = build_agent_environment(
+            payload.get("env_vars"),
+            home_dir=actual_cwd,
+        )
+        venv_bin = os.path.join(
+            self.venv_dir,
+            "Scripts" if platform.system() == "Windows" else "bin",
+        )
+        env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
+        pylibs_dir = os.path.join(self.sandbox_runtime_dir, ".pylibs")
+        env["PIP_TARGET"] = pylibs_dir
+        env["PYTHONPATH"] = (
+            f"{pylibs_dir}{os.pathsep}{self.sandbox_agent_workspace}"
+            f"{os.pathsep}{env.get('PYTHONPATH', '')}"
+        )
+        command = str(payload.get("command", ""))
+        cmd = (
+            ["cmd.exe", "/c", command]
+            if platform.system() == "Windows"
+            else ["/bin/sh", "-c", command]
+        )
+        returncode, stdout_text, stderr_text = await asyncio.to_thread(
+            run_with_streaming_stdout,
+            cmd,
+            cwd=actual_cwd,
+            env=env,
+            timeout=float(payload.get("timeout_seconds", 300)),
+        )
+        return {
+            "success": returncode == 0,
+            "output": stdout_text,
+            "stderr": stderr_text,
+            "return_code": returncode,
+        }
 
     async def execute_background(
         self, command: str, cwd: Optional[str] = None

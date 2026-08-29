@@ -22,6 +22,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import asyncio
 import fnmatch
@@ -425,9 +426,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """同步宿主技能到本地沙箱工作区。"""
         from sagents.skill.sandbox_skill_manager import SandboxSkillManager
 
-        manager = SandboxSkillManager(
-            self, os.path.join(self.workspace_path, "skills")
-        )
+        manager = SandboxSkillManager(self, os.path.join(self.workspace_path, "skills"))
         await manager.sync_from_host(host_skill_manager)
         return manager
 
@@ -769,7 +768,9 @@ class LocalSandboxProvider(ISandboxHandle):
                 )
 
         # 为 npm/npx 配置项目级缓存，避免写入用户主目录 ~/.npm 导致权限问题
-        npm_cache_dir = os.path.join(os.path.expanduser("~"), ".sage", ".npm-cache")
+        npm_cache_dir = os.environ.get("SAGE_NPM_CACHE_DIR") or os.path.join(
+            os.path.expanduser("~"), ".sage", ".npm-cache"
+        )
         try:
             os.makedirs(npm_cache_dir, exist_ok=True)
         except Exception as e:
@@ -798,14 +799,20 @@ class LocalSandboxProvider(ISandboxHandle):
                     "command": converted_command,
                     "cwd": actual_workdir,
                     "env_vars": env_vars or {},
+                    "timeout_seconds": timeout,
                 }
                 result = await self._isolation.execute(payload, cwd=actual_workdir)
                 if isinstance(result, dict):
                     return CommandResult(
                         success=result.get("success", True),
                         stdout=result.get("output", ""),
-                        stderr="",
-                        return_code=0 if result.get("success", True) else 1,
+                        stderr=result.get("stderr", ""),
+                        return_code=int(
+                            result.get(
+                                "return_code",
+                                0 if result.get("success", True) else 1,
+                            )
+                        ),
                         execution_time=0,
                     )
                 else:
@@ -816,9 +823,16 @@ class LocalSandboxProvider(ISandboxHandle):
                         return_code=0,
                         execution_time=0,
                     )
+            except subprocess.TimeoutExpired:
+                return CommandResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Command timed out after {timeout} seconds",
+                    return_code=-1,
+                    execution_time=timeout,
+                )
             except Exception as e:
                 if server_isolation is not None:
-                    logger.error(f"Server isolation execution failed closed: {e}")
                     return CommandResult(
                         success=False,
                         stdout="",

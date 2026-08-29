@@ -10,6 +10,8 @@ import contextvars
 from contextlib import contextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union, Type
 
+from openai import BadRequestError
+
 from sagents.agent import (
     AgentBase,
     FibreAgent,
@@ -48,6 +50,7 @@ from sagents.flow.executor import FlowExecutor
 from sagents.utils.sandbox.config import VolumeMount
 from sagents.utils.message_control_flags import extract_control_flags_from_messages
 from sagents.utils.i18n import normalize_language, t
+from sagents.utils.llm_request_utils import format_api_error_details
 from sagents.storage import (
     SessionStorageConfigInput,
     SessionStore,
@@ -948,7 +951,13 @@ class Session:
     async def _handle_workflow_error(
         self, error: Exception
     ) -> AsyncGenerator[List[MessageChunk], None]:
-        logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
+        if isinstance(error, BadRequestError):
+            logger.error(
+                f"SAgent: 处理工作流错误: {format_api_error_details(error)}",
+                exc_info=False,
+            )
+        else:
+            logger.error(f"SAgent: 处理工作流错误: {error}")
         language = self._resolve_workflow_error_language()
         error_message = self._extract_friendly_error_message(error, language=language)
         yield [

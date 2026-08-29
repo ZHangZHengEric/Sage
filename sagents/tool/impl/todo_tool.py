@@ -10,6 +10,8 @@ import datetime
 
 
 class ToDoTool:
+    TOOL_CATEGORY = "planning"
+
     """任务清单管理工具"""
 
     def _get_session_context(self, session_id: Optional[str] = None):

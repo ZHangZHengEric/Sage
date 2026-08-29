@@ -1,0 +1,420 @@
+"""OpenAI Responses API adapter for the v2 model capability port."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+
+from openai import AsyncOpenAI
+from pydantic import Field
+
+from sagents.v2.contracts.common import StrictModel, new_id
+from sagents.v2.contracts.items import (
+    AudioBlock,
+    FileBlock,
+    ImageBlock,
+    JsonBlock,
+    ResourceRefBlock,
+    TextBlock,
+    UsageSummary,
+)
+from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.model.wire import (
+    compact_json,
+    parse_tool_arguments,
+    provider_error,
+    wire_value,
+)
+from sagents.v2.model.contracts import (
+    ModelCapabilities,
+    ModelEventKind,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ModelStreamEvent,
+)
+
+
+class OpenAIResponsesConfig(StrictModel):
+    """Configuration that is safe to persist because credentials live elsewhere."""
+
+    provider_id: str = "openai-responses"
+    base_url: str = "https://api.openai.com/v1"
+    model: str
+    capabilities: ModelCapabilities
+    default_max_output_tokens: int | None = None
+    default_temperature: float | None = None
+    default_top_p: float | None = None
+    reasoning_effort: str | None = None
+    timeout_seconds: float = 120
+    store: bool = False
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenAIResponsesModelProvider:
+    """Map v2 messages, tools, and stream events to the Responses API.
+
+    The adapter is stateless by default (`store=False`) because the Sage Run
+    ledger is authoritative.  Hosts may opt into provider storage explicitly,
+    but this adapter never relies on `previous_response_id` for correctness.
+    """
+
+    def __init__(
+        self,
+        config: OpenAIResponsesConfig,
+        credential: CredentialMaterial | None = None,
+        *,
+        client: Any | None = None,
+    ) -> None:
+        if client is None and credential is None:
+            raise ValueError("credential is required when client is not injected")
+        self.config = config
+        if client is not None:
+            self._client = client
+        else:
+            assert credential is not None
+            self._client = AsyncOpenAI(
+                api_key=credential.secret.get_secret_value(),
+                base_url=config.base_url,
+                timeout=config.timeout_seconds,
+            )
+
+    @property
+    def raw_client(self) -> Any:
+        return self._client
+
+    async def capabilities(self, model_binding: str) -> ModelCapabilities:
+        return self.config.capabilities
+
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        return self._stream(request)
+
+    def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
+        """Return the exact non-secret keyword arguments passed to the SDK."""
+
+        self._validate_request(request)
+        payload: dict[str, Any] = {
+            "model": self.config.model,
+            "input": self._input_items(request.messages),
+            "stream": True,
+            "store": self.config.store,
+        }
+        if request.tools:
+            payload["tools"] = [self._tool_definition(tool) for tool in request.tools]
+        maximum = request.max_output_tokens or self.config.default_max_output_tokens
+        if maximum is not None:
+            payload["max_output_tokens"] = maximum
+        temperature = (
+            request.temperature
+            if request.temperature is not None
+            else self.config.default_temperature
+        )
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if self.config.default_top_p is not None:
+            payload["top_p"] = self.config.default_top_p
+        if self.config.reasoning_effort is not None:
+            payload["reasoning"] = {"effort": self.config.reasoning_effort}
+        if request.response_schema is not None:
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "sage_response",
+                    "strict": True,
+                    "schema": request.response_schema,
+                }
+            }
+        if self.config.extra_body:
+            payload["extra_body"] = dict(self.config.extra_body)
+        return payload
+
+    async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        payload = self.diagnostic_request(request)
+        upstream = None
+        response_id = new_id("model_response")
+        text = ""
+        reasoning = ""
+        finish_reason = "completed"
+        usage = UsageSummary(models=(self.config.model,))
+        tool_fragments: dict[str, dict[str, str]] = {}
+        try:
+            upstream = await self._client.responses.create(**payload)
+            async for event in upstream:
+                event_type = str(wire_value(event, "type", ""))
+                if event_type == "response.output_text.delta":
+                    delta = str(wire_value(event, "delta", "") or "")
+                    if delta:
+                        text += delta
+                        yield ModelStreamEvent(
+                            kind=ModelEventKind.TEXT_DELTA, delta=delta
+                        )
+                    continue
+                if event_type in {
+                    "response.reasoning_summary_text.delta",
+                    "response.reasoning_text.delta",
+                }:
+                    delta = str(wire_value(event, "delta", "") or "")
+                    if delta:
+                        reasoning += delta
+                        yield ModelStreamEvent(
+                            kind=ModelEventKind.REASONING_DELTA, delta=delta
+                        )
+                    continue
+                if event_type == "response.output_item.added":
+                    self._record_tool_item(
+                        tool_fragments, wire_value(event, "item"), replace=False
+                    )
+                    continue
+                if event_type == "response.function_call_arguments.delta":
+                    key = self._tool_key(event)
+                    fragment = tool_fragments.setdefault(
+                        key, {"id": key, "name": "", "arguments": ""}
+                    )
+                    fragment["arguments"] += str(wire_value(event, "delta", "") or "")
+                    continue
+                if event_type == "response.output_item.done":
+                    self._record_tool_item(
+                        tool_fragments, wire_value(event, "item"), replace=True
+                    )
+                    continue
+                if event_type in {"response.completed", "response.incomplete"}:
+                    response = wire_value(event, "response")
+                    response_id = str(
+                        wire_value(response, "id", response_id) or response_id
+                    )
+                    status = str(
+                        wire_value(response, "status", "completed") or "completed"
+                    )
+                    finish_reason = status
+                    incomplete = wire_value(response, "incomplete_details")
+                    if incomplete is not None:
+                        finish_reason = str(
+                            wire_value(incomplete, "reason", finish_reason)
+                            or finish_reason
+                        )
+                    raw_usage = wire_value(response, "usage")
+                    usage = self._usage(raw_usage)
+                    continue
+                if event_type in {"response.failed", "error"}:
+                    error = wire_value(event, "error") or wire_value(
+                        wire_value(event, "response"), "error"
+                    )
+                    raise RuntimeError(
+                        str(wire_value(error, "message", "Responses API failed"))
+                    )
+        except Exception as exc:
+            from sagents.v2.contracts.errors import SageV2Error
+
+            if isinstance(exc, SageV2Error):
+                raise
+            raise provider_error(exc) from exc
+        finally:
+            if upstream is not None:
+                await self._close_stream(upstream)
+
+        calls = tuple(
+            parse_tool_arguments(
+                fragment["arguments"],
+                tool_call_id=fragment["id"],
+                name=fragment["name"],
+            )
+            for fragment in tool_fragments.values()
+        )
+        yield ModelStreamEvent(
+            kind=ModelEventKind.COMPLETED,
+            response=ModelResponse(
+                response_id=response_id,
+                text=text,
+                reasoning=reasoning,
+                tool_calls=calls,
+                finish_reason=finish_reason,
+                usage=usage,
+                provider_metadata={
+                    "provider_id": self.config.provider_id,
+                    "model": self.config.model,
+                    "api": "responses",
+                },
+            ),
+        )
+
+    def _validate_request(self, request: ModelRequest) -> None:
+        capabilities = self.config.capabilities
+        if request.tools and not capabilities.supports_tools:
+            raise self._capability_error("tools")
+        if (
+            request.response_schema is not None
+            and not capabilities.supports_structured_output
+        ):
+            raise self._capability_error("structured_output")
+        maximum = capabilities.max_output_tokens
+        requested = request.max_output_tokens or self.config.default_max_output_tokens
+        if maximum is not None and requested is not None and requested > maximum:
+            from sagents.v2.contracts.errors import (
+                ErrorCategory,
+                RuntimeErrorInfo,
+                SageV2Error,
+            )
+
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="model.output_budget_exceeded",
+                    category=ErrorCategory.VALIDATION,
+                    message=(
+                        f"requested output tokens {requested} exceed model limit {maximum}"
+                    ),
+                    safe_to_resume=True,
+                )
+            )
+
+    @staticmethod
+    def _capability_error(capability: str):
+        from sagents.v2.contracts.errors import (
+            ErrorCategory,
+            RuntimeErrorInfo,
+            SageV2Error,
+        )
+
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="model.capability_unsupported",
+                category=ErrorCategory.VALIDATION,
+                message=f"model binding does not support {capability}",
+                safe_to_resume=True,
+            )
+        )
+
+    @classmethod
+    def _input_items(cls, messages: tuple[ModelMessage, ...]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for message in messages:
+            if message.role == "tool":
+                items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": message.tool_call_id,
+                        "output": cls._plain_content(message),
+                    }
+                )
+                continue
+            if message.tool_calls:
+                if message.content:
+                    items.append(cls._message_item(message))
+                items.extend(
+                    {
+                        "type": "function_call",
+                        "call_id": call.tool_call_id,
+                        "name": call.name,
+                        "arguments": compact_json(call.arguments),
+                    }
+                    for call in message.tool_calls
+                )
+                continue
+            items.append(cls._message_item(message))
+        return items
+
+    @classmethod
+    def _message_item(cls, message: ModelMessage) -> dict[str, Any]:
+        role = "developer" if message.role == "developer" else message.role
+        return {
+            "type": "message",
+            "role": role,
+            "content": [
+                cls._content_block(block, role=role) for block in message.content
+            ],
+        }
+
+    @staticmethod
+    def _content_block(block: Any, *, role: str) -> dict[str, Any]:
+        text_type = "output_text" if role == "assistant" else "input_text"
+        if isinstance(block, TextBlock):
+            return {"type": text_type, "text": block.text}
+        if isinstance(block, ImageBlock):
+            return {"type": "input_image", "image_url": block.uri}
+        if isinstance(block, FileBlock):
+            return {"type": "input_file", "file_id": block.uri}
+        if isinstance(block, JsonBlock):
+            return {"type": text_type, "text": compact_json(block.value)}
+        if isinstance(block, ResourceRefBlock):
+            return {"type": text_type, "text": f"[resource: {block.uri}]"}
+        if isinstance(block, AudioBlock):
+            return {"type": "input_audio", "audio_url": block.uri}
+        raise TypeError(f"unsupported content block {type(block)!r}")
+
+    @classmethod
+    def _plain_content(cls, message: ModelMessage) -> str:
+        values = []
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                values.append(block.text)
+            elif isinstance(block, JsonBlock):
+                values.append(compact_json(block.value))
+            else:
+                values.append(str(cls._content_block(block, role="user")))
+        return "\n".join(values)
+
+    @staticmethod
+    def _tool_definition(tool) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "type": "function",
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.input_schema,
+        }
+        if tool.strict is not None:
+            value["strict"] = tool.strict
+        if tool.output_schema is not None:
+            value["output_schema"] = tool.output_schema
+        return value
+
+    @classmethod
+    def _record_tool_item(
+        cls,
+        fragments: dict[str, dict[str, str]],
+        item: Any,
+        *,
+        replace: bool,
+    ) -> None:
+        if wire_value(item, "type") != "function_call":
+            return
+        key = cls._tool_key(item)
+        current = fragments.setdefault(key, {"id": key, "name": "", "arguments": ""})
+        call_id = str(wire_value(item, "call_id", "") or "")
+        name = str(wire_value(item, "name", "") or "")
+        arguments = str(wire_value(item, "arguments", "") or "")
+        if call_id:
+            current["id"] = call_id
+        if name:
+            current["name"] = name
+        if arguments and (replace or not current["arguments"]):
+            current["arguments"] = arguments
+
+    @staticmethod
+    def _tool_key(value: Any) -> str:
+        return str(
+            wire_value(value, "item_id", None)
+            or wire_value(value, "id", None)
+            or wire_value(value, "call_id", None)
+            or wire_value(value, "output_index", 0)
+        )
+
+    def _usage(self, raw: Any) -> UsageSummary:
+        input_details = wire_value(raw, "input_tokens_details")
+        output_details = wire_value(raw, "output_tokens_details")
+        return UsageSummary(
+            input_tokens=int(wire_value(raw, "input_tokens", 0) or 0),
+            output_tokens=int(wire_value(raw, "output_tokens", 0) or 0),
+            cached_input_tokens=int(wire_value(input_details, "cached_tokens", 0) or 0),
+            reasoning_tokens=int(
+                wire_value(output_details, "reasoning_tokens", 0) or 0
+            ),
+            models=(self.config.model,),
+        )
+
+    @staticmethod
+    async def _close_stream(stream: Any) -> None:
+        closer = getattr(stream, "close", None) or getattr(stream, "aclose", None)
+        if closer is None:
+            return
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result

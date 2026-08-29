@@ -1,4 +1,6 @@
 import pytest
+import httpx
+from openai import BadRequestError
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
@@ -98,3 +100,45 @@ async def test_handle_workflow_error_uses_session_language_for_rate_limit(
     assert len(chunks) == 1
     assert chunks[0].content == expected
     assert chunks[0].type == "final_answer"
+
+
+@pytest.mark.asyncio
+async def test_handle_workflow_error_logs_provider_bad_request_without_traceback(
+    monkeypatch, tmp_path
+):
+    session = Session(session_id="error-session", enable_obs=False)
+    session.session_context = SessionContext(
+        session_id="error-session",
+        user_id="user-1",
+        agent_id="agent-1",
+        session_root_space=str(tmp_path),
+    )
+    request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+    response = httpx.Response(400, request=request)
+    error = BadRequestError(
+        "Error code: 400 - Content Exists Risk",
+        response=response,
+        body={
+            "error": {
+                "message": "Content Exists Risk",
+                "type": "invalid_request_error",
+                "code": "invalid_request_error",
+            }
+        },
+    )
+    logged = []
+    monkeypatch.setattr(
+        "sagents.session_runtime.logger.error",
+        lambda message, **kwargs: logged.append((message, kwargs)),
+    )
+
+    try:
+        raise error
+    except BadRequestError as caught:
+        async for _ in session._handle_workflow_error(caught):
+            pass
+
+    assert len(logged) == 1
+    assert "Content Exists Risk" in logged[0][0]
+    assert "Traceback" not in logged[0][0]
+    assert logged[0][1] == {"exc_info": False}

@@ -39,7 +39,11 @@ class HostBackgroundRunner:
     """
 
     def __init__(self, log_dir: Optional[str] = None):
-        self._log_dir = log_dir or os.path.join(os.path.expanduser("~"), ".sage", "bg")
+        self._log_dir = (
+            log_dir
+            or os.environ.get("SAGE_BG_DIR")
+            or os.path.join(os.path.expanduser("~"), ".sage", "bg")
+        )
         try:
             os.makedirs(self._log_dir, exist_ok=True)
         except Exception as exc:

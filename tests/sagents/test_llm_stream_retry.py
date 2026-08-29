@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import httpx
 
-from openai import APIConnectionError, APIError
+from openai import APIConnectionError, APIError, BadRequestError
 from openai.types.chat import chat_completion_chunk
 from openai.types.completion_usage import CompletionUsage
 
@@ -988,6 +988,38 @@ async def test_llm_request_releases_claim_when_provider_never_responds():
             pass
 
     assert context.state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_provider_bad_request_is_not_logged_before_workflow_boundary(monkeypatch):
+    request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+    response = httpx.Response(400, request=request)
+    error = BadRequestError(
+        "Error code: 400 - Content Exists Risk",
+        response=response,
+        body={
+            "error": {
+                "message": "Content Exists Risk",
+                "type": "invalid_request_error",
+                "code": "invalid_request_error",
+            }
+        },
+    )
+    client = FakeClient(attempts=[_attempt_raises_before_yield(error)])
+    agent = DummyAgent(model=client, model_config={"model": "deepseek-chat"})
+    error_logs = []
+    monkeypatch.setattr(
+        "sagents.agent.agent_base.logger.error",
+        lambda message, **kwargs: error_logs.append((message, kwargs)),
+    )
+
+    with pytest.raises(BadRequestError, match="Content Exists Risk"):
+        async for _ in agent._call_llm_streaming(
+            [MessageChunk(role=MessageRole.USER.value, content="run")]
+        ):
+            pass
+
+    assert error_logs == []
 
 
 def _tool_call_chunk(call_id, arguments):

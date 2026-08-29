@@ -42,6 +42,8 @@ def _classify(path: str) -> str:
 
 
 class LintTool:
+    TOOL_CATEGORY = "code_quality"
+
     """通用 lint 工具：在沙箱中调用 ruff / eslint / tsc。"""
 
     def _get_sandbox(self, session_id: str):
