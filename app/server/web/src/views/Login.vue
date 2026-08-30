@@ -356,7 +356,6 @@ const loadAuthConfig = async () => {
 }
 
 const handleLocalSubmit = async () => {
-  if (!localProvider.value) return
   if (!account.value || !password.value) {
     errorMessage.value = t('auth.requiredFields')
     return
