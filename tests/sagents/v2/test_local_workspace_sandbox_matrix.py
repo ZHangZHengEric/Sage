@@ -27,6 +27,8 @@ async def provision(
     *,
     max_total_bytes: int = 2048,
     allowed_roots: tuple[str, ...] = ("/workspace",),
+    process_read_only: bool = False,
+    allowed_executables: tuple[str, ...] = ("python",),
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -42,7 +44,8 @@ async def provision(
             ),
             process=ProcessPolicy(
                 enabled=True,
-                allowed_executables=("python",),
+                read_only=process_read_only,
+                allowed_executables=allowed_executables,
                 max_wall_time_seconds=2,
                 max_output_bytes=32,
             ),
@@ -92,6 +95,19 @@ async def test_local_workspace_reads_and_writes_only_with_matching_signed_grants
         == b"hello"
     )
     assert (tmp_path / "note.txt").read_bytes() == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_maps_host_paths_at_the_sandbox_boundary(
+    tmp_path: Path,
+):
+    _, handle = await provision(tmp_path)
+    inside = tmp_path / "nested" / "note.txt"
+    assert handle.filesystem.normalize_path(str(inside)) == (
+        "/workspace/nested/note.txt"
+    )
+    with pytest.raises(PermissionError, match="outside"):
+        handle.filesystem.normalize_path(str(tmp_path.parent / "outside.txt"))
 
 
 @pytest.mark.asyncio
@@ -197,6 +213,68 @@ async def test_local_process_denies_unlisted_executable(tmp_path: Path):
     )
     with pytest.raises(PermissionError, match="not allowed"):
         await handle.process.run(request, intent=intent, grant=grant)
+
+
+@pytest.mark.asyncio
+async def test_read_only_process_allows_inspection_pipeline(tmp_path: Path):
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+    issuer, handle = await provision(
+        tmp_path,
+        process_read_only=True,
+        allowed_executables=("bash",),
+    )
+    request = ProcessRequest(
+        argv=("bash", "-c", "cat note.txt | head -n 1"), cwd="/workspace"
+    )
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=request.cwd,
+        executable="bash",
+        argv=request.argv,
+    )
+
+    result = await handle.process.run(request, intent=intent, grant=grant)
+
+    assert result.exit_code == 0
+    assert b"needle" in result.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    (
+        "touch changed.txt",
+        "echo changed > note.txt",
+        'python -c \'open("changed.txt", "w").write("x")\'',
+        "find . -delete",
+        "git diff --output=changed.patch",
+    ),
+)
+async def test_read_only_process_rejects_mutating_shell_commands(
+    tmp_path: Path, command: str
+):
+    issuer, handle = await provision(
+        tmp_path,
+        process_read_only=True,
+        allowed_executables=("bash",),
+    )
+    request = ProcessRequest(argv=("bash", "-c", command), cwd="/workspace")
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=request.cwd,
+        executable="bash",
+        argv=request.argv,
+    )
+
+    with pytest.raises(PermissionError, match="read-only"):
+        await handle.process.run(request, intent=intent, grant=grant)
+
+    assert not (tmp_path / "changed.txt").exists()
+    assert not (tmp_path / "changed.patch").exists()
 
 
 @pytest.mark.asyncio

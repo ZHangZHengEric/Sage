@@ -9,6 +9,18 @@ from __future__ import annotations
 
 import importlib.util
 
+from sagents.v2.agent.policy import (
+    BudgetRule,
+    CompositeContinuationPolicy,
+    ExplicitStatusContinuationPolicy,
+    ExplicitStatusRule,
+    FlowBoundaryRule,
+    LoopRecoveryRule,
+    HybridContinuationPolicy,
+    LLMContinuationJudge,
+    LLMJudgeContinuationPolicy,
+    ToolOrTextRule,
+)
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     InMemoryConversationSummaryStore,
@@ -39,7 +51,13 @@ from sagents.v2.runtime.execution.sandbox import (
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 from sagents.v2.runtime.observability import (
     FilesystemDiagnosticSink,
+    FilesystemLogSink,
     NoopDiagnosticSink,
+    NoopLogSink,
+)
+from sagents.v2.session_memory import (
+    NoopSessionMemoryProvider,
+    SqliteBm25SessionMemoryProvider,
 )
 from sagents.v2.runtime.extensions.contracts import (
     CapabilityOffer,
@@ -50,10 +68,170 @@ from sagents.v2.runtime.extensions.contracts import (
 )
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
+from sagents.v2.tool.selection import (
+    DirectToolSelectionPolicy,
+    LLMToolSelectionPolicy,
+    LexicalToolSelectionPolicy,
+    RecentToolSelectionPolicy,
+)
+from sagents.v2.workspace import (
+    BareWorkspaceInitializer,
+    ClawWorkspaceInitializer,
+)
 
 
 def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     """Register every concrete host-selectable infrastructure implementation."""
+
+    bounded_config_schema = {
+        "type": "object",
+        "properties": {
+            "max_visible_tools": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10_000,
+                "default": 24,
+                "title": "Tool count limit",
+                "description": "Maximum number of full Tool schemas sent to the model.",
+            },
+        },
+        "additionalProperties": False,
+    }
+    for plugin_id, name, description, implementation, uses_model in (
+        (
+            "sage.tool-selection.direct",
+            "Show all Tools",
+            "Sends every policy-allowed Tool to the model. Best for small catalogs.",
+            DirectToolSelectionPolicy,
+            False,
+        ),
+        (
+            "sage.tool-selection.llm",
+            "LLM Tool selection",
+            "Uses a fast model and recent context to select relevant Tools; falls back locally on failure.",
+            LLMToolSelectionPolicy,
+            True,
+        ),
+        (
+            "sage.tool-selection.lexical",
+            "BM25 Tool selection",
+            "Ranks Tool names, descriptions, and parameters locally like a search engine.",
+            LexicalToolSelectionPolicy,
+            False,
+        ),
+        (
+            "sage.tool-selection.recent",
+            "Recently used Tools first",
+            "Keeps recently called Tools first, then fills the remaining count deterministically.",
+            RecentToolSelectionPolicy,
+            False,
+        ),
+    ):
+        registry.register(
+            ExtensionRegistration(
+                descriptor=ExtensionDescriptor(
+                    plugin_id=plugin_id,
+                    version="2.0.0",
+                    name=name,
+                    description=description,
+                    provides=(
+                        CapabilityOffer(
+                            capability="tool.selection-policy", api_version="2"
+                        ),
+                    ),
+                    supported_scopes=frozenset(
+                        {ExtensionScope.AGENT, ExtensionScope.RUN}
+                    ),
+                    config_schema=(
+                        {"type": "object", "properties": {}, "additionalProperties": False}
+                        if implementation is DirectToolSelectionPolicy
+                        else bounded_config_schema
+                    ),
+                    capabilities={
+                        "bounded_catalog": implementation
+                        is not DirectToolSelectionPolicy,
+                        "supports_expansion": True,
+                        "uses_model": uses_model,
+                    },
+                    built_in=True,
+                ),
+                factory=lambda context, dependencies, implementation=implementation: implementation(
+                    context.config
+                ),
+            )
+        )
+
+    _one(
+        registry,
+        "sage.session-memory.noop",
+        "No-op Session Memory provider",
+        "session-memory.provider",
+        lambda context, dependencies: NoopSessionMemoryProvider(),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+    )
+    _one(
+        registry,
+        "sage.session-memory.sqlite-bm25",
+        "SQLite BM25 Session Memory provider",
+        "session-memory.provider",
+        lambda context, dependencies: SqliteBm25SessionMemoryProvider(
+            context.config["root"]
+        ),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+    )
+    _one(
+        registry,
+        "sage.agent.continuation.deterministic",
+        "Deterministic continuation policy",
+        "agent.continuation-policy",
+        lambda context, dependencies: CompositeContinuationPolicy(
+            rules=(
+                BudgetRule(),
+                ExplicitStatusRule(),
+                LoopRecoveryRule(int(context.config.get("repeat_threshold", 3))),
+                FlowBoundaryRule(),
+                ToolOrTextRule(),
+            )
+        ),
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+    )
+    _one(
+        registry,
+        "sage.agent.continuation.llm-judge",
+        "No-tool-call LLM Judge completion policy",
+        "agent.continuation-policy",
+        lambda context, dependencies: LLMJudgeContinuationPolicy(
+            LLMContinuationJudge(
+                context.config["model"],
+                model_binding=str(context.config.get("model_binding", "fast")),
+            ),
+        ),
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+    )
+    _one(
+        registry,
+        "sage.agent.continuation.hybrid",
+        "Hybrid deterministic and LLM Judge policy",
+        "agent.continuation-policy",
+        lambda context, dependencies: HybridContinuationPolicy(
+            LLMContinuationJudge(
+                context.config["model"],
+                model_binding=str(context.config.get("model_binding", "fast")),
+            ),
+            repeat_threshold=int(context.config.get("repeat_threshold", 3)),
+        ),
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+    )
+    _one(
+        registry,
+        "sage.agent.continuation.explicit-status",
+        "Explicit turn_status completion policy",
+        "agent.continuation-policy",
+        lambda context, dependencies: ExplicitStatusContinuationPolicy(
+            repeat_threshold=int(context.config.get("repeat_threshold", 3))
+        ),
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+    )
 
     _one(
         registry,
@@ -232,8 +410,51 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         "sage.observability.filesystem",
         "Filesystem diagnostic sink",
         "observability.diagnostic-sink",
-        lambda context, dependencies: FilesystemDiagnosticSink(context.config["root"]),
+        lambda context, dependencies: FilesystemDiagnosticSink(
+            context.config["root"],
+            legacy_root=context.config.get("legacy_root"),
+        ),
         scopes={ExtensionScope.PROCESS},
+    )
+    _one(
+        registry,
+        "sage.logging.noop",
+        "No-op structured log sink",
+        "observability.log-sink",
+        lambda context, dependencies: NoopLogSink(),
+        scopes={ExtensionScope.PROCESS},
+    )
+    _one(
+        registry,
+        "sage.logging.filesystem",
+        "Rotating filesystem structured log sink",
+        "observability.log-sink",
+        lambda context, dependencies: FilesystemLogSink(
+            context.config["root"],
+            filename=str(context.config.get("filename", "sage.jsonl")),
+            max_bytes=int(context.config.get("max_bytes", 10 * 1024 * 1024)),
+            backup_count=int(context.config.get("backup_count", 5)),
+            min_level=str(context.config.get("min_level", "info")),
+        ),
+        scopes={ExtensionScope.PROCESS},
+    )
+    _one(
+        registry,
+        "sage.workspace.initializer.claw",
+        "Claw Mode workspace",
+        "workspace.initializer",
+        lambda context, dependencies: ClawWorkspaceInitializer(
+            language=str(context.config.get("language", "en"))
+        ),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+    )
+    _one(
+        registry,
+        "sage.workspace.initializer.bare",
+        "Bare workspace",
+        "workspace.initializer",
+        lambda context, dependencies: BareWorkspaceInitializer(),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,

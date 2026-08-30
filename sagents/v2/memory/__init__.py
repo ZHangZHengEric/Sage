@@ -1,6 +1,11 @@
 """Independent long-term Memory component for SAgents v2."""
 
 from sagents.v2.memory.context import MemoryContextSource
+from sagents.v2.memory.query import (
+    DirectMemoryRecallQueryGenerator,
+    LLMMemoryRecallQueryGenerator,
+    MemoryRecallQueryGenerator,
+)
 from sagents.v2.memory.contracts import (
     MemoryCapabilities,
     MemoryDeleteResult,
@@ -27,6 +32,9 @@ __all__ = [
     "FilesystemBm25MemoryProvider",
     "MemoryCapabilities",
     "MemoryContextSource",
+    "MemoryRecallQueryGenerator",
+    "DirectMemoryRecallQueryGenerator",
+    "LLMMemoryRecallQueryGenerator",
     "MemoryDeleteResult",
     "MemoryExtractor",
     "MemoryHit",

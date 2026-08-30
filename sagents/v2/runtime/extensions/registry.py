@@ -41,6 +41,9 @@ class ExtensionRegistry:
                 )
             ) from exc
 
+    def contains(self, plugin_id: str) -> bool:
+        return plugin_id in self._registrations
+
     def registrations(self) -> tuple[ExtensionRegistration, ...]:
         return tuple(self._registrations[key] for key in sorted(self._registrations))
 

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from sagents.v2.agent.policy import (
+    CompositeContinuationPolicy,
+    ExplicitStatusContinuationPolicy,
+    HybridContinuationPolicy,
+    LLMJudgeContinuationPolicy,
+)
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
@@ -14,6 +20,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScopeContext,
 )
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
 def test_builtin_inventory_contains_only_real_factories():
@@ -21,6 +28,10 @@ def test_builtin_inventory_contains_only_real_factories():
     inventory = {value["plugin_id"]: value for value in registry.inventory()}
 
     assert {
+        "sage.agent.continuation.deterministic",
+        "sage.agent.continuation.llm-judge",
+        "sage.agent.continuation.hybrid",
+        "sage.agent.continuation.explicit-status",
         "sage.artifact.ephemeral",
         "sage.context.reducer.persistent-summary",
         "sage.context.reducer.window",
@@ -36,19 +47,29 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.flow.agent",
         "sage.job.ephemeral",
         "sage.memory.filesystem-bm25",
+        "sage.memory.recall-query.direct",
+        "sage.memory.recall-query.llm",
         "sage.session.filesystem",
         "sage.session.ephemeral",
+        "sage.session-memory.noop",
+        "sage.session-memory.sqlite-bm25",
         "sage.memory.noop",
         "sage.tool.mcp",
         "sage.tool.multi-agent",
         "sage.tool.official",
         "sage.tool.skill",
+        "sage.tool-selection.direct",
+        "sage.tool-selection.lexical",
+        "sage.tool-selection.llm",
+        "sage.tool-selection.recent",
         "sage.skill.filesystem",
         "sage.model.openai-responses",
         "sage.model.openai-chat-completions",
         "sage.model.anthropic-messages",
         "sage.observability.filesystem",
         "sage.observability.noop",
+        "sage.logging.filesystem",
+        "sage.logging.noop",
         "sage.package-registry.ephemeral",
         "sage.protocol.a2a",
         "sage.protocol.acp",
@@ -58,6 +79,8 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.sandbox.ephemeral",
         "sage.sandbox.local-workspace",
         "sage.scheduler.ephemeral",
+        "sage.workspace.initializer.bare",
+        "sage.workspace.initializer.claw",
     } == set(inventory)
     assert all(callable(value.factory) for value in registry.registrations())
     assert (
@@ -95,3 +118,36 @@ def test_registered_factory_creates_the_selected_instance():
         {},
     )
     assert value.__class__.__name__ == "NoopMemoryProvider"
+
+
+@pytest.mark.parametrize(
+    ("plugin_id", "expected_type"),
+    [
+        (
+            "sage.agent.continuation.deterministic",
+            CompositeContinuationPolicy,
+        ),
+        ("sage.agent.continuation.llm-judge", LLMJudgeContinuationPolicy),
+        ("sage.agent.continuation.hybrid", HybridContinuationPolicy),
+        (
+            "sage.agent.continuation.explicit-status",
+            ExplicitStatusContinuationPolicy,
+        ),
+    ],
+)
+def test_every_continuation_plugin_factory_creates_a_real_policy(
+    plugin_id, expected_type
+):
+    registry = builtin_extension_registry()
+    registration = registry.get(plugin_id)
+
+    value = registration.factory(
+        ExtensionScopeContext(
+            scope=ExtensionScope.AGENT,
+            scope_id="test-continuation",
+            config={"model": ScriptedModelProvider(())},
+        ),
+        {},
+    )
+
+    assert isinstance(value, expected_type)

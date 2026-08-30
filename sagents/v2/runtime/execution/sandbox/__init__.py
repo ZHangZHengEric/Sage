@@ -2,6 +2,7 @@
 
 from sagents.v2.runtime.execution.sandbox.contracts import (
     FileOperation,
+    FileSystemMode,
     FileSystemPolicy,
     IsolationLevel,
     LifecyclePolicy,
@@ -36,6 +37,7 @@ from sagents.v2.runtime.execution.sandbox.provider import (
 
 __all__ = [
     "FileOperation",
+    "FileSystemMode",
     "FileSystemPolicy",
     "InMemorySandboxProvider",
     "IsolationLevel",

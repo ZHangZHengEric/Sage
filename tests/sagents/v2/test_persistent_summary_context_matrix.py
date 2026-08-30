@@ -78,6 +78,7 @@ async def test_persistent_summary_replaces_old_units_without_splitting_tool_pair
 
     assert projection.strategy == "persistent_summary"
     assert projection.dropped_message_count == 3
+    assert projection.historical_messages == ledger()[1:4]
     assert [message.role for message in projection.messages] == [
         "system",
         "system",
@@ -117,6 +118,7 @@ async def test_existing_summary_is_reused_and_rolled_forward_on_later_turns():
     assert stored is not None
     assert stored.revision == 2
     assert summarizer.requests[-1].previous_summary == "summary(user,assistant,tool)"
+    assert projection.historical_messages == extended[1:6]
     assert projection.messages[-1].content[0].text == "new request"
 
 

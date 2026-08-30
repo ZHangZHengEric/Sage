@@ -100,6 +100,18 @@ def test_agent_config_read_normalizes_multi_and_drops_legacy_flag():
     assert "multiAgent" not in convert_agent_to_config(agent)
 
 
+def test_agent_config_read_migrates_synchronous_questionnaire_tool():
+    agent = convert_config_to_agent(
+        "legacy",
+        {
+            "name": "Legacy",
+            "availableTools": ["file_read", "questionnaire", "questionnaire_async"],
+        },
+    )
+
+    assert agent.availableTools == ["file_read", "questionnaire_async"]
+
+
 def test_agent_config_round_trip_preserves_thinking_level():
     agent = convert_config_to_agent(
         "reasoner",

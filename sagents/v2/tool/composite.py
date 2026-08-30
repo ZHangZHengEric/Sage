@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
 from sagents.v2.tool.contracts import (
     ReconcileResult,
@@ -40,6 +40,66 @@ class FilteredToolCatalog:
                     code="tool.not_enabled",
                     category=ErrorCategory.POLICY_DENIED,
                     message=f"tool {name!r} is outside this run's resolved tool set",
+                    safe_to_resume=True,
+                )
+            )
+        return await self._catalog.get_tool(name, run_id=run_id)
+
+
+class InvocationGrantToolCatalog:
+    """Catalog restricted by the durable Run invocation-mode grant.
+
+    Runtime control tools are granted explicitly per invocation.  The same
+    check protects both model-visible listing and direct lookup, so a provider
+    cannot execute a hidden control tool by returning its name.
+    """
+
+    _CONTROL_TOOLS = frozenset({"goal_submit", "goal_complete"})
+    _MODE_GRANTS = {
+        "plan": frozenset({"goal_submit"}),
+        "goal": frozenset({"goal_submit", "goal_complete"}),
+    }
+
+    def __init__(
+        self,
+        catalog: ToolCatalog,
+        allowed_names,
+        command_reader: Callable[[str], Awaitable[object]],
+        *,
+        fallback_invocation_mode: str | None = None,
+    ) -> None:
+        self._catalog = catalog
+        self._base_allowed = frozenset(allowed_names) - self._CONTROL_TOOLS
+        self._command_reader = command_reader
+        self._fallback_invocation_mode = fallback_invocation_mode
+
+    async def _allowed(self, run_id: str) -> frozenset[str]:
+        try:
+            command = await self._command_reader(run_id)
+            mode = str(getattr(command, "invocation_mode", None) or "normal")
+        except SageV2Error as exc:
+            if self._fallback_invocation_mode is None or not exc.info.code.endswith(
+                ".not_found"
+            ):
+                raise
+            mode = self._fallback_invocation_mode
+        return self._base_allowed | self._MODE_GRANTS.get(mode, frozenset())
+
+    async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
+        allowed = await self._allowed(run_id)
+        return tuple(
+            definition
+            for definition in await self._catalog.list_tools(run_id=run_id)
+            if definition.name in allowed
+        )
+
+    async def get_tool(self, name: str, *, run_id: str) -> ToolDefinition:
+        if name not in await self._allowed(run_id):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool.not_enabled",
+                    category=ErrorCategory.POLICY_DENIED,
+                    message=f"tool {name!r} is outside this run's resolved tool grant",
                     safe_to_resume=True,
                 )
             )

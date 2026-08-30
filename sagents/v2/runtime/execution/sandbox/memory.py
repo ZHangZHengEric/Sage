@@ -42,6 +42,9 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxState,
     TerminateMode,
 )
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    validate_read_only_shell_command,
+)
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -126,6 +129,14 @@ class _MemoryFileSystem:
     def __init__(self, provider: "InMemorySandboxProvider", sandbox_id: str) -> None:
         self._provider = provider
         self._sandbox_id = sandbox_id
+
+    def normalize_path(self, path: str) -> str:
+        row = self._provider._row(self._sandbox_id)
+        return self._provider._normalize_path(
+            path,
+            row.spec.workspace_root,
+            row.spec.filesystem.allowed_roots,
+        )
 
     async def read_bytes(self, path, *, intent, grant):
         row, normalized = self._provider._authorize(
@@ -224,6 +235,24 @@ class _MemoryProcessRuntime:
         row = self._provider._authorize_process(
             self._sandbox_id, request, intent, grant
         )
+        if row.spec.process.read_only:
+            if (
+                request.argv[:2] not in {("bash", "-c"), ("sh", "-c")}
+                or len(request.argv) != 3
+            ):
+                raise self._provider._error(
+                    "sandbox.permission_denied",
+                    ErrorCategory.POLICY_DENIED,
+                    "read-only process mode accepts only a validated shell command",
+                )
+            try:
+                validate_read_only_shell_command(request.argv[2])
+            except PermissionError as exc:
+                raise self._provider._error(
+                    "sandbox.permission_denied",
+                    ErrorCategory.POLICY_DENIED,
+                    str(exc),
+                ) from exc
         handler = self._provider._process_handlers.get(request.argv[0])
         if handler is None:
             raise self._provider._error(

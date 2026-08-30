@@ -35,6 +35,8 @@ class RuntimeErrorInfo(StrictModel):
     safe_to_resume: bool = False
     details_ref: Identifier | None = None
     provider_code: str | None = None
+    message_key: Identifier | None = None
+    message_params: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -31,7 +31,7 @@ from common.services.agent_workspace import (
     get_agent_workspace_root,
     sync_selected_skills_to_workspace,
 )
-from common.schemas.agent import AgentAbilityItem
+from common.schemas.agent import AgentAbilityItem, normalize_available_tool_names
 from common.utils.agent_mode import normalize_persisted_agent_mode
 
 try:
@@ -150,12 +150,18 @@ def validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     if not available_tools:
         return agent_config
 
+    configured_tools = list(available_tools)
+    migrated_tools = normalize_available_tool_names(configured_tools) or []
+    if migrated_tools != configured_tools:
+        logger.info("已将停用的 questionnaire 工具迁移为 questionnaire_async")
+
     valid_tool_names = set(tm.list_all_tools_name())
-    filtered_tools = [t for t in available_tools if t in valid_tool_names]
-    if len(filtered_tools) != len(available_tools):
-        removed_tools = set(available_tools) - set(filtered_tools)
+    filtered_tools = [t for t in migrated_tools if t in valid_tool_names]
+    removed_tools = set(migrated_tools) - set(filtered_tools)
+    if removed_tools:
         logger.warning(f"以下工具不可用，已自动移除: {removed_tools}")
 
+    if filtered_tools != configured_tools:
         if "available_tools" in agent_config:
             agent_config["available_tools"] = filtered_tools
         if "availableTools" in agent_config:

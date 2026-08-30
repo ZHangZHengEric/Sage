@@ -16,7 +16,7 @@ ref: questionnaire-formats
 1. assistant 文本中的 Inline Questionnaire；
 2. `questionnaire_async` 工具调用。
 
-同步等待答案的工具问卷不在本文范围内。
+原同步等待答案的 `questionnaire` 工具已从工具目录移除；旧会话仍可兼容展示其历史消息。
 
 ## 方式总览
 

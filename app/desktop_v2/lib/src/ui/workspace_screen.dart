@@ -5,25 +5,28 @@ import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../models.dart';
 import '../localization/app_localizations.dart';
+import '../services/terminal_service.dart';
 import '../state/workspace_controller.dart';
 import 'file_preview.dart';
 import 'settings_screen.dart';
 import 'shared/desktop_shell.dart';
 import 'tool_activity_presentation.dart';
+import 'workspace_panels/terminal/terminal_workspace_panel_plugin.dart';
+import 'workspace_panels/workspace_panel_plugin.dart';
 
 const double _splitHandleHitWidth = 12;
 const double _minRailFraction = 0.16;
 const double _defaultRailFraction = 0.16;
 const double _maxRailFraction = 0.28;
-const double _minWorkspaceFraction = 0.34;
-const double _defaultWorkspaceFraction = 0.44;
-const double _maxWorkspaceFraction = 0.60;
+const WorkspacePanelSizing _defaultWorkspacePanelSizing =
+    WorkspacePanelSizing();
 
 class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({
@@ -32,6 +35,8 @@ class WorkspaceScreen extends StatefulWidget {
     required this.onThemeModeChanged,
     required this.language,
     required this.onLanguageChanged,
+    this.panelPlugins = const [],
+    this.panelDockController,
     super.key,
   });
 
@@ -40,6 +45,8 @@ class WorkspaceScreen extends StatefulWidget {
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final String language;
   final ValueChanged<String> onLanguageChanged;
+  final List<WorkspacePanelPlugin> panelPlugins;
+  final WorkspacePanelDockController? panelDockController;
 
   @override
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
@@ -50,7 +57,66 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _workspaceCollapsed = false;
   bool _settingsOpen = false;
   double _railFraction = _defaultRailFraction;
-  double _workspaceFraction = _defaultWorkspaceFraction;
+  double _workspaceFraction =
+      _defaultWorkspacePanelSizing.preferredWidthFraction;
+  late WorkspacePanelRegistry _panelRegistry;
+  late WorkspacePanelDockController _panelDockController;
+  late bool _ownsPanelDockController;
+
+  WorkspacePanelServices get _panelServices => WorkspacePanelServices({
+    WorkspaceController: widget.controller,
+    TerminalService: widget.controller.terminalService,
+    WorkspacePanelSelection: WorkspacePanelSelection(
+      agentId: widget.controller.selectedAgentId,
+      workspaceId: widget.controller.selectedGroup.workspaceId,
+      workspaceName: widget.controller.selectedGroup.name,
+    ),
+  });
+
+  WorkspacePanelSizing get _activePanelSizing =>
+      _panelDockController.activePlugin?.sizing ?? _defaultWorkspacePanelSizing;
+
+  @override
+  void initState() {
+    super.initState();
+    _panelDockController =
+        widget.panelDockController ?? WorkspacePanelDockController();
+    _ownsPanelDockController = widget.panelDockController == null;
+    _rebuildPanelRegistry();
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkspaceScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.panelDockController != widget.panelDockController) {
+      if (_ownsPanelDockController) _panelDockController.dispose();
+      _panelDockController =
+          widget.panelDockController ?? WorkspacePanelDockController();
+      _ownsPanelDockController = widget.panelDockController == null;
+    }
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.panelPlugins != widget.panelPlugins ||
+        oldWidget.panelDockController != widget.panelDockController) {
+      _rebuildPanelRegistry();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_ownsPanelDockController) _panelDockController.dispose();
+    super.dispose();
+  }
+
+  void _rebuildPanelRegistry() {
+    _panelRegistry = WorkspacePanelRegistry([
+      const _FileWorkspacePanelPlugin(),
+      const TerminalWorkspacePanelPlugin(),
+      ...widget.panelPlugins,
+    ]);
+    _panelDockController.syncPlugins(
+      _panelRegistry.plugins.where((plugin) => plugin.supports(_panelServices)),
+    );
+  }
 
   void _resizeRail(double delta, double width) {
     setState(() {
@@ -61,9 +127,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _resizeWorkspace(double delta, double width) {
+    final sizing = _activePanelSizing;
     setState(() {
       _workspaceFraction = (_workspaceFraction - delta / width)
-          .clamp(_minWorkspaceFraction, _maxWorkspaceFraction)
+          .clamp(sizing.minWidthFraction, sizing.maxWidthFraction)
           .toDouble();
     });
   }
@@ -71,48 +138,54 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: widget.controller,
+      listenable: _panelDockController,
       builder: (context, _) {
-        final colors = Theme.of(context).colorScheme;
-        return GlassScaffold(
-          statusBarStyle: GlassStatusBarStyle.auto,
-          backgroundColor: Colors.transparent,
-          background: _Background(colors: colors),
-          enableBackgroundSampling: false,
-          edgeToEdge: true,
-          edgeFade: false,
-          body: Stack(
-            children: [
-              Positioned.fill(
-                child: widget.controller.loading
-                    ? const Center(child: CupertinoActivityIndicator())
-                    : _settingsOpen
-                    ? SettingsScreen(
-                        controller: widget.controller,
-                        themeMode: widget.themeMode,
-                        onThemeModeChanged: widget.onThemeModeChanged,
-                        language: widget.language,
-                        onLanguageChanged: widget.onLanguageChanged,
-                        railFraction: _railFraction,
-                        onClose: () => setState(() => _settingsOpen = false),
-                      )
-                    : _buildWorkspaceShell(),
+        return ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) {
+            final colors = Theme.of(context).colorScheme;
+            return GlassScaffold(
+              statusBarStyle: GlassStatusBarStyle.auto,
+              backgroundColor: Colors.transparent,
+              background: _Background(colors: colors),
+              enableBackgroundSampling: false,
+              edgeToEdge: true,
+              edgeFade: false,
+              body: Stack(
+                children: [
+                  Positioned.fill(
+                    child: widget.controller.loading
+                        ? const Center(child: CupertinoActivityIndicator())
+                        : _settingsOpen
+                        ? SettingsScreen(
+                            controller: widget.controller,
+                            themeMode: widget.themeMode,
+                            onThemeModeChanged: widget.onThemeModeChanged,
+                            language: widget.language,
+                            onLanguageChanged: widget.onLanguageChanged,
+                            railFraction: _railFraction,
+                            onClose: () =>
+                                setState(() => _settingsOpen = false),
+                          )
+                        : _buildWorkspaceShell(),
+                  ),
+                  if (widget.controller.error case final message?)
+                    Positioned(
+                      top: 70,
+                      right: 18,
+                      width: min(
+                        380,
+                        max(0, MediaQuery.sizeOf(context).width - 36),
+                      ),
+                      child: _ErrorNotice(
+                        message: message,
+                        onClose: widget.controller.clearError,
+                      ),
+                    ),
+                ],
               ),
-              if (widget.controller.error case final message?)
-                Positioned(
-                  top: 70,
-                  right: 18,
-                  width: min(
-                    380,
-                    max(0, MediaQuery.sizeOf(context).width - 36),
-                  ),
-                  child: _ErrorNotice(
-                    message: message,
-                    onClose: widget.controller.clearError,
-                  ),
-                ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -121,13 +194,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _buildWorkspaceShell() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final panelSizing = _activePanelSizing;
         if (constraints.maxWidth < desktopCompactBreakpoint) {
           final railHeight = _railCollapsed
               ? 0.0
               : desktopCompactRailHeight(constraints.maxHeight);
           final workspaceHeight = _workspaceCollapsed
               ? 0.0
-              : (constraints.maxHeight * 0.42).clamp(240.0, 430.0).toDouble();
+              : (constraints.maxHeight * panelSizing.compactHeightFraction)
+                    .clamp(
+                      panelSizing.minCompactHeight,
+                      panelSizing.maxCompactHeight,
+                    )
+                    .toDouble();
           return Column(
             children: [
               if (!_railCollapsed)
@@ -164,8 +243,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   height: workspaceHeight,
                   child: RepaintBoundary(
                     key: const ValueKey('workspace-repaint-boundary'),
-                    child: _FilePanel(
-                      controller: widget.controller,
+                    child: WorkspacePanelDock(
+                      registry: _panelRegistry,
+                      services: _panelServices,
+                      controller: _panelDockController,
                       compact: true,
                     ),
                   ),
@@ -182,9 +263,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             constraints.maxWidth -
             railWidth -
             (_railCollapsed ? 0 : desktopSplitHandleWidth);
-        final minWorkspaceWidth = constraints.maxWidth * _minWorkspaceFraction;
+        final minWorkspaceWidth =
+            constraints.maxWidth * panelSizing.minWidthFraction;
         final maxWorkspaceWidth = min(
-          constraints.maxWidth * _maxWorkspaceFraction,
+          constraints.maxWidth * panelSizing.maxWidthFraction,
           max(0.0, widthAfterRail - desktopSplitHandleWidth - minThreadWidth),
         );
         final showWorkspace =
@@ -245,7 +327,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     width: workspaceWidth,
                     child: RepaintBoundary(
                       key: const ValueKey('workspace-repaint-boundary'),
-                      child: _FilePanel(controller: widget.controller),
+                      child: WorkspacePanelDock(
+                        registry: _panelRegistry,
+                        services: _panelServices,
+                        controller: _panelDockController,
+                      ),
                     ),
                   ),
                 ],
@@ -338,6 +424,7 @@ class _ProjectRail extends StatefulWidget {
 
 class _ProjectRailState extends State<_ProjectRail> {
   final Set<String> _collapsedProjectIds = <String>{};
+  final Set<String> _collapsedConversationIds = <String>{};
 
   // Project conversations stay open while the user moves between projects or
   // Agent Workspace. Only an explicit disclosure-button click may collapse a
@@ -360,6 +447,69 @@ class _ProjectRailState extends State<_ProjectRail> {
         _collapsedProjectIds.remove(group.id);
       }
     });
+  }
+
+  List<Widget> _conversationBranch(
+    String groupId,
+    Conversation conversation, {
+    required bool agentWorkspace,
+  }) {
+    final hasChildren = conversation.subSessions.isNotEmpty;
+    final expanded = !_collapsedConversationIds.contains(conversation.id);
+    return [
+      _ConversationTile(
+        conversation: conversation,
+        selected:
+            widget.controller.selectedConversationId == conversation.id &&
+            !widget.controller.viewingSubSession,
+        indented: !agentWorkspace,
+        hasChildren: hasChildren,
+        expanded: expanded,
+        onToggleExpanded: hasChildren
+            ? () => setState(() {
+                if (!_collapsedConversationIds.add(conversation.id)) {
+                  _collapsedConversationIds.remove(conversation.id);
+                }
+              })
+            : null,
+        onTap: () => agentWorkspace
+            ? widget.controller.selectAgentWorkspaceConversation(
+                conversation.id,
+              )
+            : widget.controller.selectConversation(conversation.id),
+        onArchive: () =>
+            widget.controller.archiveConversation(groupId, conversation.id),
+        onDelete: () => _deleteConversation(context, groupId, conversation),
+      ),
+      if (hasChildren && expanded)
+        ..._subSessionTiles(conversation, conversation.sessionId, depth: 0),
+    ];
+  }
+
+  List<Widget> _subSessionTiles(
+    Conversation root,
+    String? parentSessionId, {
+    required int depth,
+  }) {
+    final children = root.subSessions
+        .where((value) => value.parentSessionId == parentSessionId)
+        .toList();
+    return [
+      for (final child in children) ...[
+        _SubSessionTile(
+          conversation: child,
+          depth: depth,
+          selected:
+              widget.controller.selectedConversationId == root.id &&
+              widget.controller.selectedSubSessionId == child.sessionId,
+          onTap: () => widget.controller.selectSubSession(
+            root.id,
+            child.sessionId ?? '',
+          ),
+        ),
+        ..._subSessionTiles(root, child.sessionId, depth: depth + 1),
+      ],
+    ];
   }
 
   @override
@@ -498,21 +648,10 @@ class _ProjectRailState extends State<_ProjectRail> {
                     ),
                     if (_isExpanded(group))
                       for (final conversation in group.conversations)
-                        _ConversationTile(
-                          conversation: conversation,
-                          selected:
-                              conversation.id ==
-                              widget.controller.selectedConversationId,
-                          onTap: () => widget.controller.selectConversation(
-                            conversation.id,
-                          ),
-                          onArchive: () => widget.controller
-                              .archiveConversation(group.id, conversation.id),
-                          onDelete: () => _deleteConversation(
-                            context,
-                            group.id,
-                            conversation,
-                          ),
+                        ..._conversationBranch(
+                          group.id,
+                          conversation,
+                          agentWorkspace: false,
                         ),
                     const SizedBox(height: 10),
                   ],
@@ -550,25 +689,10 @@ class _ProjectRailState extends State<_ProjectRail> {
                     ),
                     for (final conversation
                         in widget.controller.agentWorkspaceConversations)
-                      _ConversationTile(
-                        conversation: conversation,
-                        selected:
-                            widget.controller.selectedGroupId ==
-                                WorkspaceController.agentWorkspaceId &&
-                            conversation.id ==
-                                widget.controller.selectedConversationId,
-                        indented: false,
-                        onTap: () => widget.controller
-                            .selectAgentWorkspaceConversation(conversation.id),
-                        onArchive: () => widget.controller.archiveConversation(
-                          WorkspaceController.agentWorkspaceId,
-                          conversation.id,
-                        ),
-                        onDelete: () => _deleteConversation(
-                          context,
-                          WorkspaceController.agentWorkspaceId,
-                          conversation,
-                        ),
+                      ..._conversationBranch(
+                        WorkspaceController.agentWorkspaceId,
+                        conversation,
+                        agentWorkspace: true,
                       ),
                   ],
                 ],
@@ -797,6 +921,9 @@ class _ConversationTile extends StatefulWidget {
     required this.onArchive,
     required this.onDelete,
     this.indented = true,
+    this.hasChildren = false,
+    this.expanded = false,
+    this.onToggleExpanded,
   });
 
   final Conversation conversation;
@@ -805,6 +932,9 @@ class _ConversationTile extends StatefulWidget {
   final VoidCallback onArchive;
   final VoidCallback onDelete;
   final bool indented;
+  final bool hasChildren;
+  final bool expanded;
+  final VoidCallback? onToggleExpanded;
 
   @override
   State<_ConversationTile> createState() => _ConversationTileState();
@@ -816,11 +946,15 @@ class _ConversationTileState extends State<_ConversationTile> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final manageable =
-        widget.conversation.status != RunStatus.starting &&
-        widget.conversation.status != RunStatus.running &&
-        widget.conversation.status != RunStatus.suspending &&
-        widget.conversation.status != RunStatus.suspended;
+    final manageable = [widget.conversation, ...widget.conversation.subSessions]
+        .every(
+          (conversation) => !{
+            RunStatus.starting,
+            RunStatus.running,
+            RunStatus.suspending,
+            RunStatus.suspended,
+          }.contains(conversation.status),
+        );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -843,6 +977,26 @@ class _ConversationTileState extends State<_ConversationTile> {
             child: Row(
               children: [
                 if (widget.indented) const SizedBox(width: 16),
+                if (widget.hasChildren)
+                  InkWell(
+                    key: ValueKey(
+                      'conversation-disclosure:${widget.conversation.id}',
+                    ),
+                    onTap: widget.onToggleExpanded,
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox.square(
+                      dimension: 18,
+                      child: Icon(
+                        widget.expanded
+                            ? CupertinoIcons.chevron_down
+                            : CupertinoIcons.chevron_right,
+                        size: 11,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 18),
                 Icon(
                   CupertinoIcons.bubble_left,
                   size: 14,
@@ -939,6 +1093,72 @@ class _ConversationTileState extends State<_ConversationTile> {
   }
 }
 
+class _SubSessionTile extends StatelessWidget {
+  const _SubSessionTile({
+    required this.conversation,
+    required this.depth,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Conversation conversation;
+  final int depth;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return InkWell(
+      key: ValueKey('sub-session-tile:${conversation.sessionId}'),
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        height: 30,
+        padding: EdgeInsets.only(left: 42 + depth * 14, right: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? colors.onSurface.withValues(alpha: 0.095)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              CupertinoIcons.arrow_turn_down_right,
+              size: 13,
+              color: selected
+                  ? colors.primary
+                  : colors.onSurfaceVariant.withValues(alpha: 0.72),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                conversation.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
+            if (conversation.pendingInteraction != null)
+              Icon(
+                CupertinoIcons.exclamationmark_circle_fill,
+                size: 13,
+                color: colors.tertiary,
+              )
+            else if (conversation.status != RunStatus.idle &&
+                conversation.status != RunStatus.completed)
+              _StatusDot(status: conversation.status),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ThreadPanel extends StatelessWidget {
   const _ThreadPanel({
     required this.controller,
@@ -958,8 +1178,9 @@ class _ThreadPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final conversation = controller.selectedConversation;
+    final conversation = controller.selectedDisplayConversation;
     if (conversation == null) return const SizedBox.shrink();
+    final readOnly = controller.viewingSubSession;
     return DecoratedBox(
       decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface),
       child: Column(
@@ -993,10 +1214,11 @@ class _ThreadPanel extends StatelessWidget {
                               ),
                         ),
                         const SizedBox(height: 42),
-                        _Composer(
-                          controller: controller,
-                          conversation: conversation,
-                        ),
+                        if (!readOnly)
+                          _Composer(
+                            controller: controller,
+                            conversation: conversation,
+                          ),
                       ],
                     ),
                   ),
@@ -1004,24 +1226,33 @@ class _ThreadPanel extends StatelessWidget {
               ),
             )
           else ...[
-            Expanded(child: _MessageList(conversation: conversation)),
+            Expanded(
+              child: _MessageList(
+                conversation: conversation,
+                subSessions:
+                    controller.selectedConversation?.subSessions ?? const [],
+              ),
+            ),
             if (conversation.pendingInteraction case final interaction?)
               _InteractionCard(
                 interaction: interaction,
-                onReply: controller.replyInteraction,
+                onReply: readOnly
+                    ? controller.replyDisplayInteraction
+                    : controller.replyInteraction,
               ),
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 820),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(34, 8, 34, compact ? 18 : 24),
-                  child: _Composer(
-                    controller: controller,
-                    conversation: conversation,
+            if (!readOnly)
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(34, 8, 34, compact ? 18 : 24),
+                    child: _Composer(
+                      controller: controller,
+                      conversation: conversation,
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ],
       ),
@@ -1130,9 +1361,10 @@ class _ThreadHeader extends StatelessWidget {
 }
 
 class _MessageList extends StatefulWidget {
-  const _MessageList({required this.conversation});
+  const _MessageList({required this.conversation, this.subSessions = const []});
 
   final Conversation conversation;
+  final List<Conversation> subSessions;
 
   @override
   State<_MessageList> createState() => _MessageListState();
@@ -1192,7 +1424,16 @@ class _MessageListState extends State<_MessageList> {
               '${panel.activities.fold<int>(0, (sum, value) => sum + value.result.length)}',
         )
         .join('|');
-    return '$messageSignature:$processSignature';
+    final subSessionSignature = widget.subSessions
+        .map(
+          (value) =>
+              '${value.sessionId}:${value.status}:${value.runSequence}:'
+              '${value.messages.fold<int>(0, (sum, message) => sum + message.text.length)}:'
+              '${value.pendingInteraction?.id ?? ''}',
+        )
+        .join('|');
+    return '$messageSignature:$processSignature:$subSessionSignature:'
+        '${conversation.thinking}';
   }
 
   void _updateScrollButton() {
@@ -1238,6 +1479,7 @@ class _MessageListState extends State<_MessageList> {
             key: ValueKey(panel.id),
             panel: panel,
             messages: _processMessagesFor(panel),
+            subSessions: _subSessionsFor(panel),
           ),
         );
       }
@@ -1252,9 +1494,14 @@ class _MessageListState extends State<_MessageList> {
           key: ValueKey(panel.id),
           panel: panel,
           messages: _processMessagesFor(panel),
+          subSessions: _subSessionsFor(panel),
         ),
       );
       children.add(const SizedBox(height: 26));
+    }
+    if (conversation.thinking) {
+      children.add(const _RunningThinkingStatus());
+      children.add(const SizedBox(height: 14));
     }
     return Stack(
       children: [
@@ -1277,7 +1524,8 @@ class _MessageListState extends State<_MessageList> {
   bool _shouldShowPanel(RuntimeProcessPanel panel) {
     return panel.running ||
         panel.activities.isNotEmpty ||
-        _processMessagesFor(panel).isNotEmpty;
+        _processMessagesFor(panel).isNotEmpty ||
+        _subSessionsFor(panel).isNotEmpty;
   }
 
   List<ChatMessage> _processMessagesFor(RuntimeProcessPanel panel) {
@@ -1303,6 +1551,176 @@ class _MessageListState extends State<_MessageList> {
       ))
         if (message.role == 'assistant' && message.processOnly) message,
     ];
+  }
+
+  List<Conversation> _subSessionsFor(RuntimeProcessPanel panel) {
+    final parentSessionId = conversation.sessionId;
+    final values = <Conversation>[
+      for (final value in widget.subSessions)
+        if (value.parentSessionId == parentSessionId &&
+            (panel.runId.isEmpty || value.parentRunId == panel.runId))
+          value,
+    ];
+    final includedSessionIds = {for (final value in values) value.sessionId};
+    var added = true;
+    while (added) {
+      added = false;
+      for (final value in widget.subSessions) {
+        if (values.contains(value) ||
+            !includedSessionIds.contains(value.parentSessionId)) {
+          continue;
+        }
+        values.add(value);
+        includedSessionIds.add(value.sessionId);
+        added = true;
+      }
+    }
+    return values;
+  }
+}
+
+class _RunningThinkingStatus extends StatefulWidget {
+  const _RunningThinkingStatus();
+
+  @override
+  State<_RunningThinkingStatus> createState() => _RunningThinkingStatusState();
+}
+
+class _RunningThinkingStatusState extends State<_RunningThinkingStatus> {
+  late final Timer _timer;
+  var _dotCount = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 420), (_) {
+      if (mounted) setState(() => _dotCount = (_dotCount % 3) + 1);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final label =
+        '${context.l10n.text('workspace.thinking')}'
+        '${'.' * _dotCount}';
+    return Semantics(
+      key: const ValueKey('thread-thinking-status'),
+      liveRegion: true,
+      label: context.l10n.text('workspace.thinking'),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CupertinoActivityIndicator(
+                  radius: 7,
+                  color: colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 9),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurface.withValues(alpha: 0.82),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolActivityShimmer extends StatefulWidget {
+  const _ToolActivityShimmer({
+    required this.child,
+    this.enabled = true,
+    required this.shimmerKey,
+  });
+
+  final Widget child;
+  final bool enabled;
+  final Key shimmerKey;
+
+  @override
+  State<_ToolActivityShimmer> createState() => _ToolActivityShimmerState();
+}
+
+class _ToolActivityShimmerState extends State<_ToolActivityShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    if (widget.enabled) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ToolActivityShimmer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.maybeOf(context);
+    final animationsDisabled =
+        (media?.disableAnimations ?? false) ||
+        (media?.accessibleNavigation ?? false);
+    if (!widget.enabled || animationsDisabled) return widget.child;
+
+    final colors = Theme.of(context).colorScheme;
+    final base = colors.onSurfaceVariant.withValues(alpha: 0.72);
+    final highlight = colors.onSurface;
+    return RepaintBoundary(
+      key: widget.shimmerKey,
+      child: AnimatedBuilder(
+        animation: _controller,
+        child: widget.child,
+        builder: (context, child) => ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) {
+            final sweepWidth = max(bounds.width * 0.52, 42.0);
+            final travel = bounds.width + sweepWidth * 2;
+            final left = -sweepWidth + travel * _controller.value;
+            return LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [base, base, highlight, base, base],
+              stops: const [0, 0.32, 0.5, 0.68, 1],
+            ).createShader(Rect.fromLTWH(left, 0, sweepWidth, bounds.height));
+          },
+          child: child,
+        ),
+      ),
+    );
   }
 }
 
@@ -1368,28 +1786,39 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _ProcessPanel extends StatefulWidget {
-  const _ProcessPanel({required this.panel, required this.messages, super.key});
+  const _ProcessPanel({
+    required this.panel,
+    required this.messages,
+    this.subSessions = const [],
+    super.key,
+  });
 
   final RuntimeProcessPanel panel;
   final List<ChatMessage> messages;
+  final List<Conversation> subSessions;
 
   @override
   State<_ProcessPanel> createState() => _ProcessPanelState();
 }
 
 class _ProcessPanelState extends State<_ProcessPanel> {
-  bool _expanded = true;
+  late bool _expanded;
+  late bool _wasRunning;
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
+    _expanded = widget.panel.running;
+    _wasRunning = widget.panel.running;
     _syncTimer();
   }
 
   @override
   void didUpdateWidget(covariant _ProcessPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_wasRunning && !widget.panel.running) _expanded = false;
+    _wasRunning = widget.panel.running;
     _syncTimer();
   }
 
@@ -1418,6 +1847,17 @@ class _ProcessPanelState extends State<_ProcessPanel> {
       panel.startedAt,
     );
     final items = _orderedProcessItems(panel, widget.messages);
+    final childSessionIds = {
+      for (final value in widget.subSessions) value.sessionId,
+    };
+    final rootSubSessions = [
+      for (final value in widget.subSessions)
+        if (!childSessionIds.contains(value.parentSessionId)) value,
+    ];
+    final unlinkedRootSubSessions = _unlinkedSubSessions(
+      items,
+      rootSubSessions,
+    );
     return Center(
       child: ConstrainedBox(
         key: const ValueKey('process-panel'),
@@ -1492,7 +1932,22 @@ class _ProcessPanelState extends State<_ProcessPanel> {
             ),
             if (_expanded && items.isNotEmpty) ...[
               const SizedBox(height: 12),
-              _ProcessStreamLog(items: items),
+              _ProcessStreamLog(
+                items: items,
+                subSessions: rootSubSessions,
+                allSubSessions: widget.subSessions,
+              ),
+            ],
+            if (_expanded && unlinkedRootSubSessions.isNotEmpty) ...[
+              if (items.isNotEmpty) const SizedBox(height: 10),
+              for (final child in unlinkedRootSubSessions) ...[
+                _SubSessionProcessGroup(
+                  conversation: child,
+                  allSubSessions: widget.subSessions,
+                ),
+                if (child != unlinkedRootSubSessions.last)
+                  const SizedBox(height: 8),
+              ],
             ],
           ],
         ),
@@ -1551,18 +2006,42 @@ List<_ProcessStreamItem> _orderedProcessItems(
 }
 
 class _ProcessStreamLog extends StatelessWidget {
-  const _ProcessStreamLog({required this.items});
+  const _ProcessStreamLog({
+    required this.items,
+    this.subSessions = const [],
+    this.allSubSessions = const [],
+  });
 
   final List<_ProcessStreamItem> items;
+  final List<Conversation> subSessions;
+  final List<Conversation> allSubSessions;
 
   @override
   Widget build(BuildContext context) {
-    final entries = _processStreamEntries(items);
+    final anchoredActivityIds = {
+      for (final child in subSessions)
+        if ((child.parentToolCallId ?? '').isNotEmpty) child.parentToolCallId!,
+    };
+    final entries = _processStreamEntries(
+      items,
+      separateActivityIds: anchoredActivityIds,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (var index = 0; index < entries.length; index++) ...[
           entries[index].build(context),
+          for (final child in subSessions.where(
+            (value) =>
+                (value.parentToolCallId ?? '').isNotEmpty &&
+                entries[index].containsActivity(value.parentToolCallId!),
+          )) ...[
+            const SizedBox(height: 8),
+            _SubSessionProcessGroup(
+              conversation: child,
+              allSubSessions: allSubSessions,
+            ),
+          ],
           if (index != entries.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -1571,8 +2050,9 @@ class _ProcessStreamLog extends StatelessWidget {
 }
 
 List<_ProcessStreamEntry> _processStreamEntries(
-  List<_ProcessStreamItem> items,
-) {
+  List<_ProcessStreamItem> items, {
+  Set<String> separateActivityIds = const {},
+}) {
   final entries = <_ProcessStreamEntry>[];
   var pendingActivities = <RuntimeActivity>[];
 
@@ -1588,6 +2068,11 @@ List<_ProcessStreamEntry> _processStreamEntries(
 
   for (final item in items) {
     if (item is _ProcessActivityItem) {
+      if (separateActivityIds.contains(item.activity.id)) {
+        flushActivities();
+        entries.add(_SingleProcessActivityEntry(item.activity));
+        continue;
+      }
       pendingActivities.add(item.activity);
       continue;
     }
@@ -1599,6 +2084,8 @@ List<_ProcessStreamEntry> _processStreamEntries(
 }
 
 sealed class _ProcessStreamEntry {
+  bool containsActivity(String activityId) => false;
+
   Widget build(BuildContext context);
 }
 
@@ -1606,6 +2093,9 @@ class _SingleProcessActivityEntry extends _ProcessStreamEntry {
   _SingleProcessActivityEntry(this.activity);
 
   final RuntimeActivity activity;
+
+  @override
+  bool containsActivity(String activityId) => activity.id == activityId;
 
   @override
   Widget build(BuildContext context) => _ProcessActivityLine(
@@ -1618,6 +2108,10 @@ class _GroupedProcessActivityEntry extends _ProcessStreamEntry {
   _GroupedProcessActivityEntry(this.activities);
 
   final List<RuntimeActivity> activities;
+
+  @override
+  bool containsActivity(String activityId) =>
+      activities.any((activity) => activity.id == activityId);
 
   @override
   Widget build(BuildContext context) => _ProcessActivityGroup(
@@ -1735,6 +2229,184 @@ class _ProcessActivityGroupState extends State<_ProcessActivityGroup> {
   }
 }
 
+class _SubSessionProcessGroup extends StatefulWidget {
+  const _SubSessionProcessGroup({
+    required this.conversation,
+    required this.allSubSessions,
+  });
+
+  final Conversation conversation;
+  final List<Conversation> allSubSessions;
+
+  @override
+  State<_SubSessionProcessGroup> createState() =>
+      _SubSessionProcessGroupState();
+}
+
+class _SubSessionProcessGroupState extends State<_SubSessionProcessGroup> {
+  late bool _expanded;
+
+  bool get _active => {
+    RunStatus.starting,
+    RunStatus.running,
+    RunStatus.suspending,
+    RunStatus.suspended,
+  }.contains(widget.conversation.status);
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = _active;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final conversation = widget.conversation;
+    final colors = Theme.of(context).colorScheme;
+    final items = _subSessionProcessItems(conversation);
+    final children = widget.allSubSessions
+        .where((value) => value.parentSessionId == conversation.sessionId)
+        .toList();
+    final unlinkedChildren = _unlinkedSubSessions(items, children);
+    final failed =
+        conversation.status == RunStatus.failed ||
+        conversation.status == RunStatus.cancelled;
+    final waiting = conversation.pendingInteraction != null;
+    return Container(
+      key: ValueKey('sub-session-process:${conversation.sessionId}'),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.34),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(7),
+            child: Row(
+              children: [
+                _ProcessActivityIcon(
+                  icon: CupertinoIcons.person_2,
+                  running: _active && !waiting,
+                  failed: failed,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    conversation.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _processTextStyle(context)?.copyWith(
+                      color: waiting ? colors.tertiary : null,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (waiting) ...[
+                  Icon(
+                    CupertinoIcons.exclamationmark_circle_fill,
+                    size: 13,
+                    color: colors.tertiary,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '等待审批',
+                    style: _processTextStyle(
+                      context,
+                    )?.copyWith(fontSize: 11.5, color: colors.tertiary),
+                  ),
+                ],
+                const SizedBox(width: 7),
+                Icon(
+                  _expanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_right,
+                  size: 12,
+                  color: colors.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+          if (_expanded && (items.isNotEmpty || children.isNotEmpty)) ...[
+            const SizedBox(height: 9),
+            Padding(
+              padding: const EdgeInsets.only(left: 23),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (items.isNotEmpty)
+                    _ProcessStreamLog(
+                      items: items,
+                      subSessions: children,
+                      allSubSessions: widget.allSubSessions,
+                    ),
+                  if (items.isNotEmpty && unlinkedChildren.isNotEmpty)
+                    const SizedBox(height: 8),
+                  for (
+                    var index = 0;
+                    index < unlinkedChildren.length;
+                    index++
+                  ) ...[
+                    _SubSessionProcessGroup(
+                      conversation: unlinkedChildren[index],
+                      allSubSessions: widget.allSubSessions,
+                    ),
+                    if (index != unlinkedChildren.length - 1)
+                      const SizedBox(height: 8),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+List<_ProcessStreamItem> _subSessionProcessItems(Conversation conversation) {
+  var sourceIndex = 0;
+  final items = <_ProcessStreamItem>[
+    for (final panel in conversation.processPanels)
+      for (final activity in panel.activities)
+        _ProcessActivityItem(activity: activity, sourceIndex: sourceIndex++),
+    for (final message in conversation.messages)
+      if (message.role == 'assistant')
+        _ProcessMessageItem(message: message, sourceIndex: sourceIndex++),
+  ];
+  items.sort((left, right) {
+    if (left.sequence > 0 && right.sequence > 0) {
+      final bySequence = left.sequence.compareTo(right.sequence);
+      if (bySequence != 0) return bySequence;
+    }
+    final byTime = left.createdAt.compareTo(right.createdAt);
+    if (byTime != 0) return byTime;
+    return left.sourceIndex.compareTo(right.sourceIndex);
+  });
+  return items;
+}
+
+List<Conversation> _unlinkedSubSessions(
+  List<_ProcessStreamItem> items,
+  List<Conversation> subSessions,
+) {
+  final activityIds = {
+    for (final item in items)
+      if (item is _ProcessActivityItem) item.activity.id,
+  };
+  return [
+    for (final child in subSessions)
+      if ((child.parentToolCallId ?? '').isEmpty ||
+          !activityIds.contains(child.parentToolCallId))
+        child,
+  ];
+}
+
 class _ProcessActivityIcon extends StatelessWidget {
   const _ProcessActivityIcon({
     required this.icon,
@@ -1779,7 +2451,7 @@ class _ProcessActivityLine extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final language = toolPresentationLanguage(context);
     final name = localizedToolName(activity.label, language);
-    final arguments = toolArgumentPreview(
+    final arguments = toolArgumentPresentation(
       activity.label,
       activity.arguments,
       language,
@@ -1803,48 +2475,51 @@ class _ProcessActivityLine extends StatelessWidget {
           ),
           const SizedBox(width: 9),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text.rich(
-                  TextSpan(
-                    children: [
+            child: _ToolActivityShimmer(
+              enabled: activity.active,
+              shimmerKey: ValueKey('tool-activity-shimmer:${activity.id}'),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: activity.failed
+                          ? '$name · ${localizedToolFailure(language)}'
+                          : name,
+                      style: _processTextStyle(context)?.copyWith(
+                        color: titleColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (arguments.primary.isNotEmpty)
                       TextSpan(
-                        text: activity.failed
-                            ? '$name · ${localizedToolFailure(language)}'
-                            : name,
+                        text: '  ${arguments.primary}',
                         style: _processTextStyle(context)?.copyWith(
-                          color: titleColor,
-                          fontWeight: FontWeight.w600,
+                          color: detailColor,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                      if (arguments.isNotEmpty)
-                        TextSpan(
-                          text: '  $arguments',
-                          style: _processTextStyle(context)?.copyWith(
-                            color: detailColor,
-                            fontWeight: FontWeight.w400,
-                          ),
+                    if (arguments.metadata.isNotEmpty)
+                      TextSpan(
+                        text: '  ·  ${arguments.metadata.join(' · ')}',
+                        style: _processTextStyle(context)?.copyWith(
+                          color: detailColor.withValues(alpha: 0.82),
+                          fontWeight: FontWeight.w400,
                         ),
-                    ],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                      ),
+                    if (result.isNotEmpty)
+                      TextSpan(
+                        text: '  ·  $result',
+                        style: _processTextStyle(context)?.copyWith(
+                          color: detailColor.withValues(alpha: 0.72),
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                  ],
                 ),
-                if (result.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    result,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _processTextStyle(context)?.copyWith(
-                      fontSize: 11.5,
-                      color: detailColor,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ],
-              ],
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
         ],
@@ -1889,40 +2564,17 @@ IconData _processGroupIcon(List<RuntimeActivity> activities) =>
       'write' => CupertinoIcons.pencil,
       'shell' => CupertinoIcons.chevron_left_slash_chevron_right,
       'agent' => CupertinoIcons.person_2,
+      'planning' => CupertinoIcons.checkmark_square,
+      'interaction' => CupertinoIcons.question_circle,
+      'browser' => CupertinoIcons.globe,
+      'memory' => CupertinoIcons.archivebox,
+      'skill' => CupertinoIcons.sparkles,
+      'image' => CupertinoIcons.photo,
       _ => CupertinoIcons.square_stack_3d_up,
     };
 
-String _activityCategory(RuntimeActivity activity) {
-  final name = activity.label.toLowerCase();
-  if (name.contains('search') ||
-      name.contains('find') ||
-      name.contains('grep') ||
-      name.contains('fetch') ||
-      name.contains('browser')) {
-    return 'search';
-  }
-  if (name.contains('read') || name.contains('list') || name.contains('glob')) {
-    return 'read';
-  }
-  if (name.contains('write') ||
-      name.contains('update') ||
-      name.contains('patch') ||
-      name.contains('edit')) {
-    return 'write';
-  }
-  if (name.contains('shell') ||
-      name.contains('exec') ||
-      name.contains('command') ||
-      name.contains('test')) {
-    return 'shell';
-  }
-  if (name.contains('agent') ||
-      name.contains('spawn') ||
-      name.contains('delegate')) {
-    return 'agent';
-  }
-  return 'other';
-}
+String _activityCategory(RuntimeActivity activity) =>
+    toolPresentationCategory(activity.label);
 
 class _ThreadScrollToBottomButton extends StatelessWidget {
   const _ThreadScrollToBottomButton({required this.onTap});
@@ -2009,7 +2661,12 @@ class _InteractionCard extends StatefulWidget {
   const _InteractionCard({required this.interaction, required this.onReply});
 
   final PendingInteraction interaction;
-  final Future<void> Function(String decision, {String text}) onReply;
+  final Future<void> Function(
+    String decision, {
+    String text,
+    Map<String, Object?> payload,
+  })
+  onReply;
 
   @override
   State<_InteractionCard> createState() => _InteractionCardState();
@@ -2017,13 +2674,24 @@ class _InteractionCard extends StatefulWidget {
 
 class _InteractionCardState extends State<_InteractionCard> {
   final _answer = TextEditingController();
+  final Map<String, TextEditingController> _questionControllers = {};
+  final Map<String, Object?> _questionAnswers = {};
   bool _submitting = false;
+  bool _showTechnicalDetails = false;
 
   Future<void> _reply(String decision) async {
     if (_submitting) return;
     setState(() => _submitting = true);
     try {
-      await widget.onReply(decision, text: _answer.text);
+      final answers = <String, Object?>{..._questionAnswers};
+      for (final entry in _questionControllers.entries) {
+        answers[entry.key] = entry.value.text.trim();
+      }
+      await widget.onReply(
+        decision,
+        text: answers.isEmpty ? _answer.text : jsonEncode({'answers': answers}),
+        payload: answers.isEmpty ? const {} : {'answers': answers},
+      );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -2035,28 +2703,125 @@ class _InteractionCardState extends State<_InteractionCard> {
     return decisions.where((value) => value != 'cancel').toList();
   }
 
-  String? _argumentSummary(Map<String, Object?> payload) {
-    final rawArguments = payload['arguments'];
-    if (rawArguments is! Map || rawArguments.isEmpty) return null;
-    final arguments = rawArguments.cast<Object?, Object?>();
-    final command = arguments['command']?.toString().trim();
-    if (command != null && command.isNotEmpty) return command;
-    try {
-      return const JsonEncoder.withIndent('  ').convert(arguments);
-    } on JsonUnsupportedObjectError {
-      return arguments.toString();
-    }
-  }
-
   @override
   void dispose() {
     _answer.dispose();
+    for (final controller in _questionControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  List<Map<String, Object?>> _questions(Map<String, Object?> payload) {
+    final raw = payload['questions'];
+    if (raw is! List) return const [];
+    return [
+      for (final value in raw)
+        if (value is Map) value.cast<String, Object?>(),
+    ];
+  }
+
+  String _questionId(Map<String, Object?> question, int index) =>
+      question['id']?.toString() ?? 'q${index + 1}';
+
+  Widget _questionField(
+    BuildContext context,
+    Map<String, Object?> question,
+    int index,
+  ) {
+    final id = _questionId(question, index);
+    final type = question['type']?.toString() ?? 'text';
+    final title =
+        question['title']?.toString() ?? question['question']?.toString() ?? id;
+    final rawOptions = question['options'];
+    final options = rawOptions is List ? rawOptions : const <Object?>[];
+    String optionValue(Object? option) => option is Map
+        ? option['value']?.toString() ?? option['label']?.toString() ?? ''
+        : option?.toString() ?? '';
+    String optionLabel(Object? option) => option is Map
+        ? option['label']?.toString() ?? option['value']?.toString() ?? ''
+        : option?.toString() ?? '';
+    if (type == 'single') {
+      final selected = _questionAnswers[id]?.toString();
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey('interaction-question-$id'),
+          initialValue: selected,
+          decoration: InputDecoration(labelText: title, isDense: true),
+          items: [
+            for (final option in options)
+              DropdownMenuItem(
+                value: optionValue(option),
+                child: Text(optionLabel(option)),
+              ),
+          ],
+          onChanged: (value) => setState(() => _questionAnswers[id] = value),
+        ),
+      );
+    }
+    if (type == 'multiple') {
+      final selected = <String>{
+        ...((_questionAnswers[id] as List?)?.map((value) => value.toString()) ??
+            const <String>[]),
+      };
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 7,
+              runSpacing: 5,
+              children: [
+                for (final option in options)
+                  FilterChip(
+                    label: Text(optionLabel(option)),
+                    selected: selected.contains(optionValue(option)),
+                    onSelected: (enabled) {
+                      final updated = {...selected};
+                      enabled
+                          ? updated.add(optionValue(option))
+                          : updated.remove(optionValue(option));
+                      setState(
+                        () => _questionAnswers[id] = updated.toList(
+                          growable: false,
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+    final controller = _questionControllers.putIfAbsent(
+      id,
+      () => TextEditingController(text: question['default']?.toString() ?? ''),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: TextField(
+        key: ValueKey('interaction-question-$id'),
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: title,
+          hintText: question['placeholder']?.toString(),
+          isDense: true,
+        ),
+        minLines: 1,
+        maxLines: 4,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final payload = widget.interaction.payload;
+    final questions = _questions(payload);
     final approval = widget.interaction.type == 'approval';
     final prompt =
         payload['prompt']?.toString() ??
@@ -2066,9 +2831,16 @@ class _InteractionCardState extends State<_InteractionCard> {
             : widget.interaction.type);
     final toolName = payload['tool_name']?.toString();
     final language = toolPresentationLanguage(context);
-    final argumentSummary = approval ? _argumentSummary(payload) : null;
+    final rawArguments = payload['arguments'];
+    final arguments = rawArguments is Map
+        ? rawArguments.map((key, value) => MapEntry(key.toString(), value))
+        : <String, Object?>{};
+    final presentation = approval && toolName != null
+        ? approvalToolPresentation(toolName, arguments, language)
+        : null;
     final riskReason = payload['risk_reason']?.toString();
     final riskCategory = payload['risk_category']?.toString();
+    final sideEffectLevel = payload['side_effect_level']?.toString();
     final displayedRiskReason = _riskReason(
       riskCategory,
       riskReason,
@@ -2077,8 +2849,40 @@ class _InteractionCardState extends State<_InteractionCard> {
     final decisions = _visibleDecisions(approval);
     final colors = Theme.of(context).colorScheme;
     final title = approval && toolName != null
-        ? localizedToolName(toolName, language)
+        ? toolName == 'goal_submit' && riskCategory == 'plan_approval'
+              ? _planApprovalTitle(language)
+              : localizedToolName(toolName, language)
         : prompt;
+    final elevatedRisk =
+        sideEffectLevel == 'irreversible' ||
+        riskCategory == 'destructive_filesystem' ||
+        riskCategory == 'filesystem_delete' ||
+        riskCategory == 'external_side_effect';
+    final technicalToggle = presentation == null
+        ? null
+        : TextButton.icon(
+            key: const ValueKey('interaction-technical-toggle'),
+            onPressed: () =>
+                setState(() => _showTechnicalDetails = !_showTechnicalDetails),
+            style: TextButton.styleFrom(
+              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+            icon: Icon(
+              _showTechnicalDetails
+                  ? CupertinoIcons.chevron_up
+                  : CupertinoIcons.chevron_down,
+              size: 12,
+            ),
+            label: Text(
+              _approvalCardText(
+                _showTechnicalDetails ? 'hideDetails' : 'showDetails',
+                language,
+              ),
+            ),
+          );
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 580),
@@ -2086,15 +2890,15 @@ class _InteractionCardState extends State<_InteractionCard> {
           padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
           child: _GlassSurface(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 11),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       Container(
-                        width: 32,
-                        height: 32,
+                        width: 30,
+                        height: 30,
                         decoration: BoxDecoration(
                           color: approval
                               ? colors.tertiaryContainer.withValues(alpha: 0.7)
@@ -2128,31 +2932,48 @@ class _InteractionCardState extends State<_InteractionCard> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: colors.errorContainer.withValues(
-                              alpha: 0.55,
-                            ),
+                            color:
+                                (elevatedRisk
+                                        ? colors.errorContainer
+                                        : colors.tertiaryContainer)
+                                    .withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            _riskLabel(riskCategory, context.l10n),
+                            _riskLabel(
+                              riskCategory,
+                              sideEffectLevel,
+                              context.l10n,
+                            ),
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  color: colors.onErrorContainer,
+                                  color: elevatedRisk
+                                      ? colors.onErrorContainer
+                                      : colors.onTertiaryContainer,
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
                         ),
                     ],
                   ),
-                  if (argumentSummary != null) ...[
-                    const SizedBox(height: 12),
+                  if (payload['guidance'] case final String guidance)
+                    if (guidance.isNotEmpty && guidance != title)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          guidance,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.onSurfaceVariant),
+                        ),
+                      ),
+                  if (presentation != null) ...[
+                    const SizedBox(height: 9),
                     Container(
                       key: const ValueKey('interaction-command'),
                       width: double.infinity,
-                      constraints: const BoxConstraints(maxHeight: 132),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
-                        vertical: 10,
+                        vertical: 8,
                       ),
                       decoration: BoxDecoration(
                         color: colors.surfaceContainerHighest.withValues(
@@ -2163,18 +2984,121 @@ class _InteractionCardState extends State<_InteractionCard> {
                           color: colors.outlineVariant.withValues(alpha: 0.7),
                         ),
                       ),
-                      child: SingleChildScrollView(
-                        child: SelectableText(
-                          argumentSummary,
-                          style: TextStyle(
-                            color: colors.onSurface,
-                            fontFamily: 'monospace',
-                            fontSize: 12.5,
-                            height: 1.45,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          SelectableText(
+                            presentation.summary,
+                            style: TextStyle(
+                              color: colors.onSurface,
+                              fontFamily: 'monospace',
+                              fontSize: 12.5,
+                              height: 1.45,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          for (final fact in presentation.facts)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.surface.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                fact,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(color: colors.onSurfaceVariant),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (presentation.preview case final preview?) ...[
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              presentation.previewLabel ?? '',
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: colors.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ),
+                          technicalToggle!,
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Container(
+                        key: const ValueKey('interaction-preview'),
+                        width: double.infinity,
+                        constraints: BoxConstraints(
+                          maxHeight: toolName == 'goal_submit' ? 360 : 112,
+                        ),
+                        padding: const EdgeInsets.all(9),
+                        decoration: BoxDecoration(
+                          color: colors.surfaceContainerLowest.withValues(
+                            alpha: 0.58,
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: colors.outlineVariant.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            preview,
+                            style: TextStyle(
+                              color: colors.onSurface,
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              height: 1.42,
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ] else
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: technicalToggle!,
+                        ),
+                      ),
+                    if (_showTechnicalDetails)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Container(
+                          key: const ValueKey('interaction-technical-details'),
+                          width: double.infinity,
+                          constraints: const BoxConstraints(maxHeight: 150),
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceContainerLowest.withValues(
+                              alpha: 0.45,
+                            ),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              presentation.technicalDetails,
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
+                                fontFamily: 'monospace',
+                                fontSize: 11.5,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                   if (approval &&
                       displayedRiskReason != null &&
@@ -2187,7 +3111,12 @@ class _InteractionCardState extends State<_InteractionCard> {
                       ),
                     ),
                   ],
-                  if (widget.interaction.type == 'user_input') ...[
+                  if (widget.interaction.type == 'user_input' &&
+                      questions.isNotEmpty)
+                    for (final entry in questions.indexed)
+                      _questionField(context, entry.$2, entry.$1),
+                  if (widget.interaction.type == 'user_input' &&
+                      questions.isEmpty) ...[
                     const SizedBox(height: 10),
                     TextField(
                       key: const ValueKey('interaction-input'),
@@ -2196,7 +3125,7 @@ class _InteractionCardState extends State<_InteractionCard> {
                       onSubmitted: (_) => _reply(decisions.first),
                     ),
                   ],
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   Wrap(
                     alignment: WrapAlignment.end,
                     spacing: 8,
@@ -2209,14 +3138,28 @@ class _InteractionCardState extends State<_InteractionCard> {
                             onPressed: _submitting
                                 ? null
                                 : () => _reply(decision),
-                            child: Text(_decisionLabel(decision, context.l10n)),
+                            child: Text(
+                              _interactionDecisionLabel(
+                                decision,
+                                toolName,
+                                context.l10n,
+                              ),
+                            ),
                           )
                         else
                           GlassButton.custom(
                             key: ValueKey('interaction-submit-$decision'),
-                            width: decision == 'approve_once' ? 108 : 92,
+                            width: switch (decision) {
+                              'approve_and_remember' => 132,
+                              'approve_once' => 108,
+                              _ => 92,
+                            },
                             height: 36,
-                            label: _decisionLabel(decision, context.l10n),
+                            label: _interactionDecisionLabel(
+                              decision,
+                              toolName,
+                              context.l10n,
+                            ),
                             enabled: !_submitting,
                             onTap: () => _reply(decision),
                             shape: const LiquidRoundedRectangle(
@@ -2226,7 +3169,11 @@ class _InteractionCardState extends State<_InteractionCard> {
                             child: _submitting
                                 ? const CupertinoActivityIndicator(radius: 7)
                                 : Text(
-                                    _decisionLabel(decision, context.l10n),
+                                    _interactionDecisionLabel(
+                                      decision,
+                                      toolName,
+                                      context.l10n,
+                                    ),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -2255,58 +3202,164 @@ class _Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<_Composer> {
-  final _text = TextEditingController();
+  late final _ComposerTextEditingController _text;
   final _focus = FocusNode();
+  final _editorRegionKey = GlobalKey();
+  OverlayEntry? _referenceHoverOverlay;
+  ComposerReference? _hoveredReference;
+  Offset _hoverPosition = Offset.zero;
 
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_syncComposerInsertions);
-    _syncComposerInsertions();
+    _text = _ComposerTextEditingController(
+      onReferencesRemoved: _removeDeletedReferences,
+    );
+    widget.controller.addListener(_syncComposerReferences);
+    _syncComposerReferences();
   }
 
   @override
   void didUpdateWidget(covariant _Composer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_syncComposerInsertions);
-      widget.controller.addListener(_syncComposerInsertions);
+      oldWidget.controller.removeListener(_syncComposerReferences);
+      widget.controller.addListener(_syncComposerReferences);
     }
-    _syncComposerInsertions();
+    if (oldWidget.conversation.id != widget.conversation.id) {
+      _text.reset();
+    }
+    _syncComposerReferences();
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_syncComposerInsertions);
+    widget.controller.removeListener(_syncComposerReferences);
+    _hideReferenceHover();
     _text.dispose();
     _focus.dispose();
     super.dispose();
   }
 
-  void _syncComposerInsertions() {
-    var inserted = false;
-    while (true) {
-      final insertion = widget.controller.takeComposerInsertion(
-        widget.conversation.id,
-      );
-      if (insertion == null) break;
-      final current = _text.text.trimRight();
-      final next = current.isEmpty ? insertion : '$current\n\n$insertion';
-      _text.value = TextEditingValue(
-        text: next,
-        selection: TextSelection.collapsed(offset: next.length),
-      );
-      inserted = true;
+  void _syncComposerReferences() {
+    final references = widget.controller.composerReferences;
+    _text.syncReferences(references);
+    if (_hoveredReference != null && !references.contains(_hoveredReference)) {
+      _hideReferenceHover();
     }
-    if (inserted) _focus.requestFocus();
+  }
+
+  void _removeDeletedReferences(List<ComposerReference> references) {
+    for (final reference in references) {
+      if (widget.controller.composerReferences.contains(reference)) {
+        widget.controller.removeComposerReference(reference);
+      }
+    }
   }
 
   void _submit() {
-    final value = _text.text;
-    if (value.trim().isEmpty) return;
-    _text.clear();
+    final value = _text.promptText.trim();
+    if (value.isEmpty) return;
     widget.controller.send(value);
+    _text.reset();
+    widget.controller.clearComposerReferences(widget.conversation.id);
     _focus.requestFocus();
+  }
+
+  void _handleEditorHover(PointerHoverEvent event) {
+    final reference = _referenceAt(event.position);
+    if (reference == null) {
+      _hideReferenceHover();
+      return;
+    }
+    _hoveredReference = reference;
+    _hoverPosition = event.position;
+    if (_referenceHoverOverlay == null) {
+      _referenceHoverOverlay = OverlayEntry(builder: _buildReferenceHover);
+      Overlay.of(context, rootOverlay: true).insert(_referenceHoverOverlay!);
+    } else {
+      _referenceHoverOverlay!.markNeedsBuild();
+    }
+  }
+
+  ComposerReference? _referenceAt(Offset globalPosition) {
+    final root = _editorRegionKey.currentContext?.findRenderObject();
+    final editable = _findRenderEditable(root);
+    if (editable == null) return null;
+    final origin = editable.localToGlobal(Offset.zero);
+    for (final token in _text.referenceTokens) {
+      final boxes = editable.getBoxesForSelection(
+        TextSelection(baseOffset: token.offset, extentOffset: token.offset + 1),
+      );
+      for (final box in boxes) {
+        if (box.toRect().shift(origin).inflate(2).contains(globalPosition)) {
+          return token.reference;
+        }
+      }
+    }
+    return null;
+  }
+
+  Widget _buildReferenceHover(BuildContext overlayContext) {
+    final reference = _hoveredReference;
+    if (reference == null) return const SizedBox.shrink();
+    final screen = MediaQuery.sizeOf(overlayContext);
+    final width = min(520.0, max(220.0, screen.width - 32));
+    final left = (_hoverPosition.dx + 12)
+        .clamp(16.0, max(16.0, screen.width - width - 16))
+        .toDouble();
+    final top = (_hoverPosition.dy + 18)
+        .clamp(16.0, max(16.0, screen.height - 260))
+        .toDouble();
+    final colors = Theme.of(overlayContext).colorScheme;
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      child: IgnorePointer(
+        child: Material(
+          key: const ValueKey('composer-inline-reference-hover'),
+          elevation: 10,
+          color: colors.surfaceContainerHigh,
+          shadowColor: colors.shadow.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    reference.path,
+                    style: Theme.of(overlayContext).textTheme.labelMedium
+                        ?.copyWith(
+                          color: colors.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (reference.text.isNotEmpty)
+                    Text(
+                      reference.text,
+                      style: Theme.of(
+                        overlayContext,
+                      ).textTheme.bodyMedium?.copyWith(height: 1.45),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideReferenceHover() {
+    _referenceHoverOverlay?.remove();
+    _referenceHoverOverlay = null;
+    _hoveredReference = null;
   }
 
   KeyEventResult _handleKey(KeyEvent event) {
@@ -2400,36 +3453,48 @@ class _ComposerState extends State<_Composer> {
             ),
             ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 36, maxHeight: 124),
-              child: Focus(
-                onKeyEvent: (_, event) => _handleKey(event),
-                child: TextField(
-                  key: const ValueKey('agent-composer'),
-                  controller: _text,
-                  focusNode: _focus,
-                  minLines: 1,
-                  maxLines: null,
-                  textInputAction: TextInputAction.newline,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontSize: 14.5,
-                    height: 1.35,
-                    color: colors.onSurface,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: context.l10n.text(
-                      running ? 'workspace.inputSteer' : 'workspace.inputAgent',
-                    ),
-                    hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              child: MouseRegion(
+                key: _editorRegionKey,
+                onHover: _handleEditorHover,
+                onExit: (_) => _hideReferenceHover(),
+                child: Focus(
+                  onKeyEvent: (_, event) => _handleKey(event),
+                  child: TextField(
+                    key: const ValueKey('agent-composer'),
+                    controller: _text,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: null,
+                    textInputAction: TextInputAction.newline,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       fontSize: 14.5,
-                      color: colors.onSurfaceVariant.withValues(
-                        alpha: dark ? 0.68 : 0.76,
-                      ),
+                      height: 1.35,
+                      color: colors.onSurface,
                     ),
-                    isDense: true,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
-                    contentPadding: EdgeInsets.zero,
+                    decoration: InputDecoration(
+                      hintText: context.l10n.text(
+                        running
+                            ? 'workspace.inputSteer'
+                            : widget.conversation.planMode
+                            ? 'workspace.inputPlan'
+                            : widget.conversation.goalMode
+                            ? 'workspace.inputGoal'
+                            : 'workspace.inputAgent',
+                      ),
+                      hintStyle: Theme.of(context).textTheme.bodyLarge
+                          ?.copyWith(
+                            fontSize: 14.5,
+                            color: colors.onSurfaceVariant.withValues(
+                              alpha: dark ? 0.68 : 0.76,
+                            ),
+                          ),
+                      isDense: true,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      contentPadding: EdgeInsets.zero,
+                    ),
                   ),
                 ),
               ),
@@ -2458,7 +3523,10 @@ class _ComposerState extends State<_Composer> {
                 final controlGap = compactApproval ? 5.0 : 8.0;
                 return Row(
                   children: [
-                    _SkillPicker(controller: widget.controller),
+                    _SkillPicker(
+                      controller: widget.controller,
+                      conversation: widget.conversation,
+                    ),
                     SizedBox(width: controlGap),
                     Container(
                       key: const ValueKey('composer-control-cluster'),
@@ -2492,7 +3560,9 @@ class _ComposerState extends State<_Composer> {
                       builder: (context, value, _) => _ComposerSendButton(
                         enabled: widget.controller.canSend || running,
                         running: running,
-                        hasDraft: value.text.trim().isNotEmpty,
+                        hasDraft:
+                            value.text.trim().isNotEmpty ||
+                            widget.controller.composerReferences.isNotEmpty,
                         onSend: _submit,
                         onStop: widget.controller.cancel,
                       ),
@@ -2500,6 +3570,268 @@ class _ComposerState extends State<_Composer> {
                   ],
                 );
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+RenderEditable? _findRenderEditable(RenderObject? root) {
+  if (root is RenderEditable) return root;
+  RenderEditable? result;
+  root?.visitChildren((child) {
+    result ??= _findRenderEditable(child);
+  });
+  return result;
+}
+
+class _ComposerReferenceToken {
+  _ComposerReferenceToken({required this.reference, required this.offset});
+
+  final ComposerReference reference;
+  int offset;
+}
+
+class _ComposerTextEditingController extends TextEditingController {
+  _ComposerTextEditingController({required this.onReferencesRemoved});
+
+  static const _placeholder = '\uFFFC';
+
+  final ValueChanged<List<ComposerReference>> onReferencesRemoved;
+  final List<_ComposerReferenceToken> _tokens = [];
+  bool _internalUpdate = false;
+
+  List<_ComposerReferenceToken> get referenceTokens =>
+      List.unmodifiable(_tokens);
+
+  void syncReferences(List<ComposerReference> references) {
+    final removed = [
+      for (final token in _tokens)
+        if (!references.contains(token.reference)) token,
+    ]..sort((left, right) => right.offset.compareTo(left.offset));
+    if (removed.isNotEmpty) {
+      var nextText = text;
+      var nextSelection = selection;
+      for (final token in removed) {
+        if (token.offset < nextText.length &&
+            nextText[token.offset] == _placeholder) {
+          nextText = nextText.replaceRange(token.offset, token.offset + 1, '');
+          nextSelection = _selectionAfterRemoval(nextSelection, token.offset);
+        }
+        _tokens.remove(token);
+        for (final remaining in _tokens) {
+          if (remaining.offset > token.offset) remaining.offset--;
+        }
+      }
+      _setInternalValue(
+        value.copyWith(
+          text: nextText,
+          selection: nextSelection,
+          composing: TextRange.empty,
+        ),
+      );
+    }
+    for (final reference in references) {
+      if (_tokens.any((token) => identical(token.reference, reference))) {
+        continue;
+      }
+      _insertReference(reference);
+    }
+  }
+
+  void _insertReference(ComposerReference reference) {
+    final selectedOffset = selection.isValid
+        ? selection.extentOffset
+        : text.length;
+    final offset = selectedOffset.clamp(0, text.length);
+    for (final token in _tokens) {
+      if (token.offset >= offset) token.offset++;
+    }
+    _tokens.add(_ComposerReferenceToken(reference: reference, offset: offset));
+    _tokens.sort((left, right) => left.offset.compareTo(right.offset));
+    final nextText = text.replaceRange(offset, offset, _placeholder);
+    _setInternalValue(
+      TextEditingValue(
+        text: nextText,
+        selection: TextSelection.collapsed(offset: offset + 1),
+      ),
+    );
+  }
+
+  TextSelection _selectionAfterRemoval(
+    TextSelection current,
+    int removedOffset,
+  ) {
+    if (!current.isValid) return current;
+    int shift(int value) => value > removedOffset ? value - 1 : value;
+    return current.copyWith(
+      baseOffset: shift(current.baseOffset),
+      extentOffset: shift(current.extentOffset),
+    );
+  }
+
+  @override
+  set value(TextEditingValue newValue) {
+    if (_internalUpdate) {
+      super.value = newValue;
+      return;
+    }
+    final previousText = text;
+    final removedReferences = _reconcileExternalEdit(
+      previousText,
+      newValue.text,
+    );
+    super.value = newValue;
+    if (removedReferences.isNotEmpty) {
+      onReferencesRemoved(removedReferences);
+    }
+  }
+
+  List<ComposerReference> _reconcileExternalEdit(
+    String previousText,
+    String nextText,
+  ) {
+    var prefix = 0;
+    final shortest = min(previousText.length, nextText.length);
+    while (prefix < shortest &&
+        previousText.codeUnitAt(prefix) == nextText.codeUnitAt(prefix)) {
+      prefix++;
+    }
+    var suffix = 0;
+    while (suffix < previousText.length - prefix &&
+        suffix < nextText.length - prefix &&
+        previousText.codeUnitAt(previousText.length - suffix - 1) ==
+            nextText.codeUnitAt(nextText.length - suffix - 1)) {
+      suffix++;
+    }
+    final previousEnd = previousText.length - suffix;
+    final nextEnd = nextText.length - suffix;
+    final removed = [
+      for (final token in _tokens)
+        if (token.offset >= prefix && token.offset < previousEnd) token,
+    ];
+    _tokens.removeWhere(removed.contains);
+    final shift = nextEnd - previousEnd;
+    for (final token in _tokens) {
+      if (token.offset >= previousEnd) token.offset += shift;
+    }
+    return [for (final token in removed) token.reference];
+  }
+
+  String get promptText {
+    final ordered = [..._tokens]
+      ..sort((left, right) => left.offset.compareTo(right.offset));
+    final buffer = StringBuffer();
+    var cursor = 0;
+    for (final token in ordered) {
+      if (token.offset < cursor || token.offset >= text.length) continue;
+      buffer.write(text.substring(cursor, token.offset));
+      buffer.write('\n\n${token.reference.promptText}\n\n');
+      cursor = token.offset + 1;
+    }
+    buffer.write(text.substring(cursor));
+    return buffer.toString();
+  }
+
+  void reset() {
+    _tokens.clear();
+    _setInternalValue(TextEditingValue.empty);
+  }
+
+  void _setInternalValue(TextEditingValue next) {
+    _internalUpdate = true;
+    try {
+      value = next;
+    } finally {
+      _internalUpdate = false;
+    }
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final tokensByOffset = {for (final token in _tokens) token.offset: token};
+    final children = <InlineSpan>[];
+    var cursor = 0;
+    for (var offset = 0; offset < text.length; offset++) {
+      final token = tokensByOffset[offset];
+      if (token == null || text[offset] != _placeholder) continue;
+      if (cursor < offset) {
+        children.add(TextSpan(text: text.substring(cursor, offset)));
+      }
+      children.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: _ComposerInlineReferenceItem(reference: token.reference),
+        ),
+      );
+      cursor = offset + 1;
+    }
+    if (cursor < text.length) {
+      children.add(TextSpan(text: text.substring(cursor)));
+    }
+    return TextSpan(style: style, children: children);
+  }
+}
+
+class _ComposerInlineReferenceItem extends StatelessWidget {
+  const _ComposerInlineReferenceItem({required this.reference});
+
+  final ComposerReference reference;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final normalized = reference.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final preview = normalized.length > 24
+        ? '${normalized.substring(0, 24)}…'
+        : normalized;
+    final label = preview.isEmpty
+        ? reference.fileName
+        : '${reference.fileName} · $preview';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Container(
+        key: const ValueKey('composer-inline-reference'),
+        height: 25,
+        constraints: BoxConstraints(
+          maxWidth: min(280, MediaQuery.sizeOf(context).width * 0.42),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: colors.primaryContainer.withValues(alpha: 0.42),
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: colors.primary.withValues(alpha: 0.24)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              reference.isDirectory
+                  ? CupertinoIcons.folder
+                  : reference.text.isEmpty
+                  ? CupertinoIcons.doc
+                  : CupertinoIcons.quote_bubble,
+              size: 11,
+              color: colors.primary,
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontSize: 11,
+                  color: colors.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),
@@ -2519,6 +3851,7 @@ class _ComposerAssetShelf extends StatelessWidget {
     if (assets.isEmpty) return const SizedBox.shrink();
     final colors = Theme.of(context).colorScheme;
     return Padding(
+      key: const ValueKey('composer-asset-shelf'),
       padding: const EdgeInsets.only(bottom: 12),
       child: SizedBox(
         height: 74,
@@ -3173,9 +4506,10 @@ IconData _approvalModeIcon(ApprovalMode mode) => switch (mode) {
 };
 
 class _SkillPicker extends StatefulWidget {
-  const _SkillPicker({required this.controller});
+  const _SkillPicker({required this.controller, required this.conversation});
 
   final WorkspaceController controller;
+  final Conversation conversation;
 
   @override
   State<_SkillPicker> createState() => _SkillPickerState();
@@ -3224,6 +4558,40 @@ class _SkillPickerState extends State<_SkillPicker> {
                       onTap: () {
                         _close();
                         widget.controller.chooseAndUploadFile();
+                      },
+                    ),
+                    _ComposerMenuItem(
+                      key: const ValueKey('composer-plan-mode-option'),
+                      selected: widget.conversation.planMode,
+                      icon: CupertinoIcons.lightbulb,
+                      label: context.l10n.text('workspace.planMode'),
+                      description: context.l10n.text(
+                        'workspace.planModeDescription',
+                      ),
+                      onTap: () {
+                        _close();
+                        widget.controller.setInvocationMode(
+                          widget.conversation.planMode
+                              ? InvocationMode.normal
+                              : InvocationMode.plan,
+                        );
+                      },
+                    ),
+                    _ComposerMenuItem(
+                      key: const ValueKey('composer-goal-mode-option'),
+                      selected: widget.conversation.goalMode,
+                      icon: CupertinoIcons.scope,
+                      label: context.l10n.text('workspace.goalMode'),
+                      description: context.l10n.text(
+                        'workspace.goalModeDescription',
+                      ),
+                      onTap: () {
+                        _close();
+                        widget.controller.setInvocationMode(
+                          widget.conversation.goalMode
+                              ? InvocationMode.normal
+                              : InvocationMode.goal,
+                        );
                       },
                     ),
                     Divider(
@@ -3298,7 +4666,10 @@ class _SkillPickerState extends State<_SkillPicker> {
                 curve: Curves.easeOutCubic,
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _isOpen
+                  color:
+                      _isOpen ||
+                          widget.conversation.invocationMode !=
+                              InvocationMode.normal
                       ? colors.primary.withValues(alpha: 0.12)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(9),
@@ -3306,7 +4677,12 @@ class _SkillPickerState extends State<_SkillPicker> {
                 child: Icon(
                   CupertinoIcons.add,
                   size: 20,
-                  color: _isOpen ? colors.primary : colors.onSurfaceVariant,
+                  color:
+                      _isOpen ||
+                          widget.conversation.invocationMode !=
+                              InvocationMode.normal
+                      ? colors.primary
+                      : colors.onSurfaceVariant,
                 ),
               ),
             ),
@@ -3372,6 +4748,36 @@ class _ComposerSendButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _FileWorkspacePanelPlugin extends WorkspacePanelPluginBase {
+  const _FileWorkspacePanelPlugin();
+
+  @override
+  String get id => 'sage.workspace.files';
+
+  @override
+  IconData get icon => CupertinoIcons.folder;
+
+  @override
+  bool get initiallyOpen => true;
+
+  @override
+  bool get closable => false;
+
+  @override
+  String title(
+    BuildContext context,
+    WorkspacePanelServices services, {
+    WorkspacePanelInstance? instance,
+  }) => context.l10n.text('workspace.file');
+
+  @override
+  Widget build(BuildContext context, WorkspacePanelContext panelContext) =>
+      _FilePanel(
+        controller: panelContext.services.read<WorkspaceController>(),
+        compact: panelContext.compact,
+      );
 }
 
 class _FilePanel extends StatefulWidget {
@@ -4308,14 +5714,48 @@ class _ErrorNotice extends StatelessWidget {
   }
 }
 
-String _riskLabel(String? category, SageLocalizations l10n) =>
-    switch (category) {
-      'destructive_filesystem' ||
-      'filesystem_delete' => l10n.text('risk.files'),
-      'external_side_effect' => l10n.text('risk.external'),
-      'command_policy' => l10n.text('risk.command'),
-      _ => l10n.text('risk.generic'),
-    };
+String _riskLabel(
+  String? category,
+  String? sideEffectLevel,
+  SageLocalizations l10n,
+) => switch (category) {
+  'destructive_filesystem' || 'filesystem_delete' => l10n.text('risk.files'),
+  'external_side_effect' => l10n.text('risk.external'),
+  'command_policy' => l10n.text('risk.command'),
+  _ => switch (sideEffectLevel) {
+    'none' => _approvalCardText('noSideEffect', l10n.languageCode),
+    'read' => _approvalCardText('readOnly', l10n.languageCode),
+    'write' ||
+    'reversible' => _approvalCardText('writeOperation', l10n.languageCode),
+    'irreversible' => _approvalCardText('highRisk', l10n.languageCode),
+    _ => l10n.text('risk.generic'),
+  },
+};
+
+String _approvalCardText(String key, String language) {
+  final zh = language == 'zh';
+  return switch (key) {
+    'showDetails' => zh ? '查看技术详情' : 'Show technical details',
+    'hideDetails' => zh ? '收起技术详情' : 'Hide technical details',
+    'noSideEffect' => zh ? '无副作用' : 'No side effects',
+    'readOnly' => zh ? '只读操作' : 'Read only',
+    'writeOperation' => zh ? '写入操作' : 'Writes data',
+    'highRisk' => zh ? '高风险操作' : 'High risk',
+    _ => key,
+  };
+}
+
+String _planApprovalTitle(String language) => switch (language) {
+  'zh' => '审批计划',
+  'pt' => 'Revisar plano',
+  'es' => 'Revisar plan',
+  'fr' => 'Examiner le plan',
+  'de' => 'Plan prüfen',
+  'ja' => '計画を確認',
+  'ko' => '계획 검토',
+  'ru' => 'Проверить план',
+  _ => 'Review plan',
+};
 
 String? _riskReason(
   String? category,
@@ -4351,11 +5791,80 @@ String _decisionLabel(String decision, SageLocalizations l10n) =>
     switch (decision) {
       'approve' => l10n.text('decision.approve'),
       'approve_once' => l10n.text('decision.approveOnce'),
+      'approve_and_remember' => l10n.text('decision.approveAndRemember'),
       'allow' => l10n.text('decision.allow'),
       'deny' => l10n.text('decision.deny'),
       'cancel' => l10n.text('common.cancel'),
       'submit' => l10n.text('decision.submit'),
       'confirm_succeeded' => l10n.text('decision.confirmSucceeded'),
       'mark_failed' => l10n.text('decision.markFailed'),
+      'continue' => _localizedRuntimeDecision('continue', l10n.languageCode),
+      'change_direction' => _localizedRuntimeDecision(
+        'change_direction',
+        l10n.languageCode,
+      ),
+      'reconcile' => _localizedRuntimeDecision('reconcile', l10n.languageCode),
+      'retry' => l10n.text('common.retry'),
       _ => decision,
     };
+
+String _interactionDecisionLabel(
+  String decision,
+  String? toolName,
+  SageLocalizations l10n,
+) {
+  if (toolName == 'goal_submit' &&
+      {'approve', 'approve_once', 'approve_and_remember'}.contains(decision)) {
+    return switch (l10n.languageCode) {
+      'zh' => '批准计划',
+      'pt' => 'Aprovar plano',
+      'es' => 'Aprobar plan',
+      'fr' => 'Approuver le plan',
+      'de' => 'Plan genehmigen',
+      'ja' => '計画を承認',
+      'ko' => '계획 승인',
+      'ru' => 'Утвердить план',
+      _ => 'Approve plan',
+    };
+  }
+  return _decisionLabel(decision, l10n);
+}
+
+String _localizedRuntimeDecision(String decision, String language) {
+  const values = <String, Map<String, String>>{
+    'continue': {
+      'zh': '继续',
+      'en': 'Continue',
+      'pt': 'Continuar',
+      'es': 'Continuar',
+      'fr': 'Continuer',
+      'de': 'Fortfahren',
+      'ja': '続行',
+      'ko': '계속',
+      'ru': 'Продолжить',
+    },
+    'change_direction': {
+      'zh': '改变方向',
+      'en': 'Change direction',
+      'pt': 'Mudar direção',
+      'es': 'Cambiar de dirección',
+      'fr': 'Changer de direction',
+      'de': 'Richtung ändern',
+      'ja': '方針を変更',
+      'ko': '방향 변경',
+      'ru': 'Изменить направление',
+    },
+    'reconcile': {
+      'zh': '核对工具结果',
+      'en': 'Check Tool result',
+      'pt': 'Verificar resultado',
+      'es': 'Comprobar resultado',
+      'fr': 'Vérifier le résultat',
+      'de': 'Ergebnis prüfen',
+      'ja': 'ツール結果を確認',
+      'ko': '도구 결과 확인',
+      'ru': 'Проверить результат',
+    },
+  };
+  return values[decision]?[language] ?? values[decision]?['en'] ?? decision;
+}

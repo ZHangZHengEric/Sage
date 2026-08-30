@@ -24,7 +24,6 @@ TOOL_PT_DESCRIPTIONS: Dict[str, str] = {
     "read_lints": "Executar diagnósticos estáticos nos arquivos indicados.",
     "todo_write": "Criar ou atualizar incrementalmente a lista de tarefas.",
     "todo_read": "Ler a lista de tarefas atual.",
-    "questionnaire": "Exibir um questionário ao usuário e coletar as respostas.",
     "questionnaire_async": "Iniciar um questionário e aguardar a resposta do usuário.",
     "turn_status": "Informar o estado atual da execução ao usuário.",
     "search_memory": "Pesquisar informações relevantes na memória do usuário.",
@@ -410,7 +409,7 @@ PARAM_PT_OVERRIDES: Dict[str, Dict[tuple[str, ...], str]] = {
             "conclusion",
         ): "Conclusão da tarefa exibida ao usuário; use o idioma de resposta.",
     },
-    "questionnaire": {
+    "questionnaire_async": {
         ("title",): "Título exibido ao usuário; use o idioma de resposta.",
         (
             "questions",

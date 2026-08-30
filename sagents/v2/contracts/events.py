@@ -9,7 +9,12 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import Field, model_validator
 
-from sagents.v2.contracts.common import Identifier, StrictModel, ToolName
+from sagents.v2.contracts.common import (
+    Identifier,
+    StrictModel,
+    ToolName,
+    VerbatimText,
+)
 from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.items import ArtifactRef, ItemSnapshot, UsageSummary
 from sagents.v2.contracts.principals import ActorRef
@@ -70,7 +75,7 @@ class ItemEventData(StrictModel):
     kind: Literal["item"] = "item"
     operation: Literal["started", "delta", "completed", "failed", "snapshot"]
     item: ItemSnapshot | None = None
-    delta: str | dict[str, Any] | tuple[dict[str, Any], ...] | None = None
+    delta: VerbatimText | dict[str, Any] | tuple[dict[str, Any], ...] | None = None
     content_hash: str | None = None
     error: RuntimeErrorInfo | None = None
 
@@ -109,6 +114,8 @@ class InteractionEventData(StrictModel):
     interaction_id: Identifier
     interaction_type: Identifier
     state: str
+    allowed_decisions: tuple[str, ...] = ()
+    payload: dict[str, Any] = Field(default_factory=dict)
     decision: str | None = None
     revision: int = Field(default=0, ge=0)
 
@@ -138,6 +145,7 @@ class ContinuationEventData(StrictModel):
     reason: str
     decision_hash: str
     next_agent: Identifier | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class FlowEventData(StrictModel):

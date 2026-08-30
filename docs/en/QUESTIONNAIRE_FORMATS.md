@@ -16,7 +16,7 @@ This document covers the questionnaire methods that Sage currently supports with
 1. Inline Questionnaires in assistant text;
 2. the `questionnaire_async` tool.
 
-The synchronous waiting questionnaire tool is outside this document's scope.
+The former synchronous `questionnaire` tool has been removed from the Tool catalog; historical messages remain renderable for compatibility.
 
 ## Overview
 

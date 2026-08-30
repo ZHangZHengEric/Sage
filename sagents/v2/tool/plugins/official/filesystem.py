@@ -14,6 +14,37 @@ from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
 
 
+_FILE_UPDATE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "file_path": {"type": "string"},
+        "operations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "update_mode": {
+                        "type": "string",
+                        "enum": ["search_replace", "line_range"],
+                    },
+                    "search_pattern": {"type": "string"},
+                    "replacement": {"type": "string"},
+                    "replace_all": {"type": "boolean", "default": False},
+                    "start_line": {"type": "integer", "minimum": 0},
+                    "end_line": {"type": "integer", "minimum": 0},
+                },
+                "required": ["update_mode", "replacement"],
+                "additionalProperties": False,
+            },
+        },
+        "session_id": {"type": ["string", "null"], "default": None},
+    },
+    "required": ["file_path", "operations"],
+    "additionalProperties": False,
+}
+
+
 class FileSystemTools:
     """Real workspace operations; every public method is a V2 Tool."""
 
@@ -85,6 +116,7 @@ class FileSystemTools:
             "Update one text file with search_replace or inclusive line_range "
             "operations."
         ),
+        input_schema=_FILE_UPDATE_INPUT_SCHEMA,
         side_effect_level=SideEffectLevel.WRITE,
         requires_approval=True,
     )
@@ -107,7 +139,11 @@ class FileSystemTools:
             if mode == "line_range":
                 start = operation.get("start_line")
                 end = operation.get("end_line")
-                if not isinstance(start, int) or not isinstance(end, int) or end < start:
+                if (
+                    not isinstance(start, int)
+                    or not isinstance(end, int)
+                    or end < start
+                ):
                     raise ValueError(f"operation {index}: invalid inclusive line range")
                 lines = content.splitlines(keepends=True)
                 if start < 0 or end >= len(lines):
@@ -128,12 +164,16 @@ class FileSystemTools:
                             f"operation {index}: search_pattern matched multiple times"
                         )
                     count = literal_count if replace_all else 1
-                    content = content.replace(pattern, replacement, 0 if replace_all else 1)
+                    content = content.replace(
+                        pattern, replacement, 0 if replace_all else 1
+                    )
                 else:
                     regex = re.compile(pattern, re.MULTILINE)
                     matches = list(regex.finditer(content))
                     if not matches:
-                        raise ValueError(f"operation {index}: search_pattern was not found")
+                        raise ValueError(
+                            f"operation {index}: search_pattern was not found"
+                        )
                     if len(matches) > 1 and not replace_all:
                         raise ValueError(
                             f"operation {index}: search_pattern matched multiple times"
@@ -203,7 +243,9 @@ class FileSystemTools:
                         destination = operation.get("move_to") or operation["path"]
                         await self.runtime.write_text(destination, updated, invocation)
                         if destination != operation["path"]:
-                            await self.runtime.delete_file(operation["path"], invocation)
+                            await self.runtime.delete_file(
+                                operation["path"], invocation
+                            )
                     changes.append(
                         {
                             "action": action,
@@ -232,7 +274,10 @@ class CodeSearchTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
-    @tool(description="Search file content with a regular expression.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Search file content with a regular expression.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def grep(
         self,
         pattern: str,
@@ -293,7 +338,9 @@ class CodeSearchTools:
                         )
             else:
                 lines = text.splitlines()
-                indexes = [index for index, line in enumerate(lines) if regex.search(line)]
+                indexes = [
+                    index for index, line in enumerate(lines) if regex.search(line)
+                ]
                 if indexes:
                     counts[candidate.path] = len(indexes)
                 for index in indexes[: max(0, head_limit - len(matches))]:
@@ -314,7 +361,10 @@ class CodeSearchTools:
             return {"counts": dict(list(sorted(counts.items()))[:head_limit])}
         return {"matches": matches, "truncated": len(matches) >= head_limit}
 
-    @tool(description="Find files matching a glob.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Find files matching a glob.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def glob(
         self,
         pattern: str,
@@ -334,7 +384,10 @@ class CodeSearchTools:
                     break
         return {"files": values, "truncated": len(values) >= head_limit}
 
-    @tool(description="List a workspace directory tree.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="List a workspace directory tree.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def list_dir(
         self,
         invocation: ToolInvocation,
@@ -372,7 +425,11 @@ class CodeSearchTools:
 
 def _parse_patch(patch: str) -> list[dict[str, Any]]:
     lines = patch.splitlines()
-    if not lines or lines[0].strip() != "*** Begin Patch" or lines[-1].strip() != "*** End Patch":
+    if (
+        not lines
+        or lines[0].strip() != "*** Begin Patch"
+        or lines[-1].strip() != "*** End Patch"
+    ):
         raise ValueError("patch must be wrapped in Begin Patch and End Patch")
     operations: list[dict[str, Any]] = []
     index = 1

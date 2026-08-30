@@ -6,8 +6,8 @@ that work and call this facade to make legal, atomic lifecycle transitions.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 
 from sagents.v2.contracts.checkpoint import (
     Checkpoint,
@@ -39,6 +39,7 @@ from sagents.v2.contracts.run_state import (
     RunResult,
     RunSnapshot,
     RunState,
+    TERMINAL_RUN_STATES,
 )
 from sagents.v2.contracts.session_commit import (
     ProposeSessionCommit,
@@ -46,21 +47,9 @@ from sagents.v2.contracts.session_commit import (
     RejectSessionCommit,
     SessionCommitProposal,
 )
-from sagents.v2.runtime.session.ephemeral import EventDraft, EphemeralSessionStore
-from sagents.v2.runtime.session.contracts import SessionStore
-
-
-@dataclass
-class RuntimeRunStream:
-    """Repository event observer returned by the low-level Runtime facade."""
-
-    handle: RunHandle
-    events: AsyncIterator[RuntimeEvent]
-
-    async def detach(self) -> None:
-        closer = getattr(self.events, "aclose", None)
-        if closer is not None:
-            await closer()
+from sagents.v2.runtime.session.contracts import EventDraft, SessionStore
+from sagents.v2.runtime.contracts import RuntimeRunStream, RuntimeSessionTreeEvent
+from sagents.v2.i18n import error_recovery_payload, localize_error
 
 
 class HarnessRuntime:
@@ -75,8 +64,8 @@ class HarnessRuntime:
     store as long as it preserves the declared atomic lifecycle semantics.
     """
 
-    def __init__(self, session_store: SessionStore | None = None) -> None:
-        self.session_store = session_store or EphemeralSessionStore()
+    def __init__(self, session_store: SessionStore) -> None:
+        self.session_store = session_store
 
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run request; execution is started separately by a driver."""
@@ -101,6 +90,73 @@ class HarnessRuntime:
         """Replay and then follow events after the supplied exclusive cursor."""
 
         return self.session_store.subscribe_events(cursor)
+
+    async def subscribe_session_tree(
+        self,
+        session_id: str,
+        *,
+        cursors: dict[str, int] | None = None,
+        include_root: bool = True,
+    ) -> AsyncIterator[RuntimeSessionTreeEvent]:
+        """Replay and follow a root Run plus every descendant Run.
+
+        Each yielded value retains its own Session and Run identity. Consumers
+        can therefore use one channel without mixing child sequence numbers or
+        writing child events into the parent's canonical history.
+        """
+
+        root = await self.session_store.get_session(session_id)
+        positions = dict(cursors or {})
+        announced_runs: set[str] = set()
+        while True:
+            descendants = await self.session_store.list_descendant_sessions(
+                session_id
+            )
+            sessions = ((root,) if include_root else ()) + descendants
+            # A descendant can be created at any point while the root Run is
+            # active. Keep a descendants-only subscription alive during that
+            # window instead of treating an initially empty tree as complete.
+            # Otherwise presentation clients race the first delegation: they
+            # subscribe when the root stream opens, observe no children, and
+            # permanently miss the child Session and all of its events.
+            active = False
+            if not include_root:
+                root_runs = await self.session_store.list_session_runs(
+                    root.session_id
+                )
+                if root_runs and root_runs[-1].state not in TERMINAL_RUN_STATES:
+                    active = True
+            for session in sessions:
+                runs = await self.session_store.list_session_runs(session.session_id)
+                if not runs:
+                    continue
+                run = runs[-1]
+                command = await self.session_store.get_start_command(run.run_id)
+                if run.run_id not in announced_runs:
+                    announced_runs.add(run.run_id)
+                    yield RuntimeSessionTreeEvent(
+                        kind="session.discovered",
+                        session=session,
+                        run=run,
+                        start_command=command,
+                    )
+                events = await self.session_store.read_events(
+                    run.run_id, after_sequence=positions.get(run.run_id, 0)
+                )
+                for event in events:
+                    positions[run.run_id] = event.run_sequence
+                    yield RuntimeSessionTreeEvent(
+                        kind="session.event",
+                        session=session,
+                        run=run,
+                        start_command=command,
+                        event=event,
+                    )
+                if run.state not in TERMINAL_RUN_STATES:
+                    active = True
+            if not active:
+                return
+            await asyncio.sleep(0.2)
 
     async def get_run(self, run_id: str) -> RunSnapshot:
         return await self.session_store.get_run(run_id)
@@ -217,6 +273,8 @@ class HarnessRuntime:
                         interaction_id=interaction.interaction_id,
                         interaction_type=interaction.interaction_type.value,
                         state="requested",
+                        allowed_decisions=interaction.allowed_decisions,
+                        payload=interaction.payload,
                         revision=interaction.expected_revision,
                     ),
                 ),
@@ -248,7 +306,7 @@ class HarnessRuntime:
                 command_id=command_id,
                 decision=CommandDecision.REJECTED,
                 target_id=command.run_id,
-                error=exc.info,
+                error=self._command_error(exc.info, context.language),
             )
         return CommandReceipt(
             command_id=command_id,
@@ -275,7 +333,7 @@ class HarnessRuntime:
                 command_id=command_id,
                 decision=CommandDecision.REJECTED,
                 target_id=command.run_id,
-                error=exc.info,
+                error=self._command_error(exc.info, context.language),
             )
         return CommandReceipt(
             command_id=command_id,
@@ -340,7 +398,7 @@ class HarnessRuntime:
                 command_id=command_id,
                 decision=CommandDecision.REJECTED,
                 target_id=command.run_id,
-                error=exc.info,
+                error=self._command_error(exc.info, context.language),
             )
         event = result.events[-1]
         return CommandReceipt(
@@ -419,6 +477,18 @@ class HarnessRuntime:
     ) -> RunSnapshot:
         """Commit a typed terminal failure for a driver."""
 
+        error = localize_error(error, context.language)
+        if "recovery_questionnaire" not in error.metadata:
+            error = error.model_copy(
+                update={
+                    "metadata": {
+                        **error.metadata,
+                        "recovery_questionnaire": error_recovery_payload(
+                            error, context.language, resumable=False
+                        ),
+                    }
+                }
+            )
         result = await self.session_store.commit_run(
             run_id=run_id,
             expected_revision=expected_revision,
@@ -439,6 +509,26 @@ class HarnessRuntime:
             idempotency_key=idempotency_key,
         )
         return result.run
+
+    @staticmethod
+    def _command_error(
+        error: RuntimeErrorInfo, language: str | None
+    ) -> RuntimeErrorInfo:
+        localized = localize_error(error, language)
+        return localized.model_copy(
+            update={
+                "metadata": {
+                    **localized.metadata,
+                    "recovery_questionnaire": error_recovery_payload(
+                        localized,
+                        language,
+                        resumable=(
+                            localized.safe_to_resume or localized.retryable
+                        ),
+                    ),
+                }
+            }
+        )
 
     async def _command_transition(
         self,
@@ -467,7 +557,7 @@ class HarnessRuntime:
                 command_id=command_id,
                 decision=CommandDecision.REJECTED,
                 target_id=run_id,
-                error=exc.info,
+                error=self._command_error(exc.info, context.language),
             )
         return CommandReceipt(
             command_id=command_id,

@@ -18,7 +18,10 @@ class WebTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
-    @tool(description="Fetch webpage text or download remote files.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Fetch webpage text or download remote files.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def fetch_webpages(
         self,
         urls: list[str],
@@ -75,9 +78,7 @@ class WebTools:
             else:
                 filename = _filename(response, parsed)
                 target = f"downloads/{filename}"
-                path = await self.runtime.write_bytes(
-                    target, response.body, invocation
-                )
+                path = await self.runtime.write_bytes(target, response.body, invocation)
                 results.append(
                     {
                         "url": url,

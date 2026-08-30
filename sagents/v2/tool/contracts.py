@@ -74,6 +74,8 @@ class ToolCall(StrictModel):
     operation_id: Identifier
     idempotency_key: Identifier
     owner_run_id: Identifier
+    owner_agent_id: Identifier | None = None
+    owner_session_id: Identifier | None = None
 
 
 class ToolExecutionResult(StrictModel):

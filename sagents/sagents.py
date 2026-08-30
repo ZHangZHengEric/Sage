@@ -238,7 +238,7 @@ class SAgent:
             agent_mode: Agent 模式，可选 "simple" | "fibre" | "team"
             more_suggest: 是否启用更多建议功能
             force_summary: 是否强制生成总结
-            system_context: 系统上下文字典，注入额外信息到提示词
+            system_context: 运行变量字典，注入运行时所需的额外信息
             available_workflows: 可用工作流配置
             context_budget_config: 上下文预算配置，控制 token 使用
             custom_sub_agents: 自定义子 Agent 配置列表

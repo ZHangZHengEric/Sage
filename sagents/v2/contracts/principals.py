@@ -35,3 +35,4 @@ class RequestContext(StrictModel):
     actor: ActorRef
     trace: TraceContext = Field(default_factory=TraceContext)
     deadline: datetime | None = None
+    language: str = "en"

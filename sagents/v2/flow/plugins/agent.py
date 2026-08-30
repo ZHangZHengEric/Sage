@@ -8,9 +8,10 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.flow import FlowNodeContext, FlowNodeOutcome, FlowNodeResult
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.agent.multi_agent.contracts import (
     AgentDescriptor,
+    AgentInvocationMode,
     DelegationTask,
     WorkspaceSharingPolicy,
 )
@@ -23,7 +24,7 @@ class NativeAgentFlowNode:
     def __init__(
         self,
         *,
-        runtime: HarnessRuntime,
+        runtime: RuntimePort,
         descriptor: AgentDescriptor,
         child_executor: LoopChildRunExecutor,
         workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
@@ -44,6 +45,10 @@ class NativeAgentFlowNode:
                 task_name=str(context.config.get("task_name") or context.node_id),
                 original_task=self._input_text(command.input),
                 content=task_content,
+                flow_boundary=str(
+                    context.config.get("flow_boundary") or "complete_node"
+                ),
+                invocation_mode=AgentInvocationMode.AGENT_AS_TOOL,
             ),
             parent_run_id=context.run_id,
             workspace_policy=self.workspace_policy,

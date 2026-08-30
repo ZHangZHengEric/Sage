@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from sagents.v2.flow.plugins import NativeAgentFlowNode
 from sagents.v2.flow import FlowRuntime
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
@@ -28,10 +28,15 @@ class BuiltinAgentModeFactory:
     """Simple/Fibre/Team are shipped as ordinary first-party Agent Flow nodes."""
 
     def __init__(
-        self, runtime: HarnessRuntime, child_executor: LoopChildRunExecutor
+        self,
+        runtime: RuntimePort,
+        child_executor: LoopChildRunExecutor,
+        *,
+        workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
     ) -> None:
         self.runtime = runtime
         self.child_executor = child_executor
+        self.workspace_policy = workspace_policy
 
     def create(self, descriptor: AgentDescriptor) -> BuiltinModeBundle:
         """Wrap one mode-aware Agent body in an ordinary one-node Flow.
@@ -51,16 +56,11 @@ class BuiltinAgentModeFactory:
             nodes=(FlowNode(id=node_id, type="agent", agent=descriptor.agent_id),),
             edges=(FlowEdge(**{"from": node_id, "to": "end"}),),
         )
-        policy = (
-            WorkspaceSharingPolicy.PRIVATE_CHILD
-            if descriptor.mode == AgentMode.FIBRE
-            else WorkspaceSharingPolicy.SHARED_PARENT
-        )
         runner = NativeAgentFlowNode(
             runtime=self.runtime,
             descriptor=descriptor,
             child_executor=self.child_executor,
-            workspace_policy=policy,
+            workspace_policy=self.workspace_policy,
         )
         return BuiltinModeBundle(
             mode=descriptor.mode,

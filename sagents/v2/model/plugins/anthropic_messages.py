@@ -47,6 +47,7 @@ class AnthropicMessagesConfig(StrictModel):
     default_max_output_tokens: int = Field(default=4096, gt=0)
     default_temperature: float | None = None
     default_top_p: float | None = None
+    reasoning_effort: str | None = None
     timeout_seconds: float = 120
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
@@ -110,19 +111,44 @@ class AnthropicMessagesModelProvider:
             payload["system"] = system
         if request.tools:
             payload["tools"] = [self._tool_definition(tool) for tool in request.tools]
-        temperature = (
-            request.temperature
-            if request.temperature is not None
-            else self.config.default_temperature
-        )
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if self.config.default_top_p is not None:
-            payload["top_p"] = self.config.default_top_p
-        if request.response_schema is not None:
-            payload["output_config"] = {
-                "format": {"type": "json_schema", "schema": request.response_schema}
+            if request.tool_choice is not None:
+                payload["tool_choice"] = {
+                    "type": {
+                        "auto": "auto",
+                        "required": "any",
+                        "none": "none",
+                    }[request.tool_choice]
+                }
+        if self.config.reasoning_effort is None:
+            temperature = (
+                request.temperature
+                if request.temperature is not None
+                else self.config.default_temperature
+            )
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if self.config.default_top_p is not None:
+                payload["top_p"] = self.config.default_top_p
+        output_config: dict[str, Any] = {}
+        if self.config.reasoning_effort is not None:
+            effort = (
+                "low"
+                if self.config.reasoning_effort == "minimal"
+                else self.config.reasoning_effort
+            )
+            payload["thinking"] = {"type": "adaptive", "display": "summarized"}
+            output_config["effort"] = effort
+        if request.response_format == "json_object":
+            # Anthropic Messages has no generic JSON-object response mode; the
+            # unchanged V1 prompt remains the format contract for this route.
+            pass
+        elif request.response_schema is not None:
+            output_config["format"] = {
+                "type": "json_schema",
+                "schema": request.response_schema,
             }
+        if output_config:
+            payload["output_config"] = output_config
         payload.update(self.config.extra_body)
         return payload
 

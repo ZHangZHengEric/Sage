@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
@@ -44,7 +45,13 @@ class CompletedRunMemoryPolicy:
 
 
 class CanonicalMessageMemoryExtractor:
-    """Conservative default extractor over canonical completed messages."""
+    """Conservative default extractor over canonical user-authored messages.
+
+    This extractor deliberately does not treat assistant output as a fact about
+    the user. It provides exact-content deduplication; applications that need
+    semantic keys, conflict resolution, or LLM extraction can replace it via
+    the backend-neutral ``MemoryExtractor`` protocol.
+    """
 
     async def extract(
         self,
@@ -66,17 +73,20 @@ class CanonicalMessageMemoryExtractor:
                 for block in item.data.content
                 if isinstance(block, TextBlock)
             ).strip()
-            if not text or item.data.role not in {"user", "assistant"}:
+            if not text or item.data.role != "user":
                 continue
+            normalized = " ".join(text.split()).casefold()
+            memory_id = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
             now = utc_now()
             records.append(
                 MemoryRecord(
-                    # Event-derived identity makes post-commit ingestion safe
-                    # to retry after a process crash or duplicate publication.
-                    memory_id=f"memory_{event.event_id}",
+                    # Keep logical identity separate from ingestion provenance.
+                    # Exact repeated user content updates one durable record,
+                    # while the source below points at its latest observation.
+                    memory_id=f"memory_user_{memory_id}",
                     scope=scope,
                     content=text,
-                    kind=f"conversation.{item.data.role}",
+                    kind="conversation.user",
                     source={
                         "session_id": run.session_id,
                         "run_id": run.run_id,
@@ -113,6 +123,28 @@ class MemoryService:
     async def recall(self, query: MemoryQuery) -> tuple[MemoryHit, ...]:
         return await self.provider.recall(query)
 
+    def scope(
+        self,
+        *,
+        tenant_id: str | None,
+        principal_id: str,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+    ) -> MemoryScope:
+        """Build the provider scope selected for this Memory service.
+
+        Every recall and ingestion path must use this method so a provider sees
+        the same isolation key whether it was reached through automatic recall
+        or the model-visible ``search_memory`` Tool.
+        """
+
+        return MemoryScope(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            agent_id=(agent_id if self.scope_mode in {"agent", "session"} else None),
+            session_id=(session_id if self.scope_mode == "session" else None),
+        )
+
     async def remember(self, record: MemoryRecord) -> MemoryWriteResult:
         return await self.provider.remember(record)
 
@@ -128,15 +160,11 @@ class MemoryService:
             events = await session_store.read_events(run.run_id)
             if not await self.ingestion_policy.should_ingest(run, events):
                 return
-            scope = MemoryScope(
+            scope = self.scope(
                 tenant_id=context.actor.tenant_id,
                 principal_id=context.actor.principal_id,
-                agent_id=(
-                    (await session_store.get_start_command(run.run_id)).agent_id
-                    if self.scope_mode in {"agent", "session"}
-                    else None
-                ),
-                session_id=(run.session_id if self.scope_mode == "session" else None),
+                agent_id=(await session_store.get_start_command(run.run_id)).agent_id,
+                session_id=run.session_id,
             )
             for record in await self.extractor.extract(run, events, scope):
                 await self.provider.remember(record)

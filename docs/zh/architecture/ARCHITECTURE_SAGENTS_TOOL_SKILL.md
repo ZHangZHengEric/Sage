@@ -101,7 +101,7 @@ flowchart TB
         TodoT[todo_tool · 多智能体任务清单]
     end
     subgraph 用户交互
-        Quest[questionnaire_tool · 结构化问卷]
+        Quest[questionnaire_async · 异步结构化问卷]
     end
     subgraph 记忆
         Mem[memory_tool]

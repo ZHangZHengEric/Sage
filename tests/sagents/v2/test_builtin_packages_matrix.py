@@ -27,7 +27,6 @@ OFFICIAL_LOCAL_TOOLS = {
     "grep",
     "kill_shell",
     "list_dir",
-    "questionnaire",
     "questionnaire_async",
     "read_lints",
     "search_memory",
@@ -91,12 +90,7 @@ def test_no_hand_written_builtin_catalogs_or_placeholder_plugin_folders():
 
 def test_official_tools_use_runtime_execution_instead_of_direct_host_io():
     official = (
-        Path(__file__).parents[3]
-        / "sagents"
-        / "v2"
-        / "tool"
-        / "plugins"
-        / "official"
+        Path(__file__).parents[3] / "sagents" / "v2" / "tool" / "plugins" / "official"
     )
     forbidden = (
         "import subprocess",

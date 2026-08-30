@@ -10,22 +10,26 @@ from sagents.v2.model import ModelProvider
 from sagents.v2.tool import (
     CompositeToolCatalog,
     CompositeToolExecutor,
-    FilteredToolCatalog,
+    InvocationGrantToolCatalog,
     ToolCatalog,
     ToolExecutor,
 )
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
     AgentMode,
     AgentRegistry,
     MultiAgentCoordinator,
+    WorkspaceSharingPolicy,
 )
 from sagents.v2.tool.plugins.official.delegation import MultiAgentToolPlugin
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 
 
 ModelProviderFactory = Callable[[AgentDescriptor, str], ModelProvider]
+ModeLoopComposer = Callable[
+    [AgentDescriptor, str, ToolCatalog, ToolExecutor], AgentLoopEngine
+]
 
 
 class ModeAwareAgentLoopFactory:
@@ -34,13 +38,17 @@ class ModeAwareAgentLoopFactory:
     def __init__(
         self,
         *,
-        runtime: HarnessRuntime,
+        runtime: RuntimePort,
         model_factory: ModelProviderFactory,
         base_catalog: ToolCatalog,
         base_executor: ToolExecutor,
         registry: AgentRegistry,
         resolved_spec_hash: str,
         max_delegation_concurrency: int = 4,
+        loop_composer: ModeLoopComposer | None = None,
+        workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
+        fallback_invocation_mode: str | None = None,
+        child_loop_factory=None,
     ) -> None:
         self.runtime = runtime
         self.model_factory = model_factory
@@ -49,21 +57,41 @@ class ModeAwareAgentLoopFactory:
         self.registry = registry
         self.resolved_spec_hash = resolved_spec_hash
         self.max_delegation_concurrency = max_delegation_concurrency
+        self.loop_composer = loop_composer
+        self.workspace_policy = workspace_policy
+        self.fallback_invocation_mode = fallback_invocation_mode
         self._coordinators: dict[tuple[str, AgentMode], MultiAgentCoordinator] = {}
+        async def build_child(descriptor, run_id, context):
+            if child_loop_factory is not None:
+                value = child_loop_factory(descriptor, run_id, context)
+                if hasattr(value, "__await__"):
+                    value = await value
+                return value
+            return self.create_loop(descriptor, run_id)
+
         self.child_executor = LoopChildRunExecutor(
             runtime=runtime,
-            loop_factory=self.create_loop,
+            loop_factory=build_child,
             resolved_spec_hash=resolved_spec_hash,
+            descriptor_resolver=registry.get,
         )
 
     def create_loop(self, descriptor: AgentDescriptor, run_id: str) -> AgentLoopEngine:
         """Add delegation tools only for multi-agent modes, then build one Loop."""
 
         catalogs: list[ToolCatalog] = [
-            FilteredToolCatalog(self.base_catalog, descriptor.tools)
+            InvocationGrantToolCatalog(
+                self.base_catalog,
+                descriptor.tools,
+                self.runtime.session_store.get_start_command,
+                fallback_invocation_mode=self.fallback_invocation_mode,
+            )
         ]
         executors: list[ToolExecutor] = [self.base_executor]
-        if descriptor.mode in {AgentMode.FIBRE, AgentMode.TEAM}:
+        if descriptor.allow_delegation and descriptor.mode in {
+            AgentMode.FIBRE,
+            AgentMode.TEAM,
+        }:
             # Multi-agent behavior is exposed to the model as typed tools backed
             # by child Runs. The core Loop itself does not special-case Fibre or
             # Team and therefore keeps one completion/tool protocol.
@@ -75,18 +103,26 @@ class ModeAwareAgentLoopFactory:
                     registry=self.registry,
                     executor=self.child_executor,
                     max_concurrency=self.max_delegation_concurrency,
+                    workspace_policy=self.workspace_policy,
                 )
                 self._coordinators[key] = coordinator
             suite = MultiAgentToolPlugin(coordinator=coordinator, runtime=self.runtime)
             catalogs.append(suite.catalog)
             executors.append(suite.executor)
+        catalog = CompositeToolCatalog(tuple(catalogs))
+        executor = CompositeToolExecutor(tuple(executors))
+        if self.loop_composer is not None:
+            loop = self.loop_composer(descriptor, run_id, catalog, executor)
+            loop.delegated_run_controller = self.child_executor
+            return loop
         return AgentLoopEngine(
             runtime=self.runtime,
             model=self.model_factory(descriptor, run_id),
-            tool_catalog=CompositeToolCatalog(tuple(catalogs)),
-            tool_executor=CompositeToolExecutor(tuple(executors)),
+            tool_catalog=catalog,
+            tool_executor=executor,
             context_assembler=DefaultContextAssembler(
                 developer_instructions=descriptor.instructions,
                 history_reader=self.runtime.session_store,
             ),
+            delegated_run_controller=self.child_executor,
         )

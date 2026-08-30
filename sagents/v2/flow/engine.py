@@ -10,6 +10,7 @@ from sagents.v2.contracts.checkpoint import (
     Suspension,
     SuspensionReason,
 )
+from sagents.v2.contracts.commands import CancelRun, ReplyInteraction
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -34,11 +35,19 @@ from sagents.v2.flow.contracts import (
     FlowNodeContext,
     FlowNodeOutcome,
     FlowNodeResult,
+    ParallelBranchState,
+    PendingParallelState,
     RunnableNode,
 )
-from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.package.manifest.flows import FlowDefinition
-from sagents.v2.runtime.session.ephemeral import EventDraft
+from sagents.v2.runtime.session.contracts import EventDraft
+from sagents.v2.i18n import (
+    error_recovery_payload,
+    localize_error,
+    normalize_language,
+    tr,
+)
 
 
 ConditionEvaluator = Callable[[str, FlowExecutionState, str], bool]
@@ -50,7 +59,7 @@ class FlowRuntime:
     def __init__(
         self,
         *,
-        runtime: HarnessRuntime,
+        runtime: RuntimePort,
         flows: Mapping[str, FlowDefinition],
         agent_nodes: Mapping[str, RunnableNode],
         tool_nodes: Mapping[str, RunnableNode] | None = None,
@@ -121,7 +130,7 @@ class FlowRuntime:
         checkpoint = await self.runtime.session_store.get_checkpoint(
             suspension.checkpoint_id
         )
-        if checkpoint.checkpoint_codec_version != "flow/1":
+        if checkpoint.checkpoint_codec_version not in {"flow/1", "flow/2"}:
             raise self._error(
                 "flow.checkpoint_incompatible",
                 ErrorCategory.UNSUPPORTED_SCHEMA,
@@ -141,6 +150,99 @@ class FlowRuntime:
         resolution = await self.runtime.session_store.get_interaction_resolution(
             active.pending_interaction_id
         )
+        if active.pending_error is not None:
+            if resolution.decision == "cancel":
+                await self.runtime.cancel_run(
+                    CancelRun(
+                        run_id=run.run_id,
+                        expected_revision=run.revision,
+                        idempotency_key=(
+                            f"flow-error-cancel:{active.pending_interaction_id}"
+                        ),
+                        reason="interaction_cancelled",
+                    ),
+                    context,
+                )
+                return await self.runtime.get_run(run.run_id)
+            results = dict(active.results)
+            if resolution.payload:
+                results[f"{active.current_node_id}__recovery"] = {
+                    "decision": resolution.decision,
+                    "payload": resolution.payload,
+                }
+            active = active.model_copy(
+                update={
+                    "results": results,
+                    "pending_interaction_id": None,
+                    "pending_error": None,
+                }
+            )
+            state = self._apply_active(state, active)
+            return await self._drive(run, flow, state, context)
+        if active.pending_child_run_id is not None:
+            child = await self.runtime.get_run(active.pending_child_run_id)
+            if child.state != RunState.SUSPENDED or child.suspension_id is None:
+                return await self._fail(
+                    run,
+                    state,
+                    RuntimeErrorInfo(
+                        code="flow.child_interaction_state_changed",
+                        category=ErrorCategory.CONFLICT,
+                        message="delegated child interaction is no longer pending",
+                        safe_to_resume=True,
+                    ),
+                    context,
+                )
+            child_suspension = await self.runtime.session_store.get_suspension(
+                child.suspension_id
+            )
+            if child_suspension.interaction_id is None:
+                return await self._fail(
+                    run,
+                    state,
+                    RuntimeErrorInfo(
+                        code="flow.child_interaction_missing",
+                        category=ErrorCategory.CORRUPT_STATE,
+                        message="delegated child suspension has no interaction",
+                    ),
+                    context,
+                )
+            child_interaction = await self.runtime.session_store.get_interaction(
+                child_suspension.interaction_id
+            )
+            receipt = await self.runtime.reply_interaction(
+                ReplyInteraction(
+                    run_id=child.run_id,
+                    suspension_id=child_suspension.suspension_id,
+                    interaction_id=child_interaction.interaction_id,
+                    expected_revision=child.revision,
+                    expected_suspension_revision=child_suspension.expected_revision,
+                    expected_interaction_revision=child_interaction.expected_revision,
+                    decision=resolution.decision,
+                    payload=resolution.payload,
+                    idempotency_key=(
+                        f"flow-child-proxy:{run.run_id}:"
+                        f"{active.pending_interaction_id}:{resolution.decision}"
+                    ),
+                ),
+                context,
+            )
+            if receipt.decision.value == "rejected":
+                return await self._fail(
+                    run,
+                    state,
+                    receipt.error
+                    or RuntimeErrorInfo(
+                        code="flow.child_interaction_rejected",
+                        category=ErrorCategory.CONFLICT,
+                        message="delegated child rejected the proxied interaction",
+                        safe_to_resume=True,
+                    ),
+                    context,
+                )
+            active = active.model_copy(update={"pending_interaction_id": None})
+            state = self._apply_active(state, active)
+            return await self._drive(run, flow, state, context)
         node_id = active.current_node_id
         node_execution_id = active.pending_node_execution_id or new_id("node_execution")
         results = dict(active.results)
@@ -258,10 +360,11 @@ class FlowRuntime:
                 )
             if node.type == "parallel":
                 try:
-                    run, active = await self._run_parallel(
-                        run, active_flow, active, node, context
+                    run, state = await self._run_parallel(
+                        run, active_flow, state, active, node, context
                     )
-                    state = self._apply_active(state, active)
+                    if run.state != RunState.RUNNING:
+                        return run
                 except SageV2Error as exc:
                     return await self._fail(run, state, exc.info, context)
             elif node.type in {"join", "end"}:
@@ -465,17 +568,11 @@ class FlowRuntime:
             node_execution_id=node_execution_id,
         )
 
-    async def _run_parallel(self, run, flow, state, node, context):
-        """Execute declared Agent/Tool branches concurrently, then join results.
+    async def _run_parallel(self, run, flow, root_state, state, node, context):
+        """Run or resume a parallel batch without losing suspended branches."""
 
-        Every branch receives a distinct node_execution_id. Start events are
-        committed before `gather`, and completion events are committed only after
-        all reference branches succeed; branch-local suspension is not yet a
-        full production parallel-interaction scheduler.
-        """
-
-        branches = tuple(node.config.get("branches") or ())
-        if not branches:
+        branch_ids = tuple(node.config.get("branches") or ())
+        if not branch_ids:
             raise self._error(
                 "flow.parallel_branches_missing",
                 ErrorCategory.VALIDATION,
@@ -483,7 +580,7 @@ class FlowRuntime:
             )
         node_map = {value.id: value for value in flow.nodes}
         branch_nodes = []
-        for branch_id in branches:
+        for branch_id in branch_ids:
             branch = node_map.get(branch_id)
             if branch is None or branch.type not in {"agent", "tool"}:
                 raise self._error(
@@ -491,32 +588,6 @@ class FlowRuntime:
                     ErrorCategory.VALIDATION,
                     f"parallel branch {branch_id!r} must be an agent/tool node",
                 )
-            branch_nodes.append(branch)
-        execution_ids = {branch.id: new_id("node_execution") for branch in branch_nodes}
-        parent_execution_id = new_id("node_execution")
-        started_drafts = (
-            EventDraft(
-                type="flow.node.started",
-                flow_execution_id=state.flow_execution_id,
-                node_execution_id=parent_execution_id,
-                data=FlowEventData(
-                    state="started", flow_id=state.flow_id, node_id=node.id
-                ),
-            ),
-        ) + tuple(
-            EventDraft(
-                type="flow.node.started",
-                flow_execution_id=state.flow_execution_id,
-                node_execution_id=execution_ids[branch.id],
-                data=FlowEventData(
-                    state="started", flow_id=state.flow_id, node_id=branch.id
-                ),
-            )
-            for branch in branch_nodes
-        )
-        run = await self._commit(run, context, started_drafts)
-
-        async def invoke(branch):
             runner = (
                 self.agent_nodes.get(branch.agent or "")
                 if branch.type == "agent"
@@ -528,61 +599,306 @@ class FlowRuntime:
                     ErrorCategory.VALIDATION,
                     f"parallel branch {branch.id!r} has no runner",
                 )
-            return await runner.run(
-                FlowNodeContext(
-                    session_id=run.session_id,
-                    run_id=run.run_id,
-                    flow_id=state.flow_id,
-                    flow_execution_id=state.flow_execution_id,
-                    node_id=branch.id,
-                    node_execution_id=execution_ids[branch.id],
-                    node_type=branch.type,
-                    config=branch.config,
-                    prior_results=state.results,
-                    request_context=context,
-                )
-            )
+            branch_nodes.append(branch)
 
-        outputs = await asyncio.gather(*(invoke(branch) for branch in branch_nodes))
-        for branch, output in zip(branch_nodes, outputs, strict=True):
-            if output.outcome == FlowNodeOutcome.FAILED:
-                raise self._error(
-                    "flow.parallel_branch_failed",
-                    ErrorCategory.PROVIDER_PERMANENT,
-                    f"parallel branch {branch.id!r} failed",
-                )
-        results = dict(state.results)
-        completed = list(state.completed_node_ids)
-        for branch, output in zip(branch_nodes, outputs, strict=True):
-            results[branch.id] = output.output
-            completed.append(branch.id)
-        results[node.id] = {"branches": list(branches)}
-        completed.append(node.id)
-        state = state.model_copy(
-            update={"results": results, "completed_node_ids": tuple(completed)}
-        )
-        drafts = tuple(
-            EventDraft(
-                type="flow.node.completed",
-                flow_execution_id=state.flow_execution_id,
-                node_execution_id=execution_ids[branch.id],
-                data=FlowEventData(
-                    state="completed", flow_id=state.flow_id, node_id=branch.id
+        pending = state.pending_parallel
+        changed: tuple[ParallelBranchState, ...]
+        if pending is None:
+            execution_ids = {
+                branch.id: new_id("node_execution") for branch in branch_nodes
+            }
+            pending = PendingParallelState(
+                node_id=node.id,
+                node_execution_id=new_id("node_execution"),
+            )
+            run = await self._commit(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="flow.node.started",
+                        flow_execution_id=state.flow_execution_id,
+                        node_execution_id=pending.node_execution_id,
+                        data=FlowEventData(
+                            state="started", flow_id=state.flow_id, node_id=node.id
+                        ),
+                    ),
+                    *(
+                        EventDraft(
+                            type="flow.node.started",
+                            flow_execution_id=state.flow_execution_id,
+                            node_execution_id=execution_ids[branch.id],
+                            data=FlowEventData(
+                                state="started",
+                                flow_id=state.flow_id,
+                                node_id=branch.id,
+                            ),
+                        )
+                        for branch in branch_nodes
+                    ),
                 ),
             )
-            for branch in branch_nodes
-        ) + (
-            EventDraft(
-                type="flow.node.completed",
-                flow_execution_id=state.flow_execution_id,
-                node_execution_id=parent_execution_id,
-                data=FlowEventData(
-                    state="completed", flow_id=state.flow_id, node_id=node.id
+
+            async def invoke(branch):
+                runner = (
+                    self.agent_nodes[branch.agent or ""]
+                    if branch.type == "agent"
+                    else self.tool_nodes[branch.tool or ""]
+                )
+                return await runner.run(
+                    FlowNodeContext(
+                        session_id=run.session_id,
+                        run_id=run.run_id,
+                        flow_id=state.flow_id,
+                        flow_execution_id=state.flow_execution_id,
+                        node_id=branch.id,
+                        node_execution_id=execution_ids[branch.id],
+                        node_type=branch.type,
+                        config=branch.config,
+                        prior_results=state.results,
+                        request_context=context,
+                    )
+                )
+
+            raw_results = await asyncio.gather(
+                *(invoke(branch) for branch in branch_nodes),
+                return_exceptions=True,
+            )
+            changed = tuple(
+                self._parallel_branch_state(
+                    branch.id, execution_ids[branch.id], raw_result
+                )
+                for branch, raw_result in zip(
+                    branch_nodes, raw_results, strict=True
+                )
+            )
+            pending = pending.model_copy(update={"branches": changed})
+        else:
+            if pending.node_id != node.id:
+                raise self._error(
+                    "flow.parallel_checkpoint_mismatch",
+                    ErrorCategory.CORRUPT_STATE,
+                    "parallel checkpoint belongs to a different node",
+                )
+            active_child = state.pending_child_run_id
+            branch_state = next(
+                (
+                    value
+                    for value in pending.branches
+                    if (
+                        value.outcome == FlowNodeOutcome.SUSPENDED
+                        and value.child_run_id == active_child
+                    )
+                    or (
+                        active_child is None
+                        and value.outcome == FlowNodeOutcome.FAILED
+                    )
+                ),
+                None,
+            )
+            if branch_state is None:
+                raise self._error(
+                    "flow.parallel_active_branch_missing",
+                    ErrorCategory.CORRUPT_STATE,
+                    "parallel checkpoint has no matching active child branch",
+                )
+            branch = node_map[branch_state.node_id]
+            run = await self._commit(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="flow.node.resumed",
+                        flow_execution_id=state.flow_execution_id,
+                        node_execution_id=branch_state.node_execution_id,
+                        data=FlowEventData(
+                            state="resumed",
+                            flow_id=state.flow_id,
+                            node_id=branch.id,
+                        ),
+                    ),
+                ),
+            )
+            runner = (
+                self.agent_nodes[branch.agent or ""]
+                if branch.type == "agent"
+                else self.tool_nodes[branch.tool or ""]
+            )
+            try:
+                raw_result = await runner.run(
+                    FlowNodeContext(
+                        session_id=run.session_id,
+                        run_id=run.run_id,
+                        flow_id=state.flow_id,
+                        flow_execution_id=state.flow_execution_id,
+                        node_id=branch.id,
+                        node_execution_id=branch_state.node_execution_id,
+                        node_type=branch.type,
+                        config=branch.config,
+                        prior_results=state.results,
+                        request_context=context,
+                    )
+                )
+            except Exception as exc:  # every started branch gets a durable outcome
+                raw_result = exc
+            replacement = self._parallel_branch_state(
+                branch.id, branch_state.node_execution_id, raw_result
+            )
+            changed = (replacement,)
+            pending = pending.model_copy(
+                update={
+                    "branches": tuple(
+                        replacement if value.node_id == branch.id else value
+                        for value in pending.branches
+                    )
+                }
+            )
+
+        run = await self.runtime.get_run(run.run_id)
+        run = await self._commit(
+            run,
+            context,
+            tuple(
+                self._parallel_outcome_draft(state, branch_state)
+                for branch_state in changed
+            ),
+        )
+        state = state.model_copy(
+            update={
+                "pending_parallel": pending,
+                "pending_child_run_id": None,
+                "pending_interaction_id": None,
+                "pending_node_execution_id": None,
+            }
+        )
+        root_state = self._apply_active(root_state, state)
+
+        suspended = next(
+            (
+                value
+                for value in pending.branches
+                if value.outcome == FlowNodeOutcome.SUSPENDED
+            ),
+            None,
+        )
+        if suspended is not None:
+            branch = node_map[suspended.node_id]
+            return (
+                await self._suspend_child_dependency(
+                    run,
+                    root_state,
+                    state,
+                    branch,
+                    FlowNodeResult(
+                        outcome=FlowNodeOutcome.SUSPENDED,
+                        output=suspended.output,
+                        error=suspended.error,
+                    ),
+                    context,
+                    suspended.node_execution_id,
+                    emit_lifecycle_event=False,
+                ),
+                root_state,
+            )
+
+        failed = next(
+            (
+                value
+                for value in pending.branches
+                if value.outcome == FlowNodeOutcome.FAILED
+            ),
+            None,
+        )
+        if failed is not None:
+            return (
+                await self._fail(
+                    run,
+                    root_state,
+                    failed.error
+                    or RuntimeErrorInfo(
+                        code="flow.parallel_branch_failed",
+                        category=ErrorCategory.PROVIDER_PERMANENT,
+                        message=f"parallel branch {failed.node_id!r} failed",
+                    ),
+                    context,
+                ),
+                root_state,
+            )
+
+        results = dict(state.results)
+        completed = list(state.completed_node_ids)
+        for branch_state in pending.branches:
+            results[branch_state.node_id] = branch_state.output
+            if branch_state.node_id not in completed:
+                completed.append(branch_state.node_id)
+        results[node.id] = {"branches": list(branch_ids)}
+        if node.id not in completed:
+            completed.append(node.id)
+        state = state.model_copy(
+            update={
+                "results": results,
+                "completed_node_ids": tuple(completed),
+                "pending_parallel": None,
+            }
+        )
+        root_state = self._apply_active(root_state, state)
+        run = await self._commit(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="flow.node.completed",
+                    flow_execution_id=state.flow_execution_id,
+                    node_execution_id=pending.node_execution_id,
+                    data=FlowEventData(
+                        state="completed", flow_id=state.flow_id, node_id=node.id
+                    ),
                 ),
             ),
         )
-        run = await self._commit(run, context, drafts)
-        return run, state
+        return run, root_state
+
+    @staticmethod
+    def _parallel_branch_state(node_id, node_execution_id, raw_result):
+        if isinstance(raw_result, FlowNodeResult):
+            child_run_id = raw_result.output.get("child_run_id")
+            return ParallelBranchState(
+                node_id=node_id,
+                node_execution_id=node_execution_id,
+                outcome=raw_result.outcome,
+                output=raw_result.output,
+                error=raw_result.error,
+                child_run_id=(
+                    child_run_id
+                    if isinstance(child_run_id, str) and child_run_id
+                    else None
+                ),
+            )
+        message = str(raw_result) or raw_result.__class__.__name__
+        return ParallelBranchState(
+            node_id=node_id,
+            node_execution_id=node_execution_id,
+            outcome=FlowNodeOutcome.FAILED,
+            error=RuntimeErrorInfo(
+                code="flow.parallel_branch_provider_error",
+                category=ErrorCategory.PROVIDER_PERMANENT,
+                message=message,
+            ),
+        )
+
+    @staticmethod
+    def _parallel_outcome_draft(state, branch_state):
+        return EventDraft(
+            type=f"flow.node.{branch_state.outcome.value}",
+            flow_execution_id=state.flow_execution_id,
+            node_execution_id=branch_state.node_execution_id,
+            data=FlowEventData(
+                state=branch_state.outcome.value,
+                flow_id=state.flow_id,
+                node_id=branch_state.node_id,
+                error=branch_state.error,
+            ),
+        )
 
     async def _enter_subflow(self, run, state, active, node, context):
         """Push the parent frame and begin a child Flow with its own execution id."""
@@ -697,6 +1013,8 @@ class FlowRuntime:
                 "pending_interaction_id": active.pending_interaction_id,
                 "pending_child_run_id": active.pending_child_run_id,
                 "pending_node_execution_id": active.pending_node_execution_id,
+                "pending_error": active.pending_error,
+                "pending_parallel": active.pending_parallel,
             }
         )
 
@@ -715,7 +1033,7 @@ class FlowRuntime:
         checkpoint_id = new_id("checkpoint")
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,
-            checkpoint_codec_version="flow/1",
+            checkpoint_codec_version="flow/2",
             session_id=run.session_id,
             run_id=run.run_id,
             run_sequence=run.last_run_sequence,
@@ -726,6 +1044,11 @@ class FlowRuntime:
             resolved_spec_hash=run.resolved_spec_hash,
             created_at=self.clock(),
         )
+        payload = dict(node.config.get("payload") or {"node_id": node.id})
+        payload.setdefault("title", tr("approval.title", context.language))
+        payload.setdefault("prompt", tr("approval.guidance", context.language))
+        payload.setdefault("guidance", tr("approval.guidance", context.language))
+        payload.setdefault("language", normalize_language(context.language))
         interaction = InteractionRequest(
             interaction_id=interaction_id,
             run_id=run.run_id,
@@ -735,7 +1058,7 @@ class FlowRuntime:
                 node.config.get("allowed_decisions") or ("approve", "deny")
             ),
             eligible_principal_ids=(context.actor.principal_id,),
-            payload=node.config.get("payload") or {"node_id": node.id},
+            payload=payload,
             requested_at=self.clock(),
         )
         suspension = Suspension(
@@ -792,6 +1115,8 @@ class FlowRuntime:
         output,
         context,
         node_execution_id,
+        *,
+        emit_lifecycle_event=True,
     ):
         """Keep the same node execution pending while its child Run is suspended."""
 
@@ -811,9 +1136,37 @@ class FlowRuntime:
                 ),
                 context,
             )
+        child = await self.runtime.get_run(child_run_id)
+        proxy_interaction = None
+        parent_interaction_id = None
+        if child.state == RunState.SUSPENDED and child.suspension_id is not None:
+            child_suspension = await self.runtime.session_store.get_suspension(
+                child.suspension_id
+            )
+            if child_suspension.interaction_id is not None:
+                child_interaction = await self.runtime.session_store.get_interaction(
+                    child_suspension.interaction_id
+                )
+                parent_interaction_id = new_id("interaction")
+                proxy_interaction = InteractionRequest(
+                    interaction_id=parent_interaction_id,
+                    run_id=run.run_id,
+                    interaction_type=child_interaction.interaction_type,
+                    blocking_scope=BlockingScope.RUN,
+                    allowed_decisions=child_interaction.allowed_decisions,
+                    eligible_principal_ids=(context.actor.principal_id,),
+                    payload={
+                        **child_interaction.payload,
+                        "delegated": True,
+                        "child_run_id": child_run_id,
+                        "child_interaction_id": child_interaction.interaction_id,
+                    },
+                    requested_at=self.clock(),
+                )
         active = active.model_copy(
             update={
                 "pending_child_run_id": child_run_id,
+                "pending_interaction_id": parent_interaction_id,
                 "pending_node_execution_id": node_execution_id,
             }
         )
@@ -821,7 +1174,7 @@ class FlowRuntime:
         checkpoint_id = new_id("checkpoint")
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,
-            checkpoint_codec_version="flow/1",
+            checkpoint_codec_version="flow/2",
             session_id=run.session_id,
             run_id=run.run_id,
             run_sequence=run.last_run_sequence,
@@ -835,29 +1188,39 @@ class FlowRuntime:
         suspension = Suspension(
             suspension_id=new_id("suspension"),
             run_id=run.run_id,
-            reason=SuspensionReason.RESOURCE_WAIT,
+            reason=(
+                SuspensionReason.INPUT_REQUIRED
+                if proxy_interaction is not None
+                else SuspensionReason.RESOURCE_WAIT
+            ),
             blocking_scope=node.blocking_scope or "node",
             checkpoint_id=checkpoint_id,
             checkpoint_sequence=run.last_run_sequence,
-            resume_policy="after_child_run_terminal",
+            interaction_id=parent_interaction_id,
+            resume_policy=(
+                "after_interaction_resolution"
+                if proxy_interaction is not None
+                else "after_child_run_terminal"
+            ),
             requested_at=self.clock(),
         )
-        run = await self._commit(
-            run,
-            context,
-            (
-                EventDraft(
-                    type="flow.node.suspended",
-                    flow_execution_id=active.flow_execution_id,
-                    node_execution_id=node_execution_id,
-                    data=FlowEventData(
-                        state="suspended",
-                        flow_id=active.flow_id,
-                        node_id=node.id,
+        if emit_lifecycle_event:
+            run = await self._commit(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="flow.node.suspended",
+                        flow_execution_id=active.flow_execution_id,
+                        node_execution_id=node_execution_id,
+                        data=FlowEventData(
+                            state="suspended",
+                            flow_id=active.flow_id,
+                            node_id=node.id,
+                        ),
                     ),
                 ),
-            ),
-        )
+            )
         session = await self.runtime.session_store.get_session(run.session_id)
         return await self.runtime.commit_suspension(
             run_id=run.run_id,
@@ -869,6 +1232,7 @@ class FlowRuntime:
                 }
             ),
             suspension=suspension,
+            interaction=proxy_interaction,
             context=context,
             idempotency_key=(
                 f"flow-child-wait:{run.run_id}:{child_run_id}:{node_execution_id}"
@@ -879,7 +1243,7 @@ class FlowRuntime:
         checkpoint_id = new_id("checkpoint")
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,
-            checkpoint_codec_version="flow/1",
+            checkpoint_codec_version="flow/2",
             session_id=run.session_id,
             run_id=run.run_id,
             run_sequence=run.last_run_sequence,
@@ -971,9 +1335,25 @@ class FlowRuntime:
         return result.run
 
     async def _fail(self, run, state, error, context):
+        error = localize_error(error, context.language)
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
             return current
+        resumable = error.safe_to_resume or error.retryable
+        if current.state == RunState.RUNNING and resumable:
+            return await self._suspend_for_error_recovery(
+                current, state, error, context
+            )
+        error = error.model_copy(
+            update={
+                "metadata": {
+                    **error.metadata,
+                    "recovery_questionnaire": error_recovery_payload(
+                        error, context.language, resumable=False
+                    ),
+                }
+            }
+        )
         active = self._active_view(state)
         result = await self.runtime.session_store.commit_run(
             run_id=current.run_id,
@@ -1003,6 +1383,84 @@ class FlowRuntime:
             idempotency_key=f"flow-fail:{state.flow_execution_id}:{error.code}",
         )
         return result.run
+
+    async def _suspend_for_error_recovery(self, run, state, error, context):
+        active = self._active_view(state)
+        interaction_id = new_id("interaction")
+        node_execution_id = active.pending_node_execution_id or new_id(
+            "node_execution"
+        )
+        active = active.model_copy(
+            update={
+                "pending_interaction_id": interaction_id,
+                "pending_node_execution_id": node_execution_id,
+                "pending_error": error.model_dump(mode="json"),
+            }
+        )
+        state = self._apply_active(state, active)
+        run = await self._commit(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="flow.node.suspended",
+                    flow_execution_id=active.flow_execution_id,
+                    node_execution_id=node_execution_id,
+                    data=FlowEventData(
+                        state="error_recovery",
+                        flow_id=active.flow_id,
+                        node_id=active.current_node_id,
+                        error=error,
+                    ),
+                ),
+            ),
+        )
+        checkpoint_id = new_id("checkpoint")
+        checkpoint = Checkpoint(
+            checkpoint_id=checkpoint_id,
+            checkpoint_codec_version="flow/2",
+            session_id=run.session_id,
+            run_id=run.run_id,
+            run_sequence=run.last_run_sequence,
+            session_revision=(
+                await self.runtime.session_store.get_session(run.session_id)
+            ).revision,
+            state=state.model_dump(mode="json"),
+            resolved_spec_hash=run.resolved_spec_hash,
+            created_at=self.clock(),
+        )
+        interaction = InteractionRequest(
+            interaction_id=interaction_id,
+            run_id=run.run_id,
+            interaction_type=InteractionType.USER_INPUT,
+            blocking_scope=BlockingScope.RUN,
+            allowed_decisions=("retry", "change_direction", "cancel"),
+            eligible_principal_ids=(context.actor.principal_id,),
+            payload=error_recovery_payload(
+                error, context.language, resumable=True
+            ),
+            requested_at=self.clock(),
+        )
+        suspension = Suspension(
+            suspension_id=new_id("suspension"),
+            run_id=run.run_id,
+            reason=SuspensionReason.INPUT_REQUIRED,
+            blocking_scope=BlockingScope.RUN,
+            checkpoint_id=checkpoint_id,
+            checkpoint_sequence=run.last_run_sequence,
+            interaction_id=interaction_id,
+            resume_policy="after_interaction_resolution",
+            requested_at=self.clock(),
+        )
+        return await self.runtime.commit_suspension(
+            run_id=run.run_id,
+            expected_revision=run.revision,
+            checkpoint=checkpoint,
+            suspension=suspension,
+            interaction=interaction,
+            context=context,
+            idempotency_key=f"flow-error-suspend:{interaction_id}",
+        )
 
     async def _commit(self, run, context, drafts):
         result = await self.runtime.session_store.commit_run(
@@ -1042,12 +1500,12 @@ class FlowRuntime:
         return bool(result.get(expression))
 
     @staticmethod
-    def _error(code, category, message):
+    def _error(code, category, message, *, safe_to_resume=False):
         return SageV2Error(
             RuntimeErrorInfo(
                 code=code,
                 category=category,
                 message=message,
-                safe_to_resume=True,
+                safe_to_resume=safe_to_resume,
             )
         )

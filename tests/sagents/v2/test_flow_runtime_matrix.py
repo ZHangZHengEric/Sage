@@ -20,7 +20,7 @@ from sagents.v2.contracts.principals import (
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.flow.contracts import FlowNodeOutcome, FlowNodeResult
 from sagents.v2.flow.engine import FlowRuntime
-from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 
 
@@ -47,7 +47,7 @@ class FakeNode:
 
 
 async def setup(flow, runners):
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(
         StartRun(
             agent_id="flow_agent",
@@ -66,7 +66,7 @@ async def setup(flow, runners):
 
 
 async def setup_flows(flows, runners, *, max_node_visits=100):
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(
         StartRun(
             agent_id="flow_agent",
@@ -216,6 +216,48 @@ async def test_parallel_branches_actually_overlap_and_commit_deterministically()
 
 
 @pytest.mark.asyncio
+async def test_parallel_provider_exception_still_settles_every_started_branch():
+    class ExplodingNode:
+        async def run(self, context):
+            del context
+            raise RuntimeError("branch exploded")
+
+    flow = FlowDefinition(
+        version="1",
+        start="parallel",
+        nodes=(
+            FlowNode(
+                id="parallel",
+                type="parallel",
+                config={"branches": ["good", "bad"]},
+            ),
+            FlowNode(id="good", type="agent", agent="good"),
+            FlowNode(id="bad", type="agent", agent="bad"),
+        ),
+        edges=(FlowEdge(**{"from": "parallel", "to": "end"}),),
+    )
+    runtime, handle, engine = await setup(
+        flow,
+        {"good": FakeNode({"ok": True}), "bad": ExplodingNode()},
+    )
+
+    result = await engine.execute(handle.run_id, "main", CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    outcomes = {
+        event.data.node_id: event.type
+        for event in events
+        if event.type in {"flow.node.completed", "flow.node.failed"}
+        and event.data.node_id in {"good", "bad"}
+    }
+
+    assert result.state == RunState.FAILED
+    assert outcomes == {
+        "good": "flow.node.completed",
+        "bad": "flow.node.failed",
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("decision", "expected_agent"),
     [("approve", "approved_agent"), ("deny", "denied_agent")],
@@ -252,7 +294,7 @@ async def test_interaction_node_suspends_and_resumes_conditional_flow(
     suspended = await engine.execute(handle.run_id, "main", CONTEXT)
     assert suspended.state == RunState.SUSPENDED
     checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
-    assert checkpoint.checkpoint_codec_version == "flow/1"
+    assert checkpoint.checkpoint_codec_version == "flow/2"
     suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
     interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     await runtime.reply_interaction(
@@ -321,6 +363,70 @@ async def test_node_failure_becomes_flow_and_run_failure():
         "run.failed",
     ]
     assert events[-1].data.error.code == "node.failed"
+    recovery = events[-1].data.error.metadata["recovery_questionnaire"]
+    assert recovery["resumable"] is False
+    assert recovery["questions"][0]["options"] == [
+        {"label": "Stop this run", "value": "cancel"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resumable_node_failure_suspends_with_questionnaire_and_retries():
+    class FailOnceNode:
+        def __init__(self):
+            self.calls = 0
+
+        async def run(self, context):
+            self.calls += 1
+            if self.calls == 1:
+                return FlowNodeResult(
+                    outcome=FlowNodeOutcome.FAILED,
+                    error=RuntimeErrorInfo(
+                        code="node.temporary_failure",
+                        category=ErrorCategory.PROVIDER_TRANSIENT,
+                        message="temporary diagnostic",
+                        retryable=True,
+                    ),
+                )
+            return FlowNodeResult(output={"status": "recovered"})
+
+    node = FailOnceNode()
+    flow = FlowDefinition(
+        version="1",
+        start="work",
+        nodes=(FlowNode(id="work", type="agent", agent="worker"),),
+        edges=(FlowEdge(**{"from": "work", "to": "end"}),),
+    )
+    runtime, handle, engine = await setup(flow, {"worker": node})
+
+    suspended = await engine.execute(handle.run_id, "main", CONTEXT)
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(
+        suspension.interaction_id
+    )
+
+    assert suspended.state == RunState.SUSPENDED
+    assert interaction.payload["reason_code"] == "node.temporary_failure"
+    assert interaction.payload["questions"]
+    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="retry",
+            idempotency_key="retry_temporary_node_failure",
+        ),
+        CONTEXT,
+    )
+    completed = await engine.resume(handle.run_id, CONTEXT)
+
+    assert completed.state == RunState.COMPLETED
+    assert node.calls == 2
 
 
 @pytest.mark.asyncio

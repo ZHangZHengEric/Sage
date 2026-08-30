@@ -5,9 +5,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
-from sagents.v2.contracts.common import Identifier, StrictModel, ToolName
+from sagents.v2.contracts.common import Identifier, StrictModel, ToolName, VerbatimText
 from sagents.v2.contracts.items import ContentBlock, UsageSummary
 
 
@@ -66,8 +66,36 @@ class ModelRequest(StrictModel):
     tools: tuple[ModelToolDefinition, ...] = ()
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_output_tokens: int | None = Field(default=None, gt=0)
+    response_format: Literal["json_object"] | None = None
     response_schema: dict[str, Any] | None = None
+    tool_choice: Literal["auto", "required", "none"] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("tools")
+    @classmethod
+    def stabilize_tool_order(
+        cls, tools: tuple[ModelToolDefinition, ...]
+    ) -> tuple[ModelToolDefinition, ...]:
+        """Keep provider payloads stable when selection ranking changes.
+
+        Tool-selection policies may rank the same selected set differently as
+        recent calls change. Provider prompt caches include the serialized
+        ``tools`` field, so ranking order must not leak across this request
+        boundary. Selection membership is preserved; only its wire order is
+        canonicalized.
+        """
+
+        return tuple(sorted(tools, key=lambda tool: tool.name))
+
+    @model_validator(mode="after")
+    def validate_output_and_tool_controls(self) -> "ModelRequest":
+        if self.response_format is not None and self.response_schema is not None:
+            raise ValueError(
+                "response_format and response_schema are mutually exclusive"
+            )
+        if self.tool_choice == "required" and not self.tools:
+            raise ValueError("required tool_choice requires at least one Tool")
+        return self
 
 
 class ModelResponse(StrictModel):
@@ -82,7 +110,7 @@ class ModelResponse(StrictModel):
 
 class ModelStreamEvent(StrictModel):
     kind: ModelEventKind
-    delta: str | None = None
+    delta: VerbatimText | None = None
     response: ModelResponse | None = None
 
     @model_validator(mode="after")

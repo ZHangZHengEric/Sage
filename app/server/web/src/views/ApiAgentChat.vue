@@ -37,7 +37,7 @@
         <Alert variant="destructive" class="mb-4">
           <AlertTitle>Attention</AlertTitle>
           <AlertDescription>
-            不同会话请使用不同的 <code>session_id</code>。<code>system_context</code> 按业务值填写。
+            不同会话请使用不同的 <code>session_id</code>。运行变量通过兼容字段 <code>system_context</code> 按业务值填写。
           </AlertDescription>
         </Alert>
 
@@ -181,7 +181,7 @@ const params = [
   ] },
   { name: 'session_id', type: 'string', required: true, desc: '会话唯一标识，需为不同对话设置不同值' },
   { name: 'agent_id', type: 'string', required: true, desc: 'Agent唯一标识' },
-  { name: 'system_context', type: 'object', required: false, desc: '系统上下文信息，根据真实业务值填写' }
+  { name: 'system_context', type: 'object', required: false, desc: '运行变量（兼容字段名），根据真实业务值填写' }
 ]
 
 const exampleBody = {

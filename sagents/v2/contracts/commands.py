@@ -38,6 +38,7 @@ class RunConfig(StrictModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     max_total_tokens: int | None = Field(default=None, gt=0)
     deadline_seconds: float | None = Field(default=None, gt=0)
+    flow_boundary: Literal["complete_node", "continue_node"] | None = None
     priority: int = Field(default=0, ge=-100, le=100)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

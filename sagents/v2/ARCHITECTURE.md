@@ -37,8 +37,8 @@ imports, so deleting the legacy implementation cannot break V2 imports.
 | `testing/` | Scripted providers and conformance harnesses | test-only plugins |
 
 ```text
-sagent -> builder -> runtime/kernel -> domain contracts
-                     agent loop -> context/model/tool/skill/memory
+sagent -> builder -> agent/factory -> runtime/kernel -> domain contracts
+                                      agent loop -> context/model/tool/skill/memory
 builder -> extension registry/resolver/host -> domain plugin factories
 interfaces -> canonical RuntimeEvents
 Desktop/server -> SAgents + application-owned Session index
@@ -48,21 +48,30 @@ Desktop/server -> SAgents + application-owned Session index
 lives under its domain, for example `model/plugins/openai_responses.py`, and is
 registered by a real `ExtensionRegistration` factory.
 
+`runtime/kernel.py` depends only on `SessionStore` contracts and requires the
+selected store at construction. Shared transactional semantics live in
+`runtime/session/state.py`; file and ephemeral backends adapt that state core
+without inheriting from each other.
+
+Execution domains consume `runtime/contracts.py::RuntimePort`; only composition
+code constructs `HarnessRuntime`. This keeps Agent and Flow orchestration from
+depending on one in-process lifecycle implementation.
+
 ## Single-Session authority
 
 The framework has no concept of “all Sessions”. `SessionStore` can create or
 open one known `session_id`, manipulate its Runs, and recover that Session from
-its journal. It has no list/search/page/title/archive/favorite API.
+its checksummed state. It has no list/search/page/title/archive/favorite API.
 
-`FilesystemSessionStore` does not materialize the store root on startup. A
-known `session_id` maps directly to one directory. Run-only legacy-shaped
-methods use a compatibility locator and load only the matching Session. Product
-software such as Desktop owns any global index.
+`FilesystemSessionStore` does not materialize all Sessions in memory on startup.
+A known `session_id` maps directly to one directory. Run-only compatibility
+methods use a locator and load only the matching Session. Product software such
+as Desktop owns any global index.
 
 ## Authoritative versus derived data
 
 ```text
-Session journal  -> authoritative lifecycle and canonical history
+Session state    -> authoritative lifecycle and canonical history
 derived/         -> deletable summaries, token caches, Skill activation
 MemoryProvider   -> independent long-term Memory backend
 DiagnosticSink   -> optional model/trace diagnostics, never recovery input

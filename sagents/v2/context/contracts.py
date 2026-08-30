@@ -45,12 +45,30 @@ class ContextBudget(StrictModel):
 
 
 class ContextProjection(StrictModel):
+    """The reducer-owned model request view and its searchable history boundary.
+
+    ``historical_messages`` is authoritative: it contains canonical input
+    messages that this reducer intentionally removed or replaced in
+    ``messages``. Consumers must not infer history by diffing the two views.
+    Reducer plugins that leave it empty explicitly expose no searchable
+    history for this projection.
+    """
+
     messages: tuple[ModelMessage, ...]
+    historical_messages: tuple[ModelMessage, ...] = ()
     estimated_tokens: int = Field(ge=0)
     source_message_count: int = Field(ge=0)
     dropped_message_count: int = Field(default=0, ge=0)
     dropped_digest: str | None = None
     strategy: str = "none"
+
+
+class ContextProjectionObserver(Protocol):
+    """Observe the exact request view without changing canonical history."""
+
+    async def observe_projection(
+        self, run_id: str, projection: ContextProjection
+    ) -> None: ...
 
 
 class ContextReductionScope(StrictModel):

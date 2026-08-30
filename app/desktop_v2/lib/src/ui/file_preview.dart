@@ -1,5 +1,6 @@
 // ignore_for_file: invalid_use_of_internal_member
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -10,6 +11,7 @@ import 'package:flutter_highlighting/themes/github.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:highlighting/highlighting.dart' as syntax;
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../localization/app_localizations.dart';
 import '../models.dart';
@@ -114,35 +116,17 @@ class _PreviewContent extends StatelessWidget {
     }
 
     if (mode == WorkspaceFilePreviewMode.rendered && _isHtml(node.name)) {
-      return SingleChildScrollView(
-        key: const ValueKey('file-preview-rendered'),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-        child: _ReferenceableSelectionArea(
-          key: const ValueKey('file-preview-html-selection'),
+      if (WebViewPlatform.instance != null) {
+        return _InteractiveHtmlPreview(
+          key: ValueKey('file-preview-webview:${node.path}'),
+          source: source,
           onReferenceSelection: onReferenceSelection,
-          child: Html(
-            data: source,
-            shrinkWrap: true,
-            doNotRenderTheseTags: const {
-              'script',
-              'iframe',
-              'object',
-              'embed',
-              'form',
-              'input',
-              'button',
-              'textarea',
-              'select',
-            },
-            style: {
-              'body': Style(
-                margin: Margins.zero,
-                color: Theme.of(context).colorScheme.onSurface,
-                backgroundColor: Colors.transparent,
-              ),
-            },
-          ),
-        ),
+        );
+      }
+      return _StaticHtmlPreview(
+        key: const ValueKey('file-preview-rendered'),
+        source: source,
+        onReferenceSelection: onReferenceSelection,
       );
     }
 
@@ -153,6 +137,254 @@ class _PreviewContent extends StatelessWidget {
       onReferenceSelection: onReferenceSelection,
     );
   }
+}
+
+class _InteractiveHtmlPreview extends StatefulWidget {
+  const _InteractiveHtmlPreview({
+    required this.source,
+    required this.onReferenceSelection,
+    super.key,
+  });
+
+  final String source;
+  final ValueChanged<String> onReferenceSelection;
+
+  @override
+  State<_InteractiveHtmlPreview> createState() =>
+      _InteractiveHtmlPreviewState();
+}
+
+class _InteractiveHtmlPreviewState extends State<_InteractiveHtmlPreview> {
+  late final WebViewController _controller;
+  var _loading = true;
+  String? _loadError;
+  String _selection = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller =
+        WebViewController(onPermissionRequest: (request) => request.deny())
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..addJavaScriptChannel(
+            'SagePreviewSelection',
+            onMessageReceived: (message) {
+              if (!mounted) return;
+              final selection = message.message.trim();
+              if (selection == _selection) return;
+              setState(() => _selection = selection);
+            },
+          )
+          ..setNavigationDelegate(
+            NavigationDelegate(
+              onPageStarted: (_) {
+                if (!mounted) return;
+                setState(() {
+                  _loading = true;
+                  _loadError = null;
+                });
+              },
+              onPageFinished: (_) {
+                if (!mounted) return;
+                setState(() => _loading = false);
+              },
+              onWebResourceError: (error) {
+                if (!mounted || error.isForMainFrame == false) return;
+                setState(() {
+                  _loading = false;
+                  _loadError = error.description;
+                });
+              },
+              onNavigationRequest: (request) {
+                if (!request.isMainFrame ||
+                    request.url == 'about:blank' ||
+                    request.url.startsWith('data:text/html')) {
+                  return NavigationDecision.navigate;
+                }
+                return NavigationDecision.prevent;
+              },
+            ),
+          );
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _InteractiveHtmlPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source) unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+        _selection = '';
+      });
+    }
+    try {
+      await _controller.loadHtmlString(
+        workspaceInteractiveHtmlDocument(widget.source),
+      );
+    } on Object catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = exception.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final error = _loadError;
+    if (error != null) {
+      return _StaticHtmlPreview(
+        key: const ValueKey('file-preview-rendered'),
+        source: widget.source,
+        onReferenceSelection: widget.onReferenceSelection,
+      );
+    }
+    return Stack(
+      key: const ValueKey('file-preview-rendered'),
+      fit: StackFit.expand,
+      children: [
+        WebViewWidget(
+          key: const ValueKey('file-preview-interactive-html'),
+          controller: _controller,
+        ),
+        if (_loading)
+          const Center(
+            child: CupertinoActivityIndicator(
+              key: ValueKey('file-preview-webview-loading'),
+            ),
+          ),
+        if (_selection.isNotEmpty)
+          Positioned(
+            right: 18,
+            bottom: 18,
+            child: FilledButton.tonalIcon(
+              key: const ValueKey('file-preview-webview-reference'),
+              onPressed: () => widget.onReferenceSelection(_selection),
+              icon: const Icon(CupertinoIcons.at, size: 15),
+              label: Text(context.l10n.text('workspace.referenceSelection')),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StaticHtmlPreview extends StatelessWidget {
+  const _StaticHtmlPreview({
+    required this.source,
+    required this.onReferenceSelection,
+    super.key,
+  });
+
+  final String source;
+  final ValueChanged<String> onReferenceSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      child: _ReferenceableSelectionArea(
+        key: const ValueKey('file-preview-html-selection'),
+        onReferenceSelection: onReferenceSelection,
+        child: Html(
+          data: source,
+          shrinkWrap: true,
+          doNotRenderTheseTags: const {
+            'script',
+            'iframe',
+            'object',
+            'embed',
+            'form',
+            'input',
+            'button',
+            'textarea',
+            'select',
+          },
+          style: {
+            'body': Style(
+              margin: Margins.zero,
+              color: Theme.of(context).colorScheme.onSurface,
+              backgroundColor: Colors.transparent,
+            ),
+          },
+        ),
+      ),
+    );
+  }
+}
+
+const _interactiveHtmlSecurity = '''
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+''';
+
+const _interactiveHtmlSelectionBridge = r'''
+<script>
+(() => {
+  let lastSelection = '';
+  const reportSelection = () => {
+    const selection = String(window.getSelection ? window.getSelection() : '').trim();
+    if (selection === lastSelection) return;
+    lastSelection = selection;
+    if (window.SagePreviewSelection) {
+      window.SagePreviewSelection.postMessage(selection);
+    }
+  };
+  document.addEventListener('selectionchange', () => setTimeout(reportSelection, 0));
+  document.addEventListener('mouseup', reportSelection);
+  document.addEventListener('keyup', reportSelection);
+})();
+</script>
+''';
+
+String workspaceInteractiveHtmlDocument(String source) {
+  final head = RegExp(
+    r'<head(?:\s[^>]*)?>',
+    caseSensitive: false,
+  ).firstMatch(source);
+  var document = source;
+  if (head != null) {
+    document = source.replaceRange(
+      head.end,
+      head.end,
+      _interactiveHtmlSecurity,
+    );
+  } else {
+    final html = RegExp(
+      r'<html(?:\s[^>]*)?>',
+      caseSensitive: false,
+    ).firstMatch(source);
+    if (html != null) {
+      document = source.replaceRange(
+        html.end,
+        html.end,
+        '<head>$_interactiveHtmlSecurity</head>',
+      );
+    } else {
+      document =
+          '''<!doctype html><html><head>
+$_interactiveHtmlSecurity
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head><body>$source</body></html>''';
+    }
+  }
+  final bodyMatches = RegExp(
+    r'</body\s*>',
+    caseSensitive: false,
+  ).allMatches(document);
+  final bodyEnd = bodyMatches.isEmpty ? null : bodyMatches.last;
+  if (bodyEnd == null) return '$document$_interactiveHtmlSelectionBridge';
+  return document.replaceRange(
+    bodyEnd.start,
+    bodyEnd.start,
+    _interactiveHtmlSelectionBridge,
+  );
 }
 
 class _ReferenceableMarkdown extends StatelessWidget {

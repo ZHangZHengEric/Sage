@@ -98,7 +98,14 @@ class PersistentSummaryContextReducer:
                     estimated_tokens=self.estimator.estimate(messages),
                     source_message_count=len(messages),
                 )
-            return self._projection(messages, current, previous)
+            return self._projection(
+                messages,
+                current,
+                previous,
+                historical_messages=payload[
+                    : len(previous.covered_message_digests)
+                ],
+            )
 
         units = self._units(remaining)
         removable_count = max(0, len(units) - self.protected_recent_units)
@@ -167,7 +174,12 @@ class PersistentSummaryContextReducer:
             summary,
             expected_revision=previous.revision if previous else None,
         )
-        return self._projection(messages, result, saved)
+        return self._projection(
+            messages,
+            result,
+            saved,
+            historical_messages=all_covered,
+        )
 
     async def _hierarchical_summary(
         self,
@@ -262,9 +274,12 @@ class PersistentSummaryContextReducer:
         source: tuple[ModelMessage, ...],
         result: tuple[ModelMessage, ...],
         summary: ConversationSummary,
+        *,
+        historical_messages: tuple[ModelMessage, ...],
     ) -> ContextProjection:
         return ContextProjection(
             messages=result,
+            historical_messages=historical_messages,
             estimated_tokens=self.estimator.estimate(result),
             source_message_count=len(source),
             dropped_message_count=len(summary.covered_message_digests),

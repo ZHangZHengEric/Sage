@@ -38,6 +38,9 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxState,
     TerminateMode,
 )
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    validate_read_only_shell_command,
+)
 
 
 def _grant_payload(grant: SandboxGrant) -> bytes:
@@ -69,6 +72,9 @@ class _LocalFileSystem:
     def __init__(self, provider: "LocalWorkspaceSandboxProvider", row: _LocalRow):
         self.provider = provider
         self.row = row
+
+    def normalize_path(self, path: str) -> str:
+        return self.provider._wire_path(self.row, path)
 
     async def read_bytes(self, path, *, intent, grant):
         candidate = self.provider._authorize(
@@ -149,6 +155,15 @@ class _LocalProcessRuntime:
         policy = self.row.spec.process
         if not policy.enabled:
             raise PermissionError("process execution is disabled")
+        if policy.read_only:
+            if (
+                request.argv[:2] not in {("bash", "-c"), ("sh", "-c")}
+                or len(request.argv) != 3
+            ):
+                raise PermissionError(
+                    "read-only process mode accepts only a validated shell command"
+                )
+            validate_read_only_shell_command(request.argv[2])
         executable = request.argv[0]
         if policy.allowed_executables and executable not in policy.allowed_executables:
             raise PermissionError(f"executable {executable!r} is not allowed")
@@ -379,10 +394,14 @@ class LocalWorkspaceSandboxProvider:
     def _path(self, row: _LocalRow, path: str) -> Path:
         relative = path
         if relative == row.spec.workspace_root:
-            relative = "."
+            candidate = row.root
         elif relative.startswith(row.spec.workspace_root.rstrip("/") + "/"):
             relative = relative[len(row.spec.workspace_root.rstrip("/")) + 1 :]
-        candidate = (row.root / relative).resolve()
+            candidate = (row.root / relative).resolve()
+        elif Path(relative).is_absolute():
+            candidate = Path(relative).expanduser().resolve()
+        else:
+            candidate = (row.root / relative).resolve()
         if candidate != row.root and row.root not in candidate.parents:
             raise PermissionError("path is outside the workspace")
         allowed = False
@@ -409,6 +428,13 @@ class LocalWorkspaceSandboxProvider:
                 if current.is_symlink():
                     raise PermissionError("symlinks are not allowed")
         return candidate
+
+    def _wire_path(self, row: _LocalRow, path: str) -> str:
+        candidate = self._path(row, path)
+        relative = candidate.relative_to(row.root).as_posix()
+        return row.spec.workspace_root.rstrip("/") + (
+            f"/{relative}" if relative != "." else ""
+        )
 
     def _authorize(self, row, operation, path, intent, grant):
         self._verify(row, operation.value, intent, grant)
@@ -437,6 +463,7 @@ class LocalWorkspaceSandboxProvider:
         if (
             intent.operation != operation
             or intent.sandbox_id != row.ref.sandbox_id
+            or intent.run_id != row.ref.owner_run_id
             or grant.run_id != intent.run_id
             or grant.tool_call_id != intent.tool_call_id
             or grant.sandbox_id != row.ref.sandbox_id

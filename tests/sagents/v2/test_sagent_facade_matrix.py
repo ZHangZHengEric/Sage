@@ -18,7 +18,7 @@ from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 
 
 CONTEXT = RequestContext(
@@ -46,7 +46,7 @@ def completed(text="done"):
 
 @pytest.mark.asyncio
 async def test_run_stream_returns_handle_and_individual_canonical_events_to_terminal():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
 
     def factory(run_id):
         return AgentLoopEngine(
@@ -73,7 +73,7 @@ async def test_run_stream_returns_handle_and_individual_canonical_events_to_term
 
 @pytest.mark.asyncio
 async def test_detach_does_not_cancel_or_suspend_the_run():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     release = asyncio.Event()
 
     class Driver:
@@ -111,7 +111,7 @@ async def test_detach_does_not_cancel_or_suspend_the_run():
 
 @pytest.mark.asyncio
 async def test_unhandled_driver_crash_becomes_typed_terminal_failure():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
 
     class CrashingDriver:
         async def execute(self, run_id, context):
@@ -133,7 +133,7 @@ async def test_unhandled_driver_crash_becomes_typed_terminal_failure():
 
 @pytest.mark.asyncio
 async def test_completed_execution_is_removed_from_facade_task_registry():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
 
     def factory(run_id):
         return AgentLoopEngine(
@@ -154,7 +154,7 @@ async def test_completed_execution_is_removed_from_facade_task_registry():
 
 @pytest.mark.asyncio
 async def test_stream_closes_at_suspension_so_a_client_can_resume_by_cursor():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
 
     class SuspendingDriver:
         async def execute(self, run_id, context):

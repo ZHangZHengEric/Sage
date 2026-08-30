@@ -40,7 +40,7 @@ class AgentDefinition:
             available_tools: List of tool names available to this agent
             available_skills: List of skill names available to this agent
             available_workflows: List of workflow names available to this agent
-            system_context: Additional system context/configuration
+            system_context: Additional runtime variables (legacy field name)
             backend_stored: Whether this agent is stored in backend (persisted)
         """
         if not str(name or "").strip():

@@ -580,7 +580,7 @@ const createDefaultAgent = async (providerId = null) => {
       agentMode: "fibre",
       availableTools: [
         'todo_write', 'todo_read', 'execute_shell_command',
-        'file_read', 'file_write','search_memory','questionnaire','analyze_image',
+        'file_read', 'file_write','search_memory','questionnaire_async','analyze_image',
         'file_update', 'load_skill', 'add_task', 'delete_task', 'complete_task',
         'enable_task', 'get_task_details', 'fetch_webpages', 'search_web_page', 'search_image_from_web'
       ],

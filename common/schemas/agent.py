@@ -125,6 +125,18 @@ class AsyncTaskResponse(BaseModel):
     updated_at: float
 
 
+def normalize_available_tool_names(tools: Optional[List[str]]) -> Optional[List[str]]:
+    """Migrate retired Tool names while preserving configured order."""
+    if tools is None:
+        return None
+    normalized: List[str] = []
+    for tool_name in tools:
+        current = "questionnaire_async" if tool_name == "questionnaire" else tool_name
+        if current not in normalized:
+            normalized.append(current)
+    return normalized
+
+
 def convert_config_to_agent(
     agent_id: str,
     config: Dict[str, Any],
@@ -141,7 +153,9 @@ def convert_config_to_agent(
         availableWorkflows=_first_present(
             config, "availableWorkflows", "available_workflows"
         ),
-        availableTools=_first_present(config, "availableTools", "available_tools"),
+        availableTools=normalize_available_tool_names(
+            _first_present(config, "availableTools", "available_tools")
+        ),
         availableSubAgentIds=_first_present(
             config, "availableSubAgentIds", "available_sub_agent_ids"
         ),
@@ -216,6 +230,7 @@ __all__ = [
     "FileWorkspaceCsvMutationRequest",
     "SystemPromptOptimizeRequest",
     "AsyncTaskResponse",
+    "normalize_available_tool_names",
     "convert_config_to_agent",
     "convert_agent_to_config",
     "AgentAbilitiesRequest",

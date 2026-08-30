@@ -7,12 +7,25 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 
 import '../models.dart';
+import '../usage_models.dart';
+
+const sageSidecarProtocol = 'sage.runtime/v2';
+const sageSidecarRevision = 3;
 
 class SageApiException implements Exception {
-  const SageApiException(this.message, {this.statusCode});
+  const SageApiException(
+    this.message, {
+    this.statusCode,
+    this.code,
+    this.category,
+    this.metadata = const {},
+  });
 
   final String message;
   final int? statusCode;
+  final String? code;
+  final String? category;
+  final Map<String, Object?> metadata;
 
   @override
   String toString() => message;
@@ -20,15 +33,12 @@ class SageApiException implements Exception {
 
 class V2ApiClient {
   V2ApiClient({Uri? baseUri, HttpClient? httpClient})
-    : baseUri =
-          baseUri ??
-          Uri.parse(
-            Platform.environment['SAGE_DESKTOP_V2_API'] ?? 'http://127.0.0.1:0',
-          ),
+    : baseUri = baseUri ?? Uri.parse('http://127.0.0.1:0'),
       _http = httpClient ?? HttpClient();
 
   Uri baseUri;
   final HttpClient _http;
+  String? expectedBuildId;
 
   Future<bool> health() async {
     try {
@@ -38,8 +48,15 @@ class V2ApiClient {
       final response = await request.close().timeout(
         const Duration(seconds: 1),
       );
-      await response.drain<void>();
-      return response.statusCode == HttpStatus.ok;
+      final body = await utf8.decoder.bind(response).join();
+      if (response.statusCode != HttpStatus.ok) return false;
+      final envelope = jsonDecode(body);
+      if (envelope is! Map || envelope['data'] is! Map) return false;
+      final data = envelope['data'] as Map;
+      return data['status'] == 'ok' &&
+          data['protocol'] == sageSidecarProtocol &&
+          data['revision'] == sageSidecarRevision &&
+          (expectedBuildId == null || data['build_id'] == expectedBuildId);
     } on Object {
       return false;
     }
@@ -54,6 +71,15 @@ class V2ApiClient {
                 AgentSummary.fromJson(item.cast<String, Object?>()),
           ]
         : const [];
+  }
+
+  Future<UsageOverview> getUsageOverview({int days = 30}) async {
+    final offset = DateTime.now().timeZoneOffset.inMinutes;
+    final value = await _json(
+      'GET',
+      '/api/v2/usage/overview?days=$days&timezone_offset_minutes=$offset',
+    );
+    return UsageOverview.fromJson((value as Map).cast<String, Object?>());
   }
 
   Future<AgentConfiguration> createAgent(String name) async =>
@@ -89,15 +115,26 @@ class V2ApiClient {
   Future<AgentConfiguration> patchAgentConfiguration(
     String agentId,
     Map<String, Object?> patch,
-  ) async => AgentConfiguration.fromJson(
-    (await _json(
-              'PATCH',
-              '/api/v2/agents/${Uri.encodeComponent(agentId)}/settings',
-              body: patch,
-            )
-            as Map)
-        .cast<String, Object?>(),
-  );
+  ) async {
+    // A sidecar can outlive and be reused by a newer Flutter process. Keep the
+    // transport compatible with sidecars that predate the runtime_variables
+    // name while retaining the canonical field inside the client.
+    final compatiblePatch = Map<String, Object?>.of(patch);
+    if (compatiblePatch.containsKey('runtime_variables')) {
+      compatiblePatch['system_context'] = compatiblePatch.remove(
+        'runtime_variables',
+      );
+    }
+    return AgentConfiguration.fromJson(
+      (await _json(
+                'PATCH',
+                '/api/v2/agents/${Uri.encodeComponent(agentId)}/settings',
+                body: compatiblePatch,
+              )
+              as Map)
+          .cast<String, Object?>(),
+    );
+  }
 
   Future<List<AgentSummary>> deleteAgent(String agentId) async {
     final value = await _json(
@@ -113,8 +150,11 @@ class V2ApiClient {
         : const [];
   }
 
+  String toolCatalogLanguage = 'en';
+
   Future<List<ToolSummary>> listTools() async {
-    final value = await _json('GET', '/api/v2/tools');
+    final language = Uri.encodeQueryComponent(toolCatalogLanguage);
+    final value = await _json('GET', '/api/v2/tools?lang=$language');
     return value is List
         ? [
             for (final item in value)
@@ -252,11 +292,15 @@ class V2ApiClient {
         : const [];
   }
 
-  Future<void> selectComponent(String componentId, String pluginId) async {
+  Future<void> selectComponent(
+    String componentId,
+    String pluginId, {
+    Map<String, Object?> config = const {},
+  }) async {
     await _json(
       'PUT',
       '/api/v2/components/${Uri.encodeComponent(componentId)}/selection',
-      body: {'plugin_id': pluginId, 'config': <String, Object?>{}},
+      body: {'plugin_id': pluginId, 'config': config},
     );
   }
 
@@ -364,6 +408,59 @@ class V2ApiClient {
     return UploadedAttachment.fromJson((data as Map).cast<String, Object?>());
   }
 
+  Future<Map<String, Object?>> createTerminal({
+    required String agentId,
+    String workspaceId = '',
+    int columns = 100,
+    int rows = 30,
+  }) async =>
+      (await _json(
+                'POST',
+                '/api/v2/terminals',
+                body: {
+                  'agent_id': agentId,
+                  'workspace_id': workspaceId,
+                  'columns': columns,
+                  'rows': rows,
+                },
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Stream<Map<String, Object?>> terminalEvents(
+    String sessionId, {
+    int afterSequence = 0,
+  }) => _ndjson(
+    'GET',
+    '/api/v2/terminals/${Uri.encodeComponent(sessionId)}/events'
+        '?after_sequence=$afterSequence',
+  );
+
+  Future<void> writeTerminal(String sessionId, String data) => _command(
+    '/api/v2/terminals/${Uri.encodeComponent(sessionId)}/input',
+    body: {'data': base64Encode(utf8.encode(data))},
+  );
+
+  Future<void> resizeTerminal(
+    String sessionId, {
+    required int columns,
+    required int rows,
+  }) => _command(
+    '/api/v2/terminals/${Uri.encodeComponent(sessionId)}/resize',
+    body: {'columns': columns, 'rows': rows},
+  );
+
+  Future<void> closeTerminal(String sessionId) async {
+    try {
+      await _json(
+        'DELETE',
+        '/api/v2/terminals/${Uri.encodeComponent(sessionId)}',
+      );
+    } on SageApiException catch (exception) {
+      if (exception.statusCode != HttpStatus.notFound) rethrow;
+    }
+  }
+
   Stream<Map<String, Object?>> startRun(Map<String, Object?> body) =>
       _ndjson('POST', '/api/v2/runs/stream', body: body);
 
@@ -379,6 +476,25 @@ class V2ApiClient {
       (await _json('GET', '/api/v2/runs/${Uri.encodeComponent(runId)}') as Map)
           .cast<String, Object?>();
 
+  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async {
+    final value = await _json(
+      'GET',
+      '/api/v2/sessions/${Uri.encodeComponent(sessionId)}/tree',
+    );
+    return value is List
+        ? [
+            for (final item in value)
+              if (item is Map) item.cast<String, Object?>(),
+          ]
+        : const [];
+  }
+
+  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) =>
+      _ndjson(
+        'GET',
+        '/api/v2/sessions/${Uri.encodeComponent(sessionId)}/tree/events',
+      );
+
   Future<void> pause(String runId) =>
       _command('/api/v2/runs/${Uri.encodeComponent(runId)}/pause');
 
@@ -389,7 +505,16 @@ class V2ApiClient {
       _command('/api/v2/runs/${Uri.encodeComponent(runId)}/cancel');
 
   Future<void> deleteSession(String sessionId) async {
-    await _json('DELETE', '/api/v2/sessions/${Uri.encodeComponent(sessionId)}');
+    try {
+      await _json(
+        'DELETE',
+        '/api/v2/sessions/${Uri.encodeComponent(sessionId)}',
+      );
+    } on SageApiException catch (exception) {
+      // DELETE is idempotent. Older reusable sidecars may still report 404
+      // after the authoritative Session state has already disappeared.
+      if (exception.statusCode != HttpStatus.notFound) rethrow;
+    }
   }
 
   Future<void> steer(String runId, String turnId, String text) => _command(
@@ -490,10 +615,7 @@ class V2ApiClient {
     if (decoded is Map) {
       if (decoded['code'] == 0) return decoded['data'];
       if (decoded.containsKey('detail')) {
-        throw SageApiException(
-          decoded['detail'].toString(),
-          statusCode: statusCode,
-        );
+        throw _httpError(statusCode, jsonEncode(decoded));
       }
     }
     return decoded;
@@ -501,15 +623,35 @@ class V2ApiClient {
 
   SageApiException _httpError(int statusCode, String body) {
     var message = body;
+    String? code;
+    String? category;
+    var metadata = const <String, Object?>{};
     try {
       final value = jsonDecode(body);
       if (value is Map) {
-        message = (value['detail'] ?? value['message'] ?? body).toString();
+        final detail = value['detail'];
+        if (detail is Map) {
+          message = (detail['message'] ?? value['message'] ?? body).toString();
+          code = detail['code']?.toString();
+          category = detail['category']?.toString();
+          final rawMetadata = detail['metadata'];
+          if (rawMetadata is Map) {
+            metadata = rawMetadata.cast<String, Object?>();
+          }
+        } else {
+          message = (detail ?? value['message'] ?? body).toString();
+        }
       }
     } on FormatException {
       // Keep the original response body.
     }
-    return SageApiException(message, statusCode: statusCode);
+    return SageApiException(
+      message,
+      statusCode: statusCode,
+      code: code,
+      category: category,
+      metadata: metadata,
+    );
   }
 
   Uri _uri(String path, Map<String, String> query) =>

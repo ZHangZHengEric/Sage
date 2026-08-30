@@ -78,6 +78,11 @@ class SessionStore(ABC):
     def remove_session(self, session_id: str) -> None: ...
 
     @abstractmethod
+    def delete_session(self, session_id: str) -> None:
+        """Delete a session and all of its durable descendant data."""
+        ...
+
+    @abstractmethod
     def list_sessions(self) -> Mapping[str, str]: ...
 
     @abstractmethod

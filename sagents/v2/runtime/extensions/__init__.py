@@ -14,6 +14,10 @@ from sagents.v2.runtime.extensions.contracts import (
 from sagents.v2.runtime.extensions.host import (
     ExtensionHost,
 )
+from sagents.v2.runtime.extensions.discovery import (
+    ENTRY_POINT_GROUP,
+    load_installed_extension,
+)
 from sagents.v2.runtime.extensions.registry import (
     ExtensionRegistry,
     TypedExtensionRegistry,
@@ -30,6 +34,7 @@ __all__ = [
     "ExtensionDependency",
     "ExtensionDescriptor",
     "ExtensionAvailability",
+    "ENTRY_POINT_GROUP",
     "ExtensionHost",
     "ExtensionRegistration",
     "ExtensionRegistry",
@@ -40,4 +45,5 @@ __all__ = [
     "ResolvedExtensionGraph",
     "StopReason",
     "TypedExtensionRegistry",
+    "load_installed_extension",
 ]

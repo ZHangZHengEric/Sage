@@ -23,7 +23,7 @@ from sagents.v2.tool import (
 from sagents.v2.contracts.commands import InputItem, RunConfig
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.testing import (
     ScenarioDefinition,
     ScenarioExpectation,
@@ -122,7 +122,7 @@ def driver(runtime, dispatches):
 
 @pytest.mark.asyncio
 async def test_scenario_runner_drives_approval_resume_and_projects_run_result():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     dispatches = []
     result = await ScenarioRunner(runtime).run(
         scenario(), driver(runtime, dispatches), CONTEXT
@@ -136,7 +136,7 @@ async def test_scenario_runner_drives_approval_resume_and_projects_run_result():
 
 @pytest.mark.asyncio
 async def test_scenario_runner_reports_semantic_assertion_failures_without_throwing():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     result = await ScenarioRunner(runtime).run(
         scenario(
             "expected_failure",
@@ -155,7 +155,7 @@ async def test_scenario_runner_reports_semantic_assertion_failures_without_throw
 
 @pytest.mark.asyncio
 async def test_scenario_suite_has_bounded_parallel_execution_and_stable_counts():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     active = 0
     peak = 0
 
@@ -179,7 +179,7 @@ async def test_scenario_suite_has_bounded_parallel_execution_and_stable_counts()
 
 @pytest.mark.asyncio
 async def test_scenario_without_approval_reply_stays_suspended_and_fails_cleanly():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     value = scenario().model_copy(update={"interactions": ()})
     result = await ScenarioRunner(runtime).run(value, driver(runtime, []), CONTEXT)
     assert result.passed is False

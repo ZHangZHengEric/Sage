@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from sagents.v2.memory.plugins.noop import NoopMemoryProvider
 from sagents.v2.memory.plugins.filesystem_bm25 import FilesystemBm25MemoryProvider
+from sagents.v2.memory.query import (
+    DirectMemoryRecallQueryGenerator,
+    LLMMemoryRecallQueryGenerator,
+)
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
     model_protocol_descriptors,
@@ -34,16 +38,22 @@ def builtin_extension_registry() -> ExtensionRegistry:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="sage.session.filesystem",
-                version="2.0.0",
+                version="2.1.0",
                 name="Filesystem SessionStore",
-                description="Authoritative checksummed journal per Session.",
+                description="Compact authoritative checksummed state per Session.",
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={
                     "type": "object",
-                    "properties": {"root": {"type": "string", "minLength": 1}},
+                    "properties": {
+                        "root": {"type": "string", "minLength": 1},
+                        "previous_v2_root": {
+                            "type": "string",
+                            "minLength": 1,
+                        },
+                    },
                     "required": ["root"],
                     "additionalProperties": False,
                 },
@@ -55,7 +65,68 @@ def builtin_extension_registry() -> ExtensionRegistry:
                 built_in=True,
             ),
             factory=lambda context, dependencies: FilesystemSessionStore(
-                context.config["root"]
+                context.config["root"],
+                previous_v2_root=context.config.get("previous_v2_root"),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.memory.recall-query.direct",
+                version="2.0.0",
+                name="Direct user input",
+                description=(
+                    "Uses the current user input as the search_memory query without "
+                    "an additional model request."
+                ),
+                provides=(
+                    CapabilityOffer(
+                        capability="memory.recall-query", api_version="2"
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
+                ),
+                capabilities={"uses_model": False},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: DirectMemoryRecallQueryGenerator(),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.memory.recall-query.llm",
+                version="2.0.0",
+                name="LLM-generated keywords",
+                description=(
+                    "Uses a fast model to generate compact keywords before calling "
+                    "search_memory."
+                ),
+                provides=(
+                    CapabilityOffer(
+                        capability="memory.recall-query", api_version="2"
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.AGENT, ExtensionScope.RUN}
+                ),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "model": {},
+                        "language": {"type": "string"},
+                    },
+                    "required": ["model"],
+                    "additionalProperties": False,
+                },
+                capabilities={"uses_model": True},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: LLMMemoryRecallQueryGenerator(
+                context.config["model"],
+                language=str(context.config.get("language") or "en"),
             ),
         )
     )
@@ -103,9 +174,9 @@ def builtin_extension_registry() -> ExtensionRegistry:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="sage.memory.filesystem-bm25",
-                version="2.0.0",
+                version="2.1.0",
                 name="Filesystem BM25 Memory",
-                description="Durable scoped Memory records with BM25 recall.",
+                description="Durable scoped Memory records with incremental SQLite FTS5 BM25 recall.",
                 provides=(
                     CapabilityOffer(capability="memory.provider", api_version="2"),
                 ),
@@ -121,7 +192,12 @@ def builtin_extension_registry() -> ExtensionRegistry:
                     "properties": {"root": {"type": "string", "minLength": 1}},
                     "required": ["root"],
                 },
-                capabilities={"durable": True, "retrieval": "bm25"},
+                capabilities={
+                    "durable": True,
+                    "retrieval": "bm25",
+                    "storage": "sqlite-fts5",
+                    "incremental_index": True,
+                },
                 built_in=True,
             ),
             factory=lambda context, dependencies: FilesystemBm25MemoryProvider(

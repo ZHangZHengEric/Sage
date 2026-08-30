@@ -161,7 +161,12 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
     completions = FakeCompletions(stream=stream)
     provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
 
-    events = [event async for event in provider.stream(request())]
+    events = [
+        event
+        async for event in provider.stream(
+            request(tool_choice="required", response_format="json_object")
+        )
+    ]
 
     assert [event.kind for event in events] == [
         ModelEventKind.REASONING_DELTA,
@@ -185,6 +190,8 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
 
     outgoing = completions.calls[0]
     assert outgoing["stream_options"] == {"include_usage": True}
+    assert outgoing["tool_choice"] == "required"
+    assert outgoing["response_format"] == {"type": "json_object"}
     assert outgoing["max_tokens"] == 512
     assert outgoing["extra_body"] == {"reasoning_effort": "high"}
     assert (
@@ -192,6 +199,141 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
         == '{"q":"old"}'
     )
     assert outgoing["messages"][3]["tool_call_id"] == "call_old"
+
+
+@pytest.mark.asyncio
+async def test_stream_accepts_common_nonstandard_text_and_reasoning_fields():
+    stream = FakeStream(
+        (
+            {
+                "id": "response_alt",
+                "choices": (
+                    {"delta": {"thinking": "think "}, "finish_reason": None},
+                ),
+            },
+            {
+                "id": "response_alt",
+                "choices": (
+                    {"delta": {"text": "answer"}, "finish_reason": "stop"},
+                ),
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+            },
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    assert [event.kind for event in events] == [
+        ModelEventKind.REASONING_DELTA,
+        ModelEventKind.TEXT_DELTA,
+        ModelEventKind.COMPLETED,
+    ]
+    response = events[-1].response
+    assert response is not None
+    assert response.reasoning == "think"
+    assert response.text == "answer"
+
+
+@pytest.mark.asyncio
+async def test_stream_accepts_structured_content_parts_from_compatible_gateway():
+    stream = FakeStream(
+        (
+            {
+                "id": "response_parts",
+                "choices": (
+                    {
+                        "delta": {
+                            "reasoning_content": [
+                                {"type": "reasoning_text", "text": "think "}
+                            ],
+                            "content": [
+                                {"type": "text", "text": "answer"}
+                            ],
+                        },
+                        "finish_reason": "stop",
+                    },
+                ),
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+            },
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    response = events[-1].response
+    assert response is not None
+    assert response.reasoning == "think"
+    assert response.text == "answer"
+
+
+@pytest.mark.asyncio
+async def test_stream_recovers_final_message_content_from_nonstandard_chunk():
+    stream = FakeStream(
+        (
+            {
+                "id": "response_message",
+                "choices": (
+                    {
+                        "message": {"content": '{"decision":"completed"}'},
+                        "finish_reason": "stop",
+                    },
+                ),
+                "usage": {"prompt_tokens": 5, "completion_tokens": 4},
+            },
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    response = events[-1].response
+    assert response is not None
+    assert response.text == '{"decision":"completed"}'
+
+
+@pytest.mark.asyncio
+async def test_output_tokens_without_semantic_fields_are_a_provider_error():
+    usage = SimpleNamespace(
+        prompt_tokens=10,
+        completion_tokens=43,
+        prompt_tokens_details=None,
+        completion_tokens_details=None,
+    )
+    stream = FakeStream((chunk(finish="stop", usage=usage),))
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.empty_semantic_response"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
+    assert caught.value.info.retryable is True
+    assert caught.value.info.metadata == {
+        "output_tokens": 43,
+        "finish_reason": "stop",
+        "observed_choice_fields": ["delta", "finish_reason"],
+        "observed_delta_fields": [
+            "content",
+            "reasoning_content",
+            "tool_calls",
+        ],
+        "observed_delta_field_types": {
+            "content": ["null"],
+            "reasoning_content": ["null"],
+            "tool_calls": ["array"],
+        },
+    }
+    assert stream.closed is True
 
 
 @pytest.mark.asyncio

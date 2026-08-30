@@ -2,26 +2,37 @@
 
 The Loop owns Step orchestration, not durable storage or provider behavior. It
 asks Context, Model, Tool, and Policy ports for decisions and records every
-observable lifecycle change through `HarnessRuntime`/`SessionStore`.
+observable lifecycle change through `RuntimePort`/`SessionStore`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
 from collections.abc import Callable
 
-from sagents.v2.agent.state import AgentLoopCheckpointState
+from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
+from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
-    ModelRequest,
-    ModelToolDefinition,
+    ModelToolCall,
+)
+from sagents.v2.agent.step_request import (
+    AgentStepRequestBuilder,
+    DefaultAgentStepRequestBuilder,
+    tools_for_invocation_mode,
 )
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.session_history import (
     RunLedgerRebuilder,
     SessionHistoryLedgerBuilder,
+)
+from sagents.v2.memory import (
+    DirectMemoryRecallQueryGenerator,
+    MemoryRecallQueryGenerator,
 )
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.agent.policy.continuation import (
@@ -29,6 +40,10 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationAction,
     ContinuationContext,
     ContinuationPolicy,
+    ContinuationSignalProvider,
+    ContinuationSignals,
+    ContinuationDecision,
+    InteractionDraft,
 )
 from sagents.v2.agent.policy.tool_policy import (
     DefaultToolPolicy,
@@ -42,6 +57,11 @@ from sagents.v2.tool.contracts import (
     ToolExecutionResult,
 )
 from sagents.v2.tool.provider import ToolCatalog, ToolExecutor
+from sagents.v2.tool.selection import (
+    RecentToolSelectionPolicy,
+    ToolSelectionPolicy,
+    ToolSelectionPrepareContext,
+)
 from sagents.v2.contracts.checkpoint import (
     Checkpoint,
     Suspension,
@@ -73,6 +93,7 @@ from sagents.v2.contracts.interactions import (
 from sagents.v2.contracts.items import (
     ItemSnapshot,
     ItemStatus,
+    JsonBlock,
     MessageItemData,
     ReasoningItemData,
     TextBlock,
@@ -86,24 +107,45 @@ from sagents.v2.contracts.run_state import (
     TERMINAL_RUN_STATES,
 )
 from sagents.v2.contracts.commands import CancelRun, InputItem
-from sagents.v2.runtime.kernel import HarnessRuntime
-from sagents.v2.runtime.session.ephemeral import EventDraft
+from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.runtime.session.contracts import EventDraft
+from sagents.v2.i18n import (
+    error_recovery_payload,
+    localize_error,
+    normalize_language,
+    recovery_payload,
+    tr,
+)
 
 
 class AgentLoopEngine:
+    # V1 Fibre retries transient provider failures inside the logical model
+    # request. V2 keeps that behavior narrowly scoped to a response that
+    # contained no usable semantic fields, where replay cannot duplicate a
+    # Tool call or other external side effect.
+    _MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES = 2
+
     """Composable model/tool loop with durable, resumable side-effect barriers."""
 
     def __init__(
         self,
         *,
-        runtime: HarnessRuntime,
+        runtime: RuntimePort,
         model: ModelProvider,
         tool_catalog: ToolCatalog,
         tool_executor: ToolExecutor,
         tool_policy: DefaultToolPolicy | None = None,
+        tool_selection_policy: ToolSelectionPolicy | None = None,
         continuation_policy: ContinuationPolicy | None = None,
+        continuation_signal_provider: ContinuationSignalProvider | None = None,
         context_assembler: ContextAssembler | None = None,
+        step_request_builder: AgentStepRequestBuilder | None = None,
         ledger_rebuilder: RunLedgerRebuilder | None = None,
+        automatic_memory_recall: bool = False,
+        memory_recall_limit: int = 5,
+        memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
+        tool_selection_model: ModelProvider | None = None,
+        delegated_run_controller=None,
         clock: Callable = utc_now,
     ) -> None:
         self.runtime = runtime
@@ -111,13 +153,30 @@ class AgentLoopEngine:
         self.tool_catalog = tool_catalog
         self.tool_executor = tool_executor
         self.tool_policy = tool_policy or DefaultToolPolicy()
+        self.tool_selection_policy = tool_selection_policy or RecentToolSelectionPolicy()
+        self.tool_selection_model = tool_selection_model or model
         self.continuation_policy = continuation_policy or CompositeContinuationPolicy()
+        self.continuation_signal_provider = continuation_signal_provider
         self.context_assembler = context_assembler or DefaultContextAssembler(
             history_reader=runtime.session_store
+        )
+        self.step_request_builder = (
+            step_request_builder
+            or DefaultAgentStepRequestBuilder(
+                context_assembler=self.context_assembler,
+                tool_catalog=self.tool_catalog,
+                tool_selection_policy=self.tool_selection_policy,
+            )
         )
         self.ledger_rebuilder = ledger_rebuilder or SessionHistoryLedgerBuilder(
             runtime.session_store
         )
+        self.automatic_memory_recall = automatic_memory_recall
+        self.memory_recall_limit = max(1, min(int(memory_recall_limit), 100))
+        self.memory_recall_query_generator = (
+            memory_recall_query_generator or DirectMemoryRecallQueryGenerator()
+        )
+        self.delegated_run_controller = delegated_run_controller
         self.clock = clock
 
     async def execute(self, run_id: str, context: RequestContext) -> RunSnapshot:
@@ -136,6 +195,7 @@ class AgentLoopEngine:
                 "loop.run_not_runnable", f"run is {run.state.value}, not running"
             )
         command = await self.runtime.session_store.get_start_command(run_id)
+        context = self._context_for_command(context, command)
         turn_id = new_id("turn")
         messages = await self.context_assembler.initial_ledger(
             command, run_id=run.run_id
@@ -144,6 +204,7 @@ class AgentLoopEngine:
             turn_id=turn_id,
             step_number=1,
             messages=messages,
+            pending_flow_boundary=command.config.flow_boundary,
         )
         run = await self._commit_running(
             run,
@@ -156,7 +217,199 @@ class AgentLoopEngine:
                 ),
             ),
         )
+        tool_selection_task = asyncio.create_task(
+            self._prepare_tool_selection(
+                command=command,
+                run_id=run_id,
+                messages=messages,
+                language=context.language,
+            )
+        )
+        try:
+            if self.automatic_memory_recall:
+                run, state = await self._run_automatic_memory_recall(
+                    run, state, command, context
+                )
+            await tool_selection_task
+        except BaseException:
+            if not tool_selection_task.done():
+                tool_selection_task.cancel()
+                await asyncio.gather(tool_selection_task, return_exceptions=True)
+            raise
         return await self._drive(run, state, context)
+
+    async def _prepare_tool_selection(
+        self, *, command, run_id: str, messages, language: str | None
+    ) -> None:
+        """Prepare the selected plugin beside Memory Recall, once per Run."""
+
+        catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
+        catalog_tools = tools_for_invocation_mode(
+            catalog_tools, command.invocation_mode
+        )
+        await self.tool_selection_policy.prepare(
+            ToolSelectionPrepareContext(
+                run_id=run_id,
+                tools=catalog_tools,
+                messages=messages,
+                language=normalize_language(language),
+                model=self.tool_selection_model,
+            )
+        )
+
+    async def _run_automatic_memory_recall(self, run, state, command, context):
+        """Run v1-compatible Memory recall as a real Tool input/output pair."""
+
+        latest_user = next(
+            (item for item in reversed(command.input) if item.role == "user"), None
+        )
+        if latest_user is None:
+            return run, state
+        user_input = "\n".join(
+            block.text for block in latest_user.content if isinstance(block, TextBlock)
+        ).strip()
+        if not user_input:
+            return run, state
+        try:
+            query = await self.memory_recall_query_generator.generate(
+                user_input, run_id=run.run_id
+            )
+        except Exception:
+            query = user_input
+        if not query.strip():
+            return run, state
+        try:
+            definition = await self.tool_catalog.get_tool(
+                "search_memory", run_id=run.run_id
+            )
+        except SageV2Error as exc:
+            if exc.info.code == "tool.not_found":
+                return run, state
+            raise
+
+        scope = command.config.metadata.get("memory_scope")
+        configured_limit = scope.get("limit") if isinstance(scope, dict) else None
+        limit = self.memory_recall_limit
+        if configured_limit is not None:
+            try:
+                limit = max(1, min(int(configured_limit), 100))
+            except (TypeError, ValueError):
+                pass
+        model_call = ModelToolCall(
+            tool_call_id=new_id("call_memory_recall"),
+            name="search_memory",
+            arguments={"query": query, "top_k": limit},
+        )
+        call = ToolCall(
+            tool_call_id=model_call.tool_call_id,
+            tool_name=model_call.name,
+            arguments=model_call.arguments,
+            operation_id=new_id("operation"),
+            idempotency_key=f"{run.run_id}:automatic-memory-recall",
+            owner_run_id=run.run_id,
+            owner_agent_id=command.agent_id,
+            owner_session_id=run.session_id,
+        )
+        step_id = new_id("step_memory_recall")
+        item_id = new_id("item")
+        item = self._item(
+            item_id,
+            run.run_id,
+            state.turn_id,
+            step_id,
+            ToolCallItemData(
+                tool_call_id=model_call.tool_call_id,
+                tool_name=model_call.name,
+                arguments=model_call.arguments,
+            ),
+        )
+        run = await self._commit_running(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="step.started",
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    data=StepEventData(state="started", attempt=1),
+                ),
+                EventDraft(
+                    type="item.completed",
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    item_id=item_id,
+                    data=ItemEventData(operation="completed", item=item),
+                ),
+            ),
+        )
+        assistant = ModelMessage(
+            role="assistant",
+            tool_calls=(model_call,),
+        )
+        state = state.model_copy(update={"messages": (*state.messages, assistant)})
+        run = await self._record_tool_proposal(
+            run, call, context, state.turn_id, step_id
+        )
+        policy = await self.tool_policy.decide(
+            ToolPolicyContext(
+                run_id=run.run_id,
+                actor=context.actor,
+                definition=definition,
+                call=call,
+                invocation_mode=command.invocation_mode,
+            )
+        )
+        run = await self._record_policy(
+            run, call, policy, context, state.turn_id, step_id
+        )
+        if policy.action == ToolPolicyAction.ALLOW:
+            run, result = await self._dispatch_tool(
+                run, call, context, state.turn_id, step_id, state
+            )
+            if result is None:
+                return run, state
+        else:
+            reason = (
+                policy.reason
+                if policy.action == ToolPolicyAction.DENY
+                else "automatic memory recall requires approval"
+            )
+            result = ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(TextBlock(text=f"memory recall skipped: {reason}"),),
+                error=RuntimeErrorInfo(
+                    code="memory.recall_not_authorized",
+                    category=ErrorCategory.POLICY_DENIED,
+                    message=reason,
+                    safe_to_resume=True,
+                ),
+            )
+            run = await self._commit_tool_result(
+                run,
+                call,
+                result,
+                context,
+                state.turn_id,
+                step_id=step_id,
+                declined=True,
+            )
+        state = state.model_copy(
+            update={"messages": (*state.messages, self._tool_result_message(result))}
+        )
+        run = await self._commit_running(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="step.completed",
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    data=StepEventData(state="completed", attempt=1),
+                ),
+            ),
+        )
+        return run, state
 
     async def resume(self, run_id: str, context: RequestContext) -> RunSnapshot:
         """Restore a suspended Loop and finish its pending barrier before driving.
@@ -175,8 +428,24 @@ class AgentLoopEngine:
         checkpoint = await self.runtime.session_store.get_checkpoint(
             suspension.checkpoint_id
         )
-        state = AgentLoopCheckpointState.model_validate(checkpoint.state)
+        if checkpoint.checkpoint_codec_version not in {
+            "agent-loop/1",
+            "agent-loop/2",
+            "agent-loop/3",
+        }:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="loop.checkpoint_incompatible",
+                    category=ErrorCategory.UNSUPPORTED_SCHEMA,
+                    message="checkpoint is not an Agent Loop checkpoint",
+                )
+            )
+        state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+        self.tool_selection_policy.restore_expanded_tools(
+            run_id, state.expanded_tool_names
+        )
         command = await self.runtime.session_store.get_start_command(run_id)
+        context = self._context_for_command(context, command)
         rebuilt_messages = await self.ledger_rebuilder.rebuild(
             command,
             run_id=run_id,
@@ -226,7 +495,17 @@ class AgentLoopEngine:
                     "pending approval tool call has no interaction",
                 )
             assert resolution is not None
-            if state.pending_tool_phase == "reconciliation":
+            if state.pending_tool_phase == "delegation_interaction":
+                run, result = await self._resume_delegated_tool(
+                    run,
+                    state,
+                    resolution.decision,
+                    resolution.payload,
+                    context,
+                )
+                if result is None:
+                    return run
+            elif state.pending_tool_phase == "reconciliation":
                 run, result = await self._resume_uncertain_tool(
                     run,
                     state,
@@ -250,18 +529,21 @@ class AgentLoopEngine:
                     if result is None:
                         return run
                 else:
-                    result = ToolExecutionResult(
-                        tool_call_id=state.pending_tool_call.tool_call_id,
-                        operation_id=state.pending_tool_call.operation_id,
-                        content=(
-                            TextBlock(text=f"tool declined: {resolution.decision}"),
-                        ),
-                        error=RuntimeErrorInfo(
+                    declined_error = localize_error(
+                        RuntimeErrorInfo(
                             code="tool.declined",
                             category=ErrorCategory.POLICY_DENIED,
                             message=f"tool call declined with {resolution.decision}",
+                            message_key="error.tool.declined",
                             safe_to_resume=True,
                         ),
+                        context.language,
+                    )
+                    result = ToolExecutionResult(
+                        tool_call_id=state.pending_tool_call.tool_call_id,
+                        operation_id=state.pending_tool_call.operation_id,
+                        content=(TextBlock(text=declined_error.message),),
+                        error=declined_error,
                     )
                     run = await self._commit_tool_result(
                         run,
@@ -280,6 +562,11 @@ class AgentLoopEngine:
                     "pending_tool_phase": None,
                     "pending_tool_step_id": None,
                     "pending_tool_error": None,
+                    "pending_tool_result": None,
+                    "pending_child_interactions": (),
+                    "expanded_tool_names": (
+                        self.tool_selection_policy.expanded_tools(run.run_id)
+                    ),
                     "step_number": state.step_number + 1,
                 }
             )
@@ -300,12 +587,42 @@ class AgentLoopEngine:
                         ),
                         context,
                     )
+                    self.tool_selection_policy.release_run(run.run_id)
                     return await self.runtime.get_run(run.run_id)
-                input_items = self._interaction_input_items(
-                    resolution.payload,
-                    interaction_id=interaction.interaction_id,
-                    decision=resolution.decision,
-                )
+                try:
+                    input_items = self._interaction_input_items(
+                        resolution.payload,
+                        interaction_id=interaction.interaction_id,
+                        decision=resolution.decision,
+                    )
+                except SageV2Error as exc:
+                    localized = localize_error(exc.info, context.language)
+                    return await self._suspend_for_continuation_interaction(
+                        run,
+                        state,
+                        ContinuationDecision(
+                            action=ContinuationAction.REQUEST_INTERACTION,
+                            reason_code=exc.info.code,
+                            reason=localized.message,
+                            interaction=InteractionDraft(
+                                interaction_type="interaction_correction",
+                                allowed_decisions=("submit", "cancel"),
+                                payload={
+                                    **recovery_payload(
+                                        "recovery.input_prompt",
+                                        context.language,
+                                        reason_code=exc.info.code,
+                                    ),
+                                    "error": localized.model_dump(
+                                        mode="json", exclude_none=True
+                                    ),
+                                    "preserve_step_budget": True,
+                                },
+                            ),
+                        ),
+                        context,
+                        None,
+                    )
                 if input_items:
                     run = await self._commit_interaction_input(
                         run,
@@ -346,8 +663,9 @@ class AgentLoopEngine:
         """
 
         command = await self.runtime.session_store.get_start_command(run.run_id)
+        context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
-        model_binding = command.config.model_bindings.get("primary", "primary")
+        empty_response_retries = 0
         while run.state == RunState.RUNNING:
             # Phase 1: observe control-plane state only at a safe boundary. A
             # pause never snapshots the middle of arbitrary Python mutation.
@@ -355,6 +673,7 @@ class AgentLoopEngine:
             if current.state == RunState.SUSPEND_REQUESTED:
                 return await self._suspend_at_safe_point(current, state, context)
             if current.state in TERMINAL_RUN_STATES:
+                self.tool_selection_policy.release_run(run.run_id)
                 return current
             run = current
             claimed = await self.runtime.session_store.claim_steers(
@@ -393,32 +712,19 @@ class AgentLoopEngine:
                     ),
                 ),
             )
-            tools = await self.tool_catalog.list_tools(run_id=run.run_id)
             # Phase 2: ContextAssembler creates the provider-facing projection.
             # The raw ledger and canonical RuntimeEvents are left unchanged.
-            request = ModelRequest(
-                request_id=new_id("model_request"),
+            prepared_step = await self.step_request_builder.prepare(
+                command=command,
                 run_id=run.run_id,
-                model_binding=model_binding,
-                messages=await self.context_assembler.prepare_messages(
-                    command, state.messages, run_id=run.run_id
-                ),
-                tools=tuple(
-                    ModelToolDefinition(
-                        name=tool.name,
-                        description=tool.description,
-                        input_schema=tool.input_schema,
-                        strict=tool.strict,
-                        output_schema=tool.output_schema,
-                    )
-                    for tool in tools
-                ),
-                max_output_tokens=(
-                    command.config.max_output_tokens
-                    or command.config.metadata.get("max_output_tokens")
-                ),
-                metadata={"turn_id": state.turn_id, "step_id": step_id},
+                turn_id=state.turn_id,
+                step_id=step_id,
+                messages=state.messages,
+                pending_continuation_reason=state.pending_continuation_reason,
+                language=context.language,
             )
+            request = prepared_step.request
+            tools = prepared_step.tools
             try:
                 # Phase 3: deltas are emitted as replay-buffered events, followed
                 # by completed Items that are authoritative for final content.
@@ -426,7 +732,56 @@ class AgentLoopEngine:
                     run, request, context, state, step_id
                 )
             except SageV2Error as exc:
-                return await self._fail(run, state, step_id, exc.info, context)
+                if (
+                    exc.info.code == "model.empty_semantic_response"
+                    and empty_response_retries
+                    < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                ):
+                    empty_response_retries += 1
+                    retry_error = exc.info.model_copy(
+                        update={
+                            "retryable": True,
+                            "metadata": {
+                                **exc.info.metadata,
+                                "transparent_retry_attempt": empty_response_retries,
+                                "transparent_retry_limit": (
+                                    self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                                ),
+                            },
+                        }
+                    )
+                    run = await self._commit_running(
+                        run,
+                        context,
+                        (
+                            EventDraft(
+                                type="step.retry_scheduled",
+                                turn_id=state.turn_id,
+                                step_id=step_id,
+                                data=StepEventData(
+                                    state="retry_scheduled",
+                                    attempt=empty_response_retries,
+                                    retry_at=self.clock(),
+                                    error=retry_error,
+                                ),
+                            ),
+                        ),
+                    )
+                    continue
+                error = exc.info
+                if error.code == "model.empty_semantic_response":
+                    error = error.model_copy(
+                        update={
+                            "retryable": True,
+                            "metadata": {
+                                **error.metadata,
+                                "transparent_retries_exhausted": (
+                                    empty_response_retries
+                                ),
+                            },
+                        }
+                    )
+                return await self._fail(run, state, step_id, error, context)
             except Exception as exc:
                 return await self._fail(
                     run,
@@ -443,14 +798,27 @@ class AgentLoopEngine:
             if partial_suspension is not None:
                 return partial_suspension
             assert response is not None
-            assistant_message = ModelMessage(
-                role="assistant",
-                content=(TextBlock(text=response.text),) if response.text else (),
-                tool_calls=response.tool_calls,
-            )
+            empty_response_retries = 0
+            messages = state.messages
+            # Reasoning is recorded as its own canonical Item and intentionally
+            # excluded from the provider-visible ledger. Do not append an empty
+            # assistant message for a reasoning-only response: it cannot be
+            # reconstructed from Item events and repeated empty assistant turns
+            # can make OpenAI-compatible providers return another blank turn.
+            if response.text or response.tool_calls:
+                messages = (
+                    *messages,
+                    ModelMessage(
+                        role="assistant",
+                        content=(
+                            (TextBlock(text=response.text),) if response.text else ()
+                        ),
+                        tool_calls=response.tool_calls,
+                    ),
+                )
             state = state.model_copy(
                 update={
-                    "messages": (*state.messages, assistant_message),
+                    "messages": messages,
                     "total_input_tokens": state.total_input_tokens
                     + response.usage.input_tokens,
                     "total_output_tokens": state.total_output_tokens
@@ -459,6 +827,8 @@ class AgentLoopEngine:
                         *state.response_fingerprints,
                         self._response_fingerprint(response),
                     ),
+                    "force_tool_choice_required_next": False,
+                    "pending_continuation_reason": None,
                 }
             )
 
@@ -471,6 +841,35 @@ class AgentLoopEngine:
                             model_call.name, run_id=run.run_id
                         )
                     except SageV2Error as exc:
+                        if exc.info.code == "tool.not_found":
+                            language = str(
+                                command.config.metadata.get("response_language")
+                                or context.language
+                                or "en"
+                            )
+                            decision = ContinuationDecision(
+                                action=ContinuationAction.REQUEST_INTERACTION,
+                                reason_code="tool.not_found",
+                                reason=tr("recovery.tool_not_found", language),
+                                interaction=InteractionDraft(
+                                    interaction_type="agent_recovery",
+                                    allowed_decisions=("submit", "cancel"),
+                                    payload={
+                                        **recovery_payload(
+                                            "recovery.tool_not_found",
+                                            language,
+                                            reason_code="tool.not_found",
+                                        ),
+                                        "tool_name": model_call.name,
+                                    },
+                                ),
+                            )
+                            run = await self._record_continuation(
+                                run, decision, context, state.turn_id, step_id
+                            )
+                            return await self._suspend_for_continuation_interaction(
+                                run, state, decision, context, step_id
+                            )
                         return await self._fail(run, state, step_id, exc.info, context)
                     tool_call = ToolCall(
                         tool_call_id=model_call.tool_call_id,
@@ -479,6 +878,8 @@ class AgentLoopEngine:
                         operation_id=new_id("operation"),
                         idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
                         owner_run_id=run.run_id,
+                        owner_agent_id=command.agent_id,
+                        owner_session_id=run.session_id,
                     )
                     run = await self._record_tool_proposal(
                         run, tool_call, context, state.turn_id, step_id
@@ -489,22 +890,27 @@ class AgentLoopEngine:
                             actor=context.actor,
                             definition=definition,
                             call=tool_call,
+                            invocation_mode=command.invocation_mode,
                         )
                     )
                     run = await self._record_policy(
                         run, tool_call, policy, context, state.turn_id, step_id
                     )
                     if policy.action == ToolPolicyAction.DENY:
-                        result = ToolExecutionResult(
-                            tool_call_id=tool_call.tool_call_id,
-                            operation_id=tool_call.operation_id,
-                            content=(TextBlock(text=f"tool denied: {policy.reason}"),),
-                            error=RuntimeErrorInfo(
+                        denied = localize_error(
+                            RuntimeErrorInfo(
                                 code="tool.policy_denied",
                                 category=ErrorCategory.POLICY_DENIED,
                                 message=policy.reason,
                                 safe_to_resume=True,
                             ),
+                            context.language,
+                        )
+                        result = ToolExecutionResult(
+                            tool_call_id=tool_call.tool_call_id,
+                            operation_id=tool_call.operation_id,
+                            content=(TextBlock(text=denied.message),),
+                            error=denied,
                         )
                         run = await self._commit_tool_result(
                             run,
@@ -546,11 +952,15 @@ class AgentLoopEngine:
                             "messages": (
                                 *state.messages,
                                 self._tool_result_message(result),
-                            )
+                            ),
+                            "expanded_tool_names": (
+                                self.tool_selection_policy.expanded_tools(run.run_id)
+                            ),
                         }
                     )
 
             repeated = self._trailing_repeat_count(state.response_fingerprints)
+            signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF
             # or a provider finish_reason.
             decision = await self.continuation_policy.decide(
@@ -559,8 +969,22 @@ class AgentLoopEngine:
                     step_number=state.step_number,
                     max_steps=max_steps,
                     response=response,
+                    ledger=state.messages,
+                    language=str(
+                        command.config.metadata.get("response_language")
+                        or context.language
+                        or "en"
+                    ),
+                    agent_system_requirements=self._system_requirements(
+                        request.messages
+                    ),
+                    available_tools=tuple(tool.name for tool in tools),
                     pending_tool_calls=0,
                     repeated_fingerprint_count=repeated,
+                    explicit_status=signals.explicit_status,
+                    explicit_status_note=signals.explicit_status_note,
+                    requested_interaction=signals.interaction,
+                    flow_boundary=signals.flow_boundary,
                     elapsed_seconds=max(
                         0.0, (self.clock() - run.created_at).total_seconds()
                     ),
@@ -572,9 +996,20 @@ class AgentLoopEngine:
                     ),
                 )
             )
+            if decision.usage.input_tokens or decision.usage.output_tokens:
+                state = state.model_copy(
+                    update={
+                        "total_input_tokens": state.total_input_tokens
+                        + decision.usage.input_tokens,
+                        "total_output_tokens": state.total_output_tokens
+                        + decision.usage.output_tokens,
+                    }
+                )
             run = await self._record_continuation(
                 run, decision, context, state.turn_id, step_id
             )
+            if decision.reason_code in {"flow.node_complete", "flow.node_continue"}:
+                state = state.model_copy(update={"pending_flow_boundary": None})
             if decision.action == ContinuationAction.COMPLETE_RUN:
                 return await self._complete(run, state, step_id, context)
             if decision.action == ContinuationAction.FAIL:
@@ -614,8 +1049,76 @@ class AgentLoopEngine:
                     ),
                 ),
             )
-            state = state.model_copy(update={"step_number": state.step_number + 1})
+            continuation_reason = None
+            if (
+                decision.action == ContinuationAction.CONTINUE_STEP
+                and decision.reason
+                and decision.reason_code
+                in {
+                    "plan.explanation_required",
+                    "plan.required",
+                    "goal.explanation_required",
+                    "goal.incomplete",
+                    "judge.continue",
+                    "judge.explanation_required",
+                    "judge.v1_must_continue",
+                }
+            ):
+                continuation_reason = self._normalized_continuation_reason(
+                    decision.reason
+                )
+            state = state.model_copy(
+                update={
+                    "step_number": state.step_number + 1,
+                    # Kept in the checkpoint schema only for compatibility with
+                    # runs created before Tool choice became explicitly auto.
+                    "force_tool_choice_required_next": False,
+                    "pending_continuation_reason": continuation_reason,
+                }
+            )
         return run
+
+    @staticmethod
+    def _system_requirements(messages: tuple[ModelMessage, ...]) -> str:
+        values = []
+        for message in messages:
+            if message.role not in {"system", "developer"}:
+                continue
+            values.extend(
+                block.text for block in message.content if isinstance(block, TextBlock)
+            )
+        return "\n".join(value for value in values if value.strip())
+
+    @staticmethod
+    def _normalized_continuation_reason(reason: str) -> str | None:
+        value = " ".join(str(reason or "").split()).strip()
+        if not value:
+            return None
+        return value[:240].replace("<", "[").replace(">", "]").strip()
+
+    async def _continuation_signals(
+        self, run_id: str, state: AgentLoopCheckpointState
+    ) -> ContinuationSignals:
+        """Resolve typed host/Tool signals without inferring them from text."""
+
+        signals = ContinuationSignals(flow_boundary=state.pending_flow_boundary)
+        if self.continuation_signal_provider is None:
+            return signals
+        external = self.continuation_signal_provider(run_id)
+        if inspect.isawaitable(external):
+            external = await external
+        if not isinstance(external, ContinuationSignals):
+            raise TypeError(
+                "continuation signal provider must return ContinuationSignals"
+            )
+        return signals.model_copy(
+            update={
+                "explicit_status": external.explicit_status,
+                "explicit_status_note": external.explicit_status_note,
+                "interaction": external.interaction,
+                "flow_boundary": external.flow_boundary or signals.flow_boundary,
+            }
+        )
 
     async def _stream_model(self, run, request, context, state, step_id):
         """Normalize one provider stream into canonical Item lifecycle events.
@@ -634,10 +1137,36 @@ class AgentLoopEngine:
         reasoning_started = False
         response = None
         stream = self.model.stream(request)
+
+        async def commit_delta_batch(batch_run, drafts):
+            try:
+                return await self._commit_running(batch_run, context, drafts)
+            except SageV2Error as exc:
+                if exc.info.category != ErrorCategory.CONFLICT:
+                    raise
+                latest = await self.runtime.get_run(batch_run.run_id)
+                if latest.state in TERMINAL_RUN_STATES:
+                    return latest
+                if latest.state not in {
+                    RunState.RUNNING,
+                    RunState.SUSPEND_REQUESTED,
+                }:
+                    raise
+                return await self._commit_running(
+                    latest,
+                    context,
+                    drafts,
+                    expected_states={latest.state},
+                )
+
+        batcher = StreamEventBatcher(run, commit_delta_batch)
         try:
             async for model_event in stream:
                 current = await self.runtime.get_run(run.run_id)
+                await batcher.observe_run(current)
                 if current.state == RunState.SUSPEND_REQUESTED:
+                    run = await batcher.flush()
+                    current = await self.runtime.get_run(run.run_id)
                     if text or reasoning:
                         drafts = []
                         if text:
@@ -702,7 +1231,8 @@ class AgentLoopEngine:
                             ),
                         )
                     )
-                    run = await self._commit_running(run, context, tuple(drafts))
+                    for draft in drafts:
+                        run = await batcher.add(draft)
                 elif model_event.kind == ModelEventKind.REASONING_DELTA:
                     drafts = []
                     if not reasoning_started:
@@ -728,10 +1258,12 @@ class AgentLoopEngine:
                             ),
                         )
                     )
-                    run = await self._commit_running(run, context, tuple(drafts))
+                    for draft in drafts:
+                        run = await batcher.add(draft)
                 else:
                     response = model_event.response
         finally:
+            run = await batcher.flush()
             closer = getattr(stream, "aclose", None)
             if closer is not None:
                 await closer()
@@ -901,9 +1433,10 @@ class AgentLoopEngine:
         try:
             result = await self.tool_executor.execute(call, context)
         except SageV2Error as exc:
+            localized = localize_error(exc.info, context.language)
             if exc.info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
                 run = await self._record_tool_unknown(
-                    run, call, exc.info, context, turn_id, step_id
+                    run, call, localized, context, turn_id, step_id
                 )
                 return await self._reconcile_or_suspend_tool(
                     run,
@@ -912,30 +1445,210 @@ class AgentLoopEngine:
                     turn_id,
                     step_id,
                     state,
-                    exc.info,
+                    localized,
                 )
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
                 operation_id=call.operation_id,
-                content=(TextBlock(text=exc.info.message),),
-                error=exc.info,
+                content=(TextBlock(text=localized.message),),
+                error=localized,
             )
         except Exception as exc:
-            result = ToolExecutionResult(
-                tool_call_id=call.tool_call_id,
-                operation_id=call.operation_id,
-                content=(TextBlock(text=str(exc)),),
-                error=RuntimeErrorInfo(
+            localized = localize_error(
+                RuntimeErrorInfo(
                     code="tool.provider_error",
                     category=ErrorCategory.PROVIDER_PERMANENT,
                     message=str(exc),
                     safe_to_resume=True,
                 ),
+                context.language,
+            )
+            result = ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(TextBlock(text=localized.message),),
+                error=localized,
+            )
+        if result.error is not None:
+            localized = localize_error(result.error, context.language)
+            result = result.model_copy(
+                update={
+                    "error": localized,
+                    "content": (TextBlock(text=localized.message),),
+                }
+            )
+        elif call.tool_name == "tool_expand_tools":
+            requested_names = call.arguments.get("tool_names")
+            if requested_names is None:
+                requested_names = call.arguments.get("names")
+            if isinstance(requested_names, (list, tuple)):
+                self.tool_selection_policy.expand_tools(
+                    run_id=call.owner_run_id,
+                    names=tuple(
+                        name for name in requested_names if isinstance(name, str)
+                    ),
+                )
+        pending_delegations = result.metadata.get("delegation_interactions")
+        if (
+            state is not None
+            and isinstance(pending_delegations, list)
+            and pending_delegations
+        ):
+            pending_state = state.model_copy(
+                update={
+                    "pending_tool_call": call,
+                    "pending_tool_phase": "delegation_interaction",
+                    "pending_tool_step_id": step_id,
+                    "pending_tool_result": result.model_dump(mode="json"),
+                    "pending_child_interactions": tuple(pending_delegations),
+                }
+            )
+            return (
+                await self._suspend_for_delegated_interaction(
+                    run,
+                    pending_state,
+                    call,
+                    pending_delegations[0],
+                    context,
+                    step_id,
+                ),
+                None,
             )
         run = await self._commit_tool_result(
             run, call, result, context, turn_id, step_id=step_id
         )
         return run, result
+
+    async def _resume_delegated_tool(self, run, state, decision, payload, context):
+        if self.delegated_run_controller is None:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="agent.delegation_controller_missing",
+                    category=ErrorCategory.INTERNAL,
+                    message="delegated interaction controller is unavailable",
+                )
+            )
+        pending = list(state.pending_child_interactions)
+        if not pending or state.pending_tool_result is None:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="agent.delegation_checkpoint_invalid",
+                    category=ErrorCategory.CORRUPT_STATE,
+                    message="delegated interaction checkpoint is incomplete",
+                )
+            )
+        current = pending.pop(0)
+        child_run_id = str(current.get("child_run_id") or "")
+        child_result = await self.delegated_run_controller.resolve_interaction(
+            child_run_id,
+            decision=decision,
+            payload=payload,
+            context=context,
+        )
+        tool_result = ToolExecutionResult.model_validate(state.pending_tool_result)
+        content = []
+        for block in tool_result.content:
+            if not isinstance(block, JsonBlock) or not isinstance(block.value, dict):
+                content.append(block)
+                continue
+            value = dict(block.value)
+            values = []
+            for item in value.get("results") or ():
+                if isinstance(item, dict) and item.get("child_run_id") == child_run_id:
+                    values.append(child_result.model_dump(mode="json"))
+                else:
+                    values.append(item)
+            value["results"] = values
+            content.append(JsonBlock(value=value))
+        tool_result = tool_result.model_copy(
+            update={
+                "content": tuple(content),
+                "metadata": {
+                    **tool_result.metadata,
+                    "delegation_interactions": [],
+                },
+            }
+        )
+        if child_result.outcome == RunState.SUSPENDED:
+            next_interaction = await self.delegated_run_controller.pending_interaction(
+                child_run_id
+            )
+            if next_interaction is not None:
+                pending.insert(
+                    0,
+                    {
+                        "agent_id": child_result.agent_id,
+                        "child_run_id": child_run_id,
+                        "interaction": next_interaction,
+                    },
+                )
+        if pending:
+            pending_state = state.model_copy(
+                update={
+                    "pending_tool_result": tool_result.model_dump(mode="json"),
+                    "pending_child_interactions": tuple(pending),
+                }
+            )
+            return (
+                await self._suspend_for_delegated_interaction(
+                    run,
+                    pending_state,
+                    state.pending_tool_call,
+                    pending[0],
+                    context,
+                    state.pending_tool_step_id,
+                ),
+                None,
+            )
+        run = await self._commit_tool_result(
+            run,
+            state.pending_tool_call,
+            tool_result,
+            context,
+            state.turn_id,
+            step_id=state.pending_tool_step_id,
+        )
+        return run, tool_result
+
+    async def _suspend_for_delegated_interaction(
+        self, run, state, call, pending, context, step_id
+    ):
+        raw = pending.get("interaction") if isinstance(pending, dict) else None
+        child = InteractionRequest.model_validate(raw)
+        interaction_id = new_id("interaction")
+        checkpoint, suspension = self._checkpoint_records(
+            run,
+            state,
+            reason=SuspensionReason.INPUT_REQUIRED,
+            interaction_id=interaction_id,
+        )
+        interaction = InteractionRequest(
+            interaction_id=interaction_id,
+            run_id=run.run_id,
+            turn_id=state.turn_id,
+            step_id=step_id,
+            interaction_type=child.interaction_type,
+            blocking_scope=BlockingScope.RUN,
+            allowed_decisions=child.allowed_decisions,
+            eligible_principal_ids=(context.actor.principal_id,),
+            payload={
+                **child.payload,
+                "delegated": True,
+                "child_run_id": pending.get("child_run_id"),
+                "child_interaction_id": child.interaction_id,
+                "tool_name": call.tool_name,
+            },
+            requested_at=self.clock(),
+        )
+        return await self.runtime.commit_suspension(
+            run_id=run.run_id,
+            expected_revision=run.revision,
+            checkpoint=checkpoint,
+            suspension=suspension,
+            interaction=interaction,
+            context=context,
+            idempotency_key=f"delegation-suspend:{interaction_id}",
+        )
 
     async def _record_tool_unknown(self, run, call, error, context, turn_id, step_id):
         return await self._commit_running(
@@ -1134,6 +1847,15 @@ class AgentLoopEngine:
     ):
         """Atomically commit the Tool lifecycle result and model-visible Item."""
 
+        if result.error is not None:
+            localized = localize_error(result.error, context.language)
+            result = result.model_copy(
+                update={
+                    "error": localized,
+                    "content": (TextBlock(text=localized.message),),
+                }
+            )
+
         item_id = new_id("item")
         status = (
             ItemStatus.DECLINED
@@ -1222,6 +1944,11 @@ class AgentLoopEngine:
             allowed_decisions=tuple(decisions),
             eligible_principal_ids=(context.actor.principal_id,),
             payload={
+                **recovery_payload(
+                    "recovery.uncertain_tool",
+                    context.language,
+                    reason_code="tool_outcome_unknown",
+                ),
                 "reason": "tool_outcome_unknown",
                 "tool_name": call.tool_name,
                 "operation_id": call.operation_id,
@@ -1251,6 +1978,22 @@ class AgentLoopEngine:
             reason=SuspensionReason.APPROVAL_REQUIRED,
             interaction_id=interaction_id,
         )
+        payload = dict(policy.interaction_payload)
+        diagnostic_risk = payload.get("risk_reason")
+        if payload.get("risk_category") == "plan_approval":
+            payload.pop("risk_reason", None)
+        elif diagnostic_risk:
+            payload["diagnostic_risk_reason"] = diagnostic_risk
+            payload["risk_reason"] = tr("approval.risk", context.language)
+        tool_name = str(payload.get("tool_name") or state.pending_tool_call.tool_name)
+        payload.update(
+            {
+                "title": tr("approval.title", context.language),
+                "prompt": tr("approval.tool_prompt", context.language, tool=tool_name),
+                "guidance": tr("approval.guidance", context.language),
+                "language": normalize_language(context.language),
+            }
+        )
         interaction = InteractionRequest(
             interaction_id=interaction_id,
             run_id=run.run_id,
@@ -1260,7 +2003,7 @@ class AgentLoopEngine:
             blocking_scope=BlockingScope.RUN,
             allowed_decisions=policy.allowed_decisions,
             eligible_principal_ids=(context.actor.principal_id,),
-            payload=policy.interaction_payload,
+            payload=payload,
             requested_at=self.clock(),
         )
         run = await self._commit_running(
@@ -1302,9 +2045,18 @@ class AgentLoopEngine:
         self, run, state, decision, context, step_id
     ):
         interaction_id = new_id("interaction")
+        reset_budget = bool(decision.interaction.payload.get("reset_step_budget"))
+        preserve_budget = bool(decision.interaction.payload.get("preserve_step_budget"))
+        next_step = (
+            1
+            if reset_budget
+            else state.step_number
+            if preserve_budget
+            else state.step_number + 1
+        )
         checkpoint, suspension = self._checkpoint_records(
             run,
-            state.model_copy(update={"step_number": state.step_number + 1}),
+            state.model_copy(update={"step_number": next_step}),
             reason=SuspensionReason.INPUT_REQUIRED,
             interaction_id=interaction_id,
         )
@@ -1350,12 +2102,12 @@ class AgentLoopEngine:
         """Build matching Checkpoint/Suspension records for one atomic commit."""
 
         checkpoint_id = new_id("checkpoint")
-        checkpoint_state = state.model_dump(mode="json", exclude={"messages"})
-        checkpoint_state["state_version"] = "2"
-        checkpoint_state["ledger_digest"] = self._ledger_digest(state.messages)
+        checkpoint_state = AgentLoopCheckpointCodec.encode(
+            state, ledger_digest=self._ledger_digest(state.messages)
+        )
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,
-            checkpoint_codec_version="agent-loop/2",
+            checkpoint_codec_version=AgentLoopCheckpointCodec.version,
             session_id=run.session_id,
             run_id=run.run_id,
             run_sequence=run.last_run_sequence,
@@ -1382,24 +2134,48 @@ class AgentLoopEngine:
         return checkpoint, suspension
 
     async def _record_continuation(self, run, decision, context, turn_id, step_id):
+        drafts = [
+            EventDraft(
+                type="continuation.decided",
+                turn_id=turn_id,
+                step_id=step_id,
+                data=ContinuationEventData(
+                    action=decision.action.value,
+                    reason_code=decision.reason_code,
+                    reason=decision.reason,
+                    decision_hash=decision.stable_hash(),
+                    next_agent=decision.next_agent,
+                    details=decision.metadata,
+                ),
+            )
+        ]
+        if (
+            decision.usage.input_tokens
+            or decision.usage.output_tokens
+            or decision.usage.cost is not None
+        ):
+            drafts.append(
+                EventDraft(
+                    type="usage.recorded",
+                    turn_id=turn_id,
+                    step_id=step_id,
+                    data=UsageEventData(usage=decision.usage),
+                )
+            )
         return await self._commit_running(
             run,
             context,
-            (
-                EventDraft(
-                    type="continuation.decided",
-                    turn_id=turn_id,
-                    step_id=step_id,
-                    data=ContinuationEventData(
-                        action=decision.action.value,
-                        reason_code=decision.reason_code,
-                        reason=decision.reason,
-                        decision_hash=decision.stable_hash(),
-                        next_agent=decision.next_agent,
-                    ),
-                ),
-            ),
+            tuple(drafts),
         )
+
+    @staticmethod
+    def _context_for_command(context: RequestContext, command) -> RequestContext:
+        language = normalize_language(
+            str(command.config.metadata.get("response_language") or context.language)
+        )
+        if context.language == language:
+            return context
+        return context.model_copy(update={"language": language})
 
     @staticmethod
     def _ledger_digest(messages) -> str:
@@ -1449,12 +2225,12 @@ class AgentLoopEngine:
                 items = (
                     InputItem(role="user", content=(TextBlock(text=text.strip()),)),
                 )
-        if decision == "change_direction" and not items:
+        if decision in {"submit", "change_direction"} and not items:
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="interaction.input_required",
                     category=ErrorCategory.VALIDATION,
-                    message="change_direction requires payload.text, guidance, or input",
+                    message=(f"{decision} requires payload.text, guidance, or input"),
                     safe_to_resume=True,
                 )
             )
@@ -1555,12 +2331,44 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=f"loop-complete:{run.run_id}:{state.step_number}",
         )
+        self.tool_selection_policy.release_run(run.run_id)
         return result.run
 
     async def _fail(self, run, state, step_id, error, context):
+        error = localize_error(error, context.language)
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
+            self.tool_selection_policy.release_run(run.run_id)
             return current
+        resumable = error.safe_to_resume or error.retryable
+        if current.state == RunState.RUNNING and resumable:
+            decision = ContinuationDecision(
+                action=ContinuationAction.REQUEST_INTERACTION,
+                reason_code=error.code,
+                reason=error.message,
+                interaction=InteractionDraft(
+                    interaction_type="error_recovery",
+                    allowed_decisions=("retry", "change_direction", "cancel"),
+                    payload=error_recovery_payload(
+                        error, context.language, resumable=True
+                    ),
+                ),
+            )
+            current = await self._record_continuation(
+                current, decision, context, state.turn_id, step_id
+            )
+            return await self._suspend_for_continuation_interaction(
+                current, state, decision, context, step_id
+            )
+        recovery = error_recovery_payload(error, context.language, resumable=False)
+        error = error.model_copy(
+            update={
+                "metadata": {
+                    **error.metadata,
+                    "recovery_questionnaire": recovery,
+                }
+            }
+        )
         result = await self.runtime.session_store.commit_run(
             run_id=current.run_id,
             expected_revision=current.revision,
@@ -1592,6 +2400,7 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=f"loop-fail:{run.run_id}:{state.step_number}:{error.code}",
         )
+        self.tool_selection_policy.release_run(run.run_id)
         return result.run
 
     async def _commit_running(

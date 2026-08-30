@@ -5,7 +5,7 @@ from __future__ import annotations
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
-from sagents.v2.memory.contracts import MemoryQuery, MemoryScope
+from sagents.v2.memory.contracts import MemoryQuery
 from sagents.v2.memory.service import MemoryService
 
 
@@ -35,19 +35,11 @@ class MemoryContextSource:
             return ()
         hits = await self.service.recall(
             MemoryQuery(
-                scope=MemoryScope(
+                scope=self.service.scope(
                     tenant_id=scope_data.get("tenant_id"),
                     principal_id=principal_id,
-                    agent_id=(
-                        command.agent_id
-                        if scope_data.get("scope") in {"agent", "session"}
-                        else None
-                    ),
-                    session_id=(
-                        command.session_id
-                        if scope_data.get("scope") == "session"
-                        else None
-                    ),
+                    agent_id=command.agent_id,
+                    session_id=command.session_id,
                 ),
                 text=query_text,
                 limit=int(scope_data.get("limit") or self.default_limit),

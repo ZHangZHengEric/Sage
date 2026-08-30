@@ -37,6 +37,25 @@ class FlowNodeResult(StrictModel):
     error: RuntimeErrorInfo | None = None
 
 
+class ParallelBranchState(StrictModel):
+    """Durable outcome for one branch of a parallel Flow node."""
+
+    node_id: Identifier
+    node_execution_id: Identifier
+    outcome: FlowNodeOutcome
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: RuntimeErrorInfo | None = None
+    child_run_id: Identifier | None = None
+
+
+class PendingParallelState(StrictModel):
+    """Checkpointed join state while one or more parallel branches are pending."""
+
+    node_id: Identifier
+    node_execution_id: Identifier
+    branches: tuple[ParallelBranchState, ...] = ()
+
+
 class FlowFrameState(StrictModel):
     """Suspended parent frame while a nested subflow is active."""
 
@@ -51,12 +70,14 @@ class FlowFrameState(StrictModel):
     pending_interaction_id: Identifier | None = None
     pending_child_run_id: Identifier | None = None
     pending_node_execution_id: Identifier | None = None
+    pending_error: dict[str, Any] | None = None
+    pending_parallel: PendingParallelState | None = None
 
 
 class FlowExecutionState(StrictModel):
     """Checkpoint payload for one Flow execution, including nested frames."""
 
-    state_version: str = "1"
+    state_version: str = "2"
     flow_id: Identifier
     flow_execution_id: Identifier
     current_node_id: Identifier
@@ -66,6 +87,8 @@ class FlowExecutionState(StrictModel):
     pending_interaction_id: Identifier | None = None
     pending_child_run_id: Identifier | None = None
     pending_node_execution_id: Identifier | None = None
+    pending_error: dict[str, Any] | None = None
+    pending_parallel: PendingParallelState | None = None
     subflow_stack: tuple[FlowFrameState, ...] = ()
 
 

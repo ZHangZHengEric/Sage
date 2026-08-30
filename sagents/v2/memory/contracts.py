@@ -20,6 +20,14 @@ class MemoryScope(StrictModel):
 
 
 class MemoryRecord(StrictModel):
+    """One logical long-term Memory value.
+
+    ``memory_id`` is a stable provider-neutral key. Remembering another record
+    with the same scope and id replaces that logical value incrementally.
+    Event ids belong in ``source`` so ingestion provenance is not coupled to
+    Memory identity.
+    """
+
     memory_id: str
     scope: MemoryScope
     content: str
