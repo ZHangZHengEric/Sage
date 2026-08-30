@@ -147,3 +147,35 @@ def test_export_session_archive_rejects_workspace_outside_storage_root(tmp_path)
 
     with pytest.raises(StorageError, match="escapes storage root"):
         store.export_session_archive(session_id)
+
+
+def test_delete_session_removes_workspace_and_descendant_catalog_entries(tmp_path):
+    store = create_session_store(session_root=str(tmp_path))
+    parent_id = "parent-session"
+    child_id = "child-session"
+    parent_workspace = store.create_session_workspace(parent_id)
+    store.register_session(parent_id, parent_workspace)
+    child_workspace = store.create_session_workspace(
+        child_id, parent_workspace=parent_workspace
+    )
+    store.register_session(child_id, child_workspace, parent_session_id=parent_id)
+    store.save_message_snapshot(parent_id, [{"role": "user", "content": "hello"}])
+    store.save_message_snapshot(child_id, [{"role": "assistant", "content": "hi"}])
+
+    store.delete_session(parent_id)
+
+    assert not (tmp_path / parent_id).exists()
+    assert not store.session_exists(parent_id)
+    assert not store.session_exists(child_id)
+
+
+def test_delete_session_removes_unregistered_legacy_workspace(tmp_path):
+    store = create_session_store(session_root=str(tmp_path))
+    session_id = "legacy-session"
+    workspace = tmp_path / session_id
+    workspace.mkdir()
+    (workspace / "messages.json").write_text("[]", encoding="utf-8")
+
+    store.delete_session(session_id)
+
+    assert not workspace.exists()

@@ -26,10 +26,16 @@ def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, 
         "systemPrefix": "You are a helpful Sage agent.",
         "systemContext": {},
         "agentMode": "simple",
+        "subAgentSelectionMode": "auto_all",
+        "availableSubAgentIds": [],
         "maxLoopCount": 48,
         "deepThinking": False,
         "thinkingLevel": "medium",
         "llm_provider_id": model_provider_id,
+        # Keep the fast-model binding explicit for newly created Agents. Older
+        # records without this field remain compatible and fall back to the
+        # primary provider at runtime.
+        "fast_llm_provider_id": model_provider_id,
         "availableTools": [
             "file_read",
             "grep",
@@ -160,11 +166,9 @@ class JsonDesktopCatalogStore:
                                 user_id=user_id,
                                 name="OpenAI",
                                 protocol="openai-responses",
-                                model=os.getenv("SAGE_MODEL", "gpt-5.4"),
-                                base_url=os.getenv(
-                                    "OPENAI_BASE_URL", "https://api.openai.com/v1"
-                                ),
-                                api_key=os.getenv("OPENAI_API_KEY", ""),
+                                model="gpt-5.4",
+                                base_url="https://api.openai.com/v1",
+                                api_key="",
                                 is_default=True,
                             ),
                         )

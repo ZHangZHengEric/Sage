@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, Literal
 
 from openai import AsyncOpenAI
@@ -34,6 +34,7 @@ from sagents.v2.contracts.items import (
     TextBlock,
     UsageSummary,
 )
+from sagents.v2.model.wire import wire_value
 
 
 class OpenAICompatibleConfig(StrictModel):
@@ -107,6 +108,8 @@ class OpenAICompatibleModelProvider:
                 if tool.output_schema is not None:
                     function["returns"] = tool.output_schema
                 kwargs["tools"].append({"type": "function", "function": function})
+            if request.tool_choice is not None:
+                kwargs["tool_choice"] = request.tool_choice
         max_tokens = request.max_output_tokens or self.config.default_max_output_tokens
         if max_tokens is not None:
             kwargs[self.config.max_output_tokens_field] = max_tokens
@@ -119,7 +122,9 @@ class OpenAICompatibleModelProvider:
             kwargs["temperature"] = temperature
         if self.config.default_top_p is not None:
             kwargs["top_p"] = self.config.default_top_p
-        if request.response_schema is not None:
+        if request.response_format == "json_object":
+            kwargs["response_format"] = {"type": "json_object"}
+        elif request.response_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -153,67 +158,98 @@ class OpenAICompatibleModelProvider:
         finish_reason = "unknown"
         usage = UsageSummary()
         tool_fragments: dict[int, dict[str, str]] = {}
+        observed_choice_fields: set[str] = set()
+        observed_delta_fields: set[str] = set()
+        observed_delta_field_types: dict[str, set[str]] = {}
         try:
             upstream = await self._client.chat.completions.create(**kwargs)
             async for chunk in upstream:
-                response_id = str(getattr(chunk, "id", None) or response_id)
-                raw_usage = getattr(chunk, "usage", None)
+                response_id = str(wire_value(chunk, "id") or response_id)
+                raw_usage = wire_value(chunk, "usage")
                 if raw_usage is not None:
+                    prompt_details = wire_value(raw_usage, "prompt_tokens_details")
+                    completion_details = wire_value(
+                        raw_usage, "completion_tokens_details"
+                    )
                     usage = UsageSummary(
-                        input_tokens=int(getattr(raw_usage, "prompt_tokens", 0) or 0),
+                        input_tokens=int(
+                            wire_value(raw_usage, "prompt_tokens", 0) or 0
+                        ),
                         output_tokens=int(
-                            getattr(raw_usage, "completion_tokens", 0) or 0
+                            wire_value(raw_usage, "completion_tokens", 0) or 0
                         ),
                         cached_input_tokens=int(
-                            getattr(
-                                getattr(raw_usage, "prompt_tokens_details", None),
-                                "cached_tokens",
-                                0,
-                            )
+                            wire_value(prompt_details, "cached_tokens", 0)
                             or 0
                         ),
                         reasoning_tokens=int(
-                            getattr(
-                                getattr(raw_usage, "completion_tokens_details", None),
-                                "reasoning_tokens",
-                                0,
-                            )
+                            wire_value(completion_details, "reasoning_tokens", 0)
                             or 0
                         ),
                         models=(self.config.model,),
                     )
-                choices = getattr(chunk, "choices", None) or ()
+                choices = wire_value(chunk, "choices", ()) or ()
                 for choice in choices:
-                    if getattr(choice, "finish_reason", None):
-                        finish_reason = str(choice.finish_reason)
-                    delta = getattr(choice, "delta", None)
+                    observed_choice_fields.update(self._wire_field_names(choice))
+                    choice_finish_reason = wire_value(choice, "finish_reason")
+                    if choice_finish_reason:
+                        finish_reason = str(choice_finish_reason)
+                    delta = wire_value(choice, "delta")
                     if delta is None:
-                        continue
-                    reasoning_content = getattr(delta, "reasoning_content", None)
+                        delta = {}
+                    delta_fields = self._wire_field_names(delta)
+                    observed_delta_fields.update(delta_fields)
+                    for field in delta_fields:
+                        observed_delta_field_types.setdefault(field, set()).add(
+                            self._wire_type_name(wire_value(delta, field))
+                        )
+                    reasoning_content = self._first_wire_text(
+                        delta,
+                        "reasoning_content",
+                        "reasoning",
+                        "thinking",
+                        "analysis",
+                    )
+                    if not reasoning_content and not reasoning:
+                        reasoning_content = self._first_wire_text(
+                            wire_value(choice, "message"),
+                            "reasoning_content",
+                            "reasoning",
+                            "thinking",
+                            "analysis",
+                        )
                     if reasoning_content:
-                        reasoning += str(reasoning_content)
+                        reasoning += reasoning_content
                         yield ModelStreamEvent(
                             kind=ModelEventKind.REASONING_DELTA,
-                            delta=str(reasoning_content),
+                            delta=reasoning_content,
                         )
-                    content = getattr(delta, "content", None)
+                    content = self._first_wire_text(delta, "content", "text")
+                    if not content and not text:
+                        content = self._first_wire_text(choice, "text")
+                    if not content and not text:
+                        content = self._first_wire_text(
+                            wire_value(choice, "message"), "content", "text"
+                        )
+                    if not content and not text:
+                        content = self._first_wire_text(delta, "refusal")
                     if content:
-                        text += str(content)
+                        text += content
                         yield ModelStreamEvent(
-                            kind=ModelEventKind.TEXT_DELTA, delta=str(content)
+                            kind=ModelEventKind.TEXT_DELTA, delta=content
                         )
-                    for tool_delta in getattr(delta, "tool_calls", None) or ():
-                        index = int(getattr(tool_delta, "index", 0) or 0)
+                    for tool_delta in wire_value(delta, "tool_calls", ()) or ():
+                        index = int(wire_value(tool_delta, "index", 0) or 0)
                         accumulator = tool_fragments.setdefault(
                             index, {"id": "", "name": "", "arguments": ""}
                         )
-                        tool_id = getattr(tool_delta, "id", None)
+                        tool_id = wire_value(tool_delta, "id")
                         if tool_id:
                             accumulator["id"] += str(tool_id)
-                        function = getattr(tool_delta, "function", None)
+                        function = wire_value(tool_delta, "function")
                         if function is not None:
-                            name = getattr(function, "name", None)
-                            arguments = getattr(function, "arguments", None)
+                            name = wire_value(function, "name")
+                            arguments = wire_value(function, "arguments")
                             if name:
                                 accumulator["name"] += str(name)
                             if arguments:
@@ -262,6 +298,36 @@ class OpenAICompatibleModelProvider:
                     arguments=arguments,
                 )
             )
+        if (
+            usage.output_tokens > 0
+            and not text.strip()
+            and not reasoning.strip()
+            and not tool_calls
+        ):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="model.empty_semantic_response",
+                    category=ErrorCategory.PROVIDER_TRANSIENT,
+                    message=(
+                        "provider reported output tokens but returned no supported "
+                        "text, reasoning, or Tool call fields"
+                    ),
+                    retryable=True,
+                    safe_to_resume=True,
+                    metadata={
+                        "output_tokens": usage.output_tokens,
+                        "finish_reason": finish_reason,
+                        "observed_choice_fields": sorted(observed_choice_fields),
+                        "observed_delta_fields": sorted(observed_delta_fields),
+                        "observed_delta_field_types": {
+                            key: sorted(values)
+                            for key, values in sorted(
+                                observed_delta_field_types.items()
+                            )
+                        },
+                    },
+                )
+            )
         yield ModelStreamEvent(
             kind=ModelEventKind.COMPLETED,
             response=ModelResponse(
@@ -277,6 +343,73 @@ class OpenAICompatibleModelProvider:
                 },
             ),
         )
+
+    @classmethod
+    def _first_wire_text(cls, value: Any, *names: str) -> str:
+        if value is None:
+            return ""
+        for name in names:
+            item = wire_value(value, name)
+            text = cls._coerce_wire_text(item)
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def _coerce_wire_text(cls, value: Any) -> str:
+        """Accept common structured Chat Completions content-part shapes."""
+
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            return "".join(cls._coerce_wire_text(item) for item in value)
+        if isinstance(value, Mapping):
+            part_type = str(value.get("type") or "").lower()
+            if part_type and part_type not in {
+                "text",
+                "output_text",
+                "reasoning",
+                "reasoning_text",
+                "thinking",
+            }:
+                return ""
+            for key in ("text", "content", "value"):
+                text = cls._coerce_wire_text(value.get(key))
+                if text:
+                    return text
+            return ""
+        dumper = getattr(value, "model_dump", None)
+        if callable(dumper):
+            dumped = dumper(exclude_none=True)
+            if isinstance(dumped, Mapping):
+                return cls._coerce_wire_text(dumped)
+        return ""
+
+    @staticmethod
+    def _wire_field_names(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            return {str(key) for key in value}
+        dumper = getattr(value, "model_dump", None)
+        if callable(dumper):
+            dumped = dumper(exclude_none=True)
+            if isinstance(dumped, dict):
+                return {str(key) for key in dumped}
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, dict):
+            return {str(key) for key in attributes if not str(key).startswith("_")}
+        return set()
+
+    @staticmethod
+    def _wire_type_name(value: Any) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, Mapping):
+            return "object"
+        if isinstance(value, (list, tuple)):
+            return "array"
+        return type(value).__name__
 
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities

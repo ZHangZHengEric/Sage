@@ -32,7 +32,7 @@ from sagents.v2.contracts.commands import (
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 
 
 CONTEXT = RequestContext(
@@ -52,7 +52,7 @@ def start(*, key="start_1", text="initial"):
 
 @pytest.mark.asyncio
 async def test_start_idempotency_replays_identical_request_but_rejects_key_reuse():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     first = await runtime.start_run(start(), CONTEXT)
     replay = await runtime.start_run(start(), CONTEXT)
     assert replay.run_id == first.run_id
@@ -63,7 +63,7 @@ async def test_start_idempotency_replays_identical_request_but_rejects_key_reuse
 
 @pytest.mark.asyncio
 async def test_command_idempotency_replays_identical_request_but_rejects_key_reuse():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(start(), CONTEXT)
     running = await runtime.start_execution(
         run_id=handle.run_id,
@@ -90,7 +90,7 @@ async def test_command_idempotency_replays_identical_request_but_rejects_key_reu
 
 @pytest.mark.asyncio
 async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(start(), CONTEXT)
     running = await runtime.start_execution(
         run_id=handle.run_id,
@@ -202,7 +202,7 @@ class BlockingTwoStepModel:
 
 @pytest.mark.asyncio
 async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(start(), CONTEXT)
     model = BlockingTwoStepModel()
     loop = AgentLoopEngine(

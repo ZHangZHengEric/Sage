@@ -6,6 +6,8 @@ from sagents.v2.flow.contracts import (
     FlowNodeContext,
     FlowNodeOutcome,
     FlowNodeResult,
+    ParallelBranchState,
+    PendingParallelState,
     RunnableNode,
 )
 from sagents.v2.flow.engine import FlowRuntime
@@ -17,5 +19,7 @@ __all__ = [
     "FlowNodeOutcome",
     "FlowNodeResult",
     "FlowRuntime",
+    "ParallelBranchState",
+    "PendingParallelState",
     "RunnableNode",
 ]

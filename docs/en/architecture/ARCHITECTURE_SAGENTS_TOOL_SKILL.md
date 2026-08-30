@@ -109,7 +109,7 @@ flowchart TB
         TodoT[todo_tool · multi-agent task list]
     end
     subgraph UserInter ["User interaction"]
-        Quest[questionnaire_tool · structured questionnaire]
+        Quest[questionnaire_async · asynchronous structured questionnaire]
     end
     subgraph Memory
         Mem[memory_tool]

@@ -723,7 +723,7 @@ class FibreOrchestrator:
             available_tools: List of available tool names
             available_skills: List of available skill names
             available_workflows: List of available workflow names
-            system_context: Additional system context
+            system_context: Additional runtime variables (legacy field name)
 
         Returns:
             agent_id: The created agent's ID
@@ -1818,7 +1818,7 @@ class FibreOrchestrator:
             parent_session_id=parent_session_id,
         )
         logger.info(
-            f"[Orchestrator] Created sub-session {session_id} and system context {sub_session.session_context.system_context}"
+            f"[Orchestrator] Created sub-session {session_id} with runtime variables {sub_session.session_context.system_context}"
         )
 
         if parent_session:

@@ -15,10 +15,12 @@ import 'package:sage_desktop_v2/src/app.dart';
 import 'package:sage_desktop_v2/src/localization/app_localizations.dart';
 import 'package:sage_desktop_v2/src/models.dart';
 import 'package:sage_desktop_v2/src/state/workspace_controller.dart';
+import 'package:sage_desktop_v2/src/usage_models.dart';
 import 'package:sage_desktop_v2/src/ui/file_preview.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 
 class _FakeApi extends V2ApiClient {
+  final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
   Map<String, Object?>? lastAgentPatch;
   String? lastCreatedAgentName;
   Map<String, Object?>? lastModelPatch;
@@ -28,11 +30,14 @@ class _FakeApi extends V2ApiClient {
   String? lastDeletedAgentId;
   String? lastDeletedSessionId;
   Map<String, Object?>? lastRunBody;
+  int workspaceTreeCalls = 0;
   int workspaceFileCalls = 0;
+  int? lastUsageDays;
   String? lastWorkspaceTreeId;
   String? importedSkillFolder;
   String? lastSelectedComponent;
   String? lastSelectedComponentPlugin;
+  Map<String, Object?>? lastSelectedComponentConfig;
   WorkspaceFileContent workspaceFileContent = WorkspaceFileContent(
     bytes: Uint8List.fromList('Sage v2 workspace'.codeUnits),
     mediaType: 'text/plain',
@@ -59,6 +64,59 @@ class _FakeApi extends V2ApiClient {
   Future<DesktopSettings> getSettings() async => desktopSettings;
 
   @override
+  Future<UsageOverview> getUsageOverview({int days = 30}) async {
+    lastUsageDays = days;
+    return UsageOverview(
+      rangeDays: days,
+      totals: const UsageTotals(
+        inputTokens: 12000,
+        outputTokens: 3000,
+        cachedInputTokens: 4000,
+        totalTokens: 15000,
+        modelRequests: 8,
+        turns: 5,
+        toolCalls: 4,
+        sessions: 2,
+      ),
+      daily: [
+        UsageDay(
+          date: DateTime(2026, 8, 29),
+          inputTokens: 12000,
+          outputTokens: 3000,
+          cachedInputTokens: 4000,
+          totalTokens: 15000,
+          turns: 5,
+          toolCalls: 4,
+        ),
+      ],
+      models: const [
+        UsageBreakdown(
+          name: 'test-model',
+          inputTokens: 12000,
+          outputTokens: 3000,
+          cachedInputTokens: 4000,
+          totalTokens: 15000,
+          requests: 8,
+        ),
+      ],
+      agents: const [
+        UsageBreakdown(
+          id: 'agent_main',
+          name: 'Sage Agent',
+          inputTokens: 12000,
+          outputTokens: 3000,
+          cachedInputTokens: 4000,
+          totalTokens: 15000,
+          requests: 8,
+          turns: 5,
+          toolCalls: 4,
+        ),
+      ],
+      tools: const [ToolUsage(name: 'read_file', count: 4)],
+    );
+  }
+
+  @override
   Future<List<SkillSummary>> listSkills(String agentId) async => const [
     SkillSummary(name: 'code-review'),
   ];
@@ -77,6 +135,12 @@ class _FakeApi extends V2ApiClient {
         thinkingLevel: 'medium',
         availableTools: const ['read_file'],
         availableSkills: const ['code-review'],
+        shellPolicy: const ShellPolicySummary(
+          autoExecuteKeywords: ['git push (non-force)', 'relative rm -rf'],
+          approvalKeywords: ['git reset --hard', 'git clean'],
+          blockedKeywords: ['sudo / su', 'curl|sh / wget|bash'],
+          userApprovedCommands: ['git clean -fd'],
+        ),
       );
 
   @override
@@ -85,16 +149,7 @@ class _FakeApi extends V2ApiClient {
     Map<String, Object?> patch,
   ) async {
     lastAgentPatch = patch;
-    return AgentConfiguration(
-      id: agentId,
-      name: patch['name']?.toString() ?? 'Sage Agent',
-      systemPrefix: '# Sage\n\n- Follow instructions.',
-      systemContext: const {'language': 'zh'},
-      deepThinking: patch['deep_thinking'] as bool? ?? true,
-      thinkingLevel: patch['thinking_level']?.toString() ?? 'medium',
-      availableTools: const ['read_file'],
-      availableSkills: const ['code-review'],
-    );
+    return (await getAgentConfiguration(agentId)).applyPatch(patch);
   }
 
   @override
@@ -214,12 +269,19 @@ Inspect the complete diff before reporting findings.
     lastModelPatch = patch;
     return ModelProviderSummary(
       id: providerId,
-      name: patch['name']?.toString() ?? 'Primary',
+      name:
+          patch['name']?.toString() ??
+          (providerId == 'model_secondary' ? 'Secondary' : 'Primary'),
       protocol: patch['protocol']?.toString() ?? 'openai-responses',
-      model: patch['model']?.toString() ?? 'test-model',
+      model:
+          patch['model']?.toString() ??
+          (providerId == 'model_secondary'
+              ? 'test-model-secondary'
+              : 'test-model'),
       baseUrl: patch['base_url']?.toString() ?? 'https://example.test/v1',
       apiKeyConfigured: true,
       supportsMultimodal: true,
+      isDefault: patch['is_default'] == true || providerId == 'model_main',
     );
   }
 
@@ -246,12 +308,115 @@ Inspect the complete diff before reporting findings.
   }
 
   @override
+  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async =>
+      const [];
+
+  @override
+  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) =>
+      _sessionTreeEvents.stream;
+
+  @override
   Future<List<McpConnectionSummary>> listMcpConnections() async => const [
     McpConnectionSummary(name: 'filesystem', protocol: 'stdio', toolCount: 2),
   ];
 
   @override
   Future<List<ComponentSummary>> listComponents() async => const [
+    ComponentSummary(
+      id: 'agent.continuation-policy',
+      name: 'Run completion policy',
+      value: 'Decides when a run completes.',
+      selectionMode: 'user',
+      applyMode: 'next_run',
+      scope: 'run',
+      activePluginId: 'sage.agent.continuation.deterministic',
+      activeConfig: {
+        'repeat_threshold': 3,
+        'mode': 'deterministic',
+        'completion_reason': 'text.final',
+        'status_source': 'turn_status',
+        'explicit_statuses': [
+          'task_done',
+          'need_user_input',
+          'blocked',
+          'continue_work',
+          'failed',
+        ],
+        'flow_boundaries': ['complete_node', 'continue_node'],
+        'uses_llm_judge': false,
+        'uses_finish_reason': false,
+      },
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.agent.continuation.deterministic',
+          name: 'Deterministic completion rules',
+          value: 'Uses tools and final text.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.agent.continuation.llm-judge',
+          name: 'LLM Judge completion policy',
+          value: 'Uses a separate Judge request.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.agent.continuation.explicit-status',
+          name: 'Explicit status only',
+          value: 'Requires turn_status.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'tool.selection-policy',
+      name: 'Tool selection policy',
+      value: 'Bounds large Tool catalogs.',
+      selectionMode: 'user',
+      applyMode: 'next_run',
+      scope: 'agent',
+      activePluginId: 'sage.tool-selection.llm',
+      selectedPluginId: 'sage.tool-selection.llm',
+      activeConfig: {'max_visible_tools': 24},
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.tool-selection.direct',
+          name: 'Direct Tool selection',
+          value: 'Shows every Tool.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.tool-selection.llm',
+          name: 'LLM Tool selection',
+          value: 'Uses a fast model.',
+          configSchema: {
+            'properties': {
+              'max_visible_tools': {
+                'type': 'integer',
+                'minimum': 1,
+                'maximum': 10000,
+                'default': 24,
+              },
+            },
+          },
+        ),
+        ComponentPluginSummary(
+          id: 'sage.tool-selection.lexical',
+          name: 'BM25 Tool selection',
+          value: 'Selects relevant Tools.',
+          configSchema: {
+            'properties': {
+              'max_visible_tools': {
+                'type': 'integer',
+                'minimum': 1,
+                'maximum': 10000,
+                'default': 24,
+              },
+            },
+          },
+        ),
+        ComponentPluginSummary(
+          id: 'sage.tool-selection.recent',
+          name: 'Recent Tool selection',
+          value: 'Keeps recent Tools first.',
+        ),
+      ],
+    ),
     ComponentSummary(
       id: 'context.reducer',
       name: 'Context reducer',
@@ -288,12 +453,188 @@ Inspect the complete diff before reporting findings.
         ),
       ],
     ),
+    ComponentSummary(
+      id: 'memory.provider',
+      name: 'Long-term memory',
+      value: 'Recalls and writes long-term memory.',
+      selectionMode: 'user',
+      applyMode: 'restart',
+      scope: 'process',
+      activePluginId: 'sage.memory.filesystem-bm25',
+      activeConfig: {
+        'path': '/Users/test/sage/runtime/memory',
+        'recall': true,
+        'auto_write': true,
+        'scope_mode': 'agent',
+      },
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.memory.filesystem-bm25',
+          name: 'Local BM25 memory',
+          value: 'Persists and retrieves memory locally.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.memory.noop',
+          name: 'Memory off',
+          value: 'Disables recall and writing.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'memory.recall-query',
+      name: 'Memory query generation',
+      value: 'Chooses how search_memory builds its query.',
+      selectionMode: 'user',
+      applyMode: 'next_run',
+      scope: 'agent',
+      activePluginId: 'sage.memory.recall-query.direct',
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.memory.recall-query.direct',
+          name: 'Direct user input',
+          value: 'Uses the current user input directly.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.memory.recall-query.llm',
+          name: 'LLM-generated keywords',
+          value: 'Uses the fast model to generate retrieval keywords.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'session-memory.provider',
+      name: 'session-memory.provider',
+      value: 'session-memory.provider',
+      selectionMode: 'user',
+      applyMode: 'restart',
+      scope: 'process',
+      activePluginId: 'sage.session-memory.sqlite-bm25',
+      activeConfig: {
+        'path': '/Users/test/sage/runtime/session-memory',
+        'derived_from': 'session.events',
+      },
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.session-memory.noop',
+          name: 'No-op Session Memory provider',
+          value: 'Disables Session Memory.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.session-memory.sqlite-bm25',
+          name: 'SQLite BM25 Session Memory provider',
+          value: 'Indexes Session history.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'observability.diagnostic-sink',
+      name: 'Model diagnostics',
+      value: 'Stores model diagnostics.',
+      selectionMode: 'host',
+      applyMode: 'restart',
+      scope: 'process',
+      activePluginId: 'sage.observability.filesystem',
+      activeConfig: {'path': '/Users/test/sage/runtime/diagnostics'},
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.observability.filesystem',
+          name: 'Filesystem diagnostics',
+          value: 'Writes model diagnostics.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.observability.noop',
+          name: 'No-op diagnostics',
+          value: 'Disables model diagnostics.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'observability.log-sink',
+      name: 'Structured logging',
+      value: 'Records operational failures.',
+      selectionMode: 'user',
+      applyMode: 'restart',
+      scope: 'process',
+      activePluginId: 'sage.logging.filesystem',
+      activeConfig: {
+        'format_version': 'sage.log/v1',
+        'path': '/Users/test/sage/runtime/logs/sage.jsonl',
+        'min_level': 'info',
+        'max_bytes': 10485760,
+        'backup_count': 5,
+      },
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.logging.filesystem',
+          name: 'Rotating filesystem structured log sink',
+          value: 'Writes redacted rotating JSONL files.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.logging.noop',
+          name: 'No-op structured log sink',
+          value: 'Disables operational log persistence.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'execution.sandbox',
+      name: 'Execution sandbox',
+      value: 'Applies sandbox workspace and execution policy.',
+      selectionMode: 'host',
+      applyMode: 'next_run',
+      scope: 'run',
+      activePluginId: 'sage.sandbox.local-workspace',
+      activeConfig: {
+        'workspace_root': '/workspace',
+        'workspace_path_mode': 'virtual',
+        'workspace_mapping': 'active_workspace',
+        'filesystem_mode': 'workspace',
+      },
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.sandbox.local-workspace',
+          name: 'Local workspace sandbox',
+          value: 'Maps the active workspace.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.sandbox.ephemeral',
+          name: 'Ephemeral sandbox',
+          value: 'Uses an isolated filesystem.',
+        ),
+      ],
+    ),
+    ComponentSummary(
+      id: 'workspace.initializer',
+      name: 'Workspace initialization',
+      value: 'Seeds Agent Workspace files and folders on first use.',
+      selectionMode: 'user',
+      applyMode: 'immediate',
+      scope: 'agent',
+      activePluginId: 'sage.workspace.initializer.claw',
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.workspace.initializer.claw',
+          name: 'Claw Mode workspace',
+          value: 'Seeds identity, memory, and working folders.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.workspace.initializer.bare',
+          name: 'Bare workspace',
+          value: 'Seeds nothing.',
+        ),
+      ],
+    ),
   ];
 
   @override
-  Future<void> selectComponent(String componentId, String pluginId) async {
+  Future<void> selectComponent(
+    String componentId,
+    String pluginId, {
+    Map<String, Object?> config = const {},
+  }) async {
     lastSelectedComponent = componentId;
     lastSelectedComponentPlugin = pluginId;
+    lastSelectedComponentConfig = config;
   }
 
   @override
@@ -308,6 +649,7 @@ Inspect the complete diff before reporting findings.
     required String agentId,
     String workspaceId = '',
   }) async {
+    workspaceTreeCalls += 1;
     lastWorkspaceTreeId = workspaceId;
     return const [
       WorkspaceFileNode(
@@ -463,6 +805,500 @@ Inspect the complete diff before reporting findings.
   }
 }
 
+class _ControlledProcessApi extends _FakeApi {
+  final _events = StreamController<Map<String, Object?>>();
+
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) {
+    lastRunBody = Map<String, Object?>.of(body);
+    return _events.stream;
+  }
+
+  void emitRunningProcess() {
+    _events
+      ..add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_controlled',
+          'session_id': 'session_controlled',
+          'event_cursor': {'run_sequence': 0},
+        },
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'turn.started',
+        'run_id': 'run_controlled',
+        'session_id': 'session_controlled',
+        'turn_id': 'turn_controlled',
+        'run_sequence': 1,
+        'data': {'kind': 'turn', 'state': 'running'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'message.delta',
+        'run_id': 'run_controlled',
+        'session_id': 'session_controlled',
+        'turn_id': 'turn_controlled',
+        'item_id': 'item_process_controlled',
+        'run_sequence': 2,
+        'data': {'kind': 'item', 'operation': 'delta', 'delta': '正在检查实现。'},
+      });
+  }
+
+  void emitDelegationActivity() {
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'tool.call.proposed',
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'turn_id': 'turn_controlled',
+      'run_sequence': 3,
+      'occurred_at': '2026-08-30T15:00:02Z',
+      'data': {
+        'kind': 'tool',
+        'tool_call_id': 'call_delegate',
+        'tool_name': 'sys_delegate_task',
+        'state': 'proposed',
+        'arguments': {
+          'tasks': [
+            {'agent_id': 'agent_review', 'content': '检查快速排序'},
+          ],
+        },
+      },
+    });
+  }
+
+  void emitParentFollowupMessage() {
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'message.delta',
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'turn_id': 'turn_controlled',
+      'item_id': 'item_after_delegate',
+      'run_sequence': 4,
+      'occurred_at': '2026-08-30T15:00:44Z',
+      'data': {'kind': 'item', 'operation': 'delta', 'delta': '子任务返回后继续汇总。'},
+    });
+  }
+
+  void emitRunningTool() {
+    _events
+      ..add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_tool_shimmer',
+          'session_id': 'session_tool_shimmer',
+          'event_cursor': {'run_sequence': 0},
+        },
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'turn.started',
+        'run_id': 'run_tool_shimmer',
+        'session_id': 'session_tool_shimmer',
+        'turn_id': 'turn_tool_shimmer',
+        'run_sequence': 1,
+        'data': {'kind': 'turn', 'state': 'running'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'tool.call.proposed',
+        'run_id': 'run_tool_shimmer',
+        'session_id': 'session_tool_shimmer',
+        'turn_id': 'turn_tool_shimmer',
+        'run_sequence': 2,
+        'data': {
+          'kind': 'tool',
+          'tool_call_id': 'call_delegate',
+          'tool_name': 'sys_team_delegate_task',
+          'state': 'proposed',
+          'arguments': {'agent_id': 'agent_review', 'task': '检查实现'},
+        },
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'tool.call.started',
+        'run_id': 'run_tool_shimmer',
+        'session_id': 'session_tool_shimmer',
+        'turn_id': 'turn_tool_shimmer',
+        'run_sequence': 3,
+        'data': {
+          'kind': 'tool',
+          'tool_call_id': 'call_delegate',
+          'tool_name': 'sys_team_delegate_task',
+          'state': 'started',
+        },
+      });
+  }
+
+  void emitToolSucceeded() {
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'tool.call.succeeded',
+      'run_id': 'run_tool_shimmer',
+      'session_id': 'session_tool_shimmer',
+      'turn_id': 'turn_tool_shimmer',
+      'run_sequence': 4,
+      'data': {
+        'kind': 'tool',
+        'tool_call_id': 'call_delegate',
+        'tool_name': 'sys_team_delegate_task',
+        'state': 'succeeded',
+      },
+    });
+  }
+
+  Future<void> finishToolRun() async {
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'run.completed',
+      'run_id': 'run_tool_shimmer',
+      'session_id': 'session_tool_shimmer',
+      'turn_id': 'turn_tool_shimmer',
+      'run_sequence': 5,
+      'data': {'kind': 'run', 'state': 'completed'},
+    });
+    await _events.close();
+  }
+
+  void emitThinking() {
+    _events
+      ..add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_thinking',
+          'session_id': 'session_thinking',
+          'event_cursor': {'run_sequence': 0},
+        },
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'turn.started',
+        'run_id': 'run_thinking',
+        'session_id': 'session_thinking',
+        'turn_id': 'turn_thinking',
+        'run_sequence': 1,
+        'data': {'kind': 'turn', 'state': 'running'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'reasoning.started',
+        'run_id': 'run_thinking',
+        'session_id': 'session_thinking',
+        'turn_id': 'turn_thinking',
+        'item_id': 'reasoning_private',
+        'run_sequence': 2,
+        'data': {'kind': 'item', 'operation': 'started'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'reasoning.delta',
+        'run_id': 'run_thinking',
+        'session_id': 'session_thinking',
+        'turn_id': 'turn_thinking',
+        'item_id': 'reasoning_private',
+        'run_sequence': 3,
+        'data': {
+          'kind': 'item',
+          'operation': 'delta',
+          'delta': 'private reasoning must stay hidden',
+        },
+      });
+  }
+
+  void emitAnswerAfterThinking() {
+    _events
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'message.delta',
+        'run_id': 'run_thinking',
+        'session_id': 'session_thinking',
+        'turn_id': 'turn_thinking',
+        'item_id': 'answer_visible',
+        'run_sequence': 4,
+        'data': {'kind': 'item', 'operation': 'delta', 'delta': '这是可见回答。'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'run.completed',
+        'run_id': 'run_thinking',
+        'session_id': 'session_thinking',
+        'turn_id': 'turn_thinking',
+        'run_sequence': 5,
+        'data': {'kind': 'run', 'state': 'completed'},
+      });
+  }
+
+  Future<void> emitFinalMessage() async {
+    _events
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'message.delta',
+        'run_id': 'run_controlled',
+        'session_id': 'session_controlled',
+        'turn_id': 'turn_controlled',
+        'item_id': 'item_final_controlled',
+        'run_sequence': 3,
+        'data': {'kind': 'item', 'operation': 'delta', 'delta': '## 已完成'},
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'message.completed',
+        'run_id': 'run_controlled',
+        'session_id': 'session_controlled',
+        'turn_id': 'turn_controlled',
+        'item_id': 'item_final_controlled',
+        'run_sequence': 4,
+        'data': {
+          'kind': 'item',
+          'operation': 'completed',
+          'item': {
+            'item_id': 'item_final_controlled',
+            'data': {
+              'kind': 'message',
+              'role': 'assistant',
+              'content': [
+                {'kind': 'text', 'text': '## 已完成'},
+              ],
+            },
+          },
+        },
+      })
+      ..add({
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'run.completed',
+        'run_id': 'run_controlled',
+        'session_id': 'session_controlled',
+        'turn_id': 'turn_controlled',
+        'run_sequence': 5,
+        'data': {'kind': 'run', 'state': 'completed'},
+      });
+    await _events.close();
+  }
+}
+
+class _SessionTreeApi extends _ControlledProcessApi {
+  final _treeEvents = StreamController<Map<String, Object?>>();
+  String? repliedRunId;
+  String? repliedInteractionId;
+  String? cancelledRunId;
+  bool rootFailed = false;
+  bool childCancelled = false;
+
+  @override
+  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) =>
+      _treeEvents.stream;
+
+  void emitChildSession() {
+    _treeEvents
+      ..add({
+        'kind': 'session.discovered',
+        'session': {
+          'session_id': 'session_child',
+          'parent_session_id': 'session_controlled',
+          'created_at': '2026-08-30T15:00:00Z',
+        },
+        'run': {
+          'run_id': 'run_child',
+          'state': 'running',
+          'last_run_sequence': 0,
+          'created_at': '2026-08-30T15:00:02Z',
+          'updated_at': '2026-08-30T15:00:02Z',
+        },
+        'agent_id': 'agent_review',
+        'parent_run_id': 'run_controlled',
+        'parent_tool_call_id': 'call_delegate',
+        'task_name': '检查快速排序',
+        'original_task': '实现并验证快速排序',
+      })
+      ..add({
+        'kind': 'session.event',
+        'session_id': 'session_child',
+        'parent_session_id': 'session_controlled',
+        'run_id': 'run_child',
+        'event': {
+          'protocol_version': 'sage.runtime/v2',
+          'type': 'message.delta',
+          'run_id': 'run_child',
+          'session_id': 'session_child',
+          'turn_id': 'turn_child',
+          'item_id': 'item_child',
+          'run_sequence': 1,
+          'data': {'kind': 'item', 'operation': 'delta', 'delta': '正在检查分区逻辑。'},
+        },
+      })
+      ..add({
+        'kind': 'session.event',
+        'session_id': 'session_child',
+        'parent_session_id': 'session_controlled',
+        'run_id': 'run_child',
+        'event': {
+          'protocol_version': 'sage.runtime/v2',
+          'type': 'interaction.requested',
+          'run_id': 'run_child',
+          'session_id': 'session_child',
+          'turn_id': 'turn_child',
+          'run_sequence': 2,
+          'data': {
+            'interaction_id': 'interaction_child',
+            'interaction_type': 'approval',
+            'allowed_decisions': ['approve_once', 'deny'],
+            'payload': {
+              'tool_name': 'execute_shell_command',
+              'arguments': {'command': 'flutter test'},
+            },
+          },
+        },
+      });
+  }
+
+  void emitCompletedChildSession() {
+    _treeEvents
+      ..add({
+        'kind': 'session.discovered',
+        'session': {
+          'session_id': 'session_child_completed',
+          'parent_session_id': 'session_controlled',
+          'created_at': '2026-08-30T15:00:02Z',
+        },
+        'run': {
+          'run_id': 'run_child_completed',
+          'state': 'completed',
+          'last_run_sequence': 8,
+          'created_at': '2026-08-30T15:00:02Z',
+          'updated_at': '2026-08-30T15:00:44Z',
+        },
+        'agent_id': 'agent_review',
+        'parent_run_id': 'run_controlled',
+        'parent_tool_call_id': 'call_delegate',
+        'task_name': '已完成快速排序',
+        'original_task': '实现并验证快速排序',
+      })
+      ..add({
+        'kind': 'session.event',
+        'session_id': 'session_child_completed',
+        'parent_session_id': 'session_controlled',
+        'run_id': 'run_child_completed',
+        'event': {
+          'protocol_version': 'sage.runtime/v2',
+          'type': 'tool.call.succeeded',
+          'run_id': 'run_child_completed',
+          'session_id': 'session_child_completed',
+          'turn_id': 'turn_child_completed',
+          'run_sequence': 1,
+          'occurred_at': '2026-08-30T15:00:20Z',
+          'data': {
+            'kind': 'tool',
+            'tool_call_id': 'call_child_read',
+            'tool_name': 'read_file',
+            'state': 'succeeded',
+          },
+        },
+      });
+  }
+
+  void emitRootFailed() {
+    rootFailed = true;
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'run.failed',
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'turn_id': 'turn_controlled',
+      'run_sequence': 3,
+      'data': {
+        'kind': 'run',
+        'state': 'failed',
+        'error': {
+          'code': 'agent.driver_crashed',
+          'category': 'internal',
+          'message': 'parent failed',
+        },
+      },
+    });
+  }
+
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': runId == 'run_child'
+          ? 'session_child'
+          : 'session_controlled',
+      'active_turn_id': runId == 'run_child' ? 'turn_child' : 'turn_controlled',
+      'state': runId == 'run_child'
+          ? (childCancelled ? 'cancelled' : 'running')
+          : (rootFailed ? 'failed' : 'running'),
+      'last_run_sequence': runId == 'run_child' ? (childCancelled ? 3 : 2) : 3,
+    },
+  };
+
+  @override
+  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async => [
+    {
+      'session': {
+        'session_id': 'session_child',
+        'parent_session_id': 'session_controlled',
+        'created_at': '2026-08-30T15:00:00Z',
+      },
+      'run': {
+        'run_id': 'run_child',
+        'state': childCancelled ? 'cancelled' : 'running',
+        'last_run_sequence': childCancelled ? 3 : 2,
+      },
+      'agent_id': 'agent_review',
+      'parent_run_id': 'run_controlled',
+      'task_name': '检查快速排序',
+      'original_task': '实现并验证快速排序',
+    },
+  ];
+
+  @override
+  Future<void> cancel(String runId) async {
+    cancelledRunId = runId;
+    if (runId == 'run_child') childCancelled = true;
+  }
+
+  @override
+  Future<void> replyInteraction(
+    String runId, {
+    required String interactionId,
+    required String decision,
+    Map<String, Object?> payload = const {},
+  }) async {
+    repliedRunId = runId;
+    repliedInteractionId = interactionId;
+  }
+
+  @override
+  Stream<Map<String, Object?>> subscribeRun(
+    String runId, {
+    int afterSequence = 0,
+  }) => Stream.value({
+    'protocol_version': 'sage.runtime/v2',
+    'type': 'run.completed',
+    'run_id': runId,
+    'session_id': 'session_child',
+    'turn_id': 'turn_child',
+    'run_sequence': 3,
+    'data': {'kind': 'run', 'state': 'completed'},
+  });
+}
+
+class _ReconnectingSessionTreeApi extends _SessionTreeApi {
+  int treeSubscriptionCount = 0;
+
+  @override
+  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) {
+    treeSubscriptionCount += 1;
+    if (treeSubscriptionCount == 1) {
+      return const Stream<Map<String, Object?>>.empty();
+    }
+    return super.subscribeSessionTree(sessionId);
+  }
+}
+
 class _ManyToolsApi extends _FakeApi {
   @override
   Future<List<ToolSummary>> listTools() async => [
@@ -524,8 +1360,8 @@ class _DenseAgentApi extends _ManyToolsApi {
 class _GroupedToolsApi extends _FakeApi {
   @override
   Future<List<ToolSummary>> listTools() async => const [
-    ToolSummary(name: 'file_read', source: '文件'),
-    ToolSummary(name: 'grep', source: '代码检索'),
+    ToolSummary(name: 'file_read', source: '基础工具', category: 'files'),
+    ToolSummary(name: 'grep', source: '基础工具', category: 'code_search'),
     ToolSummary(name: 'search_web_page', source: '内置MCP: search'),
   ];
 
@@ -536,6 +1372,47 @@ class _GroupedToolsApi extends _FakeApi {
         name: 'Grouped Agent',
         availableTools: const ['file_read', 'search_web_page'],
       );
+}
+
+class _RecordingGroupedToolsApi extends _GroupedToolsApi {
+  final List<Map<String, Object?>> agentPatches = [];
+
+  @override
+  Future<AgentConfiguration> patchAgentConfiguration(
+    String agentId,
+    Map<String, Object?> patch,
+  ) async {
+    agentPatches.add(Map<String, Object?>.from(patch));
+    return (await getAgentConfiguration(agentId)).applyPatch(patch);
+  }
+}
+
+class _TeamAgentApi extends _FakeApi {
+  _TeamAgentApi({String mode = 'team'})
+    : configuration = AgentConfiguration(
+        id: 'agent_main',
+        name: 'Sage Agent',
+        agentMode: mode,
+      );
+
+  AgentConfiguration configuration;
+  final List<Map<String, Object?>> agentPatches = [];
+
+  @override
+  Future<AgentConfiguration> getAgentConfiguration(String agentId) async =>
+      agentId == configuration.id
+      ? configuration
+      : AgentConfiguration(id: agentId, name: 'Review Agent');
+
+  @override
+  Future<AgentConfiguration> patchAgentConfiguration(
+    String agentId,
+    Map<String, Object?> patch,
+  ) async {
+    agentPatches.add(Map<String, Object?>.from(patch));
+    configuration = configuration.applyPatch(patch);
+    return configuration;
+  }
 }
 
 class _ReconnectApi extends _FakeApi {
@@ -587,6 +1464,7 @@ class _SuspendedRunApi extends _FakeApi {
 
   bool cancelled;
   String? repliedDecision;
+  Map<String, Object?>? repliedPayload;
 
   @override
   Future<Map<String, Object?>> getRun(String runId) async => {
@@ -602,7 +1480,12 @@ class _SuspendedRunApi extends _FakeApi {
         'interaction_id': 'interaction_approval',
         'interaction_type': 'approval',
         'status': 'pending',
-        'allowed_decisions': ['approve_once', 'deny', 'cancel'],
+        'allowed_decisions': [
+          'approve_once',
+          'approve_and_remember',
+          'deny',
+          'cancel',
+        ],
         'payload': {
           'tool_name': 'execute_shell_command',
           'arguments': {'command': 'rm -rf build'},
@@ -626,6 +1509,7 @@ class _SuspendedRunApi extends _FakeApi {
     Map<String, Object?> payload = const {},
   }) async {
     repliedDecision = decision;
+    repliedPayload = payload;
   }
 
   @override
@@ -641,6 +1525,96 @@ class _SuspendedRunApi extends _FakeApi {
     'run_sequence': 5,
     'data': {'kind': 'run', 'state': cancelled ? 'cancelled' : 'completed'},
   });
+}
+
+class _FileWriteSuspendedRunApi extends _SuspendedRunApi {
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_suspended',
+      'active_turn_id': 'turn_suspended',
+      'state': 'suspended',
+      'last_run_sequence': 4,
+    },
+    'interaction': {
+      'interaction_id': 'interaction_file_write',
+      'interaction_type': 'approval',
+      'status': 'pending',
+      'allowed_decisions': ['approve_once', 'deny', 'cancel'],
+      'payload': {
+        'tool_name': 'file_write',
+        'arguments': {
+          'file_path': '/workspace/quicksort.py',
+          'content': 'def quicksort(values):\n    return sorted(values)\n',
+          'mode': 'overwrite',
+          'session_id': 'internal-marker',
+        },
+        'side_effect_level': 'write',
+      },
+    },
+  };
+}
+
+class _PlanSuspendedRunApi extends _SuspendedRunApi {
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_suspended',
+      'active_turn_id': 'turn_suspended',
+      'state': 'suspended',
+      'last_run_sequence': 4,
+    },
+    'interaction': {
+      'interaction_id': 'interaction_goal_submit',
+      'interaction_type': 'approval',
+      'status': 'pending',
+      'allowed_decisions': ['approve_once', 'deny', 'cancel'],
+      'payload': {
+        'tool_name': 'goal_submit',
+        'arguments': {'content': '# 实施计划\n\n1. 检查现状\n2. 修改实现\n3. 运行验证'},
+        'risk_category': 'plan_approval',
+        'side_effect_level': 'none',
+      },
+    },
+  };
+}
+
+class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_suspended',
+      'active_turn_id': 'turn_suspended',
+      'state': 'suspended',
+      'last_run_sequence': 4,
+    },
+    'interaction': {
+      'interaction_id': 'interaction_questionnaire',
+      'interaction_type': 'user_input',
+      'status': 'pending',
+      'allowed_decisions': ['submit', 'cancel'],
+      'payload': {
+        'title': '需要你的引导',
+        'prompt': '请选择部署目标并补充说明。',
+        'guidance': '回答后 Agent 会从原位置继续。',
+        'questions': [
+          {
+            'id': 'target',
+            'type': 'single',
+            'title': '部署目标',
+            'options': [
+              {'label': '预发布', 'value': 'staging'},
+              {'label': '生产', 'value': 'production'},
+            ],
+          },
+          {'id': 'notes', 'type': 'text', 'title': '补充说明', 'placeholder': '可选'},
+        ],
+      },
+    },
+  };
 }
 
 class _DelayedAgentApi extends _FakeApi {
@@ -699,7 +1673,12 @@ Map<String, Object?> _persistedSuspendedConversation() => {
   'pending_interaction': {
     'interaction_id': 'interaction_approval',
     'interaction_type': 'approval',
-    'allowed_decisions': ['approve_once', 'deny', 'cancel'],
+    'allowed_decisions': [
+      'approve_once',
+      'approve_and_remember',
+      'deny',
+      'cancel',
+    ],
     'payload': {
       'tool_name': 'execute_shell_command',
       'arguments': {'command': 'rm -rf build'},
@@ -755,13 +1734,107 @@ void main() {
     );
   });
 
+  test(
+    'conversation persists invocation mode and migrates legacy plan mode',
+    () {
+      final goal = Conversation(
+        id: 'goal',
+        invocationMode: InvocationMode.goal,
+      );
+      final restored = Conversation.fromJson(goal.toJson());
+      final legacy = Conversation.fromJson(const {
+        'id': 'legacy-plan',
+        'plan_mode': true,
+      });
+
+      expect(restored.invocationMode, InvocationMode.goal);
+      expect(restored.toJson()['invocation_mode'], 'goal');
+      expect(legacy.invocationMode, InvocationMode.plan);
+    },
+  );
+
+  test(
+    'failed parent keeps active child manageable and blocks tree deletion',
+    () async {
+      final api = _SessionTreeApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await controller.send('委派快速排序检查');
+      api.emitRunningProcess();
+      api.emitChildSession();
+      api.emitRootFailed();
+      await pumpEventQueue();
+
+      final root = controller.selectedConversation!;
+      expect(root.status, RunStatus.failed);
+      expect(root.subSessions.single.status, RunStatus.running);
+      expect(controller.canManageConversation(root), isFalse);
+
+      await controller.deleteConversation(
+        WorkspaceController.agentWorkspaceId,
+        root.id,
+      );
+      expect(api.lastDeletedSessionId, isNull);
+      expect(controller.error, '运行中的会话不能删除');
+
+      controller.selectSubSession(root.id, 'session_child');
+      await controller.cancel();
+
+      expect(api.cancelledRunId, 'run_child');
+      expect(root.subSessions.single.status, RunStatus.cancelled);
+      expect(controller.canManageConversation(root), isTrue);
+
+      await controller.deleteConversation(
+        WorkspaceController.agentWorkspaceId,
+        root.id,
+      );
+      expect(api.lastDeletedSessionId, 'session_controlled');
+      expect(controller.selectedSubSessionId, isEmpty);
+      expect(
+        controller.agentWorkspaceConversations.any(
+          (value) => value.id == root.id,
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test('desktop settings preserve generic component configuration', () {
+    final settings = DesktopSettings.fromJson(const {
+      'component_selections': {
+        'execution.sandbox': 'sage.sandbox.local-workspace',
+      },
+      'component_configs': {
+        'execution.sandbox': {
+          'workspace_root': '/project',
+          'workspace_mapping': 'active_workspace',
+        },
+      },
+    });
+
+    expect(
+      settings.componentSelections['execution.sandbox'],
+      'sage.sandbox.local-workspace',
+    );
+    expect(
+      settings.componentConfigs['execution.sandbox']?['workspace_root'],
+      '/project',
+    );
+    expect(
+      (settings.toJson()['component_configs'] as Map)['execution.sandbox'],
+      containsPair('workspace_mapping', 'active_workspace'),
+    );
+  });
+
   testWidgets('unsupported sagents display languages fall back to English', (
     tester,
   ) async {
     late String language;
     await tester.pumpWidget(
       Localizations(
-        locale: const Locale('ja'),
+        locale: const Locale('it'),
         delegates: const [
           SageLocalizations.delegate,
           DefaultWidgetsLocalizations.delegate,
@@ -897,6 +1970,29 @@ void main() {
     },
   );
 
+  test(
+    'interactive HTML preview preserves scripts inside an offline sandbox',
+    () {
+      final document = workspaceInteractiveHtmlDocument(
+        '<html><head><title>Demo</title></head><body>'
+        '<button onclick="runDemo()">Run</button>'
+        '<script>const marker = "</body>"; '
+        'function runDemo() { window.didRun = true; }</script>'
+        '</body></html>',
+      );
+
+      expect(document, contains('<button onclick="runDemo()">Run</button>'));
+      expect(document, contains('function runDemo()'));
+      expect(
+        document.indexOf('const marker'),
+        lessThan(document.indexOf('SagePreviewSelection')),
+      );
+      expect(document, contains("connect-src 'none'"));
+      expect(document, contains("frame-src 'none'"));
+      expect(document, contains('SagePreviewSelection.postMessage'));
+    },
+  );
+
   testWidgets(
     'Markdown preview selects across blocks and references selection',
     (tester) async {
@@ -1019,6 +2115,18 @@ void main() {
       expect(localizedToolName('list_dir', 'zh'), '查看目录');
       expect(localizedToolName('list_dir', 'en'), 'List directory');
       expect(localizedToolName('list_dir', 'pt'), 'Listar diretório');
+      for (final language in const ['es', 'fr', 'de', 'ja', 'ko', 'ru']) {
+        expect(
+          localizedToolName('list_dir', language),
+          isNot('List directory'),
+        );
+        final approval = approvalToolPresentation('file_write', const {
+          'file_path': '/workspace/a.txt',
+          'content': 'hello',
+        }, language);
+        expect(approval.previewLabel, isNot('Content preview'));
+        expect(localizedToolFailure(language), isNot('Failed'));
+      }
       expect(
         toolArgumentPreview('grep', const {
           'pattern': 'quicksort',
@@ -1028,10 +2136,16 @@ void main() {
         }, 'zh'),
         '“quicksort” · /workspace/projects · 忽略大小写',
       );
+      final plan = approvalToolPresentation('goal_submit', const {
+        'content': '# 实施计划\n\n1. 检查代码\n2. 完成验证',
+      }, 'zh');
+      expect(localizedToolName('goal_submit', 'zh'), '提交目标');
+      expect(plan.previewLabel, '计划全文');
+      expect(plan.preview, contains('2. 完成验证'));
     },
   );
 
-  test('workspace selection queues an exact composer reference', () async {
+  test('workspace selection queues a structured composer reference', () async {
     final controller = await _controller();
     addTearDown(controller.dispose);
     const node = WorkspaceFileNode(
@@ -1047,9 +2161,234 @@ void main() {
       controller.attachments.single.virtualPath,
       '/workspace/docs/notes.md',
     );
+    expect(controller.composerReferences.single.fileName, 'notes.md');
+    expect(controller.composerReferences.single.path, 'docs/notes.md');
     expect(
-      controller.takeComposerInsertion(controller.selectedConversationId),
+      controller.composerReferences.single.promptText,
       '@docs/notes.md\n> 第一行\n> 第二行',
+    );
+  });
+
+  testWidgets(
+    'composer shows a compact inline reference and reveals its full text',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '请解释',
+      );
+      const fullReference = '这是完整引用的第一行，内容足够长以便在输入消息里只展示简短摘要。\n这是完整引用的第二行。';
+      controller.referenceWorkspaceSelection(
+        const WorkspaceFileNode(
+          name: 'notes.md',
+          path: 'docs/notes.md',
+          isDirectory: false,
+          size: 96,
+        ),
+        fullReference,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('composer-asset-shelf')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('composer-inline-reference')),
+        findsOneWidget,
+      );
+      final composer = tester.widget<TextField>(
+        find.byKey(const ValueKey('agent-composer')),
+      );
+      expect(composer.controller?.text, '请解释\uFFFC');
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(
+          find.byKey(const ValueKey('composer-inline-reference')),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.byKey(const ValueKey('composer-inline-reference-hover')),
+        findsOneWidget,
+      );
+      expect(find.text('docs/notes.md'), findsOneWidget);
+      expect(find.text(fullReference), findsOneWidget);
+
+      final editingController = composer.controller!;
+      final nextText = '${editingController.text}这一段';
+      editingController.value = editingController.value.copyWith(
+        text: nextText,
+        selection: TextSelection.collapsed(offset: nextText.length),
+        composing: TextRange.empty,
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      await tester.pumpAndSettle();
+
+      final sentText =
+          ((api.lastRunBody?['messages'] as List).single as Map)['text'];
+      expect(
+        sentText,
+        '请解释\n\n'
+        '@docs/notes.md\n'
+        '> 这是完整引用的第一行，内容足够长以便在输入消息里只展示简短摘要。\n'
+        '> 这是完整引用的第二行。\n\n'
+        '这一段',
+      );
+      expect(controller.composerReferences, isEmpty);
+    },
+  );
+
+  testWidgets('deleting an inline reference also removes its shelf item', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await _controller();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    controller.referenceWorkspaceSelection(
+      const WorkspaceFileNode(
+        name: 'notes.md',
+        path: 'docs/notes.md',
+        isDirectory: false,
+        size: 32,
+      ),
+      '待删除的引用',
+    );
+    await tester.pumpAndSettle();
+
+    final composer = tester.widget<TextField>(
+      find.byKey(const ValueKey('agent-composer')),
+    );
+    expect(composer.controller?.text, '\uFFFC');
+    composer.controller!.value = const TextEditingValue(
+      text: '',
+      selection: TextSelection.collapsed(offset: 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.composerReferences, isEmpty);
+    expect(
+      find.byKey(const ValueKey('composer-inline-reference')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('composer-asset-shelf')), findsNothing);
+    expect(controller.attachments, isEmpty);
+  });
+
+  testWidgets('a whole folder reference is also embedded in composer text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    controller.referenceWorkspaceNode(
+      const WorkspaceFileNode(
+        name: 'mini_site',
+        path: 'mini_site',
+        isDirectory: true,
+        size: 0,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.attachments, hasLength(1));
+    expect(controller.composerReferences, hasLength(1));
+    expect(controller.composerReferences.single.promptText, '@mini_site');
+    expect(find.byKey(const ValueKey('composer-asset-shelf')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('composer-inline-reference')),
+      findsOneWidget,
+    );
+    expect(find.text('mini_site'), findsNWidgets(2));
+    final composer = tester.widget<TextField>(
+      find.byKey(const ValueKey('agent-composer')),
+    );
+    final editingController = composer.controller!;
+    final nextText = '${editingController.text}删除';
+    editingController.value = editingController.value.copyWith(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextText.length),
+      composing: TextRange.empty,
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pumpAndSettle();
+
+    final sentText =
+        ((api.lastRunBody?['messages'] as List).single as Map)['text'];
+    expect(sentText, '@mini_site\n\n删除');
+  });
+
+  test('workspace references use the real path in host path mode', () async {
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.components = [
+      const ComponentSummary(
+        id: 'execution.sandbox',
+        name: 'Execution sandbox',
+        value: 'Maps the active workspace.',
+        activeConfig: {
+          'workspace_root': '/workspace',
+          'workspace_path_mode': 'host',
+          'workspace_mapping': 'active_workspace',
+        },
+      ),
+    ];
+    const node = WorkspaceFileNode(
+      name: 'notes.md',
+      path: 'docs/notes.md',
+      isDirectory: false,
+      size: 48,
+    );
+
+    controller.referenceWorkspaceNode(node);
+
+    expect(
+      controller.attachments.single.virtualPath,
+      '/tmp/sage/agent_workspace/docs/notes.md',
+    );
+
+    controller.selectedGroupId = 'project_demo';
+    controller.referenceWorkspaceNode(
+      const WorkspaceFileNode(
+        name: 'project.md',
+        path: 'docs/project.md',
+        isDirectory: false,
+        size: 64,
+      ),
+    );
+
+    expect(
+      controller.attachments.last.virtualPath,
+      '/tmp/demo-project/docs/project.md',
     );
   });
 
@@ -1376,6 +2715,95 @@ void main() {
     );
   }
 
+  testWidgets('agent tool assignments save and update immediately', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _RecordingGroupedToolsApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('智能体').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('grep'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('grep'));
+    await tester.pumpAndSettle();
+
+    expect(api.agentPatches.last, {
+      'available_tools': ['file_read', 'grep', 'search_web_page'],
+    });
+    expect(controller.agentConfiguration?.availableTools, contains('grep'));
+
+    await tester.ensureVisible(find.text('search_web_page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('search_web_page'));
+    await tester.pumpAndSettle();
+
+    expect(api.agentPatches.last, {
+      'available_tools': ['file_read', 'grep'],
+    });
+    expect(
+      controller.agentConfiguration?.availableTools,
+      unorderedEquals(['file_read', 'grep']),
+    );
+  });
+
+  for (final mode in ['fibre', 'team']) {
+    testWidgets('$mode agent settings can select a custom member roster', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _TeamAgentApi(mode: mode);
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('所选成员作为叶节点执行，不会继续 Fibre / Team 编排。'), findsOneWidget);
+      final scope = find.byKey(const ValueKey('agent-team-scope'));
+      await tester.ensureVisible(scope);
+      await tester.tap(
+        find.descendant(of: scope, matching: find.text('自定义成员')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.agentPatches.last, {'sub_agent_selection_mode': 'manual'});
+
+      final reviewMember = find.byKey(
+        const ValueKey('assignment-协作成员-agent_review'),
+      );
+      await tester.ensureVisible(reviewMember);
+      await tester.tap(reviewMember);
+      await tester.pumpAndSettle();
+      expect(api.agentPatches.last, {
+        'available_sub_agent_ids': ['agent_review'],
+      });
+      expect(controller.agentConfiguration?.availableSubAgentIds, [
+        'agent_review',
+      ]);
+    });
+  }
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'desktop rail owns its collapse button in ${brightness.name} mode',
@@ -1568,6 +2996,34 @@ void main() {
     expect(find.text('Demo Project'), findsOneWidget);
   });
 
+  testWidgets('standalone chat refreshes Agent Workspace after a run', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    final callsBeforeRun = api.workspaceTreeCalls;
+
+    await controller.send('创建 index.html');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    expect(controller.selectedGroupId, WorkspaceController.agentWorkspaceId);
+    expect(controller.selectedGroup.project, isNull);
+    expect(api.lastRunBody, isNot(contains('workspace_id')));
+    expect(api.lastWorkspaceTreeId, '');
+    expect(api.workspaceTreeCalls, greaterThan(callsBeforeRun));
+    expect(find.text('Agent Workspace'), findsOneWidget);
+    expect(find.text('README.md'), findsWidgets);
+  });
+
   testWidgets('native stream updates the selected conversation', (
     tester,
   ) async {
@@ -1599,9 +3055,10 @@ void main() {
     expect(find.textContaining('已处理'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('process-message:item_process')),
-      findsOneWidget,
+      findsNothing,
     );
-    expect(find.text('我先搜索一下相关资料。'), findsOneWidget);
+    expect(find.text('我先搜索一下相关资料。'), findsNothing);
+    expect(find.byIcon(CupertinoIcons.chevron_right), findsWidgets);
     expect(find.byTooltip('复制'), findsNWidgets(2));
     final processTop = tester
         .getTopLeft(find.byKey(const ValueKey('process-panel')))
@@ -1611,6 +3068,15 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('检查一下代码').last).dy),
     );
     expect(processTop, lessThan(tester.getTopLeft(find.text('完成')).dy));
+
+    await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('process-message:item_process')),
+      findsOneWidget,
+    );
+    expect(find.text('我先搜索一下相关资料。'), findsOneWidget);
     expect(find.textContaining('搜索网页'), findsOneWidget);
     expect(find.textContaining('“Sage”'), findsOneWidget);
     expect(find.textContaining('search_web'), findsNothing);
@@ -1619,6 +3085,300 @@ void main() {
       lessThan(tester.getTopLeft(find.textContaining('搜索网页')).dy),
     );
   });
+
+  testWidgets('process panel collapses when the final body is promoted', (
+    tester,
+  ) async {
+    tester.platformDispatcher.localeTestValue = const Locale('zh');
+    tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final api = _ControlledProcessApi();
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '检查流式折叠',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pump();
+
+    api.emitRunningProcess();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(find.text('正在检查实现。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('running-message-shimmer')), findsNothing);
+    expect(find.byIcon(CupertinoIcons.chevron_up), findsWidgets);
+
+    await api.emitFinalMessage();
+    await tester.pumpAndSettle();
+
+    expect(find.text('已完成'), findsWidgets);
+    expect(find.text('正在检查实现。'), findsNothing);
+    expect(find.byKey(const ValueKey('running-message-shimmer')), findsNothing);
+    expect(find.byIcon(CupertinoIcons.chevron_right), findsWidgets);
+
+    await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+    await tester.pump();
+    expect(find.text('正在检查实现。'), findsOneWidget);
+  });
+
+  testWidgets('active tool text shimmers until the tool completes', (
+    tester,
+  ) async {
+    tester.platformDispatcher.localeTestValue = const Locale('zh');
+    tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ControlledProcessApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '委派检查任务',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pump();
+
+    api.emitRunningTool();
+    await tester.pump(const Duration(milliseconds: 20));
+
+    expect(find.textContaining('团队委派'), findsOneWidget);
+    expect(find.textContaining('检查实现', findRichText: true), findsOneWidget);
+    expect(
+      find.textContaining('agent_review', findRichText: true),
+      findsNothing,
+    );
+    final toolLine = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((widget) => widget.text.toPlainText().contains('团队委派'));
+    expect(toolLine.maxLines, 1);
+    expect(toolLine.softWrap, isFalse);
+    expect(toolLine.overflow, TextOverflow.ellipsis);
+    expect(
+      find.byKey(const ValueKey('tool-activity-shimmer:call_delegate')),
+      findsOneWidget,
+    );
+
+    api.emitToolSucceeded();
+    await tester.pump(const Duration(milliseconds: 20));
+
+    expect(find.textContaining('团队委派'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('tool-activity-shimmer:call_delegate')),
+      findsNothing,
+    );
+
+    await api.finishToolRun();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+    'session tree reconnects and shows child messages in the parent flow',
+    (tester) async {
+      tester.platformDispatcher.localeTestValue = const Locale('zh');
+      tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _ReconnectingSessionTreeApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '委派快速排序检查',
+      );
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      await tester.pump();
+      api.emitRunningProcess();
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(api.treeSubscriptionCount, 1);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(api.treeSubscriptionCount, greaterThanOrEqualTo(2));
+
+      api.emitDelegationActivity();
+      api.emitParentFollowupMessage();
+      await tester.pump(const Duration(milliseconds: 20));
+      api.emitChildSession();
+      await tester.pump(const Duration(milliseconds: 40));
+
+      expect(
+        find.byKey(const ValueKey('sub-session-tile:session_child')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('sub-session-process:session_child')),
+        findsOneWidget,
+      );
+      expect(find.text('正在检查分区逻辑。'), findsOneWidget);
+      expect(find.text('等待审批'), findsOneWidget);
+      final delegateY = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('process-activity:call_delegate')),
+          )
+          .dy;
+      final childY = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('sub-session-process:session_child')),
+          )
+          .dy;
+      final followupY = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('process-message:item_after_delegate')),
+          )
+          .dy;
+      expect(childY, greaterThan(delegateY));
+      expect(childY, lessThan(followupY));
+
+      await tester.tap(
+        find.byKey(const ValueKey('sub-session-tile:session_child')),
+      );
+      await tester.pump();
+      expect(
+        controller.selectedDisplayConversation?.sessionId,
+        'session_child',
+      );
+      expect(find.byKey(const ValueKey('agent-composer')), findsNothing);
+      expect(find.byIcon(CupertinoIcons.stop_fill), findsOneWidget);
+
+      await controller.replyDisplayInteraction('approve_once');
+      expect(api.repliedRunId, 'run_child');
+      expect(api.repliedInteractionId, 'interaction_child');
+
+      await tester.tap(
+        find.byKey(
+          ValueKey('conversation-tile:${controller.selectedConversationId}'),
+        ),
+      );
+      await tester.pump();
+      expect(controller.selectedSubSessionId, isEmpty);
+      expect(
+        controller.selectedDisplayConversation?.id,
+        controller.selectedConversationId,
+      );
+      expect(find.byKey(const ValueKey('agent-composer')), findsOneWidget);
+    },
+  );
+
+  testWidgets('completed child uses authoritative run duration', (
+    tester,
+  ) async {
+    tester.platformDispatcher.localeTestValue = const Locale('zh');
+    tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _SessionTreeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '委派快速排序检查',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pump();
+    api.emitRunningProcess();
+    api.emitDelegationActivity();
+    await tester.pump(const Duration(milliseconds: 20));
+    api.emitCompletedChildSession();
+    await tester.pump(const Duration(milliseconds: 40));
+
+    await tester.tap(
+      find.byKey(const ValueKey('sub-session-tile:session_child_completed')),
+    );
+    await tester.pump();
+
+    expect(find.text('已处理 42s'), findsOneWidget);
+  });
+
+  testWidgets(
+    'reasoning events show a bottom thinking status without exposing content',
+    (tester) async {
+      tester.platformDispatcher.localeTestValue = const Locale('zh');
+      tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final api = _ControlledProcessApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '先思考再回答',
+      );
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      await tester.pump();
+
+      api.emitThinking();
+      await tester.pump(const Duration(milliseconds: 20));
+
+      expect(
+        find.byKey(const ValueKey('thread-thinking-status')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('running-message-shimmer')),
+        findsNothing,
+      );
+      expect(find.textContaining('正在思考'), findsOneWidget);
+      expect(find.textContaining('private reasoning'), findsNothing);
+
+      api.emitAnswerAfterThinking();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('thread-thinking-status')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('running-message-shimmer')),
+        findsNothing,
+      );
+      expect(find.text('这是可见回答。'), findsOneWidget);
+    },
+  );
 
   testWidgets('composer sends the selected approval mode', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
@@ -1655,10 +3415,98 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.lastRunBody?['approval_mode'], 'auto_approve');
+    expect(api.lastRunBody?['response_language'], 'zh');
     expect(
       api.lastRunBody?['session_id'],
       matches(RegExp(r'^session_\d{13}_\d{6}$')),
     );
+  });
+
+  testWidgets('plus menu enables plan mode for the conversation and run', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final api = _FakeApi();
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('composer-plan-mode-option')),
+      findsOneWidget,
+    );
+    expect(find.text('计划模式'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('composer-plan-mode-option')));
+    await tester.pumpAndSettle();
+    expect(controller.selectedConversation?.planMode, isTrue);
+    expect(
+      controller.selectedConversation?.invocationMode,
+      InvocationMode.plan,
+    );
+    expect(find.text('描述你想规划的任务…'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '先规划这个功能',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pumpAndSettle();
+
+    expect(api.lastRunBody?['invocation_mode'], 'plan');
+  });
+
+  testWidgets('plus menu selects goal mode as the same invocation contract', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final api = _FakeApi();
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('composer-goal-mode-option')),
+      findsOneWidget,
+    );
+    expect(find.text('目标模式'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('composer-goal-mode-option')));
+    await tester.pumpAndSettle();
+    expect(
+      controller.selectedConversation?.invocationMode,
+      InvocationMode.goal,
+    );
+    expect(find.text('描述你要持续完成的目标…'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '完成并验证这个目标',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pumpAndSettle();
+
+    expect(api.lastRunBody?['invocation_mode'], 'goal');
   });
 
   test(
@@ -1715,6 +3563,11 @@ void main() {
         findsOneWidget,
       );
       expect(
+        find.byKey(const ValueKey('interaction-submit-approve_and_remember')),
+        findsOneWidget,
+      );
+      expect(find.text('批准并记住'), findsOneWidget);
+      expect(
         find.byKey(const ValueKey('interaction-submit-deny')),
         findsOneWidget,
       );
@@ -1730,6 +3583,172 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       expect(api.repliedDecision, 'approve_once');
       expect(controller.selectedConversation?.pendingInteraction, isNull);
+    },
+  );
+
+  testWidgets(
+    'questionnaire card renders fields and submits structured answers',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final conversation = _persistedSuspendedConversation();
+      conversation['pending_interaction'] = {
+        'interaction_id': 'interaction_questionnaire',
+        'interaction_type': 'user_input',
+        'allowed_decisions': ['submit', 'cancel'],
+        'payload': const {},
+      };
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [conversation],
+        }),
+      });
+      final api = _QuestionnaireSuspendedRunApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('请选择部署目标并补充说明。'), findsOneWidget);
+      expect(find.text('回答后 Agent 会从原位置继续。'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('interaction-question-target')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('interaction-question-notes')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('interaction-question-target')),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('预发布').last);
+      await tester.enterText(
+        find.byKey(const ValueKey('interaction-question-notes')),
+        '先进行冒烟验证',
+      );
+      await tester.tap(find.byKey(const ValueKey('interaction-submit-submit')));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(api.repliedDecision, 'submit');
+      expect(api.repliedPayload?['answers'], {
+        'target': 'staging',
+        'notes': '先进行冒烟验证',
+      });
+    },
+  );
+
+  testWidgets('file approval uses a compact preview and folds raw arguments', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [
+          _persistedSuspendedConversation(),
+        ],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _FileWriteSuspendedRunApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('写入文件'), findsOneWidget);
+    expect(find.text('/workspace/quicksort.py'), findsOneWidget);
+    expect(find.text('内容预览'), findsOneWidget);
+    expect(find.text('写入操作'), findsOneWidget);
+    expect(find.text('49 个字符'), findsOneWidget);
+    expect(find.text('3 行'), findsOneWidget);
+    expect(find.textContaining('def quicksort(values):'), findsOneWidget);
+    expect(find.textContaining('internal-marker'), findsNothing);
+    expect(
+      tester.getCenter(find.text('/workspace/quicksort.py')).dy,
+      closeTo(tester.getCenter(find.text('49 个字符')).dy, 2),
+    );
+    expect(
+      tester.getCenter(find.text('内容预览')).dy,
+      closeTo(
+        tester
+            .getCenter(
+              find.descendant(
+                of: find.byKey(const ValueKey('interaction-technical-toggle')),
+                matching: find.text('查看技术详情'),
+              ),
+            )
+            .dy,
+        2,
+      ),
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('interaction-technical-toggle')),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('interaction-technical-details')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('internal-marker'), findsOneWidget);
+  });
+
+  testWidgets(
+    'plan submission shows full text and approval selects goal mode',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final persisted = _persistedSuspendedConversation();
+      persisted['invocation_mode'] = 'plan';
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [persisted],
+        }),
+      });
+      final api = _PlanSuspendedRunApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('审批计划'), findsOneWidget);
+      expect(find.text('计划全文'), findsOneWidget);
+      expect(find.textContaining('3. 运行验证'), findsOneWidget);
+      expect(find.text('批准计划'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('interaction-submit-approve_once')),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(api.repliedDecision, 'approve_once');
+      expect(
+        controller.selectedConversation?.invocationMode,
+        InvocationMode.goal,
+      );
     },
   );
 
@@ -1761,7 +3780,8 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final controller = await _controller();
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
     addTearDown(controller.dispose);
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -1775,9 +3795,128 @@ void main() {
       find.byKey(const ValueKey('settings-security-scope')),
       findsOneWidget,
     );
-    expect(find.text('每次工具调用及参数'), findsOneWidget);
-    expect(find.text('常规工作区写入、已知只读命令'), findsOneWidget);
-    expect(find.text('系统级破坏、下载后直接执行'), findsOneWidget);
+    expect(find.text('非 Shell 工具'), findsOneWidget);
+    expect(find.text('Shell · 自动执行'), findsOneWidget);
+    expect(find.text('Shell · 请求审批'), findsOneWidget);
+    expect(find.text('Shell · 自动阻止'), findsOneWidget);
+    expect(find.textContaining('非 Shell 工具不会仅因写入而触发审批'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('security-command:git reset --hard')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('security-command:curl|sh / wget|bash')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('security-command:git clean -fd')),
+      findsOneWidget,
+    );
+
+    final rememberedChip = find.byKey(
+      const ValueKey('security-command:git clean -fd'),
+    );
+    await tester.tapAt(
+      tester.getTopRight(rememberedChip) - const Offset(12, -12),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.lastAgentPatch, {'approved_shell_commands': <String>[]});
+    expect(
+      find.byKey(const ValueKey('security-command:git clean -fd')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('sandbox settings control mapping and workspace path mode', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('沙箱').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('settings-sandbox-configuration')),
+      findsOneWidget,
+    );
+    expect(find.text('工作区访问'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-sandbox-path-mode-control')),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('与真实目录一致'));
+    await tester.pumpAndSettle();
+    expect(
+      api
+          .lastSettings
+          ?.componentConfigs['execution.sandbox']?['workspace_path_mode'],
+      'host',
+    );
+    expect(
+      api.lastSettings?.componentSelections['execution.sandbox'],
+      'sage.sandbox.local-workspace',
+    );
+    expect(
+      find.byKey(const ValueKey('settings-sandbox-host-path')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('固定虚拟路径').first);
+    await tester.pumpAndSettle();
+    expect(
+      api
+          .lastSettings
+          ?.componentConfigs['execution.sandbox']?['workspace_path_mode'],
+      'virtual',
+    );
+    expect(
+      find.byKey(const ValueKey('settings-sandbox-workspace-root')),
+      findsOneWidget,
+    );
+
+    expect(find.textContaining('空白沙箱看不到项目文件'), findsOneWidget);
+    await tester.tap(find.text('使用临时空白沙箱'));
+    await tester.pumpAndSettle();
+    expect(
+      api.lastSettings?.componentSelections['execution.sandbox'],
+      'sage.sandbox.ephemeral',
+    );
+    expect(
+      api
+          .lastSettings
+          ?.componentConfigs['execution.sandbox']?['workspace_mapping'],
+      'isolated',
+    );
+    expect(
+      api
+          .lastSettings
+          ?.componentConfigs['execution.sandbox']?['workspace_path_mode'],
+      'virtual',
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-sandbox-workspace-root')),
+      '/project',
+    );
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
+    expect(
+      api
+          .lastSettings
+          ?.componentConfigs['execution.sandbox']?['workspace_root'],
+      '/project',
+    );
   });
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
@@ -1808,6 +3947,88 @@ void main() {
         expect(find.text('上下文压缩'), findsOneWidget);
         expect(find.text('在请求超过模型窗口前精简历史消息'), findsOneWidget);
         expect(find.text('持久摘要'), findsWidgets);
+        expect(find.text('Run 完成判定'), findsOneWidget);
+        expect(find.text('无工具调用即完成'), findsWidgets);
+        expect(find.text('无工具调用 + LLM Judge'), findsOneWidget);
+        expect(find.text('结束工具（turn_status）'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('settings-continuation-policy-details')),
+          findsOneWidget,
+        );
+        expect(find.text('工具选择策略'), findsOneWidget);
+        expect(find.text('大模型工具选择'), findsWidgets);
+        expect(find.text('BM25 相关性选择'), findsOneWidget);
+        expect(find.text('最近使用优先'), findsOneWidget);
+        expect(find.text('直接展示全部工具'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('settings-tool-selection-config')),
+          findsOneWidget,
+        );
+        expect(find.text('插件参数'), findsOneWidget);
+        expect(find.text('长期记忆'), findsOneWidget);
+        expect(find.text('本地 BM25 记忆'), findsWidgets);
+        expect(find.text('/Users/test/sage/runtime/memory'), findsOneWidget);
+        expect(find.text('记忆检索词生成'), findsOneWidget);
+        expect(find.text('直接使用用户输入'), findsWidgets);
+        expect(find.text('LLM 生成检索词'), findsOneWidget);
+        expect(
+          find.byKey(
+            const ValueKey('settings-component-picker-memory.recall-query'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .getTopLeft(
+                find.byKey(
+                  const ValueKey('settings-component-memory.recall-query'),
+                ),
+              )
+              .dy,
+          lessThan(
+            tester
+                .getTopLeft(
+                  find.byKey(
+                    const ValueKey('settings-component-context.reducer'),
+                  ),
+                )
+                .dy,
+          ),
+        );
+        expect(find.text('会话记忆'), findsOneWidget);
+        expect(find.text('SQLite BM25 会话记忆'), findsWidgets);
+        expect(find.text('关闭会话记忆'), findsOneWidget);
+        expect(
+          find.text('/Users/test/sage/runtime/session-memory'),
+          findsOneWidget,
+        );
+        expect(find.text('模型请求记录'), findsOneWidget);
+        expect(find.text('文件模型请求记录'), findsWidgets);
+        expect(find.textContaining('Session → LLM 请求'), findsWidgets);
+        expect(
+          find.text('/Users/test/sage/runtime/diagnostics'),
+          findsOneWidget,
+        );
+        expect(find.text('结构化日志'), findsOneWidget);
+        expect(find.text('轮转文件日志'), findsWidgets);
+        expect(find.text('执行沙箱'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('settings-sandbox-workspace-config')),
+          findsOneWidget,
+        );
+        expect(find.textContaining('固定虚拟路径：/workspace'), findsOneWidget);
+        expect(find.textContaining('使用当前工作区'), findsOneWidget);
+        expect(find.text('工作区初始化'), findsOneWidget);
+        expect(find.text('Claw Mode'), findsWidgets);
+        expect(find.text('空白工作区'), findsOneWidget);
+        expect(
+          find.text('/Users/test/sage/runtime/logs/sage.jsonl'),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('settings-log-file-path')),
+          findsOneWidget,
+        );
         expect(
           find.byKey(
             const ValueKey('settings-component-picker-model.protocol'),
@@ -1815,16 +4036,56 @@ void main() {
           findsNothing,
         );
 
-        await tester.tap(
-          find.byKey(
-            const ValueKey('settings-component-picker-context.reducer'),
-          ),
+        final maxVisibleTools = find.byKey(
+          const ValueKey('settings-tool-selection-max_visible_tools'),
         );
+        await tester.ensureVisible(maxVisibleTools);
+        await tester.enterText(maxVisibleTools, '20');
+        await tester.pumpAndSettle();
+        final saveToolSelection = find.byKey(
+          const ValueKey('settings-tool-selection-save'),
+        );
+        await tester.ensureVisible(saveToolSelection);
+        await tester.tap(saveToolSelection);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponent, 'tool.selection-policy');
+        expect(api.lastSelectedComponentPlugin, 'sage.tool-selection.llm');
+        expect(api.lastSelectedComponentConfig, {'max_visible_tools': 20});
+
+        final toolSelectionPicker = find.byKey(
+          const ValueKey('settings-component-picker-tool.selection-policy'),
+        );
+        await tester.ensureVisible(toolSelectionPicker);
+        await tester.tap(toolSelectionPicker);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('BM25 相关性选择').last);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponent, 'tool.selection-policy');
+        expect(api.lastSelectedComponentPlugin, 'sage.tool-selection.lexical');
+
+        final contextReducerPicker = find.byKey(
+          const ValueKey('settings-component-picker-context.reducer'),
+        );
+        await tester.ensureVisible(contextReducerPicker);
+        await tester.pumpAndSettle();
+        await tester.tap(contextReducerPicker);
         await tester.pumpAndSettle();
         await tester.tap(find.text('窗口裁剪').last);
         await tester.pumpAndSettle();
         expect(api.lastSelectedComponent, 'context.reducer');
         expect(api.lastSelectedComponentPlugin, 'sage.context.reducer.window');
+
+        final memoryRecallPicker = find.byKey(
+          const ValueKey('settings-component-picker-memory.recall-query'),
+        );
+        await tester.ensureVisible(memoryRecallPicker);
+        await tester.pumpAndSettle();
+        await tester.tap(memoryRecallPicker);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('LLM 生成检索词').last);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponent, 'memory.recall-query');
+        expect(api.lastSelectedComponentPlugin, 'sage.memory.recall-query.llm');
       },
     );
   }
@@ -1860,6 +4121,8 @@ void main() {
     expect(find.text('通用'), findsWidgets);
     expect(find.text('运行时'), findsNothing);
     expect(find.text('工作区'), findsNothing);
+    await tester.tap(find.text('通用').first);
+    await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('settings-agent-workspace-path')),
       findsOneWidget,
@@ -1895,6 +4158,38 @@ void main() {
           .dx,
       moreOrLessEquals(normalContentX),
     );
+  });
+
+  testWidgets('settings opens with the usage overview and changes range', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('概览'), findsWidgets);
+    expect(find.text('总 Token'), findsOneWidget);
+    expect(find.text('15K'), findsWidgets);
+    expect(find.text('Prompt Cache 利用率'), findsOneWidget);
+    expect(find.text('33.3%'), findsWidgets);
+    expect(find.byKey(const ValueKey('usage-token-chart')), findsOneWidget);
+    expect(find.text('模型消耗'), findsOneWidget);
+    expect(find.text('Agent 消耗'), findsOneWidget);
+    expect(find.text('read_file'), findsOneWidget);
+    expect(api.lastUsageDays, 30);
+
+    await tester.tap(find.text('7 天'));
+    await tester.pumpAndSettle();
+    expect(api.lastUsageDays, 7);
   });
 
   testWidgets(
@@ -2149,7 +4444,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-      'agent tools keep source groups in ${brightness.name} appearance',
+      'tool catalog and agent tools keep source groups in ${brightness.name} appearance',
       (tester) async {
         tester.view.physicalSize = const Size(1400, 800);
         tester.view.devicePixelRatio = 1;
@@ -2169,6 +4464,22 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey('settings-button')));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('工具').first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('settings-choice-group-文件')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('settings-choice-group-代码检索')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('settings-choice-group-内置MCP: search')),
+          findsOneWidget,
+        );
+
         await tester.tap(find.text('智能体').first);
         await tester.pumpAndSettle();
 
@@ -2378,14 +4689,48 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('agent-system-context-formatted')),
+      find.byKey(const ValueKey('agent-runtime-variables-formatted')),
       findsOneWidget,
     );
+    expect(find.text('运行变量'), findsOneWidget);
+    expect(find.text('快速模型'), findsOneWidget);
+    expect(find.text('系统上下文'), findsNothing);
     expect(find.text('preferences'), findsOneWidget);
-    expect(find.textContaining('"concise": true'), findsOneWidget);
+    expect(find.text('concise'), findsOneWidget);
+    expect(find.text('true'), findsOneWidget);
+    expect(find.textContaining('"concise"'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('agent-fast-model')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('agent-fast-model')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Secondary · test-model-secondary').last);
+    await tester.pumpAndSettle();
+    expect(api.lastAgentPatch, {'fast_llm_provider_id': 'model_secondary'});
+    expect(
+      find.byKey(const ValueKey('agent-runtime-variables-editor')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('runtime-variable-key:language')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('{"language"'), findsNothing);
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('runtime-variable-value:language')),
+        matching: find.byType(GlassTextField),
+      ),
+      'en',
+    );
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(api.lastAgentPatch, {
+      'runtime_variables': {
+        'language': 'en',
+        'preferences': {'concise': true},
+      },
+    });
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('agent-deep-thinking')),
@@ -2444,8 +4789,108 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('通用').first);
+    await tester.pumpAndSettle();
 
     expect(find.text('显示运行事件'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('settings-default-agent-picker')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('settings-default-model-picker')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('agent and model pages expose right-click default actions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('智能体').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-agent-set-default')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Review Agent'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-set-default-agent_review')),
+        matching: find.text('设为默认'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('settings-set-default-agent_review')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.lastSettings?.defaultAgentId, 'agent_review');
+
+    await tester.tap(find.text('模型').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-model-set-default')),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Secondary'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-set-default-model_secondary')),
+        matching: find.text('设为默认'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('settings-set-default-model_secondary')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.lastModelPatch, {'is_default': true});
+    expect(
+      controller.modelProviders
+          .firstWhere((value) => value.id == 'model_secondary')
+          .isDefault,
+      isTrue,
+    );
+    expect(
+      controller.modelProviders
+          .firstWhere((value) => value.id == 'model_main')
+          .isDefault,
+      isFalse,
+    );
+
+    await tester.tap(find.text('Secondary'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-set-default-model_secondary')),
+        matching: find.text('当前默认'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<PopupMenuItem<bool>>(
+            find.byKey(const ValueKey('settings-set-default-model_secondary')),
+          )
+          .enabled,
+      isFalse,
+    );
   });
 
   testWidgets('model draft is applied only after explicit save', (
@@ -2933,6 +5378,8 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('settings-button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('通用').first);
+    await tester.pumpAndSettle();
     final selector = tester.widget<GlassSegmentedControl>(
       find.byType(GlassSegmentedControl).first,
     );
@@ -2978,6 +5425,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('一般'), findsWidgets);
     expect(find.text('ツール'), findsOneWidget);
+    await tester.tap(find.text('一般').first);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('settings-language-picker')));
     await tester.pumpAndSettle();
@@ -3011,6 +5460,8 @@ void main() {
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('通用').first);
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('settings-agent-workspace-path')),

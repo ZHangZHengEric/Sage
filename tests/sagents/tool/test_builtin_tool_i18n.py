@@ -120,8 +120,11 @@ def _assert_exported_schema_is_clean(node, path, language):
 
 def test_all_34_builtin_tools_have_complete_recursive_zh_en_pt_metadata():
     specs = list(_specs())
-    assert len(specs) == 35
-    assert len({spec.name for spec in specs}) == 35
+    assert len(specs) == 34
+    names = {spec.name for spec in specs}
+    assert "questionnaire" not in names
+    assert "questionnaire_async" in names
+    assert len(names) == 34
 
     for spec in specs:
         assert all(spec.description_i18n.get(lang) for lang in ("zh", "en", "pt")), (
@@ -149,7 +152,7 @@ def test_exported_schema_recursively_localizes_and_removes_internal_metadata(lan
 
 def test_portuguese_schema_localizes_anyof_and_nested_return_fields():
     specs = {spec.name: spec for spec in _specs()}
-    questionnaire = convert_spec_to_openai_format(specs["questionnaire"], lang="pt")[
+    questionnaire = convert_spec_to_openai_format(specs["questionnaire_async"], lang="pt")[
         "function"
     ]["parameters"]["properties"]
     default_schema = questionnaire["questions"]["items"]["properties"]["default"]

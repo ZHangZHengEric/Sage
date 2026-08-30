@@ -167,7 +167,7 @@ class SessionContext:
         # 注册并准备技能
         await self._register_and_prepare_skills()
 
-        # 最终化系统上下文
+        # 最终化运行变量（兼容字段名 system_context）
         await self._finalize_system_context()
 
         # 加载已持久化的消息
@@ -1422,7 +1422,7 @@ class SessionContext:
 
     def _init_external_paths_and_context(self):
         """
-        初始化外部路径和系统上下文
+        初始化外部路径和运行变量
         """
         self.external_paths = self.system_context.get("external_paths") or []
         self.system_context.pop("可以访问的其他路径文件夹", None)
@@ -1562,7 +1562,7 @@ class SessionContext:
 
     async def _finalize_system_context(self):
         """
-        最终化系统上下文，设置私有工作区、用户ID和会话ID
+        最终化运行变量，设置私有工作区、用户ID和会话ID
         """
         # 设置私有工作区
         workspace = self.sandbox_agent_workspace
@@ -1870,7 +1870,7 @@ class SessionContext:
 
             available_tools: 可用工具列表
             available_skills: 可用技能列表
-            system_context: 系统上下文
+            system_context: 运行变量（兼容字段名）
             available_workflows: 可用工作流
             deep_thinking: 深度思考模式
             thinking_level: 模型原生思考等级
@@ -2010,7 +2010,7 @@ class SessionContext:
     # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
 
     def add_and_update_system_context(self, new_system_context: Dict[str, Any]):
-        """添加并更新系统上下文"""
+        """添加并更新运行变量。"""
         if new_system_context:
             external_paths_value = None
             has_external_paths = False
@@ -2726,7 +2726,7 @@ class SessionContext:
             self._last_save_time = now
 
     # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
-    #     """序列化消息列表为系统上下文格式的字符串（私有方法）"""
+    #     """序列化消息列表为运行变量格式的字符串（私有方法）"""
     #     # 获取当前语言设置
     #     language = self.get_language()
 

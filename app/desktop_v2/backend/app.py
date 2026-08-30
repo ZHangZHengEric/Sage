@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import asynccontextmanager
+import json
+import time
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response as RawResponse
@@ -11,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sagents.v2.contracts.session_commit import SessionMergeStrategy
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+from sagents.v2.contracts.common import new_id
 
 from app.desktop_v2.backend.service import (
     AgentCreate,
@@ -24,6 +31,11 @@ from app.desktop_v2.backend.service import (
     ModelProviderPatch,
 )
 from app.desktop_v2.backend.anytool import DesktopV2AnyToolApp
+from app.desktop_v2.backend.runtime_protocol import (
+    SIDECAR_PROTOCOL,
+    SIDECAR_REVISION,
+)
+from app.desktop_v2.backend.terminal import TerminalSessionManager
 
 
 def get_desktop_user_id(request: Request) -> str:
@@ -58,6 +70,22 @@ class RejectSessionCommitRequest(BaseModel):
     reason: str = "rejected_by_user"
 
 
+class TerminalCreateRequest(BaseModel):
+    agent_id: str
+    workspace_id: str = ""
+    columns: int = Field(default=100, ge=10, le=500)
+    rows: int = Field(default=30, ge=2, le=500)
+
+
+class TerminalInputRequest(BaseModel):
+    data: str
+
+
+class TerminalResizeRequest(BaseModel):
+    columns: int = Field(ge=10, le=500)
+    rows: int = Field(ge=2, le=500)
+
+
 def _success(data: Any = None) -> dict[str, Any]:
     return {"code": 0, "message": "success", "data": data}
 
@@ -85,18 +113,44 @@ async def _safe(call):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
+def create_app(
+    *,
+    service: DesktopV2Service | None = None,
+    terminal_manager: TerminalSessionManager | None = None,
+    build_id: str = "manual",
+) -> FastAPI:
     runtime_service = service or DesktopV2Service()
+    terminals = terminal_manager or TerminalSessionManager()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
+            runtime_service.logger.info(
+                "application.started",
+                "Desktop API application started",
+            )
             await runtime_service.initialize_agent_workspace()
             yield
+        except Exception as exc:
+            runtime_service.logger.exception(
+                "application.lifecycle_failed",
+                "Desktop API application lifecycle failed",
+                exc,
+            )
+            raise
         finally:
-            close_store = getattr(runtime_service.session_store, "close", None)
-            if close_store is not None:
-                await close_store()
+            await terminals.close()
+            runtime_service.logger.info(
+                "application.stopped",
+                "Desktop API application stopped",
+            )
+            close_service = getattr(runtime_service, "close", None)
+            if close_service is not None:
+                await close_service()
+            else:
+                close_store = getattr(runtime_service.session_store, "close", None)
+                if close_store is not None:
+                    await close_store()
 
     app = FastAPI(
         title="Sage Desktop v2",
@@ -104,6 +158,7 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.v2_service = runtime_service
+    app.state.terminal_manager = terminals
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1", "http://localhost"],
@@ -119,20 +174,116 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def inject_user(request: Request, call_next):
+        request_id = request.headers.get("X-Request-Id") or new_id("request")
+        request.state.request_id = request_id
+        started = time.monotonic()
         user_id = str(request.headers.get("X-Sage-Internal-UserId") or "").strip()
         request.state.user_claims = {
             "userid": user_id or "default_user",
             "role": "admin",
         }
-        return await call_next(request)
+        request_logger = runtime_service.logger.bind(request_id=request_id)
+        quiet = request.url.path in {"/health", "/active"}
+        (request_logger.debug if quiet else request_logger.info)(
+            "api.request.started",
+            "Desktop API request started",
+            attributes={"method": request.method, "path": request.url.path},
+        )
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            request_logger.exception(
+                "api.request.failed",
+                "Desktop API request failed",
+                exc,
+                attributes={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "duration_ms": round((time.monotonic() - started) * 1000, 2),
+                },
+            )
+            raise
+        log = (
+            request_logger.warning
+            if response.status_code >= 400
+            else request_logger.debug
+            if quiet
+            else request_logger.info
+        )
+        log(
+            "api.request.completed",
+            "Desktop API request completed",
+            attributes={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            },
+        )
+        response.headers["X-Request-Id"] = request_id
+        return response
+
+    @app.exception_handler(HTTPException)
+    async def log_http_exception(request: Request, exc: HTTPException):
+        request_id = getattr(request.state, "request_id", None)
+        runtime_service.logger.warning(
+            "api.request.rejected",
+            "Desktop API request was rejected",
+            request_id=request_id,
+            attributes={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": exc.status_code,
+                "detail": exc.detail,
+            },
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=jsonable_encoder({"detail": exc.detail}),
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def log_validation_exception(request: Request, exc: RequestValidationError):
+        request_id = getattr(request.state, "request_id", None)
+        errors = exc.errors()
+        runtime_service.logger.warning(
+            "api.request.validation_failed",
+            "Desktop API request validation failed",
+            request_id=request_id,
+            attributes={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": 422,
+                "errors": errors,
+            },
+        )
+        return JSONResponse(
+            status_code=422,
+            content=jsonable_encoder({"detail": errors}),
+        )
 
     @app.get("/health")
     async def health():
-        return _success({"status": "ok", "protocol": "sage.runtime/v2"})
+        return _success(
+            {
+                "status": "ok",
+                "protocol": SIDECAR_PROTOCOL,
+                "revision": SIDECAR_REVISION,
+                "build_id": build_id,
+            }
+        )
 
     @app.get("/active")
     async def active():
-        return _success({"status": "ok", "protocol": "sage.runtime/v2"})
+        return _success(
+            {
+                "status": "ok",
+                "protocol": SIDECAR_PROTOCOL,
+                "revision": SIDECAR_REVISION,
+                "build_id": build_id,
+            }
+        )
 
     @app.get("/api/v2/agents")
     async def list_agents(request: Request):
@@ -187,9 +338,14 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
         )
 
     @app.get("/api/v2/tools")
-    async def list_tools(request: Request):
+    async def list_tools(request: Request, lang: str | None = None):
         return _success(
-            await _safe(runtime_service.list_tools(get_desktop_user_id(request)))
+            await _safe(
+                runtime_service.list_tools(
+                    get_desktop_user_id(request),
+                    language=lang or request.headers.get("accept-language"),
+                )
+            )
         )
 
     @app.get("/api/v2/skills")
@@ -371,6 +527,85 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
         )
         return _success(value)
 
+    def terminal_session(session_id: str, request: Request):
+        try:
+            return terminals.get(session_id, get_desktop_user_id(request))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v2/terminals")
+    async def create_terminal(body: TerminalCreateRequest, request: Request):
+        workspace = await _safe(
+            runtime_service.workspace_root(body.workspace_id, body.agent_id)
+        )
+        session = await _safe(
+            terminals.create(
+                owner_id=get_desktop_user_id(request),
+                cwd=workspace,
+                columns=body.columns,
+                rows=body.rows,
+            )
+        )
+        return _success(session.snapshot())
+
+    @app.get("/api/v2/terminals/{session_id}/events")
+    async def terminal_events(
+        session_id: str,
+        request: Request,
+        after_sequence: int = 0,
+    ):
+        session = terminal_session(session_id, request)
+
+        async def response_stream():
+            async for event in session.events(max(0, after_sequence)):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+
+        return StreamingResponse(
+            response_stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/api/v2/terminals/{session_id}/input")
+    async def terminal_input(
+        session_id: str,
+        body: TerminalInputRequest,
+        request: Request,
+    ):
+        session = terminal_session(session_id, request)
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="terminal input must be valid base64",
+            ) from exc
+        await _safe(session.write(data))
+        return _success({"accepted": len(data)})
+
+    @app.post("/api/v2/terminals/{session_id}/resize")
+    async def terminal_resize(
+        session_id: str,
+        body: TerminalResizeRequest,
+        request: Request,
+    ):
+        session = terminal_session(session_id, request)
+        await _safe(session.resize(body.columns, body.rows))
+        return _success(
+            {
+                "columns": session.columns,
+                "rows": session.rows,
+            }
+        )
+
+    @app.delete("/api/v2/terminals/{session_id}")
+    async def close_terminal(session_id: str, request: Request):
+        terminal_session(session_id, request)
+        await _safe(
+            terminals.close_session(session_id, get_desktop_user_id(request))
+        )
+        return _success({"session_id": session_id})
+
     @app.post("/api/v2/runs/stream")
     async def run_stream(body: DesktopRunRequest, request: Request):
         stream = runtime_service.run_events(body, get_desktop_user_id(request))
@@ -394,6 +629,22 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
     async def list_sessions():
         return _success(await _safe(runtime_service.list_sessions()))
 
+    @app.get("/api/v2/usage/overview")
+    async def usage_overview(
+        request: Request,
+        days: int = 30,
+        timezone_offset_minutes: int = 0,
+    ):
+        return _success(
+            await _safe(
+                runtime_service.usage_overview(
+                    get_desktop_user_id(request),
+                    days=days,
+                    timezone_offset_minutes=timezone_offset_minutes,
+                )
+            )
+        )
+
     @app.get("/api/v2/sessions/{session_id}")
     async def get_session(session_id: str):
         return _success(await _safe(runtime_service.session_snapshot(session_id)))
@@ -406,6 +657,18 @@ def create_app(*, service: DesktopV2Service | None = None) -> FastAPI:
     @app.get("/api/v2/sessions/{session_id}/runs")
     async def list_session_runs(session_id: str):
         return _success(await _safe(runtime_service.session_runs(session_id)))
+
+    @app.get("/api/v2/sessions/{session_id}/tree")
+    async def get_session_tree(session_id: str):
+        return _success(await _safe(runtime_service.session_tree(session_id)))
+
+    @app.get("/api/v2/sessions/{session_id}/tree/events")
+    async def subscribe_session_tree(session_id: str):
+        return StreamingResponse(
+            runtime_service.subscribe_session_tree(session_id),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/api/v2/sessions/{session_id}/commit-proposals")
     async def list_session_commit_proposals(session_id: str):

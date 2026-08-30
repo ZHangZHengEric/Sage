@@ -1429,6 +1429,30 @@ class SessionManager:
         """获取父会话 ID"""
         return self.storage.get_parent_session_id(session_id)
 
+    def _get_session_tree_ids(self, session_id: str) -> List[str]:
+        """Return the root session ID followed by all registered descendants."""
+        session_ids = [session_id]
+        registered_ids = set(self.storage.list_sessions())
+        known_ids = {session_id}
+        while True:
+            descendants = [
+                candidate
+                for candidate in registered_ids - known_ids
+                if self.storage.get_parent_session_id(candidate) in known_ids
+            ]
+            if not descendants:
+                return session_ids
+            session_ids.extend(descendants)
+            known_ids.update(descendants)
+
+    async def delete_session(self, session_id: str) -> None:
+        """Close a session tree and permanently remove its durable state."""
+        session_ids = self._get_session_tree_ids(session_id)
+        for tree_session_id in reversed(session_ids):
+            if self.get_live_session(tree_session_id) is not None:
+                await self.aclose_session(tree_session_id)
+        await asyncio.to_thread(self.storage.delete_session, session_id)
+
     def get_session_workspace(
         self, session_id: str, only_all_session_paths: bool = False
     ) -> Optional[str]:

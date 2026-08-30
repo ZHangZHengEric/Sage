@@ -1070,7 +1070,7 @@
             </div>
           </section>
 
-          <!-- System Context Section -->
+          <!-- Runtime Variables Section -->
           <section id="context" class="scroll-mt-6">
             <div class="flex items-center gap-2 mb-5">
               <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">

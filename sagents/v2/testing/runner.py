@@ -13,7 +13,7 @@ from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.items import MessageItemData, TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunSnapshot, RunState
-from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.testing.contracts import (
     ScenarioDefinition,
     ScenarioResult,
@@ -33,7 +33,7 @@ class ScenarioRunner:
     is a separate opt-in layer and must not make deterministic CI flaky.
     """
 
-    def __init__(self, runtime: HarnessRuntime) -> None:
+    def __init__(self, runtime: RuntimePort) -> None:
         self.runtime = runtime
 
     async def run(

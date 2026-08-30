@@ -119,6 +119,46 @@ class _FilesystemSessionStore(SessionStore):
     def remove_session(self, session_id: str) -> None:
         self._catalog().remove(self._validate_session_id(session_id))
 
+    def delete_session(self, session_id: str) -> None:
+        safe_session_id = self._validate_session_id(session_id)
+        catalog = self._catalog()
+        workspace = catalog.get_workspace(safe_session_id) or os.path.join(
+            self._root, safe_session_id
+        )
+
+        session_ids = {safe_session_id}
+        registered_ids = set(catalog.list_all())
+        while True:
+            descendants = {
+                candidate
+                for candidate in registered_ids - session_ids
+                if catalog.get_parent_session_id(candidate) in session_ids
+            }
+            if not descendants:
+                break
+            session_ids.update(descendants)
+
+        storage_root = Path(self._root).resolve()
+        target = Path(workspace)
+        resolved_target = target.resolve()
+        try:
+            resolved_target.relative_to(storage_root)
+        except ValueError as exc:
+            raise StorageError("session workspace escapes storage root") from exc
+        if resolved_target == storage_root:
+            raise StorageError("refusing to delete session storage root")
+        if target.is_symlink():
+            raise StorageError("refusing to delete symlinked session workspace")
+        if target.exists():
+            if not target.is_dir():
+                raise StorageError("session workspace is not a directory")
+            shutil.rmtree(target)
+
+        catalog.remove_many(list(session_ids))
+        for deleted_session_id in session_ids:
+            self._workspace_hints.pop(deleted_session_id, None)
+            self._llm_locks.pop(deleted_session_id, None)
+
     def list_sessions(self) -> Mapping[str, str]:
         return self._catalog().list_all()
 

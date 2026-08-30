@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import model_validator
 
@@ -46,6 +46,10 @@ class AgentDescriptor(StrictModel):
     tools: tuple[ToolName, ...] = ()
     skills: tuple[SkillName, ...] = ()
     dynamic: bool = False
+    # A persistent Fibre/Team Agent may be selected as a member while executing
+    # as a leaf for this invocation.  Keep its declared mode visible instead of
+    # silently rewriting it to SIMPLE.
+    allow_delegation: bool = True
 
 
 class DelegationTask(StrictModel):
@@ -54,7 +58,10 @@ class DelegationTask(StrictModel):
     task_name: str
     original_task: str
     content: str
+    parent_tool_call_id: Identifier | None = None
     child_session_id: Identifier | None = None
+    flow_boundary: Literal["complete_node", "continue_node"] | None = None
+    invocation_mode: AgentInvocationMode = AgentInvocationMode.DELEGATION
 
 
 class DelegationBatch(StrictModel):

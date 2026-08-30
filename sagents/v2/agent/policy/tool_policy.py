@@ -36,6 +36,7 @@ class ToolPolicyContext(StrictModel):
     actor: ActorRef
     definition: ToolDefinition
     call: ToolCall
+    invocation_mode: str | None = None
 
 
 class ToolPolicyDecision(StrictModel):
@@ -55,6 +56,7 @@ class ToolOperationAssessment(StrictModel):
     reason: str
     category: str | None = None
     side_effect_level: SideEffectLevel | None = None
+    persistent_approval_allowed: bool = False
 
 
 class DefaultToolPolicy:
@@ -131,7 +133,7 @@ class DefaultToolPolicy:
                 policy_hash=self.policy_hash,
                 reason=assessment.reason,
             )
-        if self._requires_interaction(context.definition, assessment):
+        if self._requires_interaction(context, assessment):
             risk_level = (
                 assessment.side_effect_level
                 if assessment is not None and assessment.side_effect_level is not None
@@ -146,6 +148,11 @@ class DefaultToolPolicy:
                 interaction_payload["risk_reason"] = assessment.reason
                 if assessment.category is not None:
                     interaction_payload["risk_category"] = assessment.category
+            allowed_decisions = ["approve_once"]
+            if assessment is not None and assessment.persistent_approval_allowed:
+                allowed_decisions.append("approve_and_remember")
+                interaction_payload["persistent_approval_allowed"] = True
+            allowed_decisions.extend(("deny", "cancel"))
             return ToolPolicyDecision(
                 action=ToolPolicyAction.REQUIRE_INTERACTION,
                 decision_id=decision_id,
@@ -156,7 +163,7 @@ class DefaultToolPolicy:
                     if assessment is not None
                     else "tool side effect requires approval"
                 ),
-                allowed_decisions=("approve_once", "deny", "cancel"),
+                allowed_decisions=tuple(allowed_decisions),
                 interaction_payload=interaction_payload,
             )
         return ToolPolicyDecision(
@@ -173,9 +180,12 @@ class DefaultToolPolicy:
 
     def _requires_interaction(
         self,
-        definition: ToolDefinition,
+        context: ToolPolicyContext,
         assessment: ToolOperationAssessment | None,
     ) -> bool:
+        definition = context.definition
+        if context.invocation_mode == "plan" and definition.name == "goal_submit":
+            return True
         if self.approval_strategy == ApprovalStrategy.ALWAYS_ASK:
             return True
         if self.approval_strategy == ApprovalStrategy.HIGH_RISK:

@@ -27,7 +27,7 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
-from sagents.v2.tool import FilteredToolCatalog
+from sagents.v2.tool import FilteredToolCatalog, InvocationGrantToolCatalog
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -224,6 +224,39 @@ async def test_filtered_catalog_hides_and_rejects_tools_outside_resolved_run_set
         await catalog.get_tool("hidden", run_id="run_1")
     assert denied.value.info.code == "tool.not_enabled"
     assert denied.value.info.category == ErrorCategory.POLICY_DENIED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("normal", {"sum"}),
+        ("plan", {"sum", "goal_submit"}),
+        ("goal", {"sum", "goal_submit", "goal_complete"}),
+    ],
+)
+async def test_invocation_grant_catalog_enforces_goal_controls_for_list_and_lookup(
+    mode, expected
+):
+    controls = (
+        TOOL.model_copy(update={"name": "goal_submit"}),
+        TOOL.model_copy(update={"name": "goal_complete"}),
+    )
+
+    async def command_reader(run_id):
+        del run_id
+        return type("Command", (), {"invocation_mode": mode})()
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL, *controls)),
+        ("sum", "goal_submit", "goal_complete"),
+        command_reader,
+    )
+    assert {value.name for value in await catalog.list_tools(run_id="run_1")} == expected
+    for control in {"goal_submit", "goal_complete"} - expected:
+        with pytest.raises(SageV2Error) as denied:
+            await catalog.get_tool(control, run_id="run_1")
+        assert denied.value.info.code == "tool.not_enabled"
 
 
 @pytest.mark.asyncio

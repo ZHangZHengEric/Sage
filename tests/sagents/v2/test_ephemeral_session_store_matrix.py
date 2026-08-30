@@ -39,6 +39,7 @@ from sagents.v2.contracts.run_state import (
     SessionConcurrencyMode,
 )
 from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
 
 
@@ -73,7 +74,7 @@ def start_command(
 
 
 async def running_runtime() -> tuple[HarnessRuntime, str, str]:
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(start_command("start_1"), CONTEXT)
     run = await runtime.start_execution(
         run_id=handle.run_id,
@@ -108,8 +109,22 @@ async def test_start_is_idempotent_and_returns_same_handle_without_new_events():
 
 
 @pytest.mark.asyncio
+async def test_run_ids_are_timestamped_and_lexically_sortable():
+    current_time = [datetime(2026, 8, 25, 1, 2, 3, 456789, tzinfo=timezone.utc)]
+    repository = EphemeralSessionStore(clock=lambda: current_time[0])
+
+    first = await repository.create_run(start_command("request_1"), CONTEXT)
+    current_time[0] = datetime(2026, 8, 25, 1, 2, 4, 123456, tzinfo=timezone.utc)
+    second = await repository.create_run(start_command("request_2"), CONTEXT)
+
+    assert first.handle.run_id.startswith("run_20260825T010203456789Z_")
+    assert second.handle.run_id.startswith("run_20260825T010204123456Z_")
+    assert first.handle.run_id < second.handle.run_id
+
+
+@pytest.mark.asyncio
 async def test_serial_mode_rejects_parallel_active_run_and_releases_after_terminal():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     first = await runtime.start_run(
         start_command("start_1", session_id="session_1"), CONTEXT
     )
@@ -137,7 +152,7 @@ async def test_serial_mode_rejects_parallel_active_run_and_releases_after_termin
 
 @pytest.mark.asyncio
 async def test_snapshot_isolated_mode_allows_stale_base_and_concurrent_runs():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(
         start_command("seed", session_id="session_1"), CONTEXT
     )
@@ -179,7 +194,7 @@ async def test_snapshot_isolated_mode_allows_stale_base_and_concurrent_runs():
 
 @pytest.mark.asyncio
 async def test_serial_rejects_stale_and_all_modes_reject_future_base_revision():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(
         start_command("seed", session_id="session_1"), CONTEXT
     )
@@ -210,7 +225,7 @@ async def test_serial_rejects_stale_and_all_modes_reject_future_base_revision():
 
 @pytest.mark.asyncio
 async def test_fork_has_new_session_and_preserves_parent_lineage():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     parent = await runtime.start_run(start_command("parent"), CONTEXT)
     fork = await runtime.start_run(
         start_command(
@@ -225,6 +240,45 @@ async def test_fork_has_new_session_and_preserves_parent_lineage():
     assert fork.session_id != parent.session_id
     assert fork_session.parent_session_id == parent.session_id
     assert fork.base_session_revision == parent.accepted_session_revision
+
+
+@pytest.mark.asyncio
+async def test_delete_parent_requires_terminal_tree_and_removes_descendants():
+    runtime = ephemeral_runtime()
+    parent = await runtime.start_run(start_command("delete-parent"), CONTEXT)
+    child = await runtime.start_run(
+        start_command(
+            "delete-child",
+            session_id=parent.session_id,
+            mode=SessionConcurrencyMode.FORK,
+        ),
+        CONTEXT,
+    )
+
+    with pytest.raises(SageV2Error) as active:
+        await runtime.session_store.delete_session(parent.session_id)
+    assert active.value.info.code == "session.active_run"
+    assert active.value.info.metadata == {
+        "root_session_id": parent.session_id,
+        "active_run_ids": sorted([parent.run_id, child.run_id]),
+        "active_session_ids": sorted([parent.session_id, child.session_id]),
+    }
+
+    for handle, key in ((parent, "cancel-parent"), (child, "cancel-child")):
+        await runtime.cancel_run(
+            CancelRun(
+                run_id=handle.run_id,
+                expected_revision=handle.run_revision,
+                idempotency_key=key,
+            ),
+            CONTEXT,
+        )
+    await runtime.session_store.delete_session(parent.session_id)
+
+    for session_id in (parent.session_id, child.session_id):
+        with pytest.raises(SageV2Error) as missing:
+            await runtime.session_store.get_session(session_id)
+        assert missing.value.info.code == "session.not_found"
 
 
 @pytest.mark.asyncio
@@ -247,6 +301,9 @@ async def test_stale_run_revision_rejected_but_same_command_key_is_duplicate():
     assert duplicate.decision == CommandDecision.DUPLICATE
     assert stale.decision == CommandDecision.REJECTED
     assert stale.error is not None and stale.error.code == "run.revision_conflict"
+    recovery = stale.error.metadata["recovery_questionnaire"]
+    assert recovery["questions"]
+    assert recovery["language"] == "en"
 
 
 def suspension_records(

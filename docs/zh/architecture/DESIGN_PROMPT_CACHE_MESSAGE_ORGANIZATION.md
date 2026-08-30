@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 Agent 的消息组织会把稳定规则、已加载 Skill、运行时上下文和 ToDo 状态混合到系统上下文链路中。这样虽然实现简单，但会导致一些高频变化内容进入靠前的 prompt 前缀，例如当前时间、工作区文件树、权限上下文、ToDo 状态等。
+当前 Agent 的消息组织会把稳定规则、已加载 Skill、运行时上下文和 ToDo 状态混合到运行变量链路中。这样虽然实现简单，但会导致一些高频变化内容进入靠前的 prompt 前缀，例如当前时间、工作区文件树、权限上下文、ToDo 状态等。
 
 Prompt cache 的核心收益来自“下次推理时历史前缀尽可能不变”。因此，本改造的目标不是单纯减少 token，而是重新划分上下文的稳定度，把长期稳定内容继续放在前面，把每轮变化的内容移动到靠近最新用户输入的位置。
 
@@ -66,10 +66,10 @@ Claude Code 官方文档显示，它通过 `CLAUDE.md`、auto memory、path-scop
 
 1. 已加载 Skill 仍然加载到 system message 中，继续享受稳定前缀缓存。
 2. Skill index 和已加载 Skill 内容必须保证确定性渲染：相同输入下文本、顺序、空白和分隔符都应一致。snapshot / manifest 是性能优化和稳定性保险，不是 prompt cache 命中的必要条件。
-3. ToDo list 从 system context 中移出，不再通过更新 system context 影响 prompt 前缀。
+3. ToDo list 从运行变量中移出，不再通过更新运行变量影响 prompt 前缀。
 4. 同一 session 恢复时，从当前 session 的 ToDo 状态源读取活跃 ToDo，并注入到最新 user 的推理内容前缀中。
 5. 大模型压缩结果仅在压缩会吞掉唯一活跃 ToDo 状态时附带 `todo_state_at_compaction_boundary`，该状态来自真实 ToDo 工具结果解析，而不是 LLM 总结。
-6. system context 不再放到 system message 中，而是在每轮推理时放入 `<runtime_context>`，并注入到当前用户消息的前缀中。
+6. 运行变量不再放到 system message 中，而是在每轮推理时放入 `<runtime_context>`，并注入到当前用户消息的前缀中。
 7. 压缩摘要必须是 reference-only anchor，不能让历史 remaining work 或旧 ToDo 复活成当前任务。
 8. 尽可能保证历史消息 ledger 一旦写入，后续推理不改写旧消息，从而提高缓存命中率和可审计性。
 
@@ -100,7 +100,7 @@ Claude Code 官方文档显示，它通过 `CLAUDE.md`、auto memory、path-scop
 
 `sagents/tool/impl/todo_tool.py` 当前将 ToDo 写入 `TODO_LIST_{session_id}.md`，同时在 `_save_todo_file()` 后调用 `_sync_to_system_context()`，把任务列表同步到 `session_context.system_context["todo_list"]`。
 
-这会让 ToDo 的变化污染 system context，并间接影响 system prompt 的稳定前缀。
+这会让 ToDo 的变化污染运行变量，并间接影响 system prompt 的稳定前缀。
 
 ### 压缩工具
 
@@ -139,7 +139,7 @@ Claude Code 官方文档显示，它通过 `CLAUDE.md`、auto memory、path-scop
 </user_request>
 ```
 
-runtime context 合并进最新 user 的推理内容，不新增消息，因此不会插入 assistant tool_calls 与 tool result 之间。ToDo 不使用单独 `<todo_context>`，而是作为 runtime context 中 system context 的一部分。
+runtime context 合并进最新 user 的推理内容，不新增消息，因此不会插入 assistant tool_calls 与 tool result 之间。ToDo 不使用单独 `<todo_context>`，而是作为 runtime context 中运行变量的一部分。
 
 ## 关键设计决策
 
@@ -294,7 +294,7 @@ ToDo 不应该再通过持久同步 `session_context.system_context["todo_list"]
 - `format_runtime_system_context(tasks)`：将活跃 ToDo 放入 `<runtime_context><system_context>...`。
 - `get_todo_snapshot_for_compaction(session_id)`：供压缩工具读取确定性 ToDo 快照。
 
-第一阶段不必改持久化结构，先把 prompt 注入层与 system context 解耦。
+第一阶段不必改持久化结构，先把 prompt 注入层与运行变量解耦。
 
 ### 7. Runtime Context 冻结到 User Metadata
 
@@ -485,7 +485,7 @@ tool expansion / deferred loading 属于低频动态变化，偶发时影响一�
 4. 固定 Skill 渲染顺序，记录 stable / semi-stable system hash。
 5. 固定 tools 请求顺序，进入 LLM 请求前按 `function.name` 排序并记录 tools schema hash。
 6. 可选新增 skill snapshot renderer，但先只记录 snapshot，不切换生产路径。
-7. 保持 feature flag 回退旧 system context 注入逻辑，通过测试覆盖新 builder 输出。
+7. 保持 feature flag 回退旧运行变量注入逻辑，通过测试覆盖新 builder 输出。
 
 ### 阶段 2：Skill Snapshot 可选接入 System
 
@@ -507,7 +507,7 @@ tool expansion / deferred loading 属于低频动态变化，偶发时影响一�
 SAGE_RUNTIME_CONTEXT_IN_USER=true
 ```
 
-### 阶段 4：ToDo 从 System Context 解耦
+### 阶段 4：ToDo 从运行变量解耦
 
 1. 修改 `ToDoTool._sync_to_system_context()` 行为：
    - 默认不再写入 `system_context["todo_list"]`。

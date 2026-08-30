@@ -134,6 +134,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': '深色',
     'settings.agent': '智能体',
     'settings.defaultAgent': '默认智能体',
+    'settings.defaultModel': '默认模型',
+    'settings.setAsDefault': '设为默认',
+    'settings.currentDefault': '当前默认',
     'settings.defaultWorkspace': '默认智能体工作区',
     'settings.defaultWorkspacePath': '默认智能体工作区路径',
     'settings.chooseDirectory': '选择目录',
@@ -154,27 +157,44 @@ const _translations = <String, Map<String, String>>{
     'settings.deleteForever': '彻底删除',
     'settings.pathRequired': '路径不能为空',
     'settings.pathUnavailable': '无法使用此目录',
-    'settings.systemContextInvalidJson': '系统上下文不是有效的 JSON',
-    'settings.systemContextMustMap': '系统上下文必须是键值对象',
-    'security.policyGranularity': '策略粒度',
-    'security.policyGranularityValue': '每次工具调用及参数',
-    'security.fileBoundary': '文件边界',
-    'security.fileBoundaryValue': '智能体工作区与当前项目',
-    'security.autoAllow': '自动放行',
-    'security.autoAllowValue': '常规工作区写入、已知只读命令',
-    'security.requestApproval': '请求审批',
-    'security.requestApprovalValue': '删除或覆盖、外部副作用、未知命令',
-    'security.autoBlock': '自动阻止',
-    'security.autoBlockValue': '系统级破坏、下载后直接执行',
-    'security.isolation': '执行隔离',
-    'security.isolationValue': '系统沙箱',
+    'settings.systemContextInvalidJson': '运行变量不是有效的 JSON',
+    'settings.systemContextMustMap': '运行变量必须是键值对象',
+    'security.policyGranularity': '审批判定范围',
+    'security.policyGranularityValue':
+        '默认使用“风险操作询问”：仅 Shell 命令按下列危险规则判断；非 Shell 工具不会仅因写入而触发审批。可在每个会话中切换策略。',
+    'security.fileBoundary': '非 Shell 工具',
+    'security.fileBoundaryValue':
+        '自动执行文件读取、写入、修改与补丁，文件搜索，计划 / Todo，技能加载及其他结构化工具；仍受工作区、权限与沙箱边界限制。',
+    'security.autoAllow': 'Shell · 自动执行',
+    'security.autoAllowValue':
+        '读取与查询；测试、构建和普通脚本；工作区文件重定向；pip / npm / pnpm / yarn / bun / brew 等依赖安装；非强制 git push；相对路径 rm -rf；chmod / chown / kill / pkill。',
+    'security.requestApproval': 'Shell · 请求审批',
+    'security.requestApprovalValue':
+        'git reset --hard、git clean、git branch/tag -d、远端分支删除；未命中白名单的递归删除、权限修改或进程终止；可疑输出重定向；无法安全解析的命令。',
+    'security.autoBlock': 'Shell · 自动阻止',
+    'security.autoBlockValue':
+        'sudo / su / systemctl / reboot / shutdown；dd / fdisk / parted / mkfs / wipefs；用户与系统服务管理；rm -rf / 或 ~；下载后直接管道到 sh/bash；向 main/master 强制推送。',
+    'security.isolation': '始终生效的边界',
+    'security.isolationValue':
+        '所有工具都只能在智能体工作区与当前项目内运行，并受可执行程序、网络、环境变量及身份权限限制；这是运行时白名单，不是 OS 级隔离。',
+    'security.userApproved': '用户批准的 Shell 命令',
+    'security.userApprovedEmpty': '暂无；在审批卡选择“批准并记住”后会显示在这里',
     'agent.primaryModel': '主模型',
+    'agent.fastModel': '快速模型',
     'agent.mode': '模式',
+    'agent.teamScope': '成员范围',
+    'agent.teamScopeAll': '全部可用智能体',
+    'agent.teamScopeCustom': '自定义成员',
+    'agent.teamMembers': '协作成员',
+    'agent.teamMembersLeaf': '所选成员作为叶节点执行，不会继续 Fibre / Team 编排。',
     'agent.loopLimit': '循环上限',
     'agent.deepThinking': '深度思考',
     'agent.thinkingLevel': '思考强度',
     'agent.systemPrompt': '系统提示词',
-    'agent.systemContext': '系统上下文',
+    'agent.systemContext': '运行变量',
+    'agent.runtimeVariableKey': '变量名',
+    'agent.runtimeVariableValue': '变量值',
+    'agent.addRuntimeVariable': '添加运行变量',
     'thinking.minimal': '极低',
     'thinking.low': '低',
     'thinking.medium': '中',
@@ -186,6 +206,31 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'API 密钥',
     'mcp.connectionError': '连接错误',
     'component.current': '{name}，当前为 {implementation}',
+    'component.toolSelection.name': '工具选择策略',
+    'component.toolSelection.value': '工具很多时，限制发送给模型的工具 Schema，并允许按需展开隐藏工具',
+    'component.plugin.toolSelectionDirect.name': '直接展示全部工具',
+    'component.plugin.toolSelectionDirect.value': '始终把所有允许的工具发送给模型，适合较小的工具目录',
+    'component.plugin.toolSelectionLexical.name': 'BM25 相关性选择',
+    'component.plugin.toolSelectionLexical.value': '不调用模型，像搜索引擎一样匹配工具名称、说明和参数',
+    'component.plugin.toolSelectionLlm.name': '大模型工具选择',
+    'component.plugin.toolSelectionLlm.value':
+        '与 Memory Recall 并行调用快速模型；失败时自动使用本地 BM25 结果',
+    'component.plugin.toolSelectionRecent.name': '最近使用优先',
+    'component.plugin.toolSelectionRecent.value': '先放入本会话最近调用过的工具，再按稳定顺序补满数量上限',
+    'component.toolSelection.settings': '插件参数',
+    'component.toolSelection.settingsHelp': '内置筛选策略只需设置工具数量上限；修改从下一次 Run 生效。',
+    'component.toolSelection.direct_tool_count_threshold': '直接展示的工具数量阈值',
+    'component.toolSelection.max_visible_tools': '工具数量上限',
+    'component.toolSelection.max_tool_schema_tokens': '工具 Schema Token 上限',
+    'component.toolSelection.candidate_top_k': '相关性候选 Top K',
+    'component.toolSelection.context_turns': '相关性检索对话轮数',
+    'component.toolSelection.max_tool_index_entries': '隐藏工具索引条目上限',
+    'component.toolSelection.max_tool_index_tokens': '隐藏工具索引 Token 上限',
+    'component.toolSelection.tool_index_description_chars': '索引中单项描述字符数',
+    'component.toolSelection.expansion_batch_limit': '单次展开工具数上限',
+    'component.toolSelection.max_expanded_tools_per_run': '单次 Run 累计展开上限',
+    'component.toolSelection.invalid': '请输入有效阈值；候选 Top K 不能超过最多可见工具数。',
+    'component.toolSelection.restoreDefaults': '恢复默认阈值',
     'component.tokenEstimator.name': 'Token 估算',
     'component.tokenEstimator.value': '估算模型请求占用的 Token 数量',
     'component.reducer.name': '上下文压缩',
@@ -200,6 +245,22 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.persistentSummary.value': '摘要较早的完整消息并保留近期内容',
     'component.plugin.window.name': '窗口裁剪',
     'component.plugin.window.value': '从请求中移除较早的完整消息',
+    'component.sessionMemory.name': '会话记忆',
+    'component.sessionMemory.value': '检索已从当前模型上下文中省略的会话历史',
+    'component.modelRequestRecords.name': '模型请求记录',
+    'component.modelRequestRecords.value':
+        '为“Session → LLM 请求”保留脱敏后的模型输入、输出和错误',
+    'component.plugin.sessionMemorySqliteBm25.name': 'SQLite BM25 会话记忆',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        '增量索引会话消息，并检索当前模型请求中已省略的历史',
+    'component.plugin.sessionMemoryNoop.name': '关闭会话记忆',
+    'component.plugin.sessionMemoryNoop.value': '不索引或检索省略的会话历史',
+    'component.plugin.filesystemModelRequests.name': '文件模型请求记录',
+    'component.plugin.filesystemModelRequests.value': '将脱敏后的模型输入、输出和错误写入本地记录目录',
+    'component.plugin.modelRequestsOff.name': '关闭模型请求记录',
+    'component.plugin.modelRequestsOff.value': '不保留“Session → LLM 请求”记录',
+    'component.path.sessionMemory': '当前会话记忆目录',
+    'component.path.modelRequestRecords': '当前模型请求记录目录',
     'component.decidedBy': '由 {owner} 决定',
     'component.scope': '范围 {scope}',
     'component.scope.process': '当前进程',
@@ -274,14 +335,21 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': '归档',
     'workspace.emptyPrompt': '我能帮你做什么？',
     'workspace.processing': '正在处理',
+    'workspace.thinking': '正在思考',
     'workspace.processed': '已处理',
     'workspace.processedTime': '已处理 {time}',
     'workspace.requestApproval': '请求批准',
     'workspace.inputSteer': '输入以调整当前任务',
     'workspace.inputAgent': '交给智能体…',
+    'workspace.inputPlan': '描述你想规划的任务…',
+    'workspace.inputGoal': '描述你要持续完成的目标…',
     'workspace.chooseAgent': '选择智能体',
     'workspace.approvalMode': '审批权限：{mode}',
     'workspace.openFile': '打开文件',
+    'workspace.planMode': '计划模式',
+    'workspace.goalMode': '目标模式',
+    'workspace.goalModeDescription': '持续执行并验证目标，完成后才结束',
+    'workspace.planModeDescription': '先制定可执行计划，不修改工作区',
     'workspace.noSkills': '无可用技能',
     'workspace.addContent': '添加内容',
     'workspace.sendSteer': '发送调整',
@@ -298,11 +366,12 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': '文件夹',
     'workspace.referenceSelection': '局部引用',
     'workspace.stop': '停止',
+    'workspace.terminal': '终端',
     'approval.alwaysAsk': '每次询问',
     'approval.highRisk': '风险操作询问',
     'approval.autoApprove': '自动审批',
     'approval.alwaysAskDescription': '每次工具执行前都请求批准',
-    'approval.highRiskDescription': '仅对不可逆或外部副作用操作请求批准',
+    'approval.highRiskDescription': '非 Shell 工具自动执行；仅对命中危险规则的 Shell 命令询问',
     'approval.autoApproveDescription': '自动批准工具调用，仍受工作区和沙箱边界限制',
     'risk.files': '文件风险',
     'risk.external': '外部操作',
@@ -327,6 +396,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': '已取消',
     'decision.approve': '批准',
     'decision.approveOnce': '批准一次',
+    'decision.approveAndRemember': '批准并记住',
     'decision.allow': '允许',
     'decision.deny': '拒绝',
     'decision.submit': '提交',
@@ -377,6 +447,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Dark',
     'settings.agent': 'Agent',
     'settings.defaultAgent': 'Default agent',
+    'settings.defaultModel': 'Default model',
+    'settings.setAsDefault': 'Make default',
+    'settings.currentDefault': 'Current default',
     'settings.defaultWorkspace': 'Default agent workspace',
     'settings.defaultWorkspacePath': 'Default agent workspace path',
     'settings.chooseDirectory': 'Choose directory',
@@ -397,31 +470,47 @@ const _translations = <String, Map<String, String>>{
     'settings.deleteForever': 'Delete permanently',
     'settings.pathRequired': 'Path cannot be empty',
     'settings.pathUnavailable': 'This directory cannot be used',
-    'settings.systemContextInvalidJson': 'System context is not valid JSON',
+    'settings.systemContextInvalidJson': 'Runtime variables are not valid JSON',
     'settings.systemContextMustMap':
-        'System context must be a key-value object',
-    'security.policyGranularity': 'Policy granularity',
-    'security.policyGranularityValue': 'Each tool call and its arguments',
-    'security.fileBoundary': 'File boundary',
-    'security.fileBoundaryValue': 'Agent workspace and current project',
-    'security.autoAllow': 'Automatically allow',
+        'Runtime variables must be a key-value object',
+    'security.policyGranularity': 'Approval decision scope',
+    'security.policyGranularityValue':
+        'The default “Ask for risky actions” mode applies the rules below only to Shell commands. Non-Shell tools do not require approval merely because they write. The mode can be changed per conversation.',
+    'security.fileBoundary': 'Non-Shell tools',
+    'security.fileBoundaryValue':
+        'File read/write/update/patch, search, planning / Todo, skill loading, and other structured tools run automatically. Workspace, scope, and sandbox boundaries still apply.',
+    'security.autoAllow': 'Shell · Run automatically',
     'security.autoAllowValue':
-        'Routine workspace writes and known read-only commands',
-    'security.requestApproval': 'Request approval',
+        'Reads and queries; tests, builds, and ordinary scripts; workspace redirects; pip / npm / pnpm / yarn / bun / brew installs; non-forced git push; relative rm -rf; chmod / chown / kill / pkill.',
+    'security.requestApproval': 'Shell · Request approval',
     'security.requestApprovalValue':
-        'Deletes or overwrites, external effects, and unknown commands',
-    'security.autoBlock': 'Automatically block',
+        'git reset --hard, git clean, git branch/tag -d, remote branch deletion; recursive delete, permission change, or process termination outside the allowlist; suspicious redirects; commands that cannot be parsed safely.',
+    'security.autoBlock': 'Shell · Block automatically',
     'security.autoBlockValue':
-        'System-level damage and direct execution after download',
-    'security.isolation': 'Execution isolation',
-    'security.isolationValue': 'System sandbox',
+        'sudo / su / systemctl / reboot / shutdown; dd / fdisk / parted / mkfs / wipefs; account and system-service management; rm -rf / or ~; download piped directly to sh/bash; force-push to main/master.',
+    'security.isolation': 'Boundaries always enforced',
+    'security.isolationValue':
+        'Every tool remains limited to the agent workspace and current project, executable/network/environment allowlists, and actor scopes. This is runtime allowlisting, not OS-level isolation.',
+    'security.userApproved': 'User-approved Shell commands',
+    'security.userApprovedEmpty':
+        'None yet. Choose “Approve and remember” on a Shell approval.',
     'agent.primaryModel': 'Primary model',
+    'agent.fastModel': 'Fast model',
     'agent.mode': 'Mode',
+    'agent.teamScope': 'Member scope',
+    'agent.teamScopeAll': 'All available agents',
+    'agent.teamScopeCustom': 'Custom members',
+    'agent.teamMembers': 'Collaboration members',
+    'agent.teamMembersLeaf':
+        'Selected members run as leaves and do not start further Fibre or Team orchestration.',
     'agent.loopLimit': 'Loop limit',
     'agent.deepThinking': 'Deep thinking',
     'agent.thinkingLevel': 'Thinking level',
     'agent.systemPrompt': 'System prompt',
-    'agent.systemContext': 'System context',
+    'agent.systemContext': 'Runtime variables',
+    'agent.runtimeVariableKey': 'Variable name',
+    'agent.runtimeVariableValue': 'Variable value',
+    'agent.addRuntimeVariable': 'Add runtime variable',
     'thinking.minimal': 'Minimal',
     'thinking.low': 'Low',
     'thinking.medium': 'Medium',
@@ -433,6 +522,43 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'API key',
     'mcp.connectionError': 'Connection error',
     'component.current': '{name}, currently {implementation}',
+    'component.toolSelection.name': 'Tool selection policy',
+    'component.toolSelection.value':
+        'Bounds Tool schemas sent to the model when the catalog is large and supports on-demand expansion',
+    'component.plugin.toolSelectionDirect.name': 'Show all Tools directly',
+    'component.plugin.toolSelectionDirect.value':
+        'Always sends every allowed Tool to the model; best for small catalogs',
+    'component.plugin.toolSelectionLexical.name': 'BM25 relevance selection',
+    'component.plugin.toolSelectionLexical.value':
+        'Matches Tool names, descriptions, and parameters locally like a search engine',
+    'component.plugin.toolSelectionLlm.name': 'LLM Tool selection',
+    'component.plugin.toolSelectionLlm.value':
+        'Runs a fast model beside Memory Recall and falls back to local BM25 on failure',
+    'component.plugin.toolSelectionRecent.name': 'Recently used first',
+    'component.plugin.toolSelectionRecent.value':
+        'Places recently called Tools first, then fills the count limit in stable order',
+    'component.toolSelection.settings': 'Plugin parameters',
+    'component.toolSelection.settingsHelp':
+        'Built-in filtering strategies only need a Tool count limit. Changes apply to the next Run.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Direct Tool-count threshold',
+    'component.toolSelection.max_visible_tools': 'Tool count limit',
+    'component.toolSelection.max_tool_schema_tokens': 'Tool-schema token limit',
+    'component.toolSelection.candidate_top_k': 'Relevance candidate Top K',
+    'component.toolSelection.context_turns': 'Context turns for relevance',
+    'component.toolSelection.max_tool_index_entries':
+        'Hidden Tool index entry limit',
+    'component.toolSelection.max_tool_index_tokens':
+        'Hidden Tool index token limit',
+    'component.toolSelection.tool_index_description_chars':
+        'Description characters per index item',
+    'component.toolSelection.expansion_batch_limit':
+        'Tools per expansion limit',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Expanded Tools per Run limit',
+    'component.toolSelection.invalid':
+        'Enter valid limits; candidate Top K cannot exceed maximum visible Tools.',
+    'component.toolSelection.restoreDefaults': 'Restore default thresholds',
     'component.tokenEstimator.name': 'Token estimation',
     'component.tokenEstimator.value':
         'Estimates token usage for model requests',
@@ -454,6 +580,29 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Window trimming',
     'component.plugin.window.value':
         'Removes older complete messages from the request',
+    'component.sessionMemory.name': 'Session memory',
+    'component.sessionMemory.value':
+        'Retrieves Session history omitted from the current model context',
+    'component.modelRequestRecords.name': 'Model request records',
+    'component.modelRequestRecords.value':
+        'Keeps redacted model inputs, outputs, and errors for Session → LLM Requests',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'SQLite BM25 Session memory',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Incrementally indexes Session messages and retrieves history omitted from the current model request',
+    'component.plugin.sessionMemoryNoop.name': 'Session memory off',
+    'component.plugin.sessionMemoryNoop.value':
+        'Does not index or retrieve omitted Session history',
+    'component.plugin.filesystemModelRequests.name':
+        'Filesystem model request records',
+    'component.plugin.filesystemModelRequests.value':
+        'Writes redacted model inputs, outputs, and errors to the local records directory',
+    'component.plugin.modelRequestsOff.name': 'Model request records off',
+    'component.plugin.modelRequestsOff.value':
+        'Does not retain Session → LLM Request records',
+    'component.path.sessionMemory': 'Current Session memory directory',
+    'component.path.modelRequestRecords':
+        'Current model request records directory',
     'component.decidedBy': 'Controlled by {owner}',
     'component.scope': 'Scope {scope}',
     'component.scope.process': 'Current process',
@@ -528,14 +677,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Archive',
     'workspace.emptyPrompt': 'What can I help you with?',
     'workspace.processing': 'Working',
+    'workspace.thinking': 'Thinking',
     'workspace.processed': 'Worked',
     'workspace.processedTime': 'Worked for {time}',
     'workspace.requestApproval': 'Approval requested',
     'workspace.inputSteer': 'Add guidance to the current task',
     'workspace.inputAgent': 'Ask the agent…',
+    'workspace.inputPlan': 'Describe what you want to plan…',
+    'workspace.inputGoal': 'Describe the goal to pursue…',
     'workspace.chooseAgent': 'Choose agent',
     'workspace.approvalMode': 'Approval: {mode}',
     'workspace.openFile': 'Open file',
+    'workspace.planMode': 'Plan mode',
+    'workspace.goalMode': 'Goal mode',
+    'workspace.goalModeDescription':
+        'Execute and verify the goal before completing',
+    'workspace.planModeDescription':
+        'Create an actionable plan without changing the workspace',
     'workspace.noSkills': 'No skills available',
     'workspace.addContent': 'Add content',
     'workspace.sendSteer': 'Send guidance',
@@ -552,13 +710,14 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'folder',
     'workspace.referenceSelection': 'Reference selection',
     'workspace.stop': 'Stop',
+    'workspace.terminal': 'Terminal',
     'approval.alwaysAsk': 'Always ask',
     'approval.highRisk': 'Ask for risky actions',
     'approval.autoApprove': 'Auto approve',
     'approval.alwaysAskDescription':
         'Request approval before every tool execution',
     'approval.highRiskDescription':
-        'Only request approval for irreversible actions or external effects',
+        'Run non-Shell tools automatically; ask only for Shell commands that match a risky rule',
     'approval.autoApproveDescription':
         'Automatically approve tool calls within workspace and sandbox boundaries',
     'risk.files': 'File risk',
@@ -584,6 +743,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Cancelled',
     'decision.approve': 'Approve',
     'decision.approveOnce': 'Approve once',
+    'decision.approveAndRemember': 'Approve and remember',
     'decision.allow': 'Allow',
     'decision.deny': 'Deny',
     'decision.submit': 'Submit',
@@ -635,6 +795,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Escuro',
     'settings.agent': 'Agente',
     'settings.defaultAgent': 'Agente padrão',
+    'settings.defaultModel': 'Modelo padrão',
+    'settings.setAsDefault': 'Definir como padrão',
+    'settings.currentDefault': 'Padrão atual',
     'settings.defaultWorkspace': 'Workspace padrão do agente',
     'settings.defaultWorkspacePath': 'Caminho do workspace padrão do agente',
     'settings.chooseDirectory': 'Escolher pasta',
@@ -656,9 +819,9 @@ const _translations = <String, Map<String, String>>{
     'settings.pathRequired': 'O caminho não pode ficar vazio',
     'settings.pathUnavailable': 'Esta pasta não pode ser usada',
     'settings.systemContextInvalidJson':
-        'O contexto do sistema não é um JSON válido',
+        'As variáveis de execução não são um JSON válido',
     'settings.systemContextMustMap':
-        'O contexto do sistema deve ser um objeto de chave e valor',
+        'As variáveis de execução devem ser um objeto de chave e valor',
     'security.policyGranularity': 'Granularidade da política',
     'security.policyGranularityValue':
         'Cada chamada de ferramenta e seus parâmetros',
@@ -675,13 +838,25 @@ const _translations = <String, Map<String, String>>{
         'Danos ao sistema e execução direta após download',
     'security.isolation': 'Isolamento da execução',
     'security.isolationValue': 'Sandbox do sistema',
+    'security.userApproved': 'Comandos Shell aprovados pelo usuário',
+    'security.userApprovedEmpty': 'Nenhum comando lembrado',
     'agent.primaryModel': 'Modelo principal',
+    'agent.fastModel': 'Modelo rápido',
     'agent.mode': 'Modo',
+    'agent.teamScope': 'Escopo dos membros',
+    'agent.teamScopeAll': 'Todos os agentes disponíveis',
+    'agent.teamScopeCustom': 'Membros personalizados',
+    'agent.teamMembers': 'Membros colaboradores',
+    'agent.teamMembersLeaf':
+        'Os membros selecionados são executados como folhas e não iniciam outra orquestração Fibre ou Team.',
     'agent.loopLimit': 'Limite de ciclos',
     'agent.deepThinking': 'Raciocínio profundo',
     'agent.thinkingLevel': 'Nível de raciocínio',
     'agent.systemPrompt': 'Prompt do sistema',
-    'agent.systemContext': 'Contexto do sistema',
+    'agent.systemContext': 'Variáveis de execução',
+    'agent.runtimeVariableKey': 'Nome da variável',
+    'agent.runtimeVariableValue': 'Valor da variável',
+    'agent.addRuntimeVariable': 'Adicionar variável de execução',
     'thinking.minimal': 'Mínimo',
     'thinking.low': 'Baixo',
     'thinking.medium': 'Médio',
@@ -693,6 +868,45 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'Chave de API',
     'mcp.connectionError': 'Erro de conexão',
     'component.current': '{name}, atual: {implementation}',
+    'component.toolSelection.name': 'Política de seleção de ferramentas',
+    'component.toolSelection.value':
+        'Limita os esquemas enviados ao modelo em catálogos grandes e permite expansão sob demanda',
+    'component.plugin.toolSelectionDirect.name': 'Mostrar todas diretamente',
+    'component.plugin.toolSelectionDirect.value':
+        'Envia sempre todas as ferramentas permitidas; ideal para catálogos pequenos',
+    'component.plugin.toolSelectionLexical.name': 'Seleção por relevância BM25',
+    'component.plugin.toolSelectionLexical.value':
+        'Compara localmente nomes, descrições e parâmetros como um mecanismo de busca',
+    'component.plugin.toolSelectionLlm.name': 'Seleção por LLM',
+    'component.plugin.toolSelectionLlm.value':
+        'Executa um modelo rápido junto da memória e usa BM25 local em caso de falha',
+    'component.plugin.toolSelectionRecent.name': 'Usadas recentemente primeiro',
+    'component.plugin.toolSelectionRecent.value':
+        'Prioriza ferramentas chamadas recentemente e completa o limite em ordem estável',
+    'component.toolSelection.settings': 'Parâmetros do plugin',
+    'component.toolSelection.settingsHelp':
+        'As estratégias internas só precisam do limite de ferramentas; vale na próxima execução.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Limite para exibição direta',
+    'component.toolSelection.max_visible_tools':
+        'Máximo visível por solicitação',
+    'component.toolSelection.max_tool_schema_tokens':
+        'Limite de tokens dos esquemas',
+    'component.toolSelection.candidate_top_k': 'Candidatos relevantes Top K',
+    'component.toolSelection.context_turns':
+        'Turnos de contexto para relevância',
+    'component.toolSelection.max_tool_index_entries':
+        'Limite de itens do índice oculto',
+    'component.toolSelection.max_tool_index_tokens':
+        'Limite de tokens do índice oculto',
+    'component.toolSelection.tool_index_description_chars':
+        'Caracteres por descrição no índice',
+    'component.toolSelection.expansion_batch_limit': 'Limite por expansão',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Limite expandido por execução',
+    'component.toolSelection.invalid':
+        'Informe limites válidos; Top K não pode superar o máximo visível.',
+    'component.toolSelection.restoreDefaults': 'Restaurar limites padrão',
     'component.tokenEstimator.name': 'Estimativa de tokens',
     'component.tokenEstimator.value':
         'Estima o uso de tokens nas solicitações ao modelo',
@@ -714,6 +928,29 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Recorte de janela',
     'component.plugin.window.value':
         'Remove mensagens completas antigas da solicitação',
+    'component.sessionMemory.name': 'Memória da sessão',
+    'component.sessionMemory.value':
+        'Recupera o histórico da sessão omitido do contexto atual do modelo',
+    'component.modelRequestRecords.name': 'Registros de solicitações ao modelo',
+    'component.modelRequestRecords.value':
+        'Mantém entradas, saídas e erros ocultados em Sessão → Solicitações LLM',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'Memória da sessão SQLite BM25',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Indexa mensagens da sessão e recupera o histórico omitido da solicitação atual',
+    'component.plugin.sessionMemoryNoop.name': 'Memória da sessão desativada',
+    'component.plugin.sessionMemoryNoop.value':
+        'Não indexa nem recupera o histórico omitido da sessão',
+    'component.plugin.filesystemModelRequests.name':
+        'Registros de modelo em arquivos',
+    'component.plugin.filesystemModelRequests.value':
+        'Grava entradas, saídas e erros ocultados no diretório local',
+    'component.plugin.modelRequestsOff.name': 'Registros de modelo desativados',
+    'component.plugin.modelRequestsOff.value':
+        'Não mantém registros de solicitações LLM da sessão',
+    'component.path.sessionMemory': 'Diretório atual da memória da sessão',
+    'component.path.modelRequestRecords':
+        'Diretório atual de registros do modelo',
     'component.decidedBy': 'Controlado por {owner}',
     'component.scope': 'Escopo {scope}',
     'component.scope.process': 'Processo atual',
@@ -788,14 +1025,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Arquivar',
     'workspace.emptyPrompt': 'Como posso ajudar?',
     'workspace.processing': 'Processando',
+    'workspace.thinking': 'Pensando',
     'workspace.processed': 'Processado',
     'workspace.processedTime': 'Processado por {time}',
     'workspace.requestApproval': 'Aprovação solicitada',
     'workspace.inputSteer': 'Adicione orientação à tarefa atual',
     'workspace.inputAgent': 'Peça ao agente…',
+    'workspace.inputPlan': 'Descreva o que você deseja planejar…',
+    'workspace.inputGoal': 'Descreva o objetivo a alcançar…',
     'workspace.chooseAgent': 'Escolher agente',
     'workspace.approvalMode': 'Aprovação: {mode}',
     'workspace.openFile': 'Abrir arquivo',
+    'workspace.planMode': 'Modo de planejamento',
+    'workspace.goalMode': 'Modo de objetivo',
+    'workspace.goalModeDescription':
+        'Execute e verifique o objetivo antes de concluir',
+    'workspace.planModeDescription':
+        'Criar um plano acionável sem alterar o workspace',
     'workspace.noSkills': 'Nenhuma skill disponível',
     'workspace.addContent': 'Adicionar conteúdo',
     'workspace.sendSteer': 'Enviar orientação',
@@ -812,6 +1058,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'pasta',
     'workspace.referenceSelection': 'Referenciar seleção',
     'workspace.stop': 'Parar',
+    'workspace.terminal': 'Terminal',
     'approval.alwaysAsk': 'Sempre perguntar',
     'approval.highRisk': 'Perguntar em ações de risco',
     'approval.autoApprove': 'Aprovar automaticamente',
@@ -846,6 +1093,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Cancelado',
     'decision.approve': 'Aprovar',
     'decision.approveOnce': 'Aprovar uma vez',
+    'decision.approveAndRemember': 'Aprovar e lembrar',
     'decision.allow': 'Permitir',
     'decision.deny': 'Negar',
     'decision.submit': 'Enviar',
@@ -899,6 +1147,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Oscuro',
     'settings.agent': 'Agente',
     'settings.defaultAgent': 'Agente predeterminado',
+    'settings.defaultModel': 'Modelo predeterminado',
+    'settings.setAsDefault': 'Establecer como predeterminado',
+    'settings.currentDefault': 'Predeterminado actual',
     'settings.defaultWorkspace': 'Espacio de trabajo predeterminado del agente',
     'settings.defaultWorkspacePath':
         'Ruta del espacio de trabajo predeterminado del agente',
@@ -921,9 +1172,9 @@ const _translations = <String, Map<String, String>>{
     'settings.pathRequired': 'La ruta no puede estar vacía',
     'settings.pathUnavailable': 'No se puede usar esta carpeta',
     'settings.systemContextInvalidJson':
-        'El contexto del sistema no es un JSON válido',
+        'Las variables de ejecución no son un JSON válido',
     'settings.systemContextMustMap':
-        'El contexto del sistema debe ser un objeto de clave y valor',
+        'Las variables de ejecución deben ser un objeto de clave y valor',
     'security.policyGranularity': 'Granularidad de la política',
     'security.policyGranularityValue':
         'Cada llamada de herramienta y sus argumentos',
@@ -941,13 +1192,25 @@ const _translations = <String, Map<String, String>>{
         'Daños al sistema y ejecución directa tras una descarga',
     'security.isolation': 'Aislamiento de ejecución',
     'security.isolationValue': 'Sandbox del sistema',
+    'security.userApproved': 'Comandos Shell aprobados por el usuario',
+    'security.userApprovedEmpty': 'No hay comandos recordados',
     'agent.primaryModel': 'Modelo principal',
+    'agent.fastModel': 'Modelo rápido',
     'agent.mode': 'Modo',
+    'agent.teamScope': 'Ámbito de miembros',
+    'agent.teamScopeAll': 'Todos los agentes disponibles',
+    'agent.teamScopeCustom': 'Miembros personalizados',
+    'agent.teamMembers': 'Miembros colaboradores',
+    'agent.teamMembersLeaf':
+        'Los miembros seleccionados se ejecutan como hojas y no inician otra orquestación Fibre o Team.',
     'agent.loopLimit': 'Límite de ciclos',
     'agent.deepThinking': 'Razonamiento profundo',
     'agent.thinkingLevel': 'Nivel de razonamiento',
     'agent.systemPrompt': 'Prompt del sistema',
-    'agent.systemContext': 'Contexto del sistema',
+    'agent.systemContext': 'Variables de ejecución',
+    'agent.runtimeVariableKey': 'Nombre de variable',
+    'agent.runtimeVariableValue': 'Valor de variable',
+    'agent.addRuntimeVariable': 'Añadir variable de ejecución',
     'thinking.minimal': 'Mínimo',
     'thinking.low': 'Bajo',
     'thinking.medium': 'Medio',
@@ -959,6 +1222,46 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'Clave de API',
     'mcp.connectionError': 'Error de conexión',
     'component.current': '{name}, actual: {implementation}',
+    'component.toolSelection.name': 'Política de selección de herramientas',
+    'component.toolSelection.value':
+        'Limita los esquemas enviados al modelo en catálogos grandes y permite expansión bajo demanda',
+    'component.plugin.toolSelectionDirect.name': 'Mostrar todas directamente',
+    'component.plugin.toolSelectionDirect.value':
+        'Envía siempre todas las herramientas permitidas; ideal para catálogos pequeños',
+    'component.plugin.toolSelectionLexical.name':
+        'Selección por relevancia BM25',
+    'component.plugin.toolSelectionLexical.value':
+        'Compara localmente nombres, descripciones y parámetros como un buscador',
+    'component.plugin.toolSelectionLlm.name': 'Selección mediante LLM',
+    'component.plugin.toolSelectionLlm.value':
+        'Ejecuta un modelo rápido junto con Memory Recall y recurre a BM25 local si falla',
+    'component.plugin.toolSelectionRecent.name': 'Usadas recientemente primero',
+    'component.plugin.toolSelectionRecent.value':
+        'Prioriza las herramientas llamadas recientemente y completa el límite en orden estable',
+    'component.toolSelection.settings': 'Parámetros del plugin',
+    'component.toolSelection.settingsHelp':
+        'Las estrategias integradas solo requieren el límite de herramientas; se aplica al próximo Run.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Umbral de visualización directa',
+    'component.toolSelection.max_visible_tools': 'Máximo visible por solicitud',
+    'component.toolSelection.max_tool_schema_tokens':
+        'Límite de tokens de esquemas',
+    'component.toolSelection.candidate_top_k': 'Candidatos relevantes Top K',
+    'component.toolSelection.context_turns':
+        'Turnos de contexto para relevancia',
+    'component.toolSelection.max_tool_index_entries':
+        'Límite de entradas del índice oculto',
+    'component.toolSelection.max_tool_index_tokens':
+        'Límite de tokens del índice oculto',
+    'component.toolSelection.tool_index_description_chars':
+        'Caracteres por descripción del índice',
+    'component.toolSelection.expansion_batch_limit': 'Límite por expansión',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Límite expandido por ejecución',
+    'component.toolSelection.invalid':
+        'Introduce límites válidos; Top K no puede superar el máximo visible.',
+    'component.toolSelection.restoreDefaults':
+        'Restaurar umbrales predeterminados',
     'component.tokenEstimator.name': 'Estimación de tokens',
     'component.tokenEstimator.value':
         'Estima el uso de tokens en las solicitudes al modelo',
@@ -980,6 +1283,30 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Recorte de ventana',
     'component.plugin.window.value':
         'Elimina mensajes completos antiguos de la solicitud',
+    'component.sessionMemory.name': 'Memoria de sesión',
+    'component.sessionMemory.value':
+        'Recupera el historial omitido del contexto actual del modelo',
+    'component.modelRequestRecords.name': 'Registros de solicitudes del modelo',
+    'component.modelRequestRecords.value':
+        'Conserva entradas, salidas y errores depurados para Sesión → Solicitudes LLM',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'Memoria de sesión SQLite BM25',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Indexa mensajes y recupera el historial omitido de la solicitud actual',
+    'component.plugin.sessionMemoryNoop.name': 'Memoria de sesión desactivada',
+    'component.plugin.sessionMemoryNoop.value':
+        'No indexa ni recupera el historial omitido de la sesión',
+    'component.plugin.filesystemModelRequests.name':
+        'Registros del modelo en archivos',
+    'component.plugin.filesystemModelRequests.value':
+        'Guarda entradas, salidas y errores depurados en el directorio local',
+    'component.plugin.modelRequestsOff.name':
+        'Registros del modelo desactivados',
+    'component.plugin.modelRequestsOff.value':
+        'No conserva registros de solicitudes LLM de la sesión',
+    'component.path.sessionMemory': 'Directorio actual de memoria de sesión',
+    'component.path.modelRequestRecords':
+        'Directorio actual de registros del modelo',
     'component.decidedBy': 'Controlado por {owner}',
     'component.scope': 'Ámbito {scope}',
     'component.scope.process': 'Proceso actual',
@@ -1054,14 +1381,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Archivar',
     'workspace.emptyPrompt': '¿En qué puedo ayudarte?',
     'workspace.processing': 'Procesando',
+    'workspace.thinking': 'Pensando',
     'workspace.processed': 'Procesado',
     'workspace.processedTime': 'Procesado durante {time}',
     'workspace.requestApproval': 'Aprobación solicitada',
     'workspace.inputSteer': 'Añade indicaciones a la tarea actual',
     'workspace.inputAgent': 'Pide al agente…',
+    'workspace.inputPlan': 'Describe lo que quieres planificar…',
+    'workspace.inputGoal': 'Describe el objetivo que quieres alcanzar…',
     'workspace.chooseAgent': 'Elegir agente',
     'workspace.approvalMode': 'Aprobación: {mode}',
     'workspace.openFile': 'Abrir archivo',
+    'workspace.planMode': 'Modo de planificación',
+    'workspace.goalMode': 'Modo objetivo',
+    'workspace.goalModeDescription':
+        'Ejecuta y verifica el objetivo antes de finalizar',
+    'workspace.planModeDescription':
+        'Crear un plan ejecutable sin modificar el espacio de trabajo',
     'workspace.noSkills': 'No hay skills disponibles',
     'workspace.addContent': 'Añadir contenido',
     'workspace.sendSteer': 'Enviar indicaciones',
@@ -1078,6 +1414,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'carpeta',
     'workspace.referenceSelection': 'Referenciar selección',
     'workspace.stop': 'Detener',
+    'workspace.terminal': 'Terminal',
     'approval.alwaysAsk': 'Preguntar siempre',
     'approval.highRisk': 'Preguntar en acciones de riesgo',
     'approval.autoApprove': 'Aprobar automáticamente',
@@ -1112,6 +1449,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Cancelado',
     'decision.approve': 'Aprobar',
     'decision.approveOnce': 'Aprobar una vez',
+    'decision.approveAndRemember': 'Aprobar y recordar',
     'decision.allow': 'Permitir',
     'decision.deny': 'Denegar',
     'decision.submit': 'Enviar',
@@ -1165,6 +1503,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Sombre',
     'settings.agent': 'Agent',
     'settings.defaultAgent': 'Agent par défaut',
+    'settings.defaultModel': 'Modèle par défaut',
+    'settings.setAsDefault': 'Définir par défaut',
+    'settings.currentDefault': 'Valeur par défaut actuelle',
     'settings.defaultWorkspace': 'Espace de travail par défaut de l’agent',
     'settings.defaultWorkspacePath':
         'Chemin de l’espace de travail par défaut de l’agent',
@@ -1187,9 +1528,9 @@ const _translations = <String, Map<String, String>>{
     'settings.pathRequired': 'Le chemin ne peut pas être vide',
     'settings.pathUnavailable': 'Ce dossier ne peut pas être utilisé',
     'settings.systemContextInvalidJson':
-        'Le contexte système n’est pas un JSON valide',
+        'Les variables d’exécution ne sont pas un JSON valide',
     'settings.systemContextMustMap':
-        'Le contexte système doit être un objet clé-valeur',
+        'Les variables d’exécution doivent être un objet clé-valeur',
     'security.policyGranularity': 'Granularité de la stratégie',
     'security.policyGranularityValue': 'Chaque appel d’outil et ses arguments',
     'security.fileBoundary': 'Limite des fichiers',
@@ -1206,13 +1547,25 @@ const _translations = <String, Map<String, String>>{
         'Dommages au système et exécution directe après téléchargement',
     'security.isolation': 'Isolation de l’exécution',
     'security.isolationValue': 'Bac à sable système',
+    'security.userApproved': 'Commandes Shell approuvées par l’utilisateur',
+    'security.userApprovedEmpty': 'Aucune commande mémorisée',
     'agent.primaryModel': 'Modèle principal',
+    'agent.fastModel': 'Modèle rapide',
     'agent.mode': 'Mode',
+    'agent.teamScope': 'Étendue des membres',
+    'agent.teamScopeAll': 'Tous les agents disponibles',
+    'agent.teamScopeCustom': 'Membres personnalisés',
+    'agent.teamMembers': 'Membres collaborateurs',
+    'agent.teamMembersLeaf':
+        'Les membres sélectionnés s’exécutent comme des feuilles et ne relancent pas d’orchestration Fibre ou Team.',
     'agent.loopLimit': 'Limite de boucles',
     'agent.deepThinking': 'Raisonnement approfondi',
     'agent.thinkingLevel': 'Niveau de raisonnement',
     'agent.systemPrompt': 'Prompt système',
-    'agent.systemContext': 'Contexte système',
+    'agent.systemContext': 'Variables d’exécution',
+    'agent.runtimeVariableKey': 'Nom de variable',
+    'agent.runtimeVariableValue': 'Valeur de variable',
+    'agent.addRuntimeVariable': 'Ajouter une variable d’exécution',
     'thinking.minimal': 'Minimal',
     'thinking.low': 'Faible',
     'thinking.medium': 'Moyen',
@@ -1224,6 +1577,46 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'Clé API',
     'mcp.connectionError': 'Erreur de connexion',
     'component.current': '{name}, actuel : {implementation}',
+    'component.toolSelection.name': 'Politique de sélection des outils',
+    'component.toolSelection.value':
+        'Limite les schémas envoyés au modèle pour les grands catalogues et permet une expansion à la demande',
+    'component.plugin.toolSelectionDirect.name': 'Afficher tous les outils',
+    'component.plugin.toolSelectionDirect.value':
+        'Envoie toujours tous les outils autorisés ; idéal pour les petits catalogues',
+    'component.plugin.toolSelectionLexical.name':
+        'Sélection par pertinence BM25',
+    'component.plugin.toolSelectionLexical.value':
+        'Compare localement les noms, descriptions et paramètres comme un moteur de recherche',
+    'component.plugin.toolSelectionLlm.name': 'Sélection par LLM',
+    'component.plugin.toolSelectionLlm.value':
+        'Lance un modèle rapide avec le rappel mémoire et revient à BM25 local en cas d’échec',
+    'component.plugin.toolSelectionRecent.name':
+        'Utilisés récemment en premier',
+    'component.plugin.toolSelectionRecent.value':
+        'Priorise les outils récemment appelés puis complète la limite dans un ordre stable',
+    'component.toolSelection.settings': 'Paramètres du plugin',
+    'component.toolSelection.settingsHelp':
+        'Les stratégies intégrées ne demandent que la limite d’outils ; effet au prochain Run.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Seuil d’affichage direct',
+    'component.toolSelection.max_visible_tools': 'Maximum visible par requête',
+    'component.toolSelection.max_tool_schema_tokens':
+        'Limite de jetons des schémas',
+    'component.toolSelection.candidate_top_k': 'Candidats pertinents Top K',
+    'component.toolSelection.context_turns':
+        'Tours de contexte pour la pertinence',
+    'component.toolSelection.max_tool_index_entries':
+        'Limite d’entrées de l’index masqué',
+    'component.toolSelection.max_tool_index_tokens':
+        'Limite de jetons de l’index masqué',
+    'component.toolSelection.tool_index_description_chars':
+        'Caractères par description d’index',
+    'component.toolSelection.expansion_batch_limit': 'Limite par expansion',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Limite développée par exécution',
+    'component.toolSelection.invalid':
+        'Saisissez des limites valides ; Top K ne peut pas dépasser le maximum visible.',
+    'component.toolSelection.restoreDefaults': 'Rétablir les seuils par défaut',
     'component.tokenEstimator.name': 'Estimation des jetons',
     'component.tokenEstimator.value':
         'Estime les jetons utilisés par les requêtes au modèle',
@@ -1245,6 +1638,30 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Réduction de fenêtre',
     'component.plugin.window.value':
         'Retire les anciens messages complets de la requête',
+    'component.sessionMemory.name': 'Mémoire de session',
+    'component.sessionMemory.value':
+        'Récupère l’historique omis du contexte actuel du modèle',
+    'component.modelRequestRecords.name': 'Enregistrements des requêtes modèle',
+    'component.modelRequestRecords.value':
+        'Conserve les entrées, sorties et erreurs filtrées pour Session → Requêtes LLM',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'Mémoire de session SQLite BM25',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Indexe les messages et retrouve l’historique omis de la requête actuelle',
+    'component.plugin.sessionMemoryNoop.name': 'Mémoire de session désactivée',
+    'component.plugin.sessionMemoryNoop.value':
+        'N’indexe ni ne récupère l’historique de session omis',
+    'component.plugin.filesystemModelRequests.name':
+        'Enregistrements modèle sur fichiers',
+    'component.plugin.filesystemModelRequests.value':
+        'Écrit les entrées, sorties et erreurs filtrées dans le dossier local',
+    'component.plugin.modelRequestsOff.name':
+        'Enregistrements modèle désactivés',
+    'component.plugin.modelRequestsOff.value':
+        'Ne conserve pas les requêtes LLM de la session',
+    'component.path.sessionMemory': 'Dossier actuel de mémoire de session',
+    'component.path.modelRequestRecords':
+        'Dossier actuel des enregistrements modèle',
     'component.decidedBy': 'Contrôlé par {owner}',
     'component.scope': 'Portée {scope}',
     'component.scope.process': 'Processus actuel',
@@ -1319,14 +1736,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Archiver',
     'workspace.emptyPrompt': 'Comment puis-je vous aider ?',
     'workspace.processing': 'Traitement en cours',
+    'workspace.thinking': 'Réflexion en cours',
     'workspace.processed': 'Traité',
     'workspace.processedTime': 'Traité pendant {time}',
     'workspace.requestApproval': 'Approbation demandée',
     'workspace.inputSteer': 'Ajoutez des instructions à la tâche en cours',
     'workspace.inputAgent': 'Demandez à l’agent…',
+    'workspace.inputPlan': 'Décrivez ce que vous souhaitez planifier…',
+    'workspace.inputGoal': 'Décrivez l’objectif à atteindre…',
     'workspace.chooseAgent': 'Choisir un agent',
     'workspace.approvalMode': 'Approbation : {mode}',
     'workspace.openFile': 'Ouvrir un fichier',
+    'workspace.planMode': 'Mode planification',
+    'workspace.goalMode': 'Mode objectif',
+    'workspace.goalModeDescription':
+        'Exécutez et vérifiez l’objectif avant de terminer',
+    'workspace.planModeDescription':
+        'Créer un plan exploitable sans modifier l’espace de travail',
     'workspace.noSkills': 'Aucune skill disponible',
     'workspace.addContent': 'Ajouter du contenu',
     'workspace.sendSteer': 'Envoyer les instructions',
@@ -1343,6 +1769,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'dossier',
     'workspace.referenceSelection': 'Référencer la sélection',
     'workspace.stop': 'Arrêter',
+    'workspace.terminal': 'Terminal',
     'approval.alwaysAsk': 'Toujours demander',
     'approval.highRisk': 'Demander pour les actions à risque',
     'approval.autoApprove': 'Approuver automatiquement',
@@ -1377,6 +1804,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Annulé',
     'decision.approve': 'Approuver',
     'decision.approveOnce': 'Approuver une fois',
+    'decision.approveAndRemember': 'Approuver et mémoriser',
     'decision.allow': 'Autoriser',
     'decision.deny': 'Refuser',
     'decision.submit': 'Envoyer',
@@ -1430,6 +1858,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Dunkel',
     'settings.agent': 'Agent',
     'settings.defaultAgent': 'Standardagent',
+    'settings.defaultModel': 'Standardmodell',
+    'settings.setAsDefault': 'Als Standard festlegen',
+    'settings.currentDefault': 'Aktueller Standard',
     'settings.defaultWorkspace': 'Standard-Arbeitsbereich des Agenten',
     'settings.defaultWorkspacePath':
         'Pfad zum Standard-Arbeitsbereich des Agenten',
@@ -1452,9 +1883,9 @@ const _translations = <String, Map<String, String>>{
     'settings.pathRequired': 'Der Pfad darf nicht leer sein',
     'settings.pathUnavailable': 'Dieser Ordner kann nicht verwendet werden',
     'settings.systemContextInvalidJson':
-        'Der Systemkontext ist kein gültiges JSON',
+        'Die Laufzeitvariablen sind kein gültiges JSON',
     'settings.systemContextMustMap':
-        'Der Systemkontext muss ein Schlüssel-Wert-Objekt sein',
+        'Die Laufzeitvariablen müssen ein Schlüssel-Wert-Objekt sein',
     'security.policyGranularity': 'Richtliniengranularität',
     'security.policyGranularityValue':
         'Jeder Werkzeugaufruf und seine Argumente',
@@ -1472,13 +1903,25 @@ const _translations = <String, Map<String, String>>{
         'Systemschäden und direkte Ausführung nach Downloads',
     'security.isolation': 'Ausführungsisolation',
     'security.isolationValue': 'System-Sandbox',
+    'security.userApproved': 'Vom Benutzer genehmigte Shell-Befehle',
+    'security.userApprovedEmpty': 'Keine gemerkten Befehle',
     'agent.primaryModel': 'Primäres Modell',
+    'agent.fastModel': 'Schnelles Modell',
     'agent.mode': 'Modus',
+    'agent.teamScope': 'Mitgliederbereich',
+    'agent.teamScopeAll': 'Alle verfügbaren Agenten',
+    'agent.teamScopeCustom': 'Benutzerdefinierte Mitglieder',
+    'agent.teamMembers': 'Zusammenarbeitende Mitglieder',
+    'agent.teamMembersLeaf':
+        'Ausgewählte Mitglieder werden als Blätter ausgeführt und starten keine weitere Fibre- oder Team-Orchestrierung.',
     'agent.loopLimit': 'Schleifenlimit',
     'agent.deepThinking': 'Tiefes Denken',
     'agent.thinkingLevel': 'Denkstufe',
     'agent.systemPrompt': 'System-Prompt',
-    'agent.systemContext': 'Systemkontext',
+    'agent.systemContext': 'Laufzeitvariablen',
+    'agent.runtimeVariableKey': 'Variablenname',
+    'agent.runtimeVariableValue': 'Variablenwert',
+    'agent.addRuntimeVariable': 'Laufzeitvariable hinzufügen',
     'thinking.minimal': 'Minimal',
     'thinking.low': 'Niedrig',
     'thinking.medium': 'Mittel',
@@ -1490,6 +1933,44 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'API-Schlüssel',
     'mcp.connectionError': 'Verbindungsfehler',
     'component.current': '{name}, aktuell: {implementation}',
+    'component.toolSelection.name': 'Werkzeug-Auswahlrichtlinie',
+    'component.toolSelection.value':
+        'Begrenzt Werkzeugschemata bei großen Katalogen und erlaubt Erweiterung bei Bedarf',
+    'component.plugin.toolSelectionDirect.name':
+        'Alle Werkzeuge direkt anzeigen',
+    'component.plugin.toolSelectionDirect.value':
+        'Sendet immer alle erlaubten Werkzeuge; ideal für kleine Kataloge',
+    'component.plugin.toolSelectionLexical.name': 'BM25-Relevanzauswahl',
+    'component.plugin.toolSelectionLexical.value':
+        'Vergleicht Namen, Beschreibungen und Parameter lokal wie eine Suchmaschine',
+    'component.plugin.toolSelectionLlm.name': 'LLM-Werkzeugauswahl',
+    'component.plugin.toolSelectionLlm.value':
+        'Nutzt parallel zum Gedächtnis ein schnelles Modell und bei Fehlern lokales BM25',
+    'component.plugin.toolSelectionRecent.name': 'Zuletzt verwendete zuerst',
+    'component.plugin.toolSelectionRecent.value':
+        'Priorisiert kürzlich aufgerufene Werkzeuge und füllt das Limit stabil auf',
+    'component.toolSelection.settings': 'Plugin-Parameter',
+    'component.toolSelection.settingsHelp':
+        'Integrierte Strategien benötigen nur das Werkzeuglimit; gültig ab dem nächsten Run.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Schwelle für direkte Anzeige',
+    'component.toolSelection.max_visible_tools': 'Maximal sichtbar pro Anfrage',
+    'component.toolSelection.max_tool_schema_tokens':
+        'Token-Limit der Werkzeugschemata',
+    'component.toolSelection.candidate_top_k': 'Relevanzkandidaten Top K',
+    'component.toolSelection.context_turns': 'Kontextrunden für Relevanz',
+    'component.toolSelection.max_tool_index_entries':
+        'Eintragslimit des verborgenen Index',
+    'component.toolSelection.max_tool_index_tokens':
+        'Token-Limit des verborgenen Index',
+    'component.toolSelection.tool_index_description_chars':
+        'Zeichen je Indexbeschreibung',
+    'component.toolSelection.expansion_batch_limit': 'Limit je Erweiterung',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Erweiterungslimit je Lauf',
+    'component.toolSelection.invalid':
+        'Gültige Grenzen eingeben; Top K darf das sichtbare Maximum nicht überschreiten.',
+    'component.toolSelection.restoreDefaults': 'Standardwerte wiederherstellen',
     'component.tokenEstimator.name': 'Token-Schätzung',
     'component.tokenEstimator.value':
         'Schätzt den Tokenverbrauch von Modellanfragen',
@@ -1511,6 +1992,30 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Fensterkürzung',
     'component.plugin.window.value':
         'Entfernt ältere vollständige Nachrichten aus der Anfrage',
+    'component.sessionMemory.name': 'Sitzungsspeicher',
+    'component.sessionMemory.value':
+        'Ruft Verlauf ab, der im aktuellen Modellkontext ausgelassen wurde',
+    'component.modelRequestRecords.name': 'Modellanfrageprotokolle',
+    'component.modelRequestRecords.value':
+        'Speichert bereinigte Ein-/Ausgaben und Fehler für Sitzung → LLM-Anfragen',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'SQLite-BM25-Sitzungsspeicher',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Indiziert Sitzungsnachrichten und findet ausgelassenen Verlauf wieder',
+    'component.plugin.sessionMemoryNoop.name': 'Sitzungsspeicher deaktiviert',
+    'component.plugin.sessionMemoryNoop.value':
+        'Indiziert oder lädt keinen ausgelassenen Sitzungsverlauf',
+    'component.plugin.filesystemModelRequests.name':
+        'Dateibasierte Modellprotokolle',
+    'component.plugin.filesystemModelRequests.value':
+        'Schreibt bereinigte Ein-/Ausgaben und Fehler in das lokale Verzeichnis',
+    'component.plugin.modelRequestsOff.name':
+        'Modellanfrageprotokolle deaktiviert',
+    'component.plugin.modelRequestsOff.value':
+        'Speichert keine LLM-Anfragen der Sitzung',
+    'component.path.sessionMemory': 'Aktuelles Sitzungsspeicherverzeichnis',
+    'component.path.modelRequestRecords':
+        'Aktuelles Verzeichnis der Modellprotokolle',
     'component.decidedBy': 'Gesteuert durch {owner}',
     'component.scope': 'Bereich {scope}',
     'component.scope.process': 'Aktueller Prozess',
@@ -1585,14 +2090,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Archivieren',
     'workspace.emptyPrompt': 'Wobei kann ich helfen?',
     'workspace.processing': 'In Bearbeitung',
+    'workspace.thinking': 'Denkt nach',
     'workspace.processed': 'Bearbeitet',
     'workspace.processedTime': '{time} lang bearbeitet',
     'workspace.requestApproval': 'Genehmigung angefordert',
     'workspace.inputSteer': 'Hinweise zur aktuellen Aufgabe hinzufügen',
     'workspace.inputAgent': 'Den Agenten fragen…',
+    'workspace.inputPlan': 'Beschreibe, was du planen möchtest…',
+    'workspace.inputGoal': 'Beschreibe das zu erreichende Ziel…',
     'workspace.chooseAgent': 'Agent auswählen',
     'workspace.approvalMode': 'Genehmigung: {mode}',
     'workspace.openFile': 'Datei öffnen',
+    'workspace.planMode': 'Planungsmodus',
+    'workspace.goalMode': 'Zielmodus',
+    'workspace.goalModeDescription':
+        'Ziel ausführen und prüfen, bevor der Lauf endet',
+    'workspace.planModeDescription':
+        'Einen umsetzbaren Plan erstellen, ohne den Arbeitsbereich zu ändern',
     'workspace.noSkills': 'Keine Skills verfügbar',
     'workspace.addContent': 'Inhalt hinzufügen',
     'workspace.sendSteer': 'Hinweise senden',
@@ -1609,6 +2123,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'Ordner',
     'workspace.referenceSelection': 'Auswahl referenzieren',
     'workspace.stop': 'Stoppen',
+    'workspace.terminal': 'Terminal',
     'approval.alwaysAsk': 'Immer fragen',
     'approval.highRisk': 'Bei riskanten Aktionen fragen',
     'approval.autoApprove': 'Automatisch genehmigen',
@@ -1643,6 +2158,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Abgebrochen',
     'decision.approve': 'Genehmigen',
     'decision.approveOnce': 'Einmal genehmigen',
+    'decision.approveAndRemember': 'Genehmigen und merken',
     'decision.allow': 'Zulassen',
     'decision.deny': 'Ablehnen',
     'decision.submit': 'Senden',
@@ -1696,6 +2212,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'ダーク',
     'settings.agent': 'エージェント',
     'settings.defaultAgent': 'デフォルトエージェント',
+    'settings.defaultModel': 'デフォルトモデル',
+    'settings.setAsDefault': 'デフォルトに設定',
+    'settings.currentDefault': '現在のデフォルト',
     'settings.defaultWorkspace': 'エージェントのデフォルトワークスペース',
     'settings.defaultWorkspacePath': 'エージェントのデフォルトワークスペースのパス',
     'settings.chooseDirectory': 'フォルダを選択',
@@ -1716,8 +2235,8 @@ const _translations = <String, Map<String, String>>{
     'settings.deleteForever': '完全に削除',
     'settings.pathRequired': 'パスを空にできません',
     'settings.pathUnavailable': 'このフォルダは使用できません',
-    'settings.systemContextInvalidJson': 'システムコンテキストは有効な JSON ではありません',
-    'settings.systemContextMustMap': 'システムコンテキストはキーと値のオブジェクトである必要があります',
+    'settings.systemContextInvalidJson': '実行変数は有効な JSON ではありません',
+    'settings.systemContextMustMap': '実行変数はキーと値のオブジェクトである必要があります',
     'security.policyGranularity': 'ポリシーの粒度',
     'security.policyGranularityValue': '各ツール呼び出しと引数',
     'security.fileBoundary': 'ファイル境界',
@@ -1730,13 +2249,24 @@ const _translations = <String, Map<String, String>>{
     'security.autoBlockValue': 'システム破壊とダウンロード後の直接実行',
     'security.isolation': '実行の分離',
     'security.isolationValue': 'システムサンドボックス',
+    'security.userApproved': 'ユーザーが承認した Shell コマンド',
+    'security.userApprovedEmpty': '記憶されたコマンドはありません',
     'agent.primaryModel': 'メインモデル',
+    'agent.fastModel': '高速モデル',
     'agent.mode': 'モード',
+    'agent.teamScope': 'メンバー範囲',
+    'agent.teamScopeAll': '利用可能な全エージェント',
+    'agent.teamScopeCustom': 'カスタムメンバー',
+    'agent.teamMembers': 'コラボレーションメンバー',
+    'agent.teamMembersLeaf': '選択したメンバーはリーフとして実行され、Fibre / Team の編成を続けません。',
     'agent.loopLimit': 'ループ上限',
     'agent.deepThinking': '深い思考',
     'agent.thinkingLevel': '思考レベル',
     'agent.systemPrompt': 'システムプロンプト',
-    'agent.systemContext': 'システムコンテキスト',
+    'agent.systemContext': '実行変数',
+    'agent.runtimeVariableKey': '変数名',
+    'agent.runtimeVariableValue': '変数値',
+    'agent.addRuntimeVariable': '実行変数を追加',
     'thinking.minimal': '最小',
     'thinking.low': '低',
     'thinking.medium': '中',
@@ -1748,6 +2278,36 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'API キー',
     'mcp.connectionError': '接続エラー',
     'component.current': '{name}、現在は {implementation}',
+    'component.toolSelection.name': 'ツール選択ポリシー',
+    'component.toolSelection.value': 'ツール数が多いときにモデルへ送るスキーマを制限し、必要に応じて展開します',
+    'component.plugin.toolSelectionDirect.name': 'すべてのツールを直接表示',
+    'component.plugin.toolSelectionDirect.value':
+        '許可された全ツールを常に送信します。小規模なカタログ向けです',
+    'component.plugin.toolSelectionLexical.name': 'BM25 関連度選択',
+    'component.plugin.toolSelectionLexical.value':
+        '名前・説明・引数を検索エンジンのようにローカル照合します',
+    'component.plugin.toolSelectionLlm.name': 'LLM ツール選択',
+    'component.plugin.toolSelectionLlm.value':
+        'Memory Recall と並行して高速モデルを使い、失敗時はローカル BM25 に戻します',
+    'component.plugin.toolSelectionRecent.name': '最近使用したツールを優先',
+    'component.plugin.toolSelectionRecent.value':
+        '最近呼び出したツールを先に置き、安定した順序で上限まで補います',
+    'component.toolSelection.settings': 'プラグイン設定',
+    'component.toolSelection.settingsHelp':
+        '内蔵の選択方式はツール数上限だけを設定します。次回の Run から有効です。',
+    'component.toolSelection.direct_tool_count_threshold': '直接表示するツール数のしきい値',
+    'component.toolSelection.max_visible_tools': 'リクエストごとの最大表示数',
+    'component.toolSelection.max_tool_schema_tokens': 'ツールスキーマの Token 上限',
+    'component.toolSelection.candidate_top_k': '関連候補 Top K',
+    'component.toolSelection.context_turns': '関連度に使う文脈ターン数',
+    'component.toolSelection.max_tool_index_entries': '非表示索引の項目上限',
+    'component.toolSelection.max_tool_index_tokens': '非表示索引の Token 上限',
+    'component.toolSelection.tool_index_description_chars': '索引説明の最大文字数',
+    'component.toolSelection.expansion_batch_limit': '1 回の展開上限',
+    'component.toolSelection.max_expanded_tools_per_run': 'Run ごとの累積展開上限',
+    'component.toolSelection.invalid':
+        '有効な値を入力してください。Top K は最大表示数以下である必要があります。',
+    'component.toolSelection.restoreDefaults': '既定のしきい値に戻す',
     'component.tokenEstimator.name': 'Token 見積もり',
     'component.tokenEstimator.value': 'モデルリクエストの Token 使用量を見積もります',
     'component.reducer.name': 'コンテキスト圧縮',
@@ -1762,6 +2322,23 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.persistentSummary.value': '古いメッセージを要約して最近の文脈を保ちます',
     'component.plugin.window.name': 'ウィンドウ切り詰め',
     'component.plugin.window.value': '古い完全なメッセージをリクエストから除外します',
+    'component.sessionMemory.name': 'セッションメモリ',
+    'component.sessionMemory.value': '現在のモデルコンテキストから省略された履歴を検索します',
+    'component.modelRequestRecords.name': 'モデルリクエスト記録',
+    'component.modelRequestRecords.value':
+        'セッション → LLM リクエスト用に秘匿化した入出力とエラーを保存します',
+    'component.plugin.sessionMemorySqliteBm25.name': 'SQLite BM25 セッションメモリ',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'メッセージを索引化し、現在のリクエストから省略された履歴を検索します',
+    'component.plugin.sessionMemoryNoop.name': 'セッションメモリを無効化',
+    'component.plugin.sessionMemoryNoop.value': '省略されたセッション履歴を索引化・検索しません',
+    'component.plugin.filesystemModelRequests.name': 'ファイル形式のモデルリクエスト記録',
+    'component.plugin.filesystemModelRequests.value':
+        '秘匿化した入出力とエラーをローカルディレクトリに保存します',
+    'component.plugin.modelRequestsOff.name': 'モデルリクエスト記録を無効化',
+    'component.plugin.modelRequestsOff.value': 'セッションの LLM リクエスト記録を保持しません',
+    'component.path.sessionMemory': '現在のセッションメモリディレクトリ',
+    'component.path.modelRequestRecords': '現在のモデルリクエスト記録ディレクトリ',
     'component.decidedBy': '{owner} が制御',
     'component.scope': '範囲 {scope}',
     'component.scope.process': '現在のプロセス',
@@ -1836,14 +2413,21 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'アーカイブ',
     'workspace.emptyPrompt': '何をお手伝いしましょうか？',
     'workspace.processing': '処理中',
+    'workspace.thinking': '考えています',
     'workspace.processed': '処理済み',
     'workspace.processedTime': '{time} 処理しました',
     'workspace.requestApproval': '承認が必要です',
     'workspace.inputSteer': '現在のタスクに指示を追加',
     'workspace.inputAgent': 'エージェントに依頼…',
+    'workspace.inputPlan': '計画したい内容を入力…',
+    'workspace.inputGoal': '達成する目標を入力…',
     'workspace.chooseAgent': 'エージェントを選択',
     'workspace.approvalMode': '承認：{mode}',
     'workspace.openFile': 'ファイルを開く',
+    'workspace.planMode': '計画モード',
+    'workspace.goalMode': '目標モード',
+    'workspace.goalModeDescription': '目標を実行・検証し、完了後に終了',
+    'workspace.planModeDescription': 'ワークスペースを変更せずに実行可能な計画を作成',
     'workspace.noSkills': '利用できる Skill はありません',
     'workspace.addContent': 'コンテンツを追加',
     'workspace.sendSteer': '指示を送信',
@@ -1860,6 +2444,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'フォルダ',
     'workspace.referenceSelection': '選択範囲を参照',
     'workspace.stop': '停止',
+    'workspace.terminal': 'ターミナル',
     'approval.alwaysAsk': '毎回確認',
     'approval.highRisk': '危険な操作のみ確認',
     'approval.autoApprove': '自動承認',
@@ -1889,6 +2474,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'キャンセル済み',
     'decision.approve': '承認',
     'decision.approveOnce': '一度だけ承認',
+    'decision.approveAndRemember': '承認して記憶',
     'decision.allow': '許可',
     'decision.deny': '拒否',
     'decision.submit': '送信',
@@ -1939,6 +2525,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': '다크',
     'settings.agent': '에이전트',
     'settings.defaultAgent': '기본 에이전트',
+    'settings.defaultModel': '기본 모델',
+    'settings.setAsDefault': '기본값으로 설정',
+    'settings.currentDefault': '현재 기본값',
     'settings.defaultWorkspace': '에이전트 기본 워크스페이스',
     'settings.defaultWorkspacePath': '에이전트 기본 워크스페이스 경로',
     'settings.chooseDirectory': '폴더 선택',
@@ -1959,8 +2548,8 @@ const _translations = <String, Map<String, String>>{
     'settings.deleteForever': '영구 삭제',
     'settings.pathRequired': '경로를 비워 둘 수 없습니다',
     'settings.pathUnavailable': '이 폴더를 사용할 수 없습니다',
-    'settings.systemContextInvalidJson': '시스템 컨텍스트가 올바른 JSON이 아닙니다',
-    'settings.systemContextMustMap': '시스템 컨텍스트는 키-값 객체여야 합니다',
+    'settings.systemContextInvalidJson': '런타임 변수가 올바른 JSON이 아닙니다',
+    'settings.systemContextMustMap': '런타임 변수는 키-값 객체여야 합니다',
     'security.policyGranularity': '정책 세분성',
     'security.policyGranularityValue': '각 도구 호출과 인수',
     'security.fileBoundary': '파일 경계',
@@ -1973,13 +2562,25 @@ const _translations = <String, Map<String, String>>{
     'security.autoBlockValue': '시스템 수준 손상 및 다운로드 후 직접 실행',
     'security.isolation': '실행 격리',
     'security.isolationValue': '시스템 샌드박스',
+    'security.userApproved': '사용자가 승인한 Shell 명령',
+    'security.userApprovedEmpty': '기억된 명령이 없습니다',
     'agent.primaryModel': '주 모델',
+    'agent.fastModel': '빠른 모델',
     'agent.mode': '모드',
+    'agent.teamScope': '멤버 범위',
+    'agent.teamScopeAll': '사용 가능한 모든 에이전트',
+    'agent.teamScopeCustom': '사용자 지정 멤버',
+    'agent.teamMembers': '협업 멤버',
+    'agent.teamMembersLeaf':
+        '선택한 멤버는 리프 노드로 실행되며 Fibre / Team 오케스트레이션을 계속하지 않습니다.',
     'agent.loopLimit': '루프 한도',
     'agent.deepThinking': '심층 사고',
     'agent.thinkingLevel': '사고 수준',
     'agent.systemPrompt': '시스템 프롬프트',
-    'agent.systemContext': '시스템 컨텍스트',
+    'agent.systemContext': '런타임 변수',
+    'agent.runtimeVariableKey': '변수 이름',
+    'agent.runtimeVariableValue': '변수 값',
+    'agent.addRuntimeVariable': '런타임 변수 추가',
     'thinking.minimal': '최소',
     'thinking.low': '낮음',
     'thinking.medium': '중간',
@@ -1991,6 +2592,37 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'API 키',
     'mcp.connectionError': '연결 오류',
     'component.current': '{name}, 현재 {implementation}',
+    'component.toolSelection.name': '도구 선택 정책',
+    'component.toolSelection.value':
+        '도구가 많을 때 모델에 보낼 스키마를 제한하고 필요 시 숨은 도구를 확장합니다',
+    'component.plugin.toolSelectionDirect.name': '모든 도구 직접 표시',
+    'component.plugin.toolSelectionDirect.value':
+        '허용된 모든 도구를 항상 전송하며 작은 카탈로그에 적합합니다',
+    'component.plugin.toolSelectionLexical.name': 'BM25 관련성 선택',
+    'component.plugin.toolSelectionLexical.value':
+        '이름, 설명, 매개변수를 검색 엔진처럼 로컬에서 비교합니다',
+    'component.plugin.toolSelectionLlm.name': 'LLM 도구 선택',
+    'component.plugin.toolSelectionLlm.value':
+        'Memory Recall과 동시에 빠른 모델을 실행하고 실패하면 로컬 BM25로 대체합니다',
+    'component.plugin.toolSelectionRecent.name': '최근 사용 도구 우선',
+    'component.plugin.toolSelectionRecent.value':
+        '최근 호출한 도구를 먼저 배치하고 안정적인 순서로 한도까지 채웁니다',
+    'component.toolSelection.settings': '플러그인 매개변수',
+    'component.toolSelection.settingsHelp':
+        '내장 선택 전략은 도구 수 한도만 설정하며 다음 Run부터 적용됩니다.',
+    'component.toolSelection.direct_tool_count_threshold': '직접 표시 도구 수 임계값',
+    'component.toolSelection.max_visible_tools': '요청당 최대 표시 도구 수',
+    'component.toolSelection.max_tool_schema_tokens': '도구 스키마 Token 한도',
+    'component.toolSelection.candidate_top_k': '관련 후보 Top K',
+    'component.toolSelection.context_turns': '관련성 문맥 턴 수',
+    'component.toolSelection.max_tool_index_entries': '숨은 도구 색인 항목 한도',
+    'component.toolSelection.max_tool_index_tokens': '숨은 도구 색인 Token 한도',
+    'component.toolSelection.tool_index_description_chars': '색인 설명당 문자 수',
+    'component.toolSelection.expansion_batch_limit': '회당 확장 도구 한도',
+    'component.toolSelection.max_expanded_tools_per_run': 'Run당 누적 확장 한도',
+    'component.toolSelection.invalid':
+        '유효한 값을 입력하세요. Top K는 최대 표시 수를 넘을 수 없습니다.',
+    'component.toolSelection.restoreDefaults': '기본 임계값 복원',
     'component.tokenEstimator.name': 'Token 추정',
     'component.tokenEstimator.value': '모델 요청의 Token 사용량을 추정합니다',
     'component.reducer.name': '컨텍스트 압축',
@@ -2005,6 +2637,23 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.persistentSummary.value': '이전 메시지를 요약하고 최근 컨텍스트를 유지합니다',
     'component.plugin.window.name': '창 잘라내기',
     'component.plugin.window.value': '이전의 완전한 메시지를 요청에서 제거합니다',
+    'component.sessionMemory.name': '세션 메모리',
+    'component.sessionMemory.value': '현재 모델 컨텍스트에서 생략된 세션 기록을 검색합니다',
+    'component.modelRequestRecords.name': '모델 요청 기록',
+    'component.modelRequestRecords.value':
+        '세션 → LLM 요청용으로 비식별화된 입력, 출력 및 오류를 보관합니다',
+    'component.plugin.sessionMemorySqliteBm25.name': 'SQLite BM25 세션 메모리',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        '메시지를 색인하고 현재 요청에서 생략된 기록을 검색합니다',
+    'component.plugin.sessionMemoryNoop.name': '세션 메모리 끄기',
+    'component.plugin.sessionMemoryNoop.value': '생략된 세션 기록을 색인하거나 검색하지 않습니다',
+    'component.plugin.filesystemModelRequests.name': '파일 모델 요청 기록',
+    'component.plugin.filesystemModelRequests.value':
+        '비식별화된 입출력과 오류를 로컬 디렉터리에 저장합니다',
+    'component.plugin.modelRequestsOff.name': '모델 요청 기록 끄기',
+    'component.plugin.modelRequestsOff.value': '세션의 LLM 요청 기록을 보관하지 않습니다',
+    'component.path.sessionMemory': '현재 세션 메모리 디렉터리',
+    'component.path.modelRequestRecords': '현재 모델 요청 기록 디렉터리',
     'component.decidedBy': '{owner}에서 제어',
     'component.scope': '범위 {scope}',
     'component.scope.process': '현재 프로세스',
@@ -2079,14 +2728,21 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': '보관',
     'workspace.emptyPrompt': '무엇을 도와드릴까요?',
     'workspace.processing': '처리 중',
+    'workspace.thinking': '생각 중',
     'workspace.processed': '처리됨',
     'workspace.processedTime': '{time} 동안 처리됨',
     'workspace.requestApproval': '승인 요청됨',
     'workspace.inputSteer': '현재 작업에 지침 추가',
     'workspace.inputAgent': '에이전트에게 요청…',
+    'workspace.inputPlan': '계획할 작업을 설명하세요…',
+    'workspace.inputGoal': '달성할 목표를 설명하세요…',
     'workspace.chooseAgent': '에이전트 선택',
     'workspace.approvalMode': '승인: {mode}',
     'workspace.openFile': '파일 열기',
+    'workspace.planMode': '계획 모드',
+    'workspace.goalMode': '목표 모드',
+    'workspace.goalModeDescription': '목표를 실행하고 검증한 뒤 완료',
+    'workspace.planModeDescription': '워크스페이스를 변경하지 않고 실행 가능한 계획 만들기',
     'workspace.noSkills': '사용 가능한 Skill이 없습니다',
     'workspace.addContent': '콘텐츠 추가',
     'workspace.sendSteer': '지침 보내기',
@@ -2103,6 +2759,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': '폴더',
     'workspace.referenceSelection': '선택 영역 참조',
     'workspace.stop': '중지',
+    'workspace.terminal': '터미널',
     'approval.alwaysAsk': '항상 묻기',
     'approval.highRisk': '위험한 작업만 묻기',
     'approval.autoApprove': '자동 승인',
@@ -2132,6 +2789,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': '취소됨',
     'decision.approve': '승인',
     'decision.approveOnce': '한 번 승인',
+    'decision.approveAndRemember': '승인하고 기억',
     'decision.allow': '허용',
     'decision.deny': '거부',
     'decision.submit': '제출',
@@ -2182,6 +2840,9 @@ const _translations = <String, Map<String, String>>{
     'settings.themeDark': 'Тёмная',
     'settings.agent': 'Агент',
     'settings.defaultAgent': 'Агент по умолчанию',
+    'settings.defaultModel': 'Модель по умолчанию',
+    'settings.setAsDefault': 'Сделать по умолчанию',
+    'settings.currentDefault': 'Текущее значение по умолчанию',
     'settings.defaultWorkspace': 'Рабочая область агента по умолчанию',
     'settings.defaultWorkspacePath':
         'Путь к рабочей области агента по умолчанию',
@@ -2204,9 +2865,9 @@ const _translations = <String, Map<String, String>>{
     'settings.pathRequired': 'Путь не может быть пустым',
     'settings.pathUnavailable': 'Эту папку нельзя использовать',
     'settings.systemContextInvalidJson':
-        'Системный контекст не является допустимым JSON',
+        'Переменные выполнения не являются допустимым JSON',
     'settings.systemContextMustMap':
-        'Системный контекст должен быть объектом ключ-значение',
+        'Переменные выполнения должны быть объектом ключ-значение',
     'security.policyGranularity': 'Детализация политики',
     'security.policyGranularityValue':
         'Каждый вызов инструмента и его аргументы',
@@ -2223,13 +2884,25 @@ const _translations = <String, Map<String, String>>{
         'Повреждение системы и прямой запуск после загрузки',
     'security.isolation': 'Изоляция выполнения',
     'security.isolationValue': 'Системная песочница',
+    'security.userApproved': 'Одобренные пользователем Shell-команды',
+    'security.userApprovedEmpty': 'Запомненных команд пока нет',
     'agent.primaryModel': 'Основная модель',
+    'agent.fastModel': 'Быстрая модель',
     'agent.mode': 'Режим',
+    'agent.teamScope': 'Состав участников',
+    'agent.teamScopeAll': 'Все доступные агенты',
+    'agent.teamScopeCustom': 'Выбранные участники',
+    'agent.teamMembers': 'Участники совместной работы',
+    'agent.teamMembersLeaf':
+        'Выбранные участники выполняются как листовые агенты и не запускают дальнейшую оркестрацию Fibre или Team.',
     'agent.loopLimit': 'Лимит циклов',
     'agent.deepThinking': 'Глубокое рассуждение',
     'agent.thinkingLevel': 'Уровень рассуждения',
     'agent.systemPrompt': 'Системный промпт',
-    'agent.systemContext': 'Системный контекст',
+    'agent.systemContext': 'Переменные выполнения',
+    'agent.runtimeVariableKey': 'Имя переменной',
+    'agent.runtimeVariableValue': 'Значение переменной',
+    'agent.addRuntimeVariable': 'Добавить переменную выполнения',
     'thinking.minimal': 'Минимальный',
     'thinking.low': 'Низкий',
     'thinking.medium': 'Средний',
@@ -2241,6 +2914,45 @@ const _translations = <String, Map<String, String>>{
     'mcp.apiKey': 'Ключ API',
     'mcp.connectionError': 'Ошибка подключения',
     'component.current': '{name}, сейчас: {implementation}',
+    'component.toolSelection.name': 'Политика выбора инструментов',
+    'component.toolSelection.value':
+        'Ограничивает схемы для больших каталогов и позволяет раскрывать скрытые инструменты по запросу',
+    'component.plugin.toolSelectionDirect.name': 'Показывать все инструменты',
+    'component.plugin.toolSelectionDirect.value':
+        'Всегда отправляет все разрешённые инструменты; подходит для небольших каталогов',
+    'component.plugin.toolSelectionLexical.name': 'Выбор по релевантности BM25',
+    'component.plugin.toolSelectionLexical.value':
+        'Локально сопоставляет имена, описания и параметры как поисковая система',
+    'component.plugin.toolSelectionLlm.name': 'Выбор инструментов через LLM',
+    'component.plugin.toolSelectionLlm.value':
+        'Запускает быструю модель параллельно с памятью и при ошибке использует локальный BM25',
+    'component.plugin.toolSelectionRecent.name':
+        'Сначала недавно использованные',
+    'component.plugin.toolSelectionRecent.value':
+        'Сначала ставит недавно вызванные инструменты и стабильно заполняет лимит',
+    'component.toolSelection.settings': 'Параметры плагина',
+    'component.toolSelection.settingsHelp':
+        'Встроенным стратегиям нужен только лимит инструментов; действует со следующего Run.',
+    'component.toolSelection.direct_tool_count_threshold':
+        'Порог прямого показа',
+    'component.toolSelection.max_visible_tools': 'Максимум видимых на запрос',
+    'component.toolSelection.max_tool_schema_tokens':
+        'Лимит Token схем инструментов',
+    'component.toolSelection.candidate_top_k': 'Релевантные кандидаты Top K',
+    'component.toolSelection.context_turns': 'Ходы контекста для релевантности',
+    'component.toolSelection.max_tool_index_entries':
+        'Лимит элементов скрытого индекса',
+    'component.toolSelection.max_tool_index_tokens':
+        'Лимит Token скрытого индекса',
+    'component.toolSelection.tool_index_description_chars':
+        'Символов на описание в индексе',
+    'component.toolSelection.expansion_batch_limit': 'Лимит за одно раскрытие',
+    'component.toolSelection.max_expanded_tools_per_run':
+        'Лимит раскрытых за Run',
+    'component.toolSelection.invalid':
+        'Введите допустимые значения; Top K не должен превышать видимый максимум.',
+    'component.toolSelection.restoreDefaults':
+        'Восстановить пороги по умолчанию',
     'component.tokenEstimator.name': 'Оценка Token',
     'component.tokenEstimator.value':
         'Оценивает число Token в запросах к модели',
@@ -2261,6 +2973,30 @@ const _translations = <String, Map<String, String>>{
     'component.plugin.window.name': 'Обрезка окна',
     'component.plugin.window.value':
         'Удаляет старые полные сообщения из запроса',
+    'component.sessionMemory.name': 'Память сеанса',
+    'component.sessionMemory.value':
+        'Извлекает историю, исключённую из текущего контекста модели',
+    'component.modelRequestRecords.name': 'Записи запросов модели',
+    'component.modelRequestRecords.value':
+        'Хранит очищенные входы, выходы и ошибки для Сеанс → Запросы LLM',
+    'component.plugin.sessionMemorySqliteBm25.name':
+        'Память сеанса SQLite BM25',
+    'component.plugin.sessionMemorySqliteBm25.value':
+        'Индексирует сообщения и находит историю, исключённую из текущего запроса',
+    'component.plugin.sessionMemoryNoop.name': 'Память сеанса отключена',
+    'component.plugin.sessionMemoryNoop.value':
+        'Не индексирует и не извлекает исключённую историю сеанса',
+    'component.plugin.filesystemModelRequests.name':
+        'Файловые записи запросов модели',
+    'component.plugin.filesystemModelRequests.value':
+        'Записывает очищенные входы, выходы и ошибки в локальный каталог',
+    'component.plugin.modelRequestsOff.name':
+        'Записи запросов модели отключены',
+    'component.plugin.modelRequestsOff.value':
+        'Не сохраняет записи LLM-запросов сеанса',
+    'component.path.sessionMemory': 'Текущий каталог памяти сеанса',
+    'component.path.modelRequestRecords':
+        'Текущий каталог записей запросов модели',
     'component.decidedBy': 'Управляется: {owner}',
     'component.scope': 'Область {scope}',
     'component.scope.process': 'Текущий процесс',
@@ -2335,14 +3071,23 @@ const _translations = <String, Map<String, String>>{
     'workspace.archive': 'Архивировать',
     'workspace.emptyPrompt': 'Чем я могу помочь?',
     'workspace.processing': 'Обработка',
+    'workspace.thinking': 'Размышляю',
     'workspace.processed': 'Обработано',
     'workspace.processedTime': 'Обработка заняла {time}',
     'workspace.requestApproval': 'Требуется подтверждение',
     'workspace.inputSteer': 'Добавьте указания к текущей задаче',
     'workspace.inputAgent': 'Попросите агента…',
+    'workspace.inputPlan': 'Опишите, что нужно спланировать…',
+    'workspace.inputGoal': 'Опишите цель, которую нужно достичь…',
     'workspace.chooseAgent': 'Выбрать агента',
     'workspace.approvalMode': 'Подтверждение: {mode}',
     'workspace.openFile': 'Открыть файл',
+    'workspace.planMode': 'Режим планирования',
+    'workspace.goalMode': 'Режим цели',
+    'workspace.goalModeDescription':
+        'Выполните и проверьте цель перед завершением',
+    'workspace.planModeDescription':
+        'Создать выполнимый план без изменения рабочей области',
     'workspace.noSkills': 'Нет доступных Skills',
     'workspace.addContent': 'Добавить содержимое',
     'workspace.sendSteer': 'Отправить указания',
@@ -2359,6 +3104,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.folder': 'папку',
     'workspace.referenceSelection': 'Добавить выделение',
     'workspace.stop': 'Остановить',
+    'workspace.terminal': 'Терминал',
     'approval.alwaysAsk': 'Всегда спрашивать',
     'approval.highRisk': 'Спрашивать для рискованных действий',
     'approval.autoApprove': 'Подтверждать автоматически',
@@ -2391,6 +3137,7 @@ const _translations = <String, Map<String, String>>{
     'status.cancelled': 'Отменено',
     'decision.approve': 'Подтвердить',
     'decision.approveOnce': 'Подтвердить один раз',
+    'decision.approveAndRemember': 'Подтвердить и запомнить',
     'decision.allow': 'Разрешить',
     'decision.deny': 'Отклонить',
     'decision.submit': 'Отправить',

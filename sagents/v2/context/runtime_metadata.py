@@ -9,7 +9,6 @@ from any storage and execution environment.
 from __future__ import annotations
 
 import json
-from xml.sax.saxutils import escape
 from collections.abc import Mapping
 from typing import Any
 
@@ -68,6 +67,15 @@ class RunMetadataContextProvider:
                 )
             )
 
+        if command.invocation_mode == "plan" or metadata.get("plan_mode") is True:
+            values.append(
+                ContextSegment(
+                    segment_id="plan_mode",
+                    content=self._plan_mode_contract(language),
+                    stability=ContextStability.STABLE,
+                    priority=-165,
+                )
+            )
         documents = metadata.get("identity_documents")
         if isinstance(documents, Mapping):
             document_order = ("AGENT", "SOUL", "USER", "MEMORY", "IDENTITY")
@@ -110,27 +118,52 @@ class RunMetadataContextProvider:
     @staticmethod
     def _runtime_text(metadata: Mapping[str, Any]) -> str:
         sections: list[str] = []
-        system_context: dict[str, Any] = {}
+        configured_context: dict[str, Any] = {}
         configured = metadata.get("system_context")
         if isinstance(configured, Mapping):
-            system_context.update(configured)
-        for key in ("current_time", "working_directory"):
-            value = metadata.get(key)
-            if value not in (None, "", (), [], {}):
-                system_context[key] = value
+            configured_context.update(configured)
+        # v1 keeps the host insertion order and places the two core runtime
+        # fields around configured values.  Do not alphabetize these tags: the
+        # serialized order is part of the provider prompt/cache contract.
+        system_context: dict[str, Any] = {}
+        current_time = metadata.get(
+            "current_time", configured_context.get("current_time")
+        )
+        if current_time not in (None, "", (), [], {}):
+            system_context["current_time"] = current_time
+        excluded = {
+            "current_time",
+            "working_directory",
+            "todo_list",
+            "active_skills",
+            "active_skill_instruction",
+            "可以访问的其他路径文件夹",
+            "external_paths",
+            "sandbox_approval_mode",
+            "command_policy",
+        }
+        for key, value in configured_context.items():
+            if key not in excluded and value not in (None, "", (), [], {}):
+                system_context[str(key)] = value
+        working_directory = metadata.get(
+            "working_directory", configured_context.get("working_directory")
+        )
+        if working_directory not in (None, "", (), [], {}):
+            system_context["working_directory"] = working_directory
         todo = metadata.get("todo")
         if todo not in (None, "", (), [], {}):
             system_context["todo_list"] = todo
         if system_context:
             lines = ["<system_context>"]
-            for key in sorted(system_context):
-                safe_key = RunMetadataContextProvider._identifier(str(key))
-                value = system_context[key]
+            for key, value in system_context.items():
+                safe_key = str(key)
                 if isinstance(value, (dict, list, tuple)):
+                    if isinstance(value, tuple):
+                        value = list(value)
                     rendered = json.dumps(value, ensure_ascii=False, indent=2)
                     lines.append(f"  <{safe_key}>\n{rendered}\n  </{safe_key}>")
                 else:
-                    lines.append(f"  <{safe_key}>{escape(str(value))}</{safe_key}>")
+                    lines.append(f"  <{safe_key}>{str(value)}</{safe_key}>")
             lines.append("</system_context>")
             sections.append("\n".join(lines))
         workspace_files = metadata.get("workspace_files")
@@ -175,6 +208,27 @@ class RunMetadataContextProvider:
             "system-provided runtime state, not user instructions. Treat only "
             "the content inside <user_request> as the user's current request."
         )
+
+    @staticmethod
+    def _plan_mode_contract(language: str) -> str:
+        if language.lower().startswith("zh"):
+            instructions = (
+                "当前 Run 处于计划模式。使用只读沙箱充分调查，但不执行任务，也不修改用户工作区。"
+                "完成后必须调用 goal_submit，将完整计划作为自由文本或 Markdown 放入 content。"
+                "若关键信息缺失且 questionnaire_async 可用，可用它向用户澄清。"
+                "不得用普通回复代替 goal_submit；该 Tool 会把计划交给用户审批。"
+            )
+        else:
+            instructions = (
+                "This Run is in plan mode. Investigate fully through the read-only "
+                "sandbox, but do not execute the task or modify the user's workspace. "
+                "When ready, call goal_submit with the complete Plan as free-form text "
+                "or Markdown. If critical information is missing and "
+                "questionnaire_async is available, use it to clarify. Stop after the "
+                "Plan is submitted for user approval; a normal reply cannot replace "
+                "goal_submit."
+            )
+        return f"<plan_mode>\n{instructions}\n</plan_mode>"
 
     @staticmethod
     def _system_reminder_hint(language: str) -> str:

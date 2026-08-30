@@ -130,6 +130,16 @@ class SessionRegistry:
             )
             self._conn.commit()
 
+    def remove_many(self, session_ids: list[str]) -> None:
+        if not session_ids:
+            return
+        with self._lock:
+            self._conn.executemany(
+                "DELETE FROM sessions WHERE session_id = ?",
+                [(session_id,) for session_id in session_ids],
+            )
+            self._conn.commit()
+
     def list_all(self) -> Dict[str, str]:
         """Return ``{session_id: absolute_workspace_path}``."""
         with self._lock:

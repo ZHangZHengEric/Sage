@@ -521,6 +521,37 @@ async def delete_conversation(
             )
         )
 
+    session_manager = get_global_session_manager()
+    session_manager.interrupt_session(
+        conversation_id,
+        "Conversation deleted by user",
+    )
+
+    await _get_stream_manager().stop_session(conversation_id)
+
+    persistence_task = _SESSION_PERSISTENCE_TASKS.get(conversation_id)
+    if persistence_task is not None and not persistence_task.done():
+        try:
+            await asyncio.shield(persistence_task)
+        except Exception as exc:
+            logger.bind(session_id=conversation_id).warning(
+                f"删除会话前等待持久化失败，继续删除: {exc}"
+            )
+
+    try:
+        await session_manager.delete_session(conversation_id)
+    except Exception as exc:
+        logger.bind(session_id=conversation_id).error(
+            f"删除 runtime session 存储失败: {exc}"
+        )
+        raise SageHTTPException(
+            **_conversation_error_kwargs(
+                message_key="conversation.delete_failed",
+                message_params={"session_id": conversation_id},
+                error_detail=f"Failed to delete runtime session '{conversation_id}': {exc}",
+            )
+        ) from exc
+
     success = await dao.delete_conversation(conversation_id)
     if not success:
         raise SageHTTPException(

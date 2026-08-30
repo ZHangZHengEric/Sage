@@ -2,7 +2,7 @@
 
 SAgents deliberately exposes only operations for a known ``session_id``.  The
 Desktop application owns listing, ordering, search, and user-facing metadata,
-so losing this file cannot damage or change any authoritative Session journal.
+so losing this file cannot damage or change authoritative Session state.
 """
 
 from __future__ import annotations
@@ -41,11 +41,14 @@ class JsonDesktopSessionIndex:
             await asyncio.to_thread(self._write, tuple(values.values()))
 
     async def remove(self, session_id: str) -> None:
+        await self.remove_many({session_id})
+
+    async def remove_many(self, session_ids: set[str] | frozenset[str]) -> None:
         async with self._lock:
             values = tuple(
                 value
                 for value in await asyncio.to_thread(self._read)
-                if value.session_id != session_id
+                if value.session_id not in session_ids
             )
             await asyncio.to_thread(self._write, values)
 

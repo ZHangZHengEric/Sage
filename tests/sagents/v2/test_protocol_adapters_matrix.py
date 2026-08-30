@@ -40,6 +40,7 @@ from sagents.v2.contracts.items import (
     ToolResultItemData,
     UsageSummary,
 )
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.principals import ActorRef, PrincipalType
 from sagents.v2.interfaces.protocols.a2a import A2AProtocolAdapter
 from sagents.v2.interfaces.protocols.acp import AcpProtocolAdapter
@@ -292,12 +293,87 @@ def test_ag_ui_pause_is_extension_or_explicit_loss_never_run_finished():
 
 
 def test_acp_interaction_is_request_with_stable_interaction_id():
-    source = event("interaction.requested")
+    source = event(
+        "interaction.requested",
+        data=InteractionEventData(
+            interaction_id="interaction_1",
+            interaction_type="questionnaire",
+            state="requested",
+            allowed_decisions=("submit", "cancel"),
+            payload={
+                "prompt": "Choose a target",
+                "questions": [
+                    {
+                        "id": "target",
+                        "type": "single",
+                        "title": "Target",
+                        "options": ["staging", "production"],
+                    }
+                ],
+            },
+        ),
+    )
     result = AcpProtocolAdapter().translate(source)
     frame_value = result.frames[0]
     assert frame_value.frame_kind == "request"
     assert frame_value.frame_id == "interaction_1"
-    assert frame_value.name == "session/request_permission"
+    assert frame_value.name == "session/request_input"
+    assert frame_value.payload["allowedDecisions"] == ["submit", "cancel"]
+    assert frame_value.payload["payload"]["questions"][0]["id"] == "target"
+
+
+def test_questionnaire_survives_a2a_and_mcp_projection():
+    source = event(
+        "interaction.requested",
+        data=InteractionEventData(
+            interaction_id="interaction_1",
+            interaction_type="questionnaire",
+            state="requested",
+            allowed_decisions=("submit", "cancel"),
+            payload={
+                "prompt": "Choose a target",
+                "questions": [
+                    {
+                        "id": "target",
+                        "type": "multiple",
+                        "title": "Targets",
+                        "options": ["staging", "production"],
+                    }
+                ],
+            },
+        ),
+    )
+
+    a2a = A2AProtocolAdapter().translate(source).frames[0].payload["status"]
+    mcp = McpProtocolAdapter().translate(source).frames[0].payload
+
+    assert a2a["allowedDecisions"] == ["submit", "cancel"]
+    assert a2a["payload"]["questions"][0]["id"] == "target"
+    assert mcp["requestedSchema"]["properties"]["target"] == {
+        "type": "array",
+        "title": "Targets",
+        "items": {"type": "string", "enum": ["staging", "production"]},
+    }
+    assert mcp["sageInteraction"]["payload"] == source.data.payload
+
+
+@pytest.mark.parametrize("adapter", [AcpProtocolAdapter(), A2AProtocolAdapter()])
+def test_terminal_error_message_and_code_survive_protocol_projection(adapter):
+    source = event(
+        "run.failed",
+        data=RunEventData(
+            state="failed",
+            error=RuntimeErrorInfo(
+                code="model.provider_error",
+                category=ErrorCategory.PROVIDER_TRANSIENT,
+                message="模型服务暂时不可用，请稍后重试。",
+            ),
+        ),
+    )
+    payload = adapter.translate(source).frames[0].payload
+    status = payload.get("status") or payload["update"]
+    assert status["message"] == "模型服务暂时不可用，请稍后重试。"
+    assert status["errorCode"] == "model.provider_error"
 
 
 def test_mcp_explicitly_refuses_to_masquerade_as_run_protocol():

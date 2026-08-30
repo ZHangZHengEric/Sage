@@ -72,6 +72,7 @@ class WindowContextReducer:
             digest = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
         return ContextProjection(
             messages=retained,
+            historical_messages=tuple(dropped),
             estimated_tokens=self.estimator.estimate(retained),
             source_message_count=len(messages),
             dropped_message_count=len(dropped),

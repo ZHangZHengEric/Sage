@@ -9,6 +9,7 @@ semantics for a known ``session_id``.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Collection, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
@@ -16,9 +17,17 @@ from sagents.v2.contracts.commands import (
     ReplyInteraction,
     ResumeRun,
     StartRun,
+    SteerInboxEntry,
     SteerRun,
 )
-from sagents.v2.contracts.events import RuntimeEvent
+from sagents.v2.contracts.common import Identifier
+from sagents.v2.contracts.events import (
+    EventData,
+    EventDurability,
+    EventSource,
+    EventSourceType,
+    RuntimeEvent,
+)
 from sagents.v2.contracts.interactions import (
     InteractionRequest,
     InteractionResolution,
@@ -26,6 +35,7 @@ from sagents.v2.contracts.interactions import (
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
     EventCursor,
+    RunHandle,
     RunResult,
     RunSnapshot,
     RunState,
@@ -37,12 +47,52 @@ from sagents.v2.contracts.session_commit import (
     RejectSessionCommit,
     SessionCommitProposal,
 )
-from sagents.v2.runtime.session.ephemeral import (
-    CommitResult,
-    EventDraft,
-    RunCreationResult,
-    SteerClaimResult,
-)
+
+
+@dataclass(frozen=True)
+class EventDraft:
+    """Unsequenced event submitted atomically through a :class:`SessionStore`.
+
+    This is part of the storage port rather than any concrete store. Callers
+    describe causality and payload while the implementation supplies identity,
+    timestamps, sequence numbers, actor, and default source information.
+    """
+
+    type: str
+    data: EventData
+    durability: EventDurability | None = None
+    turn_id: Identifier | None = None
+    step_id: Identifier | None = None
+    item_id: Identifier | None = None
+    job_id: Identifier | None = None
+    interaction_id: Identifier | None = None
+    flow_execution_id: Identifier | None = None
+    node_execution_id: Identifier | None = None
+    causation_id: Identifier | None = None
+    source: EventSource = EventSource(source_type=EventSourceType.RUNTIME)
+    ignorable: bool = False
+
+
+@dataclass(frozen=True)
+class RunCreationResult:
+    handle: RunHandle
+    events: tuple[RuntimeEvent, ...]
+    duplicate: bool = False
+
+
+@dataclass(frozen=True)
+class CommitResult:
+    run: RunSnapshot
+    session: SessionSnapshot
+    events: tuple[RuntimeEvent, ...]
+    duplicate: bool = False
+
+
+@dataclass(frozen=True)
+class SteerClaimResult:
+    run: RunSnapshot
+    entries: tuple[SteerInboxEntry, ...]
+    events: tuple[RuntimeEvent, ...]
 
 
 class SessionStoreCapabilities(Protocol):
@@ -83,7 +133,18 @@ class SessionStore(Protocol):
         self, interaction_id: str
     ) -> InteractionResolution: ...
 
-    async def delete_session(self, session_id: str) -> None: ...
+    async def delete_session(self, session_id: str) -> None:
+        """Delete a Session and every descendant after all Runs are terminal."""
+
+        ...
+
+    async def list_descendant_sessions(
+        self, session_id: str
+    ) -> tuple[SessionSnapshot, ...]:
+        """Return the authoritative child tree below ``session_id``."""
+
+        ...
+
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]: ...
 
     async def propose_session_commit(

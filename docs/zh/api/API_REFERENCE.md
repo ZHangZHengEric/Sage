@@ -71,7 +71,7 @@ agent = SAgent(
 | `agent_mode` | `"simple"` \| `"fibre"` \| `"team"`，影响默认 `AgentFlow` 组装 |
 | `custom_flow` | 若提供，则**不**再使用内置默认流 |
 | `custom_sub_agents` | 子 Agent 配置列表 |
-| `system_context` | 注入到运行时的系统上下文字典 |
+| `system_context` | 注入到运行时的运行变量字典（兼容字段名） |
 | `available_workflows` | 可用工作流（未传时内部以 `{}` 使用） |
 | `context_budget_config` | 上下文预算相关 |
 | `volume_mounts` | `List[VolumeMount]`，见 `sagents.utils.sandbox.config` |

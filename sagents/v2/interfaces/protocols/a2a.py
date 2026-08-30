@@ -68,7 +68,19 @@ class A2AProtocolAdapter:
                             payload={
                                 "taskId": event.run_id,
                                 "contextId": event.session_id,
-                                "status": {"state": status, "message": data.reason},
+                                "status": {
+                                    "state": status,
+                                    "message": (
+                                        data.error.message
+                                        if event.type == "run.failed" and data.error
+                                        else data.reason
+                                    ),
+                                    "errorCode": (
+                                        data.error.code
+                                        if event.type == "run.failed" and data.error
+                                        else None
+                                    ),
+                                },
                             },
                         ),
                     )
@@ -92,6 +104,8 @@ class A2AProtocolAdapter:
                                 "state": "input-required",
                                 "interactionId": data.interaction_id,
                                 "type": data.interaction_type,
+                                "allowedDecisions": list(data.allowed_decisions),
+                                "payload": data.payload,
                             },
                         },
                     ),

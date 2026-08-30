@@ -27,7 +27,7 @@ from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 
 
 pytestmark = [pytest.mark.live, pytest.mark.timeout(90)]
@@ -148,7 +148,7 @@ async def test_live_strict_structured_output():
 @pytest.mark.asyncio
 async def test_live_agent_loop_calls_tool_and_completes_canonical_run():
     provider = _live_provider()
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(
         StartRun(
             agent_id="live_calculator",

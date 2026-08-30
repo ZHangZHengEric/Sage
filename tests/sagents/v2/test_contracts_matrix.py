@@ -51,6 +51,12 @@ from sagents.v2.contracts.run_state import (
     RunState,
     SessionConcurrencyMode,
 )
+from sagents.v2.model.contracts import (
+    ModelEventKind,
+    ModelRequest,
+    ModelStreamEvent,
+    ModelToolDefinition,
+)
 
 
 NOW = datetime(2026, 8, 25, tzinfo=timezone.utc)
@@ -60,6 +66,52 @@ ACTOR = ActorRef(
     tenant_id="tenant_test",
 )
 SOURCE = EventSource(source_type=EventSourceType.RUNTIME, source_id="runtime_test")
+
+
+def test_streaming_text_deltas_preserve_markdown_whitespace():
+    markdown_delta = "\n\n## 实时标题\n\n"
+
+    model_event = ModelStreamEvent(
+        kind=ModelEventKind.TEXT_DELTA,
+        delta=markdown_delta,
+    )
+    runtime_data = ItemEventData(operation="delta", delta=model_event.delta)
+    restored = ItemEventData.model_validate_json(runtime_data.model_dump_json())
+
+    assert model_event.delta == markdown_delta
+    assert runtime_data.delta == markdown_delta
+    assert restored.delta == markdown_delta
+
+
+def test_model_request_canonicalizes_tool_wire_order_for_prompt_cache():
+    alpha = ModelToolDefinition(
+        name="alpha",
+        description="Alpha tool",
+        input_schema={"type": "object"},
+    )
+    zeta = ModelToolDefinition(
+        name="zeta",
+        description="Zeta tool",
+        input_schema={"type": "object"},
+    )
+
+    first = ModelRequest(
+        request_id="request_1",
+        run_id="run_1",
+        model_binding="primary",
+        messages=(),
+        tools=(zeta, alpha),
+    )
+    second = ModelRequest(
+        request_id="request_2",
+        run_id="run_1",
+        model_binding="primary",
+        messages=(),
+        tools=(alpha, zeta),
+    )
+
+    assert tuple(tool.name for tool in first.tools) == ("alpha", "zeta")
+    assert first.tools == second.tools
 
 
 def _error() -> RuntimeErrorInfo:

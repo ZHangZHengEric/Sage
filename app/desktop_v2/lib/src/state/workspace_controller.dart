@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/runtime_host.dart';
 import '../api/v2_api.dart';
 import '../models.dart';
+import '../services/terminal_service.dart';
+import '../usage_models.dart';
 
 typedef PreferencesLoader = Future<SharedPreferences> Function();
 
@@ -50,12 +52,18 @@ class WorkspaceController extends ChangeNotifier {
   final Map<String, List<Conversation>> _conversations = {};
   final Map<String, List<Conversation>> _archivedConversationCache = {};
   final Map<String, StreamSubscription<Map<String, Object?>>> _streams = {};
+  final Map<String, StreamSubscription<Map<String, Object?>>> _treeStreams = {};
+  final Map<String, Timer> _treeReconnectTimers = {};
   final Map<String, Set<String>> _preferredSkills = {};
   final Map<String, List<UploadedAttachment>> _attachments = {};
-  final Map<String, List<String>> _composerInsertions = {};
+  final Map<String, List<ComposerReference>> _composerReferences = {};
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _recoveringStreams = {};
   final Random _sessionIdRandom = Random.secure();
+  Timer? _workspaceRefreshTimer;
+  Future<void> _agentPatchTail = Future<void>.value();
+  int _agentPatchRevision = 0;
+  int _usageOverviewRevision = 0;
   bool _disposed = false;
 
   SharedPreferences? _preferences;
@@ -76,10 +84,15 @@ class WorkspaceController extends ChangeNotifier {
   String selectedGroupId = agentWorkspaceId;
   String selectedAgentId = '';
   String selectedConversationId = '';
+  String selectedSubSessionId = '';
   bool loading = true;
   bool filesLoading = false;
   bool archivedConversationsLoaded = false;
   String? error;
+  UsageOverview? usageOverview;
+  bool usageOverviewLoading = false;
+  String? usageOverviewError;
+  late final TerminalService terminalService = TerminalService(_api);
 
   List<WorkspaceGroup> get groups => [
     WorkspaceGroup(
@@ -146,15 +159,61 @@ class WorkspaceController extends ChangeNotifier {
     return null;
   }
 
+  Conversation? get selectedDisplayConversation {
+    final root = selectedConversation;
+    if (root == null || selectedSubSessionId.isEmpty) return root;
+    return root.subSessions
+        .where((value) => value.sessionId == selectedSubSessionId)
+        .firstOrNull;
+  }
+
+  bool get viewingSubSession => selectedSubSessionId.isNotEmpty;
+
   Set<String> get preferredSkills =>
       _preferredSkills.putIfAbsent(selectedConversationId, () => <String>{});
 
   List<UploadedAttachment> get attachments =>
       _attachments.putIfAbsent(selectedConversationId, () => []);
 
+  List<ComposerReference> get composerReferences {
+    final references = _composerReferences.putIfAbsent(
+      selectedConversationId,
+      () => <ComposerReference>[],
+    );
+    var hydratedAttachment = false;
+    for (final attachment in attachments) {
+      final alreadyRepresented = references.any(
+        (reference) =>
+            reference.path == attachment.path ||
+            reference.path == attachment.virtualPath,
+      );
+      if (alreadyRepresented) continue;
+      references.add(
+        ComposerReference(
+          fileName: attachment.name,
+          path: attachment.virtualPath.isEmpty
+              ? attachment.path
+              : attachment.virtualPath,
+          text: '',
+          isDirectory: attachment.isDirectory,
+        ),
+      );
+      hydratedAttachment = true;
+    }
+    if (hydratedAttachment) {
+      scheduleMicrotask(() {
+        if (!_disposed) notifyListeners();
+      });
+    }
+    return references;
+  }
+
   bool get canSend {
     final conversation = selectedConversation;
-    if (loading || selectedAgentId.isEmpty || conversation == null) {
+    if (loading ||
+        viewingSubSession ||
+        selectedAgentId.isEmpty ||
+        conversation == null) {
       return false;
     }
     if (conversation.pendingInteraction != null ||
@@ -191,11 +250,32 @@ class WorkspaceController extends ChangeNotifier {
       _adoptConversationAgent();
       await Future.wait([refreshSkills(), refreshFiles()]);
       await _reconnectRuns();
+      await _hydrateSessionTrees();
     } on Object catch (exception) {
       error = exception.toString();
     } finally {
       loading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> loadUsageOverview({int days = 30}) async {
+    final revision = ++_usageOverviewRevision;
+    usageOverviewLoading = true;
+    usageOverviewError = null;
+    notifyListeners();
+    try {
+      final value = await _api.getUsageOverview(days: days);
+      if (revision != _usageOverviewRevision) return;
+      usageOverview = value;
+    } on Object catch (exception) {
+      if (revision != _usageOverviewRevision) return;
+      usageOverviewError = exception.toString();
+    } finally {
+      if (revision == _usageOverviewRevision) {
+        usageOverviewLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -219,6 +299,7 @@ class WorkspaceController extends ChangeNotifier {
         .putIfAbsent(selectedGroupId, () => [])
         .insert(0, conversation);
     selectedConversationId = conversation.id;
+    selectedSubSessionId = '';
     _persist();
     if (notify) notifyListeners();
   }
@@ -233,11 +314,14 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectAgentWorkspaceConversation(String id) async {
-    if (selectedGroupId == agentWorkspaceId && selectedConversationId == id) {
+    if (selectedGroupId == agentWorkspaceId &&
+        selectedConversationId == id &&
+        selectedSubSessionId.isEmpty) {
       return;
     }
     selectedGroupId = agentWorkspaceId;
     selectedConversationId = id;
+    selectedSubSessionId = '';
     _adoptConversationAgent();
     selectedFile = null;
     selectedFileContent = null;
@@ -251,6 +335,7 @@ class WorkspaceController extends ChangeNotifier {
     final values = _visibleConversations(selectedGroupId);
     if (values.isEmpty) createConversation(notify: false);
     selectedConversationId = _visibleConversations(selectedGroupId).first.id;
+    selectedSubSessionId = '';
     _adoptConversationAgent();
     selectedFile = null;
     selectedFileContent = null;
@@ -259,13 +344,20 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectConversation(String id) async {
-    if (selectedConversationId == id) return;
+    if (selectedConversationId == id && selectedSubSessionId.isEmpty) return;
     selectedConversationId = id;
+    selectedSubSessionId = '';
     _adoptConversationAgent();
     selectedFile = null;
     selectedFileContent = null;
     notifyListeners();
     await Future.wait([refreshSkills(), refreshFiles()]);
+  }
+
+  void selectSubSession(String conversationId, String sessionId) {
+    selectedConversationId = conversationId;
+    selectedSubSessionId = sessionId;
+    notifyListeners();
   }
 
   Future<void> selectAgent(String id) async {
@@ -372,7 +464,30 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void referenceWorkspaceNode(WorkspaceFileNode node) {
-    if (isWorkspaceNodeReferenced(node)) return;
+    var changed = false;
+    if (!isWorkspaceNodeReferenced(node)) {
+      _addWorkspaceNodeAttachment(node);
+      changed = true;
+    }
+    final references = _composerReferences.putIfAbsent(
+      selectedConversationId,
+      () => [],
+    );
+    if (!references.any((reference) => reference.path == node.path)) {
+      references.add(
+        ComposerReference(
+          fileName: node.name,
+          path: node.path,
+          text: '',
+          isDirectory: node.isDirectory,
+        ),
+      );
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  void _addWorkspaceNodeAttachment(WorkspaceFileNode node) {
     attachments.add(
       UploadedAttachment(
         name: node.name,
@@ -382,29 +497,58 @@ class WorkspaceController extends ChangeNotifier {
         isDirectory: node.isDirectory,
       ),
     );
-    notifyListeners();
   }
 
   void referenceWorkspaceSelection(WorkspaceFileNode node, String selection) {
     final selectedText = selection.trim();
     if (selectedText.isEmpty || node.isDirectory) return;
-    referenceWorkspaceNode(node);
-    final quoted = selectedText
-        .split('\n')
-        .map((line) => line.isEmpty ? '>' : '> $line')
-        .join('\n');
-    _composerInsertions
-        .putIfAbsent(selectedConversationId, () => [])
-        .add('@${node.path}\n$quoted');
+    if (!isWorkspaceNodeReferenced(node)) {
+      _addWorkspaceNodeAttachment(node);
+    }
+    final references = _composerReferences.putIfAbsent(
+      selectedConversationId,
+      () => [],
+    );
+    references
+      ..removeWhere(
+        (reference) =>
+            (reference.path == node.path ||
+                reference.path == _workspaceVirtualPath(node.path)) &&
+            reference.text.isEmpty,
+      )
+      ..add(
+        ComposerReference(
+          fileName: node.name,
+          path: node.path,
+          text: selectedText,
+        ),
+      );
     notifyListeners();
   }
 
-  String? takeComposerInsertion(String conversationId) {
-    final values = _composerInsertions[conversationId];
-    if (values == null || values.isEmpty) return null;
-    final value = values.removeAt(0);
-    if (values.isEmpty) _composerInsertions.remove(conversationId);
-    return value;
+  void removeComposerReference(ComposerReference value) {
+    final references = _composerReferences.putIfAbsent(
+      selectedConversationId,
+      () => <ComposerReference>[],
+    );
+    references.remove(value);
+    final sameSourceRemains = references.any(
+      (reference) => reference.path == value.path,
+    );
+    if (!sameSourceRemains) {
+      attachments.removeWhere(
+        (attachment) =>
+            attachment.path == value.path ||
+            attachment.virtualPath == value.path,
+      );
+    }
+    notifyListeners();
+  }
+
+  void clearComposerReferences(String conversationId) {
+    if (_composerReferences.remove(conversationId) != null) {
+      notifyListeners();
+    }
   }
 
   String _workspaceVirtualPath(String path) {
@@ -413,7 +557,24 @@ class WorkspaceController extends ChangeNotifier {
         .split('/')
         .where((part) => part.isNotEmpty && part != '.')
         .join('/');
-    return '/workspace/$normalized';
+    String? configured;
+    for (final component in components) {
+      if (component.id != 'execution.sandbox') continue;
+      final useHostPath =
+          component.activeConfig['workspace_path_mode'] == 'host';
+      final value = useHostPath
+          ? (selectedGroup.project?.path ?? settings.agentWorkspacePath)
+          : component.activeConfig['workspace_root']?.toString();
+      if (value != null && value.startsWith('/') && value != '/') {
+        configured = value.replaceAll('\\', '/');
+      }
+      break;
+    }
+    final workspaceRoot = (configured ?? '/workspace').replaceFirst(
+      RegExp(r'/+$'),
+      '',
+    );
+    return '$workspaceRoot/$normalized';
   }
 
   Future<void> chooseAndUploadFile() async {
@@ -426,6 +587,18 @@ class WorkspaceController extends ChangeNotifier {
         file: file,
       );
       attachments.add(uploaded);
+      _composerReferences
+          .putIfAbsent(selectedConversationId, () => [])
+          .add(
+            ComposerReference(
+              fileName: uploaded.name,
+              path: uploaded.virtualPath.isEmpty
+                  ? uploaded.path
+                  : uploaded.virtualPath,
+              text: '',
+              isDirectory: uploaded.isDirectory,
+            ),
+          );
       await refreshFiles();
     } on Object catch (exception) {
       error = exception.toString();
@@ -435,6 +608,10 @@ class WorkspaceController extends ChangeNotifier {
 
   void removeAttachment(UploadedAttachment value) {
     attachments.remove(value);
+    composerReferences.removeWhere(
+      (reference) =>
+          reference.path == value.path || reference.path == value.virtualPath,
+    );
     notifyListeners();
   }
 
@@ -476,9 +653,21 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<void> saveSettings(DesktopSettings value) async {
     try {
+      final languageChanged = settings.language != value.language;
       final workspaceChanged =
           settings.agentWorkspacePath != value.agentWorkspacePath;
+      final componentConfigurationChanged =
+          !mapEquals(settings.componentSelections, value.componentSelections) ||
+          jsonEncode(settings.componentConfigs) !=
+              jsonEncode(value.componentConfigs);
       settings = await _api.saveSettings(value);
+      if (languageChanged) {
+        _syncToolCatalogLanguage();
+        toolCatalog = await _api.listTools();
+      }
+      if (componentConfigurationChanged) {
+        components = await _api.listComponents();
+      }
       if (workspaceChanged && selectedGroupId == agentWorkspaceId) {
         selectedFile = null;
         selectedFileContent = null;
@@ -508,6 +697,7 @@ class WorkspaceController extends ChangeNotifier {
     settingsCatalogLoading = true;
     notifyListeners();
     try {
+      _syncToolCatalogLanguage();
       final values = await Future.wait<Object>([
         _api.getAgentConfiguration(targetAgentId),
         _api.listTools(),
@@ -528,6 +718,13 @@ class WorkspaceController extends ChangeNotifier {
       settingsCatalogLoading = false;
       notifyListeners();
     }
+  }
+
+  void _syncToolCatalogLanguage() {
+    final configured = settings.language;
+    _api.toolCatalogLanguage = configured == 'system'
+        ? PlatformDispatcher.instance.locale.languageCode
+        : configured;
   }
 
   Future<String> loadSkillContent(String skillName) =>
@@ -573,30 +770,69 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> patchAgentConfiguration(Map<String, Object?> patch) async {
+  Future<void> patchAgentConfiguration(Map<String, Object?> patch) {
     final current = agentConfiguration;
-    if (current == null) return;
+    if (current == null) return Future<void>.value();
+    final revision = ++_agentPatchRevision;
+    final optimistic = current.applyPatch(patch);
+    agentConfiguration = optimistic;
+    _updateAgentSummary(optimistic);
+    notifyListeners();
+    final previous = _agentPatchTail;
+    final operation = _sendAgentPatch(
+      previous: previous,
+      agentId: current.id,
+      patch: Map<String, Object?>.from(patch),
+      rollback: current,
+      revision: revision,
+    );
+    _agentPatchTail = operation;
+    return operation;
+  }
+
+  Future<void> _sendAgentPatch({
+    required Future<void> previous,
+    required String agentId,
+    required Map<String, Object?> patch,
+    required AgentConfiguration rollback,
+    required int revision,
+  }) async {
     try {
-      agentConfiguration = await _api.patchAgentConfiguration(
-        current.id,
-        patch,
-      );
-      agents = [
-        for (final agent in agents)
-          agent.id == current.id
-              ? AgentSummary(
-                  id: agent.id,
-                  name: agentConfiguration!.name,
-                  isDefault: agent.isDefault,
-                )
-              : agent,
-      ];
+      await previous;
+    } on Object {
+      // A later optimistic patch still needs a chance to converge the server.
+    }
+    try {
+      final saved = await _api.patchAgentConfiguration(agentId, patch);
+      if (agentConfiguration?.id == agentId &&
+          revision == _agentPatchRevision) {
+        agentConfiguration = saved;
+        _updateAgentSummary(saved);
+      }
       notifyListeners();
     } on Object catch (exception) {
+      if (agentConfiguration?.id == agentId &&
+          revision == _agentPatchRevision) {
+        agentConfiguration = rollback;
+        _updateAgentSummary(rollback);
+      }
       error = exception.toString();
       notifyListeners();
       rethrow;
     }
+  }
+
+  void _updateAgentSummary(AgentConfiguration configuration) {
+    agents = [
+      for (final agent in agents)
+        agent.id == configuration.id
+            ? AgentSummary(
+                id: agent.id,
+                name: configuration.name,
+                isDefault: agent.isDefault,
+              )
+            : agent,
+    ];
   }
 
   Future<AgentConfiguration> createAgent(String name) async {
@@ -650,12 +886,8 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  bool canManageConversation(Conversation conversation) => !{
-    RunStatus.starting,
-    RunStatus.running,
-    RunStatus.suspending,
-    RunStatus.suspended,
-  }.contains(conversation.status);
+  bool canManageConversation(Conversation conversation) =>
+      !_treeHasActiveRun(conversation);
 
   void archiveConversation(String groupId, String conversationId) {
     final conversation = _conversationIn(groupId, conversationId);
@@ -694,19 +926,27 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> deleteConversation(String groupId, String conversationId) async {
     final conversation = _conversationIn(groupId, conversationId);
     if (conversation == null) return;
-    if (!canManageConversation(conversation)) {
-      try {
-        await _refreshConversationSnapshot(conversation);
-      } on Object catch (exception) {
+    var authoritativeSessionMissing = false;
+    try {
+      await _refreshConversationTree(conversation);
+    } on SageApiException catch (exception) {
+      // A stale local row remains deletable when the authoritative Session has
+      // already disappeared. Any other reconciliation failure is actionable.
+      if (exception.statusCode != 404) {
         error = exception.toString();
         notifyListeners();
         return;
       }
-      if (!canManageConversation(conversation)) {
-        error = '运行中的会话不能删除';
-        notifyListeners();
-        return;
-      }
+      authoritativeSessionMissing = true;
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      return;
+    }
+    if (!authoritativeSessionMissing && !canManageConversation(conversation)) {
+      error = '运行中的会话不能删除';
+      notifyListeners();
+      return;
     }
     try {
       final sessionId = conversation.sessionId;
@@ -714,11 +954,16 @@ class WorkspaceController extends ChangeNotifier {
         await _api.deleteSession(sessionId);
       }
       await _streams.remove(conversation.id)?.cancel();
+      final treeSubscription = _treeStreams.remove(conversation.id);
+      if (treeSubscription != null) {
+        unawaited(treeSubscription.cancel());
+      }
+      _treeReconnectTimers.remove(conversation.id)?.cancel();
       _recoveringStreams.remove(conversation.id);
       _reconnectAttempts.remove(conversation.id);
       _preferredSkills.remove(conversation.id);
       _attachments.remove(conversation.id);
-      _composerInsertions.remove(conversation.id);
+      _composerReferences.remove(conversation.id);
       _conversations[groupId]?.removeWhere(
         (value) => value.id == conversationId,
       );
@@ -728,12 +973,64 @@ class WorkspaceController extends ChangeNotifier {
       _selectReplacementAfterRemoval(groupId, conversationId);
       _persist();
       notifyListeners();
+    } on SageApiException catch (exception) {
+      if (exception.code == 'session.active_run') {
+        try {
+          await _refreshConversationTree(conversation);
+        } on Object {
+          // Preserve the typed deletion conflict if reconciliation also fails.
+        }
+        error = '运行中的会话不能删除';
+        notifyListeners();
+        return;
+      }
+      error = exception.toString();
+      notifyListeners();
+      rethrow;
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();
       rethrow;
     }
   }
+
+  Future<void> _refreshConversationTree(Conversation conversation) async {
+    if (conversation.runId.isNotEmpty) {
+      await _refreshConversationSnapshot(conversation);
+    }
+    final sessionId = conversation.sessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    final nodes = await _api.getSessionTree(sessionId);
+    final authoritativeSessionIds = <String>{};
+    for (final node in nodes) {
+      final rawSession = node['session'];
+      if (rawSession is Map) {
+        final childSessionId = rawSession['session_id']?.toString() ?? '';
+        if (childSessionId.isNotEmpty) {
+          authoritativeSessionIds.add(childSessionId);
+        }
+      }
+      _upsertSubSession(conversation, node);
+    }
+    conversation.subSessions.removeWhere(
+      (value) =>
+          (value.sessionId ?? '').isNotEmpty &&
+          !authoritativeSessionIds.contains(value.sessionId),
+    );
+    notifyListeners();
+    _persist();
+  }
+
+  bool _treeHasActiveRun(Conversation root) =>
+      _isControllable(root.status) ||
+      root.subSessions.any((value) => _isControllable(value.status));
+
+  bool _isControllable(RunStatus status) => {
+    RunStatus.starting,
+    RunStatus.running,
+    RunStatus.suspending,
+    RunStatus.suspended,
+  }.contains(status);
 
   Conversation? _conversationIn(String groupId, String conversationId) {
     for (final value in _conversations[groupId] ?? const <Conversation>[]) {
@@ -785,6 +1082,7 @@ class WorkspaceController extends ChangeNotifier {
       visible = _visibleConversations(groupId);
     }
     selectedConversationId = visible.first.id;
+    selectedSubSessionId = '';
     _adoptConversationAgent();
     selectedFile = null;
     selectedFileContent = null;
@@ -814,6 +1112,25 @@ class WorkspaceController extends ChangeNotifier {
       modelProviders = [
         for (final value in modelProviders)
           value.id == providerId ? updated : value,
+      ];
+      notifyListeners();
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> setDefaultModelProvider(String providerId) async {
+    try {
+      final updated = await _api.patchModelProvider(providerId, const {
+        'is_default': true,
+      });
+      modelProviders = [
+        for (final value in modelProviders)
+          value.id == providerId
+              ? updated.copyWith(isDefault: true)
+              : value.copyWith(isDefault: false),
       ];
       notifyListeners();
     } on Object catch (exception) {
@@ -872,9 +1189,13 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> selectComponent(String componentId, String pluginId) async {
+  Future<void> selectComponent(
+    String componentId,
+    String pluginId, {
+    Map<String, Object?> config = const {},
+  }) async {
     try {
-      await _api.selectComponent(componentId, pluginId);
+      await _api.selectComponent(componentId, pluginId, config: config);
       components = await _api.listComponents();
       notifyListeners();
     } on Object catch (exception) {
@@ -887,12 +1208,17 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> send(String text) async {
     final conversation = selectedConversation;
     final prompt = text.trim();
-    if (conversation == null || prompt.isEmpty || selectedAgentId.isEmpty) {
+    if (conversation == null ||
+        viewingSubSession ||
+        prompt.isEmpty ||
+        selectedAgentId.isEmpty) {
       return;
     }
     if (conversation.status == RunStatus.running ||
         conversation.status == RunStatus.starting ||
         conversation.status == RunStatus.suspending) {
+      _attachments[conversation.id] = [];
+      notifyListeners();
       await steer(prompt);
       return;
     }
@@ -919,6 +1245,7 @@ class WorkspaceController extends ChangeNotifier {
           : prompt;
     }
     conversation.status = RunStatus.starting;
+    conversation.thinking = false;
     conversation.pendingInteraction = null;
     final selectedAttachments = List<UploadedAttachment>.of(attachments);
     _attachments[conversation.id] = [];
@@ -926,6 +1253,9 @@ class WorkspaceController extends ChangeNotifier {
     _persist();
     final body = <String, Object?>{
       'agent_id': selectedAgentId,
+      'response_language': settings.language == 'system'
+          ? PlatformDispatcher.instance.locale.languageCode
+          : settings.language,
       'messages': [
         {'role': 'user', 'text': prompt},
       ],
@@ -937,6 +1267,7 @@ class WorkspaceController extends ChangeNotifier {
         for (final value in selectedAttachments) value.virtualPath,
       ],
       'approval_mode': conversation.approvalMode.wireValue,
+      'invocation_mode': conversation.invocationMode.wireValue,
       'idempotency_key': _id('desktop'),
     };
     _listen(conversation, _api.startRun(body));
@@ -958,8 +1289,24 @@ class WorkspaceController extends ChangeNotifier {
     _persist();
   }
 
+  void setInvocationMode(InvocationMode mode) {
+    final conversation = selectedConversation;
+    if (conversation == null ||
+        {
+          RunStatus.starting,
+          RunStatus.running,
+          RunStatus.suspending,
+          RunStatus.suspended,
+        }.contains(conversation.status)) {
+      return;
+    }
+    conversation.invocationMode = mode;
+    notifyListeners();
+    _persist();
+  }
+
   Future<void> pause() async {
-    final value = selectedConversation;
+    final value = selectedDisplayConversation;
     if (value == null || value.runId.isEmpty) return;
     value.status = RunStatus.suspending;
     notifyListeners();
@@ -973,7 +1320,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> resume() async {
-    final value = selectedConversation;
+    final value = selectedDisplayConversation;
     if (value == null || value.runId.isEmpty) return;
     value.status = RunStatus.running;
     value.pendingInteraction = null;
@@ -989,7 +1336,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> cancel() async {
-    final value = selectedConversation;
+    final value = selectedDisplayConversation;
     if (value == null || value.runId.isEmpty) return;
     try {
       await _api.cancel(value.runId);
@@ -1024,20 +1371,65 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> replyInteraction(String decision, {String text = ''}) async {
-    final value = selectedConversation;
+  Future<void> replyInteraction(
+    String decision, {
+    String text = '',
+    Map<String, Object?> payload = const {},
+  }) => _replyInteractionFor(
+    selectedConversation,
+    decision,
+    text: text,
+    payload: payload,
+  );
+
+  Future<void> replyDisplayInteraction(
+    String decision, {
+    String text = '',
+    Map<String, Object?> payload = const {},
+  }) => _replyInteractionFor(
+    selectedDisplayConversation,
+    decision,
+    text: text,
+    payload: payload,
+  );
+
+  Future<void> _replyInteractionFor(
+    Conversation? value,
+    String decision, {
+    String text = '',
+    Map<String, Object?> payload = const {},
+  }) async {
     final interaction = value?.pendingInteraction;
     if (value == null || interaction == null) return;
+    final approvingPlan =
+        interaction.payload['tool_name']?.toString() == 'goal_submit' &&
+        {'approve', 'approve_once', 'approve_and_remember'}.contains(decision);
     try {
       await _api.replyInteraction(
         value.runId,
         interactionId: interaction.id,
         decision: decision,
-        payload: text.trim().isEmpty ? const {} : {'text': text.trim()},
+        payload: {...payload, if (text.trim().isNotEmpty) 'text': text.trim()},
       );
+      final interactionAgentId = value.agentId.isNotEmpty
+          ? value.agentId
+          : selectedAgentId;
+      if (decision == 'approve_and_remember' &&
+          interactionAgentId.isNotEmpty &&
+          agentConfiguration?.id == interactionAgentId) {
+        try {
+          agentConfiguration = await _api.getAgentConfiguration(
+            interactionAgentId,
+          );
+        } on Object {
+          // The approval has already succeeded; refresh lazily in settings.
+        }
+      }
+      if (approvingPlan) value.invocationMode = InvocationMode.goal;
       value.pendingInteraction = null;
       value.status = RunStatus.running;
       notifyListeners();
+      _persist();
       _subscribe(value);
     } on Object catch (exception) {
       try {
@@ -1065,6 +1457,7 @@ class WorkspaceController extends ChangeNotifier {
           _streams.remove(conversation.id);
         }
         if (_disposed) return;
+        conversation.thinking = false;
         error = exception.toString();
         if (conversation.runId.isEmpty) {
           conversation.status = RunStatus.failed;
@@ -1192,13 +1585,20 @@ class WorkspaceController extends ChangeNotifier {
                 ?.toInt() ??
             conversation.runSequence;
       }
+      if (conversation.runId.isNotEmpty) {
+        _activeProcessPanel(conversation).runId = conversation.runId;
+      }
       conversation.status = RunStatus.starting;
+      _subscribeSessionTree(conversation);
       notifyListeners();
       _persist();
       return;
     }
     final type = event['type']?.toString() ?? '';
     final sequence = (event['run_sequence'] as num?)?.toInt() ?? 0;
+    final occurredAt = DateTime.tryParse(
+      event['occurred_at']?.toString() ?? '',
+    );
     if (sequence <= conversation.runSequence) return;
     conversation.runSequence = sequence;
     conversation.runId = event['run_id']?.toString() ?? conversation.runId;
@@ -1212,6 +1612,20 @@ class WorkspaceController extends ChangeNotifier {
     final eventData = data is Map
         ? data.cast<String, Object?>()
         : const <String, Object?>{};
+    if (type == 'reasoning.started' || type == 'reasoning.delta') {
+      conversation.thinking = true;
+    } else if (type == 'reasoning.completed' ||
+        type == 'message.delta' ||
+        type == 'message.completed' ||
+        type.startsWith('tool.') ||
+        type == 'interaction.requested' ||
+        type == 'run.suspend_requested' ||
+        type == 'run.suspended' ||
+        type == 'run.completed' ||
+        type == 'run.cancelled' ||
+        type == 'run.failed') {
+      conversation.thinking = false;
+    }
     if (type == 'message.delta') {
       _appendDelta(conversation, event, eventData['delta']);
     } else if (type == 'message.completed') {
@@ -1220,11 +1634,15 @@ class WorkspaceController extends ChangeNotifier {
       _trackToolResult(conversation, eventData);
     } else if (type == 'turn.started') {
       conversation.status = RunStatus.running;
+    } else if (type == 'interaction.requested') {
+      conversation.pendingInteraction = PendingInteraction.fromJson(eventData);
     } else if (type == 'run.suspend_requested') {
       conversation.status = RunStatus.suspending;
     } else if (type == 'run.suspended') {
       conversation.status = RunStatus.suspended;
-      unawaited(_hydrateInteraction(conversation));
+      if (conversation.pendingInteraction == null) {
+        unawaited(_hydrateInteraction(conversation));
+      }
     } else if (type == 'run.resumed') {
       conversation.status = RunStatus.running;
       conversation.pendingInteraction = null;
@@ -1233,17 +1651,52 @@ class WorkspaceController extends ChangeNotifier {
         conversation,
         RunStatus.completed,
         promoteFinal: true,
+        completedAt: occurredAt,
       );
     } else if (type == 'run.cancelled') {
-      _applyTerminalState(conversation, RunStatus.cancelled);
+      _applyTerminalState(
+        conversation,
+        RunStatus.cancelled,
+        completedAt: occurredAt,
+      );
     } else if (type == 'run.failed') {
-      _applyTerminalState(conversation, RunStatus.failed);
+      _applyTerminalState(
+        conversation,
+        RunStatus.failed,
+        completedAt: occurredAt,
+      );
       final rawError = eventData['error'];
       if (rawError is Map) error = rawError['message']?.toString();
     }
-    _trackActivity(conversation, type, eventData, sequence: sequence);
+    if (_shouldRefreshWorkspace(type)) {
+      _scheduleWorkspaceRefresh(conversation);
+    }
+    _trackActivity(
+      conversation,
+      type,
+      eventData,
+      sequence: sequence,
+      occurredAt: occurredAt,
+    );
     notifyListeners();
     _persist();
+  }
+
+  bool _shouldRefreshWorkspace(String eventType) =>
+      eventType == 'tool.call.succeeded' ||
+      eventType == 'tool.call.failed' ||
+      eventType == 'tool.call.cancelled' ||
+      eventType == 'run.completed' ||
+      eventType == 'run.failed' ||
+      eventType == 'run.cancelled';
+
+  void _scheduleWorkspaceRefresh(Conversation conversation) {
+    if (selectedConversationId != conversation.id) return;
+    _workspaceRefreshTimer?.cancel();
+    _workspaceRefreshTimer = Timer(const Duration(milliseconds: 120), () {
+      if (_disposed || selectedConversationId != conversation.id) return;
+      unawaited(refreshFiles());
+    });
   }
 
   void _appendDelta(
@@ -1330,6 +1783,7 @@ class WorkspaceController extends ChangeNotifier {
     String type,
     Map<String, Object?> data, {
     required int sequence,
+    DateTime? occurredAt,
   }) {
     if (!type.startsWith('tool.') && !type.startsWith('flow.')) return;
     final id =
@@ -1356,7 +1810,8 @@ class WorkspaceController extends ChangeNotifier {
           failed: type.endsWith('.failed'),
           arguments: arguments,
           sequence: sequence,
-          completedAt: terminal ? DateTime.now() : null,
+          startedAt: occurredAt,
+          completedAt: terminal ? occurredAt ?? DateTime.now() : null,
         ),
       );
       return;
@@ -1364,7 +1819,7 @@ class WorkspaceController extends ChangeNotifier {
     existing.active = !terminal;
     existing.failed = type.endsWith('.failed');
     if (arguments.isNotEmpty) existing.arguments = arguments;
-    if (terminal) existing.completedAt = DateTime.now();
+    if (terminal) existing.completedAt = occurredAt ?? DateTime.now();
   }
 
   RuntimeProcessPanel _activeProcessPanel(Conversation conversation) {
@@ -1372,6 +1827,14 @@ class WorkspaceController extends ChangeNotifier {
         .where((value) => value.running)
         .lastOrNull;
     if (running != null) return running;
+    final sameRun = conversation.processPanels
+        .where(
+          (value) =>
+              conversation.runId.isNotEmpty &&
+              value.runId == conversation.runId,
+        )
+        .lastOrNull;
+    if (sameRun != null) return sameRun;
     final anchor = conversation.messages
         .where((value) => value.role == 'user')
         .lastOrNull;
@@ -1379,6 +1842,7 @@ class WorkspaceController extends ChangeNotifier {
       id: _id('process'),
       anchorMessageId: anchor?.id ?? '',
       startedAt: DateTime.now(),
+      runId: conversation.runId,
     );
     conversation.processPanels.add(panel);
     return panel;
@@ -1387,6 +1851,7 @@ class WorkspaceController extends ChangeNotifier {
   void _finishProcessPanel(
     Conversation conversation, {
     bool promoteFinal = false,
+    DateTime? completedAt,
   }) {
     final panel =
         conversation.processPanels.where((value) => value.running).lastOrNull ??
@@ -1403,7 +1868,7 @@ class WorkspaceController extends ChangeNotifier {
       if (finalMessage != null) finalMessage.processOnly = false;
     }
     panel.running = false;
-    panel.completedAt = DateTime.now();
+    panel.completedAt = completedAt ?? DateTime.now();
     for (final activity in panel.activities.where((value) => value.active)) {
       activity.active = false;
       activity.completedAt = DateTime.now();
@@ -1472,8 +1937,10 @@ class WorkspaceController extends ChangeNotifier {
   ) {
     final rawRun = snapshot['run'];
     RunStatus? nextStatus;
+    DateTime? completedAt;
     if (rawRun is Map) {
       nextStatus = runStatusFromWire(rawRun['state']?.toString());
+      completedAt = DateTime.tryParse(rawRun['updated_at']?.toString() ?? '');
       conversation.sessionId = rawRun['session_id']?.toString();
       conversation.turnId =
           rawRun['active_turn_id']?.toString() ?? conversation.turnId;
@@ -1489,6 +1956,7 @@ class WorkspaceController extends ChangeNotifier {
           conversation,
           nextStatus,
           promoteFinal: nextStatus == RunStatus.completed,
+          completedAt: completedAt,
         );
       } else {
         conversation.status = nextStatus;
@@ -1500,11 +1968,17 @@ class WorkspaceController extends ChangeNotifier {
     Conversation conversation,
     RunStatus status, {
     bool promoteFinal = false,
+    DateTime? completedAt,
   }) {
     conversation.status = status;
+    conversation.thinking = false;
     conversation.pendingInteraction = null;
     _finishStreamingMessages(conversation);
-    _finishProcessPanel(conversation, promoteFinal: promoteFinal);
+    _finishProcessPanel(
+      conversation,
+      promoteFinal: promoteFinal,
+      completedAt: completedAt,
+    );
   }
 
   int _snapshotRunSequence(Map<String, Object?> snapshot) {
@@ -1516,6 +1990,212 @@ class WorkspaceController extends ChangeNotifier {
   void clearError() {
     error = null;
     notifyListeners();
+  }
+
+  Future<void> _hydrateSessionTrees() async {
+    for (final values in _conversations.values) {
+      for (final conversation in values) {
+        if (conversation.archived || (conversation.sessionId ?? '').isEmpty) {
+          continue;
+        }
+        try {
+          final nodes = await _api.getSessionTree(conversation.sessionId!);
+          for (final node in nodes) {
+            _upsertSubSession(conversation, node);
+          }
+          _subscribeSessionTree(conversation);
+        } on Object {
+          // A stale local conversation must not block Desktop startup.
+        }
+      }
+    }
+    _persist();
+  }
+
+  void _subscribeSessionTree(Conversation root) {
+    final sessionId = root.sessionId;
+    if (sessionId == null ||
+        sessionId.isEmpty ||
+        _treeStreams.containsKey(root.id)) {
+      return;
+    }
+    _treeReconnectTimers.remove(root.id)?.cancel();
+    late final StreamSubscription<Map<String, Object?>> subscription;
+    subscription = _api
+        .subscribeSessionTree(sessionId)
+        .listen(
+          (value) => _applySessionTreeEnvelope(root, value),
+          onError: (Object _, StackTrace _) {
+            if (identical(_treeStreams[root.id], subscription)) {
+              _treeStreams.remove(root.id);
+            }
+            _scheduleSessionTreeReconnect(root);
+          },
+          onDone: () {
+            if (identical(_treeStreams[root.id], subscription)) {
+              _treeStreams.remove(root.id);
+            }
+            // A normal HTTP stream close is still premature while the root or
+            // one of its children is active. Reconnect just as we do for an
+            // error so a transient/proxy close cannot hide later child
+            // Sessions and their message events from the conversation flow.
+            _scheduleSessionTreeReconnect(root);
+          },
+          cancelOnError: true,
+        );
+    _treeStreams[root.id] = subscription;
+  }
+
+  void _scheduleSessionTreeReconnect(Conversation root) {
+    if (_disposed || !_treeHasActiveRun(root)) return;
+    _treeReconnectTimers.putIfAbsent(
+      root.id,
+      () => Timer(const Duration(seconds: 1), () {
+        _treeReconnectTimers.remove(root.id);
+        if (!_disposed && _treeHasActiveRun(root)) {
+          _subscribeSessionTree(root);
+        }
+      }),
+    );
+  }
+
+  void _applySessionTreeEnvelope(
+    Conversation root,
+    Map<String, Object?> envelope,
+  ) {
+    final kind = envelope['kind']?.toString();
+    if (kind == 'session.discovered') {
+      _upsertSubSession(root, envelope);
+    } else if (kind == 'session.event') {
+      final sessionId = envelope['session_id']?.toString() ?? '';
+      final child = root.subSessions
+          .where((value) => value.sessionId == sessionId)
+          .firstOrNull;
+      final rawEvent = envelope['event'];
+      if (child != null && rawEvent is Map) {
+        _applyEvent(child, rawEvent.cast<String, Object?>());
+      }
+    }
+    notifyListeners();
+    _persist();
+  }
+
+  Conversation? _upsertSubSession(
+    Conversation root,
+    Map<String, Object?> node,
+  ) {
+    final rawSession = node['session'];
+    final rawRun = node['run'];
+    if (rawSession is! Map || rawRun is! Map) return null;
+    final session = rawSession.cast<String, Object?>();
+    final run = rawRun.cast<String, Object?>();
+    final sessionId = session['session_id']?.toString() ?? '';
+    if (sessionId.isEmpty) return null;
+    var child = root.subSessions
+        .where((value) => value.sessionId == sessionId)
+        .firstOrNull;
+    final taskName = node['task_name']?.toString().trim() ?? '';
+    final task = node['task']?.toString().trim() ?? '';
+    final originalTask = node['original_task']?.toString().trim() ?? '';
+    final prompt = task.isNotEmpty ? task : originalTask;
+    final runId = run['run_id']?.toString() ?? '';
+    final nextStatus = runStatusFromWire(run['state']?.toString());
+    final parentToolCallId =
+        node['parent_tool_call_id']?.toString().trim() ?? '';
+    if (child == null) {
+      child = Conversation(
+        id: 'sub-session:$sessionId',
+        title: taskName.isEmpty ? '子任务' : taskName,
+        agentId: node['agent_id']?.toString() ?? '',
+        sessionId: sessionId,
+        parentSessionId: session['parent_session_id']?.toString(),
+        parentRunId: node['parent_run_id']?.toString(),
+        parentToolCallId: parentToolCallId.isEmpty ? null : parentToolCallId,
+        runId: runId,
+        status: nextStatus,
+        createdAt: DateTime.tryParse(session['created_at']?.toString() ?? ''),
+      );
+      root.subSessions.add(child);
+      root.subSessions.sort(
+        (left, right) => left.createdAt.compareTo(right.createdAt),
+      );
+    } else {
+      if (taskName.isNotEmpty) child.title = taskName;
+      child.agentId = node['agent_id']?.toString() ?? child.agentId;
+      child.parentSessionId =
+          session['parent_session_id']?.toString() ?? child.parentSessionId;
+      child.parentRunId =
+          node['parent_run_id']?.toString() ?? child.parentRunId;
+      if (parentToolCallId.isNotEmpty) {
+        child.parentToolCallId = parentToolCallId;
+      }
+      if (runId.isNotEmpty && runId != child.runId) {
+        child.runId = runId;
+        child.runSequence = 0;
+      }
+    }
+    _syncSubSessionRunPresentation(
+      child,
+      run,
+      prompt: prompt,
+      status: nextStatus,
+    );
+    if (_isTerminal(nextStatus)) {
+      _applyTerminalState(
+        child,
+        nextStatus,
+        promoteFinal: nextStatus == RunStatus.completed,
+        completedAt: DateTime.tryParse(run['updated_at']?.toString() ?? ''),
+      );
+    } else {
+      child.status = nextStatus;
+    }
+    return child;
+  }
+
+  void _syncSubSessionRunPresentation(
+    Conversation child,
+    Map<String, Object?> run, {
+    required String prompt,
+    required RunStatus status,
+  }) {
+    final runId = run['run_id']?.toString() ?? child.runId;
+    if (runId.isEmpty) return;
+    final promptId = 'sub-task:${child.sessionId}:$runId';
+    if (prompt.isNotEmpty &&
+        !child.messages.any((message) => message.id == promptId)) {
+      child.messages.add(
+        ChatMessage(
+          id: promptId,
+          role: 'user',
+          text: prompt,
+          createdAt: DateTime.tryParse(run['created_at']?.toString() ?? ''),
+        ),
+      );
+    }
+    final startedAt =
+        DateTime.tryParse(run['created_at']?.toString() ?? '') ??
+        child.createdAt;
+    final completedAt = DateTime.tryParse(run['updated_at']?.toString() ?? '');
+    final terminal = _isTerminal(status);
+    var panel = child.processPanels
+        .where((value) => value.runId == runId)
+        .firstOrNull;
+    if (panel == null) {
+      panel = RuntimeProcessPanel(
+        id: 'sub-process:$runId',
+        anchorMessageId: promptId,
+        runId: runId,
+        startedAt: startedAt,
+        completedAt: terminal ? completedAt : null,
+        running: !terminal,
+      );
+      child.processPanels.add(panel);
+    } else {
+      panel.startedAt = startedAt;
+      panel.running = !terminal;
+      panel.completedAt = terminal ? completedAt : null;
+    }
   }
 
   void _restoreConversations() {
@@ -1590,10 +2270,19 @@ class WorkspaceController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _workspaceRefreshTimer?.cancel();
     for (final subscription in _streams.values) {
       unawaited(subscription.cancel());
     }
     _streams.clear();
+    for (final subscription in _treeStreams.values) {
+      unawaited(subscription.cancel());
+    }
+    _treeStreams.clear();
+    for (final timer in _treeReconnectTimers.values) {
+      timer.cancel();
+    }
+    _treeReconnectTimers.clear();
     _runtimeHost?.detach();
     super.dispose();
   }

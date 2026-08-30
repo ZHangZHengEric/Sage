@@ -24,7 +24,7 @@ PLAN_ALLOWED_TOOLS = {
     "search_memory",
     "fetch_webpages",
     "search_web",
-    "questionnaire",
+    "questionnaire_async",
     "execute_shell_command",
 }
 
@@ -39,7 +39,7 @@ class PlanAgent(AgentBase):
     1. 自己决定 planning 阶段要使用什么 system prompt
     2. 自己决定 planning 阶段应该带哪些历史消息
     3. 自己执行一个工具驱动的 planning loop
-    4. 允许模型自主调用 questionnaire
+    4. 允许模型自主调用 questionnaire_async
     5. 最终只写一个 flow 控制状态：plan_status
 
     这样做的目的，是尽量避免被执行期的上下文、通用 agent 的 system、以及
@@ -56,7 +56,6 @@ class PlanAgent(AgentBase):
         )
         self._active_session_context: Optional[SessionContext] = None
         self._questionnaire_tool_call_ids: Set[str] = set()
-        self._should_judge_after_tool_calls = False
 
     async def run_stream(
         self, session_context: SessionContext
@@ -68,7 +67,7 @@ class PlanAgent(AgentBase):
         - 切换到 planning 专用工具集合
         - 提取一份更“干净”的 planning history
         - 用专用 system prompt 跑一个小循环
-        - 在循环里允许模型自主调用 questionnaire
+        - 在循环里允许模型自主调用 questionnaire_async
         - 所有问卷结果都保留在消息流里，最终状态交给 `_judge_plan_status` 收口
         """
         session_id = session_context.session_id
@@ -179,6 +178,7 @@ class PlanAgent(AgentBase):
                     )
 
                 if tool_calls:
+                    questionnaire_requested = False
                     async for tool_chunks in self._execute_tool_calls(
                         tool_calls=tool_calls,
                         tool_manager=plan_tool_manager,
@@ -186,21 +186,16 @@ class PlanAgent(AgentBase):
                         working_messages=working_messages,
                     ):
                         working_messages.extend(tool_chunks)
+                        questionnaire_requested = (
+                            questionnaire_requested
+                            or self._contains_successful_async_questionnaire_result(
+                                tool_chunks
+                            )
+                        )
                         yield tool_chunks
 
-                    if self._should_judge_after_tool_calls:
-                        self._should_judge_after_tool_calls = False
-                        judged_status = await self._judge_plan_status(
-                            session_context=session_context,
-                            working_messages=working_messages,
-                            tool_manager=plan_tool_manager,
-                        )
-                        session_context.audit_status["plan_status"] = judged_status
-                        if judged_status == "continue_plan":
-                            logger.info(
-                                "PlanAgent: judge requested continue_plan after tool calls, continue loop"
-                            )
-                            continue
+                    if questionnaire_requested:
+                        session_context.audit_status["plan_status"] = "pause"
                         break
 
                     # 这一轮已经发生工具调用，先进入下一轮，让 agent 基于最新工具结果继续自主推进。
@@ -244,7 +239,6 @@ class PlanAgent(AgentBase):
         """
         self._active_session_context = session_context
         self._questionnaire_tool_call_ids.clear()
-        self._should_judge_after_tool_calls = False
         session_context.audit_status.pop("plan_status", None)
 
     def _build_plan_tool_proxy(
@@ -301,8 +295,8 @@ class PlanAgent(AgentBase):
                 all_known_names.update(manager.list_all_tools_name())
 
         allowed = {name for name in currently_available if name in PLAN_ALLOWED_TOOLS}
-        if "questionnaire" in all_known_names:
-            allowed.add("questionnaire")
+        if "questionnaire_async" in all_known_names:
+            allowed.add("questionnaire_async")
 
         if not allowed:
             logger.warning(
@@ -331,7 +325,7 @@ class PlanAgent(AgentBase):
         这里故意不直接拿通用的“最近若干轮完整对话”，而是做一次收敛：
         - 保留最近几轮 user 输入
         - 保留少量 assistant 的收尾性消息
-        - 保留 questionnaire 的 tool result
+        - 保留 questionnaire_async 的 tool result
         - 尽量排除执行期的大量中间输出
         """
         message_manager = session_context.message_manager
@@ -358,9 +352,9 @@ class PlanAgent(AgentBase):
                 continue
 
             if msg.role == MessageRole.TOOL.value:
-                # planning 阶段最有价值的 tool result 主要是 questionnaire 的答案。
+                # planning 阶段保留异步问卷状态，便于下一轮关联用户回答。
                 tool_name = (msg.metadata or {}).get("tool_name")
-                if tool_name == "questionnaire":
+                if tool_name in {"questionnaire_async", "questionnaire"}:
                     filtered_messages.append(msg)
                     continue
                 # 兼容老数据：有些 tool result 没带 metadata，这里用内容特征兜一下。
@@ -414,7 +408,7 @@ class PlanAgent(AgentBase):
         """
         blocked_chunks: List[MessageChunk] = []
 
-        # 处理 questionnaire 工具的特殊逻辑
+        # 记录 questionnaire_async 调用，以便在成功后结束当前执行轮次。
         for tool_call_id, tool_call in list(tool_calls.items()):
             tool_name = tool_call.get("function", {}).get("name")
             block_reason = self._get_blocked_plan_tool_reason(tool_call)
@@ -432,15 +426,8 @@ class PlanAgent(AgentBase):
                     arguments=self._parse_tool_arguments(tool_call)
                 )
 
-            if tool_name == "questionnaire":
-                arguments = self._parse_tool_arguments(tool_call)
-                if arguments.get("questionnaire_kind") == "plan_confirmation":
-                    self._should_judge_after_tool_calls = True
-                updated_tool_call = self._with_unique_questionnaire_session_id(
-                    tool_call, session_id, tool_call_id
-                )
-                self._register_questionnaire_call(tool_call_id, updated_tool_call)
-                tool_calls[tool_call_id] = updated_tool_call
+            if tool_name == "questionnaire_async":
+                self._register_questionnaire_call(tool_call_id)
 
         if blocked_chunks:
             yield blocked_chunks
@@ -599,44 +586,31 @@ class PlanAgent(AgentBase):
             }
         return False
 
-    def _with_unique_questionnaire_session_id(
-        self,
-        tool_call: Dict[str, Any],
-        session_id: str,
-        tool_call_id: str,
-    ) -> Dict[str, Any]:
-        """
-        为每一次 questionnaire 调用分配独立 questionnaire_id，避免同一会话内多次问卷互相串结果。
-        """
-        cloned_tool_call = json.loads(json.dumps(tool_call))
-        function_payload = cloned_tool_call.get("function", {})
-        arguments_raw = function_payload.get("arguments") or "{}"
-
-        try:
-            arguments = json.loads(arguments_raw)
-        except Exception:
-            logger.warning(
-                "PlanAgent: failed to parse questionnaire arguments for unique session id"
-            )
-            return tool_call
-
-        current_questionnaire_id = arguments.get("questionnaire_id")
-        if (
-            isinstance(current_questionnaire_id, str)
-            and current_questionnaire_id.strip()
-        ):
-            return cloned_tool_call
-
-        arguments["questionnaire_id"] = f"{session_id}__questionnaire__{tool_call_id}"
-        function_payload["arguments"] = json.dumps(arguments, ensure_ascii=False)
-        cloned_tool_call["function"] = function_payload
-        return cloned_tool_call
+    @staticmethod
+    def _contains_successful_async_questionnaire_result(
+        chunks: List[MessageChunk],
+    ) -> bool:
+        """Return whether the async questionnaire was accepted and now awaits input."""
+        for chunk in chunks:
+            if chunk.role != MessageRole.TOOL.value:
+                continue
+            content = chunk.content
+            if isinstance(content, str):
+                try:
+                    content = json.loads(content)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+            if not isinstance(content, dict):
+                continue
+            if content.get("success") is True and content.get("should_end") is True:
+                return True
+        return False
 
     def process_tool_response(
         self, tool_response: str, tool_call_id: str
     ) -> List[MessageChunk]:
         """
-        在标准工具结果处理基础上，把 questionnaire 的结果标记回 planning 历史。
+        在标准工具结果处理基础上，把 questionnaire_async 的结果标记回 planning 历史。
         """
         chunks = super().process_tool_response(tool_response, tool_call_id)
 
@@ -644,15 +618,13 @@ class PlanAgent(AgentBase):
             if chunk.role == MessageRole.TOOL.value:
                 chunk.metadata = chunk.metadata or {}
                 if tool_call_id in self._questionnaire_tool_call_ids:
-                    chunk.metadata["tool_name"] = "questionnaire"
+                    chunk.metadata["tool_name"] = "questionnaire_async"
 
         return chunks
 
-    def _register_questionnaire_call(
-        self, tool_call_id: str, tool_call: Dict[str, Any]
-    ) -> None:
+    def _register_questionnaire_call(self, tool_call_id: str) -> None:
         """
-        识别 questionnaire 调用，确保工具结果能回到 planning 历史里。
+        识别 questionnaire_async 调用，确保工具结果能回到 planning 历史里。
         """
         self._questionnaire_tool_call_ids.add(tool_call_id)
 

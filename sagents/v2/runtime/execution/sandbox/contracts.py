@@ -118,6 +118,7 @@ class FileSystemPolicy(StrictModel):
 
 class ProcessPolicy(StrictModel):
     enabled: bool = False
+    read_only: bool = False
     allowed_executables: tuple[str, ...] = ()
     allow_shell: bool = False
     allowed_env_names: tuple[str, ...] = ()

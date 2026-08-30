@@ -101,6 +101,8 @@ class OpenAIResponsesModelProvider:
         }
         if request.tools:
             payload["tools"] = [self._tool_definition(tool) for tool in request.tools]
+            if request.tool_choice is not None:
+                payload["tool_choice"] = request.tool_choice
         maximum = request.max_output_tokens or self.config.default_max_output_tokens
         if maximum is not None:
             payload["max_output_tokens"] = maximum
@@ -115,7 +117,9 @@ class OpenAIResponsesModelProvider:
             payload["top_p"] = self.config.default_top_p
         if self.config.reasoning_effort is not None:
             payload["reasoning"] = {"effort": self.config.reasoning_effort}
-        if request.response_schema is not None:
+        if request.response_format == "json_object":
+            payload["text"] = {"format": {"type": "json_object"}}
+        elif request.response_schema is not None:
             payload["text"] = {
                 "format": {
                     "type": "json_schema",

@@ -45,7 +45,7 @@ runtime:
     max_concurrent_runs: 8
     max_concurrent_runs_per_tenant: 2
 plugins:
-  - id: sage.tools.filesystem
+  - id: acme.model.private-gateway
 policies:
   budgets:
     max_steps: 12
@@ -97,6 +97,8 @@ def test_valid_single_file_resolves_to_secret_free_immutable_specs():
     assert resolved.policy_ceilings["main"].max_steps == 8
     assert resolved.policy_ceilings["main"].max_total_tokens == 5000
     assert resolved.model_routes["primary"]["model"] == "test-model"
+    assert resolved.plugins[0].id == "acme.model.private-gateway"
+    assert resolved.runtime.scheduler.max_concurrent_runs == 8
     assert "TEST_MODEL_KEY" not in str(resolved.model_routes)
     assert resolved.manifest_hash.startswith("sha256:")
 
@@ -179,6 +181,17 @@ def test_unknown_environment_and_duplicate_yaml_key_are_rejected():
     with pytest.raises(SageV2Error) as invalid:
         SageManifestLoader().loads(duplicate)
     assert invalid.value.info.code == "manifest.yaml_invalid"
+
+
+def test_duplicate_plugin_declarations_are_rejected():
+    duplicate = VALID.replace(
+        "  - id: acme.model.private-gateway",
+        "  - id: acme.model.private-gateway\n  - id: acme.model.private-gateway",
+    )
+    with pytest.raises(SageV2Error) as invalid:
+        SageManifestLoader().loads(duplicate)
+    assert invalid.value.info.code == "manifest.schema_invalid"
+    assert "unique ids" in invalid.value.info.message
 
 
 def test_instruction_file_is_resolved_inside_package(tmp_path):

@@ -38,6 +38,18 @@ extension ApprovalModeWire on ApprovalMode {
   };
 }
 
+enum InvocationMode { normal, plan, goal }
+
+InvocationMode invocationModeFromWire(String? value) => switch (value) {
+  'plan' => InvocationMode.plan,
+  'goal' => InvocationMode.goal,
+  _ => InvocationMode.normal,
+};
+
+extension InvocationModeWire on InvocationMode {
+  String get wireValue => name;
+}
+
 class AgentSummary {
   const AgentSummary({
     required this.id,
@@ -74,6 +86,7 @@ class ToolSummary {
     this.description = '',
     this.type = 'basic',
     this.source = '',
+    this.category = '',
     this.inputSchema = const {},
     this.parameters = const {},
     this.required = const [],
@@ -83,6 +96,7 @@ class ToolSummary {
   final String description;
   final String type;
   final String source;
+  final String category;
   final Map<String, Object?> inputSchema;
   final Map<String, Object?> parameters;
   final List<String> required;
@@ -95,6 +109,7 @@ class ToolSummary {
       description: json['description']?.toString() ?? '',
       type: json['type']?.toString() ?? 'basic',
       source: json['source']?.toString() ?? '',
+      category: json['category']?.toString() ?? '',
       inputSchema: rawSchema is Map
           ? rawSchema.cast<String, Object?>()
           : const {},
@@ -153,6 +168,44 @@ class ModelProviderSummary {
         topP: (json['top_p'] as num?)?.toDouble(),
         maxModelLength: (json['max_model_len'] as num?)?.toInt(),
       );
+
+  ModelProviderSummary copyWith({bool? isDefault}) => ModelProviderSummary(
+    id: id,
+    name: name,
+    model: model,
+    baseUrl: baseUrl,
+    protocol: protocol,
+    apiKeyConfigured: apiKeyConfigured,
+    supportsMultimodal: supportsMultimodal,
+    supportsStructuredOutput: supportsStructuredOutput,
+    isDefault: isDefault ?? this.isDefault,
+    maxTokens: maxTokens,
+    temperature: temperature,
+    topP: topP,
+    maxModelLength: maxModelLength,
+  );
+}
+
+class ShellPolicySummary {
+  const ShellPolicySummary({
+    this.autoExecuteKeywords = const [],
+    this.approvalKeywords = const [],
+    this.blockedKeywords = const [],
+    this.userApprovedCommands = const [],
+  });
+
+  final List<String> autoExecuteKeywords;
+  final List<String> approvalKeywords;
+  final List<String> blockedKeywords;
+  final List<String> userApprovedCommands;
+
+  factory ShellPolicySummary.fromJson(Map<String, Object?> json) =>
+      ShellPolicySummary(
+        autoExecuteKeywords: _stringList(json['auto_execute_keywords']),
+        approvalKeywords: _stringList(json['approval_keywords']),
+        blockedKeywords: _stringList(json['blocked_keywords']),
+        userApprovedCommands: _stringList(json['user_approved_commands']),
+      );
 }
 
 class AgentConfiguration {
@@ -165,11 +218,14 @@ class AgentConfiguration {
     this.llmProviderId,
     this.fastLlmProviderId,
     this.agentMode = 'simple',
+    this.subAgentSelectionMode = 'auto_all',
+    this.availableSubAgentIds = const [],
     this.maxLoopCount = 100,
     this.deepThinking = false,
     this.thinkingLevel = 'medium',
     this.availableTools = const [],
     this.availableSkills = const [],
+    this.shellPolicy = const ShellPolicySummary(),
     this.isDefault = false,
   });
 
@@ -178,18 +234,23 @@ class AgentConfiguration {
   final String description;
   final String systemPrefix;
   final Map<String, Object?> systemContext;
+  Map<String, Object?> get runtimeVariables => systemContext;
   final String? llmProviderId;
   final String? fastLlmProviderId;
   final String agentMode;
+  final String subAgentSelectionMode;
+  final List<String> availableSubAgentIds;
   final int maxLoopCount;
   final bool deepThinking;
   final String thinkingLevel;
   final List<String> availableTools;
   final List<String> availableSkills;
+  final ShellPolicySummary shellPolicy;
   final bool isDefault;
 
   factory AgentConfiguration.fromJson(Map<String, Object?> json) {
-    final context = json['system_context'];
+    final context = json['runtime_variables'] ?? json['system_context'];
+    final shellPolicy = json['shell_policy'];
     return AgentConfiguration(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -201,12 +262,86 @@ class AgentConfiguration {
       llmProviderId: json['llm_provider_id']?.toString(),
       fastLlmProviderId: json['fast_llm_provider_id']?.toString(),
       agentMode: json['agent_mode']?.toString() ?? 'simple',
+      subAgentSelectionMode:
+          json['sub_agent_selection_mode']?.toString() ?? 'auto_all',
+      availableSubAgentIds: _stringList(json['available_sub_agent_ids']),
       maxLoopCount: (json['max_loop_count'] as num?)?.toInt() ?? 100,
       deepThinking: json['deep_thinking'] == true,
       thinkingLevel: json['thinking_level']?.toString() ?? 'medium',
       availableTools: _stringList(json['available_tools']),
       availableSkills: _stringList(json['available_skills']),
+      shellPolicy: shellPolicy is Map
+          ? ShellPolicySummary.fromJson(shellPolicy.cast<String, Object?>())
+          : ShellPolicySummary(
+              userApprovedCommands: _stringList(
+                json['approved_shell_commands'],
+              ),
+            ),
       isDefault: json['is_default'] == true,
+    );
+  }
+
+  AgentConfiguration applyPatch(Map<String, Object?> patch) {
+    final hasRuntimeVariables = patch.containsKey('runtime_variables');
+    final hasLegacyContext = patch.containsKey('system_context');
+    final context = hasRuntimeVariables
+        ? patch['runtime_variables']
+        : patch['system_context'];
+    return AgentConfiguration(
+      id: id,
+      name: patch.containsKey('name') ? patch['name']?.toString() ?? '' : name,
+      description: patch.containsKey('description')
+          ? patch['description']?.toString() ?? ''
+          : description,
+      systemPrefix: patch.containsKey('system_prefix')
+          ? patch['system_prefix']?.toString() ?? ''
+          : systemPrefix,
+      systemContext: hasRuntimeVariables || hasLegacyContext
+          ? (context is Map
+                ? context.cast<String, Object?>()
+                : const <String, Object?>{})
+          : systemContext,
+      llmProviderId: patch.containsKey('llm_provider_id')
+          ? patch['llm_provider_id']?.toString()
+          : llmProviderId,
+      fastLlmProviderId: patch.containsKey('fast_llm_provider_id')
+          ? patch['fast_llm_provider_id']?.toString()
+          : fastLlmProviderId,
+      agentMode: patch.containsKey('agent_mode')
+          ? patch['agent_mode']?.toString() ?? 'simple'
+          : agentMode,
+      subAgentSelectionMode: patch.containsKey('sub_agent_selection_mode')
+          ? patch['sub_agent_selection_mode']?.toString() ?? 'auto_all'
+          : subAgentSelectionMode,
+      availableSubAgentIds: patch.containsKey('available_sub_agent_ids')
+          ? _stringList(patch['available_sub_agent_ids'])
+          : availableSubAgentIds,
+      maxLoopCount: patch.containsKey('max_loop_count')
+          ? (patch['max_loop_count'] as num?)?.toInt() ?? maxLoopCount
+          : maxLoopCount,
+      deepThinking: patch.containsKey('deep_thinking')
+          ? patch['deep_thinking'] == true
+          : deepThinking,
+      thinkingLevel: patch.containsKey('thinking_level')
+          ? patch['thinking_level']?.toString() ?? 'medium'
+          : thinkingLevel,
+      availableTools: patch.containsKey('available_tools')
+          ? _stringList(patch['available_tools'])
+          : availableTools,
+      availableSkills: patch.containsKey('available_skills')
+          ? _stringList(patch['available_skills'])
+          : availableSkills,
+      shellPolicy: patch.containsKey('approved_shell_commands')
+          ? ShellPolicySummary(
+              autoExecuteKeywords: shellPolicy.autoExecuteKeywords,
+              approvalKeywords: shellPolicy.approvalKeywords,
+              blockedKeywords: shellPolicy.blockedKeywords,
+              userApprovedCommands: _stringList(
+                patch['approved_shell_commands'],
+              ),
+            )
+          : shellPolicy,
+      isDefault: isDefault,
     );
   }
 }
@@ -256,6 +391,7 @@ class ComponentPluginSummary {
     this.available = true,
     this.builtIn = true,
     this.dependencies = const [],
+    this.configSchema = const {},
   });
 
   final String id;
@@ -264,6 +400,7 @@ class ComponentPluginSummary {
   final bool available;
   final bool builtIn;
   final List<String> dependencies;
+  final Map<String, Object?> configSchema;
 
   factory ComponentPluginSummary.fromJson(Map<String, Object?> json) =>
       ComponentPluginSummary(
@@ -273,6 +410,9 @@ class ComponentPluginSummary {
         available: json['available'] != false,
         builtIn: json['built_in'] != false,
         dependencies: _stringList(json['dependencies']),
+        configSchema: json['config_schema'] is Map
+            ? (json['config_schema'] as Map).cast<String, Object?>()
+            : const {},
       );
 }
 
@@ -286,6 +426,7 @@ class ComponentSummary {
     this.scope = '',
     this.plugins = const [],
     this.activePluginId,
+    this.selectedPluginId,
     this.activeSource = '',
     this.activeConfig = const {},
     this.pendingRestart = false,
@@ -299,6 +440,7 @@ class ComponentSummary {
   final String scope;
   final List<ComponentPluginSummary> plugins;
   final String? activePluginId;
+  final String? selectedPluginId;
   final String activeSource;
   final Map<String, Object?> activeConfig;
   final bool pendingRestart;
@@ -340,6 +482,10 @@ class ComponentSummary {
           : const [],
       activePluginId:
           active['plugin_id']?.toString() ?? json['implementation']?.toString(),
+      selectedPluginId:
+          active['selected_plugin_id']?.toString() ??
+          active['plugin_id']?.toString() ??
+          json['implementation']?.toString(),
       activeSource: active['source']?.toString() ?? '',
       activeConfig: rawConfig is Map
           ? rawConfig.cast<String, Object?>()
@@ -381,6 +527,8 @@ class DesktopSettings {
     this.agentWorkspacePath = '',
     this.maxPreviewBytes = 2000000,
     this.maxTreeEntries = 6000,
+    this.componentSelections = const {},
+    this.componentConfigs = const {},
   });
 
   final String themeMode;
@@ -390,6 +538,8 @@ class DesktopSettings {
   final String agentWorkspacePath;
   final int maxPreviewBytes;
   final int maxTreeEntries;
+  final Map<String, String> componentSelections;
+  final Map<String, Map<String, Object?>> componentConfigs;
 
   factory DesktopSettings.fromJson(Map<String, Object?> json) {
     final rawProjects = json['projects'];
@@ -422,6 +572,20 @@ class DesktopSettings {
       agentWorkspacePath: json['agent_workspace_path']?.toString() ?? '',
       maxPreviewBytes: (json['max_preview_bytes'] as num?)?.toInt() ?? 2000000,
       maxTreeEntries: (json['max_tree_entries'] as num?)?.toInt() ?? 6000,
+      componentSelections: json['component_selections'] is Map
+          ? {
+              for (final entry in (json['component_selections'] as Map).entries)
+                entry.key.toString(): entry.value.toString(),
+            }
+          : const {},
+      componentConfigs: json['component_configs'] is Map
+          ? {
+              for (final entry in (json['component_configs'] as Map).entries)
+                if (entry.value is Map)
+                  entry.key.toString(): (entry.value as Map)
+                      .cast<String, Object?>(),
+            }
+          : const {},
     );
   }
 
@@ -434,6 +598,8 @@ class DesktopSettings {
     String? agentWorkspacePath,
     int? maxPreviewBytes,
     int? maxTreeEntries,
+    Map<String, String>? componentSelections,
+    Map<String, Map<String, Object?>>? componentConfigs,
   }) => DesktopSettings(
     themeMode: themeMode ?? this.themeMode,
     language: language ?? this.language,
@@ -444,6 +610,8 @@ class DesktopSettings {
     agentWorkspacePath: agentWorkspacePath ?? this.agentWorkspacePath,
     maxPreviewBytes: maxPreviewBytes ?? this.maxPreviewBytes,
     maxTreeEntries: maxTreeEntries ?? this.maxTreeEntries,
+    componentSelections: componentSelections ?? this.componentSelections,
+    componentConfigs: componentConfigs ?? this.componentConfigs,
   );
 
   Map<String, Object?> toJson() => {
@@ -454,6 +622,8 @@ class DesktopSettings {
     'agent_workspace_path': agentWorkspacePath,
     'max_preview_bytes': maxPreviewBytes,
     'max_tree_entries': maxTreeEntries,
+    'component_selections': componentSelections,
+    'component_configs': componentConfigs,
   };
 }
 
@@ -524,6 +694,29 @@ class UploadedAttachment {
         size: (json['size'] as num?)?.toInt() ?? 0,
         isDirectory: json['is_directory'] == true,
       );
+}
+
+class ComposerReference {
+  const ComposerReference({
+    required this.fileName,
+    required this.path,
+    required this.text,
+    this.isDirectory = false,
+  });
+
+  final String fileName;
+  final String path;
+  final String text;
+  final bool isDirectory;
+
+  String get promptText {
+    if (text.isEmpty) return '@$path';
+    final quoted = text
+        .split('\n')
+        .map((line) => line.isEmpty ? '>' : '> $line')
+        .join('\n');
+    return '@$path\n$quoted';
+  }
 }
 
 class ChatMessage {
@@ -660,6 +853,7 @@ class RuntimeProcessPanel {
     required this.id,
     required this.anchorMessageId,
     required this.startedAt,
+    this.runId = '',
     List<RuntimeActivity>? activities,
     this.completedAt,
     this.running = true,
@@ -667,7 +861,8 @@ class RuntimeProcessPanel {
 
   final String id;
   final String anchorMessageId;
-  final DateTime startedAt;
+  DateTime startedAt;
+  String runId;
   DateTime? completedAt;
   bool running;
   final List<RuntimeActivity> activities;
@@ -677,6 +872,7 @@ class RuntimeProcessPanel {
     return RuntimeProcessPanel(
       id: json['id']?.toString() ?? '',
       anchorMessageId: json['anchor_message_id']?.toString() ?? '',
+      runId: json['run_id']?.toString() ?? '',
       startedAt:
           DateTime.tryParse(json['started_at']?.toString() ?? '') ??
           DateTime.now(),
@@ -695,6 +891,7 @@ class RuntimeProcessPanel {
   Map<String, Object?> toJson() => {
     'id': id,
     'anchor_message_id': anchorMessageId,
+    'run_id': runId,
     'started_at': startedAt.toIso8601String(),
     'completed_at': completedAt?.toIso8601String(),
     'running': running,
@@ -708,39 +905,61 @@ class Conversation {
     this.title = '新会话',
     this.agentId = '',
     this.sessionId,
+    this.parentSessionId,
+    this.parentRunId,
+    this.parentToolCallId,
     this.runId = '',
     this.turnId = '',
     this.runSequence = 0,
     this.status = RunStatus.idle,
+    this.thinking = false,
     List<ChatMessage>? messages,
     this.pendingInteraction,
     this.approvalMode = ApprovalMode.highRisk,
+    this.invocationMode = InvocationMode.normal,
     List<RuntimeProcessPanel>? processPanels,
+    List<Conversation>? subSessions,
+    DateTime? createdAt,
     this.archived = false,
     this.archivedAt,
   }) : messages = messages ?? [],
-       processPanels = processPanels ?? [];
+       processPanels = processPanels ?? [],
+       subSessions = subSessions ?? [],
+       createdAt = createdAt ?? DateTime.now();
 
   final String id;
   String title;
   String agentId;
   String? sessionId;
+  String? parentSessionId;
+  String? parentRunId;
+  String? parentToolCallId;
   String runId;
   String turnId;
   int runSequence;
   RunStatus status;
+
+  /// Transient UI state driven by reasoning lifecycle events.
+  /// Reasoning content is intentionally never retained or rendered.
+  bool thinking;
   List<ChatMessage> messages;
   PendingInteraction? pendingInteraction;
   ApprovalMode approvalMode;
+  InvocationMode invocationMode;
+  bool get planMode => invocationMode == InvocationMode.plan;
+  bool get goalMode => invocationMode == InvocationMode.goal;
   bool archived;
   DateTime? archivedAt;
   final List<Map<String, Object?>> runtimeEvents = [];
   final List<RuntimeProcessPanel> processPanels;
+  final List<Conversation> subSessions;
+  final DateTime createdAt;
 
   factory Conversation.fromJson(Map<String, Object?> json) {
     final rawMessages = json['messages'];
     final rawInteraction = json['pending_interaction'];
     final rawProcessPanels = json['process_panels'];
+    final rawSubSessions = json['sub_sessions'];
     final messages = rawMessages is List
         ? [
             for (final value in rawMessages)
@@ -784,6 +1003,9 @@ class Conversation {
       title: json['title']?.toString() ?? '新会话',
       agentId: json['agent_id']?.toString() ?? '',
       sessionId: json['session_id']?.toString(),
+      parentSessionId: json['parent_session_id']?.toString(),
+      parentRunId: json['parent_run_id']?.toString(),
+      parentToolCallId: json['parent_tool_call_id']?.toString(),
       runId: json['run_id']?.toString() ?? '',
       turnId: json['turn_id']?.toString() ?? '',
       runSequence: (json['run_sequence'] as num?)?.toInt() ?? 0,
@@ -793,7 +1015,19 @@ class Conversation {
           ? PendingInteraction.fromJson(rawInteraction.cast<String, Object?>())
           : null,
       approvalMode: approvalModeFromWire(json['approval_mode']?.toString()),
+      invocationMode: invocationModeFromWire(
+        json['invocation_mode']?.toString() ??
+            (json['plan_mode'] == true ? 'plan' : null),
+      ),
       processPanels: processPanels,
+      subSessions: rawSubSessions is List
+          ? [
+              for (final value in rawSubSessions)
+                if (value is Map)
+                  Conversation.fromJson(value.cast<String, Object?>()),
+            ]
+          : <Conversation>[],
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       archived: json['archived'] == true,
       archivedAt: DateTime.tryParse(json['archived_at']?.toString() ?? ''),
     );
@@ -804,6 +1038,9 @@ class Conversation {
     'title': title,
     'agent_id': agentId,
     'session_id': sessionId,
+    'parent_session_id': parentSessionId,
+    'parent_run_id': parentRunId,
+    'parent_tool_call_id': parentToolCallId,
     'run_id': runId,
     'turn_id': turnId,
     'run_sequence': runSequence,
@@ -811,7 +1048,10 @@ class Conversation {
     'messages': [for (final value in messages) value.toJson()],
     'pending_interaction': pendingInteraction?.toJson(),
     'approval_mode': approvalMode.wireValue,
+    'invocation_mode': invocationMode.wireValue,
     'process_panels': [for (final value in processPanels) value.toJson()],
+    'sub_sessions': [for (final value in subSessions) value.toJson()],
+    'created_at': createdAt.toIso8601String(),
     'archived': archived,
     'archived_at': archivedAt?.toIso8601String(),
   };

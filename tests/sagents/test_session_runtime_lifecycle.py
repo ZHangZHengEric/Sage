@@ -209,3 +209,28 @@ async def test_shutdown_closes_session_storage(tmp_path):
     await manager.shutdown()
 
     assert manager.storage.healthcheck()["initialized"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_session_closes_live_tree_and_removes_storage(tmp_path):
+    manager = SessionManager(str(tmp_path), enable_obs=False)
+    parent_id = "parent-session"
+    child_id = "child-session"
+    parent_workspace = manager.storage.create_session_workspace(parent_id)
+    manager.cache_session_workspace(parent_id, parent_workspace)
+    child_workspace = manager.storage.create_session_workspace(
+        child_id, parent_workspace=parent_workspace
+    )
+    manager.cache_session_workspace(
+        child_id, child_workspace, parent_session_id=parent_id
+    )
+    manager.get_or_create(parent_id)
+    manager.get_or_create(child_id)
+
+    await manager.delete_session(parent_id)
+
+    assert manager.get_live_session(parent_id) is None
+    assert manager.get_live_session(child_id) is None
+    assert manager.get_session_workspace(parent_id) is None
+    assert manager.get_session_workspace(child_id) is None
+    assert not (tmp_path / parent_id).exists()

@@ -77,6 +77,47 @@ def continuation_context(**updates):
             "status.continue",
         ),
         (
+            {"explicit_status": "task_done"},
+            ContinuationAction.COMPLETE_RUN,
+            "status.complete",
+        ),
+        (
+            {"explicit_status": "continue_work"},
+            ContinuationAction.CONTINUE_STEP,
+            "status.continue",
+        ),
+        (
+            {
+                "explicit_status": "need_user_input",
+                "explicit_status_note": "Please choose a target.",
+            },
+            ContinuationAction.REQUEST_INTERACTION,
+            "status.need_user_input",
+        ),
+        (
+            {"explicit_status": "blocked"},
+            ContinuationAction.REQUEST_INTERACTION,
+            "status.blocked",
+        ),
+        (
+            {"explicit_status": "failed"},
+            ContinuationAction.REQUEST_INTERACTION,
+            "status.failed",
+        ),
+        (
+            {"explicit_status": "unexpected"},
+            ContinuationAction.REQUEST_INTERACTION,
+            "status.invalid",
+        ),
+        (
+            {
+                "explicit_status": "task_done",
+                "response": response(text=""),
+            },
+            ContinuationAction.CONTINUE_STEP,
+            "status.explanation_required",
+        ),
+        (
             {"repeated_fingerprint_count": 3},
             ContinuationAction.REQUEST_INTERACTION,
             "loop.repeated_pattern",
@@ -85,6 +126,16 @@ def continuation_context(**updates):
             {"flow_boundary": "complete_node"},
             ContinuationAction.COMPLETE_TURN,
             "flow.node_complete",
+        ),
+        (
+            {"flow_boundary": "continue_node"},
+            ContinuationAction.CONTINUE_STEP,
+            "flow.node_continue",
+        ),
+        (
+            {"flow_boundary": "unexpected"},
+            ContinuationAction.FAIL,
+            "flow.invalid_boundary",
         ),
     ],
 )
@@ -97,8 +148,49 @@ async def test_default_continuation_decision_matrix(updates, action, reason):
 
 
 @pytest.mark.asyncio
+async def test_explicit_input_status_preserves_prompt_and_allowed_decisions():
+    decision = await CompositeContinuationPolicy().decide(
+        continuation_context(
+            explicit_status="need_user_input",
+            explicit_status_note="Which environment should I deploy to?",
+        )
+    )
+
+    assert decision.interaction is not None
+    assert decision.interaction.allowed_decisions == ("submit", "cancel")
+    assert decision.interaction.payload["status"] == "need_user_input"
+    assert decision.interaction.payload["prompt"] == (
+        "Which environment should I deploy to?"
+    )
+    assert decision.interaction.payload["questions"]
+    assert decision.interaction.payload["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_flow_boundary_never_skips_tool_dispatch():
+    decision = await CompositeContinuationPolicy().decide(
+        continuation_context(
+            flow_boundary="complete_node",
+            response=response(
+                text="working",
+                tools=(
+                    ModelToolCall(
+                        tool_call_id="call_flow",
+                        name="read",
+                        arguments={},
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert decision.action == ContinuationAction.CONTINUE_STEP
+    assert decision.reason_code == "tool.pending"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("updates", "reason"),
+    ("updates", "action", "reason"),
     [
         (
             {
@@ -106,21 +198,29 @@ async def test_default_continuation_decision_matrix(updates, action, reason):
                 "max_steps": 3,
                 "response": response(text=""),
             },
+            ContinuationAction.REQUEST_INTERACTION,
             "budget.max_steps",
         ),
-        ({"total_tokens": 100, "max_total_tokens": 100}, "budget.max_tokens"),
+        (
+            {"total_tokens": 100, "max_total_tokens": 100},
+            ContinuationAction.FAIL,
+            "budget.max_tokens",
+        ),
         (
             {"elapsed_seconds": 10, "deadline_seconds": 10},
+            ContinuationAction.FAIL,
             "budget.deadline",
         ),
     ],
 )
-async def test_budget_has_priority_over_continue_and_loop_recovery(updates, reason):
+async def test_budget_has_priority_over_continue_and_loop_recovery(
+    updates, action, reason
+):
     updates["repeated_fingerprint_count"] = 10
     decision = await CompositeContinuationPolicy().decide(
         continuation_context(**updates)
     )
-    assert decision.action == ContinuationAction.FAIL
+    assert decision.action == action
     assert decision.reason_code == reason
 
 

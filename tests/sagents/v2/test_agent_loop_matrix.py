@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from sagents.v2.agent.engine import AgentLoopEngine
-from sagents.v2.agent.state import AgentLoopCheckpointState
+from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -29,10 +29,19 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
+from sagents.v2.tool.selection import (
+    HybridToolSelectionPolicy,
+    RecentToolSelectionPolicy,
+)
 from sagents.v2.agent.policy.continuation import (
     ContinuationAction,
     ContinuationDecision,
+    ContinuationSignals,
     InteractionDraft,
+)
+from sagents.v2.agent.policy.judge import (
+    LLMContinuationJudge,
+    LLMJudgeContinuationPolicy,
 )
 from sagents.v2.contracts.commands import (
     CommandDecision,
@@ -56,7 +65,7 @@ from sagents.v2.contracts.principals import (
     RequestContext,
 )
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 
 
 CONTEXT = RequestContext(
@@ -184,8 +193,16 @@ async def setup_loop(
     deadline_seconds=None,
     clock=None,
     actor_context=CONTEXT,
+    flow_boundary=None,
+    continuation_signal_provider=None,
+    continuation_policy=None,
+    tool_selection_policy=None,
+    response_language=None,
+    invocation_mode=None,
+    automatic_memory_recall=False,
+    memory_recall_query_generator=None,
 ):
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     handle = await runtime.start_run(
         StartRun(
             agent_id="agent_test",
@@ -196,9 +213,16 @@ async def setup_loop(
                 max_output_tokens=max_output_tokens,
                 max_total_tokens=max_total_tokens,
                 deadline_seconds=deadline_seconds,
+                flow_boundary=flow_boundary,
+                metadata=(
+                    {"response_language": response_language}
+                    if response_language
+                    else {}
+                ),
             ),
             resolved_spec_hash="sha256:agent",
             idempotency_key="start_1",
+            invocation_mode=invocation_mode,
         ),
         actor_context,
     )
@@ -219,8 +243,210 @@ async def setup_loop(
     )
     if clock is not None:
         loop_kwargs["clock"] = clock
+    if continuation_signal_provider is not None:
+        loop_kwargs["continuation_signal_provider"] = continuation_signal_provider
+    if continuation_policy is not None:
+        loop_kwargs["continuation_policy"] = continuation_policy
+    if tool_selection_policy is not None:
+        loop_kwargs["tool_selection_policy"] = tool_selection_policy
+    if automatic_memory_recall:
+        loop_kwargs["automatic_memory_recall"] = True
+    if memory_recall_query_generator is not None:
+        loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
     loop = AgentLoopEngine(**loop_kwargs)
     return runtime, handle, loop, executor
+
+
+@pytest.mark.asyncio
+async def test_tool_selection_preparation_runs_in_parallel_with_memory_recall():
+    selection_started = asyncio.Event()
+    recall_started = asyncio.Event()
+
+    class CoordinatedSelection(RecentToolSelectionPolicy):
+        async def prepare(self, context):
+            selection_started.set()
+            await asyncio.wait_for(recall_started.wait(), timeout=1)
+            await super().prepare(context)
+
+    class CoordinatedRecallQuery:
+        async def generate(self, user_input, *, run_id):
+            del user_input, run_id
+            await asyncio.sleep(0)
+            assert selection_started.is_set()
+            recall_started.set()
+            return "current task"
+
+    memory_tool = ToolDefinition(
+        name="search_memory",
+        description="search memory",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+    )
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("done"),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(READ_TOOL, memory_tool),
+        handlers={"read_value": tool_handler, "search_memory": tool_handler},
+        tool_selection_policy=CoordinatedSelection({"max_visible_tools": 2}),
+        automatic_memory_recall=True,
+        memory_recall_query_generator=CoordinatedRecallQuery(),
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    assert selection_started.is_set() and recall_started.is_set()
+
+
+@pytest.mark.asyncio
+async def test_large_catalog_is_bounded_and_expansion_changes_the_next_request():
+    expand = ToolDefinition(
+        name="tool_expand_tools",
+        description="activate exact tool names",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tool_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                }
+            },
+            "required": ["tool_names"],
+        },
+    )
+    alpha = ToolDefinition(name="alpha", description="alpha", input_schema={})
+    beta = ToolDefinition(name="beta", description="beta", input_schema={})
+    target = ToolDefinition(
+        name="zzz_target", description="hidden target", input_schema={}
+    )
+    policy = HybridToolSelectionPolicy(
+        {
+            "direct_tool_count_threshold": 0,
+            "max_visible_tools": 2,
+            "candidate_top_k": 2,
+            "expansion_batch_limit": 1,
+            "max_expanded_tools_per_run": 1,
+            "always_visible_tools": ["tool_expand_tools"],
+        }
+    )
+
+    def initial_request(request):
+        names = [tool.name for tool in request.tools]
+        assert names == ["alpha", "tool_expand_tools"]
+        assert "zzz_target" not in names
+        assert request.metadata["tool_selection"]["hidden_index_count"] == 2
+        assert any(
+            message.metadata.get("runtime_tool_index")
+            for message in request.messages
+        )
+
+    def expanded_request(request):
+        assert "zzz_target" in [tool.name for tool in request.tools]
+        assert request.metadata["tool_selection"]["expanded_tools"] == (
+            "zzz_target",
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                assertion=initial_request,
+                events=(
+                    completed(
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="call_expand",
+                                name="tool_expand_tools",
+                                arguments={"tool_names": ["zzz_target"]},
+                            ),
+                        )
+                    ),
+                ),
+            ),
+            ScriptedModelStep(
+                assertion=expanded_request,
+                events=(completed("expanded"),),
+            ),
+        )
+    )
+    tools = (expand, alpha, beta, target)
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=tools,
+        handlers={tool.name: tool_handler for tool in tools},
+        tool_selection_policy=policy,
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_plan_invocation_keeps_the_agent_tool_catalog_visible():
+    def assert_all_tools_visible(request):
+        assert [tool.name for tool in request.tools] == [
+            "read_value",
+            "write_value",
+        ]
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                assertion=assert_all_tools_visible,
+                events=(completed(calls=(tool_call("read_value"),)),),
+            ),
+            ScriptedModelStep(events=(completed("inspected"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tools=(READ_TOOL, WRITE_TOOL),
+        invocation_mode="plan",
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert [call.tool_name for call in executor.calls] == ["read_value"]
+
+
+@pytest.mark.asyncio
+async def test_model_request_localizes_builtin_tool_metadata():
+    tool = ToolDefinition(
+        name="file_read",
+        description="Read text file within a line range.",
+        input_schema={
+            "type": "object",
+            "properties": {"file_path": {"type": "string"}},
+            "required": ["file_path"],
+            "additionalProperties": False,
+        },
+    )
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("已完成"),)),))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(tool,),
+        handlers={"file_read": tool_handler},
+        response_language="zh-CN",
+    )
+
+    await loop.execute(handle.run_id, CONTEXT)
+
+    projected = model.requests[0].tools[0]
+    assert projected.description.startswith("读取文本文件")
+    assert projected.input_schema["properties"]["file_path"]["description"] == (
+        "文件虚拟路径"
+    )
+
+
+class SignalSequence:
+    def __init__(self, *values: ContinuationSignals):
+        self.values = list(values)
+
+    def __call__(self, run_id: str) -> ContinuationSignals:
+        assert run_id
+        return self.values.pop(0) if self.values else ContinuationSignals()
 
 
 @pytest.mark.asyncio
@@ -254,11 +480,479 @@ async def test_text_reasoning_stream_completes_with_canonical_event_lifecycles()
     ]
     assert "reasoning.started" in types
     assert "reasoning.delta" in types
-    assert types.count("message.delta") == 2
+    assert types.count("message.delta") == 1
+    assert next(event.data.delta for event in events if event.type == "message.delta") == "hello"
     assert "message.completed" in types
     assert "continuation.decided" in types
     assert types[-3:] == ["step.completed", "turn.completed", "run.completed"]
     assert [event.run_sequence for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_explicit_task_done_signal_completes_and_is_recorded():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("All requested work is done."),)),)
+    )
+    signals = SignalSequence(ContinuationSignals(explicit_status="task_done"))
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decisions = [event for event in events if event.type == "continuation.decided"]
+
+    assert result.state == RunState.COMPLETED
+    assert decisions[-1].data.action == "complete_run"
+    assert decisions[-1].data.reason_code == "status.complete"
+
+
+@pytest.mark.asyncio
+async def test_continue_work_signal_is_one_step_and_then_final_text_completes():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("Still working."),)),
+            ScriptedModelStep(events=(completed("Now complete."),)),
+        )
+    )
+    signals = SignalSequence(ContinuationSignals(explicit_status="continue_work"))
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    reasons = [
+        event.data.reason_code
+        for event in events
+        if event.type == "continuation.decided"
+    ]
+
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    assert reasons == ["status.continue", "text.final"]
+
+
+@pytest.mark.asyncio
+async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("Which target should I use?"),)),
+            ScriptedModelStep(events=(completed("Deployed to staging."),)),
+        )
+    )
+    signals = SignalSequence(
+        ContinuationSignals(
+            explicit_status="need_user_input",
+            explicit_status_note="Choose production or staging.",
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals
+    )
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+
+    assert suspended.state == RunState.SUSPENDED
+    assert interaction.allowed_decisions == ("submit", "cancel")
+    assert interaction.payload["status"] == "need_user_input"
+    assert interaction.payload["prompt"] == "Choose production or staging."
+    assert interaction.payload["questions"]
+    assert interaction.payload["language"] == "en"
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="submit",
+            payload={"text": "Use staging."},
+            idempotency_key="submit-target",
+        ),
+        CONTEXT,
+    )
+    completed_run = await loop.resume(handle.run_id, CONTEXT)
+
+    assert completed_run.state == RunState.COMPLETED
+    assert model.requests[1].messages[-1].content == (TextBlock(text="Use staging."),)
+
+
+@pytest.mark.asyncio
+async def test_empty_questionnaire_reply_reasks_instead_of_failing_the_run():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("Which target should I use?"),)),)
+    )
+    signals = SignalSequence(
+        ContinuationSignals(
+            explicit_status="need_user_input",
+            explicit_status_note="Choose production or staging.",
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals, response_language="zh-CN"
+    )
+    first = await loop.execute(handle.run_id, CONTEXT)
+    first_suspension = await runtime.session_store.get_suspension(first.suspension_id)
+    first_interaction = await runtime.session_store.get_interaction(
+        first_suspension.interaction_id
+    )
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=first_suspension.suspension_id,
+            interaction_id=first_interaction.interaction_id,
+            expected_revision=first.revision,
+            expected_suspension_revision=first_suspension.expected_revision,
+            expected_interaction_revision=first_interaction.expected_revision,
+            decision="submit",
+            payload={},
+            idempotency_key="submit-empty-target",
+        ),
+        CONTEXT,
+    )
+
+    second = await loop.resume(handle.run_id, CONTEXT)
+    second_suspension = await runtime.session_store.get_suspension(second.suspension_id)
+    second_interaction = await runtime.session_store.get_interaction(
+        second_suspension.interaction_id
+    )
+
+    assert second.state == RunState.SUSPENDED
+    assert second_interaction.interaction_id != first_interaction.interaction_id
+    assert second_interaction.payload["reason_code"] == "interaction.input_required"
+    assert second_interaction.payload["language"] == "zh"
+    assert second_interaction.payload["questions"]
+
+
+@pytest.mark.asyncio
+async def test_blocked_signal_suspends_with_recoverable_interaction():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("Repository access is required."),)),)
+    )
+    signals = SignalSequence(
+        ContinuationSignals(
+            explicit_status="blocked",
+            explicit_status_note="Grant repository access, then continue.",
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals
+    )
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decision = next(event for event in events if event.type == "continuation.decided")
+
+    assert suspended.state == RunState.SUSPENDED
+    assert interaction.interaction_type.value == "user_input"
+    assert interaction.allowed_decisions == ("submit", "cancel")
+    assert interaction.payload["status"] == "blocked"
+    assert interaction.payload["prompt"] == ("Grant repository access, then continue.")
+    assert interaction.payload["questions"]
+    assert decision.data.reason_code == "status.blocked"
+
+
+@pytest.mark.asyncio
+async def test_failed_explicit_status_requests_recovery_guidance():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("The operation failed."),)),)
+    )
+    signals = SignalSequence(ContinuationSignals(explicit_status="failed"))
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_signal_provider=signals
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+
+    assert result.state == RunState.SUSPENDED
+    assert events[-1].type == "run.suspended"
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "status.failed"
+    assert interaction.payload["questions"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_questionnaire_uses_run_response_language():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("操作未能完成。"),)),)
+    )
+    signals = SignalSequence(ContinuationSignals(explicit_status="failed"))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        continuation_signal_provider=signals,
+        response_language="zh-CN",
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+
+    assert interaction.payload["language"] == "zh"
+    assert interaction.payload["title"] == "Agent 需要你的引导"
+    assert interaction.payload["questions"][0]["title"] == "接下来应该怎么做？"
+
+
+@pytest.mark.asyncio
+async def test_judge_usage_and_metadata_are_committed_to_run_events():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("The report is ready."),)),)
+    )
+    judge = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="judge_response",
+                            text='{"decision":"completed","reason":"Verified"}',
+                            finish_reason="stop",
+                            usage=UsageSummary(input_tokens=13, output_tokens=4),
+                        ),
+                    ),
+                )
+            ),
+        )
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        continuation_policy=policy,
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decision = next(event for event in events if event.type == "continuation.decided")
+    usage = [event.data.usage for event in events if event.type == "usage.recorded"]
+
+    assert result.state == RunState.COMPLETED
+    assert decision.data.reason_code == "judge.completed"
+    assert decision.data.details == {
+        "policy": "llm_judge",
+        "implementation": "v1",
+    }
+    assert [(value.input_tokens, value.output_tokens) for value in usage] == [
+        (5, 2),
+        (13, 4),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
+    def assert_first_request(request):
+        assert request.tool_choice == "auto"
+
+    def assert_auto_request(request):
+        assert request.tool_choice == "auto"
+        guidance = request.messages[-1].content[0].text
+        assert "Continue because: Verification is still missing." in guidance
+
+    def assert_after_tool_request(request):
+        assert request.tool_choice == "auto"
+        assert not request.messages[-1].metadata.get("runtime_continuation_guidance")
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                assertion=assert_first_request,
+                events=(completed("I still need to verify the value."),),
+            ),
+            ScriptedModelStep(
+                assertion=assert_auto_request,
+                events=(completed("", calls=(tool_call(),)),),
+            ),
+            ScriptedModelStep(
+                assertion=assert_after_tool_request,
+                events=(completed("The verified value is 42."),),
+            ),
+        )
+    )
+    judge = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        '{"decision":"continue",'
+                        '"reason":"Verification is still missing."}'
+                    ),
+                )
+            ),
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        '{"decision":"completed","reason":"Verification succeeded."}'
+                    ),
+                )
+            ),
+        )
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        continuation_policy=policy,
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    assert len(executor.calls) == 1
+    assert len(judge.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_judge_output_does_not_leak_parser_error_into_next_request():
+    def assert_auto_request(request):
+        assert request.tool_choice == "auto"
+        assert all(
+            not message.metadata.get("runtime_continuation_guidance")
+            for message in request.messages
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("The first answer is ready."),)),
+            ScriptedModelStep(
+                assertion=assert_auto_request,
+                events=(completed("", calls=(tool_call(),)),),
+            ),
+            ScriptedModelStep(events=(completed("The verified answer is ready."),)),
+        )
+    )
+    judge = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed(""),)),
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        '{"decision":"completed","reason":"Verification succeeded."}'
+                    ),
+                )
+            ),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        continuation_policy=LLMJudgeContinuationPolicy(LLMContinuationJudge(judge)),
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    assert len(executor.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_typed_flow_boundary_completes_node_without_finish_reason_inference():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("Node output is ready."),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        flow_boundary="complete_node",
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decision = next(event for event in events if event.type == "continuation.decided")
+
+    assert result.state == RunState.COMPLETED
+    assert decision.data.action == "complete_turn"
+    assert decision.data.reason_code == "flow.node_complete"
+
+
+@pytest.mark.asyncio
+async def test_continue_node_flow_boundary_is_consumed_once():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("Continue the node."),)),
+            ScriptedModelStep(events=(completed("Node is now complete."),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        flow_boundary="continue_node",
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    reasons = [
+        event.data.reason_code
+        for event in events
+        if event.type == "continuation.decided"
+    ]
+
+    assert result.state == RunState.COMPLETED
+    assert reasons == ["flow.node_continue", "text.final"]
+    assert len(model.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_flow_boundary_survives_tool_dispatch_until_node_output_is_ready():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("read_value"),)),)
+            ),
+            ScriptedModelStep(events=(completed("Node output: 42"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        flow_boundary="complete_node",
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    reasons = [
+        event.data.reason_code
+        for event in events
+        if event.type == "continuation.decided"
+    ]
+
+    assert result.state == RunState.COMPLETED
+    assert reasons == ["tool.pending", "flow.node_complete"]
+    assert len(executor.calls) == 1
+    assert len(model.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_text_stream_preserves_markdown_whitespace_between_deltas():
+    chunks = ("已完成。", "\n\n", "## ", "实时标题", "\n\n", "- ", "列表项")
+    markdown = "".join(chunks)
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    *(
+                        ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=chunk)
+                        for chunk in chunks
+                    ),
+                    completed(markdown),
+                )
+            ),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model)
+
+    await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    streamed = "".join(
+        event.data.delta
+        for event in events
+        if event.type == "message.delta"
+        and isinstance(event.data, ItemEventData)
+        and isinstance(event.data.delta, str)
+    )
+
+    assert streamed == markdown
 
 
 @pytest.mark.asyncio
@@ -277,12 +971,16 @@ async def test_run_config_output_and_deadline_budgets_are_enforced_by_loop():
     events = await runtime.session_store.read_events(handle.run_id)
 
     assert model.requests[0].max_output_tokens == 321
-    assert run.state == RunState.FAILED
-    assert events[-1].data.error.code == "budget.deadline"
+    assert run.state == RunState.SUSPENDED
+    assert events[-1].type == "run.suspended"
+    suspension = await runtime.session_store.get_suspension(run.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "budget.deadline"
+    assert interaction.payload["questions"]
 
 
 @pytest.mark.asyncio
-async def test_model_call_to_unavailable_tool_becomes_typed_run_failure():
+async def test_model_call_to_unavailable_tool_requests_recovery_guidance():
     model = ScriptedModelProvider(
         (
             ScriptedModelStep(
@@ -306,10 +1004,12 @@ async def test_model_call_to_unavailable_tool_becomes_typed_run_failure():
     run = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
 
-    assert run.state == RunState.FAILED
+    assert run.state == RunState.SUSPENDED
     assert executor.calls == []
-    assert events[-1].type == "run.failed"
-    assert events[-1].data.error.code == "tool.not_found"
+    assert events[-1].type == "run.suspended"
+    suspension = await runtime.session_store.get_suspension(run.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "tool.not_found"
 
 
 @pytest.mark.asyncio
@@ -507,33 +1207,202 @@ async def test_missing_actor_scope_denies_without_interaction_or_dispatch():
         ),
     ],
 )
-async def test_model_failure_matrix_ends_run_with_typed_terminal_events(
+async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
     step, error_code
 ):
     runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider((step,)))
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
-    assert result.state == RunState.FAILED
-    assert [event.type for event in events[-3:]] == [
-        "step.failed",
-        "turn.failed",
-        "run.failed",
-    ]
-    assert events[-1].data.error.code == error_code
+    assert result.state == RunState.SUSPENDED
+    assert events[-1].type == "run.suspended"
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == error_code
+    assert interaction.payload["questions"]
+    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
 
 
 @pytest.mark.asyncio
-async def test_step_budget_fails_instead_of_infinite_tool_loop():
+async def test_empty_semantic_response_retries_transparently_before_suspending():
+    empty = RuntimeErrorInfo(
+        code="model.empty_semantic_response",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message=(
+            "provider reported output tokens but returned no supported text, "
+            "reasoning, or Tool call fields"
+        ),
+        retryable=True,
+        safe_to_resume=True,
+        metadata={"output_tokens": 1721},
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(), error=empty),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model)
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    events = await runtime.session_store.read_events(handle.run_id)
+    retries = [event for event in events if event.type == "step.retry_scheduled"]
+    assert len(retries) == 1
+    assert retries[0].data.error.code == "model.empty_semantic_response"
+    assert not any(event.type == "interaction.requested" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_repeated_empty_semantic_responses_explain_exhausted_retries():
+    empty = RuntimeErrorInfo(
+        code="model.empty_semantic_response",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="provider returned token usage without semantic output",
+        retryable=True,
+        safe_to_resume=True,
+        metadata={"output_tokens": 1721, "finish_reason": "stop"},
+    )
+    model = ScriptedModelProvider(
+        tuple(ScriptedModelStep(events=(), error=empty) for _ in range(3))
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, response_language="zh"
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.SUSPENDED
+    assert len(model.requests) == 3
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(
+        suspension.interaction_id
+    )
+    error = interaction.payload["error"]
+    assert error["code"] == "model.empty_semantic_response"
+    assert error["metadata"]["transparent_retries_exhausted"] == 2
+    assert "没有返回可用的文本" in interaction.payload["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_only_response_does_not_pollute_next_model_request():
+    def no_empty_assistant_messages(request):
+        assert not any(
+            message.role == "assistant"
+            and not message.content
+            and not message.tool_calls
+            for message in request.messages
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="reasoning_only",
+                            reasoning="internal reasoning",
+                            finish_reason="stop",
+                            usage=UsageSummary(output_tokens=12),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(
+                assertion=no_empty_assistant_messages,
+                events=(completed("done"),),
+            ),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model)
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    rebuilt = await loop.ledger_rebuilder.rebuild(
+        await runtime.session_store.get_start_command(handle.run_id),
+        run_id=handle.run_id,
+    )
+    assert not any(
+        message.role == "assistant"
+        and not message.content
+        and not message.tool_calls
+        for message in rebuilt
+    )
+
+
+@pytest.mark.asyncio
+async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatch():
+    class RecallQuery:
+        async def generate(self, user_input, *, run_id):
+            assert user_input == "do task"
+            assert run_id
+            return "current task"
+
+    memory_tool = ToolDefinition(
+        name="search_memory",
+        description="search memory",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+    )
+    failure = RuntimeErrorInfo(
+        code="model.rate_limited",
+        category=ErrorCategory.RATE_LIMITED,
+        message="rate limited",
+        retryable=True,
+        safe_to_resume=True,
+    )
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(), error=failure),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(memory_tool,),
+        handlers={"search_memory": tool_handler},
+        automatic_memory_recall=True,
+        memory_recall_query_generator=RecallQuery(),
+    )
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension = await runtime.session_store.get_suspension(
+        suspended.suspension_id
+    )
+    interaction = await runtime.session_store.get_interaction(
+        suspension.interaction_id
+    )
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="cancel",
+            idempotency_key="cancel_after_memory_recall",
+        ),
+        CONTEXT,
+    )
+
+    result = await loop.resume(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_step_budget_requests_guidance_instead_of_looping_forever():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),)
     )
     runtime, handle, loop, executor = await setup_loop(model, max_steps=1)
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.FAILED
+    assert result.state == RunState.SUSPENDED
     assert len(executor.calls) == 1
-    assert (await runtime.session_store.read_events(handle.run_id))[
-        -1
-    ].data.error.code == "budget.max_steps"
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "budget.max_steps"
+    assert interaction.payload["reset_step_budget"] is True
 
 
 class BlockingModel:
@@ -600,7 +1469,7 @@ async def test_pause_during_model_stream_commits_partial_as_suspended_not_final(
         for event in events
     )
     checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
-    state = AgentLoopCheckpointState.model_validate(checkpoint.state)
+    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
     assert state.retry_model_step is True
 
 
@@ -676,7 +1545,7 @@ async def test_user_input_resume_rebuilds_ledger_from_events_not_checkpoint_mess
                 reason="done",
             )
 
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     model = ScriptedModelProvider(
         (
             ScriptedModelStep(events=(completed("first answer"),)),
@@ -703,7 +1572,7 @@ async def test_user_input_resume_rebuilds_ledger_from_events_not_checkpoint_mess
     suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
     interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     checkpoint = await runtime.session_store.get_checkpoint(suspension.checkpoint_id)
-    assert checkpoint.checkpoint_codec_version == "agent-loop/2"
+    assert checkpoint.checkpoint_codec_version == "agent-loop/3"
     assert "messages" not in checkpoint.state
 
     await runtime.reply_interaction(
@@ -780,7 +1649,7 @@ async def test_resume_rejects_checkpoint_ledger_digest_that_disagrees_with_event
     )
     payload = await runtime.session_store.export_state()
     payload["checkpoints"][0]["state"]["ledger_digest"] = "sha256:tampered"
-    restored_runtime = HarnessRuntime()
+    restored_runtime = ephemeral_runtime()
     await restored_runtime.session_store.load_state(payload)
     restored_loop = AgentLoopEngine(
         runtime=restored_runtime,
@@ -841,7 +1710,7 @@ async def test_pending_reconciliation_suspends_and_resume_reconciles_without_ret
     suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
     interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     checkpoint = await runtime.session_store.get_checkpoint(suspension.checkpoint_id)
-    state = AgentLoopCheckpointState.model_validate(checkpoint.state)
+    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
 
     assert suspended.state == RunState.SUSPENDED
     assert state.pending_tool_phase == "reconciliation"

@@ -2651,7 +2651,7 @@ class AgentBase(ABC):
             if "active_skills" in system_context_info:
                 active_skills = system_context_info.pop("active_skills")
 
-            # 2. System Context  → volatile（含时间戳/动态字段）
+            # 2. Runtime variables（兼容字段 system_context）→ volatile（含时间戳/动态字段）
             if "system_context" in include_sections:
                 system_context_info.pop("todo_list", None)
                 active_todos = await self._read_active_todo_list_for_context(session_id)

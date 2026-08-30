@@ -19,9 +19,11 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxGrantIssuer,
 )
 from sagents.v2.tool import ToolCall, decorated_tool_definition, tool
+from sagents.v2.tool.localization import localize_tool_definition
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     OfficialToolRuntime,
+    official_tool_categories,
     official_tool_definitions,
 )
 
@@ -36,10 +38,11 @@ EXPECTED_LOCAL_TOOLS = {
     "file_update",
     "file_write",
     "glob",
+    "goal_complete",
+    "goal_submit",
     "grep",
     "kill_shell",
     "list_dir",
-    "questionnaire",
     "questionnaire_async",
     "read_lints",
     "search_memory",
@@ -105,6 +108,170 @@ def test_official_catalog_contains_exact_v2_native_names(tmp_path: Path):
     assert OfficialToolPlugin.descriptor.capabilities["v2_native"] is True
 
 
+def test_official_catalog_exposes_display_categories():
+    categories = official_tool_categories()
+
+    assert categories["file_read"] == "files"
+    assert categories["grep"] == "code_search"
+    assert categories["execute_shell_command"] == "shell"
+    assert categories["todo_write"] == "planning"
+    assert categories["goal_submit"] == "planning"
+    assert categories["goal_complete"] == "planning"
+    assert categories["search_memory"] == "memory"
+    assert categories["fetch_webpages"] == "web"
+    assert categories["analyze_image"] == "image"
+    assert categories["read_lints"] == "code_quality"
+    assert categories["questionnaire_async"] == "interaction"
+
+
+def test_official_catalog_localizes_tool_and_parameter_descriptions():
+    definitions = {value.name: value for value in official_tool_definitions()}
+
+    zh = localize_tool_definition(definitions["execute_shell_command"], "zh-CN")
+    en = localize_tool_definition(definitions["execute_shell_command"], "en-US")
+    pt = localize_tool_definition(definitions["execute_shell_command"], "pt-BR")
+
+    assert zh.description.startswith("在沙箱中执行")
+    assert zh.input_schema["properties"]["command"]["description"] == (
+        "要执行的 Shell 命令"
+    )
+    assert en.description.startswith("Execute a shell command")
+    assert en.input_schema["properties"]["command"]["description"] == (
+        "Shell command to execute"
+    )
+    assert pt.description.startswith("Executar um comando shell")
+    assert pt.input_schema["properties"]["command"]["description"] == (
+        "Comando shell a executar"
+    )
+    assert (
+        "description"
+        not in definitions["execute_shell_command"].input_schema["properties"][
+            "command"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "language", ("zh", "en", "pt", "es", "fr", "de", "ja", "ko", "ru")
+)
+def test_every_official_tool_has_localized_descriptions_for_visible_parameters(
+    language,
+):
+    for definition in official_tool_definitions():
+        localized = localize_tool_definition(definition, language)
+        assert localized.description
+        for name, schema in localized.input_schema.get("properties", {}).items():
+            assert schema.get("description"), f"{language}:{definition.name}.{name}"
+        if language not in {"en", "pt"}:
+            assert localized.description != definition.description
+
+
+def test_complex_builtin_schemas_describe_nested_contracts():
+    definitions = {value.name: value for value in official_tool_definitions()}
+
+    update = localize_tool_definition(definitions["file_update"], "zh")
+    update_fields = update.input_schema["properties"]["operations"]["items"][
+        "properties"
+    ]
+    assert set(update_fields) == {
+        "update_mode",
+        "search_pattern",
+        "replacement",
+        "replace_all",
+        "start_line",
+        "end_line",
+    }
+    assert update_fields["replacement"]["description"] == "替换内容"
+
+    todo = localize_tool_definition(definitions["todo_write"], "en")
+    task_fields = todo.input_schema["properties"]["tasks"]["items"]["properties"]
+    assert task_fields["status"]["enum"] == [
+        "pending",
+        "in_progress",
+        "completed",
+    ]
+    assert task_fields["conclusion"]["description"].startswith("Conclusion")
+
+    questionnaire = localize_tool_definition(definitions["questionnaire_async"], "pt")
+    question_fields = questionnaire.input_schema["properties"]["questions"]["items"][
+        "properties"
+    ]
+    assert question_fields["type"]["enum"] == [
+        "single",
+        "multiple",
+        "text",
+    ]
+    assert question_fields["options"]["description"].startswith("Opções")
+
+
+@pytest.mark.asyncio
+async def test_questionnaire_async_requests_user_input_without_blocking(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+
+    result = await plugin.executor.execute(
+        call(
+            "questionnaire_async",
+            {
+                "title": "Deployment target",
+                "questions": [
+                    {
+                        "id": "target",
+                        "type": "single",
+                        "title": "Where should this deploy?",
+                        "options": ["staging", "production"],
+                    }
+                ],
+            },
+        ),
+        CONTEXT,
+    )
+    signal = plugin.runtime.consume_continuation_signals("run_1")
+
+    assert result.content[0].value["should_end"] is True
+    assert signal.explicit_status == "need_user_input"
+    assert signal.interaction is not None
+    assert signal.interaction.interaction_type == "questionnaire"
+    assert signal.interaction.allowed_decisions == ("submit", "cancel")
+    assert signal.interaction.payload["questions"][0]["id"] == "target"
+
+
+@pytest.mark.asyncio
+async def test_turn_status_publishes_one_shot_continuation_signals(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+
+    result = await plugin.executor.execute(
+        call(
+            "turn_status",
+            {"status": "need_user_input", "note": "Choose a deployment target."},
+        ),
+        CONTEXT,
+    )
+    first = plugin.runtime.consume_continuation_signals("run_1")
+    second = plugin.runtime.consume_continuation_signals("run_1")
+
+    assert result.content[0].value == {
+        "status": "need_user_input",
+        "note": "Choose a deployment target.",
+    }
+    assert first.explicit_status == "need_user_input"
+    assert first.explicit_status_note == "Choose a deployment target."
+    assert second.explicit_status is None
+
+
+@pytest.mark.asyncio
+async def test_turn_status_exposes_failed_as_a_typed_terminal_state(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+
+    result = await plugin.executor.execute(
+        call("turn_status", {"status": "failed", "note": "Build failed."}),
+        CONTEXT,
+    )
+    signal = plugin.runtime.consume_continuation_signals("run_1")
+
+    assert result.content[0].value["status"] == "failed"
+    assert signal.explicit_status == "failed"
+
+
 @pytest.mark.asyncio
 async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
     plugin = await plugin_for(tmp_path)
@@ -118,6 +285,17 @@ async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
     )
     assert written.content[0].value["status"] == "success"
     assert (tmp_path / "notes" / "example.txt").read_text() == "alpha\nbeta\n"
+
+    absolute = tmp_path / "notes" / "absolute.txt"
+    await plugin.executor.execute(
+        call(
+            "file_write",
+            {"file_path": str(absolute), "content": "host path mapped\n"},
+            index=20,
+        ),
+        CONTEXT,
+    )
+    assert absolute.read_text() == "host path mapped\n"
 
     await plugin.executor.execute(
         call(

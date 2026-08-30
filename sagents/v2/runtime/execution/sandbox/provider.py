@@ -28,6 +28,10 @@ from sagents.v2.contracts.principals import RequestContext
 
 
 class SandboxFileSystem(Protocol):
+    def normalize_path(self, path: str) -> str:
+        """Resolve a caller path into this sandbox's canonical namespace."""
+        ...
+
     async def read_bytes(
         self, path: str, *, intent: OperationIntent, grant: SandboxGrant
     ) -> bytes: ...

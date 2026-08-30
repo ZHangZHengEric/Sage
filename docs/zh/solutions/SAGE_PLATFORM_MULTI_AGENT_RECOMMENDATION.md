@@ -13,7 +13,7 @@ ref: sage-platform-multi-agent-recommendation
 # Sage 平台视角下的多 Agent 落地建议
 
 > 说明：本文不是对客户原方案的否定，而是把其中正确的业务诉求，改写成更符合 Sage Platform 的实现方式。  
-> 核心判断：**客户提出的功能点大体是对的，但实现上不需要把每一项都做成独立 Agent。更合理的方式是：一个主客户入口 Agent，配合阶段状态、系统上下文和工具/技能/任务来完成不同目标。**
+> 核心判断：**客户提出的功能点大体是对的，但实现上不需要把每一项都做成独立 Agent。更合理的方式是：一个主客户入口 Agent，配合阶段状态、运行变量和工具/技能/任务来完成不同目标。**
 
 ---
 
@@ -237,7 +237,7 @@ flowchart TB
 - 决定是否转交坐席
 
 这里建议把 `Triage / Self-Service / Negotiation` 视为同一个主 Agent 的阶段状态或能力组合，而不是多个并列 Agent。  
-其中 `Triage and Self-Service` 更适合做成主入口 Agent 的 Skill / Workflow；阶段的切换可以由 `system context`、`session state`、`workflow stage` 来驱动。
+其中 `Triage and Self-Service` 更适合做成主入口 Agent 的 Skill / Workflow；阶段的切换可以由运行变量、`session state`、`workflow stage` 来驱动。
 
 ### 5.3 第三层：工具化承载确定性动作
 

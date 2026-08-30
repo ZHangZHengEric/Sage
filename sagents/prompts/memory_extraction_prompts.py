@@ -20,9 +20,9 @@ memory_extraction_system_prefix = {
 memory_extraction_template = {
     "zh": """请分析以下对话，提取值得长期记忆的系统级信息。
 
-<当前系统上下文>
+<当前运行变量>
 {system_context}
-</当前系统上下文>
+</当前运行变量>
 
 <对话历史>
 {formatted_conversation}
@@ -40,8 +40,8 @@ memory_extraction_template = {
 - 确保记忆内容准确、具体
 - 为每个记忆生成简洁明确的标识key
 - memory的 key 和 content 中的描述尽可能使用绝对值，例如时间"明天"，要转换成绝对日期。
-- 记忆必须要在User的表达的内容中提取，不能在系统上下文中以及AI的执行过程中提取。
-- 不要提取系统上下文中已经提到的信息。
+- 记忆必须要在User的表达的内容中提取，不能在运行变量中以及AI的执行过程中提取。
+- 不要提取运行变量中已经提到的信息。
 
 <返回格式要求>
 请以JSON格式返回，格式如下：
@@ -64,9 +64,9 @@ memory_extraction_template = {
 </返回格式要求>""",
     "en": """Please analyze the following dialogue and extract system-level information worth long-term memory.
 
-<Current System Context>
+<Current Runtime Variables>
 {system_context}
-</Current System Context>
+</Current Runtime Variables>
 
 <Dialogue History>
 {formatted_conversation}
@@ -84,8 +84,8 @@ Extraction Principles:
 - Ensure memory content is accurate and specific
 - Generate concise and clear identification keys for each memory
 - Descriptions in memory key and content should use absolute values as much as possible, for example, time "tomorrow" should be converted to absolute date.
-- Memories must be extracted from User's expressed content, not from system context or AI execution processes.
-- Do not extract information already mentioned in system context.
+- Memories must be extracted from User's expressed content, not from runtime variables or AI execution processes.
+- Do not extract information already mentioned in runtime variables.
 
 <Return Format Requirements>
 Please return in JSON format as follows:

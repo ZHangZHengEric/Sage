@@ -8,6 +8,7 @@ from sagents.v2.testing.contracts import (
     ScenarioSuiteReport,
 )
 from sagents.v2.testing.runner import ScenarioRunner
+from sagents.v2.testing.runtime import ephemeral_runtime
 
 __all__ = [
     "ScenarioDefinition",
@@ -16,4 +17,5 @@ __all__ = [
     "ScenarioResult",
     "ScenarioRunner",
     "ScenarioSuiteReport",
+    "ephemeral_runtime",
 ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 
 import pytest
 
@@ -49,6 +50,12 @@ from sagents.v2.flow import FlowNodeResult, FlowRuntime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
 from sagents.v2.runtime.session.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.session.journal import (
+    FILESYSTEM_SESSION_STORE_FORMAT,
+    FILESYSTEM_SESSION_STORE_FORMAT_V2,
+    FILESYSTEM_SESSION_STORE_FORMAT_V1,
+    SessionCommitEnvelope,
+)
 
 
 CONTEXT = RequestContext(
@@ -144,7 +151,7 @@ async def test_reopen_does_not_materialize_a_global_session_collection(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_fork_is_self_contained_after_parent_session_is_deleted(tmp_path):
+async def test_fork_sessions_are_nested_and_parent_delete_cascades(tmp_path):
     path = tmp_path / "session-store"
     store = FilesystemSessionStore(path)
     parent = await store.create_run(command("parent"), CONTEXT)
@@ -165,16 +172,157 @@ async def test_fork_is_self_contained_after_parent_session_is_deleted(tmp_path):
         ),
         CONTEXT,
     )
+    grandchild = await store.create_run(
+        command(
+            "fork-grandchild",
+            session_id=child.handle.session_id,
+            mode=SessionConcurrencyMode.FORK,
+        ),
+        CONTEXT,
+    )
+
+    for created, key in (
+        (child, "cancel-child"),
+        (grandchild, "cancel-grandchild"),
+    ):
+        await store.commit_run(
+            run_id=created.handle.run_id,
+            expected_revision=created.handle.run_revision,
+            expected_states={RunState.QUEUED},
+            new_state=RunState.CANCELLED,
+            drafts=(),
+            context=CONTEXT,
+            idempotency_key=key,
+        )
+
+    parent_dir = path / "sessions" / parent.handle.session_id
+    child_dir = parent_dir / "sub_sessions" / child.handle.session_id
+    grandchild_dir = child_dir / "sub_sessions" / grandchild.handle.session_id
+    child_manifest = json.loads(
+        (child_dir / "session.json").read_text(encoding="utf-8")
+    )
+    assert child_dir.parent == parent_dir / "sub_sessions"
+    assert grandchild_dir.parent == child_dir / "sub_sessions"
+    assert not (path / "sessions" / child.handle.session_id).exists()
+    assert not (path / "sessions" / grandchild.handle.session_id).exists()
+    assert child_manifest["session"]["parent_session_id"] == parent.handle.session_id
+    assert (
+        child_dir / "runs" / child.handle.run_id / "fork-base-events.jsonl"
+    ).is_file()
+
+    await store.close()
+
+    # Normalize the short-lived early-v2 sibling layout without consulting v1.
+    sibling_child_dir = path / "sessions" / child.handle.session_id
+    shutil.move(child_dir, sibling_child_dir)
+    shutil.rmtree(path / ".session-store" / "locations")
+    (path / ".session-store" / "locations").mkdir()
+
+    store = FilesystemSessionStore(path)
+    assert child_dir.is_dir()
+    assert grandchild_dir.is_dir()
+    assert not sibling_child_dir.exists()
+    descendants = await store.list_descendant_sessions(parent.handle.session_id)
+    assert [value.session_id for value in descendants] == [
+        child.handle.session_id,
+        grandchild.handle.session_id,
+    ]
+    assert (await store.get_session(child.handle.session_id)).parent_session_id == (
+        parent.handle.session_id
+    )
+    assert await store.read_fork_base_events(child.handle.run_id)
 
     await store.delete_session(parent.handle.session_id)
+    assert not parent_dir.exists()
+    assert not child_dir.exists()
+    assert not grandchild_dir.exists()
     await store.close()
 
     reopened = FilesystemSessionStore(path)
-    child_session = await reopened.get_session(child.handle.session_id)
-    fork_base = await reopened.read_fork_base_events(child.handle.run_id)
-    assert child_session.parent_session_id == parent.handle.session_id
-    assert any(event.type == "message.completed" for event in fork_base)
+    for deleted_session_id in (
+        parent.handle.session_id,
+        child.handle.session_id,
+        grandchild.handle.session_id,
+    ):
+        with pytest.raises(SageV2Error) as missing:
+            await reopened.get_session(deleted_session_id)
+        assert missing.value.info.code == "session.not_found"
     await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_tree_stream_keeps_parent_and_child_cursors(tmp_path):
+    store = FilesystemSessionStore(tmp_path / "session-tree-stream")
+    runtime = HarnessRuntime(store)
+    parent = await runtime.start_run(command("tree-parent"), CONTEXT)
+    child = await runtime.start_run(
+        command(
+            "tree-child",
+            session_id=parent.session_id,
+            mode=SessionConcurrencyMode.FORK,
+        ),
+        CONTEXT,
+    )
+
+    stream = runtime.subscribe_session_tree(parent.session_id)
+    discovered: set[str] = set()
+    event_runs: set[str] = set()
+    while discovered != {parent.session_id, child.session_id} or event_runs != {
+        parent.run_id,
+        child.run_id,
+    }:
+        observation = await asyncio.wait_for(anext(stream), timeout=1)
+        if observation.kind == "session.discovered":
+            discovered.add(observation.session.session_id)
+        elif observation.event is not None:
+            event_runs.add(observation.event.run_id)
+
+    assert discovered == {parent.session_id, child.session_id}
+    assert event_runs == {parent.run_id, child.run_id}
+    await stream.aclose()
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_descendants_only_tree_stream_waits_for_late_child(tmp_path):
+    store = FilesystemSessionStore(tmp_path / "late-child-session-tree-stream")
+    runtime = HarnessRuntime(store)
+    parent = await runtime.start_run(command("late-tree-parent"), CONTEXT)
+
+    stream = runtime.subscribe_session_tree(
+        parent.session_id,
+        include_root=False,
+    )
+    first_observation = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0.05)
+    assert not first_observation.done()
+
+    child = await runtime.start_run(
+        command(
+            "late-tree-child",
+            session_id=parent.session_id,
+            mode=SessionConcurrencyMode.FORK,
+        ),
+        CONTEXT,
+    )
+
+    discovered = await asyncio.wait_for(first_observation, timeout=1)
+    assert discovered.kind == "session.discovered"
+    assert discovered.session.session_id == child.session_id
+    assert discovered.session.parent_session_id == parent.session_id
+
+    while True:
+        child_event = await asyncio.wait_for(anext(stream), timeout=1)
+        if (
+            child_event.event is not None
+            and child_event.event.type == "message.completed"
+        ):
+            break
+    assert child_event.kind == "session.event"
+    assert child_event.event is not None
+    assert child_event.event.session_id == child.session_id
+    await stream.aclose()
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -193,7 +341,7 @@ async def test_export_import_rejects_corrupt_run_sequence_without_mutation():
     assert missing.value.info.code == "run.not_found"
 
 
-def test_journal_checksum_corruption_is_detected_on_open(tmp_path):
+def test_snapshot_checksum_corruption_is_detected_on_open(tmp_path):
     path = tmp_path / "session-store"
 
     async def create():
@@ -203,12 +351,10 @@ def test_journal_checksum_corruption_is_detected_on_open(tmp_path):
         return created
 
     created = asyncio.run(create())
-    journal = next((path / "sessions").glob("*/journal.jsonl"))
-    rows = journal.read_text(encoding="utf-8").splitlines()
-    envelope = json.loads(rows[0])
+    snapshot = next((path / "sessions").glob("*/state.json"))
+    envelope = json.loads(snapshot.read_text(encoding="utf-8"))
     envelope["checksum"] = "sha256:tampered"
-    rows[0] = json.dumps(envelope, separators=(",", ":"))
-    journal.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    snapshot.write_text(json.dumps(envelope, separators=(",", ":")), encoding="utf-8")
 
     reopened = FilesystemSessionStore(path)
     with pytest.raises(SageV2Error) as mismatch:
@@ -217,7 +363,7 @@ def test_journal_checksum_corruption_is_detected_on_open(tmp_path):
     asyncio.run(reopened.close())
 
 
-def test_incomplete_final_journal_record_is_ignored(tmp_path):
+def test_interrupted_temporary_snapshot_is_ignored(tmp_path):
     path = tmp_path / "session-store"
 
     async def create():
@@ -227,14 +373,206 @@ def test_incomplete_final_journal_record_is_ignored(tmp_path):
         return created
 
     created = asyncio.run(create())
-    journal = next((path / "sessions").glob("*/journal.jsonl"))
-    with journal.open("ab") as stream:
-        stream.write(b'{"format":"interrupted"')
+    snapshot = next((path / "sessions").glob("*/state.json"))
+    snapshot.with_name(".state.json.interrupted").write_bytes(
+        b'{"format":"interrupted"'
+    )
 
     restored = FilesystemSessionStore(path)
     run = asyncio.run(restored.get_run(created.handle.run_id))
     asyncio.run(restored.close())
     assert run.state == RunState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_session_journal_appends_deltas_without_full_state_amplification(tmp_path):
+    path = tmp_path / "session-store"
+    store = FilesystemSessionStore(path)
+    created = await store.create_run(command("bounded"), CONTEXT)
+    for index in range(30):
+        await store.create_run(
+            command(
+                f"bounded-{index}",
+                session_id=created.handle.session_id,
+                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+            ),
+            CONTEXT,
+        )
+    exported = store._dump_session_state_locked(created.handle.session_id)
+    await store.close()
+
+    session_dir = path / "sessions" / created.handle.session_id
+    snapshot = session_dir / "state.json"
+    journal = session_dir / "journal.jsonl"
+    assert snapshot.is_file()
+    assert journal.is_file()
+    assert len(list(session_dir.glob("state*.json"))) == 1
+    current_state_size = len(
+        json.dumps(exported, ensure_ascii=False, separators=(",", ":")).encode()
+    )
+    assert snapshot.stat().st_size + journal.stat().st_size < current_state_size * 3
+
+    restored = FilesystemSessionStore(path)
+    assert len(await restored.list_session_runs(created.handle.session_id)) == 31
+    await restored.close()
+
+
+def test_truncated_v3_journal_tail_is_ignored_but_middle_checksum_is_not(tmp_path):
+    path = tmp_path / "session-store"
+
+    async def create():
+        store = FilesystemSessionStore(path)
+        first = await store.create_run(command("journal-base"), CONTEXT)
+        await store.create_run(
+            command(
+                "journal-next",
+                session_id=first.handle.session_id,
+                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+            ),
+            CONTEXT,
+        )
+        await store.close()
+        return first
+
+    first = asyncio.run(create())
+    journal = path / "sessions" / first.handle.session_id / "journal.jsonl"
+    original = journal.read_bytes()
+    journal.write_bytes(original + b'{"format":"incomplete"')
+    restored = FilesystemSessionStore(path)
+    assert len(asyncio.run(restored.list_session_runs(first.handle.session_id))) == 2
+    asyncio.run(restored.close())
+
+    journal.write_bytes(original.replace(b'"checksum":"sha256:', b'"checksum":"sha256:0', 1))
+    corrupted = FilesystemSessionStore(path)
+    with pytest.raises(SageV2Error) as mismatch:
+        asyncio.run(corrupted.get_session(first.handle.session_id))
+    assert mismatch.value.info.code == "session_store.hash_mismatch"
+    asyncio.run(corrupted.close())
+
+
+def test_v2_snapshot_upgrades_atomically_on_first_successful_write(tmp_path):
+    path = tmp_path / "session-store"
+
+    async def create():
+        store = FilesystemSessionStore(path)
+        result = await store.create_run(command("v2-base"), CONTEXT)
+        await store.close()
+        return result
+
+    created = asyncio.run(create())
+    session_dir = path / "sessions" / created.handle.session_id
+    snapshot_path = session_dir / "state.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V2
+    snapshot["checksum"] = FilesystemSessionStore._checksum(
+        {key: value for key, value in snapshot.items() if key != "checksum"}
+    )
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    (session_dir / "journal.jsonl").write_bytes(b"")
+    metadata_path = path / ".session-store" / "store.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V2
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    upgraded = FilesystemSessionStore(path)
+    asyncio.run(
+        upgraded.create_run(
+            command(
+                "v2-upgrade",
+                session_id=created.handle.session_id,
+                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+            ),
+            CONTEXT,
+        )
+    )
+    asyncio.run(upgraded.close())
+
+    assert json.loads(snapshot_path.read_text(encoding="utf-8"))["format"] == FILESYSTEM_SESSION_STORE_FORMAT
+    assert json.loads(metadata_path.read_text(encoding="utf-8"))["format"] == FILESYSTEM_SESSION_STORE_FORMAT
+
+
+@pytest.mark.asyncio
+async def test_readable_session_views_are_repaired_from_authoritative_state(tmp_path):
+    path = tmp_path / "session-store"
+    first = FilesystemSessionStore(path)
+    created = await first.create_run(command("repair-views"), CONTEXT)
+    await first.close()
+
+    session_dir = path / "sessions" / created.handle.session_id
+    (session_dir / "session.json").unlink()
+    shutil.rmtree(session_dir / "runs")
+
+    reopened = FilesystemSessionStore(path)
+    await reopened.get_session(created.handle.session_id)
+    await reopened.close()
+
+    assert (session_dir / "session.json").is_file()
+    assert (session_dir / "runs" / created.handle.run_id / "events.jsonl").is_file()
+
+
+@pytest.mark.asyncio
+async def test_previous_v2_store_is_compacted_into_runtime_sessions(tmp_path):
+    seed_root = tmp_path / "seed"
+    seed = FilesystemSessionStore(seed_root)
+    created = await seed.create_run(command(), CONTEXT)
+    state = seed._dump_session_state_locked(created.handle.session_id)
+    await seed.close()
+
+    runtime_root = tmp_path / "runtime"
+    previous_root = runtime_root / "session-store"
+    previous_session = previous_root / "sessions" / created.handle.session_id
+    previous_session.mkdir(parents=True)
+    (previous_session / "derived").mkdir()
+    (previous_session / "derived" / "marker.txt").write_text(
+        "preserved", encoding="utf-8"
+    )
+    (previous_root / "store.json").write_text(
+        json.dumps({"format": FILESYSTEM_SESSION_STORE_FORMAT_V1}),
+        encoding="utf-8",
+    )
+    journal = previous_session / "journal.jsonl"
+    previous_revision = 0
+    rows = []
+    current_revision = int(state["sessions"][0]["revision"])
+    for sequence in range(1, 6):
+        unsigned = {
+            "format": FILESYSTEM_SESSION_STORE_FORMAT_V1,
+            "transaction_id": f"legacy-{sequence}",
+            "journal_sequence": sequence,
+            "previous_session_revision": previous_revision,
+            "current_session_revision": current_revision,
+            "state": state,
+        }
+        envelope = SessionCommitEnvelope(
+            **unsigned,
+            checksum=FilesystemSessionStore._checksum(unsigned),
+        )
+        rows.append(
+            FilesystemSessionStore._canonical_json(envelope.model_dump(mode="json"))
+        )
+        previous_revision = current_revision
+    journal.write_bytes(b"\n".join(rows) + b'\n{"interrupted":')
+    previous_size = journal.stat().st_size
+
+    migrated = FilesystemSessionStore(
+        runtime_root,
+        previous_v2_root=previous_root,
+    )
+    restored = await migrated.get_session(created.handle.session_id)
+    duplicate = await migrated.create_run(command(), CONTEXT)
+    await migrated.close()
+
+    target = runtime_root / "sessions" / created.handle.session_id
+    assert restored.session_id == created.handle.session_id
+    assert duplicate.duplicate is True
+    assert not previous_root.exists()
+    assert (target / "state.json").stat().st_size < previous_size // 2
+    assert (target / "session.json").is_file()
+    assert (target / "runs" / created.handle.run_id / "events.jsonl").is_file()
+    assert (target / "derived" / "marker.txt").read_text(encoding="utf-8") == (
+        "preserved"
+    )
+    assert (runtime_root / ".session-store" / "store.json").is_file()
 
 
 WRITE_TOOL = ToolDefinition(
@@ -362,7 +700,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(tmp_path):
     suspension = await restored_repository.get_suspension(restored_run.suspension_id)
     interaction = await restored_repository.get_interaction(suspension.interaction_id)
     checkpoint = await restored_repository.get_checkpoint(suspension.checkpoint_id)
-    assert checkpoint.checkpoint_codec_version == "agent-loop/2"
+    assert checkpoint.checkpoint_codec_version == "agent-loop/3"
     assert "messages" not in checkpoint.state
     assert checkpoint.state["ledger_digest"].startswith("sha256:")
     receipt = await restored_runtime.reply_interaction(

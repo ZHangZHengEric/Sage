@@ -41,9 +41,11 @@ async def test_questionnaire_async_success_returns_waiting_state_and_should_end(
             questions=[{"type": "text", "text": "Your name", "default": ""}],
             title="Profile",
             session_id="session-1",
+            questionnaire_kind="plan_information",
         )
 
     assert result["success"] is True
     assert result["status"] == QuestionnaireTool.QUESTIONNAIRE_ASYNC_SUCCESS_STATUS
     assert result["should_end"] is True
     assert result["validation_passed"] is True
+    assert result["questionnaire_kind"] == "plan_information"

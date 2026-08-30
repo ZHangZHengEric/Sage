@@ -14,7 +14,10 @@ class QualityTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
-    @tool(description="Run available linters for Python and JavaScript/TypeScript files.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Run available linters for Python and JavaScript/TypeScript files.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def read_lints(
         self,
         paths: list[str],

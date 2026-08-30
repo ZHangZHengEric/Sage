@@ -11,6 +11,7 @@ import '../models.dart';
 import '../localization/app_localizations.dart';
 import '../state/workspace_controller.dart';
 import 'shared/desktop_shell.dart';
+import 'usage_overview.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -45,7 +46,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _syncedAgentId = '';
   Timer? _debounce;
   Timer? _workspaceDebounce;
+  Timer? _sandboxDebounce;
   String? _workspaceError;
+  String? _sandboxRootError;
   late DesktopSettings _draft = widget.controller.settings;
   final _name = TextEditingController();
   final _description = TextEditingController();
@@ -61,6 +64,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _workspacePath = TextEditingController(
     text: _draft.agentWorkspacePath,
   );
+  late final TextEditingController _sandboxRoot = TextEditingController(
+    text:
+        _draft.componentConfigs['execution.sandbox']?['workspace_root']
+            ?.toString() ??
+        '/workspace',
+  );
 
   @override
   void initState() {
@@ -68,6 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _settingsAgentId = widget.controller.selectedAgentId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.loadSettingsCatalog(agentId: _settingsAgentId);
+      widget.controller.loadUsageOverview();
     });
   }
 
@@ -75,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _debounce?.cancel();
     _workspaceDebounce?.cancel();
+    _sandboxDebounce?.cancel();
     _name.dispose();
     _description.dispose();
     _systemPrefix.dispose();
@@ -83,6 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _previewBytes.dispose();
     _treeEntries.dispose();
     _workspacePath.dispose();
+    _sandboxRoot.dispose();
     super.dispose();
   }
 
@@ -94,7 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _systemPrefix.text = value.systemPrefix;
     _systemContext.text = const JsonEncoder.withIndent(
       '  ',
-    ).convert(value.systemContext);
+    ).convert(value.runtimeVariables);
     _maxLoopCount.text = value.maxLoopCount.toString();
   }
 
@@ -193,6 +205,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  Map<String, Object?> get _sandboxConfig => {
+    'workspace_root': '/workspace',
+    'workspace_path_mode': 'virtual',
+    'workspace_mapping': 'active_workspace',
+    'filesystem_mode': 'workspace',
+    ...?_draft.componentConfigs['execution.sandbox'],
+  };
+
+  bool get _sandboxMapsWorkspace =>
+      _sandboxConfig['workspace_mapping'] != 'isolated' &&
+      _draft.componentSelections['execution.sandbox'] !=
+          'sage.sandbox.ephemeral';
+
+  bool get _sandboxUsesHostPath =>
+      _sandboxMapsWorkspace && _sandboxConfig['workspace_path_mode'] == 'host';
+
+  Future<void> _saveSandbox({
+    bool? mapWorkspace,
+    bool? useHostPath,
+    String? workspaceRoot,
+  }) async {
+    final mapped = mapWorkspace ?? _sandboxMapsWorkspace;
+    final hostPath = mapped && (useHostPath ?? _sandboxUsesHostPath);
+    final selections = Map<String, String>.from(_draft.componentSelections);
+    selections['execution.sandbox'] = mapped
+        ? 'sage.sandbox.local-workspace'
+        : 'sage.sandbox.ephemeral';
+    final configs = {
+      for (final entry in _draft.componentConfigs.entries)
+        entry.key: Map<String, Object?>.from(entry.value),
+    };
+    configs['execution.sandbox'] = {
+      ..._sandboxConfig,
+      'workspace_root': workspaceRoot ?? _sandboxRoot.text.trim(),
+      'workspace_path_mode': hostPath ? 'host' : 'virtual',
+      'workspace_mapping': mapped ? 'active_workspace' : 'isolated',
+      'filesystem_mode': 'workspace',
+    };
+    await _saveDesktopSettings(
+      _draft.copyWith(
+        componentSelections: selections,
+        componentConfigs: configs,
+      ),
+    );
+  }
+
+  void _saveSandboxRootLater() {
+    _sandboxDebounce?.cancel();
+    final value = _sandboxRoot.text.trim().replaceAll('\\', '/');
+    final invalid =
+        !value.startsWith('/') ||
+        value == '/' ||
+        value.split('/').contains('..');
+    setState(() {
+      _sandboxRootError = invalid
+          ? (context.l10n.languageCode == 'zh'
+                ? '请输入受限的绝对虚拟路径，例如 /workspace'
+                : 'Enter a contained absolute virtual path, such as /workspace')
+          : null;
+    });
+    if (invalid) return;
+    _sandboxDebounce = Timer(
+      const Duration(milliseconds: 650),
+      () => _saveSandbox(workspaceRoot: value),
+    );
+  }
+
   Future<void> _saveAgent(Map<String, Object?> patch) async {
     setState(() => _saving = true);
     try {
@@ -238,7 +317,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'name': _name.text,
         'description': _description.text,
         'system_prefix': _systemPrefix.text,
-        'system_context': decodedContext.cast<String, Object?>(),
+        'runtime_variables': decodedContext.cast<String, Object?>(),
       });
       if (mounted) setState(() => _editingAgent = false);
     } on Object {
@@ -318,7 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _saveAgentTextLater(String field, TextEditingController controller) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 650), () {
-      if (field == 'system_context') {
+      if (field == 'runtime_variables' || field == 'system_context') {
         try {
           final value = jsonDecode(controller.text);
           if (value is Map) {
@@ -338,14 +417,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final agent = controller.agentConfiguration;
     if (agent != null) _syncAgentControllers(agent);
     return switch (_section) {
-      0 => _general(),
-      1 => _agents(agent),
-      2 => _models(),
-      3 => _tools(),
-      4 => _skills(),
-      5 => _mcp(),
-      6 => _components(),
-      7 => _security(),
+      0 => UsageOverviewSettings(controller: widget.controller),
+      1 => _general(),
+      2 => _agents(agent),
+      3 => _models(),
+      4 => _tools(),
+      5 => _skills(),
+      6 => _mcp(),
+      7 => _components(),
+      8 => _sandbox(),
+      9 => _security(),
       _ => _archived(),
     };
   }
@@ -353,60 +434,220 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _archived() =>
       _ArchivedConversationSettings(controller: widget.controller);
 
-  Widget _security() => _SettingsContent(
-    title: context.l10n.text('settings.security'),
-    children: [
-      GlassCard(
-        key: const ValueKey('settings-security-scope'),
-        padding: EdgeInsets.zero,
-        shape: const LiquidRoundedSuperellipse(borderRadius: 16),
-        useOwnLayer: true,
-        settings: _glass(context),
-        child: _SettingsRowGroup(
-          children: [
-            _SettingsRow(
-              label: context.l10n.text('security.policyGranularity'),
-              control: Text(
-                context.l10n.text('security.policyGranularityValue'),
+  Widget _sandbox() {
+    final mapped = _sandboxMapsWorkspace;
+    final useHostPath = _sandboxUsesHostPath;
+    return _SettingsContent(
+      title: context.l10n.languageCode == 'zh' ? '沙箱' : 'Sandbox',
+      status: _saving,
+      children: [
+        GlassCard(
+          key: const ValueKey('settings-sandbox-configuration'),
+          padding: EdgeInsets.zero,
+          shape: const LiquidRoundedSuperellipse(borderRadius: 16),
+          useOwnLayer: true,
+          settings: _glass(context),
+          child: _SettingsRowGroup(
+            children: [
+              _SettingsRow(
+                label: context.l10n.languageCode == 'zh'
+                    ? '工作区访问'
+                    : 'Workspace access',
+                description: context.l10n.languageCode == 'zh'
+                    ? '选择 Run 使用真实工作区，或使用与真实文件完全隔离的临时空白沙箱。空白沙箱看不到项目文件，产生的文件也不会写回项目。'
+                    : 'Choose whether a run uses the real workspace or a temporary blank sandbox isolated from it. The blank sandbox cannot see project files, and generated files are not written back to the project.',
+                control: SizedBox(
+                  width: 300,
+                  child: GlassSegmentedControl(
+                    key: const ValueKey('settings-sandbox-mapping-control'),
+                    height: 34,
+                    segments: [
+                      GlassSegment(
+                        label: context.l10n.languageCode == 'zh'
+                            ? '使用当前工作区'
+                            : 'Use current workspace',
+                      ),
+                      GlassSegment(
+                        label: context.l10n.languageCode == 'zh'
+                            ? '使用临时空白沙箱'
+                            : 'Use temporary blank sandbox',
+                      ),
+                    ],
+                    selectedIndex: mapped ? 0 : 1,
+                    onSegmentSelected: (index) =>
+                        _saveSandbox(mapWorkspace: index == 0),
+                  ),
+                ),
               ),
-            ),
-            _SettingsRow(
-              label: context.l10n.text('security.fileBoundary'),
-              control: Text(context.l10n.text('security.fileBoundaryValue')),
-            ),
-            _SettingsRow(
-              label: context.l10n.text('security.autoAllow'),
-              control: Text(context.l10n.text('security.autoAllowValue')),
-            ),
-            _SettingsRow(
-              label: context.l10n.text('security.requestApproval'),
-              control: Text(context.l10n.text('security.requestApprovalValue')),
-            ),
-            _SettingsRow(
-              label: context.l10n.text('security.autoBlock'),
-              control: Text(context.l10n.text('security.autoBlockValue')),
-            ),
-            _SettingsRow(
-              label: context.l10n.text('security.isolation'),
-              control: Text(context.l10n.text('security.isolationValue')),
-            ),
-          ],
+              _SettingsRow(
+                label: context.l10n.languageCode == 'zh'
+                    ? '工作目录路径'
+                    : 'Workspace path',
+                description: context.l10n.languageCode == 'zh'
+                    ? '选择 Agent 和工具使用固定虚拟路径，或直接使用当前宿主机工作区的真实绝对路径。'
+                    : 'Choose a fixed virtual path, or use the current host workspace’s real absolute path.',
+                control: SizedBox(
+                  width: 300,
+                  child: GlassSegmentedControl(
+                    key: const ValueKey('settings-sandbox-path-mode-control'),
+                    height: 34,
+                    segments: [
+                      GlassSegment(
+                        label: context.l10n.languageCode == 'zh'
+                            ? '固定虚拟路径'
+                            : 'Fixed virtual path',
+                      ),
+                      GlassSegment(
+                        label: context.l10n.languageCode == 'zh'
+                            ? '与真实目录一致'
+                            : 'Same as host path',
+                      ),
+                    ],
+                    selectedIndex: useHostPath ? 1 : 0,
+                    onSegmentSelected: (index) => _saveSandbox(
+                      mapWorkspace: index == 1 ? true : null,
+                      useHostPath: index == 1,
+                    ),
+                  ),
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.languageCode == 'zh'
+                    ? '固定虚拟路径'
+                    : 'Fixed virtual path',
+                description: useHostPath
+                    ? (context.l10n.languageCode == 'zh'
+                          ? '当前使用路径一致模式；每次 Run 会自动采用当前 Agent Workspace 或 Project 的真实目录。'
+                          : 'Path parity is active; each run uses the real path of its Agent Workspace or Project.')
+                    : (context.l10n.languageCode == 'zh'
+                          ? 'Agent 和工具看到的固定沙箱路径。'
+                          : 'The fixed sandbox path seen by the Agent and tools.'),
+                control: SizedBox(
+                  width: 300,
+                  child: useHostPath
+                      ? Text(
+                          context.l10n.languageCode == 'zh'
+                              ? '自动使用当前真实工作目录'
+                              : 'Uses the active real workspace automatically',
+                          key: const ValueKey('settings-sandbox-host-path'),
+                        )
+                      : TextField(
+                          key: const ValueKey(
+                            'settings-sandbox-workspace-root',
+                          ),
+                          controller: _sandboxRoot,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onChanged: (_) => _saveSandboxRootLater(),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: '/workspace',
+                            errorText: _sandboxRootError,
+                          ),
+                        ),
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.languageCode == 'zh'
+                    ? '生效范围'
+                    : 'Apply scope',
+                control: Text(
+                  context.l10n.languageCode == 'zh'
+                      ? '下次 Run 生效'
+                      : 'Applies to the next run',
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
+
+  Widget _security() {
+    final shellPolicy = widget.controller.agentConfiguration?.shellPolicy;
+    final approvedCommands = shellPolicy?.userApprovedCommands ?? const [];
+    return _SettingsContent(
+      title: context.l10n.text('settings.security'),
+      children: [
+        GlassCard(
+          key: const ValueKey('settings-security-scope'),
+          padding: EdgeInsets.zero,
+          shape: const LiquidRoundedSuperellipse(borderRadius: 16),
+          useOwnLayer: true,
+          settings: _glass(context),
+          child: _SettingsRowGroup(
+            children: [
+              _SettingsRow(
+                label: context.l10n.text('security.policyGranularity'),
+                control: Text(
+                  context.l10n.text('security.policyGranularityValue'),
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.fileBoundary'),
+                control: Text(context.l10n.text('security.fileBoundaryValue')),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.autoAllow'),
+                control: _SecurityKeywordList(
+                  values: shellPolicy?.autoExecuteKeywords ?? const [],
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.requestApproval'),
+                control: _SecurityKeywordList(
+                  values: shellPolicy?.approvalKeywords ?? const [],
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.autoBlock'),
+                control: _SecurityKeywordList(
+                  values: shellPolicy?.blockedKeywords ?? const [],
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.userApproved'),
+                control: _SecurityKeywordList(
+                  values: approvedCommands,
+                  emptyLabel: context.l10n.text('security.userApprovedEmpty'),
+                  onRemove: (command) =>
+                      widget.controller.patchAgentConfiguration({
+                        'approved_shell_commands': [
+                          for (final value in approvedCommands)
+                            if (value != command) value,
+                        ],
+                      }),
+                ),
+              ),
+              _SettingsRow(
+                label: context.l10n.text('security.isolation'),
+                control: Text(context.l10n.text('security.isolationValue')),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _components() => _SettingsContent(
     title: context.l10n.text('settings.components'),
     status: _saving,
     children: [
-      for (final component in widget.controller.components)
+      for (final component in _orderedRuntimeComponents(
+        widget.controller.components,
+      ))
         _ComponentSettingsCard(
           component: component,
-          onSelect: (pluginId) async {
+          onSelect: (pluginId, config) async {
             setState(() => _saving = true);
             try {
-              await widget.controller.selectComponent(component.id, pluginId);
+              await widget.controller.selectComponent(
+                component.id,
+                pluginId,
+                config: config,
+              );
             } finally {
               if (mounted) setState(() => _saving = false);
             }
@@ -414,6 +655,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
     ],
   );
+
+  Future<void> _setDefaultAgent(String agentId) async {
+    if (_saving || agentId.isEmpty || agentId == _draft.defaultAgentId) return;
+    await _saveDesktopSettings(_draft.copyWith(defaultAgentId: agentId));
+  }
 
   Widget _general() => _SettingsContent(
     title: context.l10n.text('settings.general'),
@@ -468,28 +714,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           _SettingsRow(
-            label: context.l10n.text('settings.defaultAgent'),
-            control: _SettingsPicker<String>(
-              width: 270,
-              value: _draft.defaultAgentId ?? '',
-              options: [
-                _PickerOption(
-                  value: '',
-                  label: context.l10n.text('common.auto'),
-                ),
-                for (final agent in widget.controller.agents)
-                  _PickerOption(value: agent.id, label: agent.name),
-              ],
-              onChanged: (value) => _saveDesktopSettings(
-                _draft.copyWith(
-                  defaultAgentId: value,
-                  clearDefaultAgent: value.isEmpty,
-                ),
-              ),
-            ),
-          ),
-          _SettingsRow(
             label: context.l10n.text('settings.defaultWorkspace'),
+            description: context.l10n.languageCode == 'zh'
+                ? 'Agent Workspace 在宿主机上的持久化位置；是否映射到 Run 由“沙箱”设置决定。'
+                : 'Persistent host location for Agent Workspace; whether it is mapped into runs is controlled in Sandbox settings.',
             control: SizedBox(
               width: 430,
               child: Row(
@@ -572,6 +800,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (value.id.isNotEmpty) value.id: value,
     };
     final currentProviderId = agent.llmProviderId ?? '';
+    final currentFastProviderId = agent.fastLlmProviderId ?? '';
+    final memberCandidates = [
+      for (final value in widget.controller.agents)
+        if (value.id != agent.id) value,
+    ];
+    final customRoster = agent.subAgentSelectionMode == 'manual';
+    final selectedMemberIds = customRoster
+        ? agent.availableSubAgentIds.toSet()
+        : memberCandidates.map((value) => value.id).toSet();
     final loadingSelection =
         widget.controller.settingsAgentLoadingId == _settingsAgentId ||
         agent.id != _settingsAgentId;
@@ -582,6 +819,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       action: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-set-default'),
+            onTap:
+                _saving ||
+                    (_draft.defaultAgentId?.isNotEmpty == true
+                        ? agent.id == _draft.defaultAgentId
+                        : agent.isDefault)
+                ? null
+                : () => _setDefaultAgent(agent.id),
+            icon: Icon(
+              (_draft.defaultAgentId?.isNotEmpty == true
+                      ? agent.id == _draft.defaultAgentId
+                      : agent.isDefault)
+                  ? CupertinoIcons.star_fill
+                  : CupertinoIcons.star,
+              size: 15,
+            ),
+            label: context.l10n.text(
+              (_draft.defaultAgentId?.isNotEmpty == true
+                      ? agent.id == _draft.defaultAgentId
+                      : agent.isDefault)
+                  ? 'settings.currentDefault'
+                  : 'settings.setAsDefault',
+            ),
+          ),
+          const SizedBox(width: 10),
           _SettingsActionButton(
             key: const ValueKey('settings-agent-add'),
             onTap: _saving || loadingSelection || _editingAgent
@@ -612,7 +875,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _SettingsChoice(
                 id: value.id,
                 label: value.name,
-                marked: value.isDefault,
+                marked: _draft.defaultAgentId?.isNotEmpty == true
+                    ? value.id == _draft.defaultAgentId
+                    : value.isDefault,
                 removable: widget.controller.agents.length > 1 && !_saving,
                 busy: _deletingAgentId == value.id,
                 removeKeyPrefix: 'settings-agent-delete',
@@ -628,6 +893,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             widget.controller.selectSettingsAgent(value);
           },
           onRemove: _deleteAgent,
+          onSetDefault: _setDefaultAgent,
           detail: loadingSelection
               ? const Center(
                   key: ValueKey('settings-agent-detail-loading'),
@@ -697,6 +963,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                         ),
                         _SettingsRow(
+                          label: context.l10n.text('agent.fastModel'),
+                          control: _editingAgent
+                              ? _SettingsPicker<String>(
+                                  key: const ValueKey('agent-fast-model'),
+                                  value: currentFastProviderId,
+                                  width: 390,
+                                  options: [
+                                    _PickerOption(
+                                      value: '',
+                                      label:
+                                          '${context.l10n.text('common.default')} · ${context.l10n.text('agent.primaryModel')}',
+                                    ),
+                                    if (currentFastProviderId.isNotEmpty &&
+                                        !providersById.containsKey(
+                                          currentFastProviderId,
+                                        ))
+                                      _PickerOption(
+                                        value: currentFastProviderId,
+                                        label: currentFastProviderId,
+                                      ),
+                                    for (final value in providersById.values)
+                                      _PickerOption(
+                                        value: value.id,
+                                        label: '${value.name} · ${value.model}',
+                                      ),
+                                  ],
+                                  onChanged: (value) => _saveAgent({
+                                    'fast_llm_provider_id': value.isEmpty
+                                        ? null
+                                        : value,
+                                  }),
+                                )
+                              : Text(
+                                  currentFastProviderId.isEmpty
+                                      ? '${context.l10n.text('common.default')} · ${_providerLabel(agent.llmProviderId, providers, context.l10n)}'
+                                      : _providerLabel(
+                                          agent.fastLlmProviderId,
+                                          providers,
+                                          context.l10n,
+                                        ),
+                                ),
+                        ),
+                        _SettingsRow(
                           label: context.l10n.text('agent.mode'),
                           control: _editingAgent
                               ? SizedBox(
@@ -724,6 +1033,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 )
                               : Text(agent.agentMode),
                         ),
+                        if (agent.agentMode == 'fibre' ||
+                            agent.agentMode == 'team')
+                          _SettingsRow(
+                            label: context.l10n.text('agent.teamScope'),
+                            control: _editingAgent
+                                ? SizedBox(
+                                    width: 300,
+                                    child: GlassSegmentedControl(
+                                      key: const ValueKey('agent-team-scope'),
+                                      height: 34,
+                                      segments: [
+                                        GlassSegment(
+                                          label: context.l10n.text(
+                                            'agent.teamScopeAll',
+                                          ),
+                                        ),
+                                        GlassSegment(
+                                          label: context.l10n.text(
+                                            'agent.teamScopeCustom',
+                                          ),
+                                        ),
+                                      ],
+                                      selectedIndex: customRoster ? 1 : 0,
+                                      onSegmentSelected: (index) => _saveAgent({
+                                        'sub_agent_selection_mode': index == 1
+                                            ? 'manual'
+                                            : 'auto_all',
+                                      }),
+                                    ),
+                                  )
+                                : Text(
+                                    context.l10n.text(
+                                      customRoster
+                                          ? 'agent.teamScopeCustom'
+                                          : 'agent.teamScopeAll',
+                                    ),
+                                  ),
+                          ),
                         _SettingsRow(
                           label: context.l10n.text('agent.loopLimit'),
                           control: _editingAgent
@@ -812,6 +1159,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                     const SizedBox(height: 22),
+                    if (agent.agentMode == 'fibre' ||
+                        agent.agentMode == 'team') ...[
+                      _AssignmentSection(
+                        title: context.l10n.text('agent.teamMembers'),
+                        description: context.l10n.text('agent.teamMembersLeaf'),
+                        values: memberCandidates.map((value) => value.id),
+                        labels: {
+                          for (final value in memberCandidates)
+                            value.id: value.name,
+                        },
+                        selected: selectedMemberIds,
+                        editing: _editingAgent && customRoster,
+                        onToggle: (id) {
+                          final next =
+                              (widget
+                                          .controller
+                                          .agentConfiguration
+                                          ?.availableSubAgentIds ??
+                                      agent.availableSubAgentIds)
+                                  .toSet();
+                          next.contains(id) ? next.remove(id) : next.add(id);
+                          _saveAgent({
+                            'available_sub_agent_ids': next.toList()..sort(),
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 22),
+                    ],
                     _AgentLargeField(
                       label: context.l10n.text('agent.systemPrompt'),
                       value: agent.systemPrefix,
@@ -822,18 +1197,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _saveAgentTextLater('system_prefix', _systemPrefix),
                     ),
                     const SizedBox(height: 22),
-                    _AgentLargeField(
-                      key: const ValueKey('agent-system-context'),
-                      label: context.l10n.text('agent.systemContext'),
-                      value: const JsonEncoder.withIndent(
-                        '  ',
-                      ).convert(agent.systemContext),
-                      controller: _systemContext,
+                    _RuntimeVariablesField(
+                      value: agent.runtimeVariables,
                       editing: _editingAgent,
-                      code: true,
-                      view: _SystemContextView(value: agent.systemContext),
-                      onChanged: (_) =>
-                          _saveAgentTextLater('system_context', _systemContext),
+                      onChanged: (value) {
+                        _systemContext.text = jsonEncode(value);
+                        _saveAgentTextLater(
+                          'runtime_variables',
+                          _systemContext,
+                        );
+                      },
                     ),
                     const SizedBox(height: 22),
                     _AssignmentSection(
@@ -845,7 +1218,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       selected: agent.availableTools.toSet(),
                       editing: _editingAgent,
                       onToggle: (name) {
-                        final next = agent.availableTools.toSet();
+                        final next =
+                            (widget
+                                        .controller
+                                        .agentConfiguration
+                                        ?.availableTools ??
+                                    agent.availableTools)
+                                .toSet();
                         next.contains(name)
                             ? next.remove(name)
                             : next.add(name);
@@ -861,7 +1240,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       selected: agent.availableSkills.toSet(),
                       editing: _editingAgent,
                       onToggle: (name) {
-                        final next = agent.availableSkills.toSet();
+                        final next =
+                            (widget
+                                        .controller
+                                        .agentConfiguration
+                                        ?.availableSkills ??
+                                    agent.availableSkills)
+                                .toSet();
                         next.contains(name)
                             ? next.remove(name)
                             : next.add(name);
@@ -881,6 +1266,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     title: context.l10n.text('settings.tools'),
     values: widget.controller.toolCatalog,
     name: (value) => value.name,
+    group: (value) => _toolGroupLabel(value, context.l10n),
     rows: (value) => [
       (context.l10n.text('common.name'), value.name),
       (context.l10n.text('common.source'), value.source),
@@ -1133,6 +1519,10 @@ String _thinkingLevelLabel(String value, SageLocalizations l10n) =>
     _thinkingLevels.contains(value) ? l10n.text('thinking.$value') : value;
 
 List<(String, IconData)> _navItems(BuildContext context) => [
+  (
+    context.l10n.languageCode == 'zh' ? '概览' : 'Overview',
+    CupertinoIcons.chart_bar,
+  ),
   (context.l10n.text('settings.general'), CupertinoIcons.gear),
   (context.l10n.text('settings.agent'), CupertinoIcons.person_2),
   (context.l10n.text('settings.models'), CupertinoIcons.slider_horizontal_3),
@@ -1140,6 +1530,10 @@ List<(String, IconData)> _navItems(BuildContext context) => [
   (context.l10n.text('settings.skills'), CupertinoIcons.wand_stars),
   ('MCP', CupertinoIcons.link),
   (context.l10n.text('settings.components'), CupertinoIcons.square_grid_2x2),
+  (
+    context.l10n.languageCode == 'zh' ? '沙箱' : 'Sandbox',
+    CupertinoIcons.cube_box,
+  ),
   (context.l10n.text('settings.security'), CupertinoIcons.shield),
   (context.l10n.text('settings.archive'), CupertinoIcons.archivebox),
 ];
@@ -1151,7 +1545,7 @@ class _ComponentSettingsCard extends StatelessWidget {
   });
 
   final ComponentSummary component;
-  final ValueChanged<String> onSelect;
+  final void Function(String, Map<String, Object?>) onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -1164,6 +1558,7 @@ class _ComponentSettingsCard extends StatelessWidget {
         if (plugin.available) plugin,
     ];
     final active = component.activePluginId ?? '';
+    final selected = component.selectedPluginId ?? active;
     return Semantics(
       container: true,
       label: context.l10n.text('component.current', {
@@ -1209,7 +1604,7 @@ class _ComponentSettingsCard extends StatelessWidget {
                         key: ValueKey(
                           'settings-component-picker-${component.id}',
                         ),
-                        value: active,
+                        value: selected,
                         width: 250,
                         options: [
                           for (final plugin in available)
@@ -1222,7 +1617,12 @@ class _ComponentSettingsCard extends StatelessWidget {
                               ),
                             ),
                         ],
-                        onChanged: onSelect,
+                        onChanged: (pluginId) => onSelect(
+                          pluginId,
+                          component.id == 'tool.selection-policy'
+                              ? const {}
+                              : const {},
+                        ),
                       )
                     : _SettingsTag(
                         label: component.implementation.isEmpty
@@ -1276,6 +1676,118 @@ class _ComponentSettingsCard extends StatelessWidget {
                   ),
               ],
             ),
+            if (component.id == 'execution.sandbox')
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  key: const ValueKey('settings-sandbox-workspace-config'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.36,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: colors.outlineVariant),
+                  ),
+                  child: Text(
+                    _sandboxComponentSummary(component, context.l10n),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      fontFamily: 'Menlo',
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+            if ({
+                  'observability.log-sink',
+                  'observability.diagnostic-sink',
+                  'memory.provider',
+                  'session-memory.provider',
+                  'session.store',
+                }.contains(component.id) &&
+                (component.activeConfig['path']?.toString() ?? '').isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  key: ValueKey(
+                    component.id == 'observability.log-sink'
+                        ? 'settings-log-file-path'
+                        : 'settings-component-path-${component.id}',
+                  ),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.36,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: colors.outlineVariant),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _runtimeComponentPathLabel(component.id, context.l10n),
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(color: colors.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 4),
+                      SelectionArea(
+                        child: Text(
+                          component.activeConfig['path'].toString(),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(fontFamily: 'Menlo', height: 1.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (component.id == 'agent.continuation-policy')
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  key: const ValueKey('settings-continuation-policy-details'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.36,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: colors.outlineVariant),
+                  ),
+                  child: Text(
+                    _continuationPolicyDetails(
+                      component.activePluginId ?? '',
+                      context.l10n,
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+            if (component.id == 'tool.selection-policy')
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _ToolSelectionConfigEditor(
+                  component: component,
+                  onSave: (config) => onSelect(selected, config),
+                ),
+              ),
             const SizedBox(height: 14),
             Divider(height: 1, color: colors.outlineVariant),
             const SizedBox(height: 12),
@@ -1344,6 +1856,301 @@ class _ComponentSettingsCard extends StatelessWidget {
       ),
     );
   }
+
+  String _sandboxComponentSummary(
+    ComponentSummary component,
+    SageLocalizations l10n,
+  ) {
+    final config = component.activeConfig;
+    final hostPath = config['workspace_path_mode'] == 'host';
+    final mapped = config['workspace_mapping'] == 'active_workspace';
+    if (l10n.languageCode == 'zh') {
+      final path = hostPath
+          ? '工作目录：与真实目录一致（每次 Run 动态解析）'
+          : '固定虚拟路径：${config['workspace_root'] ?? '—'}';
+      return '$path\n'
+          '工作区模式：${mapped ? '使用当前工作区' : '使用临时空白沙箱'} · '
+          '文件系统：${config['filesystem_mode'] ?? '—'}';
+    }
+    final path = hostPath
+        ? 'Workspace path: same as host path (resolved for each run)'
+        : 'Fixed virtual path: ${config['workspace_root'] ?? '—'}';
+    return '$path\n'
+        'Workspace mode: ${mapped ? 'use current workspace' : 'use temporary blank sandbox'} · '
+        'Filesystem: ${config['filesystem_mode'] ?? '—'}';
+  }
+}
+
+class _ToolSelectionConfigEditor extends StatefulWidget {
+  const _ToolSelectionConfigEditor({
+    required this.component,
+    required this.onSave,
+  });
+
+  final ComponentSummary component;
+  final ValueChanged<Map<String, Object?>> onSave;
+
+  @override
+  State<_ToolSelectionConfigEditor> createState() =>
+      _ToolSelectionConfigEditorState();
+}
+
+class _ToolSelectionConfigEditorState
+    extends State<_ToolSelectionConfigEditor> {
+  final Map<String, TextEditingController> _controllers = {};
+  final Map<String, bool> _booleans = {};
+  String _configFingerprint = '';
+
+  ComponentPluginSummary? get _plugin {
+    final selected = widget.component.selectedPluginId;
+    for (final plugin in widget.component.plugins) {
+      if (plugin.id == selected) return plugin;
+    }
+    return null;
+  }
+
+  Map<String, Map<String, Object?>> get _properties {
+    final raw = _plugin?.configSchema['properties'];
+    if (raw is! Map) return const {};
+    return {
+      for (final entry in raw.entries)
+        if (entry.value is Map)
+          entry.key.toString(): (entry.value as Map).cast<String, Object?>(),
+    };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ToolSelectionConfigEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final fingerprint = jsonEncode([
+      widget.component.activeConfig,
+      widget.component.selectedPluginId,
+      _plugin?.configSchema,
+    ]);
+    if (fingerprint != _configFingerprint) {
+      _sync();
+    }
+  }
+
+  void _sync() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    _controllers.clear();
+    _booleans.clear();
+    _configFingerprint = jsonEncode([
+      widget.component.activeConfig,
+      widget.component.selectedPluginId,
+      _plugin?.configSchema,
+    ]);
+    for (final entry in _properties.entries) {
+      final schema = entry.value;
+      final value =
+          widget.component.activeConfig[entry.key] ?? schema['default'];
+      if (schema['type'] == 'boolean') {
+        _booleans[entry.key] = value == true;
+      } else {
+        _controllers[entry.key] = TextEditingController(
+          text: value?.toString() ?? '',
+        );
+      }
+    }
+  }
+
+  Map<String, Object?>? _value() {
+    final result = <String, Object?>{};
+    for (final entry in _properties.entries) {
+      final schema = entry.value;
+      if (schema['type'] == 'boolean') {
+        result[entry.key] = _booleans[entry.key] ?? false;
+        continue;
+      }
+      final raw = _controllers[entry.key]?.text.trim() ?? '';
+      Object? value;
+      if (schema['type'] == 'integer') {
+        value = int.tryParse(raw);
+      } else if (schema['type'] == 'number') {
+        value = double.tryParse(raw);
+      } else {
+        value = raw;
+      }
+      if (value == null) return null;
+      if (value is num) {
+        final minimum = schema['minimum'];
+        final maximum = schema['maximum'];
+        if (minimum is num && value < minimum) return null;
+        if (maximum is num && value > maximum) return null;
+      }
+      result[entry.key] = value;
+    }
+    return result;
+  }
+
+  void _restoreDefaults() {
+    setState(() {
+      for (final entry in _properties.entries) {
+        final value = entry.value['default'];
+        if (entry.value['type'] == 'boolean') {
+          _booleans[entry.key] = value == true;
+        } else {
+          _controllers[entry.key]?.text = value?.toString() ?? '';
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final properties = _properties;
+    final config = _value();
+    return Container(
+      key: const ValueKey('settings-tool-selection-config'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.36),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10n.text('component.toolSelection.settings'),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            context.l10n.text('component.toolSelection.settingsHelp'),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          if (properties.isEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.text('component.plugin.toolSelectionDirect.value'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final fieldWidth = constraints.maxWidth < 540
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth - 12) / 2;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [
+                    for (final entry in properties.entries)
+                      SizedBox(
+                        width: fieldWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.key == 'max_visible_tools'
+                                  ? context.l10n.text(
+                                      'component.toolSelection.max_visible_tools',
+                                    )
+                                  : (entry.value['title']?.toString() ??
+                                        entry.key),
+                              style: Theme.of(context).textTheme.labelMedium,
+                            ),
+                            const SizedBox(height: 5),
+                            if (entry.value['type'] == 'boolean')
+                              Switch(
+                                value: _booleans[entry.key] ?? false,
+                                onChanged: (value) => setState(
+                                  () => _booleans[entry.key] = value,
+                                ),
+                              )
+                            else
+                              GlassTextField(
+                                key: ValueKey(
+                                  'settings-tool-selection-${entry.key}',
+                                ),
+                                controller: _controllers[entry.key],
+                                height: 34,
+                                keyboardType:
+                                    {
+                                      'integer',
+                                      'number',
+                                    }.contains(entry.value['type'])
+                                    ? TextInputType.number
+                                    : TextInputType.text,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                ),
+                                useOwnLayer: true,
+                                settings: _glass(context),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+          if (config == null) ...[
+            const SizedBox(height: 8),
+            Text(
+              context.l10n.text('component.toolSelection.invalid'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.error),
+            ),
+          ],
+          if (properties.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _restoreDefaults,
+                  child: Text(
+                    context.l10n.text(
+                      'component.toolSelection.restoreDefaults',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  key: const ValueKey('settings-tool-selection-save'),
+                  onPressed: config == null
+                      ? null
+                      : () => widget.onSave(config),
+                  child: Text(context.l10n.text('common.save')),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 String _selectionOwner(String value, SageLocalizations l10n) => switch (value) {
@@ -1359,12 +2166,52 @@ String _applyModeLabel(String value, SageLocalizations l10n) => switch (value) {
   _ => l10n.text('component.apply.unavailable'),
 };
 
+List<ComponentSummary> _orderedRuntimeComponents(
+  List<ComponentSummary> components,
+) {
+  const priority = {
+    'agent.continuation-policy': 0,
+    'tool.selection-policy': 1,
+    'memory.provider': 2,
+    'memory.recall-query': 3,
+    'session-memory.provider': 4,
+  };
+  final indexed = components.indexed.toList();
+  indexed.sort((left, right) {
+    final leftPriority = priority[left.$2.id] ?? 100 + left.$1;
+    final rightPriority = priority[right.$2.id] ?? 100 + right.$1;
+    return leftPriority.compareTo(rightPriority);
+  });
+  return [for (final value in indexed) value.$2];
+}
+
 String _runtimeComponentName(
   ComponentSummary component,
   SageLocalizations l10n,
 ) => switch (component.id) {
+  'agent.continuation-policy' =>
+    l10n.languageCode == 'zh' ? 'Run 完成判定' : 'Run completion policy',
   'context.token-estimator' => l10n.text('component.tokenEstimator.name'),
   'context.reducer' => l10n.text('component.reducer.name'),
+  'context.summarizer' =>
+    l10n.languageCode == 'zh' ? '上下文摘要器' : 'Context summarizer',
+  'context.summary-store' =>
+    l10n.languageCode == 'zh' ? '摘要存储' : 'Summary store',
+  'memory.provider' => l10n.languageCode == 'zh' ? '长期记忆' : 'Long-term memory',
+  'memory.recall-query' =>
+    l10n.languageCode == 'zh' ? '记忆检索词生成' : 'Memory query generation',
+  'tool.selection-policy' => l10n.text('component.toolSelection.name'),
+  'session-memory.provider' => l10n.text('component.sessionMemory.name'),
+  'observability.diagnostic-sink' => l10n.text(
+    'component.modelRequestRecords.name',
+  ),
+  'observability.log-sink' =>
+    l10n.languageCode == 'zh' ? '结构化日志' : 'Structured logging',
+  'execution.sandbox' =>
+    l10n.languageCode == 'zh' ? '执行沙箱' : 'Execution sandbox',
+  'session.store' => l10n.languageCode == 'zh' ? '会话存储' : 'Session store',
+  'workspace.initializer' =>
+    l10n.languageCode == 'zh' ? '工作区初始化' : 'Workspace initialization',
   _ => component.name,
 };
 
@@ -1372,8 +2219,49 @@ String _runtimeComponentValue(
   ComponentSummary component,
   SageLocalizations l10n,
 ) => switch (component.id) {
+  'agent.continuation-policy' =>
+    l10n.languageCode == 'zh'
+        ? '决定 Agent 继续调用工具、请求用户输入、完成或失败'
+        : 'Decides whether an Agent continues, asks the user, completes, or fails',
   'context.token-estimator' => l10n.text('component.tokenEstimator.value'),
   'context.reducer' => l10n.text('component.reducer.value'),
+  'context.summarizer' =>
+    l10n.languageCode == 'zh'
+        ? '上下文超出预算时生成可持久复用的历史摘要'
+        : 'Produces reusable history summaries when context exceeds its budget',
+  'context.summary-store' =>
+    l10n.languageCode == 'zh'
+        ? '保存由 Session 事件派生的摘要，不改写原始会话记录'
+        : 'Stores summaries derived from Session events without rewriting history',
+  'memory.provider' =>
+    l10n.languageCode == 'zh'
+        ? '运行前召回相关记忆，成功结束后自动写入长期记忆'
+        : 'Recalls relevant memory before a run and ingests it after successful completion',
+  'memory.recall-query' =>
+    l10n.languageCode == 'zh'
+        ? '决定 search_memory 使用原始用户输入，还是先由快速模型生成关键词'
+        : 'Chooses whether search_memory uses the raw user input or keywords generated by a fast model',
+  'tool.selection-policy' => l10n.text('component.toolSelection.value'),
+  'session-memory.provider' => l10n.text('component.sessionMemory.value'),
+  'observability.diagnostic-sink' => l10n.text(
+    'component.modelRequestRecords.value',
+  ),
+  'observability.log-sink' =>
+    l10n.languageCode == 'zh'
+        ? '统一记录应用、Agent、模型、工具和运行时错误'
+        : 'Records application, Agent, model, tool, and runtime failures uniformly',
+  'execution.sandbox' =>
+    l10n.languageCode == 'zh'
+        ? '按当前沙箱配置决定虚拟工作目录、是否映射宿主工作区，并执行路径与进程策略'
+        : 'Uses the active sandbox configuration for its virtual root and host mapping, then enforces path and process policy',
+  'session.store' =>
+    l10n.languageCode == 'zh'
+        ? '权威保存 Session、Run、事件、检查点、暂停与审批状态'
+        : 'Authoritatively stores Sessions, Runs, events, checkpoints, suspensions, and approvals',
+  'workspace.initializer' =>
+    l10n.languageCode == 'zh'
+        ? '首次使用时预置 Agent Workspace 的文件和目录'
+        : 'Seeds Agent Workspace files and folders on first use',
   _ => component.value,
 };
 
@@ -1382,6 +2270,18 @@ String _runtimePluginName(
   String fallback,
   SageLocalizations l10n,
 ) => switch (pluginId) {
+  'sage.agent.continuation.deterministic' =>
+    l10n.languageCode == 'zh' ? '无工具调用即完成' : 'Complete without Tool calls',
+  'sage.agent.continuation.llm-judge' =>
+    l10n.languageCode == 'zh'
+        ? '无工具调用 + LLM Judge'
+        : 'No Tool call + LLM Judge',
+  'sage.agent.continuation.hybrid' =>
+    l10n.languageCode == 'zh' ? '混合完成判定' : 'Hybrid completion policy',
+  'sage.agent.continuation.explicit-status' =>
+    l10n.languageCode == 'zh'
+        ? '结束工具（turn_status）'
+        : 'Completion Tool (turn_status)',
   'sage.context.token-estimator.json-heuristic' ||
   'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.name'),
   'sage.context.token-estimator.unicode-heuristic' ||
@@ -1392,6 +2292,61 @@ String _runtimePluginName(
   'persistent-summary' => l10n.text('component.plugin.persistentSummary.name'),
   'sage.context.reducer.window' ||
   'window' => l10n.text('component.plugin.window.name'),
+  'sage.context.summarizer.model' =>
+    l10n.languageCode == 'zh' ? '模型摘要' : 'Model summary',
+  'sage.context.summarizer.extractive' =>
+    l10n.languageCode == 'zh' ? '抽取式摘要' : 'Extractive summary',
+  'sage.context.summary-store.session-derived' =>
+    l10n.languageCode == 'zh' ? 'Session 派生存储' : 'Session-derived store',
+  'sage.context.summary-store.ephemeral' =>
+    l10n.languageCode == 'zh' ? '临时摘要存储' : 'Ephemeral summary store',
+  'sage.memory.filesystem-bm25' =>
+    l10n.languageCode == 'zh' ? '本地 BM25 记忆' : 'Local BM25 memory',
+  'sage.memory.noop' =>
+    l10n.languageCode == 'zh' ? '关闭长期记忆' : 'Long-term memory off',
+  'sage.memory.recall-query.direct' =>
+    l10n.languageCode == 'zh' ? '直接使用用户输入' : 'Direct user input',
+  'sage.memory.recall-query.llm' =>
+    l10n.languageCode == 'zh' ? 'LLM 生成检索词' : 'LLM-generated keywords',
+  'sage.tool-selection.direct' => l10n.text(
+    'component.plugin.toolSelectionDirect.name',
+  ),
+  'sage.tool-selection.lexical' => l10n.text(
+    'component.plugin.toolSelectionLexical.name',
+  ),
+  'sage.tool-selection.llm' => l10n.text(
+    'component.plugin.toolSelectionLlm.name',
+  ),
+  'sage.tool-selection.recent' => l10n.text(
+    'component.plugin.toolSelectionRecent.name',
+  ),
+  'sage.session-memory.sqlite-bm25' => l10n.text(
+    'component.plugin.sessionMemorySqliteBm25.name',
+  ),
+  'sage.session-memory.noop' => l10n.text(
+    'component.plugin.sessionMemoryNoop.name',
+  ),
+  'sage.observability.filesystem' => l10n.text(
+    'component.plugin.filesystemModelRequests.name',
+  ),
+  'sage.observability.noop' => l10n.text(
+    'component.plugin.modelRequestsOff.name',
+  ),
+  'sage.logging.filesystem' =>
+    l10n.languageCode == 'zh' ? '轮转文件日志' : 'Rotating file logs',
+  'sage.logging.noop' => l10n.languageCode == 'zh' ? '关闭日志' : 'Logging off',
+  'sage.sandbox.local-workspace' =>
+    l10n.languageCode == 'zh' ? '本地工作区沙箱' : 'Local workspace sandbox',
+  'sage.sandbox.ephemeral' =>
+    l10n.languageCode == 'zh' ? '临时内存沙箱' : 'Ephemeral sandbox',
+  'sage.session.filesystem' =>
+    l10n.languageCode == 'zh' ? '文件 Session 存储' : 'Filesystem Session store',
+  'sage.session.ephemeral' =>
+    l10n.languageCode == 'zh' ? '临时 Session 存储' : 'Ephemeral Session store',
+  'sage.workspace.initializer.claw' =>
+    l10n.languageCode == 'zh' ? 'Claw Mode' : 'Claw Mode',
+  'sage.workspace.initializer.bare' =>
+    l10n.languageCode == 'zh' ? '空白工作区' : 'Bare workspace',
   _ => fallback,
 };
 
@@ -1400,6 +2355,22 @@ String _runtimePluginValue(
   String fallback,
   SageLocalizations l10n,
 ) => switch (pluginId) {
+  'sage.agent.continuation.deterministic' =>
+    l10n.languageCode == 'zh'
+        ? '模型没有调用工具且返回最终文本时完成；工具调用后继续运行'
+        : 'Completes on final text without Tool calls; continues after Tool calls',
+  'sage.agent.continuation.llm-judge' =>
+    l10n.languageCode == 'zh'
+        ? '模型无工具调用后，再由 V1 Judge 二次判定继续、完成、请求输入或阻塞'
+        : 'After a response without Tool calls, the V1 Judge decides whether to continue, complete, request input, or block',
+  'sage.agent.continuation.hybrid' =>
+    l10n.languageCode == 'zh'
+        ? '确定性规则优先，最终文本交给 V1 Judge；Judge 输出无效或失败时安全回退'
+        : 'Prioritizes deterministic rules and sends final text to the V1 Judge, with fallback for invalid output or failure',
+  'sage.agent.continuation.explicit-status' =>
+    l10n.languageCode == 'zh'
+        ? '由 turn_status 明确返回完成、继续、请求输入、阻塞或失败'
+        : 'Uses turn_status to explicitly complete, continue, request input, block, or fail',
   'sage.context.token-estimator.json-heuristic' ||
   'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.value'),
   'sage.context.token-estimator.unicode-heuristic' ||
@@ -1410,8 +2381,131 @@ String _runtimePluginValue(
   'persistent-summary' => l10n.text('component.plugin.persistentSummary.value'),
   'sage.context.reducer.window' ||
   'window' => l10n.text('component.plugin.window.value'),
+  'sage.context.summarizer.model' =>
+    l10n.languageCode == 'zh'
+        ? '使用当前 Agent 的模型生成结构化摘要；请求会进入模型诊断记录'
+        : 'Uses the current Agent model to produce a structured summary and records the request in diagnostics',
+  'sage.context.summarizer.extractive' =>
+    l10n.languageCode == 'zh'
+        ? '无需额外模型请求，按内容抽取生成保守摘要'
+        : 'Creates a conservative extractive summary without another model request',
+  'sage.context.summary-store.session-derived' =>
+    l10n.languageCode == 'zh'
+        ? '摘要与 Session 事件关联，原始消息保持完整且可审计'
+        : 'Associates summaries with Session events while preserving auditable original messages',
+  'sage.context.summary-store.ephemeral' =>
+    l10n.languageCode == 'zh'
+        ? '仅在当前进程保存摘要，重启后丢失'
+        : 'Keeps summaries only for the current process',
+  'sage.memory.filesystem-bm25' =>
+    l10n.languageCode == 'zh'
+        ? '按用户与 Agent 隔离，在本地持久化并用 BM25 检索；默认开启召回与自动写入'
+        : 'Persists locally per user and Agent with BM25 retrieval; recall and auto-write are enabled by default',
+  'sage.memory.recall-query.direct' =>
+    l10n.languageCode == 'zh'
+        ? '直接把本轮用户输入作为 search_memory.query，不增加模型 Token 和延迟'
+        : 'Uses the current user input as search_memory.query with no extra model tokens or latency',
+  'sage.memory.recall-query.llm' =>
+    l10n.languageCode == 'zh'
+        ? '先调用快速模型提取 3–10 个关键词，再执行 search_memory；召回更聚焦，但会增加一次模型请求'
+        : 'Calls a fast model for 3–10 keywords before search_memory; retrieval is more focused but adds one model request',
+  'sage.memory.noop' =>
+    l10n.languageCode == 'zh'
+        ? '不召回或写入长期记忆；切换后需重启应用'
+        : 'Does not recall or write long-term memory; switching requires an app restart',
+  'sage.tool-selection.direct' => l10n.text(
+    'component.plugin.toolSelectionDirect.value',
+  ),
+  'sage.tool-selection.lexical' => l10n.text(
+    'component.plugin.toolSelectionLexical.value',
+  ),
+  'sage.tool-selection.llm' => l10n.text(
+    'component.plugin.toolSelectionLlm.value',
+  ),
+  'sage.tool-selection.recent' => l10n.text(
+    'component.plugin.toolSelectionRecent.value',
+  ),
+  'sage.session-memory.sqlite-bm25' => l10n.text(
+    'component.plugin.sessionMemorySqliteBm25.value',
+  ),
+  'sage.session-memory.noop' => l10n.text(
+    'component.plugin.sessionMemoryNoop.value',
+  ),
+  'sage.observability.filesystem' => l10n.text(
+    'component.plugin.filesystemModelRequests.value',
+  ),
+  'sage.observability.noop' => l10n.text(
+    'component.plugin.modelRequestsOff.value',
+  ),
+  'sage.logging.filesystem' =>
+    l10n.languageCode == 'zh'
+        ? '写入经过脱敏的 JSONL，并自动限制文件大小与保留数量'
+        : 'Writes redacted JSONL with bounded size and retention',
+  'sage.logging.noop' =>
+    l10n.languageCode == 'zh'
+        ? '不保存运行日志（Session 事件仍正常持久化）'
+        : 'Does not retain operational logs; Session events remain durable',
+  'sage.sandbox.local-workspace' =>
+    l10n.languageCode == 'zh'
+        ? '文件工具只描述虚拟路径；主机路径映射、越界检查与权限由沙箱实现'
+        : 'File tools use virtual paths; host mapping, boundary checks, and permissions are enforced by the sandbox',
+  'sage.sandbox.ephemeral' =>
+    l10n.languageCode == 'zh'
+        ? '使用隔离的临时文件系统，不映射当前项目'
+        : 'Uses an isolated temporary filesystem without mapping the active project',
+  'sage.session.filesystem' =>
+    l10n.languageCode == 'zh'
+        ? '按 Session 保存紧凑状态，并生成结构化的 Runs、事件与嵌套子 Session'
+        : 'Persists compact Session state with structured Runs, events, and child references',
+  'sage.session.ephemeral' =>
+    l10n.languageCode == 'zh'
+        ? '仅用于短期进程内运行，重启后状态丢失'
+        : 'Keeps run state only in the current process',
+  'sage.workspace.initializer.claw' =>
+    l10n.languageCode == 'zh'
+        ? '按 desktop-v1.1.8 模板预置身份与记忆文档，以及 memory、data、projects、temp、logs 目录；不会读取旧版数据'
+        : 'Seeds desktop-v1.1.8 identity and memory templates plus memory, data, projects, temp, and logs directories without reading legacy data',
+  'sage.workspace.initializer.bare' =>
+    l10n.languageCode == 'zh'
+        ? '不预置内容，由用户或 Agent 自行创建'
+        : 'Seeds nothing; the user or Agent creates all content',
   _ => fallback,
 };
+
+String _continuationPolicyDetails(String pluginId, SageLocalizations l10n) {
+  final zh = l10n.languageCode == 'zh';
+  return switch (pluginId) {
+    'sage.agent.continuation.llm-judge' =>
+      zh
+          ? '模型有工具调用时继续执行；只有模型未调用工具时，才追加一次 V1 LLM Judge 请求进行二次判定。Judge 使用最近请求执行轨迹、Todo 硬约束、系统要求与工具清单，输出继续、完成、请求输入或阻塞；无效 JSON 默认继续。Judge 使用 fast 模型绑定，Token 计入 Run 用量。'
+          : 'Tool calls continue execution. Only a response without Tool calls triggers one additional V1 LLM Judge request. The Judge uses the recent execution trace, Todo invariant, system requirements, and Tool list to decide continue, complete, request input, or block; invalid JSON continues. It uses the fast model binding and its tokens count toward Run usage.',
+    'sage.agent.continuation.hybrid' =>
+      zh
+          ? '判定顺序：预算与截止时间 → turn_status → 重复停滞 → Flow 边界 → 工具或空响应 → V1 LLM Judge 审查最终文本。Judge 输出无效或调用失败时，回退到“无工具且有最终文本即完成”的确定性规则；没有置信度字段。Judge Token 计入 Run 用量。'
+          : 'Order: budgets and deadline → turn_status → repeated stalls → Flow boundary → Tools or empty response → V1 LLM Judge review of final text. Invalid Judge output or failure falls back to deterministic final-text completion. There is no confidence field. Judge usage counts toward the Run.',
+    'sage.agent.continuation.explicit-status' =>
+      zh
+          ? '预算、截止时间、重复停滞和 Flow 边界继续生效。普通文本不会自动完成：Agent 必须调用 turn_status。task_done 完成；need_user_input / blocked 暂停；continue_work 继续；failed 失败。达到最大步数仍无显式状态时，Run 明确失败。不调用 LLM Judge，也不依赖 finish_reason。'
+          : 'Budgets, deadlines, repeated stalls, and Flow boundaries remain active. Ordinary text never completes automatically: the Agent must call turn_status. task_done completes; need_user_input / blocked suspend; continue_work continues; failed fails. Missing status at the step limit explicitly fails the Run. No LLM Judge or finish_reason dependency.',
+    _ =>
+      zh
+          ? '判定顺序：预算与截止时间 → turn_status → 重复停滞 → Flow 边界 → 工具或最终文本。工具调用后继续，空响应重试，无工具且有最终文本时完成。重复停滞 3 次请求用户介入。不调用 LLM Judge，也不依赖 finish_reason。'
+          : 'Order: budgets and deadline → turn_status → repeated stalls → Flow boundary → Tools or final text. Tool calls continue, empty responses retry, and final text without Tools completes. Three repeated stalls ask the user. No LLM Judge or finish_reason dependency.',
+  };
+}
+
+String _runtimeComponentPathLabel(String componentId, SageLocalizations l10n) =>
+    switch (componentId) {
+      'memory.provider' =>
+        l10n.languageCode == 'zh' ? '当前记忆目录' : 'Current memory directory',
+      'session-memory.provider' => l10n.text('component.path.sessionMemory'),
+      'observability.diagnostic-sink' => l10n.text(
+        'component.path.modelRequestRecords',
+      ),
+      'session.store' =>
+        l10n.languageCode == 'zh' ? '当前会话目录' : 'Current Session directory',
+      _ => l10n.languageCode == 'zh' ? '当前日志文件' : 'Current log file',
+    };
 
 String _componentScopeLabel(String value, SageLocalizations l10n) =>
     switch (value) {
@@ -2003,6 +3097,47 @@ class _SettingsRowGroup extends StatelessWidget {
   }
 }
 
+class _SecurityKeywordList extends StatelessWidget {
+  const _SecurityKeywordList({
+    required this.values,
+    this.emptyLabel,
+    this.onRemove,
+  });
+
+  final List<String> values;
+  final String? emptyLabel;
+  final ValueChanged<String>? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    if (values.isEmpty) {
+      return Text(
+        emptyLabel ?? '—',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+    return Wrap(
+      spacing: 7,
+      runSpacing: 7,
+      children: [
+        for (final value in values)
+          InputChip(
+            key: ValueKey('security-command:$value'),
+            label: Text(
+              value,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5),
+            ),
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onDeleted: onRemove == null ? null : () => onRemove!(value),
+          ),
+      ],
+    );
+  }
+}
+
 class _PickerOption<T> {
   const _PickerOption({required this.value, required this.label});
 
@@ -2195,6 +3330,7 @@ class _SettingsChoice {
   const _SettingsChoice({
     required this.id,
     required this.label,
+    this.group = '',
     this.marked = false,
     this.removable = false,
     this.busy = false,
@@ -2203,6 +3339,7 @@ class _SettingsChoice {
 
   final String id;
   final String label;
+  final String group;
   final bool marked;
   final bool removable;
   final bool busy;
@@ -2217,6 +3354,7 @@ class _SettingsMasterDetail extends StatelessWidget {
     required this.detail,
     this.selectorKey,
     this.onRemove,
+    this.onSetDefault,
   });
 
   final List<_SettingsChoice> items;
@@ -2225,6 +3363,7 @@ class _SettingsMasterDetail extends StatelessWidget {
   final Widget detail;
   final Key? selectorKey;
   final ValueChanged<String>? onRemove;
+  final Future<void> Function(String)? onSetDefault;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -2241,7 +3380,12 @@ class _SettingsMasterDetail extends StatelessWidget {
                   : (items.isEmpty ? '' : items.first.id),
               options: [
                 for (final item in items)
-                  _PickerOption(value: item.id, label: item.label),
+                  _PickerOption(
+                    value: item.id,
+                    label: item.group.isEmpty
+                        ? item.label
+                        : '${item.group} · ${item.label}',
+                  ),
               ],
               onChanged: onSelected,
             ),
@@ -2266,6 +3410,7 @@ class _SettingsMasterDetail extends StatelessWidget {
               selectedId: selectedId,
               onSelected: onSelected,
               onRemove: onRemove,
+              onSetDefault: onSetDefault,
             ),
           ),
           const SizedBox(width: 32),
@@ -2324,12 +3469,14 @@ class _SettingsChoiceList extends StatefulWidget {
     required this.selectedId,
     required this.onSelected,
     this.onRemove,
+    this.onSetDefault,
   });
 
   final List<_SettingsChoice> items;
   final String selectedId;
   final ValueChanged<String> onSelected;
   final ValueChanged<String>? onRemove;
+  final Future<void> Function(String)? onSetDefault;
 
   @override
   State<_SettingsChoiceList> createState() => _SettingsChoiceListState();
@@ -2345,37 +3492,68 @@ class _SettingsChoiceListState extends State<_SettingsChoiceList> {
   }
 
   @override
-  Widget build(BuildContext context) => ScrollConfiguration(
-    behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-    child: Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: true,
-      thickness: 5,
-      radius: const Radius.circular(3),
-      child: ListView.separated(
-        key: const ValueKey('settings-choice-list'),
+  Widget build(BuildContext context) {
+    final children = <Widget>[];
+    for (var index = 0; index < widget.items.length; index++) {
+      final item = widget.items[index];
+      final previousGroup = index == 0 ? null : widget.items[index - 1].group;
+      if (item.group.isNotEmpty && item.group != previousGroup) {
+        children.add(
+          Padding(
+            padding: EdgeInsets.fromLTRB(12, index == 0 ? 5 : 18, 8, 7),
+            child: Text(
+              item.group,
+              key: ValueKey('settings-choice-group-${item.group}'),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        );
+      }
+      children.add(
+        _SettingsChoiceButton(
+          item: item,
+          selected: item.id == widget.selectedId,
+          onTap: () => widget.onSelected(item.id),
+          onRemove: item.removable && widget.onRemove != null
+              ? () => widget.onRemove!(item.id)
+              : null,
+          onSetDefault: widget.onSetDefault == null
+              ? null
+              : () => widget.onSetDefault!(item.id),
+        ),
+      );
+      final next = index + 1 < widget.items.length
+          ? widget.items[index + 1]
+          : null;
+      if (next != null && (item.group.isEmpty || next.group == item.group)) {
+        children.add(
+          Divider(
+            height: 1,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        );
+      }
+    }
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: Scrollbar(
         controller: _scrollController,
-        primary: false,
-        padding: const EdgeInsets.only(right: 8),
-        itemCount: widget.items.length,
-        itemBuilder: (context, index) {
-          final item = widget.items[index];
-          return _SettingsChoiceButton(
-            item: item,
-            selected: item.id == widget.selectedId,
-            onTap: () => widget.onSelected(item.id),
-            onRemove: item.removable && widget.onRemove != null
-                ? () => widget.onRemove!(item.id)
-                : null,
-          );
-        },
-        separatorBuilder: (context, index) => Divider(
-          height: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
+        thumbVisibility: true,
+        thickness: 5,
+        radius: const Radius.circular(3),
+        child: ListView(
+          key: const ValueKey('settings-choice-list'),
+          controller: _scrollController,
+          primary: false,
+          padding: const EdgeInsets.only(right: 8),
+          children: children,
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SettingsChoiceButton extends StatelessWidget {
@@ -2384,90 +3562,174 @@ class _SettingsChoiceButton extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onRemove,
+    this.onSetDefault,
   });
 
   final _SettingsChoice item;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onRemove;
+  final Future<void> Function()? onSetDefault;
+
+  Future<void> _showContextMenu(
+    BuildContext context,
+    TapDownDetails details,
+  ) async {
+    if (onSetDefault == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final colors = Theme.of(context).colorScheme;
+    final point = details.globalPosition;
+    final action = await showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        point.dx,
+        point.dy,
+        overlay.size.width - point.dx,
+        overlay.size.height - point.dy,
+      ),
+      color: colors.surfaceContainerHigh.withValues(alpha: 0.98),
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.black.withValues(alpha: 0.3),
+      elevation: 10,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(9),
+        side: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.8)),
+      ),
+      constraints: const BoxConstraints(minWidth: 120, maxWidth: 240),
+      menuPadding: const EdgeInsets.all(4),
+      items: [
+        PopupMenuItem<bool>(
+          key: ValueKey('settings-set-default-${item.id}'),
+          value: true,
+          enabled: !item.marked,
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                item.marked ? CupertinoIcons.star_fill : CupertinoIcons.star,
+                size: 14,
+                color: item.marked ? colors.primary : colors.onSurface,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  context.l10n.text(
+                    item.marked
+                        ? 'settings.currentDefault'
+                        : 'settings.setAsDefault',
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: item.marked
+                        ? colors.onSurfaceVariant
+                        : colors.onSurface,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (action == true && !item.marked) await onSetDefault!();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: EdgeInsets.zero,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(11),
-        mouseCursor: SystemMouseCursors.click,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(minHeight: 46),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? colors.onSurface.withValues(alpha: 0.1)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                selected
-                    ? CupertinoIcons.checkmark_circle_fill
-                    : CupertinoIcons.circle,
-                size: 15,
-                color: selected ? colors.primary : colors.onSurfaceVariant,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapDown: onSetDefault == null
+            ? null
+            : (details) => _showContextMenu(context, details),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(11),
+          mouseCursor: SystemMouseCursors.click,
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            constraints: const BoxConstraints(minHeight: 46),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? colors.onSurface.withValues(alpha: 0.1)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  selected
+                      ? CupertinoIcons.checkmark_circle_fill
+                      : CupertinoIcons.circle,
+                  size: 15,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    ),
                   ),
                 ),
-              ),
-              if (item.marked)
-                Icon(CupertinoIcons.star_fill, size: 11, color: colors.primary),
-              if (onRemove != null) ...[
-                const SizedBox(width: 3),
-                Semantics(
-                  button: true,
-                  label: context.l10n.text('settings.deleteNamed', {
-                    'name': item.label,
-                  }),
-                  child: item.busy
-                      ? const SizedBox.square(
-                          dimension: 30,
-                          child: Center(
-                            child: CupertinoActivityIndicator(radius: 7),
-                          ),
-                        )
-                      : Tooltip(
-                          message: context.l10n.text('settings.deleteNamed', {
-                            'name': item.label,
-                          }),
-                          child: InkWell(
-                            key: ValueKey('${item.removeKeyPrefix}-${item.id}'),
-                            borderRadius: BorderRadius.circular(7),
-                            onTap: onRemove,
-                            child: Padding(
-                              padding: const EdgeInsets.all(7),
-                              child: Icon(
-                                CupertinoIcons.trash,
-                                size: 14,
-                                color: colors.error,
+                if (item.marked)
+                  Tooltip(
+                    message: context.l10n.text('settings.currentDefault'),
+                    child: Icon(
+                      CupertinoIcons.star_fill,
+                      size: 11,
+                      color: colors.primary,
+                    ),
+                  ),
+                if (onRemove != null) ...[
+                  const SizedBox(width: 3),
+                  Semantics(
+                    button: true,
+                    label: context.l10n.text('settings.deleteNamed', {
+                      'name': item.label,
+                    }),
+                    child: item.busy
+                        ? const SizedBox.square(
+                            dimension: 30,
+                            child: Center(
+                              child: CupertinoActivityIndicator(radius: 7),
+                            ),
+                          )
+                        : Tooltip(
+                            message: context.l10n.text('settings.deleteNamed', {
+                              'name': item.label,
+                            }),
+                            child: InkWell(
+                              key: ValueKey(
+                                '${item.removeKeyPrefix}-${item.id}',
+                              ),
+                              borderRadius: BorderRadius.circular(7),
+                              onTap: onRemove,
+                              child: Padding(
+                                padding: const EdgeInsets.all(7),
+                                child: Icon(
+                                  CupertinoIcons.trash,
+                                  size: 14,
+                                  color: colors.error,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -2476,17 +3738,37 @@ class _SettingsChoiceButton extends StatelessWidget {
 }
 
 class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({required this.label, required this.control});
+  const _SettingsRow({
+    required this.label,
+    required this.control,
+    this.description,
+  });
   final String label;
   final Widget control;
+  final String? description;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final labelWidget = Text(
-        label,
-        style: Theme.of(
-          context,
-        ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      final labelWidget = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          if (description != null) ...[
+            const SizedBox(height: 3),
+            Text(
+              description!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ],
       );
       if (constraints.maxWidth < 560) {
         return Padding(
@@ -2555,13 +3837,11 @@ class _AgentTextRow extends StatelessWidget {
 
 class _AgentLargeField extends StatelessWidget {
   const _AgentLargeField({
-    super.key,
     required this.label,
     required this.value,
     required this.controller,
     required this.editing,
     required this.onChanged,
-    this.code = false,
     this.view,
   });
   final String label;
@@ -2569,7 +3849,6 @@ class _AgentLargeField extends StatelessWidget {
   final TextEditingController controller;
   final bool editing;
   final ValueChanged<String> onChanged;
-  final bool code;
   final Widget? view;
   @override
   Widget build(BuildContext context) => Column(
@@ -2593,18 +3872,9 @@ class _AgentLargeField extends StatelessWidget {
           useOwnLayer: true,
           settings: _glass(context),
           onChanged: onChanged,
-          textStyle: code
-              ? const TextStyle(fontFamily: 'Menlo', fontSize: 12.5)
-              : null,
         )
       else
-        view ??
-            SelectableText(
-              value.isEmpty ? '—' : value,
-              style: code
-                  ? const TextStyle(fontFamily: 'Menlo', fontSize: 12.5)
-                  : null,
-            ),
+        view ?? SelectableText(value.isEmpty ? '—' : value),
     ],
   );
 }
@@ -2643,71 +3913,534 @@ class _SystemPromptMarkdown extends StatelessWidget {
   }
 }
 
-class _SystemContextView extends StatelessWidget {
-  const _SystemContextView({required this.value});
+class _RuntimeVariablesField extends StatelessWidget {
+  const _RuntimeVariablesField({
+    required this.value,
+    required this.editing,
+    required this.onChanged,
+  });
+
+  final Map<String, Object?> value;
+  final bool editing;
+  final ValueChanged<Map<String, Object?>> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey('agent-runtime-variables'),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        context.l10n.text('agent.systemContext'),
+        style: Theme.of(
+          context,
+        ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 10),
+      if (editing)
+        _RuntimeVariablesEditor(value: value, onChanged: onChanged)
+      else
+        _RuntimeVariablesView(value: value),
+    ],
+  );
+}
+
+class _RuntimeVariablesEditor extends StatefulWidget {
+  const _RuntimeVariablesEditor({required this.value, required this.onChanged});
+
+  final Map<String, Object?> value;
+  final ValueChanged<Map<String, Object?>> onChanged;
+
+  @override
+  State<_RuntimeVariablesEditor> createState() =>
+      _RuntimeVariablesEditorState();
+}
+
+class _RuntimeVariablesEditorState extends State<_RuntimeVariablesEditor> {
+  late Map<String, Object?> _draft;
+  late String _sourceSignature;
+
+  @override
+  void initState() {
+    super.initState();
+    _sourceSignature = jsonEncode(widget.value);
+    _draft = _copyRuntimeVariables(widget.value);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RuntimeVariablesEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextSignature = jsonEncode(widget.value);
+    if (nextSignature == _sourceSignature) return;
+    _sourceSignature = nextSignature;
+    _draft = _copyRuntimeVariables(widget.value);
+  }
+
+  void _change(Map<String, Object?> value) {
+    setState(() => _draft = value);
+    widget.onChanged(value);
+  }
+
+  @override
+  Widget build(BuildContext context) => _RuntimeVariableMapEditor(
+    key: const ValueKey('agent-runtime-variables-editor'),
+    value: _draft,
+    onChanged: _change,
+  );
+}
+
+Map<String, Object?> _copyRuntimeVariables(Map<String, Object?> value) {
+  final decoded = jsonDecode(jsonEncode(value));
+  return decoded is Map ? decoded.cast<String, Object?>() : <String, Object?>{};
+}
+
+class _RuntimeVariableMapEditor extends StatelessWidget {
+  const _RuntimeVariableMapEditor({
+    required this.value,
+    required this.onChanged,
+    this.nested = false,
+    super.key,
+  });
+
+  final Map<String, Object?> value;
+  final ValueChanged<Map<String, Object?>> onChanged;
+  final bool nested;
+
+  void _replace(String key, Object? nextValue) {
+    final next = Map<String, Object?>.of(value)..[key] = nextValue;
+    onChanged(next);
+  }
+
+  bool _rename(String oldKey, String candidate) {
+    final nextKey = candidate.trim();
+    if (nextKey.isEmpty || (nextKey != oldKey && value.containsKey(nextKey))) {
+      return false;
+    }
+    if (nextKey == oldKey) return true;
+    final next = <String, Object?>{};
+    for (final entry in value.entries) {
+      next[entry.key == oldKey ? nextKey : entry.key] = entry.value;
+    }
+    onChanged(next);
+    return true;
+  }
+
+  void _remove(String key) {
+    final next = Map<String, Object?>.of(value)..remove(key);
+    onChanged(next);
+  }
+
+  void _add() {
+    var index = 1;
+    var key = 'variable';
+    while (value.containsKey(key)) {
+      index += 1;
+      key = 'variable_$index';
+    }
+    final next = Map<String, Object?>.of(value)..[key] = '';
+    onChanged(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final content = Column(
+      children: [
+        for (final entry in value.entries) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: nested ? 126 : 160,
+                  child: _RuntimeVariableKeyInput(
+                    key: ValueKey('runtime-variable-key:${entry.key}'),
+                    value: entry.key,
+                    onCommitted: (next) => _rename(entry.key, next),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: _RuntimeVariableValueEditor(
+                    key: ValueKey('runtime-variable-value:${entry.key}'),
+                    value: entry.value,
+                    onChanged: (next) => _replace(entry.key, next),
+                  ),
+                ),
+                const SizedBox(width: 3),
+                IconButton(
+                  key: ValueKey('runtime-variable-delete:${entry.key}'),
+                  tooltip: context.l10n.text('common.delete'),
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    CupertinoIcons.trash,
+                    size: 15,
+                    color: colors.error,
+                  ),
+                  onPressed: () => _remove(entry.key),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: colors.outlineVariant),
+        ],
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: ValueKey(
+              nested ? 'runtime-variable-add-nested' : 'runtime-variable-add',
+            ),
+            onPressed: _add,
+            icon: const Icon(CupertinoIcons.add, size: 14),
+            label: Text(context.l10n.text('agent.addRuntimeVariable')),
+          ),
+        ),
+      ],
+    );
+    if (!nested) return content;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 4, 8, 2),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.7)),
+      ),
+      child: content,
+    );
+  }
+}
+
+class _RuntimeVariableKeyInput extends StatefulWidget {
+  const _RuntimeVariableKeyInput({
+    required this.value,
+    required this.onCommitted,
+    super.key,
+  });
+
+  final String value;
+  final bool Function(String value) onCommitted;
+
+  @override
+  State<_RuntimeVariableKeyInput> createState() =>
+      _RuntimeVariableKeyInputState();
+}
+
+class _RuntimeVariableKeyInputState extends State<_RuntimeVariableKeyInput> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.value,
+  );
+
+  @override
+  void didUpdateWidget(covariant _RuntimeVariableKeyInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value && _controller.text != widget.value) {
+      _controller.text = widget.value;
+    }
+  }
+
+  void _commit() {
+    if (!widget.onCommitted(_controller.text)) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => GlassTextField(
+    controller: _controller,
+    height: 34,
+    padding: const EdgeInsets.symmetric(horizontal: 9),
+    placeholder: context.l10n.text('agent.runtimeVariableKey'),
+    useOwnLayer: true,
+    settings: _glass(context),
+    onSubmitted: (_) => _commit(),
+    onTapOutside: (_) {
+      _commit();
+      FocusManager.instance.primaryFocus?.unfocus();
+    },
+  );
+}
+
+class _RuntimeVariableValueEditor extends StatelessWidget {
+  const _RuntimeVariableValueEditor({
+    required this.value,
+    required this.onChanged,
+    super.key,
+  });
+
+  final Object? value;
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = value;
+    if (raw is Map) {
+      return _RuntimeVariableMapEditor(
+        value: raw.cast<String, Object?>(),
+        nested: true,
+        onChanged: onChanged,
+      );
+    }
+    if (raw is List) {
+      return _RuntimeVariableListEditor(value: raw, onChanged: onChanged);
+    }
+    if (raw is bool) {
+      return SizedBox(
+        height: 34,
+        child: Row(
+          children: [
+            Switch.adaptive(value: raw, onChanged: onChanged),
+            const SizedBox(width: 6),
+            Text(raw.toString()),
+          ],
+        ),
+      );
+    }
+    return _RuntimeVariableScalarInput(value: raw, onChanged: onChanged);
+  }
+}
+
+class _RuntimeVariableScalarInput extends StatefulWidget {
+  const _RuntimeVariableScalarInput({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final Object? value;
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  State<_RuntimeVariableScalarInput> createState() =>
+      _RuntimeVariableScalarInputState();
+}
+
+class _RuntimeVariableScalarInputState
+    extends State<_RuntimeVariableScalarInput> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.value?.toString() ?? '',
+  );
+
+  @override
+  void didUpdateWidget(covariant _RuntimeVariableScalarInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = widget.value?.toString() ?? '';
+    if (widget.value != oldWidget.value && _controller.text != next) {
+      _controller.text = next;
+    }
+  }
+
+  void _change(String text) {
+    final raw = widget.value;
+    if (raw is int) {
+      final parsed = int.tryParse(text);
+      if (parsed != null) widget.onChanged(parsed);
+      return;
+    }
+    if (raw is double) {
+      final parsed = double.tryParse(text);
+      if (parsed != null) widget.onChanged(parsed);
+      return;
+    }
+    widget.onChanged(text);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => GlassTextField(
+    controller: _controller,
+    height: 34,
+    padding: const EdgeInsets.symmetric(horizontal: 9),
+    placeholder: context.l10n.text('agent.runtimeVariableValue'),
+    useOwnLayer: true,
+    settings: _glass(context),
+    onChanged: _change,
+  );
+}
+
+class _RuntimeVariableListEditor extends StatelessWidget {
+  const _RuntimeVariableListEditor({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final List<Object?> value;
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(9, 4, 7, 2),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.7)),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < value.length; index++)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 28, child: Text('${index + 1}.')),
+                Expanded(
+                  child: _RuntimeVariableValueEditor(
+                    value: value[index],
+                    onChanged: (nextValue) {
+                      final next = List<Object?>.of(value)..[index] = nextValue;
+                      onChanged(next);
+                    },
+                  ),
+                ),
+                IconButton(
+                  tooltip: context.l10n.text('common.delete'),
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    CupertinoIcons.trash,
+                    size: 14,
+                    color: colors.error,
+                  ),
+                  onPressed: () {
+                    final next = List<Object?>.of(value)..removeAt(index);
+                    onChanged(next);
+                  },
+                ),
+              ],
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => onChanged([...value, '']),
+              icon: const Icon(CupertinoIcons.add, size: 14),
+              label: Text(context.l10n.text('common.add')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RuntimeVariablesView extends StatelessWidget {
+  const _RuntimeVariablesView({required this.value});
 
   final Map<String, Object?> value;
 
   @override
   Widget build(BuildContext context) {
     if (value.isEmpty) return const Text('—');
+    return _RuntimeVariableReadOnlyMap(
+      key: const ValueKey('agent-runtime-variables-formatted'),
+      value: value,
+    );
+  }
+}
+
+class _RuntimeVariableReadOnlyMap extends StatelessWidget {
+  const _RuntimeVariableReadOnlyMap({
+    required this.value,
+    this.nested = false,
+    super.key,
+  });
+
+  final Map<String, Object?> value;
+  final bool nested;
+
+  @override
+  Widget build(BuildContext context) {
     final entries = value.entries.toList()
       ..sort((left, right) => left.key.compareTo(right.key));
     final colors = Theme.of(context).colorScheme;
-    return Column(
-      key: const ValueKey('agent-system-context-formatted'),
+    final content = Column(
       children: [
         for (var index = 0; index < entries.length; index++) ...[
-          _SystemContextEntry(entry: entries[index]),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 9),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: nested ? 126 : 150,
+                  child: SelectableText(
+                    entries[index].key,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: _RuntimeVariableReadOnlyValue(
+                    value: entries[index].value,
+                  ),
+                ),
+              ],
+            ),
+          ),
           if (index != entries.length - 1)
             Divider(height: 1, color: colors.outlineVariant),
         ],
       ],
     );
+    if (!nested) return content;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: content,
+    );
   }
 }
 
-class _SystemContextEntry extends StatelessWidget {
-  const _SystemContextEntry({required this.entry});
+class _RuntimeVariableReadOnlyValue extends StatelessWidget {
+  const _RuntimeVariableReadOnlyValue({required this.value});
 
-  final MapEntry<String, Object?> entry;
+  final Object? value;
 
   @override
   Widget build(BuildContext context) {
-    final raw = entry.value;
-    final formatted = raw is Map || raw is List
-        ? const JsonEncoder.withIndent('  ').convert(raw)
-        : raw?.toString() ?? 'null';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
-      child: Row(
+    final raw = value;
+    if (raw is Map) {
+      if (raw.isEmpty) return const Text('—');
+      return _RuntimeVariableReadOnlyMap(
+        value: raw.cast<String, Object?>(),
+        nested: true,
+      );
+    }
+    if (raw is List) {
+      if (raw.isEmpty) return const Text('—');
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 150,
-            child: SelectableText(
-              entry.key,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+          for (var index = 0; index < raw.length; index++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(width: 28, child: Text('${index + 1}.')),
+                  Expanded(
+                    child: _RuntimeVariableReadOnlyValue(value: raw[index]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: SelectableText(
-              formatted,
-              style: raw is Map || raw is List
-                  ? const TextStyle(
-                      fontFamily: 'Menlo',
-                      fontSize: 12.5,
-                      height: 1.45,
-                    )
-                  : Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
         ],
-      ),
-    );
+      );
+    }
+    return SelectableText(raw?.toString() ?? 'null');
   }
 }
 
@@ -2719,10 +4452,14 @@ class _AssignmentSection extends StatelessWidget {
     required this.onToggle,
     this.values = const [],
     this.groups = const [],
+    this.labels = const {},
+    this.description,
   });
   final String title;
+  final String? description;
   final Iterable<String> values;
   final List<_AssignmentGroup> groups;
+  final Map<String, String> labels;
   final Set<String> selected;
   final bool editing;
   final ValueChanged<String> onToggle;
@@ -2751,6 +4488,15 @@ class _AssignmentSection extends StatelessWidget {
             context,
           ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
+        if (description case final description?) ...[
+          const SizedBox(height: 5),
+          Text(
+            description,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         if (visibleGroups.isEmpty)
           const Text('—')
@@ -2779,7 +4525,8 @@ class _AssignmentSection extends StatelessWidget {
                   children: [
                     for (final value in visibleGroups[index].values)
                       _AssignmentItem(
-                        value: value,
+                        key: ValueKey('assignment-$title-$value'),
+                        value: labels[value] ?? value,
                         selected: selected.contains(value),
                         enabled: editing,
                         onTap: () => onToggle(value),
@@ -2807,9 +4554,7 @@ List<_AssignmentGroup> _toolAssignmentGroups(
 ) {
   final grouped = <String, List<String>>{};
   for (final tool in tools) {
-    final source = tool.source.trim().isEmpty
-        ? l10n.text('tool.baseTools')
-        : tool.source.trim();
+    final source = _toolGroupLabel(tool, l10n);
     grouped.putIfAbsent(source, () => []).add(tool.name);
   }
   return [
@@ -2818,8 +4563,45 @@ List<_AssignmentGroup> _toolAssignmentGroups(
   ];
 }
 
+String _toolGroupLabel(ToolSummary tool, SageLocalizations l10n) {
+  final category = tool.category.trim();
+  if (category.isNotEmpty) {
+    final labels = l10n.languageCode == 'zh'
+        ? const <String, String>{
+            'code_quality': '代码质量',
+            'code_search': '代码检索',
+            'files': '文件',
+            'image': '图像',
+            'interaction': '交互',
+            'memory': '记忆',
+            'multi_agent': '多智能体',
+            'planning': '任务规划',
+            'shell': '终端',
+            'system': '系统',
+            'web': '网页',
+          }
+        : const <String, String>{
+            'code_quality': 'Code quality',
+            'code_search': 'Code search',
+            'files': 'Files',
+            'image': 'Image',
+            'interaction': 'Interaction',
+            'memory': 'Memory',
+            'multi_agent': 'Multi-agent',
+            'planning': 'Planning',
+            'shell': 'Terminal',
+            'system': 'System',
+            'web': 'Web',
+          };
+    return labels[category] ?? category;
+  }
+  final source = tool.source.trim();
+  return source.isEmpty ? l10n.text('tool.baseTools') : source;
+}
+
 class _AssignmentItem extends StatelessWidget {
   const _AssignmentItem({
+    super.key,
     required this.value,
     required this.selected,
     required this.enabled,
@@ -3045,6 +4827,24 @@ class _ModelSettingsState extends State<_ModelSettings> {
       // WorkspaceController exposes the backend error in the shared banner.
     } finally {
       if (mounted) setState(() => _deletingId = null);
+    }
+  }
+
+  Future<void> _setDefaultProvider(String providerId) async {
+    if (_saving || providerId.isEmpty) return;
+    ModelProviderSummary? provider;
+    for (final value in widget.controller.modelProviders) {
+      if (value.id == providerId) {
+        provider = value;
+        break;
+      }
+    }
+    if (provider == null || provider.isDefault) return;
+    setState(() => _saving = true);
+    try {
+      await widget.controller.setDefaultModelProvider(providerId);
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -3324,6 +5124,26 @@ class _ModelSettingsState extends State<_ModelSettings> {
               label: context.l10n.text('common.save'),
             ),
           ] else ...[
+            if (!_creating) ...[
+              _SettingsActionButton(
+                key: const ValueKey('settings-model-set-default'),
+                onTap: _saving || displayed.isDefault
+                    ? null
+                    : () => _setDefaultProvider(displayed.id),
+                icon: Icon(
+                  displayed.isDefault
+                      ? CupertinoIcons.star_fill
+                      : CupertinoIcons.star,
+                  size: 15,
+                ),
+                label: context.l10n.text(
+                  displayed.isDefault
+                      ? 'settings.currentDefault'
+                      : 'settings.setAsDefault',
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
             _SettingsActionButton(
               key: const ValueKey('settings-model-add'),
               onTap: _saving ? null : _startCreating,
@@ -3373,6 +5193,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
             _dirty = false;
           }),
           onRemove: _deleteProvider,
+          onSetDefault: _setDefaultProvider,
           detail: _SettingsRowGroup(
             children: [
               field(context.l10n.text('common.name'), displayed.name, _name),
@@ -3486,11 +5307,13 @@ class _CatalogSettings<T> extends StatefulWidget {
     required this.values,
     required this.name,
     required this.rows,
+    this.group,
     this.detailBuilder,
   });
   final String title;
   final List<T> values;
   final String Function(T) name;
+  final String Function(T)? group;
   final List<(String, String)> Function(T) rows;
   final Widget Function(T)? detailBuilder;
 
@@ -3501,14 +5324,26 @@ class _CatalogSettings<T> extends StatefulWidget {
 class _CatalogSettingsState<T> extends State<_CatalogSettings<T>> {
   String _selectedName = '';
 
+  List<T> get _orderedValues {
+    final values = widget.values.toList();
+    final group = widget.group;
+    if (group == null) return values;
+    values.sort((left, right) {
+      final byGroup = group(left).compareTo(group(right));
+      return byGroup != 0
+          ? byGroup
+          : widget.name(left).compareTo(widget.name(right));
+    });
+    return values;
+  }
+
   T? get _selected {
-    if (widget.values.isEmpty) return null;
-    if (!widget.values.any((value) => widget.name(value) == _selectedName)) {
-      _selectedName = widget.name(widget.values.first);
+    final values = _orderedValues;
+    if (values.isEmpty) return null;
+    if (!values.any((value) => widget.name(value) == _selectedName)) {
+      _selectedName = widget.name(values.first);
     }
-    return widget.values.firstWhere(
-      (value) => widget.name(value) == _selectedName,
-    );
+    return values.firstWhere((value) => widget.name(value) == _selectedName);
   }
 
   @override
@@ -3521,10 +5356,11 @@ class _CatalogSettingsState<T> extends State<_CatalogSettings<T>> {
         if (selected != null)
           _SettingsMasterDetail(
             items: [
-              for (final value in widget.values)
+              for (final value in _orderedValues)
                 _SettingsChoice(
                   id: widget.name(value),
                   label: widget.name(value),
+                  group: widget.group?.call(value) ?? '',
                 ),
             ],
             selectedId: _selectedName,

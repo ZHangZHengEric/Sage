@@ -20,6 +20,7 @@ from sagents.v2.contracts.session_commit import (
     SessionMergeStrategy,
 )
 from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.model import (
     ModelEventKind,
     ModelResponse,
@@ -102,7 +103,7 @@ async def execute(runtime, handle, model, *, definitions=(), handlers=None):
 
 @pytest.mark.asyncio
 async def test_serial_run_projects_completed_history_from_previous_runs():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     first = await runtime.start_run(command("first question", "first"), CONTEXT)
     await execute(
         runtime,
@@ -129,7 +130,7 @@ async def test_serial_run_projects_completed_history_from_previous_runs():
 
 @pytest.mark.asyncio
 async def test_fork_materializes_parent_history_at_its_stable_base_sequence():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     parent = await runtime.start_run(command("parent question", "parent"), CONTEXT)
     await execute(
         runtime,
@@ -165,7 +166,7 @@ async def test_fork_materializes_parent_history_at_its_stable_base_sequence():
 
 @pytest.mark.asyncio
 async def test_snapshot_reads_its_base_but_is_not_published_into_serial_history():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(command("seed question", "seed"), CONTEXT)
     await execute(
         runtime,
@@ -211,7 +212,7 @@ async def test_snapshot_reads_its_base_but_is_not_published_into_serial_history(
 
 @pytest.mark.asyncio
 async def test_snapshot_publication_is_explicit_and_visible_only_after_publish_boundary():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(command("seed", "publish-seed"), CONTEXT)
     await execute(
         runtime,
@@ -298,7 +299,7 @@ async def test_snapshot_publication_is_explicit_and_visible_only_after_publish_b
 
 @pytest.mark.asyncio
 async def test_snapshot_conflict_requires_explicit_append_or_can_be_rejected():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(command("seed", "conflict-seed"), CONTEXT)
     await execute(
         runtime,
@@ -372,7 +373,7 @@ async def test_snapshot_conflict_requires_explicit_append_or_can_be_rejected():
 
 @pytest.mark.asyncio
 async def test_stale_snapshot_never_reads_events_committed_after_its_base():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     seed = await runtime.start_run(command("base question", "stale-seed"), CONTEXT)
     await execute(
         runtime,
@@ -449,7 +450,7 @@ async def test_sqlite_restart_preserves_the_session_history_anchor(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tool_call_and_result_items_reconstruct_a_complete_provider_pair():
-    runtime = HarnessRuntime()
+    runtime = ephemeral_runtime()
     definition = ToolDefinition(
         name="lookup",
         description="look up a value",

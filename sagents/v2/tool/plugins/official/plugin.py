@@ -38,6 +38,18 @@ _OFFICIAL_TOOL_CLASSES = (
     InteractionTools,
 )
 
+_OFFICIAL_TOOL_CATEGORIES = {
+    FileSystemTools: "files",
+    CodeSearchTools: "code_search",
+    ShellTools: "shell",
+    PlanningTools: "planning",
+    MemoryTools: "memory",
+    WebTools: "web",
+    MediaTools: "image",
+    QualityTools: "code_quality",
+    InteractionTools: "interaction",
+}
+
 
 def official_tool_definitions() -> tuple[ToolDefinition, ...]:
     """Return decorator metadata without constructing an execution runtime."""
@@ -51,6 +63,19 @@ def official_tool_definitions() -> tuple[ToolDefinition, ...]:
                     raise ValueError(f"duplicate official Tool {definition.name!r}")
                 values[definition.name] = definition
     return tuple(values[name] for name in sorted(values))
+
+
+def official_tool_categories() -> dict[str, str]:
+    """Return stable display categories for the official Tool catalog."""
+
+    values: dict[str, str] = {}
+    for owner in _OFFICIAL_TOOL_CLASSES:
+        category = _OFFICIAL_TOOL_CATEGORIES[owner]
+        for _, method in inspect.getmembers(owner, callable):
+            definition = decorated_tool_definition(method)
+            if definition is not None:
+                values[definition.name] = category
+    return values
 
 
 class OfficialToolPlugin:

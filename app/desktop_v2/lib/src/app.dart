@@ -4,11 +4,19 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'localization/app_localizations.dart';
 import 'state/workspace_controller.dart';
 import 'ui/workspace_screen.dart';
+import 'ui/workspace_panels/workspace_panel_plugin.dart';
 
 class SageDesktopV2App extends StatefulWidget {
-  const SageDesktopV2App({super.key, this.controller});
+  const SageDesktopV2App({
+    super.key,
+    this.controller,
+    this.panelPlugins = const [],
+    this.panelDockController,
+  });
 
   final WorkspaceController? controller;
+  final List<WorkspacePanelPlugin> panelPlugins;
+  final WorkspacePanelDockController? panelDockController;
 
   @override
   State<SageDesktopV2App> createState() => _SageDesktopV2AppState();
@@ -69,6 +77,8 @@ class _SageDesktopV2AppState extends State<SageDesktopV2App> {
         onThemeModeChanged: (value) => setState(() => _themeMode = value),
         language: _language,
         onLanguageChanged: (value) => setState(() => _language = value),
+        panelPlugins: widget.panelPlugins,
+        panelDockController: widget.panelDockController,
       ),
     );
   }

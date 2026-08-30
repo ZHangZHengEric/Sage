@@ -13,7 +13,7 @@ ref: sage-platform-multi-agent-recommendation
 # Sage Platform Multi-Agent Delivery Recommendation
 
 > Note: This document is not a rejection of the customer proposal. It reframes the same business goals in a way that fits the Sage Platform delivery model.  
-> Core point: **the customer's capability goals are valid, but not every capability needs to become a separate Agent. A more practical design is a single customer-facing main Agent, supported by stage state, system context, and tools/skills/tasks.**
+> Core point: **the customer's capability goals are valid, but not every capability needs to become a separate Agent. A more practical design is a single customer-facing main Agent, supported by stage state, runtime variables, and tools/skills/tasks.**
 
 ---
 
@@ -276,4 +276,3 @@ If we do it the Sage way, the answer is:
 - **Tasks handle time-driven operations**
 
 That gives us a cleaner architecture, better reuse, easier governance, and a more reliable delivery path.
-

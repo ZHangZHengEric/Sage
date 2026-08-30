@@ -43,9 +43,59 @@ class McpProtocolAdapter:
         data = event.data
         if (
             isinstance(data, InteractionEventData)
-            and data.interaction_type == "elicitation"
             and event.type == "interaction.requested"
         ):
+            questions = tuple(
+                question
+                for question in (data.payload.get("questions") or ())
+                if isinstance(question, dict)
+            )
+            properties = {
+                str(question.get("id") or f"q{index + 1}"): {
+                    "type": (
+                        "array" if question.get("type") == "multiple" else "string"
+                    ),
+                    "title": question.get("title") or question.get("question"),
+                    **(
+                        {
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    option.get("value")
+                                    if isinstance(option, dict)
+                                    else option
+                                    for option in question.get("options", [])
+                                ],
+                            }
+                        }
+                        if question.get("type") == "multiple"
+                        else {
+                            "enum": [
+                                option.get("value")
+                                if isinstance(option, dict)
+                                else option
+                                for option in question.get("options", [])
+                            ]
+                        }
+                        if question.get("type") == "single"
+                        else {}
+                    ),
+                }
+                for index, question in enumerate(questions)
+            }
+            if not properties:
+                properties["response"] = {
+                    "type": "string",
+                    "title": data.payload.get("prompt")
+                    or data.payload.get("title")
+                    or data.interaction_type,
+                }
+            if data.allowed_decisions:
+                properties["decision"] = {
+                    "type": "string",
+                    "title": data.payload.get("guidance") or "Decision",
+                    "enum": list(data.allowed_decisions),
+                }
             return AdapterResult(
                 frames=(
                     frame(
@@ -58,6 +108,18 @@ class McpProtocolAdapter:
                         payload={
                             "interactionId": data.interaction_id,
                             "runId": event.run_id,
+                            "message": data.payload.get("prompt")
+                            or data.payload.get("title")
+                            or data.interaction_type,
+                            "requestedSchema": {
+                                "type": "object",
+                                "properties": properties,
+                            },
+                            "sageInteraction": {
+                                "type": data.interaction_type,
+                                "allowedDecisions": list(data.allowed_decisions),
+                                "payload": data.payload,
+                            },
                         },
                     ),
                 )

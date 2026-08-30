@@ -88,9 +88,7 @@ class SkillLoadTool:
                     safe_to_resume=True,
                 )
             )
-        loaded = await self.loader.load(
-            skill_name, run_id=invocation.call.owner_run_id
-        )
+        loaded = await self.loader.load(skill_name, run_id=invocation.call.owner_run_id)
         active = await self.loader.loaded(run_id=invocation.call.owner_run_id)
         active_names = [value.descriptor.name for value in active]
         result = (

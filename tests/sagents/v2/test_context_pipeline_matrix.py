@@ -17,13 +17,14 @@ from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 
 
-def command(*, metadata=None):
+def command(*, metadata=None, invocation_mode=None):
     return StartRun(
         agent_id="agent_1",
         input=(InputItem(role="user", content=(TextBlock(text="question"),)),),
         config={"metadata": metadata or {}},
         resolved_spec_hash="sha256:spec",
         idempotency_key="start",
+        invocation_mode=invocation_mode,
     )
 
 
@@ -130,6 +131,45 @@ async def test_tool_pair_sanitizer_keeps_complete_pairs_and_drops_orphans():
 
 
 @pytest.mark.asyncio
+async def test_historical_memory_tool_pair_is_not_replayed_but_current_pair_is():
+    old_call = ModelToolCall(
+        tool_call_id="memory_old", name="search_memory", arguments={"query": "old"}
+    )
+    current_call = ModelToolCall(
+        tool_call_id="memory_current",
+        name="search_memory",
+        arguments={"query": "current"},
+    )
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="old request"),)),
+        ModelMessage(role="assistant", tool_calls=(old_call,)),
+        ModelMessage(
+            role="tool",
+            tool_call_id="memory_old",
+            content=(TextBlock(text="old memory"),),
+        ),
+        ModelMessage(role="user", content=(TextBlock(text="current request"),)),
+        ModelMessage(role="assistant", tool_calls=(current_call,)),
+        ModelMessage(
+            role="tool",
+            tool_call_id="memory_current",
+            content=(TextBlock(text="current memory"),),
+        ),
+    )
+
+    prepared = await DefaultContextAssembler().prepare_messages(command(), ledger)
+
+    assert [message.role for message in prepared] == [
+        "user",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert prepared[-2].tool_calls == (current_call,)
+    assert prepared[-1].content[0].text == "current memory"
+
+
+@pytest.mark.asyncio
 async def test_explicit_latest_user_segment_is_injected_even_when_not_volatile():
     assembler = DefaultContextAssembler(
         providers=(
@@ -188,6 +228,21 @@ async def test_run_metadata_context_has_stable_prefix_and_volatile_user_state():
 
 
 @pytest.mark.asyncio
+async def test_run_metadata_context_projects_plan_mode_as_system_contract():
+    provider = RunMetadataContextProvider()
+
+    segments = await provider.segments(
+        command(metadata={"response_language": "zh"}, invocation_mode="plan")
+    )
+    plan = next(value for value in segments if value.segment_id == "plan_mode")
+
+    assert "<plan_mode>" in plan.content
+    assert "不执行任务" in plan.content
+    assert "不修改用户工作区" in plan.content
+    assert plan.stability == ContextStability.STABLE
+
+
+@pytest.mark.asyncio
 async def test_historical_user_keeps_its_frozen_time_but_not_old_runtime_state():
     current = command(
         metadata={
@@ -220,6 +275,57 @@ async def test_historical_user_keeps_its_frozen_time_but_not_old_runtime_state()
 
 
 @pytest.mark.asyncio
+async def test_historical_projected_user_is_reduced_to_v1_time_only_context():
+    current = command(
+        metadata={
+            "current_time": "Fri, 28 Aug 2026 12:30:00 +0800",
+            "working_directory": "/workspace/current",
+            "workspace_files": "current.txt",
+        }
+    )
+    assembler = DefaultContextAssembler(providers=(RunMetadataContextProvider(),))
+    old_projection = ModelMessage(
+        role="user",
+        content=(
+            TextBlock(
+                text=(
+                    "<runtime_context>\n"
+                    "Relevant long-term memory:\n- old private memory\n"
+                    "<system_context>\n"
+                    "  <current_time>Thu, 27 Aug 2026 09:00:00 +0800</current_time>\n"
+                    "  <working_directory>/workspace/old</working_directory>\n"
+                    "</system_context>\n"
+                    "<workspace_files>\nold.txt\n</workspace_files>\n"
+                    "</runtime_context>\n\n"
+                    "<user_request>\nold request\n</user_request>"
+                )
+            ),
+        ),
+    )
+    ledger = (
+        old_projection,
+        ModelMessage(role="assistant", content=(TextBlock(text="old answer"),)),
+        ModelMessage(role="user", content=(TextBlock(text="new request"),)),
+    )
+
+    prepared = await assembler.prepare_messages(current, ledger)
+
+    old_user = prepared[-3].content[0].text
+    new_user = prepared[-1].content[0].text
+    assert old_user == (
+        "<runtime_context>\n"
+        "<current_time>Thu, 27 Aug 2026 09:00:00 +0800</current_time>\n"
+        "</runtime_context>\n\n"
+        "<user_request>\nold request\n</user_request>"
+    )
+    assert "Relevant long-term memory" not in old_user
+    assert "working_directory" not in old_user
+    assert "workspace_files" not in old_user
+    assert "/workspace/current" in new_user
+    assert "current.txt" in new_user
+
+
+@pytest.mark.asyncio
 async def test_budget_reduction_drops_oldest_complete_units_not_half_tool_pairs():
     call = ModelToolCall(tool_call_id="call_1", name="lookup", arguments={})
     ledger = (
@@ -240,6 +346,7 @@ async def test_budget_reduction_drops_oldest_complete_units_not_half_tool_pairs(
     assert projection.strategy == "window"
     assert projection.dropped_message_count == 3
     assert projection.dropped_digest.startswith("sha256:")
+    assert projection.historical_messages == ledger[:3]
     assert [message.role for message in projection.messages] == [
         "system",
         "assistant",

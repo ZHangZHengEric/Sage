@@ -10,12 +10,43 @@ from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
 
 _TODO_STATUSES = {"pending", "in_progress", "completed"}
 
+_TODO_WRITE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "content": {"type": "string", "minLength": 1},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed"],
+                    },
+                    "conclusion": {"type": "string"},
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
+        },
+        "session_id": {"type": "string"},
+    },
+    "required": ["tasks", "session_id"],
+    "additionalProperties": False,
+}
+
 
 class PlanningTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
-    @tool(description="Replace the current structured task list.", side_effect_level=SideEffectLevel.WRITE)
+    @tool(
+        description="Replace the current structured task list.",
+        input_schema=_TODO_WRITE_INPUT_SCHEMA,
+        side_effect_level=SideEffectLevel.WRITE,
+    )
     async def todo_write(
         self,
         tasks: list[dict[str, Any]],
@@ -67,7 +98,10 @@ class PlanningTools:
             "updated": updated,
         }
 
-    @tool(description="Read the current structured task list.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Read the current structured task list.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def todo_read(
         self,
         session_id: str,
@@ -79,10 +113,108 @@ class PlanningTools:
             "tasks": await self.runtime.load_todos(invocation),
         }
 
-    @tool(description="Publish the current turn status.")
+    @tool(
+        description=(
+            "Submit the single free-form goal for this Run. In Plan mode, put the "
+            "complete proposed Plan in content for user approval. In Goal mode, put "
+            "the complete direct goal in content before substantive execution."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"content": {"type": "string", "minLength": 1}},
+            "required": ["content"],
+            "additionalProperties": False,
+        },
+        strict=True,
+    )
+    async def goal_submit(
+        self,
+        content: str,
+        invocation: ToolInvocation,
+    ) -> dict[str, Any]:
+        goals = self.runtime.goal_state_service
+        if goals is None:
+            raise RuntimeError("goal state service is unavailable")
+        run_id = invocation.call.owner_run_id
+        is_plan = await goals.is_plan_mode(run_id)
+        is_goal = await goals.is_goal_mode(run_id)
+        if not (is_plan or is_goal):
+            raise ValueError("goal_submit is available only in plan or goal mode")
+        existing = await goals.get(invocation.call.owner_run_id)
+        if existing is not None:
+            raise ValueError("this Run already has a goal")
+        normalized = content.strip()
+        if not normalized:
+            raise ValueError("goal content must not be empty")
+        return {
+            "status": "approved" if is_plan else "active",
+            "content": normalized,
+            "source": "plan" if is_plan else "direct",
+        }
+
+    @tool(
+        description=(
+            "Complete the active goal after independently verifying every acceptance "
+            "criterion. A goal-mode Run cannot finish successfully until this Tool "
+            "succeeds."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string", "minLength": 1}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        strict=True,
+    )
+    async def goal_complete(
+        self,
+        summary: str,
+        invocation: ToolInvocation,
+    ) -> dict[str, Any]:
+        goals = self.runtime.goal_state_service
+        if goals is None:
+            raise RuntimeError("goal state service is unavailable")
+        if not await goals.is_goal_mode(invocation.call.owner_run_id):
+            raise ValueError("goal_complete is available only in goal mode")
+        state = await goals.get(invocation.call.owner_run_id)
+        if state is None:
+            raise ValueError("call goal_submit before goal_complete")
+        if state.completed:
+            return {
+                "status": "completed",
+                "content": state.content,
+                "summary": state.completion_summary,
+                "already_completed": True,
+            }
+        normalized = summary.strip()
+        if not normalized:
+            raise ValueError("completion summary must not be empty")
+        return {
+            "status": "completed",
+            "content": state.content,
+            "summary": normalized,
+            "already_completed": False,
+        }
+
+    @tool(
+        description=(
+            "Control what happens after the current model response. First write "
+            "the user-facing result, question, or blocker explanation, then call "
+            "this tool in the same response. task_done completes the Run; "
+            "need_user_input and blocked suspend it for a user reply; "
+            "continue_work starts another Agent step; failed ends the Run as "
+            "failed."
+        ),
+    )
     async def turn_status(
         self,
-        status: Literal["task_done", "need_user_input", "blocked", "continue_work"],
+        status: Literal[
+            "task_done",
+            "need_user_input",
+            "blocked",
+            "continue_work",
+            "failed",
+        ],
         note: str | None = None,
         session_id: str | None = None,
         invocation: ToolInvocation | None = None,

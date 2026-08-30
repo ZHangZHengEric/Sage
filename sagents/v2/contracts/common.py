@@ -56,6 +56,11 @@ SkillName = Annotated[
     ),
 ]
 
+# Text streamed from a model is a lossless transport payload. Leading spaces
+# and newlines may be Markdown syntax split into their own delta, so it must
+# opt out of StrictModel's identifier-oriented whitespace normalization.
+VerbatimText = Annotated[str, StringConstraints(strip_whitespace=False)]
+
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -66,3 +71,14 @@ def utc_now() -> datetime:
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def new_sortable_id(prefix: str, *, created_at: datetime | None = None) -> str:
+    """Return a unique ID whose lexical order starts with its creation time."""
+
+    timestamp = created_at or utc_now()
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError("created_at must be timezone-aware")
+    utc_timestamp = timestamp.astimezone(timezone.utc)
+    sortable_timestamp = utc_timestamp.strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{prefix}_{sortable_timestamp}_{uuid.uuid4().hex}"

@@ -12,12 +12,16 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import posixpath
 import re
-from typing import Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 from urllib.parse import urlsplit
 
 from sagents.v2.memory import MemoryService
+from sagents.v2.session_memory import SessionMemoryService
+from sagents.v2.agent.policy import ContinuationSignals, InteractionDraft
+
+if TYPE_CHECKING:
+    from sagents.v2.goal.state import GoalStateService
 from sagents.v2.contracts.jobs import (
     JobCompletion,
     JobCursor,
@@ -36,19 +40,7 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxHandle,
 )
 from sagents.v2.tool import ToolInvocation
-
-
-class QuestionnairePresenter(Protocol):
-    async def __call__(
-        self,
-        *,
-        title: str,
-        questions: list[dict[str, Any]],
-        questionnaire_id: str,
-        wait_time: int,
-        questionnaire_kind: str,
-        run_id: str,
-    ) -> dict[str, Any]: ...
+from sagents.v2.tool.selection import ToolSelectionPolicy
 
 
 class ImageContextPublisher(Protocol):
@@ -77,34 +69,31 @@ class OfficialToolRuntime:
         grant_issuer: SandboxGrantIssuer,
         *,
         memory_service: MemoryService | None = None,
-        questionnaire_presenter: QuestionnairePresenter | None = None,
+        session_memory_service: SessionMemoryService | None = None,
         image_context_publisher: ImageContextPublisher | None = None,
         tool_catalog_resolver: ToolCatalogResolver | None = None,
+        tool_selection_policy: ToolSelectionPolicy | None = None,
         job_runtime: JobRuntime | None = None,
+        goal_state_service: GoalStateService | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.grant_issuer = grant_issuer
         self.memory_service = memory_service
-        self.questionnaire_presenter = questionnaire_presenter
+        self.session_memory_service = session_memory_service
         self.image_context_publisher = image_context_publisher
         self.tool_catalog_resolver = tool_catalog_resolver
+        self.tool_selection_policy = tool_selection_policy
+        self.goal_state_service = goal_state_service
         self.job_runtime = job_runtime or InMemoryJobRuntime(
             {"official.shell": self._run_shell_job}
         )
         self._expanded_tools: dict[str, set[str]] = {}
         self._turn_status: dict[str, dict[str, Any]] = {}
 
-    @staticmethod
-    def virtual_path(value: str | None) -> str:
-        """Normalize a model path into the sandbox's ``/workspace`` namespace."""
+    def virtual_path(self, value: str | None) -> str:
+        """Ask the active sandbox to resolve a canonical resource path."""
 
-        raw = (value or "/workspace").replace("\\", "/")
-        if not raw.startswith("/"):
-            raw = f"/workspace/{raw}"
-        normalized = posixpath.normpath(raw)
-        if normalized != "/workspace" and not normalized.startswith("/workspace/"):
-            raise PermissionError(f"path escapes workspace: {value!r}")
-        return normalized
+        return self.sandbox.filesystem.normalize_path(value or ".")
 
     def _intent(
         self,
@@ -302,7 +291,9 @@ class OfficialToolRuntime:
                 "status": "running",
                 "task_id": task_id,
                 "stdout": output,
-                "pattern_matched": bool(re.search(pattern, output)) if pattern else None,
+                "pattern_matched": bool(re.search(pattern, output))
+                if pattern
+                else None,
             }
         return {
             "success": snapshot.state == JobState.COMPLETED and snapshot.exit_code == 0,
@@ -362,12 +353,10 @@ class OfficialToolRuntime:
         self, tasks: list[dict[str, Any]], invocation: ToolInvocation
     ) -> str:
         payload = json.dumps(tasks, ensure_ascii=False, indent=2) + "\n"
-        return await self.write_text(
-            "/workspace/.sage/todos.json", payload, invocation
-        )
+        return await self.write_text(".sage/todos.json", payload, invocation)
 
     async def load_todos(self, invocation: ToolInvocation) -> list[dict[str, Any]]:
-        target = "/workspace/.sage/todos.json"
+        target = ".sage/todos.json"
         if not await self.exists(target, invocation):
             return []
         value = json.loads(await self.read_text(target, invocation))
@@ -376,7 +365,31 @@ class OfficialToolRuntime:
     def set_turn_status(self, run_id: str, value: dict[str, Any]) -> None:
         self._turn_status[run_id] = value
 
+    def consume_continuation_signals(self, run_id: str) -> ContinuationSignals:
+        """Consume one explicit status so it cannot leak into a later Step."""
+
+        value = self._turn_status.pop(run_id, None)
+        if value is None:
+            return ContinuationSignals()
+        status = value.get("status")
+        note = value.get("note")
+        interaction = value.get("interaction")
+        return ContinuationSignals(
+            explicit_status=str(status) if status is not None else None,
+            explicit_status_note=str(note) if note is not None else None,
+            interaction=(
+                InteractionDraft.model_validate(interaction)
+                if isinstance(interaction, dict)
+                else None
+            ),
+        )
+
     async def expand_tools(self, run_id: str, names: list[str]) -> dict[str, Any]:
+        if self.tool_selection_policy is not None:
+            return self.tool_selection_policy.expand_tools(
+                run_id=run_id,
+                names=tuple(names),
+            )
         available: tuple[str, ...] = ()
         if self.tool_catalog_resolver is not None:
             value = self.tool_catalog_resolver(run_id)

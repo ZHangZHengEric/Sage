@@ -4,6 +4,7 @@ import pytest
 
 from common.services import agent_service
 from sagents.tool.impl.apply_patch_tool import ApplyPatchTool
+from sagents.tool.impl.questionnaire_tool import QuestionnaireTool
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
 
@@ -41,3 +42,19 @@ async def test_auto_generate_agent_hides_explicit_only_tools_by_default(monkeypa
     assert proxy.get_tool("apply_patch") is None
     assert proxy.get_openai_tools() == []
     assert result["name"] == "generated"
+
+
+def test_validate_tools_migrates_synchronous_questionnaire(monkeypatch):
+    manager = ToolManager(is_auto_discover=False, isolated=True)
+    manager.tools = {
+        "questionnaire_async": QuestionnaireTool.questionnaire_async._tool_spec,
+    }
+    monkeypatch.setattr(
+        "sagents.tool.tool_manager.get_tool_manager",
+        lambda: manager,
+    )
+    config = {"availableTools": ["questionnaire", "questionnaire_async"]}
+
+    agent_service.validate_and_filter_tools(config)
+
+    assert config["availableTools"] == ["questionnaire_async"]

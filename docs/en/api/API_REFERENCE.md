@@ -70,7 +70,7 @@ agent = SAgent(
 | `agent_mode` | `"simple"` \| `"fibre"` \| `"team"` — selects the default `AgentFlow` |
 | `custom_flow` | If set, the built-in default flow is **not** used |
 | `custom_sub_agents` | Sub-agent configuration list |
-| `system_context` | Extra system context `dict` |
+| `system_context` | Runtime variables `dict` (legacy wire name) |
 | `available_workflows` | Uses `{}` internally if omitted |
 | `context_budget_config` | Context budget controls |
 | `volume_mounts` | List of `VolumeMount` from `sagents.utils.sandbox.config` |

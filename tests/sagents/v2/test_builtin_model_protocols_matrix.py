@@ -175,7 +175,12 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
         client=client,
     )
 
-    events = [event async for event in provider.stream(request())]
+    events = [
+        event
+        async for event in provider.stream(
+            request(tool_choice="required", response_format="json_object")
+        )
+    ]
 
     assert [event.kind for event in events] == [
         ModelEventKind.REASONING_DELTA,
@@ -195,6 +200,8 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
 
     outgoing = responses.calls[0]
     assert outgoing["store"] is False
+    assert outgoing["tool_choice"] == "required"
+    assert outgoing["text"] == {"format": {"type": "json_object"}}
     assert outgoing["reasoning"] == {"effort": "high"}
     assert outgoing["tools"][0] == {
         "type": "function",
@@ -309,7 +316,12 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
         client=client,
     )
 
-    events = [event async for event in provider.stream(request())]
+    events = [
+        event
+        async for event in provider.stream(
+            request(tool_choice="required", response_format="json_object")
+        )
+    ]
 
     completed = events[-1].response
     assert completed is not None
@@ -326,6 +338,8 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     assert (method, url) == ("POST", "/v1/messages")
     outgoing = call["json"]
     assert outgoing["system"] == [{"type": "text", "text": "be exact"}]
+    assert outgoing["tool_choice"] == {"type": "any"}
+    assert "output_config" not in outgoing
     assert outgoing["messages"][1]["content"][-1] == {
         "type": "tool_use",
         "id": "call_old",
@@ -340,6 +354,29 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
         }
     ]
     assert outgoing["tools"][0]["input_schema"] == {"type": "object"}
+
+
+def test_anthropic_thinking_uses_native_adaptive_effort_parameters():
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(
+            model="claude-sonnet-5",
+            capabilities=CAPABILITIES,
+            reasoning_effort="xhigh",
+            default_temperature=0.4,
+            default_top_p=0.9,
+        ),
+        client=object(),
+    )
+
+    outgoing = provider.diagnostic_request(request())
+
+    assert outgoing["thinking"] == {
+        "type": "adaptive",
+        "display": "summarized",
+    }
+    assert outgoing["output_config"] == {"effort": "xhigh"}
+    assert "temperature" not in outgoing
+    assert "top_p" not in outgoing
 
 
 @pytest.mark.parametrize(

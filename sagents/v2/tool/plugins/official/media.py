@@ -16,7 +16,10 @@ class MediaTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
-    @tool(description="Attach an image to the next multimodal model turn.", side_effect_level=SideEffectLevel.READ)
+    @tool(
+        description="Attach an image to the next multimodal model turn.",
+        side_effect_level=SideEffectLevel.READ,
+    )
     async def analyze_image(
         self,
         image_path: str,
@@ -45,7 +48,9 @@ class MediaTools:
         else:
             assert invocation is not None
             data = await self.runtime.read_bytes(image_path, invocation)
-            mime = mimetypes.guess_type(PurePosixPath(image_path).name)[0] or "image/jpeg"
+            mime = (
+                mimetypes.guess_type(PurePosixPath(image_path).name)[0] or "image/jpeg"
+            )
         if not mime.startswith("image/"):
             raise ValueError(f"unsupported image type: {mime}")
         uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
@@ -54,6 +59,9 @@ class MediaTools:
         return ToolExecutionResult(
             tool_call_id=invocation.call.tool_call_id,
             operation_id=invocation.call.operation_id,
-            content=(TextBlock(text=text), ImageBlock(uri=uri, mime_type=mime, alt=image_path)),
+            content=(
+                TextBlock(text=text),
+                ImageBlock(uri=uri, mime_type=mime, alt=image_path),
+            ),
             metadata={"image_path": image_path, "native_multimodal": True},
         )

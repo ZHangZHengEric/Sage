@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from sagents.v2.context.contracts import (
     ContextBudget,
     ContextPlacement,
     ContextProjection,
+    ContextProjectionObserver,
     ContextReductionScope,
     ContextReducer,
     ContextSegment,
@@ -80,6 +82,7 @@ class DefaultContextAssembler:
         reducer: ContextReducer | None = None,
         estimator: TokenEstimator | None = None,
         history_reader: SessionHistoryReader | None = None,
+        projection_observer: ContextProjectionObserver | None = None,
     ) -> None:
         static = []
         if system_instructions:
@@ -117,6 +120,7 @@ class DefaultContextAssembler:
             if history_reader is not None
             else None
         )
+        self.projection_observer = projection_observer
 
     async def initial_ledger(
         self, command: StartRun, *, run_id: str | None = None
@@ -207,7 +211,9 @@ class DefaultContextAssembler:
             )
         system = tuple(system_messages)
         payload = self._sanitize_tool_pairs(
-            tuple(message for message in ledger if message.role != "system")
+            self._strip_historical_search_memory(
+                tuple(message for message in ledger if message.role != "system")
+            )
         )
         volatile = tuple(
             segment
@@ -236,12 +242,16 @@ class DefaultContextAssembler:
                     run_id=run.run_id,
                     source_sequence=run.base_session_sequence,
                 )
-            return await self.reducer.reduce(messages, self.budget, scope=scope)
-        return ContextProjection(
-            messages=messages,
-            estimated_tokens=self.estimator.estimate(messages),
-            source_message_count=len(messages),
-        )
+            projection = await self.reducer.reduce(messages, self.budget, scope=scope)
+        else:
+            projection = ContextProjection(
+                messages=messages,
+                estimated_tokens=self.estimator.estimate(messages),
+                source_message_count=len(messages),
+            )
+        if self.projection_observer is not None and run_id is not None:
+            await self.projection_observer.observe_projection(run_id, projection)
+        return projection
 
     @staticmethod
     def _inject_latest_user(
@@ -263,11 +273,19 @@ class DefaultContextAssembler:
         prepared = list(messages)
         for prior_index in range(index):
             prior = prepared[prior_index]
-            frozen = prior.metadata.get("frozen_current_time_context")
-            if prior.role == "user" and isinstance(frozen, str) and frozen.strip():
-                prepared[prior_index] = DefaultContextAssembler._wrap_user_context(
-                    prior, frozen.strip()
-                )
+            if prior.role != "user":
+                continue
+            # Match v1's historical projection: old user turns retain only the
+            # time captured for that turn.  Long-term Memory, Todo state,
+            # working directories, and workspace listings belong exclusively
+            # to the current request projection.
+            frozen = DefaultContextAssembler._historical_current_time(prior)
+            clean = DefaultContextAssembler._unwrap_user_context(prior)
+            prepared[prior_index] = (
+                DefaultContextAssembler._wrap_user_context(clean, frozen)
+                if frozen
+                else clean
+            )
         original = prepared[index]
         prepared[index] = DefaultContextAssembler._wrap_user_context(
             original, runtime_text
@@ -276,11 +294,10 @@ class DefaultContextAssembler:
 
     @staticmethod
     def _wrap_user_context(original: ModelMessage, runtime_text: str) -> ModelMessage:
-        prefix = TextBlock(
-            text=(
-                f"<runtime_context>\n{runtime_text}\n</runtime_context>"
-                "\n\n<user_request>\n"
-            )
+        original = DefaultContextAssembler._unwrap_user_context(original)
+        prefix_text = (
+            f"<runtime_context>\n{runtime_text}\n</runtime_context>"
+            "\n\n<user_request>\n"
         )
         # Prefix and suffix the original block list instead of flattening text
         # and moving images/files behind it. Provider adapters therefore see
@@ -288,12 +305,14 @@ class DefaultContextAssembler:
         if len(original.content) == 1 and isinstance(original.content[0], TextBlock):
             content: tuple[ContentBlock, ...] = (
                 TextBlock(
-                    text=(f"{prefix.text}{original.content[0].text}\n</user_request>")
+                    text=(
+                        f"{prefix_text}{original.content[0].text}\n</user_request>"
+                    )
                 ),
             )
         else:
             content = (
-                prefix,
+                TextBlock(text=prefix_text),
                 *original.content,
                 TextBlock(text="\n</user_request>"),
             )
@@ -308,6 +327,104 @@ class DefaultContextAssembler:
             }
         )
         return updated
+
+    @staticmethod
+    def _historical_current_time(message: ModelMessage) -> str | None:
+        frozen = message.metadata.get("frozen_current_time_context")
+        if isinstance(frozen, str):
+            match = re.search(
+                r"<current_time\b[^>]*>.*?</current_time>",
+                frozen,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if match is not None:
+                return match.group(0).strip()
+        for block in message.content:
+            if not isinstance(block, TextBlock):
+                continue
+            runtime = re.search(
+                r"<runtime_context\b[^>]*>(.*?)</runtime_context>",
+                block.text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if runtime is None:
+                continue
+            runtime_body = runtime.group(1)
+            system = re.search(
+                r"<system_context\b[^>]*>(.*?)</system_context>",
+                runtime_body,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            trusted_body = system.group(1) if system is not None else runtime_body
+            match = re.search(
+                r"<current_time\b[^>]*>.*?</current_time>",
+                trusted_body,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if match is not None:
+                return match.group(0).strip()
+        return None
+
+    @staticmethod
+    def _unwrap_user_context(message: ModelMessage) -> ModelMessage:
+        """Recover canonical user content from a previously projected view."""
+
+        content = list(message.content)
+        if not content:
+            return message
+        changed = False
+        if len(content) == 1 and isinstance(content[0], TextBlock):
+            match = re.search(
+                r"<user_request\b[^>]*>\s*(.*?)\s*</user_request>",
+                content[0].text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if match is not None:
+                content = [
+                    content[0].model_copy(update={"text": match.group(1)})
+                ]
+                changed = True
+        else:
+            first = content[0]
+            if isinstance(first, TextBlock):
+                opening = re.search(
+                    r"<user_request\b[^>]*>", first.text, flags=re.IGNORECASE
+                )
+                if opening is not None:
+                    remainder = first.text[opening.end() :].lstrip("\n")
+                    content = (
+                        [first.model_copy(update={"text": remainder}), *content[1:]]
+                        if remainder
+                        else content[1:]
+                    )
+                    changed = True
+            if content and isinstance(content[-1], TextBlock):
+                closing_text = re.sub(
+                    r"\s*</user_request>\s*$",
+                    "",
+                    content[-1].text,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+                if closing_text != content[-1].text:
+                    if closing_text:
+                        content[-1] = content[-1].model_copy(
+                            update={"text": closing_text}
+                        )
+                    else:
+                        content.pop()
+                    changed = True
+        if not changed:
+            return message
+        return message.model_copy(
+            update={
+                "content": tuple(content),
+                "metadata": {
+                    key: value
+                    for key, value in message.metadata.items()
+                    if key not in {"runtime_context_injected", "inference_view_only"}
+                },
+            }
+        )
 
     @staticmethod
     def _sanitize_tool_pairs(
@@ -336,4 +453,56 @@ class DefaultContextAssembler:
                 output.append(message)
                 output.extend(results)
             index = cursor
+        return tuple(output)
+
+    @staticmethod
+    def _strip_historical_search_memory(
+        messages: tuple[ModelMessage, ...],
+    ) -> tuple[ModelMessage, ...]:
+        """Keep only the current turn's automatic Memory Tool pair, as v1 does."""
+
+        latest_user = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if messages[index].role == "user"
+                and messages[index].metadata.get("runtime_continuation_guidance")
+                is not True
+            ),
+            None,
+        )
+        if latest_user is None:
+            return messages
+        historical_ids = {
+            call.tool_call_id
+            for message in messages[:latest_user]
+            if message.role == "assistant"
+            for call in message.tool_calls
+            if call.name == "search_memory"
+        }
+        if not historical_ids:
+            return messages
+        output = []
+        for index, message in enumerate(messages):
+            if (
+                index < latest_user
+                and message.role == "tool"
+                and message.tool_call_id in historical_ids
+            ):
+                continue
+            if index < latest_user and message.role == "assistant":
+                kept = tuple(
+                    call
+                    for call in message.tool_calls
+                    if call.tool_call_id not in historical_ids
+                )
+                if kept != message.tool_calls:
+                    has_content = any(
+                        not isinstance(block, TextBlock) or bool(block.text.strip())
+                        for block in message.content
+                    )
+                    if not kept and not has_content:
+                        continue
+                    message = message.model_copy(update={"tool_calls": kept})
+            output.append(message)
         return tuple(output)

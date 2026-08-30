@@ -77,6 +77,8 @@ class AcpProtocolAdapter:
                             "interactionId": data.interaction_id,
                             "type": data.interaction_type,
                             "revision": data.revision,
+                            "allowedDecisions": list(data.allowed_decisions),
+                            "payload": data.payload,
                         },
                     ),
                 )
@@ -141,7 +143,20 @@ class AcpProtocolAdapter:
                             name="session/update",
                             payload={
                                 "sessionId": event.session_id,
-                                "update": {"sessionUpdate": "status", "status": status},
+                                "update": {
+                                    "sessionUpdate": "status",
+                                    "status": status,
+                                    "message": (
+                                        data.error.message
+                                        if event.type == "run.failed" and data.error
+                                        else data.reason
+                                    ),
+                                    "errorCode": (
+                                        data.error.code
+                                        if event.type == "run.failed" and data.error
+                                        else None
+                                    ),
+                                },
                             },
                         ),
                     )
