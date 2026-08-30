@@ -1993,6 +1993,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> _hydrateSessionTrees() async {
+    var hydratedAnyNodes = false;
     for (final values in _conversations.values) {
       for (final conversation in values) {
         if (conversation.archived || (conversation.sessionId ?? '').isEmpty) {
@@ -2000,22 +2001,33 @@ class WorkspaceController extends ChangeNotifier {
         }
         try {
           final nodes = await _api.getSessionTree(conversation.sessionId!);
+          hydratedAnyNodes = hydratedAnyNodes || nodes.isNotEmpty;
           for (final node in nodes) {
             _upsertSubSession(conversation, node);
           }
-          _subscribeSessionTree(conversation);
+          // Completed history only needs the one-shot snapshot above. Opening
+          // a follow stream for every old conversation adds avoidable startup
+          // work and briefly retains an HTTP stream even though the backend
+          // will close it immediately. Active roots or children still receive
+          // the live tree stream and its reconnect protection.
+          if (_treeHasActiveRun(conversation)) {
+            _subscribeSessionTree(conversation);
+          }
         } on Object {
           // A stale local conversation must not block Desktop startup.
         }
       }
     }
-    _persist();
+    // Avoid serializing the entire local conversation cache on every startup
+    // when hydration did not discover anything new.
+    if (hydratedAnyNodes) _persist();
   }
 
   void _subscribeSessionTree(Conversation root) {
     final sessionId = root.sessionId;
     if (sessionId == null ||
         sessionId.isEmpty ||
+        !_treeHasActiveRun(root) ||
         _treeStreams.containsKey(root.id)) {
       return;
     }

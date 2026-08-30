@@ -133,6 +133,73 @@ async def test_concurrent_acknowledged_writes_survive_restart(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_failed_write_does_not_advance_the_durable_delta_baseline(tmp_path):
+    path = tmp_path / "failed-write-baseline"
+    store = FilesystemSessionStore(path)
+    first = await store.create_run(command("first"), CONTEXT)
+    original_write = store._write_session_state
+    failed_once = False
+
+    def fail_before_write(*args, **kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise OSError("injected storage failure")
+        return original_write(*args, **kwargs)
+
+    store._write_session_state = fail_before_write
+    with pytest.raises(OSError, match="injected storage failure"):
+        await store.create_run(
+            command(
+                "uncertain",
+                session_id=first.handle.session_id,
+                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+            ),
+            CONTEXT,
+        )
+
+    # The next write must compact from the current aggregate rather than append
+    # a delta whose previous revision was never durably acknowledged.
+    await store.create_run(
+        command(
+            "recovery",
+            session_id=first.handle.session_id,
+            mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+        ),
+        CONTEXT,
+    )
+    await store.close()
+
+    reopened = FilesystemSessionStore(path)
+    runs = await reopened.list_session_runs(first.handle.session_id)
+    assert len(runs) == 3
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_create_transaction_recovers_missing_start_idempotency_lookup(tmp_path):
+    path = tmp_path / "create-lookup-recovery"
+    store = FilesystemSessionStore(path)
+    original_lookup_write = store._write_start_idempotency
+
+    def fail_lookup(*args, **kwargs):
+        raise OSError("injected lookup failure")
+
+    store._write_start_idempotency = fail_lookup
+    with pytest.raises(OSError, match="injected lookup failure"):
+        await store.create_run(command("create-once"), CONTEXT)
+    store._write_start_idempotency = original_lookup_write
+    await store.close()
+
+    assert tuple((path / ".session-store/transactions").glob("*.json"))
+    reopened = FilesystemSessionStore(path)
+    duplicate = await reopened.create_run(command("create-once"), CONTEXT)
+    assert duplicate.duplicate is True
+    assert not tuple((path / ".session-store/transactions").glob("*.json"))
+    await reopened.close()
+
+
+@pytest.mark.asyncio
 async def test_reopen_does_not_materialize_a_global_session_collection(tmp_path):
     path = tmp_path / "session-store"
     first = FilesystemSessionStore(path)
@@ -385,7 +452,9 @@ def test_interrupted_temporary_snapshot_is_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_journal_appends_deltas_without_full_state_amplification(tmp_path):
+async def test_session_journal_appends_deltas_without_full_state_amplification(
+    tmp_path,
+):
     path = tmp_path / "session-store"
     store = FilesystemSessionStore(path)
     created = await store.create_run(command("bounded"), CONTEXT)
@@ -442,7 +511,9 @@ def test_truncated_v3_journal_tail_is_ignored_but_middle_checksum_is_not(tmp_pat
     assert len(asyncio.run(restored.list_session_runs(first.handle.session_id))) == 2
     asyncio.run(restored.close())
 
-    journal.write_bytes(original.replace(b'"checksum":"sha256:', b'"checksum":"sha256:0', 1))
+    journal.write_bytes(
+        original.replace(b'"checksum":"sha256:', b'"checksum":"sha256:0', 1)
+    )
     corrupted = FilesystemSessionStore(path)
     with pytest.raises(SageV2Error) as mismatch:
         asyncio.run(corrupted.get_session(first.handle.session_id))
@@ -487,8 +558,14 @@ def test_v2_snapshot_upgrades_atomically_on_first_successful_write(tmp_path):
     )
     asyncio.run(upgraded.close())
 
-    assert json.loads(snapshot_path.read_text(encoding="utf-8"))["format"] == FILESYSTEM_SESSION_STORE_FORMAT
-    assert json.loads(metadata_path.read_text(encoding="utf-8"))["format"] == FILESYSTEM_SESSION_STORE_FORMAT
+    assert (
+        json.loads(snapshot_path.read_text(encoding="utf-8"))["format"]
+        == FILESYSTEM_SESSION_STORE_FORMAT
+    )
+    assert (
+        json.loads(metadata_path.read_text(encoding="utf-8"))["format"]
+        == FILESYSTEM_SESSION_STORE_FORMAT
+    )
 
 
 @pytest.mark.asyncio

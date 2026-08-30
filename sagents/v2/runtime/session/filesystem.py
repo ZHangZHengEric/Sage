@@ -91,6 +91,11 @@ class FilesystemSessionStore(SessionStateStore):
         self._filesystem_lock = threading.RLock()
         self._loaded_session_ids: set[str] = set()
         self._persisted_states: dict[str, dict[str, Any]] = {}
+        # A failed write may have reached any point between journal append and
+        # the auxiliary indexes.  The next successful write must therefore
+        # replace the compact snapshot instead of deriving a delta from an
+        # uncertain baseline.
+        self._storage_recovery_required: set[str] = set()
         self._journal_commits: dict[str, int] = {}
         self._storage_locks: dict[str, asyncio.Lock] = {}
         self._load_lock = asyncio.Lock()
@@ -127,8 +132,6 @@ class FilesystemSessionStore(SessionStateStore):
         # These entries are also materialized as a lookup that can be rebuilt
         # from state.json after a crash; removing the lookup never loses data.
         start_entries = list(state.get("start_idempotency", ()))
-        previous = self._persisted_states.get(session_id)
-        self._persisted_states[session_id] = deepcopy(state)
         storage_lock = self._storage_locks.setdefault(session_id, asyncio.Lock())
         # The aggregate mutation is already frozen above. Release the shared
         # index lock while this Session's adapter fsyncs; another Session can
@@ -136,13 +139,29 @@ class FilesystemSessionStore(SessionStateStore):
         self._lock.release()
         try:
             async with storage_lock:
-                await asyncio.to_thread(
-                    self._write_session_state,
-                    session_id,
-                    state,
-                    start_entries,
-                    previous,
+                previous = (
+                    None
+                    if session_id in self._storage_recovery_required
+                    else self._persisted_states.get(session_id)
                 )
+                try:
+                    await asyncio.to_thread(
+                        self._write_session_state,
+                        session_id,
+                        state,
+                        start_entries,
+                        previous,
+                    )
+                except BaseException:
+                    self._storage_recovery_required.add(session_id)
+                    raise
+                else:
+                    # This cache describes durable state, not merely the most
+                    # recently frozen in-memory aggregate.  Advancing it before
+                    # the write succeeds can make the next journal envelope
+                    # skip a revision after a transient I/O failure.
+                    self._persisted_states[session_id] = deepcopy(state)
+                    self._storage_recovery_required.discard(session_id)
         finally:
             await self._lock.acquire()
         self._loaded_session_ids.add(session_id)
@@ -171,6 +190,7 @@ class FilesystemSessionStore(SessionStateStore):
         for value in deleted_session_ids:
             self._storage_locks.pop(value, None)
             self._persisted_states.pop(value, None)
+            self._storage_recovery_required.discard(value)
             self._journal_commits.pop(value, None)
 
     async def get_derived_state(
@@ -996,7 +1016,10 @@ class FilesystemSessionStore(SessionStateStore):
                 self._append_journal_line(journal, envelope.model_dump(mode="json"))
                 count = self._journal_commits.get(session_id, 0) + 1
                 self._journal_commits[session_id] = count
-                if count >= JOURNAL_COMPACT_COMMITS or journal.stat().st_size >= JOURNAL_COMPACT_BYTES:
+                if (
+                    count >= JOURNAL_COMPACT_COMMITS
+                    or journal.stat().st_size >= JOURNAL_COMPACT_BYTES
+                ):
                     # Snapshot replacement precedes journal trimming. Recovery
                     # skips already-included envelopes if a crash lands between.
                     self._write_snapshot(snapshot, state)
@@ -1351,9 +1374,7 @@ class FilesystemSessionStore(SessionStateStore):
             )
         return envelope
 
-    def _read_session_aggregate(
-        self, snapshot: Path
-    ) -> tuple[dict[str, Any], int]:
+    def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
         envelope = self._read_snapshot(snapshot)
         state = deepcopy(envelope.state)
         revision = envelope.current_session_revision
@@ -1552,6 +1573,15 @@ class FilesystemSessionStore(SessionStateStore):
                     shutil.rmtree(session_dir)
                 if not snapshot.exists():
                     self._location_path(session_id).unlink(missing_ok=True)
+                else:
+                    # The snapshot/journal is the canonical create record.  A
+                    # crash can occur before its lookup files are materialized;
+                    # rebuild them before retiring the transaction intent so a
+                    # retry with the same idempotency key remains exactly-once.
+                    state, _journal_count = self._read_session_aggregate(snapshot)
+                    for entry in state.get("start_idempotency", ()):
+                        self._write_start_idempotency(entry, session_id)
+                    self._write_location(session_id, session_dir)
             elif operation == "delete":
                 if session_dir.exists():
                     shutil.rmtree(session_dir)

@@ -183,7 +183,7 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
                               'No token usage in this period',
                             ),
                           )
-                        : _TokenBarChart(days: overview.daily),
+                        : _TokenBarChart(days: overview.daily, zh: _zh),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -497,25 +497,231 @@ class _LegendDot extends StatelessWidget {
   );
 }
 
-class _TokenBarChart extends StatelessWidget {
-  const _TokenBarChart({required this.days});
+class _TokenBarChart extends StatefulWidget {
+  const _TokenBarChart({required this.days, required this.zh});
   final List<UsageDay> days;
+  final bool zh;
+
+  @override
+  State<_TokenBarChart> createState() => _TokenBarChartState();
+}
+
+class _TokenBarChartState extends State<_TokenBarChart> {
+  int? _hoveredIndex;
+
+  @override
+  void didUpdateWidget(covariant _TokenBarChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_hoveredIndex != null && _hoveredIndex! >= widget.days.length) {
+      _hoveredIndex = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) => Semantics(
     label: 'Token usage by day',
     image: true,
-    child: CustomPaint(
-      key: const ValueKey('usage-token-chart'),
-      painter: _TokenBarPainter(
-        days: days,
-        inputColor: Theme.of(context).colorScheme.primary,
-        cachedColor: Theme.of(context).colorScheme.secondary,
-        outputColor: Theme.of(context).colorScheme.tertiary,
-        gridColor: Theme.of(context).colorScheme.outlineVariant,
-        labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        final geometry = _TokenChartGeometry(size, widget.days.length);
+        final colors = Theme.of(context).colorScheme;
+        return MouseRegion(
+          cursor: SystemMouseCursors.precise,
+          onHover: (event) {
+            final index = geometry.indexAt(event.localPosition);
+            if (index != _hoveredIndex) {
+              setState(() => _hoveredIndex = index);
+            }
+          },
+          onExit: (_) {
+            if (_hoveredIndex != null) setState(() => _hoveredIndex = null);
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  key: const ValueKey('usage-token-chart'),
+                  painter: _TokenBarPainter(
+                    days: widget.days,
+                    hoveredIndex: _hoveredIndex,
+                    inputColor: colors.primary,
+                    cachedColor: colors.secondary,
+                    outputColor: colors.tertiary,
+                    gridColor: colors.outlineVariant,
+                    labelColor: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (_hoveredIndex case final index?)
+                _TokenChartTooltip(
+                  day: widget.days[index],
+                  index: index,
+                  geometry: geometry,
+                  zh: widget.zh,
+                ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _TokenChartGeometry {
+  const _TokenChartGeometry(this.size, this.dayCount);
+
+  static const axisWidth = 52.0;
+  static const rightPadding = 8.0;
+  static const topPadding = 26.0;
+  static const bottomPadding = 24.0;
+
+  final Size size;
+  final int dayCount;
+
+  Rect get plot => Rect.fromLTRB(
+    axisWidth,
+    topPadding,
+    math.max(axisWidth + 1, size.width - rightPadding),
+    math.max(topPadding + 1, size.height - bottomPadding),
+  );
+
+  double get slotWidth => plot.width / math.max(1, dayCount);
+
+  int? indexAt(Offset position) {
+    final bounds = Rect.fromLTRB(plot.left, 0, plot.right, size.height);
+    if (dayCount == 0 || !bounds.contains(position)) return null;
+    return ((position.dx - plot.left) / slotWidth).floor().clamp(
+      0,
+      dayCount - 1,
+    );
+  }
+
+  double centerFor(int index) => plot.left + slotWidth * (index + .5);
+}
+
+class _TokenChartTooltip extends StatelessWidget {
+  const _TokenChartTooltip({
+    required this.day,
+    required this.index,
+    required this.geometry,
+    required this.zh,
+  });
+
+  final UsageDay day;
+  final int index;
+  final _TokenChartGeometry geometry;
+  final bool zh;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final width = math.min(220.0, math.max(1.0, geometry.size.width - 8));
+    final center = geometry.centerFor(index);
+    final preferredLeft = center < geometry.size.width / 2
+        ? center + 12
+        : center - width - 12;
+    final left = preferredLeft.clamp(4.0, geometry.size.width - width - 4);
+    return Positioned(
+      key: const ValueKey('usage-token-tooltip'),
+      left: left,
+      top: 4,
+      width: width,
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: .24),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: colors.outlineVariant),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${day.date.year}/${day.date.month}/${day.date.day}',
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              _TokenTooltipRow(
+                color: colors.primary,
+                label: zh ? '非缓存输入' : 'Uncached input',
+                value: day.nonCachedInputTokens,
+              ),
+              _TokenTooltipRow(
+                color: colors.secondary,
+                label: zh ? '缓存输入' : 'Cached input',
+                value: day.cachedInputTokens,
+              ),
+              _TokenTooltipRow(
+                color: colors.tertiary,
+                label: zh ? '输出' : 'Output',
+                value: day.outputTokens,
+              ),
+              const Divider(height: 13),
+              _TokenTooltipRow(
+                label: zh ? '合计' : 'Total',
+                value: day.totalTokens,
+                strong: true,
+              ),
+            ],
+          ),
+        ),
       ),
-      size: Size.infinite,
+    );
+  }
+}
+
+class _TokenTooltipRow extends StatelessWidget {
+  const _TokenTooltipRow({
+    required this.label,
+    required this.value,
+    this.color,
+    this.strong = false,
+  });
+
+  final Color? color;
+  final String label;
+  final int value;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 1.5),
+    child: Row(
+      children: [
+        if (color != null) ...[
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+        ],
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontWeight: strong ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ),
+        Text(
+          _integerText(value),
+          key: ValueKey('usage-token-tooltip:$label'),
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -523,6 +729,7 @@ class _TokenBarChart extends StatelessWidget {
 class _TokenBarPainter extends CustomPainter {
   const _TokenBarPainter({
     required this.days,
+    required this.hoveredIndex,
     required this.inputColor,
     required this.cachedColor,
     required this.outputColor,
@@ -530,6 +737,7 @@ class _TokenBarPainter extends CustomPainter {
     required this.labelColor,
   });
   final List<UsageDay> days;
+  final int? hoveredIndex;
   final Color inputColor;
   final Color cachedColor;
   final Color outputColor;
@@ -538,32 +746,54 @@ class _TokenBarPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const bottom = 24.0;
-    const top = 8.0;
-    final chartHeight = math.max(1.0, size.height - bottom - top);
-    final maximum = days.fold<int>(
-      1,
-      (value, day) => math.max(value, day.totalTokens),
-    );
+    final geometry = _TokenChartGeometry(size, days.length);
+    final plot = geometry.plot;
+    final maximum = _tokenAxisMaximum(days);
     final gridPaint = Paint()
       ..color = gridColor.withValues(alpha: .75)
       ..strokeWidth = 1;
-    for (var index = 0; index <= 3; index++) {
-      final y = top + chartHeight * index / 3;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    for (var index = 0; index <= 4; index++) {
+      final ratio = index / 4;
+      final y = plot.bottom - plot.height * ratio;
+      canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
+      final value = (maximum * ratio).round();
+      final labelPainter = TextPainter(
+        text: TextSpan(
+          text: _compact(value),
+          style: TextStyle(color: labelColor, fontSize: 10),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: _TokenChartGeometry.axisWidth - 10);
+      labelPainter.paint(
+        canvas,
+        Offset(
+          plot.left - labelPainter.width - 8,
+          (y - labelPainter.height / 2).clamp(
+            0,
+            size.height - labelPainter.height,
+          ),
+        ),
+      );
     }
-    final slot = size.width / math.max(1, days.length);
+    final slot = geometry.slotWidth;
     final barWidth = math.min(14.0, math.max(2.0, slot * .58));
     final inputPaint = Paint()..color = inputColor;
     final cachedPaint = Paint()..color = cachedColor;
     final outputPaint = Paint()..color = outputColor;
+    if (hoveredIndex case final index?) {
+      canvas.drawRect(
+        Rect.fromLTWH(plot.left + slot * index, plot.top, slot, plot.height),
+        Paint()..color = labelColor.withValues(alpha: .07),
+      );
+    }
+    var lastValueLabelRight = double.negativeInfinity;
     for (var index = 0; index < days.length; index++) {
       final day = days[index];
-      final inputHeight = chartHeight * day.nonCachedInputTokens / maximum;
-      final cachedHeight = chartHeight * day.cachedInputTokens / maximum;
-      final outputHeight = chartHeight * day.outputTokens / maximum;
-      final left = slot * index + (slot - barWidth) / 2;
-      final baseline = top + chartHeight;
+      final inputHeight = plot.height * day.nonCachedInputTokens / maximum;
+      final cachedHeight = plot.height * day.cachedInputTokens / maximum;
+      final outputHeight = plot.height * day.outputTokens / maximum;
+      final left = plot.left + slot * index + (slot - barWidth) / 2;
+      final baseline = plot.bottom;
       if (inputHeight > 0) {
         canvas.drawRRect(
           RRect.fromRectAndRadius(
@@ -601,6 +831,34 @@ class _TokenBarPainter extends CustomPainter {
           outputPaint,
         );
       }
+      if (day.totalTokens > 0) {
+        final totalHeight = inputHeight + cachedHeight + outputHeight;
+        final valuePainter = TextPainter(
+          text: TextSpan(
+            text: _compact(day.totalTokens),
+            style: TextStyle(
+              color: labelColor,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final valueLeft = geometry.centerFor(index) - valuePainter.width / 2;
+        if (valueLeft >= lastValueLabelRight + 4) {
+          valuePainter.paint(
+            canvas,
+            Offset(
+              valueLeft.clamp(plot.left, plot.right - valuePainter.width),
+              (baseline - totalHeight - valuePainter.height - 3).clamp(
+                0,
+                plot.bottom - valuePainter.height,
+              ),
+            ),
+          );
+          lastValueLabelRight = valueLeft + valuePainter.width;
+        }
+      }
     }
     final labelIndexes = <int>{0, days.length ~/ 2, days.length - 1};
     for (final index in labelIndexes) {
@@ -613,11 +871,14 @@ class _TokenBarPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      final center = slot * index + slot / 2;
+      final center = geometry.centerFor(index);
       painter.paint(
         canvas,
         Offset(
-          (center - painter.width / 2).clamp(0, size.width - painter.width),
+          (center - painter.width / 2).clamp(
+            plot.left,
+            plot.right - painter.width,
+          ),
           size.height - 15,
         ),
       );
@@ -627,9 +888,32 @@ class _TokenBarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TokenBarPainter oldDelegate) =>
       oldDelegate.days != days ||
+      oldDelegate.hoveredIndex != hoveredIndex ||
       oldDelegate.inputColor != inputColor ||
       oldDelegate.cachedColor != cachedColor ||
-      oldDelegate.outputColor != outputColor;
+      oldDelegate.outputColor != outputColor ||
+      oldDelegate.gridColor != gridColor ||
+      oldDelegate.labelColor != labelColor;
+}
+
+double _tokenAxisMaximum(List<UsageDay> days) {
+  final maximum = days.fold<int>(
+    1,
+    (value, day) => math.max(value, day.totalTokens),
+  );
+  final roughStep = maximum / 4;
+  final magnitude = math.pow(10, (math.log(roughStep) / math.ln10).floor());
+  final normalized = roughStep / magnitude;
+  final niceNormalized = normalized <= 1
+      ? 1
+      : normalized <= 2
+      ? 2
+      : normalized <= 2.5
+      ? 2.5
+      : normalized <= 5
+      ? 5
+      : 10;
+  return niceNormalized * magnitude * 4;
 }
 
 class _EmptyChart extends StatelessWidget {
@@ -892,6 +1176,18 @@ String _compact(int value) {
   if (value < 1000000) return '${_trim(value / 1000)}K';
   if (value < 1000000000) return '${_trim(value / 1000000)}M';
   return '${_trim(value / 1000000000)}B';
+}
+
+String _integerText(int value) {
+  final negative = value < 0;
+  final digits = value.abs().toString();
+  final buffer = StringBuffer();
+  if (negative) buffer.write('-');
+  for (var index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) buffer.write(',');
+    buffer.write(digits[index]);
+  }
+  return buffer.toString();
 }
 
 String _percent(double value) => '${_trim(value * 100)}%';

@@ -12,6 +12,7 @@ import pytest
 
 from app.desktop_v2.backend.catalog import DesktopMcpRecord
 from app.desktop_v2.backend.service import (
+    _DesktopDriver,
     AgentCreate,
     AgentRosterContextProvider,
     AgentSettingsPatch,
@@ -80,6 +81,48 @@ def test_desktop_settings_accept_supported_frontend_languages(language: str):
 def test_desktop_settings_reject_unknown_frontend_language():
     with pytest.raises(ValueError):
         DesktopV2Settings(language="unsupported")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_build_loop_closes_provisioned_sandbox_on_composition_failure(
+    tmp_path: Path, monkeypatch
+):
+    service = DesktopV2Service(tmp_path / "sage")
+    sandbox = SimpleNamespace(close=AsyncMock())
+
+    async def fail_after_provision(**kwargs):
+        kwargs["sandbox_observer"](sandbox)
+        raise RuntimeError("composition failed")
+
+    monkeypatch.setattr(service, "_build_loop_impl", fail_after_provision)
+    with pytest.raises(RuntimeError, match="composition failed"):
+        await service._build_loop(
+            agent=object(),
+            provider=object(),
+            workspace=tmp_path,
+            preferred_skills=(),
+            approval_mode="auto",
+        )
+    sandbox.close.assert_awaited_once()
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_driver_closes_root_sandbox_when_controller_close_fails(
+    tmp_path: Path,
+):
+    controller = SimpleNamespace(
+        close=AsyncMock(side_effect=RuntimeError("controller close failed"))
+    )
+    loop = SimpleNamespace(delegated_run_controller=controller)
+    sandbox = SimpleNamespace(close=AsyncMock())
+    driver = _DesktopDriver(None, loop, tmp_path, sandbox)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="controller close failed"):
+            await driver.close_binding()
+    controller.close.assert_awaited_once()
+    sandbox.close.assert_awaited_once()
 
 
 def test_legacy_plan_mode_request_migrates_to_typed_invocation_mode():

@@ -38,6 +38,8 @@ class _FakeApi extends V2ApiClient {
   String? lastSelectedComponent;
   String? lastSelectedComponentPlugin;
   Map<String, Object?>? lastSelectedComponentConfig;
+  int sessionTreeSnapshotCalls = 0;
+  int sessionTreeSubscriptionCalls = 0;
   WorkspaceFileContent workspaceFileContent = WorkspaceFileContent(
     bytes: Uint8List.fromList('Sage v2 workspace'.codeUnits),
     mediaType: 'text/plain',
@@ -308,12 +310,16 @@ Inspect the complete diff before reporting findings.
   }
 
   @override
-  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async =>
-      const [];
+  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async {
+    sessionTreeSnapshotCalls += 1;
+    return const [];
+  }
 
   @override
-  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) =>
-      _sessionTreeEvents.stream;
+  Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) {
+    sessionTreeSubscriptionCalls += 1;
+    return _sessionTreeEvents.stream;
+  }
 
   @override
   Future<List<McpConnectionSummary>> listMcpConnections() async => const [
@@ -2557,6 +2563,41 @@ void main() {
     },
   );
 
+  test(
+    'completed history snapshots do not open live session tree streams',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [
+            {
+              'id': 'conversation-completed',
+              'title': '已完成会话',
+              'agent_id': 'agent_main',
+              'run_id': 'run_completed',
+              'session_id': 'session_completed',
+              'turn_id': 'turn_completed',
+              'run_sequence': 4,
+              'status': 'completed',
+            },
+          ],
+        }),
+      });
+      final api = _FakeApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await pumpEventQueue();
+
+      expect(api.sessionTreeSnapshotCalls, 1);
+      expect(api.sessionTreeSubscriptionCalls, 0);
+      expect(controller.selectedConversation?.status, RunStatus.completed);
+    },
+  );
+
   testWidgets('desktop layout exposes agent, skill, workspace, and files', (
     tester,
   ) async {
@@ -4186,6 +4227,22 @@ void main() {
     expect(find.text('Agent 消耗'), findsOneWidget);
     expect(find.text('read_file'), findsOneWidget);
     expect(api.lastUsageDays, 30);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('usage-token-chart'))),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('usage-token-tooltip')), findsOneWidget);
+    expect(find.text('非缓存输入'), findsWidgets);
+    expect(find.text('8,000'), findsOneWidget);
+    expect(find.text('4,000'), findsOneWidget);
+    expect(find.text('3,000'), findsOneWidget);
+    expect(find.text('合计'), findsOneWidget);
+    expect(find.text('15,000'), findsOneWidget);
 
     await tester.tap(find.text('7 天'));
     await tester.pumpAndSettle();

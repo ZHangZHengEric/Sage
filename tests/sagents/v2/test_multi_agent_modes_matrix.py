@@ -131,6 +131,36 @@ async def test_fibre_team_delegation_is_parallel_and_preserves_order(mode, works
 
 
 @pytest.mark.asyncio
+async def test_delegation_batch_preserves_successes_when_one_task_fails():
+    class PartiallyFailingExecutor(FakeChildExecutor):
+        async def run_child(self, descriptor, delegated_task, **kwargs):
+            if delegated_task.task_id == "task_1":
+                raise RuntimeError("cannot allocate child")
+            return await super().run_child(descriptor, delegated_task, **kwargs)
+
+    coordinator = MultiAgentCoordinator(
+        mode=AgentMode.TEAM,
+        registry=AgentRegistry((MEMBER,)),
+        executor=PartiallyFailingExecutor(),
+    )
+    results = await coordinator.delegate(
+        DelegationBatch(tasks=(task(0), task(1), task(2))),
+        parent_run_id="run_parent",
+        parent_session_id="session_parent",
+        context=CONTEXT,
+    )
+
+    assert [result.outcome for result in results] == [
+        RunState.COMPLETED,
+        RunState.FAILED,
+        RunState.COMPLETED,
+    ]
+    assert results[1].child_run_id is None
+    assert results[1].error is not None
+    assert results[1].error.code == "agent.delegation_task_failed"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [AgentMode.FIBRE, AgentMode.TEAM])
 async def test_workspace_policy_is_independent_from_agent_mode(mode):
     executor = FakeChildExecutor()
@@ -593,6 +623,38 @@ async def test_fibre_dynamic_agent_roster_survives_a_fresh_projection():
     assert restored[0].dynamic is True
     assert restored[0].tools == ("file_read",)
     assert restored[0].skills == ("python",)
+
+
+@pytest.mark.asyncio
+async def test_fibre_roster_rebuilds_when_cache_sequence_is_ahead():
+    runtime = ephemeral_runtime()
+    parent = await runtime.start_run(
+        StartRun(
+            agent_id="leader",
+            input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
+            resolved_spec_hash="sha256:roster-ahead",
+            idempotency_key="roster-ahead",
+        ),
+        CONTEXT,
+    )
+    session = await runtime.session_store.get_session(parent.session_id)
+    fabricated = MEMBER.model_copy(update={"agent_id": "fabricated", "dynamic": True})
+    roster = SessionDynamicAgentRoster(runtime.session_store)
+    payload = {
+        "schema_version": roster.SCHEMA_VERSION,
+        "through_sequence": session.last_sequence + 10,
+        "agents": [fabricated.model_dump(mode="json")],
+        "pending_spawn_call_ids": [],
+    }
+    payload["checksum"] = roster._checksum(payload)
+    await runtime.session_store.put_derived_state(
+        parent.session_id,
+        roster.NAMESPACE,
+        roster.KEY,
+        payload,
+    )
+
+    assert await roster.load(parent.session_id) == ()
 
 
 def completed(text):

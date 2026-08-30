@@ -82,8 +82,11 @@ class DelegationBatch(StrictModel):
 class DelegationResult(StrictModel):
     task_id: Identifier
     agent_id: Identifier
-    child_session_id: Identifier
-    child_run_id: Identifier
+    # A task can fail before a durable child Session/Run is allocated.  Keep
+    # those identities optional so a mixed batch can still report one typed
+    # result per requested task instead of discarding successful siblings.
+    child_session_id: Identifier | None = None
+    child_run_id: Identifier | None = None
     outcome: RunState
     content: tuple[ContentBlock, ...] = ()
     error: RuntimeErrorInfo | None = None

@@ -62,6 +62,10 @@ sealed class TerminalEvent {
         sequence: sequence,
         message: json['message']?.toString() ?? 'Terminal failed',
       ),
+      'terminal.overflow' => TerminalOverflowEvent(
+        sessionId: sessionId,
+        sequence: sequence,
+      ),
       final type => TerminalFailedEvent(
         sessionId: sessionId,
         sequence: sequence,
@@ -107,6 +111,13 @@ class TerminalFailedEvent extends TerminalEvent {
   });
 
   final String message;
+}
+
+class TerminalOverflowEvent extends TerminalEvent {
+  const TerminalOverflowEvent({
+    required super.sessionId,
+    required super.sequence,
+  });
 }
 
 class TerminalService {
