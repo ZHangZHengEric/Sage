@@ -200,7 +200,11 @@ class _DelegationMethods:
             self.coordinator.executor, "pending_interaction", None
         )
         for value in results:
-            if value.outcome.value != "suspended" or interaction_reader is None:
+            if (
+                value.outcome.value != "suspended"
+                or value.child_run_id is None
+                or interaction_reader is None
+            ):
                 continue
             interaction = await interaction_reader(value.child_run_id)
             if interaction is not None:

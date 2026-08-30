@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any
 
 from sagents.v2.agent.multi_agent.contracts import AgentDescriptor
@@ -33,7 +35,7 @@ class SessionDynamicAgentRoster:
 
     NAMESPACE = "multi_agent"
     KEY = "dynamic_agent_roster_v1"
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, session_store: SessionStore) -> None:
         self.session_store = session_store
@@ -44,6 +46,15 @@ class SessionDynamicAgentRoster:
         async with self._session_lock(session_id):
             session = await self.session_store.get_session(session_id)
             cached = await self._cached(session_id)
+            if cached is not None:
+                through = cached.get("through_sequence")
+                if (
+                    not isinstance(through, int)
+                    or isinstance(through, bool)
+                    or through < 0
+                    or through > session.last_sequence
+                ):
+                    cached = None
             if (
                 cached is not None
                 and cached.get("through_sequence") == session.last_sequence
@@ -69,16 +80,18 @@ class SessionDynamicAgentRoster:
                 initial_agents=agents,
                 initial_spawn_calls=pending_calls,
             )
+            payload = {
+                "schema_version": self.SCHEMA_VERSION,
+                "through_sequence": session.last_sequence,
+                "agents": [value.model_dump(mode="json") for value in agents],
+                "pending_spawn_call_ids": sorted(pending_calls),
+            }
+            payload["checksum"] = self._checksum(payload)
             await self.session_store.put_derived_state(
                 session_id,
                 self.NAMESPACE,
                 self.KEY,
-                {
-                    "schema_version": self.SCHEMA_VERSION,
-                    "through_sequence": session.last_sequence,
-                    "agents": [value.model_dump(mode="json") for value in agents],
-                    "pending_spawn_call_ids": sorted(pending_calls),
-                },
+                payload,
             )
             return agents
 
@@ -101,7 +114,20 @@ class SessionDynamicAgentRoster:
             return None
         if value.get("schema_version") != self.SCHEMA_VERSION:
             return None
+        unsigned = {key: item for key, item in value.items() if key != "checksum"}
+        if value.get("checksum") != self._checksum(unsigned):
+            return None
         return value
+
+    @staticmethod
+    def _checksum(value: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     @staticmethod
     def _validated_agents(value: Any) -> tuple[AgentDescriptor, ...] | None:
@@ -121,7 +147,9 @@ class SessionDynamicAgentRoster:
     def _validated_call_ids(value: Any) -> frozenset[str] | None:
         if value is None:
             return frozenset()
-        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) for item in value
+        ):
             return None
         return frozenset(value)
 

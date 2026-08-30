@@ -80,7 +80,7 @@ default_agent_md = {
 - 优先最小化安装范围（只装必要依赖，尽量固定版本），避免污染全局环境
 - 若安装失败，先尝试镜像源或兼容替代方案；多次失败后再向用户说明阻塞并请求确认
 
-**可自由执行：** 读取文件、搜索、整理、在 workspace 内工作
+**可自由执行：** 读取文件、搜索、整理、在 workspace 内工作\x20\x20
 **需要确认：** 发送邮件/消息、任何向外发送数据的操作
 """,
     "en": """# AGENT.md - Workspace Specification
@@ -151,7 +151,7 @@ You start fresh each session, but can maintain memory through files:
 - Keep installs minimal (only required packages, preferably pinned versions) to avoid polluting the global environment
 - If installation fails, try mirrors or compatible alternatives first; only escalate to the user after repeated failures
 
-**Freely allowed:** Read files, search, organize, work in workspace
+**Freely allowed:** Read files, search, organize, work in workspace\x20\x20
 **Requires confirmation:** Send emails/messages, any data export operations
 """,
     "pt": """# AGENT.md - Especificação do Espaço de Trabalho
@@ -222,14 +222,14 @@ Você começa fresco a cada sessão, mas pode manter memória através de arquiv
 - Mantenha instalações mínimas (somente o necessário, de preferência com versões fixas) para evitar poluir o ambiente global
 - Se a instalação falhar, tente espelhos ou alternativas compatíveis primeiro; só escale ao usuário após falhas repetidas
 
-**Livremente permitido:** Ler arquivos, buscar, organizar, trabalhar no workspace
+**Livremente permitido:** Ler arquivos, buscar, organizar, trabalhar no workspace\x20\x20
 **Requer confirmação:** Enviar e-mails/mensagens, qualquer operação de exportação de dados
 """,
 }
 
 # 默认 SOUL.md 内容
 default_soul_md = {
-    "zh": """# SOUL:
+    "zh": """# SOUL:\x20
 
 ## 核心身份
 - 你是一个高效的执行助手

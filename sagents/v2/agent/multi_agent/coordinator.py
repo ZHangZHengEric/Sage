@@ -10,6 +10,7 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.contracts.run_state import RunState
 from sagents.v2.agent.multi_agent.contracts import (
     AgentDescriptor,
     AgentMode,
@@ -104,7 +105,8 @@ class MultiAgentCoordinator:
                     context=context,
                 )
             async with self._session_lock:
-                self._session_owners[result.child_session_id] = task.agent_id
+                if result.child_session_id is not None:
+                    self._session_owners[result.child_session_id] = task.agent_id
             return result
 
         settled = await asyncio.gather(
@@ -114,17 +116,35 @@ class MultiAgentCoordinator:
             ),
             return_exceptions=True,
         )
-        unexpected = next(
-            (value for value in settled if isinstance(value, BaseException)), None
-        )
-        if unexpected is not None:
-            if isinstance(unexpected, SageV2Error):
-                raise unexpected
-            raise self._error(
-                "agent.delegation_batch_failed",
-                f"delegation batch could not start every task: {unexpected}",
+        results: list[DelegationResult] = []
+        for task, value in zip(batch.tasks, settled, strict=True):
+            if not isinstance(value, BaseException):
+                results.append(value)
+                continue
+            error = (
+                value.info
+                if isinstance(value, SageV2Error)
+                else RuntimeErrorInfo(
+                    code="agent.delegation_task_failed",
+                    category=ErrorCategory.INTERNAL,
+                    message=(
+                        "delegation task failed before producing a durable "
+                        f"child result: {type(value).__name__}: {value}"
+                    ),
+                    safe_to_resume=False,
+                )
             )
-        return tuple(settled)
+            results.append(
+                DelegationResult(
+                    task_id=task.task_id,
+                    agent_id=task.agent_id,
+                    child_session_id=task.child_session_id,
+                    child_run_id=None,
+                    outcome=RunState.FAILED,
+                    error=error,
+                )
+            )
+        return tuple(results)
 
     @staticmethod
     def _error(code, message):

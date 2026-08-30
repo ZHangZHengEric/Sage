@@ -1,9 +1,11 @@
 from pathlib import Path
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
 from sagents.v2 import RunExecutionBinding, SAgent, SAgentBuilder
+from sagents.v2.builder import _ExecutionBoundDriver
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
@@ -18,6 +20,8 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
@@ -201,7 +205,9 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_execution_binding_provider_receives_actual_run_and_closes_once(tmp_path: Path):
+async def test_execution_binding_provider_receives_actual_run_and_closes_once(
+    tmp_path: Path,
+):
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.run-binding",
@@ -298,3 +304,86 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(tm
     assert bindings.bindings[0].sandbox.ref.owner_run_id == result.run_id
     assert bindings.bindings[0].closed is True
     await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_execution_bound_driver_rejects_mismatched_policy_and_closes(
+    tmp_path: Path,
+):
+    context = RequestContext(
+        actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
+    )
+    issuer = SandboxGrantIssuer()
+    sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    handle = await sandbox_provider.provision(
+        ResolvedSandboxSpec(
+            spec_hash="sha256:mismatch",
+            architecture="native",
+            filesystem=FileSystemPolicy(allowed_operations=frozenset(FileOperation)),
+            process=ProcessPolicy(enabled=False),
+            network=NetworkPolicy(),
+            policy_hash="sha256:mismatch",
+            metadata={"host_workspace": str(tmp_path)},
+        ),
+        context,
+        run_id="run_mismatch",
+    )
+    binding = RunExecutionBinding(
+        run_id="run_mismatch",
+        parent_run_id=None,
+        agent_id="agent_1",
+        workspace_root=str(tmp_path),
+        workspace_policy="private_child",
+        sandbox=handle,
+        grant_issuer=issuer,
+    )
+
+    class Provider:
+        async def acquire(self, request: ExecutionBindingRequest):
+            return binding
+
+    class Store:
+        async def get_start_command(self, run_id):
+            return SimpleNamespace(
+                parent_run_id=None,
+                config=SimpleNamespace(metadata={"workspace_policy": "shared_parent"}),
+            )
+
+    driver = _ExecutionBoundDriver(
+        runtime=SimpleNamespace(session_store=Store()),
+        provider=Provider(),
+        run_id="run_mismatch",
+        agent_id="agent_1",
+        loop_builder=lambda _binding: pytest.fail("loop must not be composed"),
+    )
+    with pytest.raises(SageV2Error) as mismatch:
+        await driver._ensure_loop(context)
+    assert mismatch.value.info.code == "execution.workspace_policy_unsupported"
+    assert binding.closed is True
+
+
+@pytest.mark.asyncio
+async def test_execution_binding_invokes_failing_close_only_once():
+    class FailingSandbox:
+        def __init__(self):
+            self.ref = SimpleNamespace(owner_run_id="run_1", tenant_id=None)
+            self.calls = 0
+
+        async def close(self):
+            self.calls += 1
+            raise RuntimeError("close failed")
+
+    sandbox = FailingSandbox()
+    binding = RunExecutionBinding(
+        run_id="run_1",
+        agent_id="agent_1",
+        workspace_root="/workspace",
+        workspace_policy="shared_parent",
+        sandbox=sandbox,
+        grant_issuer=SandboxGrantIssuer(),
+    )
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="close failed"):
+            await binding.close()
+    assert sandbox.calls == 1

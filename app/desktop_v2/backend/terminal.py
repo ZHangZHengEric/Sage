@@ -28,6 +28,8 @@ if os.name == "posix":
 
 _OUTPUT_CHUNK_BYTES = 16 * 1024
 _HISTORY_EVENTS = 1024
+_LIVE_SUBSCRIBER_EVENTS = 256
+_EXITED_SESSION_RETENTION_SECONDS = 60.0
 _MIN_COLUMNS = 10
 _MAX_COLUMNS = 500
 _MIN_ROWS = 2
@@ -42,17 +44,13 @@ def _bounded_size(columns: int, rows: int) -> tuple[int, int]:
             f"terminal columns must be between {_MIN_COLUMNS} and {_MAX_COLUMNS}"
         )
     if not _MIN_ROWS <= rows <= _MAX_ROWS:
-        raise ValueError(
-            f"terminal rows must be between {_MIN_ROWS} and {_MAX_ROWS}"
-        )
+        raise ValueError(f"terminal rows must be between {_MIN_ROWS} and {_MAX_ROWS}")
     return columns, rows
 
 
 def _default_shell() -> str:
     configured = str(os.environ.get("SHELL") or "").strip()
-    if configured and Path(configured).is_absolute() and os.access(
-        configured, os.X_OK
-    ):
+    if configured and Path(configured).is_absolute() and os.access(configured, os.X_OK):
         return configured
     for candidate in ("zsh", "bash", "sh"):
         resolved = shutil.which(candidate)
@@ -179,15 +177,14 @@ class TerminalSession:
             pass
 
     async def events(self, after_sequence: int = 0) -> AsyncIterator[dict[str, object]]:
-        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(
+            maxsize=_LIVE_SUBSCRIBER_EVENTS
+        )
         backlog = [
-            event
-            for event in self._history
-            if int(event["sequence"]) > after_sequence
+            event for event in self._history if int(event["sequence"]) > after_sequence
         ]
         terminal_in_backlog = any(
-            event["type"] in {"terminal.exited", "terminal.failed"}
-            for event in backlog
+            event["type"] in {"terminal.exited", "terminal.failed"} for event in backlog
         )
         if not terminal_in_backlog and not self._ended.is_set():
             self._subscribers.add(queue)
@@ -199,7 +196,11 @@ class TerminalSession:
             while True:
                 event = await queue.get()
                 yield event
-                if event["type"] in {"terminal.exited", "terminal.failed"}:
+                if event["type"] in {
+                    "terminal.exited",
+                    "terminal.failed",
+                    "terminal.overflow",
+                }:
                     return
         finally:
             self._subscribers.discard(queue)
@@ -269,13 +270,37 @@ class TerminalSession:
         }
         self._history.append(event)
         for queue in tuple(self._subscribers):
-            queue.put_nowait(event)
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                # A disconnected or slow subscriber must not make terminal
+                # output an unbounded memory sink.  End only that subscription;
+                # clients can reconnect from their last canonical sequence.
+                self._subscribers.discard(queue)
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait(
+                    {
+                        "type": "terminal.overflow",
+                        "session_id": self.session_id,
+                        "sequence": self._sequence,
+                    }
+                )
 
 
 class TerminalSessionManager:
-    def __init__(self, *, shell_resolver: Callable[[], str] = _default_shell) -> None:
+    def __init__(
+        self,
+        *,
+        shell_resolver: Callable[[], str] = _default_shell,
+        exited_session_retention_seconds: float = _EXITED_SESSION_RETENTION_SECONDS,
+    ) -> None:
+        if exited_session_retention_seconds < 0:
+            raise ValueError("terminal retention must not be negative")
         self._shell_resolver = shell_resolver
+        self._exited_session_retention_seconds = exited_session_retention_seconds
         self._sessions: dict[str, TerminalSession] = {}
+        self._reap_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def create(
         self,
@@ -295,6 +320,10 @@ class TerminalSessionManager:
             rows=rows,
         )
         self._sessions[session_id] = session
+        self._reap_tasks[session_id] = asyncio.create_task(
+            self._reap_after_exit(session),
+            name=f"sage-terminal-reaper:{session_id}",
+        )
         return session
 
     def get(self, session_id: str, owner_id: str) -> TerminalSession:
@@ -307,14 +336,32 @@ class TerminalSessionManager:
         session = self.get(session_id, owner_id)
         await session.close()
         self._sessions.pop(session_id, None)
+        reaper = self._reap_tasks.pop(session_id, None)
+        if reaper is not None and reaper is not asyncio.current_task():
+            reaper.cancel()
+            await asyncio.gather(reaper, return_exceptions=True)
+
+    async def _reap_after_exit(self, session: TerminalSession) -> None:
+        try:
+            await session._ended.wait()
+            await asyncio.sleep(self._exited_session_retention_seconds)
+            if self._sessions.get(session.session_id) is session:
+                self._sessions.pop(session.session_id, None)
+        finally:
+            self._reap_tasks.pop(session.session_id, None)
 
     async def close(self) -> None:
         sessions = list(self._sessions.values())
         self._sessions.clear()
+        reapers = list(self._reap_tasks.values())
+        self._reap_tasks.clear()
+        for task in reapers:
+            task.cancel()
         await asyncio.gather(
             *(session.close() for session in sessions),
             return_exceptions=True,
         )
+        await asyncio.gather(*reapers, return_exceptions=True)
 
 
 __all__ = ["TerminalSession", "TerminalSessionManager"]

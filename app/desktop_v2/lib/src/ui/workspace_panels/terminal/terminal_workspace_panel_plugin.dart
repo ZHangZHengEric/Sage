@@ -196,6 +196,15 @@ class _TerminalWorkspacePanelState extends State<_TerminalWorkspacePanel> {
 
   void _handleEvent(TerminalEvent event, int generation) {
     if (!mounted || generation != _generation) return;
+    if (event is TerminalOverflowEvent) {
+      // Do not advance the cursor: the overflow sequence is the producer's
+      // current position, not the last event this subscriber consumed.
+      _handleStreamError(
+        StateError('Terminal output subscriber fell behind; reconnecting.'),
+        generation,
+      );
+      return;
+    }
     _lastSequence = event.sequence;
     _reconnectAttempts = 0;
     switch (event) {
@@ -214,6 +223,9 @@ class _TerminalWorkspacePanelState extends State<_TerminalWorkspacePanel> {
           _status = _TerminalStatus.failed;
           _error = message;
         });
+      case TerminalOverflowEvent():
+        // Handled before advancing the replay cursor above.
+        return;
     }
   }
 

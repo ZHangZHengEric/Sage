@@ -37,6 +37,7 @@ class RunExecutionBinding:
     grant_issuer: SandboxGrantIssuer
     parent_run_id: str | None = None
     _closed: bool = field(default=False, init=False, repr=False)
+    _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _close_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
     )
@@ -48,9 +49,47 @@ class RunExecutionBinding:
                     code="execution.binding_owner_mismatch",
                     category=ErrorCategory.AUTHORIZATION,
                     message=(
-                        "execution binding sandbox owner must equal the durable "
-                        "run_id"
+                        "execution binding sandbox owner must equal the durable run_id"
                     ),
+                )
+            )
+
+    def validate_for(self, request: ExecutionBindingRequest) -> None:
+        """Reject Host bindings that do not satisfy the requested identity/policy."""
+
+        if (
+            self.run_id != request.run_id
+            or self.agent_id != request.agent_id
+            or self.parent_run_id != request.parent_run_id
+        ):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="execution.binding_identity_mismatch",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message="execution binding identity does not match its request",
+                )
+            )
+        actual_policy = getattr(self.workspace_policy, "value", self.workspace_policy)
+        requested_policy = getattr(
+            request.workspace_policy, "value", request.workspace_policy
+        )
+        if str(actual_policy) != str(requested_policy):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="execution.workspace_policy_unsupported",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message=(
+                        f"Host returned workspace policy {actual_policy!r}; "
+                        f"requested {requested_policy!r}"
+                    ),
+                )
+            )
+        if self.sandbox.ref.tenant_id != request.context.actor.tenant_id:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="execution.binding_tenant_mismatch",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message="execution binding tenant does not match its request",
                 )
             )
 
@@ -62,17 +101,21 @@ class RunExecutionBinding:
         """Release the Host handle exactly once; provider policy owns destruction."""
 
         async with self._close_lock:
-            if self._closed:
-                return
-            await self.sandbox.close()
-            self._closed = True
+            if self._close_task is None:
+                self._close_task = asyncio.create_task(self.sandbox.close())
+            close_task = self._close_task
+        # Shield the shared close operation so cancellation of one waiter does
+        # not trigger a second provider close on retry.
+        await asyncio.shield(close_task)
+        self._closed = True
 
 
 class ExecutionBindingProvider(Protocol):
     """Host port for acquiring actual-Run execution resources."""
 
-    async def acquire(self, request: ExecutionBindingRequest) -> RunExecutionBinding:
-        ...
+    async def acquire(
+        self, request: ExecutionBindingRequest
+    ) -> RunExecutionBinding: ...
 
     async def close(self) -> None:
         """Release provider-level resources during Host shutdown."""

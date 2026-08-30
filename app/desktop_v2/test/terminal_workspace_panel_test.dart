@@ -58,6 +58,34 @@ void main() {
     await tester.pump();
     expect(api.closed, ['terminal-1']);
   });
+
+  testWidgets('terminal overflow reconnects from the last consumed sequence', (
+    tester,
+  ) async {
+    final api = _FakeTerminalApi();
+    final controller = WorkspacePanelDockController();
+    addTearDown(api.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(_TerminalTestApp(api: api, controller: controller));
+    await tester.pump();
+    await tester.pump();
+    api.events.add({
+      'type': 'terminal.output',
+      'session_id': 'terminal-1',
+      'sequence': 1,
+      'data': base64Encode(utf8.encode('first')),
+    });
+    api.events.add({
+      'type': 'terminal.overflow',
+      'session_id': 'terminal-1',
+      'sequence': 300,
+    });
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(api.eventAfterSequences, [0, 1]);
+    expect(find.text('Running'), findsOneWidget);
+  });
 }
 
 class _TerminalTestApp extends StatelessWidget {
@@ -104,6 +132,7 @@ class _FakeTerminalApi extends V2ApiClient {
   final writes = <String>[];
   final resizes = <(int, int)>[];
   final closed = <String>[];
+  final eventAfterSequences = <int>[];
   var createCalls = 0;
   String? lastAgentId;
   String? lastWorkspaceId;
@@ -134,7 +163,10 @@ class _FakeTerminalApi extends V2ApiClient {
   Stream<Map<String, Object?>> terminalEvents(
     String sessionId, {
     int afterSequence = 0,
-  }) => events.stream;
+  }) {
+    eventAfterSequences.add(afterSequence);
+    return events.stream;
+  }
 
   @override
   Future<void> writeTerminal(String sessionId, String data) async {

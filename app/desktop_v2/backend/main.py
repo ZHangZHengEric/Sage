@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import socket
@@ -23,6 +24,25 @@ from sagents.v2.runtime.session.filesystem import StoreInUseError
 
 
 _ServiceT = TypeVar("_ServiceT")
+
+
+def _require_loopback_host(host: str) -> str:
+    """Keep the unauthenticated Desktop control plane local to this machine."""
+
+    candidate = str(host).strip()
+    if candidate.lower() == "localhost":
+        # Avoid relying on a mutable hosts/DNS mapping for the security
+        # boundary; bind the numeric loopback address explicitly.
+        return "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError as exc:
+        raise ValueError("Desktop v2 sidecar host must be a loopback address") from exc
+    if not address.is_loopback:
+        raise ValueError("Desktop v2 sidecar host must be a loopback address")
+    if address.version != 4:
+        raise ValueError("Desktop v2 sidecar currently requires an IPv4 loopback host")
+    return candidate
 
 
 def _sidecar_registry_path(runtime_root: Path) -> Path:
@@ -94,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument("--build-id", default="manual")
     args = parser.parse_args(argv)
+    try:
+        args.host = _require_loopback_host(args.host)
+    except ValueError as exc:
+        parser.error(str(exc))
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind((args.host, args.port))

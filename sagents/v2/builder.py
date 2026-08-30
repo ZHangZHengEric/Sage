@@ -99,16 +99,25 @@ class _ExecutionBoundDriver:
             policy = str(
                 command.config.metadata.get("workspace_policy") or "shared_parent"
             )
-            self.binding = await self.provider.acquire(
-                ExecutionBindingRequest(
-                    run_id=self.run_id,
-                    parent_run_id=command.parent_run_id,
-                    agent_id=self.agent_id,
-                    workspace_policy=policy,
-                    context=context,
-                )
+            request = ExecutionBindingRequest(
+                run_id=self.run_id,
+                parent_run_id=command.parent_run_id,
+                agent_id=self.agent_id,
+                workspace_policy=policy,
+                context=context,
             )
-            self.loop = self.loop_builder(self.binding)
+            binding = await self.provider.acquire(request)
+            try:
+                binding.validate_for(request)
+                loop = self.loop_builder(binding)
+            except BaseException as exc:
+                try:
+                    await binding.close()
+                except BaseException as close_exc:
+                    raise exc from close_exc
+                raise
+            self.binding = binding
+            self.loop = loop
             return self.loop
 
     async def execute(self, run_id, context):
@@ -480,37 +489,44 @@ class SAgentBuilder:
             async def compose_bound_child(descriptor, child_run_id, child_context):
                 assert self._execution_binding_provider is not None
                 command = await runtime.session_store.get_start_command(child_run_id)
-                binding = await self._execution_binding_provider.acquire(
-                    ExecutionBindingRequest(
-                        run_id=child_run_id,
-                        parent_run_id=command.parent_run_id,
-                        agent_id=descriptor.agent_id,
-                        workspace_policy=str(
-                            command.config.metadata.get("workspace_policy")
-                            or "shared_parent"
-                        ),
-                        context=child_context,
-                    )
-                )
-                child_runtime = OfficialToolRuntime(
-                    binding.sandbox,
-                    binding.grant_issuer,
-                )
-                configure_official_runtime(child_runtime)
-                child_catalog, child_executor = self._create_tools(
-                    runtime_config,
-                    plugin_declarations,
-                    runtime_override=child_runtime,
-                )
-                return (
-                    compose_with_runtime(
-                        descriptor,
-                        child_catalog,
-                        child_executor,
-                        child_runtime,
+                request = ExecutionBindingRequest(
+                    run_id=child_run_id,
+                    parent_run_id=command.parent_run_id,
+                    agent_id=descriptor.agent_id,
+                    workspace_policy=str(
+                        command.config.metadata.get("workspace_policy")
+                        or "shared_parent"
                     ),
-                    binding,
+                    context=child_context,
                 )
+                binding = await self._execution_binding_provider.acquire(request)
+                try:
+                    binding.validate_for(request)
+                    child_runtime = OfficialToolRuntime(
+                        binding.sandbox,
+                        binding.grant_issuer,
+                    )
+                    configure_official_runtime(child_runtime)
+                    child_catalog, child_executor = self._create_tools(
+                        runtime_config,
+                        plugin_declarations,
+                        runtime_override=child_runtime,
+                    )
+                    return (
+                        compose_with_runtime(
+                            descriptor,
+                            child_catalog,
+                            child_executor,
+                            child_runtime,
+                        ),
+                        binding,
+                    )
+                except BaseException as exc:
+                    try:
+                        await binding.close()
+                    except BaseException as close_exc:
+                        raise exc from close_exc
+                    raise
 
             async def reject_prebound_child(descriptor, child_run_id, child_context):
                 del descriptor, child_run_id, child_context

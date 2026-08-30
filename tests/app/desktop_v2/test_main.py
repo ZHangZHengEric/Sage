@@ -4,10 +4,13 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from app.desktop_v2.backend.main import (
     _create_after_writer_release,
     _publish_sidecar,
     _remove_owned_sidecar_registry,
+    _require_loopback_host,
 )
 from app.desktop_v2.backend.observability import create_desktop_log_sink
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
@@ -117,3 +120,13 @@ def test_sidecar_waits_for_previous_writer_lock_to_be_released():
     assert result == "service"
     assert attempts == 3
     assert delays == [0.1, 0.1]
+
+
+def test_sidecar_rejects_non_loopback_bind_addresses():
+    assert _require_loopback_host("127.0.0.1") == "127.0.0.1"
+    assert _require_loopback_host("127.0.0.42") == "127.0.0.42"
+    assert _require_loopback_host("localhost") == "127.0.0.1"
+    with pytest.raises(ValueError, match="loopback"):
+        _require_loopback_host("0.0.0.0")
+    with pytest.raises(ValueError, match="loopback"):
+        _require_loopback_host("192.168.1.10")

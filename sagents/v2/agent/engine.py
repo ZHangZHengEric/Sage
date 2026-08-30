@@ -153,7 +153,9 @@ class AgentLoopEngine:
         self.tool_catalog = tool_catalog
         self.tool_executor = tool_executor
         self.tool_policy = tool_policy or DefaultToolPolicy()
-        self.tool_selection_policy = tool_selection_policy or RecentToolSelectionPolicy()
+        self.tool_selection_policy = (
+            tool_selection_policy or RecentToolSelectionPolicy()
+        )
         self.tool_selection_model = tool_selection_model or model
         self.continuation_policy = continuation_policy or CompositeContinuationPolicy()
         self.continuation_signal_provider = continuation_signal_provider
@@ -1263,10 +1265,14 @@ class AgentLoopEngine:
                 else:
                     response = model_event.response
         finally:
-            run = await batcher.flush()
-            closer = getattr(stream, "aclose", None)
-            if closer is not None:
-                await closer()
+            try:
+                run = await batcher.flush()
+            finally:
+                # Provider streams may own sockets/tasks.  A persistence error
+                # while flushing the final delta must not bypass their cleanup.
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
         if response is None:
             raise SageV2Error(
                 RuntimeErrorInfo(

@@ -941,6 +941,7 @@ class _DesktopDriver:
         self.sandbox_handle = sandbox_handle
         self._binding_closed = False
         self._binding_close_lock = asyncio.Lock()
+        self._binding_close_task: asyncio.Task[None] | None = None
 
     async def execute(self, run_id: str, context: RequestContext):
         return await self.loop.execute(run_id, context)
@@ -950,16 +951,33 @@ class _DesktopDriver:
 
     async def close_binding(self) -> None:
         async with self._binding_close_lock:
-            if self._binding_closed:
-                return
-            controller = getattr(self.loop, "delegated_run_controller", None)
-            controller_close = getattr(controller, "close", None)
-            if controller_close is not None:
+            if self._binding_close_task is None:
+                self._binding_close_task = asyncio.create_task(
+                    self._close_binding_once()
+                )
+            close_task = self._binding_close_task
+        await asyncio.shield(close_task)
+        self._binding_closed = True
+
+    async def _close_binding_once(self) -> None:
+        controller = getattr(self.loop, "delegated_run_controller", None)
+        controller_close = getattr(controller, "close", None)
+        controller_error: BaseException | None = None
+        if controller_close is not None:
+            try:
                 closed = controller_close()
                 if inspect.isawaitable(closed):
                     await closed
+            except BaseException as exc:
+                controller_error = exc
+        try:
             await self.sandbox_handle.close()
-            self._binding_closed = True
+        except BaseException as sandbox_error:
+            if controller_error is not None:
+                raise sandbox_error from controller_error
+            raise
+        if controller_error is not None:
+            raise controller_error
 
 
 class DesktopV2Service:
@@ -2551,6 +2569,7 @@ class DesktopV2Service:
         self, request: DesktopRunRequest, user_id: str
     ) -> AsyncIterator[str]:
         accepted_handle = None
+        driver: _DesktopDriver | None = None
         run_logger = self.logger.bind(correlation_id=request.idempotency_key)
         run_logger.info(
             "agent.run.requested",
@@ -2622,7 +2641,21 @@ class DesktopV2Service:
                 },
             )
             stream = facade.drive_accepted_run(accepted_handle, context)
+        except asyncio.CancelledError:
+            if driver is not None:
+                await asyncio.shield(driver.close_binding())
+            raise
         except Exception as exc:
+            if driver is not None:
+                try:
+                    await driver.close_binding()
+                except BaseException as close_exc:
+                    run_logger.exception(
+                        "agent.run.start_cleanup_failed",
+                        "Agent run resources failed to close after startup failure",
+                        close_exc,
+                        attributes={"agent_id": request.agent_id},
+                    )
             run_logger.exception(
                 "agent.run.start_failed",
                 "Agent run failed before execution started",
@@ -3089,6 +3122,42 @@ class DesktopV2Service:
         run_id: str | None = None,
         force_leaf: bool = False,
     ):
+        provisioned: list[Any] = []
+        try:
+            return await self._build_loop_impl(
+                agent=agent,
+                provider=provider,
+                workspace=workspace,
+                preferred_skills=preferred_skills,
+                approval_mode=approval_mode,
+                invocation_mode=invocation_mode,
+                session_id=session_id,
+                run_id=run_id,
+                force_leaf=force_leaf,
+                sandbox_observer=provisioned.append,
+            )
+        except BaseException as exc:
+            for sandbox_handle in reversed(provisioned):
+                try:
+                    await sandbox_handle.close()
+                except BaseException as close_exc:
+                    raise exc from close_exc
+            raise
+
+    async def _build_loop_impl(
+        self,
+        *,
+        agent,
+        provider,
+        workspace,
+        preferred_skills,
+        approval_mode,
+        invocation_mode="normal",
+        session_id: str | None = None,
+        run_id: str | None = None,
+        force_leaf: bool = False,
+        sandbox_observer,
+    ):
         skill_provider = self._skill_provider()
         mcp_plugin = await self._mcp_plugin(agent.user_id)
         mcp_definitions = await mcp_plugin.list_tools(run_id="desktop-composition")
@@ -3333,6 +3402,7 @@ class DesktopV2Service:
             self._context(agent.user_id, language=settings.language),
             run_id=run_id or new_id("desktop_sandbox"),
         )
+        sandbox_observer(sandbox_handle)
         skill_workspace = (
             LocalSkillWorkspace(workspace, workspace_root=workspace_root)
             if sandbox_config["workspace_mapping"] == "active_workspace"

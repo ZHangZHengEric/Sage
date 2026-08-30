@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from sagents.v2.agent.engine import AgentLoopEngine
+from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.model.contracts import (
     ModelCapabilities,
@@ -282,9 +283,7 @@ async def test_tool_selection_preparation_runs_in_parallel_with_memory_recall():
         input_schema={"type": "object"},
         side_effect_level=SideEffectLevel.READ,
     )
-    model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed("done"),)),)
-    )
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
     runtime, handle, loop, _ = await setup_loop(
         model,
         tools=(READ_TOOL, memory_tool),
@@ -338,15 +337,12 @@ async def test_large_catalog_is_bounded_and_expansion_changes_the_next_request()
         assert "zzz_target" not in names
         assert request.metadata["tool_selection"]["hidden_index_count"] == 2
         assert any(
-            message.metadata.get("runtime_tool_index")
-            for message in request.messages
+            message.metadata.get("runtime_tool_index") for message in request.messages
         )
 
     def expanded_request(request):
         assert "zzz_target" in [tool.name for tool in request.tools]
-        assert request.metadata["tool_selection"]["expanded_tools"] == (
-            "zzz_target",
-        )
+        assert request.metadata["tool_selection"]["expanded_tools"] == ("zzz_target",)
 
     model = ScriptedModelProvider(
         (
@@ -481,7 +477,10 @@ async def test_text_reasoning_stream_completes_with_canonical_event_lifecycles()
     assert "reasoning.started" in types
     assert "reasoning.delta" in types
     assert types.count("message.delta") == 1
-    assert next(event.data.delta for event in events if event.type == "message.delta") == "hello"
+    assert (
+        next(event.data.delta for event in events if event.type == "message.delta")
+        == "hello"
+    )
     assert "message.completed" in types
     assert "continuation.decided" in types
     assert types[-3:] == ["step.completed", "turn.completed", "run.completed"]
@@ -1267,18 +1266,14 @@ async def test_repeated_empty_semantic_responses_explain_exhausted_retries():
     model = ScriptedModelProvider(
         tuple(ScriptedModelStep(events=(), error=empty) for _ in range(3))
     )
-    runtime, handle, loop, _ = await setup_loop(
-        model, response_language="zh"
-    )
+    runtime, handle, loop, _ = await setup_loop(model, response_language="zh")
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state == RunState.SUSPENDED
     assert len(model.requests) == 3
     suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(
-        suspension.interaction_id
-    )
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     error = interaction.payload["error"]
     assert error["code"] == "model.empty_semantic_response"
     assert error["metadata"]["transparent_retries_exhausted"] == 2
@@ -1326,9 +1321,7 @@ async def test_reasoning_only_response_does_not_pollute_next_model_request():
         run_id=handle.run_id,
     )
     assert not any(
-        message.role == "assistant"
-        and not message.content
-        and not message.tool_calls
+        message.role == "assistant" and not message.content and not message.tool_calls
         for message in rebuilt
     )
 
@@ -1354,9 +1347,7 @@ async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatc
         retryable=True,
         safe_to_resume=True,
     )
-    model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(), error=failure),)
-    )
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),))
     runtime, handle, loop, _ = await setup_loop(
         model,
         tools=(memory_tool,),
@@ -1365,12 +1356,8 @@ async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatc
         memory_recall_query_generator=RecallQuery(),
     )
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(
-        suspended.suspension_id
-    )
-    interaction = await runtime.session_store.get_interaction(
-        suspension.interaction_id
-    )
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -1430,6 +1417,51 @@ class BlockingModel:
 
     def stream(self, request):
         return self._stream(request)
+
+
+@pytest.mark.asyncio
+async def test_provider_stream_closes_even_when_final_batch_flush_fails(monkeypatch):
+    class ClosingStream:
+        def __init__(self):
+            self.sent = False
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return completed("done")
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = ClosingStream()
+
+    class ClosingModel:
+        async def capabilities(self, model_binding):
+            return ModelCapabilities(
+                supports_streaming=True,
+                supports_tools=False,
+                supports_parallel_tool_calls=False,
+                supports_reasoning=False,
+                supports_multimodal_input=False,
+                supports_structured_output=False,
+            )
+
+        def stream(self, request):
+            return stream
+
+    async def fail_flush(self):
+        raise OSError("injected flush failure")
+
+    monkeypatch.setattr(StreamEventBatcher, "flush", fail_flush)
+    runtime, handle, loop, _ = await setup_loop(ClosingModel(), tools=(), handlers={})
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state in {RunState.FAILED, RunState.SUSPENDED}
+    assert stream.closed is True
 
 
 @pytest.mark.asyncio
