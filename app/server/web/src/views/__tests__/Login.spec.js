@@ -4,8 +4,10 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import Login from '../Login.vue'
 
 const routerReplace = vi.fn()
-const { getSystemInfo } = vi.hoisted(() => ({
+const { getSystemInfo, loginAPI, registerAPI } = vi.hoisted(() => ({
   getSystemInfo: vi.fn(),
+  loginAPI: vi.fn(),
+  registerAPI: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -24,8 +26,8 @@ vi.mock('@/api/system.js', () => ({
 }))
 
 vi.mock('@/utils/auth.js', () => ({
-  loginAPI: vi.fn(),
-  registerAPI: vi.fn(),
+  loginAPI,
+  registerAPI,
 }))
 
 vi.mock('@/utils/i18n.js', () => ({
@@ -54,7 +56,11 @@ const mountComponent = async () => {
         AnimatedCharactersStage: { template: '<div />' },
         Button: { template: '<button><slot /></button>' },
         Checkbox: { template: '<input type="checkbox" />' },
-        Input: { template: '<input />' },
+        Input: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+        },
         Label: { template: '<label><slot /></label>' },
       },
     },
@@ -66,7 +72,23 @@ const mountComponent = async () => {
 describe('Login view', () => {
   beforeEach(() => {
     getSystemInfo.mockReset()
+    loginAPI.mockReset()
+    registerAPI.mockReset()
     routerReplace.mockReset()
+  })
+
+  it('submits account credentials when the login button is clicked', async () => {
+    getSystemInfo.mockResolvedValue({ allow_registration: true })
+    loginAPI.mockResolvedValue({ success: true })
+    const wrapper = await mountComponent()
+
+    await wrapper.find('#account').setValue('sage-user')
+    await wrapper.find('#password').setValue('secret-password')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(loginAPI).toHaveBeenCalledWith('sage-user', 'secret-password')
+    expect(routerReplace).toHaveBeenCalledWith('/agent/chat')
   })
 
   it('treats native auth providers as local login and renders the credentials form', async () => {
