@@ -120,6 +120,35 @@ def test_duplicate_plugin_id_is_rejected_per_host():
     assert duplicate.value.info.code == "extension.duplicate_id"
 
 
+def test_composition_hash_includes_validated_config_and_scope():
+    configurable = plugin(
+        "configurable",
+        "service",
+        scopes=(ExtensionScope.AGENT, ExtensionScope.RUN),
+    )
+    host = ExtensionHost()
+    host.register(configurable.registration)
+
+    agent_plan = host.plan(
+        (requirement("service"),),
+        configs={"configurable": {"mode": "agent"}},
+        scope_overrides={"configurable": ExtensionScope.AGENT},
+    )
+    changed_config = host.plan(
+        (requirement("service"),),
+        configs={"configurable": {"mode": "changed"}},
+        scope_overrides={"configurable": ExtensionScope.AGENT},
+    )
+    run_plan = host.plan(
+        (requirement("service"),),
+        configs={"configurable": {"mode": "agent"}},
+        scope_overrides={"configurable": ExtensionScope.RUN},
+    )
+
+    assert agent_plan.composition_hash != changed_config.composition_hash
+    assert agent_plan.composition_hash != run_plan.composition_hash
+
+
 @pytest.mark.parametrize(
     ("api", "valid"),
     [("1", False), ("2", True), ("2.5", True), ("3", False)],

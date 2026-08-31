@@ -485,7 +485,9 @@ class SAgentBuilder:
         components = ContextComponentBundle(
             summary_store=SessionDerivedConversationSummaryStore(driver_session_store)
         )
-        factory = AgentRuntimeFactory(driver_runtime, context_components=components)
+        factory = AgentCompositionFactory(
+            driver_runtime, context_components=components
+        )
         root_descriptor = AgentDescriptor(
             agent_id=selected_agent,
             name=selected_definition.name,
@@ -774,7 +776,7 @@ class SAgentBuilder:
         agent.attach_dispatcher(dispatcher)
         services["execution.dispatcher"] = dispatcher
         composition_hash = self._composition_hash(
-            resolved.manifest_hash, scope_handles
+            resolved.manifest_hash, scope_handles, services
         )
         return SAgentApplication(
             agents={selected_agent: agent},
@@ -1212,19 +1214,30 @@ class SAgentBuilder:
         return services, adapters
 
     @staticmethod
-    def _composition_hash(manifest_hash, handles) -> str:
+    def _composition_hash(manifest_hash, handles, services) -> str:
         payload = {
             "manifest": manifest_hash,
-            "graphs": [
-                handle.graph.resolution_hash
+            "plans": sorted(
+                handle.composition_hash
                 for handle in handles
                 if handle.graph.plugin_ids
-            ],
+            ),
+            "services": {
+                capability: _service_composition_identity(provider)
+                for capability, provider in sorted(services.items())
+            },
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
-
-# Compatibility for existing embedders; new code should import the explicit
-# composition boundary from ``sagents.v2.agent``.
-AgentRuntimeFactory = AgentCompositionFactory
+def _service_composition_identity(provider: Any) -> dict[str, Any]:
+    identity = getattr(provider, "composition_identity", None)
+    if callable(identity):
+        identity = identity()
+    if identity is None:
+        root = getattr(provider, "root", None)
+        identity = str(root) if root is not None else None
+    return {
+        "type": f"{type(provider).__module__}.{type(provider).__qualname__}",
+        "identity": identity,
+    }

@@ -125,6 +125,31 @@ async def test_close_cancels_execution_before_requeueing_work():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_failure_recording_error_still_completes_result_future():
+    scheduler = InMemoryScheduler()
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+
+    class UnavailableStoreAgent(FakeAgent):
+        async def _fail_driver_crash(self, run_id, error, context):
+            del run_id, error, context
+            raise OSError("store unavailable")
+
+    agent = UnavailableStoreAgent(delay=60)
+    result = await dispatcher.submit(
+        agent,
+        SimpleNamespace(run_id="run-close-store-failure", run_revision=0),
+        CONTEXT,
+    )
+    await asyncio.wait_for(agent.started.wait(), timeout=1)
+
+    await dispatcher.close()
+
+    with pytest.raises(OSError, match="store unavailable"):
+        await asyncio.wait_for(result, timeout=1)
+    assert dispatcher._requests == {}
+
+
+@pytest.mark.asyncio
 async def test_execution_task_inherits_the_worker_lease_scope():
     scheduler = InMemoryScheduler()
     active = ContextVar("active-test-lease", default=False)

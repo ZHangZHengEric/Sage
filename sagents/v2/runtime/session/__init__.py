@@ -8,7 +8,6 @@ from sagents.v2.runtime.session.contracts import (
     SteerClaimResult,
 )
 from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
-from sagents.v2.runtime.session.state import SessionStateStore
 from sagents.v2.runtime.session.filesystem import (
     FilesystemSessionStore,
     SessionStoreCorruptionError,
@@ -45,7 +44,6 @@ __all__ = [
     "RunCreationResult",
     "SessionStoreCorruptionError",
     "SessionStore",
-    "SessionStateStore",
     "StoreInUseError",
     "SteerClaimResult",
     "migrate_manifest_v1",

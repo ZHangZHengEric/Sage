@@ -137,7 +137,7 @@ class _SubscriptionOverflow:
     latest_available: int
 
 
-class SessionStateStore:
+class SessionStoreCoordinator:
     """Atomic reference state machine for the SessionStore contract.
 
     The default persistence hooks retain process-local state. Concrete adapters

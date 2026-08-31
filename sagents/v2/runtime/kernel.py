@@ -25,7 +25,7 @@ from sagents.v2.contracts.commands import (
     SteerRun,
 )
 from sagents.v2.contracts.common import new_id
-from sagents.v2.contracts.errors import RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.events import (
     CheckpointEventData,
     RunEventData,
@@ -248,6 +248,75 @@ class HarnessRuntime:
         """
 
         if self.job_runtime is not None:
+            current = await self.session_store.get_run(run_id)
+            if checkpoint.run_id != run_id or checkpoint.session_id != current.session_id:
+                raise ValueError("checkpoint identity must match run and session")
+            if suspension.run_id != run_id:
+                raise ValueError("suspension.run_id must match run_id")
+            if suspension.checkpoint_id != checkpoint.checkpoint_id:
+                raise ValueError("suspension must reference the committed checkpoint")
+            if interaction is not None:
+                if interaction.run_id != run_id:
+                    raise ValueError("interaction.run_id must match run_id")
+                if suspension.interaction_id != interaction.interaction_id:
+                    raise ValueError(
+                        "suspension must reference the committed interaction"
+                    )
+
+            prepare_key = f"{idempotency_key}:prepare-job-pause"
+            if current.state == RunState.RUNNING:
+                prepared = await self.session_store.commit_run(
+                    run_id=run_id,
+                    expected_revision=expected_revision,
+                    expected_states={RunState.RUNNING},
+                    new_state=RunState.SUSPEND_REQUESTED,
+                    drafts=(
+                        EventDraft(
+                            type="run.pause_requested",
+                            data=RunEventData(
+                                state="suspend_requested",
+                                reason=suspension.reason.value,
+                            ),
+                        ),
+                    ),
+                    context=context,
+                    idempotency_key=prepare_key,
+                )
+                expected_revision = prepared.run.revision
+            elif current.state == RunState.SUSPEND_REQUESTED:
+                if current.revision != expected_revision:
+                    # A retry after the final suspension write failed must
+                    # recover the durable preparation through its own key.
+                    prepared = await self.session_store.commit_run(
+                        run_id=run_id,
+                        expected_revision=expected_revision,
+                        expected_states={RunState.RUNNING},
+                        new_state=RunState.SUSPEND_REQUESTED,
+                        drafts=(
+                            EventDraft(
+                                type="run.pause_requested",
+                                data=RunEventData(
+                                    state="suspend_requested",
+                                    reason=suspension.reason.value,
+                                ),
+                            ),
+                        ),
+                        context=context,
+                        idempotency_key=prepare_key,
+                    )
+                    expected_revision = prepared.run.revision
+            else:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="run.invalid_transition",
+                        category=ErrorCategory.CONFLICT,
+                        message=(
+                            "cannot suspend Run while it is "
+                            f"{current.state.value}"
+                        ),
+                        safe_to_resume=False,
+                    )
+                )
             await self.job_runtime.handle_run_pause(run_id)
 
         drafts: list[EventDraft] = [

@@ -28,8 +28,9 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.runtime.session.state import (
     SESSION_AGGREGATE_FORMAT,
-    SessionStateStore,
+    SessionStoreCoordinator,
 )
+from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
@@ -59,10 +60,10 @@ class SessionStoreCorruptionError(SageV2Error):
     """Raised when authoritative Session state integrity cannot be established."""
 
 
-class _FilesystemSessionState(SessionStateStore):
+class _FilesystemSessionState(SessionStoreCoordinator):
     """Single-host persistence adapter around the state coordinator.
 
-    Runtime semantics live in :class:`SessionStateStore`; this subclass
+    Runtime semantics live in :class:`SessionStoreCoordinator`; this subclass
     implements only the durability hooks. This is the central invariant that
     prevents the file and in-memory implementations from acquiring different
     CAS, idempotency, checkpoint, or interaction behavior.  A checksummed
@@ -121,42 +122,101 @@ class _FilesystemSessionState(SessionStateStore):
 
     async def _commit_storage_locked(self, session_id: str) -> None:
         state = self._dump_session_state_locked(session_id)
+        state = SessionAggregate(
+            SessionAggregateSnapshotV2.model_validate(state)
+        ).snapshot.model_dump(mode="json")
         # These entries are also materialized as a lookup that can be rebuilt
         # from state.json after a crash; removing the lookup never loses data.
         start_entries = list(state.get("start_idempotency", ()))
         storage_lock = self._storage_locks.setdefault(session_id, asyncio.Lock())
-        # The aggregate mutation is already frozen above. Release the shared
-        # index lock while this Session's adapter fsyncs; another Session can
-        # commit independently, while the per-Session lock preserves ordering.
-        self._lock.release()
-        try:
-            async with storage_lock:
-                previous = (
-                    None
-                    if session_id in self._storage_recovery_required
-                    else self._persisted_states.get(session_id)
+        # Keep the coordinator lock until durability is known. The state
+        # machine mutates its aggregate before invoking this hook; allowing a
+        # second Session mutation to overlap would make a failed write
+        # impossible to roll back without also disturbing that in-flight
+        # mutation. Per-Session disk queues can be restored after the state
+        # machine itself owns independent aggregates.
+        async with storage_lock:
+            previous = (
+                None
+                if session_id in self._storage_recovery_required
+                else self._persisted_states.get(session_id)
+            )
+            try:
+                await asyncio.to_thread(
+                    self._write_session_state,
+                    session_id,
+                    state,
+                    start_entries,
+                    previous,
                 )
-                try:
-                    await asyncio.to_thread(
-                        self._write_session_state,
-                        session_id,
-                        state,
-                        start_entries,
-                        previous,
-                    )
-                except BaseException:
-                    self._storage_recovery_required.add(session_id)
-                    raise
-                else:
-                    # This cache describes durable state, not merely the most
-                    # recently frozen in-memory aggregate.  Advancing it before
-                    # the write succeeds can make the next journal envelope
-                    # skip a revision after a transient I/O failure.
+            except BaseException:
+                self._storage_recovery_required.add(session_id)
+                if await asyncio.to_thread(
+                    self._recover_and_matches_state, session_id, state
+                ):
+                    # The canonical snapshot/journal was committed and only a
+                    # recoverable auxiliary write failed. Treat the operation
+                    # as durable after rebuilding those indexes.
                     self._persisted_states[session_id] = deepcopy(state)
                     self._storage_recovery_required.discard(session_id)
-        finally:
-            await self._lock.acquire()
+                else:
+                    # Do not leave a failed command or its idempotency result
+                    # visible in memory. A retry must execute and persist the
+                    # transition again instead of falsely returning duplicate.
+                    self._restore_durable_state_locked()
+                    raise
+            else:
+                # This cache describes durable state, not merely the most
+                # recently frozen in-memory aggregate. Advancing it before the
+                # write succeeds can make the next journal envelope skip a
+                # revision after a transient I/O failure.
+                self._persisted_states[session_id] = deepcopy(state)
+                self._storage_recovery_required.discard(session_id)
         self._loaded_session_ids.add(session_id)
+
+    def _recover_and_matches_state(
+        self, session_id: str, expected: dict[str, Any]
+    ) -> bool:
+        """Return whether recovery proves the requested aggregate is durable."""
+
+        try:
+            self._recover_transactions()
+            snapshot = self._session_dir(session_id) / "state.json"
+            if not snapshot.is_file():
+                return False
+            actual, _journal_count = self._read_session_aggregate(snapshot)
+        except BaseException:
+            return False
+        return actual == expected
+
+    def _restore_durable_state_locked(self) -> None:
+        """Replace tentative in-memory aggregates with confirmed disk state."""
+
+        combined = self._dump_state_locked()
+        for key in (
+            "sessions",
+            "runs",
+            "start_idempotency",
+            "command_results",
+            "checkpoints",
+            "suspensions",
+            "interactions",
+            "interaction_resolutions",
+            "session_commit_proposals",
+            "session_commit_command_results",
+        ):
+            combined[key] = []
+        for key in ("run_events", "fork_base_events", "steer_inbox"):
+            combined[key] = {}
+        for state in self._persisted_states.values():
+            self._merge_state(combined, state)
+
+        subscribers = self._subscribers
+        derived = self._derived_state
+        self._load_state_locked(combined)
+        self._subscribers.update(subscribers)
+        self._derived_state.update(derived)
+        self._loaded_session_ids.intersection_update(self._sessions)
 
     async def _delete_storage_locked(
         self, session_id: str, deleted_session_ids: frozenset[str]

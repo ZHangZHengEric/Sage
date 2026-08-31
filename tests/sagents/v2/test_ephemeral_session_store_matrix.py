@@ -405,6 +405,52 @@ async def test_invalid_checkpoint_fails_without_mutating_run_session_or_event_lo
 
 
 @pytest.mark.asyncio
+async def test_job_pause_uses_durable_prepare_state_before_terminal_suspend_commit(
+    monkeypatch,
+):
+    runtime, session_id, run_id = await running_runtime()
+    checkpoint, interaction, suspension = suspension_records(session_id, run_id)
+
+    class Jobs:
+        def __init__(self):
+            self.paused = False
+
+        async def handle_run_pause(self, requested_run_id):
+            assert requested_run_id == run_id
+            self.paused = True
+            return ()
+
+    jobs = Jobs()
+    runtime.job_runtime = jobs
+    original_commit = runtime.session_store.commit_run
+
+    async def fail_final_commit(**kwargs):
+        if kwargs["new_state"] == RunState.SUSPENDED:
+            raise OSError("final suspension write failed")
+        return await original_commit(**kwargs)
+
+    monkeypatch.setattr(runtime.session_store, "commit_run", fail_final_commit)
+
+    with pytest.raises(OSError, match="final suspension write failed"):
+        await runtime.commit_suspension(
+            run_id=run_id,
+            expected_revision=1,
+            checkpoint=checkpoint,
+            suspension=suspension,
+            interaction=interaction,
+            context=CONTEXT,
+            idempotency_key="suspend-with-jobs",
+        )
+
+    assert jobs.paused is True
+    prepared = await runtime.get_run(run_id)
+    assert prepared.state == RunState.SUSPEND_REQUESTED
+    assert (await runtime.session_store.read_events(run_id))[-1].type == (
+        "run.pause_requested"
+    )
+
+
+@pytest.mark.asyncio
 async def test_pause_resume_requires_matching_suspension_and_preserves_replay_history():
     runtime, session_id, run_id = await running_runtime()
     pause = await runtime.pause_run(
