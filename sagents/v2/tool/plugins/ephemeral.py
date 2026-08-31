@@ -12,6 +12,8 @@ from sagents.v2.tool.contracts import (
     ReconcileResult,
     ReconcileState,
     ToolCall,
+    ToolCancellationResult,
+    ToolCancellationState,
     ToolDefinition,
     ToolExecutionResult,
 )
@@ -61,6 +63,7 @@ class InMemoryToolExecutor:
         self._lock = asyncio.Lock()
         self._results: dict[str, ToolExecutionResult] = {}
         self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
+        self._execution_tasks: dict[str, asyncio.Task] = {}
         self.calls: list[ToolCall] = []
 
     async def execute(
@@ -98,6 +101,9 @@ class InMemoryToolExecutor:
                 self._inflight[call.idempotency_key] = future
                 owner = True
                 self.calls.append(call)
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    self._execution_tasks[call.operation_id] = current_task
             else:
                 owner = False
         if not owner:
@@ -129,6 +135,24 @@ class InMemoryToolExecutor:
         finally:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
+                self._execution_tasks.pop(call.operation_id, None)
+
+    async def cancel(
+        self, operation_id: str, context: RequestContext
+    ) -> ToolCancellationResult:
+        del context
+        async with self._lock:
+            task = self._execution_tasks.get(operation_id)
+            if task is None or task.done():
+                return ToolCancellationResult(
+                    operation_id=operation_id,
+                    state=ToolCancellationState.TOO_LATE,
+                )
+            task.cancel()
+        return ToolCancellationResult(
+            operation_id=operation_id,
+            state=ToolCancellationState.CANCELLED,
+        )
 
     async def reconcile(
         self, operation_id: str, context: RequestContext

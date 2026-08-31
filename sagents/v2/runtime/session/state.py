@@ -1801,6 +1801,151 @@ class SessionStoreCoordinator:
             ],
         }
 
+    def _dump_session_state_locked(self, session_id: str) -> dict[str, Any]:
+        """Serialize exactly one authoritative Session aggregate.
+
+        Durable per-Session repositories must not serialize every loaded
+        aggregate and then discard unrelated rows. Keeping this projection in
+        the coordinator also prevents storage adapters from reimplementing the
+        canonical ownership rules for Runs, checkpoints, and idempotency data.
+        """
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise self._not_found("session.not_found", session_id)
+        run_ids = {
+            row.run_id for row in self._runs.values() if row.session_id == session_id
+        }
+        interaction_ids = {
+            value.interaction_id
+            for value in self._interactions.values()
+            if value.run_id in run_ids
+        }
+        proposals = tuple(
+            value
+            for value in self._session_commit_proposals.values()
+            if value.session_id == session_id
+        )
+        proposal_ids = {value.proposal_id for value in proposals}
+        return {
+            "session_format_version": SESSION_AGGREGATE_FORMAT,
+            "sessions": [
+                {
+                    "session_id": session.session_id,
+                    "revision": session.revision,
+                    "last_sequence": session.last_sequence,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "active_serial_run_id": session.active_serial_run_id,
+                    "parent_session_id": session.parent_session_id,
+                    "revision_sequences": {
+                        str(revision): sequence
+                        for revision, sequence in session.revision_sequences.items()
+                    },
+                }
+            ],
+            "runs": [
+                {
+                    "session_id": row.session_id,
+                    "run_id": row.run_id,
+                    "state": row.state.value,
+                    "revision": row.revision,
+                    "last_run_sequence": row.last_run_sequence,
+                    "concurrency_mode": row.concurrency_mode.value,
+                    "base_session_revision": row.base_session_revision,
+                    "base_session_sequence": row.base_session_sequence,
+                    "accepted_session_revision": row.accepted_session_revision,
+                    "resolved_spec_hash": row.resolved_spec_hash,
+                    "created_at": row.created_at.isoformat(),
+                    "updated_at": row.updated_at.isoformat(),
+                    "suspension_id": row.suspension_id,
+                    "checkpoint_id": row.checkpoint_id,
+                    "start_command": (
+                        row.start_command.model_dump(mode="json")
+                        if row.start_command is not None
+                        else None
+                    ),
+                }
+                for row in self._runs.values()
+                if row.run_id in run_ids
+            ],
+            "run_events": {
+                run_id: [event.model_dump(mode="json") for event in events]
+                for run_id, events in self._run_events.items()
+                if run_id in run_ids
+            },
+            "fork_base_events": {
+                run_id: [event.model_dump(mode="json") for event in events]
+                for run_id, events in self._fork_base_events.items()
+                if run_id in run_ids and events
+            },
+            "start_idempotency": [
+                {
+                    "tenant_id": scope[0],
+                    "principal_id": scope[1],
+                    "idempotency_key": scope[2],
+                    "run_id": run_id,
+                    "request_digest": self._start_idempotency_digests[scope],
+                }
+                for scope, run_id in self._start_idempotency.items()
+                if run_id in run_ids
+            ],
+            "command_results": [
+                {
+                    "run_id": key[0],
+                    "idempotency_key": key[1],
+                    "request_digest": self._command_digests[key],
+                    "result": {
+                        "run": result.run.model_dump(mode="json"),
+                        "session": result.session.model_dump(mode="json"),
+                        "events": [
+                            event.model_dump(mode="json") for event in result.events
+                        ],
+                    },
+                }
+                for key, result in self._command_results.items()
+                if key[0] in run_ids
+            ],
+            "checkpoints": [
+                value.model_dump(mode="json")
+                for value in self._checkpoints.values()
+                if value.run_id in run_ids
+            ],
+            "suspensions": [
+                value.model_dump(mode="json")
+                for value in self._suspensions.values()
+                if value.run_id in run_ids
+            ],
+            "interactions": [
+                value.model_dump(mode="json")
+                for value in self._interactions.values()
+                if value.run_id in run_ids
+            ],
+            "interaction_resolutions": [
+                value.model_dump(mode="json")
+                for value in self._interaction_resolutions.values()
+                if value.interaction_id in interaction_ids
+            ],
+            "steer_inbox": {
+                run_id: [entry.model_dump(mode="json") for entry in entries]
+                for run_id, entries in self._steer_inbox.items()
+                if run_id in run_ids
+            },
+            "session_commit_proposals": [
+                value.model_dump(mode="json") for value in proposals
+            ],
+            "session_commit_command_results": [
+                {
+                    "target_id": key[0],
+                    "idempotency_key": key[1],
+                    "request_digest": self._session_commit_command_digests[key],
+                    "proposal": value.model_dump(mode="json"),
+                }
+                for key, value in self._session_commit_command_results.items()
+                if value.proposal_id in proposal_ids
+            ],
+        }
+
     def _load_state_locked(self, payload: dict[str, Any]) -> None:
         """Validate and replace reference Session state from a trusted storage snapshot."""
 

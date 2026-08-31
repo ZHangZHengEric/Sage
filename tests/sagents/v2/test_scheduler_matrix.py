@@ -10,6 +10,10 @@ from sagents.v2.runtime.execution.scheduler.contracts import (
     WorkItem,
 )
 from sagents.v2.runtime.execution.scheduler.memory import InMemoryScheduler
+from sagents.v2.runtime.execution.scheduler.filesystem import (
+    FilesystemScheduler,
+    SchedulerInUseError,
+)
 from sagents.v2.contracts.errors import SageV2Error
 
 
@@ -213,3 +217,65 @@ async def test_close_wakes_waiting_claimers_with_typed_error():
     with pytest.raises(SageV2Error) as closed:
         await waiting
     assert closed.value.info.code == "scheduler.closed"
+
+
+@pytest.mark.asyncio
+async def test_filesystem_scheduler_restores_pending_work(tmp_path):
+    clock = MutableClock()
+    first = FilesystemScheduler(tmp_path, clock=clock)
+    item = work("durable", clock)
+    assert await first.submit(item) is True
+    await first.close()
+
+    restored = FilesystemScheduler(tmp_path, clock=clock)
+    capabilities = await restored.capabilities()
+    lease = await restored.claim(
+        "worker_restored",
+        lease_duration=timedelta(seconds=30),
+        wait_timeout=0,
+    )
+
+    assert capabilities.durable_across_process_restart is True
+    assert lease is not None and lease.work == item
+    await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_scheduler_enforces_one_writer_per_root(tmp_path):
+    first = FilesystemScheduler(tmp_path)
+    with pytest.raises(SchedulerInUseError) as caught:
+        FilesystemScheduler(tmp_path)
+    assert caught.value.info.code == "scheduler.in_use"
+
+    await first.close()
+    replacement = FilesystemScheduler(tmp_path)
+    await replacement.close()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_scheduler_restores_lease_and_monotonic_fence(tmp_path):
+    clock = MutableClock()
+    first = FilesystemScheduler(tmp_path, clock=clock)
+    await first.submit(work("leased", clock))
+    old = await first.claim(
+        "worker_old", lease_duration=timedelta(seconds=5), wait_timeout=0
+    )
+    await first.close()
+
+    restored = FilesystemScheduler(tmp_path, clock=clock)
+    assert (
+        await restored.claim(
+            "worker_early", lease_duration=timedelta(seconds=5), wait_timeout=0
+        )
+        is None
+    )
+    clock.advance(6)
+    assert await restored.reap_expired() == 1
+    new = await restored.claim(
+        "worker_new", lease_duration=timedelta(seconds=5), wait_timeout=0
+    )
+
+    assert new is not None
+    assert new.work.attempt == 2
+    assert new.fencing_token == old.fencing_token + 1
+    await restored.close()

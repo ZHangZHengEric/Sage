@@ -63,7 +63,12 @@ def command(
     )
 
 
-def completed(text: str = "", *, calls: tuple[ModelToolCall, ...] = ()):
+def completed(
+    text: str = "",
+    *,
+    calls: tuple[ModelToolCall, ...] = (),
+    provider_state: dict | None = None,
+):
     return ModelStreamEvent(
         kind=ModelEventKind.COMPLETED,
         response=ModelResponse(
@@ -71,6 +76,7 @@ def completed(text: str = "", *, calls: tuple[ModelToolCall, ...] = ()):
             text=text,
             tool_calls=calls,
             finish_reason="tool_calls" if calls else "stop",
+            provider_state=provider_state or {},
         ),
     )
 
@@ -126,6 +132,84 @@ async def test_serial_run_projects_completed_history_from_previous_runs():
         ("assistant", "first answer"),
         ("user", "follow up"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_provider_state_survives_tool_round_trip_and_session_rebuild():
+    runtime = ephemeral_runtime()
+    call = ModelToolCall(
+        tool_call_id="call_reasoning",
+        name="lookup",
+        arguments={"q": "state"},
+    )
+    state = {
+        "openai_compatible": {
+            "reasoning_details": [{"type": "reasoning", "value": "opaque"}]
+        }
+    }
+    definition = ToolDefinition(
+        name="lookup",
+        description="lookup",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+    )
+    first = await runtime.start_run(command("first", "state-first"), CONTEXT)
+    first_model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(completed(calls=(call,), provider_state=state),)
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+
+    async def lookup(tool_call, _context):
+        return ToolExecutionResult(
+            tool_call_id=tool_call.tool_call_id,
+            operation_id=tool_call.operation_id,
+            content=(TextBlock(text="result"),),
+            metadata={
+                "context_reference": {
+                    "uri": "artifact://tool-result/call_reasoning"
+                }
+            },
+        )
+
+    await execute(
+        runtime,
+        first,
+        first_model,
+        definitions=(definition,),
+        handlers={"lookup": lookup},
+    )
+
+    assert first_model.requests[1].messages[-2].provider_state == state
+    assert first_model.requests[1].messages[-1].metadata[
+        "context_reference"
+    ]["uri"] == "artifact://tool-result/call_reasoning"
+    second = await runtime.start_run(
+        command("follow up", "state-second", session_id=first.session_id),
+        CONTEXT,
+    )
+    second_model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("again"),)),)
+    )
+    await execute(runtime, second, second_model)
+    replayed = next(
+        message
+        for message in second_model.requests[0].messages
+        if message.tool_calls
+        and message.tool_calls[0].tool_call_id == "call_reasoning"
+    )
+    assert replayed.provider_state == state
+    replayed_tool = next(
+        message
+        for message in second_model.requests[0].messages
+        if message.role == "tool" and message.tool_call_id == "call_reasoning"
+    )
+    assert replayed_tool.metadata["context_reference"]["uri"] == (
+        "artifact://tool-result/call_reasoning"
+    )
 
 
 @pytest.mark.asyncio

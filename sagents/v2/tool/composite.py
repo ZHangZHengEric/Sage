@@ -175,6 +175,7 @@ class CompositeToolCatalog:
 class RoutedToolExecutor:
     def __init__(self, routes: Mapping[str, ToolExecutor]) -> None:
         self._routes = dict(routes)
+        self._operation_routes: dict[str, ToolExecutor] = {}
 
     async def execute(
         self, call: ToolCall, context: RequestContext
@@ -188,7 +189,23 @@ class RoutedToolExecutor:
                     message=f"tool {call.tool_name!r} has no execution route",
                 )
             )
+        self._operation_routes[call.operation_id] = executor
         return await executor.execute(call, context)
+
+    async def cancel(self, operation_id: str, context: RequestContext):
+        from sagents.v2.tool.contracts import (
+            ToolCancellationResult,
+            ToolCancellationState,
+        )
+
+        executor = self._operation_routes.get(operation_id)
+        cancel = getattr(executor, "cancel", None)
+        if not callable(cancel):
+            return ToolCancellationResult(
+                operation_id=operation_id,
+                state=ToolCancellationState.NOT_SUPPORTED,
+            )
+        return await cancel(operation_id, context)
 
     async def reconcile(
         self, operation_id: str, context: RequestContext
@@ -214,15 +231,19 @@ class CompositeToolExecutor:
 
     def __init__(self, executors: tuple[ToolExecutor, ...]) -> None:
         self._executors = executors
+        self._operation_routes: dict[str, ToolExecutor] = {}
 
     async def execute(self, call: ToolCall, context: RequestContext):
         last_missing = None
         for executor in self._executors:
+            self._operation_routes[call.operation_id] = executor
             try:
                 return await executor.execute(call, context)
             except SageV2Error as exc:
                 if exc.info.code != "tool.not_found":
                     raise
+                if self._operation_routes.get(call.operation_id) is executor:
+                    self._operation_routes.pop(call.operation_id, None)
                 last_missing = exc
         if last_missing is not None:
             raise last_missing
@@ -233,6 +254,21 @@ class CompositeToolExecutor:
                 message=f"tool {call.tool_name!r} has no execution provider",
             )
         )
+
+    async def cancel(self, operation_id: str, context: RequestContext):
+        from sagents.v2.tool.contracts import (
+            ToolCancellationResult,
+            ToolCancellationState,
+        )
+
+        executor = self._operation_routes.get(operation_id)
+        cancel = getattr(executor, "cancel", None)
+        if not callable(cancel):
+            return ToolCancellationResult(
+                operation_id=operation_id,
+                state=ToolCancellationState.NOT_SUPPORTED,
+            )
+        return await cancel(operation_id, context)
 
     async def reconcile(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import ReconcileState

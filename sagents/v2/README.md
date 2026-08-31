@@ -156,6 +156,15 @@ Completions, and Anthropic Messages. A model route in `sage.yaml` chooses the
 protocol, endpoint, model, capabilities, and credential reference. Secrets are
 resolved by the host and are not stored in the package.
 
+Provider-native continuation data is kept in a JSON-safe, protocol-namespaced
+`provider_state` on assistant Items. The matching adapter replays OpenAI
+reasoning items, Anthropic thinking/signature blocks, or compatible-provider
+reasoning details after Tool calls without exposing them as user-visible text.
+The envelope is intentionally opaque to the Agent loop. New state uses a
+versioned protocol namespace and a bounded JSON contract; legacy unversioned
+state remains replayable by the matching adapter. Unknown versions fail closed,
+and another protocol never consumes a foreign namespace.
+
 ### Tools and skills
 
 A tool provider exposes two paired interfaces: a catalog for model-visible
@@ -173,6 +182,16 @@ The Context assembler converts canonical Session history into a provider
 request. A reducer may remove old conversation units or replace a verified
 prefix with a summary to fit the model window. This never deletes the original
 Session history.
+
+Tool schemas, hidden-tool indexes, continuation guidance, and fixed provider
+overhead are non-compressible request reservations. Reducers see only canonical
+compressible context; after reduction, the runtime appends reserved content and
+validates the final request size. Summary output must be smaller than the exact
+compressible source it replaces.
+
+Oversized indivisible Tool units use the `context.unit-compactor` port. The
+built-in implementation accepts only a durable `context_reference` supplied by
+the Tool and persisted in Session history; no reference means no truncation.
 
 ### Memory
 
@@ -219,6 +238,14 @@ startup; migrate explicitly with `sage v2 migrate --runtime-root <path>`.
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
 workers, stores, diagnostics, and protocol adapters until `close()`.
+Its immutable `resolved_plan` reports the final capability bindings, plugin or
+host source, scopes, API versions, dependency edges, and composition hash
+without exposing raw configuration or credentials.
+
+The optional filesystem Scheduler persists pending work, leases, and fencing
+counters for single-host restart recovery. Queued work can be redispatched;
+uncheckpointed running work fails explicitly instead of being replayed. This
+does not claim a distributed scheduler or a durable JobRuntime.
 
 ## Extending V2
 
@@ -237,8 +264,18 @@ Production plugins can be published through the `sage.extensions` Python entry
 point group. Direct registration and direct provider injection are useful for
 tests or hosts that already own a client connection.
 
-Contracts, the Kernel, policies, and orchestration services are framework
-semantics rather than plugins.
+Contracts, legal lifecycle transitions, canonical event ordering, and the
+orchestration protocol are framework semantics rather than plugins. Policies
+with stable ports, such as continuation, Tool selection, and Context reduction,
+may be plugins, but they cannot change those runtime invariants.
+
+The extension kernel supports dependency resolution, API versions,
+configuration validation, scoped lifetimes, startup rollback, and reverse-order
+shutdown. Generic and Desktop paths use the same Agent composer, and manifest
+Context/continuation selections are consumed by the Builder. Internally the
+Builder may open multiple lifetime scopes; `resolved_plan` is the single final
+composition fact exposed to hosts. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for
+the dependency and lifecycle rules.
 
 ## Source map
 

@@ -11,6 +11,7 @@ from sagents.v2.context import (
     InMemoryConversationSummaryStore,
     JsonHeuristicTokenEstimator,
     PersistentSummaryContextReducer,
+    ContextReducer,
     TokenEstimator,
     WindowContextReducer,
 )
@@ -36,9 +37,13 @@ class ContextComponentBundle:
     protected_recent_units: int = 4
     max_summary_source_tokens: int = 24_000
     reducer_id: str = "persistent-summary"
+    reducer: ContextReducer | None = None
 
     def create_reducer(self):
         """Create the selected reducer while sharing its host-owned components."""
+
+        if self.reducer is not None:
+            return self.reducer
 
         if self.reducer_id == "window":
             return WindowContextReducer(self.token_estimator)

@@ -6,10 +6,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName
 from sagents.v2.contracts.errors import RuntimeErrorInfo
+from sagents.v2.contracts.provider_state import validate_provider_state
 
 
 class Visibility(str, Enum):
@@ -80,6 +81,11 @@ class MessageItemData(StrictModel):
     role: Literal["user", "assistant", "system", "developer", "tool"]
     content: tuple[ContentBlock, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
+    provider_state: dict[str, Any] = Field(default_factory=dict)
+
+    _validate_provider_state = field_validator("provider_state")(
+        validate_provider_state
+    )
 
 
 class ReasoningItemData(StrictModel):
@@ -101,6 +107,7 @@ class ToolResultItemData(StrictModel):
     tool_call_id: Identifier
     content: tuple[ContentBlock, ...] = ()
     error: RuntimeErrorInfo | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ActivityItemData(StrictModel):

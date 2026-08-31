@@ -41,7 +41,35 @@ class ContextSegmentProvider(Protocol):
 class ContextBudget(StrictModel):
     max_input_tokens: int = Field(gt=0)
     reserve_output_tokens: int = Field(default=0, ge=0)
+    reserve_input_tokens: int = Field(default=0, ge=0)
     max_messages: int | None = Field(default=None, gt=0)
+
+
+class ContextRequestReservation(StrictModel):
+    """Final-request space that is not part of the reducible conversation.
+
+    Tool schemas and runtime-only suffix messages are selected by the Agent step
+    builder, after canonical history has been assembled. Reserving their space
+    lets reducers fit the conversation against the request that will actually be
+    sent instead of only the message prefix they happen to receive.
+    """
+
+    tool_schema_tokens: int = Field(default=0, ge=0)
+    hidden_tool_index_tokens: int = Field(default=0, ge=0)
+    continuation_guidance_tokens: int = Field(default=0, ge=0)
+    protocol_overhead_tokens: int = Field(default=0, ge=0)
+    message_count: int = Field(default=0, ge=0)
+
+    @property
+    def input_tokens(self) -> int:
+        """Total non-compressible input reserved outside the reducer."""
+
+        return (
+            self.tool_schema_tokens
+            + self.hidden_tool_index_tokens
+            + self.continuation_guidance_tokens
+            + self.protocol_overhead_tokens
+        )
 
 
 class ContextProjection(StrictModel):
@@ -88,3 +116,11 @@ class ContextReducer(Protocol):
         *,
         scope: ContextReductionScope | None = None,
     ) -> ContextProjection: ...
+
+
+class ContextUnitCompactor(Protocol):
+    """Replace one indivisible unit without changing canonical Session facts."""
+
+    async def compact(
+        self, unit: tuple[ModelMessage, ...]
+    ) -> tuple[ModelMessage, ...] | None: ...

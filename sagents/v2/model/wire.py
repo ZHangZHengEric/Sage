@@ -28,6 +28,21 @@ def wire_value(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
+def wire_json_value(value: Any) -> Any:
+    """Convert SDK wire objects to JSON-safe provider continuation state."""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): wire_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [wire_json_value(item) for item in value]
+    dumper = getattr(value, "model_dump", None)
+    if callable(dumper):
+        return wire_json_value(dumper(mode="json", exclude_none=True))
+    raise TypeError(f"provider wire value is not JSON serializable: {type(value)!r}")
+
+
 def compact_json(value: Any) -> str:
     """Serialize provider arguments deterministically without ASCII escaping."""
 
@@ -78,16 +93,50 @@ def parse_tool_arguments(
     )
 
 
-def provider_error(exc: Exception) -> SageV2Error:
+_CONTEXT_WINDOW_MARKERS = (
+    "context_length_exceeded",
+    "context window exceeded",
+    "maximum context length",
+    "prompt is too long",
+    "input is too long",
+    "too many tokens",
+)
+
+
+def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2Error:
     """Classify common HTTP/SDK failures without exposing credential material."""
 
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
+    details = " ".join(
+        str(value)
+        for value in (
+            exc,
+            getattr(exc, "code", None),
+            getattr(exc, "body", None),
+        )
+        if value is not None
+    ).lower()
+    context_overflow = status in {400, 413, 422} and any(
+        marker in details for marker in _CONTEXT_WINDOW_MARKERS
+    )
     retryable = status in {408, 409, 425, 429} or (
         isinstance(status, int) and status >= 500
     )
+    if context_overflow:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="model.context_window_exceeded",
+                category=ErrorCategory.VALIDATION,
+                message="provider rejected the final request as exceeding its context window",
+                retryable=not response_started,
+                safe_to_resume=True,
+                provider_code=str(status),
+                metadata={"response_started": response_started},
+            )
+        )
     return SageV2Error(
         RuntimeErrorInfo(
             code="model.provider_transient"

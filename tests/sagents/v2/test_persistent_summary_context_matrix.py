@@ -38,6 +38,11 @@ class RecordingSummarizer:
         return f"summary({labels}){previous}"
 
 
+class ExpandingSummarizer:
+    async def summarize(self, request: SummarizationRequest) -> str:
+        return "expanded summary " * 2_000
+
+
 def scope(context_key="session_1"):
     return ContextReductionScope(
         context_key=context_key,
@@ -163,6 +168,102 @@ async def test_stateful_reducer_requires_explicit_session_run_scope():
     with pytest.raises(SageV2Error) as caught:
         await reducer.reduce(ledger(), ContextBudget(max_input_tokens=100_000))
     assert caught.value.info.code == "context.summary_scope_required"
+
+
+@pytest.mark.asyncio
+async def test_summary_must_reduce_only_the_selected_compressible_content():
+    store = InMemoryConversationSummaryStore()
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=ExpandingSummarizer(),
+        protected_recent_units=1,
+    )
+    source = (
+        ModelMessage(role="user", content=(TextBlock(text="old " * 400),)),
+        ModelMessage(role="assistant", content=(TextBlock(text="answer " * 400),)),
+        ModelMessage(role="user", content=(TextBlock(text="latest request"),)),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await reducer.reduce(
+            source,
+            ContextBudget(
+                max_input_tokens=2_000,
+                reserve_input_tokens=900,
+                max_messages=2,
+            ),
+            scope=scope(),
+        )
+
+    assert caught.value.info.code == "context.summary_not_reducing"
+    assert await store.get("session_1") is None
+
+
+@pytest.mark.asyncio
+async def test_latest_real_user_and_everything_after_it_are_never_summarized():
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=RecordingSummarizer(),
+        protected_recent_units=1,
+    )
+    source = (
+        ModelMessage(
+            role="user", content=(TextBlock(text="old question " * 100),)
+        ),
+        ModelMessage(
+            role="assistant", content=(TextBlock(text="old answer " * 100),)
+        ),
+        ModelMessage(role="user", content=(TextBlock(text="latest question"),)),
+        ModelMessage(role="assistant", content=(TextBlock(text="draft response"),)),
+    )
+
+    projection = await reducer.reduce(
+        source,
+        ContextBudget(max_input_tokens=100_000, max_messages=3),
+        scope=scope(),
+    )
+
+    assert projection.historical_messages == source[:2]
+    assert [message.content[0].text for message in projection.messages[-2:]] == [
+        "latest question",
+        "draft response",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_oversized_protected_tool_unit_uses_explicit_durable_reference():
+    call = ModelToolCall(tool_call_id="call_large", name="read_large", arguments={})
+    source = (
+        ModelMessage(role="user", content=(TextBlock(text="inspect it"),)),
+        ModelMessage(role="assistant", tool_calls=(call,)),
+        ModelMessage(
+            role="tool",
+            tool_call_id="call_large",
+            content=(TextBlock(text="large output " * 2_000),),
+            metadata={
+                "context_reference": {
+                    "uri": "artifact://tool-result/call_large",
+                    "digest": "sha256:large",
+                }
+            },
+        ),
+    )
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(), protected_recent_units=2
+    )
+
+    projection = await reducer.reduce(
+        source,
+        ContextBudget(max_input_tokens=300),
+        scope=scope(),
+    )
+
+    assert projection.strategy == "reference_compaction"
+    assert projection.historical_messages == (source[-1],)
+    assert projection.messages[-1].metadata["context_compacted_to_reference"]
+    assert "artifact://tool-result/call_large" in (
+        projection.messages[-1].content[0].text
+    )
 
 
 def _summary_completion(text: str) -> ModelStreamEvent:

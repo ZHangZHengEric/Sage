@@ -36,8 +36,12 @@ from app.desktop_v2.backend.shell_policy import (
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.tool.localization import localize_tool_definition
 from app.desktop_v2.backend.session_index import JsonDesktopSessionIndex
-from sagents.v2 import SAgent, SAgentApplication
-from sagents.v2.agent import AgentLoopEngine
+from sagents.v2 import (
+    ResolvedApplicationPlan,
+    ResolvedProviderBinding,
+    SAgent,
+    SAgentApplication,
+)
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
@@ -144,6 +148,7 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemMode,
     FileOperation,
     FileSystemPolicy,
+    IsolationLevel,
     NetworkPolicy,
     OperationIntent,
     ProcessPolicy,
@@ -180,6 +185,16 @@ from app.desktop_v2.backend.observability import create_desktop_log_sink
 
 
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_PLAN_BLOCKED_TOOLS = frozenset(
+    {
+        "apply_patch",
+        "await_shell",
+        "execute_shell_command",
+        "file_update",
+        "file_write",
+        "kill_shell",
+    }
+)
 LOGGER = logging.getLogger(__name__)
 _ACTIVE_EXTENSION_SCOPE_HANDLES: ContextVar[list[Any] | None] = ContextVar(
     "desktop_v2_active_extension_scope_handles", default=None
@@ -386,6 +401,10 @@ _CONTINUATION_COMPONENT_CHOICES = (
     "sage.agent.continuation.llm-judge",
     "sage.agent.continuation.deterministic",
 )
+
+
+def _desktop_component_scope(capability: str) -> str:
+    return str(_DESKTOP_COMPONENTS.get(capability, {}).get("scope", "process"))
 
 
 def _continuation_component_config(plugin_id: str) -> dict[str, Any]:
@@ -2858,6 +2877,9 @@ class DesktopV2Service:
                 facade,
                 agent_id=request.agent_id,
                 composition_hash=command.resolved_spec_hash,
+                component_snapshot=command.config.metadata.get(
+                    "runtime_components"
+                ),
             )
             stream = await application.entrypoint().schedule_accepted_run(
                 accepted_handle, context
@@ -3224,6 +3246,7 @@ class DesktopV2Service:
             facade,
             agent_id=command.agent_id,
             composition_hash=command.resolved_spec_hash,
+            component_snapshot=command.config.metadata.get("runtime_components"),
         )
         task = await application.entrypoint().continue_run(
             run_id,
@@ -3254,9 +3277,54 @@ class DesktopV2Service:
         *,
         agent_id: str,
         composition_hash: str,
+        component_snapshot: dict[str, Any] | None = None,
     ) -> SAgentApplication:
         """Expose every Desktop Run through the shared Application boundary."""
 
+        selections = {
+            **_DESKTOP_COMPONENT_DEFAULTS,
+            **dict((component_snapshot or {}).get("selections") or {}),
+        }
+        providers = {
+            ResolvedProviderBinding(
+                capability=capability,
+                name="default",
+                api_version="2",
+                plugin_id=str(plugin_id),
+                scope=_desktop_component_scope(capability),
+                source="plugin",
+            )
+            for capability, plugin_id in selections.items()
+        }
+        for capability, scope in (
+            ("session.store", "process"),
+            ("model.provider", "agent"),
+            ("tool.catalog", "run"),
+            ("tool.executor", "run"),
+            ("execution.dispatcher", "process"),
+            ("observability.diagnostic-sink", "process"),
+            ("observability.log-sink", "process"),
+        ):
+            if any(value.capability == capability for value in providers):
+                continue
+            providers.add(
+                ResolvedProviderBinding(
+                    capability=capability,
+                    name="default",
+                    api_version="2",
+                    plugin_id=None,
+                    scope=scope,
+                    source="desktop-host",
+                )
+            )
+        resolved_plan = ResolvedApplicationPlan(
+            package_id=f"desktop.{agent_id}",
+            manifest_hash=composition_hash,
+            entrypoint_agent_id=agent_id,
+            providers=tuple(sorted(providers)),
+            dependencies=(),
+            composition_hash=composition_hash,
+        )
         return SAgentApplication(
             agents={agent_id: agent},
             entrypoint_agent_id=agent_id,
@@ -3268,6 +3336,7 @@ class DesktopV2Service:
             },
             adapters={},
             composition_hash=composition_hash,
+            resolved_plan=resolved_plan,
         )
 
     def _schedule_application_close(self, application: SAgentApplication) -> None:
@@ -3694,6 +3763,14 @@ class DesktopV2Service:
         process_enabled = bool(
             sandbox_config.get("process_enabled", capabilities.process.available)
         )
+        # The bundled local-workspace provider reports IsolationLevel.NONE.
+        # Plan mode must be genuinely read-only, so do not expose host process
+        # execution when no enforceable OS isolation boundary exists.
+        if (
+            invocation_mode == "plan"
+            and capabilities.isolation_level == IsolationLevel.NONE
+        ):
+            process_enabled = False
         if process_enabled and not capabilities.process.available:
             raise ValueError("sandbox process execution is unsupported by the provider")
         fingerprint_source = json.dumps(
@@ -3841,6 +3918,10 @@ class DesktopV2Service:
                     continuation_plugin_id == "sage.agent.continuation.llm-judge"
                     and value == "turn_status"
                 )
+                and not (
+                    invocation_mode == "plan"
+                    and value in _PLAN_BLOCKED_TOOLS
+                )
             ),
             skills=tuple(valid_skills),
             allow_delegation=not force_leaf,
@@ -3872,6 +3953,10 @@ class DesktopV2Service:
                 and not (
                     continuation_plugin_id == "sage.agent.continuation.llm-judge"
                     and value == "turn_status"
+                )
+                and not (
+                    invocation_mode == "plan"
+                    and value in _PLAN_BLOCKED_TOOLS
                 )
             )
             member_skills = tuple(
@@ -3972,6 +4057,19 @@ class DesktopV2Service:
             member_descriptors.extend(
                 value for value in dynamic_members if value.agent_id not in existing_ids
             )
+        if invocation_mode == "plan":
+            member_descriptors = [
+                value.model_copy(
+                    update={
+                        "tools": tuple(
+                            tool
+                            for tool in value.tools
+                            if tool not in _PLAN_BLOCKED_TOOLS
+                        )
+                    }
+                )
+                for value in member_descriptors
+            ]
 
         member_registry = AgentRegistry(tuple(member_descriptors))
 
@@ -4016,8 +4114,7 @@ class DesktopV2Service:
                     continuation_policy,
                     goal_state_service,
                 )
-            return AgentLoopEngine(
-                runtime=self.driver_runtime,
+            return factory.create_engine(
                 model=models_by_agent.get(descriptor.agent_id, recording_model),
                 tool_catalog=catalog,
                 tool_executor=executor,
@@ -4472,12 +4569,20 @@ class DesktopV2Service:
             "goal": ("goal_submit", "goal_complete"),
         }.get(request.invocation_mode, ())
         if invocation_grants:
+            base_tools = tuple(
+                name
+                for name in run_config.enabled_tools
+                if not (
+                    request.invocation_mode == "plan"
+                    and name in _PLAN_BLOCKED_TOOLS
+                )
+            )
             enabled_tools = (
-                *run_config.enabled_tools,
+                *base_tools,
                 *(
                     name
                     for name in invocation_grants
-                    if name not in run_config.enabled_tools
+                    if name not in base_tools
                 ),
             )
             run_config = run_config.model_copy(

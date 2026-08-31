@@ -27,6 +27,7 @@ from sagents.v2.context import (
     JsonHeuristicTokenEstimator,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
+    ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
     TiktokenTokenEstimator,
     UnicodeHeuristicTokenEstimator,
@@ -48,7 +49,10 @@ from sagents.v2.runtime.execution.sandbox import (
     InMemorySandboxProvider,
     LocalWorkspaceSandboxProvider,
 )
-from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.runtime.execution.scheduler import (
+    FilesystemScheduler,
+    InMemoryScheduler,
+)
 from sagents.v2.runtime.observability import (
     FilesystemDiagnosticSink,
     FilesystemLogSink,
@@ -267,6 +271,16 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
+        "sage.context.unit-compactor.reference",
+        "Durable-reference context unit compactor",
+        "context.unit-compactor",
+        lambda context, dependencies: ReferenceContextUnitCompactor(
+            context.config.get("estimator")
+        ),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+    )
+    _one(
+        registry,
         "sage.context.reducer.window",
         "Window context reducer",
         "context.reducer",
@@ -291,6 +305,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             max_summary_source_tokens=int(
                 context.config.get("max_summary_source_tokens", 24000)
             ),
+            unit_compactor=context.config.get("unit_compactor"),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
     )
@@ -342,6 +357,31 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             max_pending_items=int(context.config.get("max_pending_items", 1024))
         ),
         scopes={ExtensionScope.PROCESS},
+        config_schema=_scheduler_config_schema(durable=False),
+        capabilities={
+            "durable_across_process_restart": False,
+            "multi_process_writes": False,
+            "supports_leases": True,
+            "supports_fencing": True,
+        },
+    )
+    _one(
+        registry,
+        "sage.scheduler.filesystem",
+        "Filesystem durable scheduler",
+        "execution.scheduler",
+        lambda context, dependencies: FilesystemScheduler(
+            context.config["root"],
+            max_pending_items=int(context.config.get("max_pending_items", 1024)),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        config_schema=_scheduler_config_schema(durable=True),
+        capabilities={
+            "durable_across_process_restart": True,
+            "multi_process_writes": False,
+            "supports_leases": True,
+            "supports_fencing": True,
+        },
     )
     _one(
         registry,
@@ -538,6 +578,8 @@ def _one(
     provider_name: str = "default",
     multi_provider: bool = False,
     availability: ExtensionAvailability | None = None,
+    config_schema: dict | None = None,
+    capabilities: dict | None = None,
 ) -> None:
     registry.register(
         ExtensionRegistration(
@@ -554,12 +596,33 @@ def _one(
                     ),
                 ),
                 supported_scopes=frozenset(scopes),
+                config_schema=config_schema or {},
+                capabilities=capabilities or {},
                 availability=availability or ExtensionAvailability(),
                 built_in=True,
             ),
             factory=factory,
         )
     )
+
+
+def _scheduler_config_schema(*, durable: bool) -> dict:
+    properties = {
+        "max_pending_items": {"type": "integer", "minimum": 1},
+        "max_concurrent_runs": {"type": "integer", "minimum": 1},
+        "max_concurrent_runs_per_tenant": {"type": "integer", "minimum": 1},
+        "lease_seconds": {"type": "number", "exclusiveMinimum": 0},
+    }
+    required = []
+    if durable:
+        properties["root"] = {"type": "string", "minLength": 1}
+        required.append("root")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
 
 
 def _bytes(value) -> bytes:

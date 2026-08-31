@@ -21,11 +21,13 @@ from sagents.v2.context.contracts import (
     ContextPlacement,
     ContextProjection,
     ContextProjectionObserver,
+    ContextRequestReservation,
     ContextReductionScope,
     ContextReducer,
     ContextSegment,
     ContextSegmentProvider,
     ContextStability,
+    ContextUnitCompactor,
 )
 from sagents.v2.context.persistent_reducer import (
     PersistentSummaryContextReducer,
@@ -46,6 +48,7 @@ from sagents.v2.context.session_history import (
     SessionHistoryReader,
 )
 from sagents.v2.context.runtime_metadata import RunMetadataContextProvider
+from sagents.v2.context.unit_compactor import ReferenceContextUnitCompactor
 
 __all__ = [
     "ContextAssembler",
@@ -53,11 +56,13 @@ __all__ = [
     "ContextPlacement",
     "ContextProjection",
     "ContextProjectionObserver",
+    "ContextRequestReservation",
     "ContextReducer",
     "ContextReductionScope",
     "ContextSegment",
     "ContextSegmentProvider",
     "ContextStability",
+    "ContextUnitCompactor",
     "DefaultContextAssembler",
     "ConversationSummarizer",
     "ConversationSummary",
@@ -79,5 +84,6 @@ __all__ = [
     "SessionHistoryLedgerBuilder",
     "SessionHistoryReader",
     "RunMetadataContextProvider",
+    "ReferenceContextUnitCompactor",
     "WindowContextReducer",
 ]

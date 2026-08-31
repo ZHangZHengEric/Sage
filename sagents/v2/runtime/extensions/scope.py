@@ -44,7 +44,8 @@ class ExtensionScopeHandle:
         if self._closed:
             return
         errors = []
-        for value in reversed(self._started):
+        pending_started = list(reversed(self._started))
+        for index, value in enumerate(pending_started):
             try:
                 if value.registration.stop is not None:
                     result = value.registration.stop(value.instance, reason)
@@ -59,12 +60,27 @@ class ExtensionScopeHandle:
                     await result
             except Exception as exc:
                 errors.append(exc)
-        for handle in reversed(self._owned_ancestors):
-            try:
-                await handle.close(reason)
-            except Exception as exc:
-                errors.append(exc)
-        self._closed = True
+                # Do not tear down dependencies below a component whose stop
+                # failed. Keep the failure and all unattempted components for
+                # an ordered retry.
+                self._started = list(reversed(pending_started[index:]))
+                break
+        else:
+            self._started = []
+        if not self._started:
+            pending_ancestors = list(reversed(self._owned_ancestors))
+            for index, handle in enumerate(pending_ancestors):
+                try:
+                    await handle.close(reason)
+                except Exception as exc:
+                    errors.append(exc)
+                    self._owned_ancestors = tuple(
+                        reversed(pending_ancestors[index:])
+                    )
+                    break
+            else:
+                self._owned_ancestors = ()
+        self._closed = not self._started and not self._owned_ancestors
         if errors:
             raise ExtensionStopError(tuple(errors)) from errors[0]
 

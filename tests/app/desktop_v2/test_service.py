@@ -130,6 +130,48 @@ async def test_desktop_composition_hash_includes_component_selection_and_config(
 
 
 @pytest.mark.asyncio
+async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path):
+    service = DesktopV2Service(tmp_path)
+
+    class Agent:
+        async def close(self):
+            return None
+
+    application = service._run_application(
+        Agent(),
+        agent_id="agent_1",
+        composition_hash="sha256:desktop-plan",
+        component_snapshot={
+            "selections": {
+                "context.reducer": "sage.context.reducer.window"
+            }
+        },
+    )
+    bindings = {
+        (value.capability, value.plugin_id, value.scope, value.source)
+        for value in application.resolved_plan.providers
+    }
+
+    assert application.resolved_plan.package_id == "desktop.agent_1"
+    assert application.resolved_plan.composition_hash == "sha256:desktop-plan"
+    assert (
+        "context.reducer",
+        "sage.context.reducer.window",
+        "tenant",
+        "plugin",
+    ) in bindings
+    assert (
+        "agent.continuation-policy",
+        "sage.agent.continuation.deterministic",
+        "run",
+        "plugin",
+    ) in bindings
+    assert ("model.provider", None, "agent", "desktop-host") in bindings
+    await application.close()
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_workspace_initializer_reuses_agent_scope(tmp_path: Path):
     service = DesktopV2Service(tmp_path / "sage")
     settings = await service.get_settings()
@@ -1734,8 +1776,8 @@ async def test_plan_mode_is_a_read_only_run_contract(tmp_path: Path):
 
     assert "file_read" in command.config.enabled_tools
     assert "todo_write" in command.config.enabled_tools
-    assert "file_write" in command.config.enabled_tools
-    assert "execute_shell_command" in command.config.enabled_tools
+    assert "file_write" not in command.config.enabled_tools
+    assert "execute_shell_command" not in command.config.enabled_tools
     assert "goal_submit" in command.config.enabled_tools
     roster = next(
         value
@@ -1748,8 +1790,8 @@ async def test_plan_mode_is_a_read_only_run_contract(tmp_path: Path):
         if value.agent_id == member["id"]
     )
     assert "file_read" in member_descriptor.tools
-    assert "file_write" in member_descriptor.tools
-    assert "execute_shell_command" in member_descriptor.tools
+    assert "file_write" not in member_descriptor.tools
+    assert "execute_shell_command" not in member_descriptor.tools
     assert command.config.metadata["invocation_mode"] == "plan"
     assert command.invocation_mode == "plan"
     await sandbox.close()

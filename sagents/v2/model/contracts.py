@@ -9,6 +9,7 @@ from pydantic import Field, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName, VerbatimText
 from sagents.v2.contracts.items import ContentBlock, UsageSummary
+from sagents.v2.contracts.provider_state import validate_provider_state
 
 
 class ModelEventKind(str, Enum):
@@ -36,6 +37,14 @@ class ModelMessage(StrictModel):
     tool_call_id: Identifier | None = None
     tool_calls: tuple["ModelToolCall", ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Opaque, JSON-serializable continuation material partitioned by wire
+    # protocol. It is not rendered to users and a provider may only consume its
+    # own namespace.
+    provider_state: dict[str, Any] = Field(default_factory=dict)
+
+    _validate_provider_state = field_validator("provider_state")(
+        validate_provider_state
+    )
 
     @model_validator(mode="after")
     def validate_tool_message(self) -> "ModelMessage":
@@ -106,6 +115,11 @@ class ModelResponse(StrictModel):
     finish_reason: str
     usage: UsageSummary = Field(default_factory=UsageSummary)
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    provider_state: dict[str, Any] = Field(default_factory=dict)
+
+    _validate_provider_state = field_validator("provider_state")(
+        validate_provider_state
+    )
 
 
 class ModelStreamEvent(StrictModel):

@@ -317,7 +317,30 @@ class HarnessRuntime:
                         safe_to_resume=False,
                     )
                 )
-            await self.job_runtime.handle_run_pause(run_id)
+            try:
+                await self.job_runtime.handle_run_pause(run_id)
+            except asyncio.CancelledError:
+                # The durable prepare cannot be left as a pseudo-terminal
+                # state when the local driver is cancelled mid-pause.
+                settlement = asyncio.create_task(
+                    self._fail_job_pause(
+                        run_id=run_id,
+                        expected_revision=expected_revision,
+                        context=context,
+                        idempotency_key=idempotency_key,
+                        exc=RuntimeError("job pause was cancelled"),
+                    )
+                )
+                await asyncio.shield(settlement)
+                raise
+            except Exception as exc:
+                return await self._fail_job_pause(
+                    run_id=run_id,
+                    expected_revision=expected_revision,
+                    context=context,
+                    idempotency_key=idempotency_key,
+                    exc=exc,
+                )
 
         drafts: list[EventDraft] = [
             EventDraft(
@@ -365,6 +388,32 @@ class HarnessRuntime:
             interaction=interaction,
         )
         return result.run
+
+    async def _fail_job_pause(
+        self,
+        *,
+        run_id: str,
+        expected_revision: int,
+        context: RequestContext,
+        idempotency_key: str,
+        exc: Exception,
+    ) -> RunSnapshot:
+        """Settle a durably prepared pause when the Job backend fails."""
+
+        return await self.fail_run(
+            run_id=run_id,
+            expected_revision=expected_revision,
+            error=RuntimeErrorInfo(
+                code="job.pause_failed",
+                category=ErrorCategory.RESOURCE_LOST,
+                message=f"failed to pause Run jobs: {exc}",
+                retryable=True,
+                safe_to_resume=False,
+                metadata={"exception_type": type(exc).__name__},
+            ),
+            context=context,
+            idempotency_key=f"{idempotency_key}:job-pause-failed",
+        )
 
     async def resume_run(
         self, command: ResumeRun, context: RequestContext

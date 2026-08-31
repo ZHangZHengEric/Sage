@@ -18,11 +18,13 @@ from sagents.v2.contracts.items import (
     TextBlock,
     UsageSummary,
 )
+from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.model.wire import (
     compact_json,
     parse_tool_arguments,
     provider_error,
+    wire_json_value,
     wire_value,
 )
 from sagents.v2.model.contracts import (
@@ -117,6 +119,8 @@ class OpenAIResponsesModelProvider:
             payload["top_p"] = self.config.default_top_p
         if self.config.reasoning_effort is not None:
             payload["reasoning"] = {"effort": self.config.reasoning_effort}
+            if not self.config.store:
+                payload["include"] = ["reasoning.encrypted_content"]
         if request.response_format == "json_object":
             payload["text"] = {"format": {"type": "json_object"}}
         elif request.response_schema is not None:
@@ -141,6 +145,8 @@ class OpenAIResponsesModelProvider:
         finish_reason = "completed"
         usage = UsageSummary(models=(self.config.model,))
         tool_fragments: dict[str, dict[str, str]] = {}
+        reasoning_items: dict[str, dict[str, Any]] = {}
+        response_started = False
         try:
             upstream = await self._client.responses.create(**payload)
             async for event in upstream:
@@ -148,6 +154,7 @@ class OpenAIResponsesModelProvider:
                 if event_type == "response.output_text.delta":
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
+                        response_started = True
                         text += delta
                         yield ModelStreamEvent(
                             kind=ModelEventKind.TEXT_DELTA, delta=delta
@@ -159,14 +166,21 @@ class OpenAIResponsesModelProvider:
                 }:
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
+                        response_started = True
                         reasoning += delta
                         yield ModelStreamEvent(
                             kind=ModelEventKind.REASONING_DELTA, delta=delta
                         )
                     continue
                 if event_type == "response.output_item.added":
+                    item = wire_value(event, "item")
+                    if wire_value(item, "type") in {"function_call", "reasoning"}:
+                        response_started = True
+                    self._record_reasoning_item(
+                        reasoning_items, item
+                    )
                     self._record_tool_item(
-                        tool_fragments, wire_value(event, "item"), replace=False
+                        tool_fragments, item, replace=False
                     )
                     continue
                 if event_type == "response.function_call_arguments.delta":
@@ -177,6 +191,9 @@ class OpenAIResponsesModelProvider:
                     fragment["arguments"] += str(wire_value(event, "delta", "") or "")
                     continue
                 if event_type == "response.output_item.done":
+                    self._record_reasoning_item(
+                        reasoning_items, wire_value(event, "item")
+                    )
                     self._record_tool_item(
                         tool_fragments, wire_value(event, "item"), replace=True
                     )
@@ -198,6 +215,8 @@ class OpenAIResponsesModelProvider:
                         )
                     raw_usage = wire_value(response, "usage")
                     usage = self._usage(raw_usage)
+                    for item in wire_value(response, "output", ()) or ():
+                        self._record_reasoning_item(reasoning_items, item)
                     continue
                 if event_type in {"response.failed", "error"}:
                     error = wire_value(event, "error") or wire_value(
@@ -211,7 +230,7 @@ class OpenAIResponsesModelProvider:
 
             if isinstance(exc, SageV2Error):
                 raise
-            raise provider_error(exc) from exc
+            raise provider_error(exc, response_started=response_started) from exc
         finally:
             if upstream is not None:
                 await self._close_stream(upstream)
@@ -238,6 +257,12 @@ class OpenAIResponsesModelProvider:
                     "model": self.config.model,
                     "api": "responses",
                 },
+                provider_state=make_provider_state(
+                    "openai_responses",
+                    {"reasoning_items": list(reasoning_items.values())},
+                )
+                if reasoning_items
+                else {},
             ),
         )
 
@@ -300,6 +325,22 @@ class OpenAIResponsesModelProvider:
                     }
                 )
                 continue
+            replayed_reasoning = False
+            if message.role == "assistant":
+                state = read_provider_state(
+                    message.provider_state, "openai_responses"
+                )
+                if state is not None:
+                    reasoning_items = state.get("reasoning_items")
+                    if isinstance(reasoning_items, list):
+                        replay = [
+                            dict(item)
+                            for item in reasoning_items
+                            if isinstance(item, dict)
+                            and item.get("type") == "reasoning"
+                        ]
+                        items.extend(replay)
+                        replayed_reasoning = bool(replay)
             if message.tool_calls:
                 if message.content:
                     items.append(cls._message_item(message))
@@ -312,6 +353,8 @@ class OpenAIResponsesModelProvider:
                     }
                     for call in message.tool_calls
                 )
+                continue
+            if replayed_reasoning and not message.content:
                 continue
             items.append(cls._message_item(message))
         return items
@@ -391,6 +434,22 @@ class OpenAIResponsesModelProvider:
             current["name"] = name
         if arguments and (replace or not current["arguments"]):
             current["arguments"] = arguments
+
+    @classmethod
+    def _record_reasoning_item(
+        cls, items: dict[str, dict[str, Any]], item: Any
+    ) -> None:
+        if wire_value(item, "type") != "reasoning":
+            return
+        normalized = wire_json_value(item)
+        if not isinstance(normalized, dict):
+            return
+        key = str(
+            wire_value(item, "id", None)
+            or wire_value(item, "output_index", None)
+            or len(items)
+        )
+        items[key] = {**items.get(key, {}), **normalized}
 
     @staticmethod
     def _tool_key(value: Any) -> str:

@@ -32,6 +32,20 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path: Pat
     assert application.service("artifact.store") is not None
     assert application.service("package.registry") is not None
     assert application.composition_hash.startswith("sha256:")
+    assert application.resolved_plan.composition_hash == application.composition_hash
+    assert application.resolved_plan.package_id == "test.application"
+    bindings = {
+        (value.capability, value.plugin_id, value.source)
+        for value in application.resolved_plan.providers
+    }
+    assert (
+        "session.store",
+        "sage.session.filesystem",
+        "plugin",
+    ) in bindings
+    assert ("model.provider", None, "host") in bindings
+    assert ("execution.dispatcher", None, "composition-root") in bindings
+    assert all("credential" not in value.name for value in application.resolved_plan.providers)
 
     await application.close()
     await application.close()
@@ -91,3 +105,40 @@ async def test_application_stops_execution_resources_before_closing_agents():
     )
     await application.close()
     assert order == ["dispatcher", "agent"]
+
+
+@pytest.mark.asyncio
+async def test_application_close_retries_only_transient_teardown_failures():
+    calls: list[str] = []
+
+    class Resource:
+        def __init__(self, name, *, fail_once=False):
+            self.name = name
+            self.fail_once = fail_once
+
+        async def close(self):
+            calls.append(self.name)
+            if self.fail_once:
+                self.fail_once = False
+                raise OSError(f"{self.name} unavailable")
+
+    stable = Resource("stable")
+    transient = Resource("transient", fail_once=True)
+    agent = Resource("agent")
+    application = SAgentApplication(
+        agents={"main": agent},
+        entrypoint_agent_id="main",
+        scope_handles=(),
+        services={},
+        adapters={},
+        composition_hash="sha256:test",
+        owned_resources=(transient, stable),
+    )
+
+    with pytest.raises(RuntimeError, match="failed to close"):
+        await application.close()
+    with pytest.raises(RuntimeError, match="closing"):
+        application.entrypoint()
+    await application.close()
+
+    assert calls == ["stable", "transient", "transient", "agent"]

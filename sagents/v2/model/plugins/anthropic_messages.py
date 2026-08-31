@@ -22,6 +22,7 @@ from sagents.v2.contracts.items import (
     TextBlock,
     UsageSummary,
 )
+from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.model.wire import (
     compact_json,
@@ -49,6 +50,7 @@ class AnthropicMessagesConfig(StrictModel):
     default_top_p: float | None = None
     reasoning_effort: str | None = None
     timeout_seconds: float = 120
+    prompt_cache: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
@@ -111,6 +113,8 @@ class AnthropicMessagesModelProvider:
             payload["system"] = system
         if request.tools:
             payload["tools"] = [self._tool_definition(tool) for tool in request.tools]
+            if self.config.prompt_cache:
+                payload["tools"][-1]["cache_control"] = {"type": "ephemeral"}
             if request.tool_choice is not None:
                 payload["tool_choice"] = {
                     "type": {
@@ -162,6 +166,8 @@ class AnthropicMessagesModelProvider:
         output_tokens = 0
         cached_tokens = 0
         tools: dict[int, dict[str, str]] = {}
+        thinking_blocks: dict[int, dict[str, Any]] = {}
+        response_started = False
         try:
             async with self._open_stream(payload) as response:
                 raise_for_status = getattr(response, "raise_for_status", None)
@@ -179,10 +185,21 @@ class AnthropicMessagesModelProvider:
                         index = int(event.get("index") or 0)
                         block = event.get("content_block") or {}
                         if block.get("type") == "tool_use":
+                            response_started = True
                             tools[index] = {
                                 "id": str(block.get("id") or new_id("tool_call")),
                                 "name": str(block.get("name") or ""),
                                 "arguments": compact_json(block.get("input") or {}),
+                            }
+                        elif block.get("type") in {
+                            "thinking",
+                            "redacted_thinking",
+                        }:
+                            response_started = True
+                            thinking_blocks[index] = {
+                                key: value
+                                for key, value in block.items()
+                                if key in {"type", "thinking", "signature", "data"}
                             }
                     elif event_type == "content_block_delta":
                         index = int(event.get("index") or 0)
@@ -191,6 +208,7 @@ class AnthropicMessagesModelProvider:
                         if delta_type == "text_delta":
                             value = str(delta.get("text") or "")
                             if value:
+                                response_started = True
                                 text += value
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.TEXT_DELTA, delta=value
@@ -198,10 +216,22 @@ class AnthropicMessagesModelProvider:
                         elif delta_type == "thinking_delta":
                             value = str(delta.get("thinking") or "")
                             if value:
+                                response_started = True
                                 reasoning += value
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.REASONING_DELTA, delta=value
                                 )
+                            block = thinking_blocks.setdefault(
+                                index, {"type": "thinking", "thinking": ""}
+                            )
+                            block["thinking"] = str(block.get("thinking") or "") + value
+                        elif delta_type == "signature_delta":
+                            block = thinking_blocks.setdefault(
+                                index, {"type": "thinking", "thinking": ""}
+                            )
+                            block["signature"] = str(
+                                block.get("signature") or ""
+                            ) + str(delta.get("signature") or "")
                         elif delta_type == "input_json_delta":
                             fragment = tools.setdefault(
                                 index,
@@ -225,7 +255,7 @@ class AnthropicMessagesModelProvider:
         except SageV2Error:
             raise
         except Exception as exc:
-            raise provider_error(exc) from exc
+            raise provider_error(exc, response_started=response_started) from exc
 
         calls = tuple(
             parse_tool_arguments(
@@ -252,6 +282,17 @@ class AnthropicMessagesModelProvider:
                     "model": self.config.model,
                     "api": "anthropic-messages",
                 },
+                provider_state=make_provider_state(
+                    "anthropic_messages",
+                    {
+                        "thinking_blocks": [
+                            thinking_blocks[index]
+                            for index in sorted(thinking_blocks)
+                        ]
+                    },
+                )
+                if thinking_blocks
+                else {},
             ),
         )
 
@@ -318,30 +359,52 @@ class AnthropicMessagesModelProvider:
             )
         )
 
-    @classmethod
     def _messages(
-        cls, messages: tuple[ModelMessage, ...]
-    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
-        system: list[dict[str, str]] = []
+        self, messages: tuple[ModelMessage, ...]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        system: list[dict[str, Any]] = []
         output: list[dict[str, Any]] = []
+        cache_candidates: dict[str, dict[str, Any]] = {}
         for message in messages:
             if message.role in {"system", "developer"}:
                 for block in message.content:
-                    system.append({"type": "text", "text": cls._block_text(block)})
+                    system.append(
+                        {"type": "text", "text": self._block_text(block)}
+                    )
+                self._remember_cache_candidate(
+                    message, system, cache_candidates
+                )
                 continue
             if message.role == "tool":
                 tool_result_content: list[dict[str, Any]] = [
                     {
                         "type": "tool_result",
                         "tool_use_id": message.tool_call_id,
-                        "content": cls._plain_content(message),
+                        "content": self._plain_content(message),
                     }
                 ]
-                cls._append_message(output, "user", tool_result_content)
+                self._append_message(output, "user", tool_result_content)
+                self._remember_cache_candidate(
+                    message, tool_result_content, cache_candidates
+                )
                 continue
             content: list[dict[str, Any]] = [
-                cls._content_block(block) for block in message.content
+                self._content_block(block) for block in message.content
             ]
+            if message.role == "assistant":
+                state = read_provider_state(
+                    message.provider_state, "anthropic_messages"
+                )
+                if state is not None:
+                    stored_blocks = state.get("thinking_blocks")
+                    if isinstance(stored_blocks, list):
+                        content = [
+                            dict(block)
+                            for block in stored_blocks
+                            if isinstance(block, dict)
+                            and block.get("type")
+                            in {"thinking", "redacted_thinking"}
+                        ] + content
             if message.tool_calls:
                 content.extend(
                     {
@@ -352,8 +415,20 @@ class AnthropicMessagesModelProvider:
                     }
                     for call in message.tool_calls
                 )
-            cls._append_message(output, message.role, content)
+            self._append_message(output, message.role, content)
+            self._remember_cache_candidate(message, content, cache_candidates)
+        if self.config.prompt_cache:
+            for segment in ("stable", "semi_stable"):
+                candidate = cache_candidates.get(segment)
+                if candidate is not None:
+                    candidate["cache_control"] = {"type": "ephemeral"}
         return system, output
+
+    @staticmethod
+    def _remember_cache_candidate(message, content, candidates) -> None:
+        segment = message.metadata.get("cache_segment")
+        if segment in {"stable", "semi_stable"} and content:
+            candidates[str(segment)] = content[-1]
 
     @staticmethod
     def _append_message(

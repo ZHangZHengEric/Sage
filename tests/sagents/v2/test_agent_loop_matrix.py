@@ -20,6 +20,7 @@ from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelStep,
 )
 from sagents.v2.tool.contracts import (
+    CancelSemantics,
     ReconcileResult,
     ReconcileState,
     SideEffectLevel,
@@ -46,6 +47,7 @@ from sagents.v2.agent.policy.judge import (
 )
 from sagents.v2.contracts.commands import (
     CommandDecision,
+    CancelRun,
     InputItem,
     PauseRun,
     ReplyInteraction,
@@ -59,13 +61,19 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.contracts.events import ItemEventData
-from sagents.v2.contracts.items import ItemStatus, TextBlock, UsageSummary
+from sagents.v2.contracts.items import (
+    ItemStatus,
+    TextBlock,
+    ToolResultItemData,
+    UsageSummary,
+)
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
     RequestContext,
 )
 from sagents.v2.contracts.run_state import RunState
+from sagents.v2.context import ContextBudget, DefaultContextAssembler
 from sagents.v2.testing.runtime import ephemeral_runtime
 
 
@@ -202,6 +210,7 @@ async def setup_loop(
     invocation_mode=None,
     automatic_memory_recall=False,
     memory_recall_query_generator=None,
+    context_assembler=None,
 ):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(
@@ -254,6 +263,8 @@ async def setup_loop(
         loop_kwargs["automatic_memory_recall"] = True
     if memory_recall_query_generator is not None:
         loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
+    if context_assembler is not None:
+        loop_kwargs["context_assembler"] = context_assembler
     loop = AgentLoopEngine(**loop_kwargs)
     return runtime, handle, loop, executor
 
@@ -1251,6 +1262,270 @@ async def test_empty_semantic_response_retries_transparently_before_suspending()
     assert len(retries) == 1
     assert retries[0].data.error.code == "model.empty_semantic_response"
     assert not any(event.type == "interaction.requested" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_pre_stream_context_overflow_reduces_once_with_adaptive_reserve():
+    overflow = RuntimeErrorInfo(
+        code="model.context_window_exceeded",
+        category=ErrorCategory.VALIDATION,
+        message="provider rejected the request context",
+        retryable=True,
+        safe_to_resume=True,
+        metadata={"response_started": False},
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(), error=overflow),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=2_000)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, context_assembler=assembler
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    first_budget = model.requests[0].metadata["request_budget"]
+    second_budget = model.requests[1].metadata["request_budget"]
+    assert (
+        second_budget["protocol_overhead_tokens"]
+        >= first_budget["protocol_overhead_tokens"] + 512
+    )
+    events = await runtime.session_store.read_events(handle.run_id)
+    retries = [event for event in events if event.type == "step.retry_scheduled"]
+    assert len(retries) == 1
+    assert retries[0].data.error.code == "model.context_window_exceeded"
+
+
+class BlockingModelProvider:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.closed = asyncio.Event()
+        self.requests = []
+        self._release = asyncio.Event()
+
+    async def _stream(self, request):
+        self.requests.append(request)
+        self.started.set()
+        try:
+            await self._release.wait()
+            if False:
+                yield completed()
+        finally:
+            self.closed.set()
+
+    def stream(self, request):
+        return self._stream(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control", ["pause", "cancel"])
+async def test_blocked_model_stream_observes_durable_control_without_a_delta(control):
+    model = BlockingModelProvider()
+    runtime, handle, loop, _ = await setup_loop(model)
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+    current = await runtime.get_run(handle.run_id)
+    if control == "pause":
+        await runtime.pause_run(
+            PauseRun(
+                run_id=handle.run_id,
+                expected_revision=current.revision,
+                idempotency_key="pause-blocked-stream",
+            ),
+            CONTEXT,
+        )
+    else:
+        await runtime.cancel_run(
+            CancelRun(
+                run_id=handle.run_id,
+                expected_revision=current.revision,
+                idempotency_key="cancel-blocked-stream",
+            ),
+            CONTEXT,
+        )
+
+    result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.state == (
+        RunState.SUSPENDED if control == "pause" else RunState.CANCELLED
+    )
+    assert model.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_deadline_interrupts_a_blocked_model_stream():
+    model = BlockingModelProvider()
+    runtime, handle, loop, _ = await setup_loop(model, deadline_seconds=0.05)
+
+    result = await asyncio.wait_for(loop.execute(handle.run_id, CONTEXT), timeout=1)
+
+    assert result.state == RunState.SUSPENDED
+    assert model.closed.is_set()
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "budget.deadline"
+
+
+@pytest.mark.asyncio
+async def test_cooperative_tool_is_cancelled_and_checkpointed_for_pause():
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    tool = ToolDefinition(
+        name="cooperative_wait",
+        description="wait cooperatively",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+        cancel_semantics=CancelSemantics.COOPERATIVE,
+    )
+    call = ModelToolCall(
+        tool_call_id="call_cooperative", name=tool.name, arguments={}
+    )
+
+    async def handler(tool_call, _context):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        return ToolExecutionResult(
+            tool_call_id=tool_call.tool_call_id,
+            operation_id=tool_call.operation_id,
+        )
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(call,)),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, tools=(tool,), handlers={tool.name: handler}
+    )
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.pause_run(
+        PauseRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="pause-cooperative-tool",
+        ),
+        CONTEXT,
+    )
+
+    result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.state == RunState.SUSPENDED
+    assert cancelled.is_set()
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert any(event.type == "tool.call.cancelled" for event in events)
+    cancelled_item = next(
+        event.data.item.data
+        for event in events
+        if isinstance(event.data, ItemEventData)
+        and event.data.item is not None
+        and isinstance(event.data.item.data, ToolResultItemData)
+    )
+    assert cancelled_item.metadata["cancellation_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_cancellable_tool_settles_before_pause_without_state_conflict():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    tool = ToolDefinition(
+        name="non_cancellable_wait",
+        description="wait until settled",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+        cancel_semantics=CancelSemantics.NOT_SUPPORTED,
+    )
+    call = ModelToolCall(
+        tool_call_id="call_non_cancellable", name=tool.name, arguments={}
+    )
+
+    async def handler(tool_call, _context):
+        started.set()
+        await release.wait()
+        return ToolExecutionResult(
+            tool_call_id=tool_call.tool_call_id,
+            operation_id=tool_call.operation_id,
+            content=(TextBlock(text="settled"),),
+        )
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(call,)),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, tools=(tool,), handlers={tool.name: handler}
+    )
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.pause_run(
+        PauseRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="pause-non-cancellable-tool",
+        ),
+        CONTEXT,
+    )
+    await asyncio.sleep(0.15)
+    assert not execution.done()
+    release.set()
+
+    result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert any(event.type == "tool.call.succeeded" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_deadline_cooperatively_cancels_a_blocked_tool():
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    tool = ToolDefinition(
+        name="deadline_wait",
+        description="wait cooperatively",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+        cancel_semantics=CancelSemantics.COOPERATIVE,
+    )
+    call = ModelToolCall(tool_call_id="call_deadline", name=tool.name, arguments={})
+
+    async def handler(tool_call, _context):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        return ToolExecutionResult(
+            tool_call_id=tool_call.tool_call_id,
+            operation_id=tool_call.operation_id,
+        )
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(call,)),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(tool,),
+        handlers={tool.name: handler},
+        deadline_seconds=0.05,
+    )
+
+    result = await asyncio.wait_for(loop.execute(handle.run_id, CONTEXT), timeout=1)
+
+    assert started.is_set() and cancelled.is_set()
+    assert result.state == RunState.SUSPENDED
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "budget.deadline"
 
 
 @pytest.mark.asyncio

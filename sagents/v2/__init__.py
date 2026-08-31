@@ -20,7 +20,12 @@ from sagents.v2.contracts import (
     StartRun,
 )
 from sagents.v2.sagent import SAgent, SAgentRunStream
-from sagents.v2.application import SAgentApplication, InterfaceRunStream
+from sagents.v2.application import (
+    InterfaceRunStream,
+    ResolvedApplicationPlan,
+    ResolvedProviderBinding,
+    SAgentApplication,
+)
 from sagents.v2.builder import SAgentBuilder
 from sagents.v2.runtime.execution import (
     ExecutionBindingProvider,
@@ -34,6 +39,8 @@ __all__ = [
     "ExecutionBindingProvider",
     "ExecutionBindingRequest",
     "RequestContext",
+    "ResolvedApplicationPlan",
+    "ResolvedProviderBinding",
     "RunHandle",
     "RunExecutionBinding",
     "RuntimeEvent",

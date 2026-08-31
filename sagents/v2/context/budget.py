@@ -27,10 +27,15 @@ class WindowContextReducer:
         self.estimator = estimator or HeuristicTokenEstimator()
 
     async def reduce(self, messages, budget, *, scope=None):
-        maximum = budget.max_input_tokens - budget.reserve_output_tokens
+        maximum = (
+            budget.max_input_tokens
+            - budget.reserve_output_tokens
+            - budget.reserve_input_tokens
+        )
         if maximum <= 0:
             raise self._error(
-                "context.invalid_budget", "output reserve consumes input budget"
+                "context.invalid_budget",
+                "output and final-request reserves consume the input budget",
             )
         systems = tuple(value for value in messages if value.role == "system")
         payload = tuple(value for value in messages if value.role != "system")

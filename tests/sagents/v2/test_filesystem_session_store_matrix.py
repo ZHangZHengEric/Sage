@@ -127,6 +127,34 @@ async def test_concurrent_acknowledged_writes_survive_restart(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_per_session_commit_does_not_serialize_all_loaded_sessions(tmp_path):
+    store = FilesystemSessionStore(tmp_path / "runtime.db")
+    first = await store.create_run(command("first-session"), CONTEXT)
+    second = await store.create_run(command("second-session"), CONTEXT)
+    assert first.handle.session_id != second.handle.session_id
+
+    def reject_global_export():
+        raise AssertionError("per-Session commit used the global state export")
+
+    store._dump_state_locked = reject_global_export
+    await store.commit_run(
+        run_id=first.handle.run_id,
+        expected_revision=first.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.RUNNING,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key="first-session:start",
+    )
+    await store.close()
+
+    reopened = FilesystemSessionStore(tmp_path / "runtime.db")
+    assert (await reopened.get_run(first.handle.run_id)).state == RunState.RUNNING
+    assert (await reopened.get_run(second.handle.run_id)).state == RunState.QUEUED
+    await reopened.close()
+
+
+@pytest.mark.asyncio
 async def test_failed_write_does_not_advance_the_durable_delta_baseline(tmp_path):
     path = tmp_path / "failed-write-baseline"
     store = FilesystemSessionStore(path)

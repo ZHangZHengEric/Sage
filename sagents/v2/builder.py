@@ -57,9 +57,12 @@ from sagents.v2.runtime.extensions import (
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
 from sagents.v2.runtime.session import LeaseFencedSessionStore, SessionStore
 from sagents.v2.session_memory import SessionMemoryProvider, SessionMemoryService
-from sagents.v2.context import SessionDerivedConversationSummaryStore
 from sagents.v2.sagent import SAgent
-from sagents.v2.application import SAgentApplication
+from sagents.v2.application import (
+    ResolvedApplicationPlan,
+    ResolvedProviderBinding,
+    SAgentApplication,
+)
 from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
@@ -482,8 +485,81 @@ class SAgentBuilder:
             driver_session_store,
             job_runtime=services["execution.job-runtime"],
         )
+        token_estimator = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="context.token-estimator",
+            default_plugin="sage.context.token-estimator.json-heuristic",
+            default_scope=ExtensionScope.AGENT,
+        )
+        summary_store = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="context.summary-store",
+            default_plugin="sage.context.summary-store.session-derived",
+            default_scope=ExtensionScope.AGENT,
+            locked_config={"session_store": driver_session_store},
+        )
+        summarizer = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="context.summarizer",
+            default_plugin="sage.context.summarizer.extractive",
+            default_scope=ExtensionScope.AGENT,
+            locked_config={"model": models_by_agent[selected_agent]},
+        )
+        unit_compactor = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="context.unit-compactor",
+            default_plugin="sage.context.unit-compactor.reference",
+            default_scope=ExtensionScope.AGENT,
+            locked_config={"estimator": token_estimator},
+        )
+        context_reducer = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="context.reducer",
+            default_plugin="sage.context.reducer.persistent-summary",
+            default_scope=ExtensionScope.AGENT,
+            locked_config={
+                "store": summary_store,
+                "summarizer": summarizer,
+                "estimator": token_estimator,
+                "unit_compactor": unit_compactor,
+            },
+        )
+        continuation_policy = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="agent.continuation-policy",
+            default_plugin="sage.agent.continuation.deterministic",
+            default_scope=ExtensionScope.AGENT,
+            locked_config={"model": models_by_agent[selected_agent]},
+        )
         components = ContextComponentBundle(
-            summary_store=SessionDerivedConversationSummaryStore(driver_session_store)
+            token_estimator=token_estimator,
+            summary_store=summary_store,
+            summarizer=summarizer,
+            reducer=context_reducer,
         )
         factory = AgentCompositionFactory(
             driver_runtime, context_components=components
@@ -585,6 +661,7 @@ class SAgentBuilder:
                     session_memory_service=(
                         session_memory_service if member_memory_enabled else None
                     ),
+                    continuation_policy=continuation_policy,
                     continuation_signal_provider=(
                         active_runtime.consume_continuation_signals
                         if active_runtime is not None
@@ -756,6 +833,16 @@ class SAgentBuilder:
             "credentials.provider": credential_provider,
             "memory.provider": memory_provider,
             "session-memory.provider": session_memory_provider,
+            "model.provider": models_by_agent[selected_agent],
+            "tool.catalog": tool_catalog,
+            "tool.executor": tool_executor,
+            "tool.selection-policy": tool_selection,
+            "context.token-estimator": token_estimator,
+            "context.summary-store": summary_store,
+            "context.summarizer": summarizer,
+            "context.unit-compactor": unit_compactor,
+            "context.reducer": context_reducer,
+            "agent.continuation-policy": continuation_policy,
         }
         scheduler_config = self._selection(runtime_config, "execution.scheduler")
         dispatcher_values = dict(
@@ -772,11 +859,38 @@ class SAgentBuilder:
             lease_seconds=float(dispatcher_values.get("lease_seconds", 30.0)),
             lease_scope_factory=driver_session_store.lease_scope,
         )
-        await dispatcher.start()
         agent.attach_dispatcher(dispatcher)
+        dispatcher.attach_recovery_agent(agent)
+        await dispatcher.start()
         services["execution.dispatcher"] = dispatcher
         composition_hash = self._composition_hash(
             resolved.manifest_hash, scope_handles, services
+        )
+        resolved_plan = self._resolved_application_plan(
+            package_id=resolved.package_id,
+            manifest_hash=resolved.manifest_hash,
+            entrypoint_agent_id=selected_agent,
+            handles=scope_handles,
+            services=services,
+            composition_hash=composition_hash,
+            host_capabilities=frozenset(
+                capability
+                for capability, injected in (
+                    ("session.store", self._session_store),
+                    ("memory.provider", self._memory_provider),
+                    ("session-memory.provider", self._session_memory_provider),
+                    ("model.provider", self._model_provider),
+                    ("tool.catalog", self._tool_catalog),
+                    ("tool.executor", self._tool_executor),
+                    ("tool.selection-policy", self._tool_selection),
+                )
+                if injected is not None
+            ),
+            deferred_plugins=(
+                (("sage.tool.official", ExtensionScope.RUN),)
+                if uses_binding_tools
+                else ()
+            ),
         )
         return SAgentApplication(
             agents={selected_agent: agent},
@@ -785,6 +899,7 @@ class SAgentBuilder:
             services=services,
             adapters=adapters,
             composition_hash=composition_hash,
+            resolved_plan=resolved_plan,
             owned_resources=(dispatcher,),
         )
 
@@ -1026,6 +1141,7 @@ class SAgentBuilder:
         default_plugin,
         default_config=None,
         default_scope=ExtensionScope.PROCESS,
+        locked_config=None,
     ):
         selection = self._selection(runtime, capability)
         plugin_id = selection.plugin if selection else default_plugin
@@ -1034,6 +1150,10 @@ class SAgentBuilder:
             **dict(selection.config if selection else {}),
         }
         config = self._merge_plugin_config(declarations, plugin_id, config)
+        # Host-owned runtime identities are dependencies, not user/plugin
+        # configuration. Apply them last so a manifest cannot replace a model,
+        # SessionStore, estimator, or another trusted composition input.
+        config.update(dict(locked_config or {}))
         return await self._instantiate(
             host,
             parent,
@@ -1229,6 +1349,94 @@ class SAgentBuilder:
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    def _resolved_application_plan(
+        self,
+        *,
+        package_id,
+        manifest_hash,
+        entrypoint_agent_id,
+        handles,
+        services,
+        composition_hash,
+        host_capabilities,
+        deferred_plugins,
+    ) -> ResolvedApplicationPlan:
+        bindings: set[ResolvedProviderBinding] = set()
+        dependencies: set[tuple[str, str]] = set()
+        plugin_capabilities: set[str] = set()
+
+        def visit(handle) -> None:
+            for ancestor in handle._owned_ancestors:
+                visit(ancestor)
+            dependencies.update(handle.graph.dependencies)
+            for started in handle._started:
+                descriptor = started.registration.descriptor
+                for offer in descriptor.provides:
+                    plugin_capabilities.add(offer.capability)
+                    bindings.add(
+                        ResolvedProviderBinding(
+                            capability=offer.capability,
+                            name=offer.name,
+                            api_version=offer.api_version,
+                            plugin_id=descriptor.plugin_id,
+                            scope=handle.context.scope.value,
+                            source="plugin",
+                        )
+                    )
+
+        for handle in handles:
+            visit(handle)
+        for plugin_id, scope in deferred_plugins:
+            # Deferred Run-scoped providers are selected now but instantiated
+            # only after the Runtime allocates the real Run identity.
+            registration = self.extensions.get(plugin_id)
+            for offer in registration.descriptor.provides:
+                plugin_capabilities.add(offer.capability)
+                bindings.add(
+                    ResolvedProviderBinding(
+                        capability=offer.capability,
+                        name=offer.name,
+                        api_version=offer.api_version,
+                        plugin_id=plugin_id,
+                        scope=scope.value,
+                        source="plugin-deferred",
+                    )
+                )
+        for capability in services:
+            if (
+                capability in plugin_capabilities
+                and capability not in host_capabilities
+            ) or capability == "execution.dispatcher":
+                continue
+            bindings.add(
+                ResolvedProviderBinding(
+                    capability=capability,
+                    name="default",
+                    api_version="2",
+                    plugin_id=None,
+                    scope="process",
+                    source="host",
+                )
+            )
+        bindings.add(
+            ResolvedProviderBinding(
+                capability="execution.dispatcher",
+                name="local",
+                api_version="2",
+                plugin_id=None,
+                scope="process",
+                source="composition-root",
+            )
+        )
+        return ResolvedApplicationPlan(
+            package_id=package_id,
+            manifest_hash=manifest_hash,
+            entrypoint_agent_id=entrypoint_agent_id,
+            providers=tuple(sorted(bindings)),
+            dependencies=tuple(sorted(dependencies)),
+            composition_hash=composition_hash,
+        )
 
 def _service_composition_identity(provider: Any) -> dict[str, Any]:
     identity = getattr(provider, "composition_identity", None)

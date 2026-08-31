@@ -26,10 +26,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.runtime.session.state import (
-    SESSION_AGGREGATE_FORMAT,
-    SessionStoreCoordinator,
-)
+from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
@@ -1216,77 +1213,6 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 )
             revision = mutation.current_session_revision
         return state, complete_count
-
-    def _dump_session_state_locked(self, session_id: str) -> dict[str, Any]:
-        payload = self._dump_state_locked()
-        sessions = [
-            value for value in payload["sessions"] if value["session_id"] == session_id
-        ]
-        if len(sessions) != 1:
-            raise self._not_found("session.not_found", session_id)
-        runs = [value for value in payload["runs"] if value["session_id"] == session_id]
-        run_ids = {value["run_id"] for value in runs}
-        interaction_ids = {
-            value["interaction_id"]
-            for value in payload["interactions"]
-            if value["run_id"] in run_ids
-        }
-        proposals = [
-            value
-            for value in payload["session_commit_proposals"]
-            if value["session_id"] == session_id
-        ]
-        proposal_ids = {value["proposal_id"] for value in proposals}
-        return {
-            "session_format_version": SESSION_AGGREGATE_FORMAT,
-            "sessions": sessions,
-            "runs": runs,
-            "run_events": {
-                key: value
-                for key, value in payload["run_events"].items()
-                if key in run_ids
-            },
-            "fork_base_events": {
-                key: value
-                for key, value in payload.get("fork_base_events", {}).items()
-                if key in run_ids
-            },
-            "start_idempotency": [
-                value
-                for value in payload["start_idempotency"]
-                if value["run_id"] in run_ids
-            ],
-            "command_results": [
-                value
-                for value in payload["command_results"]
-                if value["run_id"] in run_ids
-            ],
-            "checkpoints": [
-                value for value in payload["checkpoints"] if value["run_id"] in run_ids
-            ],
-            "suspensions": [
-                value for value in payload["suspensions"] if value["run_id"] in run_ids
-            ],
-            "interactions": [
-                value for value in payload["interactions"] if value["run_id"] in run_ids
-            ],
-            "interaction_resolutions": [
-                value
-                for value in payload["interaction_resolutions"]
-                if value["interaction_id"] in interaction_ids
-            ],
-            "steer_inbox": {
-                key: value
-                for key, value in payload["steer_inbox"].items()
-                if key in run_ids
-            },
-            "session_commit_proposals": proposals,
-            "session_commit_command_results": [
-                value
-                for value in payload["session_commit_command_results"]
-                if value["proposal"]["proposal_id"] in proposal_ids
-            ],
-        }
 
     def _write_start_idempotency(self, entry: dict[str, Any], session_id: str) -> None:
         payload = {

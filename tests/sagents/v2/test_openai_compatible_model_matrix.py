@@ -16,6 +16,7 @@ from sagents.v2.model import (
 )
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.provider_state import make_provider_state
 
 
 CAPABILITIES = ModelCapabilities(
@@ -112,12 +113,23 @@ def request(**changes):
     return ModelRequest(**values)
 
 
-def chunk(*, content=None, reasoning=None, tool_calls=(), finish=None, usage=None):
-    delta = SimpleNamespace(
-        content=content,
-        reasoning_content=reasoning,
-        tool_calls=tool_calls,
-    )
+def chunk(
+    *,
+    content=None,
+    reasoning=None,
+    reasoning_details=None,
+    tool_calls=(),
+    finish=None,
+    usage=None,
+):
+    delta_values = {
+        "content": content,
+        "reasoning_content": reasoning,
+        "tool_calls": tool_calls,
+    }
+    if reasoning_details is not None:
+        delta_values["reasoning_details"] = reasoning_details
+    delta = SimpleNamespace(**delta_values)
     return SimpleNamespace(
         id="response_1",
         choices=(SimpleNamespace(delta=delta, finish_reason=finish),),
@@ -199,6 +211,70 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
         == '{"q":"old"}'
     )
     assert outgoing["messages"][3]["tool_call_id"] == "call_old"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_details_use_latest_snapshot_and_replay_after_tool_call():
+    stream = FakeStream(
+        (
+            chunk(
+                reasoning="think",
+                reasoning_details=[{"type": "reasoning", "value": "first"}],
+            ),
+            chunk(
+                reasoning="thinking",
+                reasoning_details=[{"type": "reasoning", "value": "complete"}],
+                tool_calls=(
+                    tool_delta(0, call_id="call_1", name="lookup", arguments="{}"),
+                ),
+                finish="tool_calls",
+            ),
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+    response = events[-1].response
+
+    assert response is not None
+    assert response.reasoning == "thinking"
+    assert [
+        event.delta
+        for event in events
+        if event.kind == ModelEventKind.REASONING_DELTA
+    ] == ["think", "ing"]
+    assert response.provider_state == make_provider_state(
+        "openai_compatible",
+        {
+            "reasoning_content": "thinking",
+            "reasoning_details": [
+                {"type": "reasoning", "value": "complete"}
+            ],
+        },
+    )
+    replay = provider.diagnostic_request(
+        request(
+            messages=(
+                ModelMessage(role="user", content=(TextBlock(text="go"),)),
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=response.tool_calls,
+                    provider_state=response.provider_state,
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_1",
+                    content=(TextBlock(text="result"),),
+                ),
+            )
+        )
+    )
+    assert replay["messages"][1]["reasoning_content"] == "thinking"
+    assert replay["messages"][1]["reasoning_details"] == [
+        {"type": "reasoning", "value": "complete"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -434,6 +510,25 @@ async def test_provider_error_matrix(status, category, retryable):
         _ = [event async for event in provider.stream(request())]
     assert caught.value.info.category == category
     assert caught.value.info.retryable is retryable
+
+
+@pytest.mark.asyncio
+async def test_provider_context_overflow_has_a_distinct_retryable_code():
+    error = RuntimeError(
+        "context_length_exceeded: maximum context length is 128000 tokens"
+    )
+    error.status_code = 400
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(error=error))
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.context_window_exceeded"
+    assert caught.value.info.category == ErrorCategory.VALIDATION
+    assert caught.value.info.retryable is True
+    assert caught.value.info.metadata["response_started"] is False
 
 
 @pytest.mark.asyncio

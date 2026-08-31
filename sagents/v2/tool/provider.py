@@ -6,6 +6,7 @@ from typing import Protocol
 
 from sagents.v2.tool.contracts import (
     ReconcileResult,
+    ToolCancellationResult,
     ToolCall,
     ToolDefinition,
     ToolExecutionResult,
@@ -30,3 +31,11 @@ class ToolExecutor(Protocol):
     async def reconcile(
         self, operation_id: str, context: RequestContext
     ) -> ReconcileResult: ...
+
+
+class CancellableToolExecutor(Protocol):
+    """Optional port implemented only by executors with real cancellation."""
+
+    async def cancel(
+        self, operation_id: str, context: RequestContext
+    ) -> ToolCancellationResult: ...

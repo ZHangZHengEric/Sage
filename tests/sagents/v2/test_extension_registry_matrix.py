@@ -42,6 +42,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.context.token-estimator.json-heuristic",
         "sage.context.token-estimator.tiktoken",
         "sage.context.token-estimator.unicode-heuristic",
+        "sage.context.unit-compactor.reference",
         "sage.credentials.environment",
         "sage.credentials.mapping",
         "sage.flow.agent",
@@ -79,12 +80,23 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.sandbox.ephemeral",
         "sage.sandbox.local-workspace",
         "sage.scheduler.ephemeral",
+        "sage.scheduler.filesystem",
         "sage.workspace.initializer.bare",
         "sage.workspace.initializer.claw",
     } == set(inventory)
     assert all(callable(value.factory) for value in registry.registrations())
     assert (
         inventory["sage.session.filesystem"]["capabilities"]["global_session_index"]
+        is False
+    )
+    assert (
+        inventory["sage.scheduler.filesystem"]["capabilities"]
+        ["durable_across_process_restart"]
+        is True
+    )
+    assert (
+        inventory["sage.scheduler.filesystem"]["capabilities"]
+        ["multi_process_writes"]
         is False
     )
 

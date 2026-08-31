@@ -10,6 +10,7 @@ from sagents.v2.context.contracts import (
     ContextPlacement,
     ContextProjection,
     ContextProjectionObserver,
+    ContextRequestReservation,
     ContextReductionScope,
     ContextReducer,
     ContextSegment,
@@ -47,6 +48,7 @@ class ContextAssembler(Protocol):
         ledger: tuple[ModelMessage, ...],
         *,
         run_id: str | None = None,
+        reservation: ContextRequestReservation | None = None,
     ) -> tuple[ModelMessage, ...]: ...
 
     async def prepare_projection(
@@ -55,6 +57,7 @@ class ContextAssembler(Protocol):
         ledger: tuple[ModelMessage, ...],
         *,
         run_id: str | None = None,
+        reservation: ContextRequestReservation | None = None,
     ) -> ContextProjection: ...
 
 
@@ -139,8 +142,16 @@ class DefaultContextAssembler:
         ledger: tuple[ModelMessage, ...],
         *,
         run_id: str | None = None,
+        reservation: ContextRequestReservation | None = None,
     ) -> tuple[ModelMessage, ...]:
-        return (await self.prepare_projection(command, ledger, run_id=run_id)).messages
+        return (
+            await self.prepare_projection(
+                command,
+                ledger,
+                run_id=run_id,
+                reservation=reservation,
+            )
+        ).messages
 
     async def prepare_projection(
         self,
@@ -148,6 +159,7 @@ class DefaultContextAssembler:
         ledger: tuple[ModelMessage, ...],
         *,
         run_id: str | None = None,
+        reservation: ContextRequestReservation | None = None,
     ) -> ContextProjection:
         """Create a fresh request view with deterministic context ordering.
 
@@ -242,7 +254,13 @@ class DefaultContextAssembler:
                     run_id=run.run_id,
                     source_sequence=run.base_session_sequence,
                 )
-            projection = await self.reducer.reduce(messages, self.budget, scope=scope)
+            effective_budget = self._with_reservation(
+                self.budget,
+                reservation or ContextRequestReservation(),
+            )
+            projection = await self.reducer.reduce(
+                messages, effective_budget, scope=scope
+            )
         else:
             projection = ContextProjection(
                 messages=messages,
@@ -252,6 +270,40 @@ class DefaultContextAssembler:
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(run_id, projection)
         return projection
+
+    @staticmethod
+    def _with_reservation(
+        budget: ContextBudget,
+        reservation: ContextRequestReservation,
+    ) -> ContextBudget:
+        max_messages = budget.max_messages
+        if max_messages is not None:
+            max_messages -= reservation.message_count
+            if max_messages <= 0:
+                from sagents.v2.contracts.errors import (
+                    ErrorCategory,
+                    RuntimeErrorInfo,
+                    SageV2Error,
+                )
+
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="context.invalid_budget",
+                        category=ErrorCategory.VALIDATION,
+                        message=(
+                            "reserved request suffix consumes the model message budget"
+                        ),
+                        safe_to_resume=True,
+                    )
+                )
+        return budget.model_copy(
+            update={
+                "reserve_input_tokens": (
+                    budget.reserve_input_tokens + reservation.input_tokens
+                ),
+                "max_messages": max_messages,
+            }
+        )
 
     @staticmethod
     def _inject_latest_user(
