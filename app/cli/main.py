@@ -126,6 +126,11 @@ async def _main_async(args: argparse.Namespace) -> int:
         if args.command == "provider":
             return await _provider_command(args)
         if args.command == "v2" and args.v2_command == "migrate":
+            manifest_output = (
+                migrate_manifest_v1(args.manifest, dry_run=True)
+                if args.manifest
+                else None
+            )
             report = await asyncio.to_thread(
                 migrate_runtime_root,
                 args.runtime_root,
@@ -136,8 +141,10 @@ async def _main_async(args: argparse.Namespace) -> int:
                 "source": str(report.source),
                 "backup": str(report.backup) if report.backup else None,
             }
-            if args.manifest:
-                payload["manifest"] = str(migrate_manifest_v1(args.manifest))
+            if manifest_output is not None:
+                if not args.dry_run:
+                    manifest_output = migrate_manifest_v1(args.manifest)
+                payload["manifest"] = str(manifest_output)
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             return 0
         if args.command == "tui":

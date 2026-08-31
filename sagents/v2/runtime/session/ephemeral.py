@@ -6,7 +6,7 @@ so durable backends can reuse it without depending on this concrete adapter.
 
 from sagents.v2.runtime.session.state import (
     SESSION_AGGREGATE_FORMAT,
-    SessionStateStore,
+    SessionStoreCoordinator,
 )
 
 
@@ -14,7 +14,9 @@ class EphemeralSessionStore:
     """Process-local composed facade over the transactional coordinator."""
 
     def __init__(self, *args, **kwargs) -> None:
-        object.__setattr__(self, "_coordinator", SessionStateStore(*args, **kwargs))
+        object.__setattr__(
+            self, "_coordinator", SessionStoreCoordinator(*args, **kwargs)
+        )
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

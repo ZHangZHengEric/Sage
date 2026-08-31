@@ -15,6 +15,7 @@ from sagents.v2.runtime.execution.scheduler import (
     LeaseReleaseReason,
     Scheduler,
     WorkItem,
+    WorkerLease,
 )
 
 
@@ -128,12 +129,7 @@ class LocalWorkerDispatcher:
         await asyncio.gather(*workers, return_exceptions=True)
         for run_id, request in tuple(self._requests.items()):
             if not request.result.done():
-                snapshot = await request.agent._fail_driver_crash(
-                    run_id,
-                    self._shutdown_error(),
-                    request.context,
-                )
-                request.result.set_result(snapshot)
+                await self._finish_shutdown_request(run_id, request)
         self._requests.clear()
 
     async def _worker(self, index: int) -> None:
@@ -207,15 +203,8 @@ class LocalWorkerDispatcher:
                 if execution is not None and not execution.done():
                     execution.cancel()
                     await asyncio.gather(execution, return_exceptions=True)
-                snapshot = await request.agent._fail_driver_crash(
-                    lease.work.run_id,
-                    self._shutdown_error(),
-                    request.context,
-                )
-                if not request.result.done():
-                    request.result.set_result(snapshot)
-                await self.scheduler.release(
-                    lease, LeaseReleaseReason.FAILED, requeue=False
+                await self._finish_shutdown_request(
+                    lease.work.run_id, request, lease=lease
                 )
                 raise
             except Exception as exc:
@@ -236,6 +225,38 @@ class LocalWorkerDispatcher:
                 if self._active_tenants[tenant] == 0:
                     self._active_tenants.pop(tenant)
                 self._requests.pop(lease.work.run_id, None)
+
+    async def _finish_shutdown_request(
+        self,
+        run_id: str,
+        request: _DispatchRequest,
+        *,
+        lease: WorkerLease | None = None,
+    ) -> None:
+        """Resolve a submitted Future even when failure recording is unavailable."""
+
+        try:
+            snapshot = await request.agent._fail_driver_crash(
+                run_id,
+                self._shutdown_error(),
+                request.context,
+            )
+        except BaseException as exc:
+            if not request.result.done():
+                request.result.set_exception(exc)
+        else:
+            if not request.result.done():
+                request.result.set_result(snapshot)
+        finally:
+            if lease is not None:
+                try:
+                    await self.scheduler.release(
+                        lease, LeaseReleaseReason.FAILED, requeue=False
+                    )
+                except BaseException:
+                    # Expiry/reaping remains the final fallback, but shutdown
+                    # must never strand the caller's Future on release failure.
+                    pass
 
     async def _renew(self, lease) -> None:
         delay = max(self.lease_duration.total_seconds() / 3, 0.05)

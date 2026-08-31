@@ -181,6 +181,45 @@ async def test_completed_execution_is_removed_from_facade_task_registry():
 
 
 @pytest.mark.asyncio
+async def test_terminal_driver_cleanup_failure_does_not_replace_completed_result():
+    runtime = ephemeral_runtime()
+
+    class CleanupFailureDriver:
+        async def execute(self, run_id, context):
+            run = await runtime.get_run(run_id)
+            run = await runtime.start_execution(
+                run_id=run_id,
+                expected_revision=run.revision,
+                context=context,
+                idempotency_key="execute-cleanup-failure",
+            )
+            return await runtime.complete_run(
+                run_id=run_id,
+                expected_revision=run.revision,
+                context=context,
+                idempotency_key="complete-cleanup-failure",
+            )
+
+        async def resume(self, run_id, context):
+            raise AssertionError("not used")
+
+        async def close(self):
+            raise OSError("cleanup unavailable")
+
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=lambda run_id: CleanupFailureDriver(),
+    )
+    stream = await agent.run_stream(command("cleanup-failure"), CONTEXT)
+
+    result = await stream.wait()
+
+    assert result.state == RunState.COMPLETED
+    assert (await runtime.get_run(result.run_id)).state == RunState.COMPLETED
+    assert agent._drivers == {}
+
+
+@pytest.mark.asyncio
 async def test_stream_closes_at_suspension_so_a_client_can_resume_by_cursor():
     runtime = ephemeral_runtime()
 

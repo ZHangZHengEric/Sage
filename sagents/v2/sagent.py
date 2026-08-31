@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -36,6 +37,9 @@ from sagents.v2.contracts.session_commit import (
 )
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.memory.service import MemoryService
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RunDriver(Protocol):
@@ -379,22 +383,33 @@ class SAgent:
                     result, context, self.runtime.session_store
                 )
         except asyncio.CancelledError:
-            await self._close_driver(run_id, driver)
+            try:
+                await self._close_driver(run_id, driver)
+            except BaseException:
+                LOGGER.exception("failed to close cancelled Run driver %s", run_id)
             raise
         except Exception as exc:
             result = await self._fail_driver_crash(run_id, exc, context)
         if result.state in TERMINAL_RUN_STATES or result.state == RunState.SUSPENDED:
-            await self._close_driver(run_id, driver)
+            try:
+                await self._close_driver(run_id, driver)
+            except BaseException:
+                # Terminal state is already an authoritative durable fact.
+                # Resource cleanup failure must remain diagnostic rather than
+                # changing a completed client outcome into an execution error.
+                LOGGER.exception("failed to close terminal Run driver %s", run_id)
         return result
 
     async def _close_driver(self, run_id, driver) -> None:
-        closer = getattr(driver, "close", None)
-        if closer is not None:
-            closed = closer()
-            if inspect.isawaitable(closed):
-                await closed
-        if self._drivers.get(run_id) is driver:
-            self._drivers.pop(run_id, None)
+        try:
+            closer = getattr(driver, "close", None)
+            if closer is not None:
+                closed = closer()
+                if inspect.isawaitable(closed):
+                    await closed
+        finally:
+            if self._drivers.get(run_id) is driver:
+                self._drivers.pop(run_id, None)
 
     async def _fail_driver_crash(self, run_id, exc, context):
         """Record a driver crash without overwriting a concurrent pause/cancel."""

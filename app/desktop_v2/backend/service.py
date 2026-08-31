@@ -585,6 +585,73 @@ def _stable_component_id(capability: str, plugin_id: str) -> str:
     return prefixes[capability] + plugin_id
 
 
+def _component_cache_fingerprint(value: Any) -> str:
+    """Create a deterministic, secret-safe identity for long-lived components."""
+
+    def normalize(candidate: Any, seen: set[int]) -> Any:
+        if candidate is None or isinstance(candidate, (str, int, float, bool)):
+            return candidate
+        if isinstance(candidate, SecretStr):
+            secret = candidate.get_secret_value().encode()
+            return {"secret_sha256": hashlib.sha256(secret).hexdigest()}
+        if isinstance(candidate, bytes):
+            return {"bytes_sha256": hashlib.sha256(candidate).hexdigest()}
+        if isinstance(candidate, Path):
+            return str(candidate)
+        if isinstance(candidate, BaseModel):
+            return normalize(candidate.model_dump(mode="python"), seen)
+        if isinstance(candidate, dict):
+            return {
+                str(key): normalize(item, seen)
+                for key, item in sorted(candidate.items(), key=lambda pair: str(pair[0]))
+            }
+        if isinstance(candidate, (list, tuple)):
+            return [normalize(item, seen) for item in candidate]
+        if isinstance(candidate, (set, frozenset)):
+            return sorted(
+                (normalize(item, seen) for item in candidate),
+                key=lambda item: json.dumps(item, sort_keys=True, default=str),
+            )
+        identity = id(candidate)
+        type_name = f"{type(candidate).__module__}.{type(candidate).__qualname__}"
+        if identity in seen:
+            return {"type": type_name}
+        seen.add(identity)
+        if isinstance(candidate, RecordingModelProvider):
+            return {
+                "type": type_name,
+                "provider": normalize(candidate.provider, seen),
+                "metadata": normalize(candidate.provider_metadata, seen),
+            }
+        try:
+            attributes = vars(candidate)
+        except TypeError:
+            return {"type": type_name}
+        state = {
+            key: normalize(item, seen)
+            for key, item in attributes.items()
+            if not callable(item)
+            and key
+            not in {
+                "client",
+                "_client",
+                "_lock",
+                "lock",
+                "_filesystem_lock",
+                "sink",
+            }
+        }
+        return {"type": type_name, "state": state}
+
+    encoded = json.dumps(
+        normalize(value, set()),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 class AgentSettingsPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=500)
@@ -1034,6 +1101,11 @@ class DesktopV2Service:
         self.extensions = builtin_extension_registry()
         self.extension_host = ExtensionHost(self.extensions)
         self._scope_handles = []
+        self._long_lived_components: dict[tuple[str, ...], tuple[Any, Any]] = {}
+        self._long_lived_component_lock = asyncio.Lock()
+        self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
+        self._workspace_initialization_lock = asyncio.Lock()
+        self._sandbox_grant_issuer = SandboxGrantIssuer()
         self._process_scope = self.extension_host.open_scope_sync(
             ExtensionScopeContext(
                 scope=ExtensionScope.PROCESS,
@@ -1235,6 +1307,8 @@ class DesktopV2Service:
         for handle in reversed(self._scope_handles):
             await handle.close()
         self._scope_handles.clear()
+        self._long_lived_components.clear()
+        self._workspace_initializations.clear()
         self.logger.info("service.closed", "Desktop v2 service closed")
         if self._owns_log_sink:
             self.log_sink.close()
@@ -2596,33 +2670,44 @@ class DesktopV2Service:
             _DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"],
         )
         plugin_id = _stable_component_id("workspace.initializer", plugin_id)
-        plan = self.extension_host.plan(
-            (
-                CapabilityRequirement(
-                    capability="workspace.initializer", api_version="2"
+        initialization_key = (str(workspace), plugin_id, language)
+        async with self._workspace_initialization_lock:
+            if initialization_key in self._workspace_initializations:
+                return workspace
+            plan = self.extension_host.plan(
+                (
+                    CapabilityRequirement(
+                        capability="workspace.initializer", api_version="2"
+                    ),
                 ),
-            ),
-            selections={"workspace.initializer": plugin_id},
-            configs={plugin_id: {"language": language}},
-            scope_overrides={plugin_id: ExtensionScope.AGENT},
-        )
-        handle = await self.extension_host.open_scope_hierarchy(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id="desktop-agent-workspace",
-            ),
-            plan,
-            parent=self._process_scope,
-        )
-        self._scope_handles.append(handle)
-        initializer = handle.providers.require_unique("workspace.initializer")
-        initialize = initializer.initialize
-        if inspect.iscoroutinefunction(initialize):
-            result = initialize(workspace)
-        else:
-            result = await asyncio.to_thread(initialize, workspace)
-        if inspect.isawaitable(result):
-            await result
+                selections={"workspace.initializer": plugin_id},
+                configs={plugin_id: {"language": language}},
+                scope_overrides={plugin_id: ExtensionScope.AGENT},
+            )
+            handle = await self.extension_host.open_scope_hierarchy(
+                ExtensionScopeContext(
+                    scope=ExtensionScope.AGENT,
+                    scope_id=f"desktop-agent-workspace:{workspace}",
+                ),
+                plan,
+                parent=self._process_scope,
+            )
+            try:
+                initializer = handle.providers.require_unique(
+                    "workspace.initializer"
+                )
+                initialize = initializer.initialize
+                if inspect.iscoroutinefunction(initialize):
+                    result = initialize(workspace)
+                else:
+                    result = await asyncio.to_thread(initialize, workspace)
+                if inspect.isawaitable(result):
+                    await result
+            except BaseException:
+                await handle.close()
+                raise
+            self._scope_handles.append(handle)
+            self._workspace_initializations[initialization_key] = workspace
         return workspace
 
     async def workspace_tree(
@@ -3494,13 +3579,21 @@ class DesktopV2Service:
             "memory.recall-query",
             memory_query_plugin_id,
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-memory-query:{agent.agent_id}",
+            scope_id=f"desktop-memory-query:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config=(
                 {"model": memory_query_model, "language": settings.language}
                 if memory_query_plugin_id == "sage.memory.recall-query.llm"
                 else {}
             ),
+            cache_identity={
+                "plugin": memory_query_plugin_id,
+                "language": settings.language,
+                "provider": judge_provider.id,
+                "model": judge_provider.model,
+                "base_url": judge_provider.base_url,
+                "credential": SecretStr(judge_provider.api_key or ""),
+            },
         )
         summarizer_plugin_id = _stable_component_id(
             "context.summarizer",
@@ -3513,15 +3606,23 @@ class DesktopV2Service:
             "context.summarizer",
             summarizer_plugin_id,
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-summarizer:{agent.agent_id}",
+            scope_id=f"desktop-summarizer:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config={"model": recording_model, "model_binding": "summary"},
+            cache_identity={
+                "plugin": summarizer_plugin_id,
+                "provider": provider.id,
+                "model": provider.model,
+                "base_url": provider.base_url,
+                "credential": SecretStr(provider.api_key or ""),
+                "model_binding": "summary",
+            },
         )
         token_estimator = await self._scoped_component(
             "context.token-estimator",
             estimator_id,
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-estimator:{agent.agent_id}",
+            scope_id=f"desktop-estimator:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config={},
         )
@@ -3537,9 +3638,17 @@ class DesktopV2Service:
             "context.reducer",
             reducer_id,
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-reducer:{agent.agent_id}",
+            scope_id=f"desktop-reducer:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config=reducer_config,
+            cache_identity={
+                "plugin": reducer_id,
+                "estimator": estimator_id,
+                "summarizer": summarizer_plugin_id,
+                "summary_store": self.summary_store_plugin_id,
+                "provider": provider.id,
+                "model": provider.model,
+            },
         )
         continuation_plugin_id = _stable_component_id(
             "agent.continuation-policy",
@@ -3563,14 +3672,15 @@ class DesktopV2Service:
         )
         sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(settings)
         workspace_root = _sandbox_workspace_root(sandbox_config, workspace)
-        issuer = SandboxGrantIssuer()
+        issuer = self._sandbox_grant_issuer
         sandbox_provider = await self._scoped_component(
             "execution.sandbox",
             sandbox_plugin_id,
             scope=ExtensionScope.PROCESS,
-            scope_id=f"desktop-sandbox:{agent.agent_id}",
+            scope_id="desktop-sandbox",
             agent_id=agent.agent_id,
             config={"verification_key": issuer.verification_key},
+            cache_identity={"verification_key": issuer.verification_key},
         )
         capabilities = await sandbox_provider.capabilities()
         architecture = str(
@@ -3688,7 +3798,7 @@ class DesktopV2Service:
             "tool.selection-policy",
             tool_selection_plugin_id,
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-tool-selection:{agent.agent_id}",
+            scope_id=f"desktop-tool-selection:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config=tool_selection_config,
         )
@@ -3882,9 +3992,10 @@ class DesktopV2Service:
             base_continuation_policy = await self._scoped_component(
                 "agent.continuation-policy",
                 continuation_plugin_id,
-                scope=ExtensionScope.AGENT,
+                scope=ExtensionScope.RUN,
                 scope_id=f"desktop-continuation:{descriptor.agent_id}:{run_id}",
                 agent_id=descriptor.agent_id,
+                run_id=run_id,
                 config={
                     "repeat_threshold": 3,
                     "model": judge_models_by_agent.get(
@@ -4014,44 +4125,90 @@ class DesktopV2Service:
         config: dict[str, Any],
         agent_id: str | None = None,
         run_id: str | None = None,
+        cache_identity: Any | None = None,
     ):
-        plan = self.extension_host.plan(
-            (CapabilityRequirement(capability=capability, api_version="2"),),
-            selections={capability: plugin_id},
-            configs={plugin_id: config},
-            scope_overrides={plugin_id: scope},
-        )
-        parents = [self._process_scope]
-        if scope == ExtensionScope.RUN:
-            agent_parent = await self.extension_host.open_scope(
-                ExtensionScopeContext(
-                    scope=ExtensionScope.AGENT,
-                    scope_id=f"desktop-agent-scope:{agent_id or 'default'}",
-                    agent_id=agent_id,
+        cache_key: tuple[str, ...] | None = None
+        if scope in {
+            ExtensionScope.PROCESS,
+            ExtensionScope.TENANT,
+            ExtensionScope.AGENT,
+        }:
+            cache_key = (
+                scope.value,
+                scope_id,
+                capability,
+                plugin_id,
+                _component_cache_fingerprint(
+                    config if cache_identity is None else cache_identity
                 ),
-                self.extension_host.plan(()),
-                parent=self._process_scope,
             )
-            owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
-            (owner_handles if owner_handles is not None else self._scope_handles).append(
-                agent_parent
+            cached = self._long_lived_components.get(cache_key)
+            if cached is not None:
+                return cached[1]
+
+        lock_acquired = False
+        if cache_key is not None:
+            await self._long_lived_component_lock.acquire()
+            lock_acquired = True
+            cached = self._long_lived_components.get(cache_key)
+            if cached is not None:
+                self._long_lived_component_lock.release()
+                return cached[1]
+        handle = None
+        try:
+            plan = self.extension_host.plan(
+                (CapabilityRequirement(capability=capability, api_version="2"),),
+                selections={capability: plugin_id},
+                configs={plugin_id: config},
+                scope_overrides={plugin_id: scope},
             )
-            parents.append(agent_parent)
-        handle = await self.extension_host.open_scope_hierarchy(
-            ExtensionScopeContext(
-                scope=scope,
-                scope_id=scope_id,
-                agent_id=agent_id,
-                run_id=run_id,
-            ),
-            plan,
-            parent=parents[-1] if scope != ExtensionScope.PROCESS else None,
-        )
-        owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
-        (owner_handles if owner_handles is not None else self._scope_handles).append(
-            handle
-        )
-        return handle.providers.require_unique(capability)
+            parents = [self._process_scope]
+            if scope == ExtensionScope.RUN:
+                agent_parent = await self.extension_host.open_scope(
+                    ExtensionScopeContext(
+                        scope=ExtensionScope.AGENT,
+                        scope_id=f"desktop-agent-scope:{agent_id or 'default'}",
+                        agent_id=agent_id,
+                    ),
+                    self.extension_host.plan(()),
+                    parent=self._process_scope,
+                )
+                owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+                (
+                    owner_handles
+                    if owner_handles is not None
+                    else self._scope_handles
+                ).append(agent_parent)
+                parents.append(agent_parent)
+            handle = await self.extension_host.open_scope_hierarchy(
+                ExtensionScopeContext(
+                    scope=scope,
+                    scope_id=scope_id,
+                    agent_id=agent_id,
+                    run_id=run_id,
+                ),
+                plan,
+                parent=parents[-1] if scope != ExtensionScope.PROCESS else None,
+            )
+            provider = handle.providers.require_unique(capability)
+            if cache_key is not None:
+                self._scope_handles.append(handle)
+                self._long_lived_components[cache_key] = (handle, provider)
+            else:
+                owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+                (
+                    owner_handles
+                    if owner_handles is not None
+                    else self._scope_handles
+                ).append(handle)
+            return provider
+        except BaseException:
+            if handle is not None:
+                await handle.close()
+            raise
+        finally:
+            if lock_acquired:
+                self._long_lived_component_lock.release()
 
     async def _session_id_for_run(self, run_id: str) -> str:
         return (await self.session_store.get_run(run_id)).session_id
@@ -4183,7 +4340,7 @@ class DesktopV2Service:
             "model.provider",
             f"sage.model.{protocol.value}",
             scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-agent:{agent.agent_id}",
+            scope_id=f"desktop-agent:{agent.user_id}:{agent.agent_id}",
             agent_id=agent.agent_id,
             config={
                 "route": route.model_dump(mode="json"),

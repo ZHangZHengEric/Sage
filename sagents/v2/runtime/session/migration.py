@@ -83,7 +83,12 @@ def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> 
                 target_dir.mkdir(parents=True, exist_ok=True)
                 derived = source_dir / "derived"
                 if derived.is_dir():
-                    shutil.copytree(derived, target_dir / "derived", dirs_exist_ok=True)
+                    shutil.copytree(
+                        derived,
+                        target_dir / "derived",
+                        symlinks=True,
+                        dirs_exist_ok=True,
+                    )
                 else:
                     (target_dir / "derived").mkdir(exist_ok=True)
                 target._write_snapshot(target_dir / "state.json", state)
@@ -143,7 +148,12 @@ def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> 
             shutil.rmtree(temporary)
 
 
-def migrate_manifest_v1(source: str | Path, target: str | Path | None = None) -> Path:
+def migrate_manifest_v1(
+    source: str | Path,
+    target: str | Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> Path:
     """Generate a new sage/v2 manifest without overwriting the v1 source."""
 
     source_path = Path(source).expanduser().resolve()
@@ -198,10 +208,11 @@ def migrate_manifest_v1(source: str | Path, target: str | Path | None = None) ->
         for name, declaration in (migrated.get("interfaces") or {}).items()
         for value in [dict(declaration or {})]
     }
-    output.write_text(
-        yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
+    if not dry_run:
+        output.write_text(
+            yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
     return output
 
 
@@ -349,6 +360,8 @@ def _unlock_source(handle) -> None:
 
 def _make_read_only(root: Path) -> None:
     for path in sorted(root.rglob("*"), key=lambda value: len(value.parts), reverse=True):
+        if path.is_symlink():
+            continue
         path.chmod(0o555 if path.is_dir() else 0o444)
     root.chmod(0o555)
 

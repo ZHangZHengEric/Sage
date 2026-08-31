@@ -59,6 +59,36 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
     await application.close()
 
 
+@pytest.mark.asyncio
+async def test_application_composition_hash_includes_builder_storage_config(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-hash",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    provider = ScriptedModelProvider(())
+    first = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "first")
+        .with_model_provider(provider)
+        .build(package)
+    )
+    first_hash = first.composition_hash
+    await first.close()
+    second = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "second")
+        .with_model_provider(provider)
+        .build(package)
+    )
+
+    assert second.composition_hash != first_hash
+    await second.close()
+
+
 @pytest.mark.parametrize(
     ("preset", "memory_enabled"),
     [("assistant", False), ("coder", True)],

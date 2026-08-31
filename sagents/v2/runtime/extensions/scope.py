@@ -36,6 +36,7 @@ class ExtensionScopeHandle:
     providers: ProviderSet
     _started: list[StartedExtension]
     parent: "ExtensionScopeHandle | None" = None
+    composition_hash: str = ""
     _owned_ancestors: tuple["ExtensionScopeHandle", ...] = ()
     _closed: bool = False
 

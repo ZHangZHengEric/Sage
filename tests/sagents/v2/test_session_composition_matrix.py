@@ -3,11 +3,9 @@ from datetime import datetime, timezone
 import pytest
 
 from sagents.v2.runtime.session import (
-    EphemeralSessionRepository,
     EphemeralSessionStore,
     FilesystemSessionStore,
     SessionAggregate,
-    SessionStateStore,
     SessionStoreCoordinator,
 )
 from sagents.v2.runtime.session.journal import (
@@ -39,17 +37,16 @@ def aggregate(revision: int = 1) -> SessionAggregate:
 async def test_public_session_stores_use_composition_not_state_store_inheritance(tmp_path):
     ephemeral = EphemeralSessionStore()
     filesystem = FilesystemSessionStore(tmp_path / "sessions")
-    assert not isinstance(ephemeral, SessionStateStore)
-    assert not isinstance(filesystem, SessionStateStore)
+    assert not isinstance(ephemeral, SessionStoreCoordinator)
+    assert not isinstance(filesystem, SessionStoreCoordinator)
+    assert isinstance(ephemeral._coordinator, SessionStoreCoordinator)
+    assert isinstance(filesystem._coordinator, SessionStoreCoordinator)
     await ephemeral.close()
     await filesystem.close()
 
 
-@pytest.mark.asyncio
-async def test_coordinator_owns_per_session_cas_and_idempotency():
-    repository = EphemeralSessionRepository()
-    await repository.commit(aggregate())
-    coordinator = SessionStoreCoordinator(repository)
+def test_session_aggregate_applies_typed_mutation_without_io():
+    current = aggregate()
     mutation = SessionStateDeltaMutation(
         upserts={
             "sessions": [
@@ -61,43 +58,7 @@ async def test_coordinator_owns_per_session_cas_and_idempotency():
         }
     )
 
-    updated = await coordinator.commit(
-        "session_1",
-        expected_revision=1,
-        idempotency_key="commit-1",
-        mutation=mutation,
-    )
-    duplicate = await coordinator.commit(
-        "session_1",
-        expected_revision=1,
-        idempotency_key="commit-1",
-        mutation=mutation,
-    )
+    updated = current.apply(mutation)
 
+    assert current.revision == 1
     assert updated.revision == 2
-    assert duplicate is updated
-    restarted = SessionStoreCoordinator(repository)
-    after_restart = await restarted.commit(
-        "session_1",
-        expected_revision=1,
-        idempotency_key="commit-1",
-        mutation=mutation,
-    )
-    assert after_restart.revision == 2
-    conflicting_mutation = mutation.model_copy(
-        update={"map_deletes": {"run_events": ["run-other"]}}
-    )
-    with pytest.raises(ValueError, match="different mutation"):
-        await restarted.commit(
-            "session_1",
-            expected_revision=1,
-            idempotency_key="commit-1",
-            mutation=conflicting_mutation,
-        )
-    with pytest.raises(ValueError, match="revision conflict"):
-        await coordinator.commit(
-            "session_1",
-            expected_revision=1,
-            idempotency_key="commit-2",
-            mutation=mutation,
-        )

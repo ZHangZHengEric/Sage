@@ -12,6 +12,7 @@ from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
 )
 from sagents.v2.runtime.session.migration import (
+    _make_writable,
     migrate_manifest_v1,
     migrate_runtime_root,
 )
@@ -77,6 +78,7 @@ async def test_v3_requires_explicit_dry_run_then_atomic_migration(tmp_path: Path
     reopened = FilesystemSessionStore(root)
     assert (await reopened.get_run(created.handle.run_id)).run_id == created.handle.run_id
     await reopened.close()
+    _make_writable(report.backup)
 
 
 @pytest.mark.asyncio
@@ -122,3 +124,42 @@ interfaces:
     assert "sage.protocol.native" in output.read_text()
     with pytest.raises(FileExistsError):
         migrate_manifest_v1(source)
+
+
+def test_manifest_migration_dry_run_validates_without_writing(tmp_path: Path):
+    source = tmp_path / "sage.yaml"
+    source.write_text(
+        """schema_version: sage/v1
+kind: application
+metadata: {id: app.test, version: 1.0.0, name: Test}
+runtime: {}
+entrypoint: {agent: main}
+agents:
+  main:
+    name: Main
+    instructions: {inline: hello}
+    models: {}
+"""
+    )
+
+    output = migrate_manifest_v1(source, dry_run=True)
+
+    assert output == tmp_path / "sage.v2.yaml"
+    assert not output.exists()
+
+
+@pytest.mark.asyncio
+async def test_migration_backup_permissions_do_not_follow_symlinks(tmp_path: Path):
+    root = tmp_path / "sessions"
+    await _v3_store(root)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("owned elsewhere")
+    outside.chmod(0o600)
+    (root / "outside-link.txt").symlink_to(outside)
+
+    report = migrate_runtime_root(root)
+
+    assert report.backup is not None
+    assert (report.backup / "outside-link.txt").is_symlink()
+    assert outside.stat().st_mode & 0o777 == 0o600
+    _make_writable(report.backup)

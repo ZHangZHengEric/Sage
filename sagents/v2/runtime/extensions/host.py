@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
+import json
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -42,6 +46,7 @@ class ExtensionCompositionPlan:
     graph: ResolvedExtensionGraph
     configs: Mapping[str, Mapping[str, Any]]
     scopes: Mapping[str, ExtensionScope]
+    composition_hash: str
 
 
 class ExtensionHost:
@@ -126,10 +131,16 @@ class ExtensionHost:
                     f"{consumer_id!r} at {scopes[consumer_id].value!r} cannot depend "
                     f"on shorter-lived {provider_id!r} at {scopes[provider_id].value!r}",
                 )
+        composition_hash = _composition_hash(
+            graph.resolution_hash,
+            validated_configs,
+            scopes,
+        )
         return ExtensionCompositionPlan(
             graph=graph,
             configs=MappingProxyType(validated_configs),
             scopes=MappingProxyType(scopes),
+            composition_hash=composition_hash,
         )
 
     async def open_scope(
@@ -247,6 +258,7 @@ class ExtensionHost:
             providers=ProviderSet(providers),
             _started=started,
             parent=parent,
+            composition_hash=plan.composition_hash,
         )
 
     async def open_scope_hierarchy(
@@ -456,6 +468,7 @@ class ExtensionHost:
             providers=ProviderSet(providers),
             _started=started,
             parent=parent,
+            composition_hash=plan.composition_hash,
         )
 
 
@@ -532,3 +545,58 @@ def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
             safe_to_resume=True,
         )
     )
+
+
+def _composition_hash(
+    resolution_hash: str,
+    configs: Mapping[str, Mapping[str, Any]],
+    scopes: Mapping[str, ExtensionScope],
+) -> str:
+    payload = {
+        "resolution": resolution_hash,
+        "configs": _composition_value(configs),
+        "scopes": {key: value.value for key, value in sorted(scopes.items())},
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _composition_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, bytes):
+        return {"bytes_sha256": hashlib.sha256(value).hexdigest()}
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {
+            str(key): _composition_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_composition_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            (_composition_value(item) for item in value),
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        )
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _composition_value(model_dump(mode="python"))
+    secret_value = getattr(value, "get_secret_value", None)
+    if callable(secret_value):
+        encoded = str(secret_value()).encode()
+        return {"secret_sha256": hashlib.sha256(encoded).hexdigest()}
+    identity = getattr(value, "composition_identity", None)
+    if callable(identity):
+        identity = identity()
+    if identity is not None:
+        return {
+            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+            "identity": _composition_value(identity),
+        }
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}

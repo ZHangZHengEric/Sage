@@ -69,6 +69,7 @@ from sagents.v2.memory import (
 )
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
 from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason, WorkItem
+from sagents.v2.runtime.extensions import ExtensionScope
 
 
 @asynccontextmanager
@@ -125,6 +126,92 @@ async def test_desktop_composition_hash_includes_component_selection_and_config(
     assert service._desktop_spec_hash(
         "sha256:manifest", defaults
     ) != service._desktop_spec_hash("sha256:manifest", changed)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_workspace_initializer_reuses_agent_scope(tmp_path: Path):
+    service = DesktopV2Service(tmp_path / "sage")
+    settings = await service.get_settings()
+
+    await service._ensure_agent_workspace(
+        settings.agent_workspace_path,
+        component_selections=settings.component_selections,
+        language=settings.language,
+    )
+    after_first = len(service._scope_handles)
+    await service._ensure_agent_workspace(
+        settings.agent_workspace_path,
+        component_selections=settings.component_selections,
+        language=settings.language,
+    )
+
+    assert len(service._scope_handles) == after_first
+    assert len(service._workspace_initializations) == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_long_lived_component_scope_is_reused_until_service_close(tmp_path: Path):
+    service = DesktopV2Service(tmp_path / "sage")
+
+    first = await service._scoped_component(
+        "context.token-estimator",
+        "sage.context.token-estimator.json-heuristic",
+        scope=ExtensionScope.AGENT,
+        scope_id="desktop-estimator:user:agent",
+        agent_id="agent",
+        config={},
+    )
+    after_first = len(service._scope_handles)
+    second = await service._scoped_component(
+        "context.token-estimator",
+        "sage.context.token-estimator.json-heuristic",
+        scope=ExtensionScope.AGENT,
+        scope_id="desktop-estimator:user:agent",
+        agent_id="agent",
+        config={},
+    )
+
+    assert second is first
+    assert len(service._scope_handles) == after_first
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_loop_composition_does_not_accumulate_agent_scopes(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path / "sage")
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
+    )
+    agent = await service._agent("sage", "user_1")
+    provider = await service._provider(agent, "user_1")
+    workspace = await service.workspace_root(None, "sage")
+
+    _, _, first_resources = await service._build_loop(
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+        preferred_skills=(),
+        approval_mode="high_risk",
+        run_id="run_scope_reuse_1",
+    )
+    await first_resources.close()
+    after_first = len(service._scope_handles)
+    _, _, second_resources = await service._build_loop(
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+        preferred_skills=(),
+        approval_mode="high_risk",
+        run_id="run_scope_reuse_2",
+    )
+    await second_resources.close()
+
+    assert len(service._scope_handles) == after_first
     await service.close()
 
 

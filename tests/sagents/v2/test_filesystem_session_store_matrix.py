@@ -152,8 +152,8 @@ async def test_failed_write_does_not_advance_the_durable_delta_baseline(tmp_path
             CONTEXT,
         )
 
-    # The next write must compact from the current aggregate rather than append
-    # a delta whose previous revision was never durably acknowledged.
+    # A failed write must not remain visible in the in-memory aggregate. The
+    # next command starts from the last confirmed durable revision.
     await store.create_run(
         command(
             "recovery",
@@ -166,7 +166,45 @@ async def test_failed_write_does_not_advance_the_durable_delta_baseline(tmp_path
 
     reopened = FilesystemSessionStore(path)
     runs = await reopened.list_session_runs(first.handle.session_id)
-    assert len(runs) == 3
+    assert len(runs) == 2
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_same_idempotency_key_retries_failed_write_instead_of_false_duplicate(
+    tmp_path,
+):
+    path = tmp_path / "failed-write-idempotency"
+    store = FilesystemSessionStore(path)
+    first = await store.create_run(command("first"), CONTEXT)
+    retry_command = command(
+        "retry-the-write",
+        session_id=first.handle.session_id,
+        mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+    )
+    original_write = store._write_session_state
+    failed_once = False
+
+    def fail_before_write(*args, **kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise OSError("injected storage failure")
+        return original_write(*args, **kwargs)
+
+    store._write_session_state = fail_before_write
+    with pytest.raises(OSError, match="injected storage failure"):
+        await store.create_run(retry_command, CONTEXT)
+
+    retried = await store.create_run(retry_command, CONTEXT)
+    assert retried.duplicate is False
+    await store.close()
+
+    reopened = FilesystemSessionStore(path)
+    duplicate = await reopened.create_run(retry_command, CONTEXT)
+    assert duplicate.duplicate is True
+    runs = await reopened.list_session_runs(first.handle.session_id)
+    assert len(runs) == 2
     await reopened.close()
 
 
