@@ -26,7 +26,6 @@ from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.agent.multi_agent.contracts import (
     AgentDescriptor,
     AgentInvocationMode,
-    AgentMode,
     DelegationResult,
     DelegationTask,
     WorkspaceSharingPolicy,

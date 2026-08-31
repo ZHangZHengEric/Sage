@@ -6,6 +6,7 @@ import pytest
 
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions.contracts import (
+    CapabilityKey,
     CapabilityOffer,
     CapabilityRequirement,
     ExtensionDependency,
@@ -162,8 +163,9 @@ async def test_multi_provider_capability_returns_stable_tuple():
     second = plugin("sink_b", "observability_sink", multi=True)
     host.register(first.registration)
     host.register(second.registration)
-    handle = await host.open_scope(context(), (requirement("observability_sink"),))
-    assert handle.providers["observability_sink:default"] == (
+    plan = host.plan((requirement("observability_sink"),))
+    handle = await host.open_scope(context(), plan)
+    assert handle.providers.get_provider("observability_sink") == (
         first.value,
         second.value,
     )
@@ -182,13 +184,54 @@ async def test_dependencies_start_before_consumers_and_stop_in_reverse():
     host.register(agent_loop.registration)
     host.register(event_store.registration)
 
-    handle = await host.open_scope(context(), (requirement("agent_loop"),))
+    plan = host.plan((requirement("agent_loop"),))
+    handle = await host.open_scope(context(), plan)
     assert EVENTS == ["start:event_store", "start:agent_loop"]
-    assert agent_loop.dependencies_seen == {"event_store:default": event_store.value}
+    assert agent_loop.dependencies_seen == {
+        CapabilityKey(capability="event_store"): event_store.value
+    }
     await handle.close()
     assert EVENTS[-2:] == [
         "stop:agent_loop:scope_closed",
         "stop:event_store:scope_closed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hierarchy_opens_async_cross_scope_dependencies_and_owns_them():
+    process_store = plugin(
+        "process_store",
+        "event_store",
+        scopes=(ExtensionScope.PROCESS,),
+    )
+    run_loop = plugin(
+        "run_loop",
+        "agent_loop",
+        requires=(requirement("event_store"),),
+        scopes=(ExtensionScope.RUN,),
+    )
+    host = ExtensionHost()
+    host.register(process_store.registration)
+    host.register(run_loop.registration)
+    plan = host.plan(
+        (requirement("agent_loop"),),
+        scope_overrides={
+            "process_store": ExtensionScope.PROCESS,
+            "run_loop": ExtensionScope.RUN,
+        },
+    )
+
+    handle = await host.open_scope_hierarchy(context(), plan)
+
+    assert run_loop.dependencies_seen == {
+        CapabilityKey(capability="event_store"): process_store.value
+    }
+    await handle.close()
+    assert EVENTS == [
+        "start:process_store",
+        "start:run_loop",
+        "stop:run_loop:scope_closed",
+        "stop:process_store:scope_closed",
     ]
 
 
@@ -216,8 +259,9 @@ async def test_start_failure_rolls_back_failing_and_started_plugins():
     host = ExtensionHost()
     host.register(dependency.registration)
     host.register(failing.registration)
+    plan = host.plan((requirement("runtime"),))
     with pytest.raises(RuntimeError, match="failed:failing"):
-        await host.open_scope(context(), (requirement("runtime"),))
+        await host.open_scope(context(), plan)
     assert failing.stops == [StopReason.START_FAILED]
     assert dependency.stops == [StopReason.START_FAILED]
     assert EVENTS == [
@@ -237,11 +281,10 @@ async def test_scope_is_validated_before_plugin_start():
     )
     host = ExtensionHost()
     host.register(process_only.registration)
+    plan = host.plan((requirement("tool_catalog"),))
     with pytest.raises(SageV2Error) as scope:
-        await host.open_scope(
-            context(ExtensionScope.RUN), (requirement("tool_catalog"),)
-        )
-    assert scope.value.info.code == "extension.scope_unsupported"
+        await host.open_scope(context(ExtensionScope.RUN), plan)
+    assert scope.value.info.code == "extension.scope_hierarchy_invalid"
     assert process_only.starts == 0
 
 
@@ -264,13 +307,17 @@ async def test_two_hosts_have_no_shared_registry_or_lifecycle_state():
     second_plugin = plugin("model", "model")
     first_host.register(first_plugin.registration)
     second_host.register(second_plugin.registration)
-    first_handle = await first_host.open_scope(context(), (requirement("model"),))
-    second_handle = await second_host.open_scope(context(), (requirement("model"),))
-    assert first_handle.providers["model:default"] is first_plugin.value
-    assert second_handle.providers["model:default"] is second_plugin.value
+    first_handle = await first_host.open_scope(
+        context(), first_host.plan((requirement("model"),))
+    )
+    second_handle = await second_host.open_scope(
+        context(), second_host.plan((requirement("model"),))
+    )
+    assert first_handle.providers.get_provider("model") is first_plugin.value
+    assert second_handle.providers.get_provider("model") is second_plugin.value
     assert (
-        first_handle.providers["model:default"]
-        is not second_handle.providers["model:default"]
+        first_handle.providers.get_provider("model")
+        is not second_handle.providers.get_provider("model")
     )
     await first_handle.close()
     assert first_plugin.stops == [StopReason.SCOPE_CLOSED]

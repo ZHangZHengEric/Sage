@@ -367,6 +367,17 @@ def create_app(
             )
         )
 
+    @app.delete("/api/v2/skills/{skill_name}")
+    async def delete_skill(skill_name: str, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.delete_skill(
+                    skill_name,
+                    get_desktop_user_id(request),
+                )
+            )
+        )
+
     @app.post("/api/v2/skills/import-folder")
     async def import_skill_folder(
         value: SkillFolderImportRequest,

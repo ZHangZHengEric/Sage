@@ -12,6 +12,7 @@ import shutil
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -35,7 +36,7 @@ from app.desktop_v2.backend.shell_policy import (
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.tool.localization import localize_tool_definition
 from app.desktop_v2.backend.session_index import JsonDesktopSessionIndex
-from sagents.v2 import SAgent
+from sagents.v2 import SAgent, SAgentApplication
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import (
@@ -71,6 +72,7 @@ from sagents.v2.contracts.principals import (
 )
 from sagents.v2.contracts.run_state import (
     EventCursor,
+    RunState,
     SessionConcurrencyMode,
     TERMINAL_RUN_STATES,
 )
@@ -81,6 +83,9 @@ from sagents.v2.contracts.session_commit import (
     SessionMergeStrategy,
 )
 from sagents.v2.runtime import HarnessRuntime
+from sagents.v2.runtime.execution import LocalWorkerDispatcher
+from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.runtime.session import LeaseFencedSessionStore
 from sagents.v2.agent import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.package.manifest.agents import (
@@ -106,7 +111,6 @@ from sagents.v2.context import (
     ContextStability,
     DefaultContextAssembler,
     RunMetadataContextProvider,
-    TokenEstimatorRegistry,
 )
 from sagents.v2.goal import (
     GoalCompletionGatePolicy,
@@ -126,7 +130,12 @@ from sagents.v2.model import (
     model_protocol_descriptor,
     resolve_model_protocol,
 )
-from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
+from sagents.v2.runtime.extensions import (
+    CapabilityRequirement,
+    ExtensionHost,
+    ExtensionScope,
+    ExtensionScopeContext,
+)
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
@@ -158,7 +167,7 @@ from sagents.v2.runtime.observability import (
     LogSink,
     StructuredLogger,
 )
-from sagents.v2.skill.contracts import SkillBundle
+from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
 from sagents.v2.tool import (
     CompositeToolCatalog,
     CompositeToolExecutor,
@@ -172,6 +181,9 @@ from app.desktop_v2.backend.observability import create_desktop_log_sink
 
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 LOGGER = logging.getLogger(__name__)
+_ACTIVE_EXTENSION_SCOPE_HANDLES: ContextVar[list[Any] | None] = ContextVar(
+    "desktop_v2_active_extension_scope_handles", default=None
+)
 _AGENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,191}$")
 _SKILL_NAME = re.compile(r"^[^\\/\x00]{1,192}$")
 _TEXT_EXTENSIONS = {
@@ -534,29 +546,6 @@ def _sandbox_workspace_root(
     if host_workspace is None:
         raise ValueError("host workspace path mode requires the active workspace")
     return _virtual_workspace_root(host_workspace.expanduser().resolve().as_posix())
-
-
-def _runtime_component_id(capability: str, plugin_id: str) -> str:
-    """Translate stable extension IDs to the short constructor IDs used by v2."""
-
-    prefixes = {
-        "agent.continuation-policy": "sage.agent.continuation.",
-        "context.token-estimator": "sage.context.token-estimator.",
-        "context.reducer": "sage.context.reducer.",
-        "context.summarizer": "sage.context.summarizer.",
-        "context.summary-store": "sage.context.summary-store.",
-        "memory.provider": "sage.memory.",
-        "memory.recall-query": "sage.memory.recall-query.",
-        "session-memory.provider": "sage.session-memory.",
-        "observability.diagnostic-sink": "sage.observability.",
-        "observability.log-sink": "sage.logging.",
-        "execution.sandbox": "sage.sandbox.",
-        "session.store": "sage.session.",
-        "workspace.initializer": "sage.workspace.initializer.",
-        "tool.selection-policy": "sage.tool-selection.",
-    }
-    prefix = prefixes[capability]
-    return plugin_id.removeprefix(prefix)
 
 
 def _stable_component_id(capability: str, plugin_id: str) -> str:
@@ -927,6 +916,34 @@ class AgentRosterContextProvider:
         )
 
 
+class _DesktopRunResources:
+    def __init__(self, sandbox_handle, scope_handles: list[Any]) -> None:
+        self.sandbox_handle = sandbox_handle
+        self.scope_handles = scope_handles
+        self._closed = False
+
+    def __getattr__(self, name):
+        return getattr(self.sandbox_handle, name)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        errors: list[BaseException] = []
+        try:
+            await self.sandbox_handle.close()
+        except BaseException as exc:
+            errors.append(exc)
+        for handle in reversed(self.scope_handles):
+            try:
+                await handle.close()
+            except BaseException as exc:
+                errors.append(exc)
+        self.scope_handles.clear()
+        if errors:
+            raise errors[0]
+
+
 class _DesktopDriver:
     def __init__(
         self,
@@ -944,10 +961,22 @@ class _DesktopDriver:
         self._binding_close_task: asyncio.Task[None] | None = None
 
     async def execute(self, run_id: str, context: RequestContext):
-        return await self.loop.execute(run_id, context)
+        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(
+            self.sandbox_handle.scope_handles
+        )
+        try:
+            return await self.loop.execute(run_id, context)
+        finally:
+            _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
     async def resume(self, run_id: str, context: RequestContext):
-        return await self.loop.resume(run_id, context)
+        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(
+            self.sandbox_handle.scope_handles
+        )
+        try:
+            return await self.loop.resume(run_id, context)
+        finally:
+            _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
     async def close_binding(self) -> None:
         async with self._binding_close_lock:
@@ -958,6 +987,11 @@ class _DesktopDriver:
             close_task = self._binding_close_task
         await asyncio.shield(close_task)
         self._binding_closed = True
+
+    async def close(self) -> None:
+        """Release all Run-scoped resources at terminal or suspension boundary."""
+
+        await self.close_binding()
 
     async def _close_binding_once(self) -> None:
         controller = getattr(self.loop, "delegated_run_controller", None)
@@ -998,6 +1032,16 @@ class DesktopV2Service:
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.runtime_root / "settings.json"
         self.extensions = builtin_extension_registry()
+        self.extension_host = ExtensionHost(self.extensions)
+        self._scope_handles = []
+        self._process_scope = self.extension_host.open_scope_sync(
+            ExtensionScopeContext(
+                scope=ExtensionScope.PROCESS,
+                scope_id="desktop-v2",
+            ),
+            self.extension_host.plan(()),
+        )
+        self._scope_handles.append(self._process_scope)
         if log_sink is None:
             self._owns_log_sink = True
             self.log_plugin_id, self.log_sink = create_desktop_log_sink(
@@ -1015,13 +1059,21 @@ class DesktopV2Service:
         )
         self.session_plugin_id, self.session_store = self._process_component(
             "session.store",
-            {
-                "root": str(self.runtime_root),
-                "previous_v2_root": str(self.runtime_root / "session-store"),
-            },
+            {"root": str(self.runtime_root)},
             allow_user_selection=False,
         )
         self.runtime = HarnessRuntime(self.session_store)
+        self.scheduler = InMemoryScheduler()
+        self.driver_session_store = LeaseFencedSessionStore(
+            self.session_store, self.scheduler
+        )
+        self.driver_runtime = HarnessRuntime(self.driver_session_store)
+        self.dispatcher = LocalWorkerDispatcher(
+            self.scheduler,
+            max_concurrent_runs=8,
+            max_concurrent_runs_per_tenant=2,
+            lease_scope_factory=self.driver_session_store.lease_scope,
+        )
         self.dynamic_agent_roster = SessionDynamicAgentRoster(self.session_store)
         self.summary_store_plugin_id, self.summary_store = self._process_component(
             "context.summary-store",
@@ -1072,6 +1124,7 @@ class DesktopV2Service:
         self._settings_lock = asyncio.Lock()
         self._drivers: dict[str, _DesktopDriver] = {}
         self._run_observers: dict[str, asyncio.Task] = {}
+        self._application_close_tasks: set[asyncio.Task] = set()
         self.logger.info(
             "service.initialized",
             "Desktop v2 service initialized",
@@ -1098,24 +1151,22 @@ class DesktopV2Service:
         )
         selected = _stable_component_id(capability, selected)
         try:
-            registration = self.extensions.get(selected)
-            if capability not in {
-                offer.capability for offer in registration.descriptor.provides
-            }:
-                raise ValueError(
-                    f"extension {selected!r} does not provide {capability!r}"
-                )
-            value = registration.factory(
+            plan = self.extension_host.plan(
+                (CapabilityRequirement(capability=capability, api_version="2"),),
+                selections={capability: selected},
+                configs={selected: config},
+                scope_overrides={selected: ExtensionScope.PROCESS},
+            )
+            handle = self.extension_host.open_scope_sync(
                 ExtensionScopeContext(
                     scope=ExtensionScope.PROCESS,
                     scope_id="desktop-v2",
-                    config=config,
                 ),
-                {},
+                plan,
+                parent=None,
             )
-            if inspect.isawaitable(value):
-                raise TypeError(f"{capability} process factory must be synchronous")
-            return selected, value
+            self._scope_handles.append(handle)
+            return selected, handle.providers.require_unique(capability)
         except Exception as exc:
             if selected == default_plugin_id:
                 raise
@@ -1129,18 +1180,21 @@ class DesktopV2Service:
                     "error": str(exc),
                 },
             )
-            registration = self.extensions.get(default_plugin_id)
-            value = registration.factory(
+            plan = self.extension_host.plan(
+                (CapabilityRequirement(capability=capability, api_version="2"),),
+                selections={capability: default_plugin_id},
+                configs={default_plugin_id: config},
+                scope_overrides={default_plugin_id: ExtensionScope.PROCESS},
+            )
+            handle = self.extension_host.open_scope_sync(
                 ExtensionScopeContext(
                     scope=ExtensionScope.PROCESS,
                     scope_id="desktop-v2",
-                    config=config,
                 ),
-                {},
+                plan,
             )
-            if inspect.isawaitable(value):
-                raise TypeError(f"{capability} process factory must be synchronous")
-            return default_plugin_id, value
+            self._scope_handles.append(handle)
+            return default_plugin_id, handle.providers.require_unique(capability)
 
     async def _log_memory_error(self, error: Exception) -> None:
         self.logger.exception(
@@ -1164,6 +1218,11 @@ class DesktopV2Service:
             task.cancel()
         if observers:
             await asyncio.gather(*observers, return_exceptions=True)
+        await self.dispatcher.close()
+        await asyncio.sleep(0)
+        close_tasks = tuple(self._application_close_tasks)
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
         drivers = tuple(self._drivers.values())
         self._drivers.clear()
         if drivers:
@@ -1171,7 +1230,11 @@ class DesktopV2Service:
                 *(driver.close_binding() for driver in drivers),
                 return_exceptions=True,
             )
+        await self.scheduler.close()
         await self.session_store.close()
+        for handle in reversed(self._scope_handles):
+            await handle.close()
+        self._scope_handles.clear()
         self.logger.info("service.closed", "Desktop v2 service closed")
         if self._owns_log_sink:
             self.log_sink.close()
@@ -1257,6 +1320,10 @@ class DesktopV2Service:
         )
         tools: Counter[str] = Counter()
         active_sessions: set[str] = set()
+        first_token_latency_total_ms = 0.0
+        first_token_latency_samples = 0
+        output_generation_total_ms = 0.0
+        output_token_intervals = 0
 
         agent_records = await self.catalog.list_agents(user_id)
         agent_names = {value.agent_id: value.name for value in agent_records}
@@ -1264,13 +1331,24 @@ class DesktopV2Service:
 
         for session in indexed_sessions:
             session_id = session.session_id
+            # Usage is a best-effort projection. One unreadable Session must not
+            # prevent healthy Sessions from contributing to the report.
             try:
                 runs = await self.session_store.list_session_runs(session_id)
                 events = await self.session_store.read_session_events(session_id)
                 requests = await self.diagnostics.list_model_requests(
                     session_id=session_id
                 )
-            except (FileNotFoundError, ValueError):
+            except (OSError, ValueError, SageV2Error) as error:
+                self.logger.warning(
+                    "usage.session_skipped",
+                    "Skipped unreadable Session while aggregating usage",
+                    attributes={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                    },
+                )
                 continue
 
             run_agents: dict[str, str] = {}
@@ -1278,7 +1356,7 @@ class DesktopV2Service:
                 try:
                     command = await self.session_store.get_start_command(run.run_id)
                     run_agents[run.run_id] = command.agent_id
-                except (FileNotFoundError, ValueError):
+                except (OSError, ValueError, SageV2Error):
                     continue
 
             for record in requests:
@@ -1311,6 +1389,16 @@ class DesktopV2Service:
                 for key, value in values.items():
                     totals[key] += value
                     daily[day_key][key] += value
+
+                first_token_latency_ms, generation_ms, token_intervals = (
+                    _usage_latency_observation(record, output_tokens=output_tokens)
+                )
+                if first_token_latency_ms is not None:
+                    first_token_latency_total_ms += first_token_latency_ms
+                    first_token_latency_samples += 1
+                if generation_ms is not None and token_intervals > 0:
+                    output_generation_total_ms += generation_ms
+                    output_token_intervals += token_intervals
 
                 # Diagnostics v2 keeps provider/routing details in one compact
                 # metadata object. Retain the v1 provider fallback so existing
@@ -1380,6 +1468,16 @@ class DesktopV2Service:
                     tools[tool_name] += 1
 
         totals["sessions"] = len(active_sessions)
+        totals["average_first_token_latency_ms"] = (
+            round(first_token_latency_total_ms / first_token_latency_samples, 2)
+            if first_token_latency_samples
+            else None
+        )
+        totals["output_tokens_per_second"] = (
+            round(output_token_intervals * 1000 / output_generation_total_ms, 2)
+            if output_generation_total_ms > 0
+            else None
+        )
         return {
             "range_days": days,
             "generated_at": now.isoformat(),
@@ -1671,7 +1769,7 @@ class DesktopV2Service:
         values = self._skill_provider().descriptors()
         names = sorted(allowed if allowed else values)
         return [
-            values[name].model_dump(mode="json")
+            self._skill_summary(name, values[name])
             for name in names
             if name in values and _SKILL_NAME.fullmatch(name)
         ]
@@ -1680,7 +1778,7 @@ class DesktopV2Service:
         del user_id
         values = self._skill_provider().descriptors()
         return [
-            values[name].model_dump(mode="json")
+            self._skill_summary(name, values[name])
             for name in sorted(values)
             if _SKILL_NAME.fullmatch(name)
         ]
@@ -1722,6 +1820,23 @@ class DesktopV2Service:
             raise ValueError(f"Skill already exists: {skill_name}")
         await asyncio.to_thread(shutil.copytree, normalized, target)
         return {"success_count": 1, "imported_names": [skill_name]}
+
+    async def delete_skill(self, skill_name: str, user_id: str) -> dict[str, Any]:
+        target = self._imported_skill_root(skill_name)
+        if target is None:
+            raise ValueError(f"Imported Skill not found: {skill_name}")
+
+        await asyncio.to_thread(shutil.rmtree, target)
+        for agent in await self.catalog.list_agents(user_id):
+            available = list(agent.config.get("availableSkills") or [])
+            if skill_name not in available:
+                continue
+            config = {
+                **agent.config,
+                "availableSkills": [name for name in available if name != skill_name],
+            }
+            await self.catalog.save_agent(agent.model_copy(update={"config": config}))
+        return {"deleted_name": skill_name}
 
     async def list_tools(
         self, user_id: str, language: str | None = None
@@ -2481,17 +2596,26 @@ class DesktopV2Service:
             _DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"],
         )
         plugin_id = _stable_component_id("workspace.initializer", plugin_id)
-        registration = self.extensions.get(plugin_id)
-        initializer = registration.factory(
+        plan = self.extension_host.plan(
+            (
+                CapabilityRequirement(
+                    capability="workspace.initializer", api_version="2"
+                ),
+            ),
+            selections={"workspace.initializer": plugin_id},
+            configs={plugin_id: {"language": language}},
+            scope_overrides={plugin_id: ExtensionScope.AGENT},
+        )
+        handle = await self.extension_host.open_scope_hierarchy(
             ExtensionScopeContext(
                 scope=ExtensionScope.AGENT,
                 scope_id="desktop-agent-workspace",
-                config={"language": language},
             ),
-            {},
+            plan,
+            parent=self._process_scope,
         )
-        if inspect.isawaitable(initializer):
-            initializer = await initializer
+        self._scope_handles.append(handle)
+        initializer = handle.providers.require_unique("workspace.initializer")
         initialize = initializer.initialize
         if inspect.iscoroutinefunction(initialize):
             result = initialize(workspace)
@@ -2624,6 +2748,10 @@ class DesktopV2Service:
                 invocation_mode=request.invocation_mode,
                 session_id=request.session_id,
                 run_id=accepted_handle.run_id,
+                resolved_spec_hash=command.resolved_spec_hash,
+                component_snapshot=command.config.metadata.get(
+                    "runtime_components"
+                ),
             )
             driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             memory_enabled = _agent_memory_enabled(
@@ -2640,7 +2768,20 @@ class DesktopV2Service:
                     "recall_limit": 8,
                 },
             )
-            stream = facade.drive_accepted_run(accepted_handle, context)
+            facade.attach_dispatcher(self.dispatcher)
+            application = self._run_application(
+                facade,
+                agent_id=request.agent_id,
+                composition_hash=command.resolved_spec_hash,
+            )
+            stream = await application.entrypoint().schedule_accepted_run(
+                accepted_handle, context
+            )
+            stream._execution.add_done_callback(
+                lambda _completed, app=application: self._schedule_application_close(
+                    app
+                )
+            )
         except asyncio.CancelledError:
             if driver is not None:
                 await asyncio.shield(driver.close_binding())
@@ -2975,6 +3116,10 @@ class DesktopV2Service:
                 invocation_mode=command.invocation_mode or "normal",
                 session_id=(await self.runtime.get_run(run_id)).session_id,
                 run_id=run_id,
+                resolved_spec_hash=command.resolved_spec_hash,
+                component_snapshot=command.config.metadata.get(
+                    "runtime_components"
+                ),
             )
             driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             self._drivers[run_id] = driver
@@ -2989,12 +3134,21 @@ class DesktopV2Service:
                 "recall_limit": 8,
             },
         )
-        task = await facade.continue_run(
+        facade.attach_dispatcher(self.dispatcher)
+        application = self._run_application(
+            facade,
+            agent_id=command.agent_id,
+            composition_hash=command.resolved_spec_hash,
+        )
+        task = await application.entrypoint().continue_run(
             run_id,
             self._context(
                 user_id,
                 language=str(command.config.metadata.get("response_language") or "en"),
             ),
+        )
+        task.add_done_callback(
+            lambda _completed, app=application: self._schedule_application_close(app)
         )
         task.add_done_callback(
             lambda _completed, key=run_id, value=driver: asyncio.create_task(
@@ -3009,6 +3163,46 @@ class DesktopV2Service:
         if self._drivers.get(run_id) is driver:
             self._drivers.pop(run_id, None)
 
+    def _run_application(
+        self,
+        agent: SAgent,
+        *,
+        agent_id: str,
+        composition_hash: str,
+    ) -> SAgentApplication:
+        """Expose every Desktop Run through the shared Application boundary."""
+
+        return SAgentApplication(
+            agents={agent_id: agent},
+            entrypoint_agent_id=agent_id,
+            scope_handles=(),
+            services={
+                "session.store": self.session_store,
+                "observability.diagnostic-sink": self.diagnostics,
+                "observability.log-sink": self.log_sink,
+            },
+            adapters={},
+            composition_hash=composition_hash,
+        )
+
+    def _schedule_application_close(self, application: SAgentApplication) -> None:
+        task = asyncio.create_task(application.close())
+        self._application_close_tasks.add(task)
+
+        def completed(value: asyncio.Task) -> None:
+            self._application_close_tasks.discard(value)
+            if value.cancelled():
+                return
+            error = value.exception()
+            if error is not None:
+                self.logger.exception(
+                    "application.close_failed",
+                    "Per-Run application failed to close",
+                    error,
+                )
+
+        task.add_done_callback(completed)
+
     async def _discard_driver_if_terminal(
         self, run_id: str, driver: _DesktopDriver
     ) -> None:
@@ -3016,7 +3210,7 @@ class DesktopV2Service:
             run = await self.runtime.get_run(run_id)
         except Exception:
             return
-        if run.state in TERMINAL_RUN_STATES:
+        if run.state in TERMINAL_RUN_STATES or run.state == RunState.SUSPENDED:
             await driver.close_binding()
             self._discard_driver(run_id, driver)
 
@@ -3120,11 +3314,15 @@ class DesktopV2Service:
         invocation_mode="normal",
         session_id: str | None = None,
         run_id: str | None = None,
+        resolved_spec_hash: str | None = None,
+        component_snapshot: dict[str, Any] | None = None,
         force_leaf: bool = False,
     ):
         provisioned: list[Any] = []
+        scope_handles: list[Any] = []
+        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(scope_handles)
         try:
-            return await self._build_loop_impl(
+            resolved, loop, sandbox_handle = await self._compose_run_driver(
                 agent=agent,
                 provider=provider,
                 workspace=workspace,
@@ -3133,8 +3331,15 @@ class DesktopV2Service:
                 invocation_mode=invocation_mode,
                 session_id=session_id,
                 run_id=run_id,
+                resolved_spec_hash=resolved_spec_hash,
+                component_snapshot=component_snapshot,
                 force_leaf=force_leaf,
                 sandbox_observer=provisioned.append,
+            )
+            return (
+                resolved,
+                loop,
+                _DesktopRunResources(sandbox_handle, scope_handles),
             )
         except BaseException as exc:
             for sandbox_handle in reversed(provisioned):
@@ -3142,9 +3347,16 @@ class DesktopV2Service:
                     await sandbox_handle.close()
                 except BaseException as close_exc:
                     raise exc from close_exc
+            for handle in reversed(scope_handles):
+                try:
+                    await handle.close()
+                except BaseException as close_exc:
+                    raise exc from close_exc
             raise
+        finally:
+            _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
-    async def _build_loop_impl(
+    async def _compose_run_driver(
         self,
         *,
         agent,
@@ -3155,6 +3367,8 @@ class DesktopV2Service:
         invocation_mode="normal",
         session_id: str | None = None,
         run_id: str | None = None,
+        resolved_spec_hash: str | None = None,
+        component_snapshot: dict[str, Any] | None = None,
         force_leaf: bool = False,
         sandbox_observer,
     ):
@@ -3190,6 +3404,17 @@ class DesktopV2Service:
         manifest = self._manifest(agent, provider, valid_tools, valid_skills)
         resolved = CompositionResolver().resolve(manifest)
         settings = await self.get_settings()
+        if component_snapshot:
+            settings = settings.model_copy(
+                update={
+                    "component_selections": dict(
+                        component_snapshot.get("selections") or {}
+                    ),
+                    "component_configs": dict(
+                        component_snapshot.get("configs") or {}
+                    ),
+                }
+            )
         estimator_id = settings.component_selections.get(
             "context.token-estimator",
             _DESKTOP_COMPONENT_DEFAULTS["context.token-estimator"],
@@ -3197,18 +3422,12 @@ class DesktopV2Service:
         reducer_id = settings.component_selections.get(
             "context.reducer", _DESKTOP_COMPONENT_DEFAULTS["context.reducer"]
         )
-        estimator_id = _runtime_component_id(
-            "context.token-estimator",
-            _stable_component_id("context.token-estimator", estimator_id),
-        )
-        reducer_id = _runtime_component_id(
-            "context.reducer",
-            _stable_component_id("context.reducer", reducer_id),
-        )
+        estimator_id = _stable_component_id("context.token-estimator", estimator_id)
+        reducer_id = _stable_component_id("context.reducer", reducer_id)
         # Desktop compression uses the configured route itself. The summary is
         # derived state in SummaryStore; canonical Session events remain intact.
         # Recording the secondary request also keeps provider diagnostics honest.
-        model_provider = self._model_provider(provider, agent)
+        model_provider = await self._model_provider(provider, agent)
         recording_model = RecordingModelProvider(
             model_provider,
             sink=self.diagnostics,
@@ -3223,7 +3442,7 @@ class DesktopV2Service:
         )
         judge_provider = await self._fast_provider(agent, provider)
         judge_recording_model = RecordingModelProvider(
-            self._model_provider(judge_provider, agent, enable_thinking=False),
+            await self._model_provider(judge_provider, agent, enable_thinking=False),
             sink=self.diagnostics,
             session_id_resolver=self._session_id_for_run,
             provider_metadata={
@@ -3244,7 +3463,7 @@ class DesktopV2Service:
             ),
         )
         memory_query_model = RecordingModelProvider(
-            self._model_provider(judge_provider, agent, enable_thinking=False),
+            await self._model_provider(judge_provider, agent, enable_thinking=False),
             sink=self.diagnostics,
             session_id_resolver=self._session_id_for_run,
             provider_metadata={
@@ -3258,7 +3477,7 @@ class DesktopV2Service:
             },
         )
         tool_selection_model = RecordingModelProvider(
-            self._model_provider(judge_provider, agent, enable_thinking=False),
+            await self._model_provider(judge_provider, agent, enable_thinking=False),
             sink=self.diagnostics,
             session_id_resolver=self._session_id_for_run,
             provider_metadata={
@@ -3271,7 +3490,7 @@ class DesktopV2Service:
                 "model_type": "fast",
             },
         )
-        memory_query_generator = self._component_instance(
+        memory_query_generator = await self._scoped_component(
             "memory.recall-query",
             memory_query_plugin_id,
             scope=ExtensionScope.AGENT,
@@ -3290,13 +3509,37 @@ class DesktopV2Service:
                 _DESKTOP_COMPONENT_DEFAULTS["context.summarizer"],
             ),
         )
-        summarizer = self._component_instance(
+        summarizer = await self._scoped_component(
             "context.summarizer",
             summarizer_plugin_id,
             scope=ExtensionScope.AGENT,
             scope_id=f"desktop-summarizer:{agent.agent_id}",
             agent_id=agent.agent_id,
             config={"model": recording_model, "model_binding": "summary"},
+        )
+        token_estimator = await self._scoped_component(
+            "context.token-estimator",
+            estimator_id,
+            scope=ExtensionScope.AGENT,
+            scope_id=f"desktop-estimator:{agent.agent_id}",
+            agent_id=agent.agent_id,
+            config={},
+        )
+        reducer_config = {"estimator": token_estimator}
+        if reducer_id == "sage.context.reducer.persistent-summary":
+            reducer_config.update(
+                {
+                    "store": self.summary_store,
+                    "summarizer": summarizer,
+                }
+            )
+        context_reducer = await self._scoped_component(
+            "context.reducer",
+            reducer_id,
+            scope=ExtensionScope.AGENT,
+            scope_id=f"desktop-reducer:{agent.agent_id}",
+            agent_id=agent.agent_id,
+            config=reducer_config,
         )
         continuation_plugin_id = _stable_component_id(
             "agent.continuation-policy",
@@ -3306,12 +3549,11 @@ class DesktopV2Service:
             ),
         )
         factory = AgentCompositionFactory(
-            self.runtime,
+            self.driver_runtime,
             context_components=ContextComponentBundle(
-                token_estimator=TokenEstimatorRegistry().create(estimator_id),
+                token_estimator=token_estimator,
                 summary_store=self.summary_store,
                 summarizer=summarizer,
-                reducer_id=reducer_id,
             ),
         )
         await self._ensure_agent_workspace(
@@ -3322,10 +3564,10 @@ class DesktopV2Service:
         sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(settings)
         workspace_root = _sandbox_workspace_root(sandbox_config, workspace)
         issuer = SandboxGrantIssuer()
-        sandbox_provider = self._component_instance(
+        sandbox_provider = await self._scoped_component(
             "execution.sandbox",
             sandbox_plugin_id,
-            scope=ExtensionScope.RUN,
+            scope=ExtensionScope.PROCESS,
             scope_id=f"desktop-sandbox:{agent.agent_id}",
             agent_id=agent.agent_id,
             config={"verification_key": issuer.verification_key},
@@ -3417,7 +3659,7 @@ class DesktopV2Service:
             activations=self.activations,
             workspace_root=workspace_root,
         )
-        goal_state_service = GoalStateService(self.session_store)
+        goal_state_service = GoalStateService(self.driver_session_store)
         raw_tool_selection = agent.config.get("toolSelection")
         legacy_tool_selection_config = (
             dict(raw_tool_selection) if isinstance(raw_tool_selection, dict) else {}
@@ -3442,7 +3684,7 @@ class DesktopV2Service:
             if configured_tool_selection is not None
             else legacy_tool_selection_config,
         )
-        tool_selection_policy = self._component_instance(
+        tool_selection_policy = await self._scoped_component(
             "tool.selection-policy",
             tool_selection_plugin_id,
             scope=ExtensionScope.AGENT,
@@ -3547,7 +3789,7 @@ class DesktopV2Service:
             )
             member_provider = await self._provider(member, member.user_id)
             models_by_agent[member.agent_id] = RecordingModelProvider(
-                self._model_provider(member_provider, member),
+                await self._model_provider(member_provider, member),
                 sink=self.diagnostics,
                 session_id_resolver=self._session_id_for_run,
                 provider_metadata={
@@ -3560,7 +3802,7 @@ class DesktopV2Service:
             )
             member_judge_provider = await self._fast_provider(member, member_provider)
             judge_models_by_agent[member.agent_id] = RecordingModelProvider(
-                self._model_provider(
+                await self._model_provider(
                     member_judge_provider, member, enable_thinking=False
                 ),
                 sink=self.diagnostics,
@@ -3623,7 +3865,7 @@ class DesktopV2Service:
 
         member_registry = AgentRegistry(tuple(member_descriptors))
 
-        def compose_mode_loop(descriptor, run_id, catalog, executor):
+        async def compose_mode_loop(descriptor, run_id, catalog, executor):
             context_providers = (
                 RunMetadataContextProvider(),
                 PlanContextProvider(goal_state_service),
@@ -3637,7 +3879,7 @@ class DesktopV2Service:
                 ActiveSkillsContextProvider(loader),
                 PreferredSkillsContextProvider(),
             )
-            base_continuation_policy = self._component_instance(
+            base_continuation_policy = await self._scoped_component(
                 "agent.continuation-policy",
                 continuation_plugin_id,
                 scope=ExtensionScope.AGENT,
@@ -3664,7 +3906,7 @@ class DesktopV2Service:
                     goal_state_service,
                 )
             return AgentLoopEngine(
-                runtime=self.runtime,
+                runtime=self.driver_runtime,
                 model=models_by_agent.get(descriptor.agent_id, recording_model),
                 tool_catalog=catalog,
                 tool_executor=executor,
@@ -3698,13 +3940,9 @@ class DesktopV2Service:
                     ),
                     providers=context_providers,
                     budget=context_budget,
-                    reducer=(
-                        factory.context_components.create_reducer()
-                        if context_budget is not None
-                        else None
-                    ),
-                    estimator=factory.context_components.token_estimator,
-                    history_reader=self.runtime.session_store,
+                    reducer=(context_reducer if context_budget is not None else None),
+                    estimator=token_estimator,
+                    history_reader=self.driver_session_store,
                     projection_observer=self.session_memory_service,
                 ),
             )
@@ -3730,6 +3968,7 @@ class DesktopV2Service:
                 )
             member_provider = await self._provider(member, member.user_id)
             child_run = await self.runtime.get_run(child_run_id)
+            child_command = await self.session_store.get_start_command(child_run_id)
             _, child_loop, child_sandbox = await self._build_loop(
                 agent=member,
                 provider=member_provider,
@@ -3739,29 +3978,33 @@ class DesktopV2Service:
                 invocation_mode="normal",
                 session_id=child_run.session_id,
                 run_id=child_run_id,
+                resolved_spec_hash=child_command.resolved_spec_hash,
+                component_snapshot=child_command.config.metadata.get(
+                    "runtime_components"
+                ),
                 force_leaf=descriptor.mode != AgentMode.TEAM,
             )
             return child_loop, child_sandbox
 
         mode_factory = ModeAwareAgentLoopFactory(
-            runtime=self.runtime,
+            runtime=self.driver_runtime,
             model_factory=lambda descriptor, run_id: models_by_agent.get(
                 descriptor.agent_id, recording_model
             ),
             base_catalog=native_catalog,
             base_executor=native_executor,
             registry=member_registry,
-            resolved_spec_hash=resolved.manifest_hash,
+            resolved_spec_hash=resolved_spec_hash or resolved.manifest_hash,
             max_delegation_concurrency=4,
             loop_composer=compose_mode_loop,
             workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
             fallback_invocation_mode=invocation_mode,
             child_loop_factory=compose_child_loop,
         )
-        loop = mode_factory.create_loop(root_descriptor, run_id or "pending")
+        loop = await mode_factory.create_loop_async(root_descriptor, run_id or "pending")
         return resolved, loop, sandbox_handle
 
-    def _component_instance(
+    async def _scoped_component(
         self,
         capability: str,
         plugin_id: str,
@@ -3772,24 +4015,43 @@ class DesktopV2Service:
         agent_id: str | None = None,
         run_id: str | None = None,
     ):
-        registration = self.extensions.get(plugin_id)
-        if capability not in {
-            offer.capability for offer in registration.descriptor.provides
-        }:
-            raise ValueError(f"extension {plugin_id!r} does not provide {capability!r}")
-        value = registration.factory(
+        plan = self.extension_host.plan(
+            (CapabilityRequirement(capability=capability, api_version="2"),),
+            selections={capability: plugin_id},
+            configs={plugin_id: config},
+            scope_overrides={plugin_id: scope},
+        )
+        parents = [self._process_scope]
+        if scope == ExtensionScope.RUN:
+            agent_parent = await self.extension_host.open_scope(
+                ExtensionScopeContext(
+                    scope=ExtensionScope.AGENT,
+                    scope_id=f"desktop-agent-scope:{agent_id or 'default'}",
+                    agent_id=agent_id,
+                ),
+                self.extension_host.plan(()),
+                parent=self._process_scope,
+            )
+            owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+            (owner_handles if owner_handles is not None else self._scope_handles).append(
+                agent_parent
+            )
+            parents.append(agent_parent)
+        handle = await self.extension_host.open_scope_hierarchy(
             ExtensionScopeContext(
                 scope=scope,
                 scope_id=scope_id,
                 agent_id=agent_id,
                 run_id=run_id,
-                config=config,
             ),
-            {},
+            plan,
+            parent=parents[-1] if scope != ExtensionScope.PROCESS else None,
         )
-        if inspect.isawaitable(value):
-            raise TypeError(f"{capability} factory must be synchronous")
-        return value
+        owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+        (owner_handles if owner_handles is not None else self._scope_handles).append(
+            handle
+        )
+        return handle.providers.require_unique(capability)
 
     async def _session_id_for_run(self, run_id: str) -> str:
         return (await self.session_store.get_run(run_id)).session_id
@@ -3859,7 +4121,9 @@ class DesktopV2Service:
             entrypoint=ApplicationEntrypoint(agent=agent.agent_id),
         )
 
-    def _model_provider(self, provider, agent, *, enable_thinking: bool | None = None):
+    async def _model_provider(
+        self, provider, agent, *, enable_thinking: bool | None = None
+    ):
         model_lower = provider.model.lower()
         max_field = (
             "max_completion_tokens"
@@ -3915,23 +4179,21 @@ class DesktopV2Service:
             ),
         )
         protocol = resolve_model_protocol(route.provider)
-        registration = self.extensions.get(f"sage.model.{protocol.value}")
-        return registration.factory(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id=f"desktop-agent:{agent.agent_id}",
-                agent_id=agent.agent_id,
-                config={
-                    "route": route.model_dump(mode="json"),
-                    "credential": CredentialMaterial(
-                        credential_id=f"llm-provider:{provider.id}",
-                        secret=SecretStr(provider.api_key or ""),
-                        source="desktop-catalog",
-                    ),
-                    "provider_instance_id": provider.id,
-                },
-            ),
-            {},
+        return await self._scoped_component(
+            "model.provider",
+            f"sage.model.{protocol.value}",
+            scope=ExtensionScope.AGENT,
+            scope_id=f"desktop-agent:{agent.agent_id}",
+            agent_id=agent.agent_id,
+            config={
+                "route": route.model_dump(mode="json"),
+                "credential": CredentialMaterial(
+                    credential_id=f"llm-provider:{provider.id}",
+                    secret=SecretStr(provider.api_key or ""),
+                    source="desktop-catalog",
+                ),
+                "provider_instance_id": provider.id,
+            },
         )
 
     async def _fast_provider(
@@ -4027,6 +4289,10 @@ class DesktopV2Service:
             "identity_documents": self._identity_documents(
                 self._agent_workspace_path(settings.agent_workspace_path)
             ),
+            "runtime_components": {
+                "selections": dict(settings.component_selections),
+                "configs": dict(settings.component_configs),
+            },
         }
         if workspace is not None:
             metadata["working_directory"] = workspace_root
@@ -4071,12 +4337,47 @@ class DesktopV2Service:
             agent_id=request.agent_id,
             input=items,
             config=run_config,
-            resolved_spec_hash=resolved.manifest_hash,
+            resolved_spec_hash=self._desktop_spec_hash(
+                resolved.manifest_hash, settings
+            ),
             idempotency_key=request.idempotency_key or new_id("desktop_request"),
             session_concurrency_mode=request.session_concurrency_mode,
             base_session_revision=request.base_session_revision,
             invocation_mode=request.invocation_mode,
         )
+
+    def _desktop_spec_hash(self, manifest_hash: str, settings) -> str:
+        components = {
+            capability: _stable_component_id(
+                capability,
+                settings.component_selections.get(capability, default_plugin),
+            )
+            for capability, default_plugin in _DESKTOP_COMPONENT_DEFAULTS.items()
+        }
+        process_plugins = {
+            "session.store": self.session_plugin_id,
+            "context.summary-store": self.summary_store_plugin_id,
+            "observability.diagnostic-sink": self.diagnostic_plugin_id,
+            "memory.provider": self.memory_plugin_id,
+            "session-memory.provider": self.session_memory_plugin_id,
+        }
+        selected_plugins = set(components.values()) | set(process_plugins.values())
+        versions = {
+            plugin_id: self.extensions.get(plugin_id).descriptor.version
+            for plugin_id in sorted(selected_plugins)
+            if self.extensions.contains(plugin_id)
+        }
+        payload = {
+            "manifest": manifest_hash,
+            "components": components,
+            "configs": dict(settings.component_configs),
+            "process_plugins": process_plugins,
+            "plugin_versions": versions,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode()
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     def _identity_documents(self, root: Path | None = None) -> dict[str, str]:
         values = {}
@@ -4150,6 +4451,32 @@ class DesktopV2Service:
     def _skill_provider(self) -> FilesystemSkillProvider:
         repository_skills = Path(__file__).resolve().parents[3] / "skills"
         return FilesystemSkillProvider((self.skill_root, repository_skills))
+
+    def _imported_skill_root(self, skill_name: str) -> Path | None:
+        if not _SKILL_NAME.fullmatch(skill_name):
+            return None
+        root = self.skill_root.resolve()
+        unresolved = root / skill_name
+        if unresolved.is_symlink():
+            return None
+        target = unresolved.resolve()
+        if (
+            target.parent != root
+            or not target.is_dir()
+            or not (target / "SKILL.md").is_file()
+        ):
+            return None
+        return target
+
+    def _skill_summary(
+        self,
+        skill_name: str,
+        descriptor: SkillDescriptor,
+    ) -> dict[str, Any]:
+        return {
+            **descriptor.model_dump(mode="json"),
+            "can_delete": self._imported_skill_root(skill_name) is not None,
+        }
 
     @staticmethod
     def _skill_name(path: Path) -> str:
@@ -4323,7 +4650,46 @@ class DesktopV2Service:
 
 
 def _usage_record_time(record: dict[str, Any]) -> datetime | None:
-    raw = record.get("completed_at") or record.get("started_at")
+    return _usage_timestamp(record.get("completed_at") or record.get("started_at"))
+
+
+def _usage_latency_observation(
+    record: dict[str, Any], *, output_tokens: int
+) -> tuple[float | None, float | None, int]:
+    started_at = _usage_timestamp(record.get("started_at"))
+    first_token_at = _usage_timestamp(record.get("first_token_at"))
+    completed_at = _usage_timestamp(record.get("completed_at"))
+
+    first_token_latency_ms: float | None = None
+    if started_at is not None and first_token_at is not None:
+        seconds = (first_token_at - started_at).total_seconds()
+        if seconds >= 0:
+            first_token_latency_ms = seconds * 1000
+    elif isinstance(record.get("ttfb_sec"), (int, float)):
+        seconds = float(record["ttfb_sec"])
+        if seconds >= 0:
+            first_token_latency_ms = seconds * 1000
+
+    token_intervals = max(0, output_tokens - 1)
+    generation_ms: float | None = None
+    if token_intervals > 0:
+        if first_token_at is not None and completed_at is not None:
+            seconds = (completed_at - first_token_at).total_seconds()
+            if seconds >= 0:
+                generation_ms = seconds * 1000
+        elif (
+            first_token_latency_ms is not None
+            and isinstance(record.get("duration_sec"), (int, float))
+        ):
+            seconds = float(record["duration_sec"]) - (
+                first_token_latency_ms / 1000
+            )
+            if seconds >= 0:
+                generation_ms = seconds * 1000
+    return first_token_latency_ms, generation_ms, token_intervals
+
+
+def _usage_timestamp(raw: Any) -> datetime | None:
     if not isinstance(raw, str) or not raw:
         return None
     try:

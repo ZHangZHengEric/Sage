@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
+from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.observability.contracts import DiagnosticSink
 from sagents.v2.model.contracts import (
     ModelCapabilities,
@@ -63,10 +64,36 @@ class RecordingModelProvider:
             wire_request=wire_request,
         )
         finalized = False
+        first_token_at = None
+        first_token_persisted = False
+
+        async def persist_first_token() -> None:
+            nonlocal first_token_persisted
+            if first_token_at is None or first_token_persisted:
+                return
+            recorder = getattr(self.sink, "record_model_first_token", None)
+            if recorder is not None:
+                await recorder(
+                    session_id=session_id,
+                    request=request,
+                    observed_at=first_token_at,
+                )
+            first_token_persisted = True
+
         try:
             async for event in self.provider.stream(request):
+                if (
+                    first_token_at is None
+                    and event.kind
+                    in {ModelEventKind.TEXT_DELTA, ModelEventKind.REASONING_DELTA}
+                    and event.delta
+                ):
+                    # Capture the observation before yielding, but defer the
+                    # diagnostic write so it never delays the first token.
+                    first_token_at = utc_now()
                 if event.kind == ModelEventKind.COMPLETED:
                     assert event.response is not None
+                    await persist_first_token()
                     await self.sink.complete_model_request(
                         session_id=session_id,
                         request=request,
@@ -75,6 +102,7 @@ class RecordingModelProvider:
                     finalized = True
                 yield event
         except Exception as exc:
+            await persist_first_token()
             await self.sink.fail_model_request(
                 session_id=session_id,
                 request=request,
@@ -84,6 +112,7 @@ class RecordingModelProvider:
             raise
         finally:
             if not finalized:
+                await persist_first_token()
                 await self.sink.fail_model_request(
                     session_id=session_id,
                     request=request,

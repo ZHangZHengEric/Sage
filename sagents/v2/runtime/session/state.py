@@ -87,7 +87,7 @@ from sagents.v2.runtime.session.contracts import (
 )
 
 
-SESSION_AGGREGATE_FORMAT = "sage.session-aggregate/v1"
+SESSION_AGGREGATE_FORMAT = "sage.session-aggregate/v2"
 
 
 @dataclass

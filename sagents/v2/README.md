@@ -50,7 +50,7 @@ The most important behavior is:
 The public entry point is:
 
 ```python
-from sagents.v2 import SAgent, SAgentBuilder
+from sagents.v2 import SAgentApplication, SAgentBuilder
 ```
 
 `SAgentBuilder` reads the package, resolves its plugins once, and builds a fully
@@ -60,7 +60,7 @@ injected runtime.
 
 ```yaml
 # sage.yaml
-schema_version: sage/v1
+schema_version: sage/v2
 kind: application
 
 metadata:
@@ -107,11 +107,12 @@ from sagents.v2.contracts.principals import PrincipalType
 
 
 async def main() -> None:
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root="runtime")
         .build("sage.yaml")
     )
+    agent = application.entrypoint()
 
     context = RequestContext(
         actor=ActorRef(
@@ -137,7 +138,7 @@ async def main() -> None:
 
     result = await stream.wait()
     print(result.state)
-    await agent.close()
+    await application.close()
 
 
 asyncio.run(main())
@@ -209,15 +210,15 @@ policy and is not inferred from the Agent mode.
 
 ## Persistence and hosting
 
-The default `FilesystemSessionStore` keeps each Session under the configured
-runtime root. Its checksummed `state.json` is authoritative; readable event,
-run, checkpoint, and derived files are projections that can be regenerated.
-Updates replace state atomically before events are published.
+The default `FilesystemSessionStore` v4 keeps each Session under the configured
+runtime root. Its typed, checksummed aggregate plus discriminated mutation
+journal are authoritative; readable event, run, checkpoint, and derived files
+are projections that can be regenerated. Older stores are never changed during
+startup; migrate explicitly with `sage v2 migrate --runtime-root <path>`.
 
-Use `AgentHost` when a server needs to route immutable versions of many Agent
-packages. The host caches built `SAgent` instances by package identity while
-the application remains responsible for package storage, HTTP routes,
-authentication, tenant ownership, and its global Session index.
+`SAgentApplication` is the application-level ownership boundary. It exposes
+logical Agents and typed services while owning extension scopes, Scheduler,
+workers, stores, diagnostics, and protocol adapters until `close()`.
 
 ## Extending V2
 

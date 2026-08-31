@@ -101,6 +101,20 @@ class FilesystemDiagnosticSink:
             },
         )
 
+    async def record_model_first_token(
+        self,
+        *,
+        session_id: str,
+        request: ModelRequest,
+        observed_at: datetime,
+    ) -> None:
+        await asyncio.to_thread(
+            self._record_model_first_token,
+            session_id,
+            request,
+            observed_at,
+        )
+
     async def fail_model_request(
         self,
         *,
@@ -198,6 +212,24 @@ class FilesystemDiagnosticSink:
             record.update(safe_update)
             record["status"] = status
             record["completed_at"] = utc_now().isoformat()
+            self._atomic_json(path, record)
+
+    def _record_model_first_token(
+        self,
+        session_id: str,
+        request: ModelRequest,
+        observed_at: datetime,
+    ) -> None:
+        with self._write_lock:
+            path = self._find_model_record_path(
+                session_id, request.run_id, request.request_id
+            )
+            if path is None:
+                return
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record.get("first_token_at"):
+                return
+            record["first_token_at"] = observed_at.isoformat()
             self._atomic_json(path, record)
 
     def _list_model_requests_sync(

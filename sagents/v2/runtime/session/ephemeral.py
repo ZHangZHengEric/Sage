@@ -10,8 +10,23 @@ from sagents.v2.runtime.session.state import (
 )
 
 
-class EphemeralSessionStore(SessionStateStore):
-    """Process-local SessionStore with no durability hooks."""
+class EphemeralSessionStore:
+    """Process-local composed facade over the transactional coordinator."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        object.__setattr__(self, "_coordinator", SessionStateStore(*args, **kwargs))
+
+    def __getattr__(self, name):
+        return getattr(self._coordinator, name)
+
+    def __setattr__(self, name, value) -> None:
+        if name == "_coordinator":
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._coordinator, name, value)
+
+    async def close(self) -> None:
+        """Match durable stores' lifecycle without owning external resources."""
 
 
 __all__ = [

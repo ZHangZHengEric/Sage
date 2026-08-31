@@ -6,12 +6,10 @@ and Agent loop receive frozen interfaces and never discover global providers.
 
 from __future__ import annotations
 
-import inspect
-import os
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
-
-from pydantic import SecretStr
 
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
@@ -21,7 +19,7 @@ from sagents.v2.agent.multi_agent import (
     AgentRegistry,
     AgentRosterContextProvider,
 )
-from sagents.v2.model import ModelProvider
+from sagents.v2.model import ModelProvider, RecordingModelProvider
 from sagents.v2.goal import GoalStateService
 from sagents.v2.tool import (
     ToolCatalog,
@@ -32,31 +30,36 @@ from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.execution import (
     ExecutionBindingProvider,
     ExecutionBindingRequest,
+    LocalWorkerDispatcher,
     RunExecutionBinding,
 )
 from sagents.v2.package.manifest.resolver import ResolvedSageManifest
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import PluginDeclaration
-from sagents.v2.package.manifest.runtime import RuntimeConfig
+from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.memory import MemoryService
 from sagents.v2.memory import MemoryProvider
 from sagents.v2.model.protocols import resolve_model_protocol
 from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.root import SageManifest
-from sagents.v2.runtime.credentials import CredentialMaterial
+from sagents.v2.runtime.credentials import CredentialRef
+from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.extensions import (
+    CapabilityRequirement,
+    ExtensionHost,
     ExtensionRegistration,
     ExtensionScope,
     ExtensionScopeContext,
     load_installed_extension,
 )
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
-from sagents.v2.runtime.session import SessionStore
+from sagents.v2.runtime.session import LeaseFencedSessionStore, SessionStore
 from sagents.v2.session_memory import SessionMemoryProvider, SessionMemoryService
 from sagents.v2.context import SessionDerivedConversationSummaryStore
 from sagents.v2.sagent import SAgent
+from sagents.v2.application import SAgentApplication
 from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
@@ -82,6 +85,7 @@ class _ExecutionBoundDriver:
         self.agent_id = agent_id
         self.loop_builder = loop_builder
         self.binding: RunExecutionBinding | None = None
+        self.scope_handle = None
         self.loop = None
         self._lock = None
 
@@ -110,6 +114,10 @@ class _ExecutionBoundDriver:
             try:
                 binding.validate_for(request)
                 loop = self.loop_builder(binding)
+                if hasattr(loop, "__await__"):
+                    loop = await loop
+                if isinstance(loop, tuple):
+                    loop, self.scope_handle = loop
             except BaseException as exc:
                 try:
                     await binding.close()
@@ -127,6 +135,8 @@ class _ExecutionBoundDriver:
         return await (await self._ensure_loop(context)).resume(run_id, context)
 
     async def close(self) -> None:
+        if self.scope_handle is not None:
+            await self.scope_handle.close()
         if self.binding is not None:
             await self.binding.close()
 
@@ -160,6 +170,17 @@ class _OwnerValidatedCompatibilityDriver:
     async def resume(self, run_id, context):
         self._validate()
         return await self.loop.resume(run_id, context)
+
+
+class _CompositeRunResource:
+    def __init__(self, *resources) -> None:
+        self.resources = resources
+
+    async def close(self) -> None:
+        for resource in reversed(self.resources):
+            closed = resource.close()
+            if hasattr(closed, "__await__"):
+                await closed
 
 
 class SAgentBuilder:
@@ -245,23 +266,56 @@ class SAgentBuilder:
     def inventory(self) -> tuple[dict, ...]:
         return self.extensions.inventory()
 
-    def build(
+    async def build(
         self,
         package: SageManifest | ResolvedSageManifest | str | Path,
         *,
         agent_id: str | None = None,
-    ) -> SAgent:
-        """Build synchronously from providers whose factories are synchronous."""
+    ) -> SAgentApplication:
+        """Resolve one composition and open all provider scopes asynchronously."""
+
+        scope_handles = []
+        try:
+            return await self._build_application(
+                package,
+                agent_id=agent_id,
+                scope_handles=scope_handles,
+            )
+        except BaseException as exc:
+            for handle in reversed(scope_handles):
+                try:
+                    await handle.close()
+                except BaseException as close_exc:
+                    exc.add_note(f"scope rollback also failed: {close_exc}")
+            raise
+
+    async def _build_application(
+        self,
+        package: SageManifest | ResolvedSageManifest | str | Path,
+        *,
+        agent_id: str | None,
+        scope_handles: list,
+    ) -> SAgentApplication:
 
         manifest, resolved = self._resolve_package(package)
         plugin_declarations = (
             manifest.plugins if manifest is not None else resolved.plugins
         )
         runtime_config = manifest.runtime if manifest is not None else resolved.runtime
+        self._load_declared_plugins(plugin_declarations)
+        extension_host = ExtensionHost(self.extensions)
+        process_root = await extension_host.open_scope(
+            ExtensionScopeContext(
+                scope=ExtensionScope.PROCESS,
+                scope_id=f"application-{resolved.package_id}",
+            ),
+            extension_host.plan(()),
+        )
+        scope_handles.append(process_root)
         uses_binding_tools = (
             self._execution_binding_provider is not None
-            and runtime_config.tool_provider is not None
-            and runtime_config.tool_provider.plugin == "sage.tool.official"
+            and self._selected_plugin(runtime_config, "tool.catalog")
+            == "sage.tool.official"
         )
         selected_agent = agent_id or resolved.entrypoint_agent
         if selected_agent is None:
@@ -270,9 +324,8 @@ class SAgentBuilder:
             raise ValueError(f"unknown Agent entrypoint {selected_agent!r}")
         if (
             (self._tool_catalog is None or self._tool_executor is None)
-            and runtime_config.tool_provider is not None
-            and runtime_config.tool_provider.plugin == "sage.tool.official"
-            and runtime_config.tool_provider.config.get("runtime") is None
+            and self._selected_plugin(runtime_config, "tool.catalog")
+            == "sage.tool.official"
             and self._tool_runtime is None
             and self._execution_binding_provider is None
         ):
@@ -280,20 +333,45 @@ class SAgentBuilder:
                 "sage.tool.official requires with_execution_binding_provider(provider) "
                 "or the compatibility with_tool_runtime(runtime)"
             )
-        self._load_declared_plugins(plugin_declarations)
-        owned_resources: list[object] = []
         session_store = self._session_store
         if session_store is None:
-            session_store = self._create_session_store(
-                runtime_config, plugin_declarations
+            session_store = await self._create_session_store(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
             )
-            owned_resources.append(session_store)
+        credential_provider = await self._create_capability(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            capability="credentials.provider",
+            default_plugin="sage.credentials.environment",
+            default_config={"declarations": resolved.credentials},
+            default_scope=ExtensionScope.PROCESS,
+        )
+        services, adapters = await self._create_application_services(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
+            resolved,
+            session_store=session_store,
+            credential_provider=credential_provider,
+        )
         memory_provider = self._memory_provider
         if memory_provider is None:
-            memory_provider = self._create_memory_provider(
-                runtime_config, plugin_declarations
+            memory_provider = await self._create_memory_provider(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
             )
-            owned_resources.append(memory_provider)
         memory_behavior = resolved.agents[selected_agent].memory
         memory_enabled = "search_memory" in resolved.agents[selected_agent].tools
         memory_service = MemoryService(
@@ -302,19 +380,27 @@ class SAgentBuilder:
         )
         session_memory_provider = self._session_memory_provider
         if session_memory_provider is None:
-            session_memory_provider = self._create_session_memory_provider(
-                runtime_config, plugin_declarations
+            session_memory_provider = await self._create_session_memory_provider(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
             )
-            owned_resources.append(session_memory_provider)
         session_memory_service = SessionMemoryService(
             session_memory_provider, session_store
         )
         model = self._model_provider
         if model is None:
-            model = self._create_model(
-                manifest, resolved, selected_agent, plugin_declarations
+            model = await self._create_model(
+                extension_host,
+                process_root,
+                scope_handles,
+                resolved,
+                selected_agent,
+                plugin_declarations,
+                credential_provider,
             )
-            owned_resources.append(model)
         models_by_agent = {selected_agent: model}
         selected_definition = resolved.agents[selected_agent]
         for member_id in selected_definition.subagents:
@@ -323,47 +409,83 @@ class SAgentBuilder:
             member_model = (
                 self._model_provider
                 if self._model_provider is not None
-                else self._create_model(
-                    manifest, resolved, member_id, plugin_declarations
+                else await self._create_model(
+                    extension_host,
+                    process_root,
+                    scope_handles,
+                    resolved,
+                    member_id,
+                    plugin_declarations,
+                    credential_provider,
                 )
             )
             models_by_agent[member_id] = member_model
-            if member_model is not self._model_provider:
-                owned_resources.append(member_model)
-        tool_selection = self._tool_selection or self._create_tool_selection(
-            runtime_config, plugin_declarations
+        async def resolve_session_id(run_id: str) -> str:
+            return (await session_store.get_run(run_id)).session_id
+
+        diagnostic_sink = services["observability.diagnostic-sink"]
+        models_by_agent = {
+            member_id: (
+                provider
+                if isinstance(provider, RecordingModelProvider)
+                else RecordingModelProvider(
+                    provider,
+                    sink=diagnostic_sink,
+                    session_id_resolver=resolve_session_id,
+                    provider_metadata={"agent_id": member_id},
+                )
+            )
+            for member_id, provider in models_by_agent.items()
+        }
+        tool_selection = self._tool_selection or await self._create_tool_selection(
+            extension_host,
+            process_root,
+            scope_handles,
+            runtime_config,
+            plugin_declarations,
         )
         if self._tool_catalog is not None and self._tool_executor is not None:
             tool_catalog, tool_executor = self._tool_catalog, self._tool_executor
         elif (
             self._execution_binding_provider is not None
-            and runtime_config.tool_provider is not None
-            and runtime_config.tool_provider.plugin == "sage.tool.official"
+            and self._selected_plugin(runtime_config, "tool.catalog")
+            == "sage.tool.official"
         ):
             # The real provider pair is composed lazily from the actual Run
             # binding. These placeholders are never exposed to that driver.
             tool_catalog = InMemoryToolCatalog(())
             tool_executor = InMemoryToolExecutor({}, {})
-        elif runtime_config.tool_provider is not None:
-            tool_catalog, tool_executor = self._create_tools(
-                runtime_config, plugin_declarations
+        elif self._selection(runtime_config, "tool.catalog") is not None:
+            tool_catalog, tool_executor = await self._create_tools(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
             )
-            owned_resources.extend((tool_catalog, tool_executor))
         else:
             tool_catalog = InMemoryToolCatalog(())
             tool_executor = InMemoryToolExecutor({}, {})
-            owned_resources.extend((tool_catalog, tool_executor))
-        goal_state_service = GoalStateService(session_store)
+        scheduler = services["execution.scheduler"]
+        driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
+        goal_state_service = GoalStateService(driver_session_store)
         if self._tool_runtime is not None:
             self._tool_runtime.memory_service = memory_service
             self._tool_runtime.session_memory_service = session_memory_service
             self._tool_runtime.goal_state_service = goal_state_service
             self._tool_runtime.tool_selection_policy = tool_selection
-        runtime = HarnessRuntime(session_store)
-        components = ContextComponentBundle(
-            summary_store=SessionDerivedConversationSummaryStore(session_store)
+        control_runtime = HarnessRuntime(
+            session_store,
+            job_runtime=services["execution.job-runtime"],
         )
-        factory = AgentRuntimeFactory(runtime, context_components=components)
+        driver_runtime = HarnessRuntime(
+            driver_session_store,
+            job_runtime=services["execution.job-runtime"],
+        )
+        components = ContextComponentBundle(
+            summary_store=SessionDerivedConversationSummaryStore(driver_session_store)
+        )
+        factory = AgentRuntimeFactory(driver_runtime, context_components=components)
         root_descriptor = AgentDescriptor(
             agent_id=selected_agent,
             name=selected_definition.name,
@@ -392,6 +514,7 @@ class SAgentBuilder:
             value.session_memory_service = session_memory_service
             value.goal_state_service = goal_state_service
             value.tool_selection_policy = tool_selection
+            value.job_runtime = services["execution.job-runtime"]
 
         def make_loop(
             run_id,
@@ -488,7 +611,7 @@ class SAgentBuilder:
 
             async def compose_bound_child(descriptor, child_run_id, child_context):
                 assert self._execution_binding_provider is not None
-                command = await runtime.session_store.get_start_command(child_run_id)
+                command = await driver_runtime.session_store.get_start_command(child_run_id)
                 request = ExecutionBindingRequest(
                     run_id=child_run_id,
                     parent_run_id=command.parent_run_id,
@@ -507,10 +630,15 @@ class SAgentBuilder:
                         binding.grant_issuer,
                     )
                     configure_official_runtime(child_runtime)
-                    child_catalog, child_executor = self._create_tools(
+                    child_catalog, child_executor, child_scope = await self._create_tools(
+                        extension_host,
+                        process_root,
+                        scope_handles,
                         runtime_config,
                         plugin_declarations,
                         runtime_override=child_runtime,
+                        return_handle=True,
+                        scope_override=ExtensionScope.RUN,
                     )
                     return (
                         compose_with_runtime(
@@ -519,7 +647,7 @@ class SAgentBuilder:
                             child_executor,
                             child_runtime,
                         ),
-                        binding,
+                        _CompositeRunResource(binding, child_scope),
                     )
                 except BaseException as exc:
                     try:
@@ -548,7 +676,7 @@ class SAgentBuilder:
                 child_factory = reject_prebound_child
 
             mode_factory = ModeAwareAgentLoopFactory(
-                runtime=runtime,
+                runtime=driver_runtime,
                 model_factory=lambda descriptor, _: models_by_agent[
                     descriptor.agent_id
                 ],
@@ -572,34 +700,42 @@ class SAgentBuilder:
                     )
                 return loop
 
-            def loop_builder(binding: RunExecutionBinding):
+            async def loop_builder(binding: RunExecutionBinding):
                 official_runtime = OfficialToolRuntime(
                     binding.sandbox,
                     binding.grant_issuer,
                 )
                 configure_official_runtime(official_runtime)
-                bound_catalog, bound_executor = self._create_tools(
+                bound_catalog, bound_executor, run_scope = await self._create_tools(
+                    extension_host,
+                    process_root,
+                    scope_handles,
                     runtime_config,
                     plugin_declarations,
                     runtime_override=official_runtime,
+                    return_handle=True,
+                    scope_override=ExtensionScope.RUN,
                 )
-                return make_loop(
-                    run_id,
-                    bound_catalog,
-                    bound_executor,
-                    official_runtime,
+                return (
+                    make_loop(
+                        run_id,
+                        bound_catalog,
+                        bound_executor,
+                        official_runtime,
+                    ),
+                    run_scope,
                 )
 
             return _ExecutionBoundDriver(
-                runtime=runtime,
+                runtime=control_runtime,
                 provider=self._execution_binding_provider,
                 run_id=run_id,
                 agent_id=selected_agent,
                 loop_builder=loop_builder,
             )
 
-        return SAgent(
-            runtime=runtime,
+        agent = SAgent(
+            runtime=control_runtime,
             driver_factory=driver_factory,
             memory_service=(
                 memory_service
@@ -611,7 +747,43 @@ class SAgentBuilder:
                 "recall": memory_enabled and memory_behavior.recall,
                 "auto_write": memory_enabled and memory_behavior.auto_write,
             },
-            owned_resources=tuple(owned_resources),
+        )
+        services = {
+            **services,
+            "session.store": session_store,
+            "credentials.provider": credential_provider,
+            "memory.provider": memory_provider,
+            "session-memory.provider": session_memory_provider,
+        }
+        scheduler_config = self._selection(runtime_config, "execution.scheduler")
+        dispatcher_values = dict(
+            scheduler_config.config if scheduler_config is not None else {}
+        )
+        dispatcher = LocalWorkerDispatcher(
+            scheduler,
+            max_concurrent_runs=int(
+                dispatcher_values.get("max_concurrent_runs", 8)
+            ),
+            max_concurrent_runs_per_tenant=int(
+                dispatcher_values.get("max_concurrent_runs_per_tenant", 2)
+            ),
+            lease_seconds=float(dispatcher_values.get("lease_seconds", 30.0)),
+            lease_scope_factory=driver_session_store.lease_scope,
+        )
+        await dispatcher.start()
+        agent.attach_dispatcher(dispatcher)
+        services["execution.dispatcher"] = dispatcher
+        composition_hash = self._composition_hash(
+            resolved.manifest_hash, scope_handles
+        )
+        return SAgentApplication(
+            agents={selected_agent: agent},
+            entrypoint_agent_id=selected_agent,
+            scope_handles=tuple(scope_handles),
+            services=services,
+            adapters=adapters,
+            composition_hash=composition_hash,
+            owned_resources=(dispatcher,),
         )
 
     def _resolve_package(self, package):
@@ -649,66 +821,73 @@ class SAgentBuilder:
         )
         return {**defaults, **selection_config}
 
-    def _create_session_store(
-        self,
-        runtime: RuntimeConfig,
-        declarations: tuple[PluginDeclaration, ...],
+    async def _create_session_store(
+        self, host, parent, handles, runtime, declarations
     ) -> SessionStore:
-        selection = runtime.session_store
-        plugin_id = (
-            selection.plugin if selection is not None else "sage.session.filesystem"
-        )
-        config = self._merge_plugin_config(
-            declarations,
-            plugin_id,
-            dict(selection.config if selection is not None else {}),
-        )
+        selection = self._selection(runtime, "session.store")
+        plugin_id = selection.plugin if selection else "sage.session.filesystem"
+        config = dict(selection.config if selection else {})
         if plugin_id == "sage.session.filesystem" and "root" not in config:
             if self._session_root is None:
                 raise ValueError("filesystem SessionStore requires session_root")
             config["root"] = str(self._session_root)
-        return self._instantiate(plugin_id, config, "session.store")
+        return await self._create_capability(
+            host,
+            parent,
+            handles,
+            runtime,
+            declarations,
+            capability="session.store",
+            default_plugin=plugin_id,
+            default_config=config,
+            default_scope=ExtensionScope.PROCESS,
+        )
 
-    def _create_memory_provider(
-        self,
-        runtime: RuntimeConfig,
-        declarations: tuple[PluginDeclaration, ...],
+    async def _create_memory_provider(
+        self, host, parent, handles, runtime, declarations
     ) -> MemoryProvider:
-        selection = runtime.memory_provider
-        plugin_id = selection.plugin if selection is not None else "sage.memory.noop"
-        config = self._merge_plugin_config(
+        return await self._create_capability(
+            host,
+            parent,
+            handles,
+            runtime,
             declarations,
-            plugin_id,
-            dict(selection.config if selection is not None else {}),
+            capability="memory.provider",
+            default_plugin="sage.memory.noop",
+            default_scope=ExtensionScope.PROCESS,
         )
-        return self._instantiate(plugin_id, config, "memory.provider")
 
-    def _create_session_memory_provider(
-        self,
-        runtime: RuntimeConfig,
-        declarations: tuple[PluginDeclaration, ...],
+    async def _create_session_memory_provider(
+        self, host, parent, handles, runtime, declarations
     ) -> SessionMemoryProvider:
-        selection = runtime.session_memory_provider
-        plugin_id = (
-            selection.plugin if selection is not None else "sage.session-memory.noop"
-        )
-        config = self._merge_plugin_config(
-            declarations,
-            plugin_id,
-            dict(selection.config if selection is not None else {}),
-        )
+        selection = self._selection(runtime, "session-memory.provider")
+        plugin_id = selection.plugin if selection else "sage.session-memory.noop"
+        config = dict(selection.config if selection else {})
         if plugin_id == "sage.session-memory.sqlite-bm25" and "root" not in config:
             if self._session_root is None:
                 raise ValueError("SQLite Session Memory requires a root")
             config["root"] = str(self._session_root / "session-memory")
-        return self._instantiate(plugin_id, config, "session-memory.provider")
+        return await self._create_capability(
+            host,
+            parent,
+            handles,
+            runtime,
+            declarations,
+            capability="session-memory.provider",
+            default_plugin=plugin_id,
+            default_config=config,
+            default_scope=ExtensionScope.PROCESS,
+        )
 
-    def _create_model(
+    async def _create_model(
         self,
-        manifest,
+        host,
+        parent,
+        handles,
         resolved,
         agent_id,
         declarations: tuple[PluginDeclaration, ...],
+        credential_provider,
     ):
         agent = resolved.agents[agent_id]
         route_id = agent.model_bindings.get("primary")
@@ -726,28 +905,44 @@ class SAgentBuilder:
             plugin_id,
             {"route": route_data, "client": self._model_client},
         )
-        if manifest is not None:
-            route = manifest.models[route_id]
-            if route.credential is not None:
-                declaration = manifest.credentials[route.credential]
-                if declaration.source == "env" and declaration.key:
-                    value = os.getenv(declaration.key)
-                    if value:
-                        config["credential"] = CredentialMaterial(
-                            credential_id=route.credential,
-                            secret=SecretStr(value),
-                            source="env",
-                        )
-        return self._instantiate(plugin_id, config, "model.provider")
+        credential_id = route_data.get("credential")
+        if credential_id is not None:
+            config["credential"] = await credential_provider.resolve(
+                CredentialRef(
+                    credential_id=credential_id,
+                    purpose="model.inference",
+                ),
+                RequestContext(
+                    actor=ActorRef(
+                        principal_id="sagent-builder",
+                        principal_type=PrincipalType.SERVICE,
+                    )
+                ),
+            )
+        return await self._instantiate(
+            host,
+            parent,
+            handles,
+            plugin_id,
+            config,
+            "model.provider",
+            scope=ExtensionScope.AGENT,
+            scope_id=f"agent-{agent_id}",
+        )
 
-    def _create_tools(
+    async def _create_tools(
         self,
+        host,
+        parent,
+        handles,
         runtime: RuntimeConfig,
         declarations: tuple[PluginDeclaration, ...],
         *,
         runtime_override: OfficialToolRuntime | None = None,
-    ) -> tuple[ToolCatalog, ToolExecutor]:
-        selection = runtime.tool_provider
+        return_handle: bool = False,
+        scope_override: ExtensionScope | None = None,
+    ):
+        selection = self._selection(runtime, "tool.catalog")
         if selection is None:
             return InMemoryToolCatalog(()), InMemoryToolExecutor({}, {})
         config = self._merge_plugin_config(
@@ -762,32 +957,40 @@ class SAgentBuilder:
                     "sage.tool.official requires "
                     "SAgentBuilder.with_tool_runtime(runtime)"
                 )
-        registration = self.extensions.get(selection.plugin)
-        value = registration.factory(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id="sagent-builder-tools",
-                config=config,
-            ),
-            {},
+        catalog, handle = await self._instantiate(
+            host,
+            parent,
+            handles,
+            selection.plugin,
+            config,
+            "tool.catalog",
+            scope=scope_override or selection.scope or ExtensionScope.AGENT,
+            scope_id="agent-tools",
+            return_handle=True,
         )
-        if inspect.isawaitable(value):
-            raise TypeError("SAgentBuilder requires a synchronous Tool factory")
-        provider = getattr(value, "provider", value)
-        catalog = getattr(value, "catalog", provider)
-        executor = getattr(value, "executor", provider)
+        executor = handle.providers.require(
+            "tool.executor",
+            self._offer_name(selection.plugin, "tool.executor"),
+        )
         if not hasattr(catalog, "list_tools") or not hasattr(executor, "execute"):
             raise TypeError(
                 f"extension {selection.plugin!r} did not create a Tool provider pair"
             )
-        return catalog, executor
+        if return_handle:
+            # The Run driver owns and closes this dynamic scope. Keeping it in
+            # the Application build list would retain one closed handle per Run.
+            handles.remove(handle)
+        return (catalog, executor, handle) if return_handle else (catalog, executor)
 
-    def _create_tool_selection(
+    async def _create_tool_selection(
         self,
+        host,
+        parent,
+        handles,
         runtime: RuntimeConfig,
         declarations: tuple[PluginDeclaration, ...],
     ) -> ToolSelectionPolicy:
-        selection = runtime.tool_selection
+        selection = self._selection(runtime, "tool.selection-policy")
         plugin_id = (
             selection.plugin if selection is not None else "sage.tool-selection.llm"
         )
@@ -798,32 +1001,228 @@ class SAgentBuilder:
             plugin_id,
             dict(selection.config if selection is not None else {}),
         )
-        return self._instantiate(plugin_id, config, "tool.selection-policy")
+        return await self._instantiate(
+            host,
+            parent,
+            handles,
+            plugin_id,
+            config,
+            "tool.selection-policy",
+            scope=selection.scope if selection and selection.scope else ExtensionScope.AGENT,
+            scope_id="agent-tool-selection",
+        )
 
-    def _instantiate(self, plugin_id: str, config: dict[str, Any], capability: str):
+    async def _create_capability(
+        self,
+        host,
+        parent,
+        handles,
+        runtime,
+        declarations,
+        *,
+        capability,
+        default_plugin,
+        default_config=None,
+        default_scope=ExtensionScope.PROCESS,
+    ):
+        selection = self._selection(runtime, capability)
+        plugin_id = selection.plugin if selection else default_plugin
+        config = {
+            **dict(default_config or {}),
+            **dict(selection.config if selection else {}),
+        }
+        config = self._merge_plugin_config(declarations, plugin_id, config)
+        return await self._instantiate(
+            host,
+            parent,
+            handles,
+            plugin_id,
+            config,
+            capability,
+            scope=selection.scope if selection and selection.scope else default_scope,
+            scope_id=f"application-{capability.replace('.', '-')}",
+        )
+
+    async def _instantiate(
+        self,
+        host,
+        parent,
+        handles,
+        plugin_id: str,
+        config: dict[str, Any],
+        capability: str,
+        *,
+        scope: ExtensionScope,
+        scope_id: str,
+        return_handle: bool = False,
+    ):
         registration = self.extensions.get(plugin_id)
         if capability not in {
             offer.capability for offer in registration.descriptor.provides
         }:
             raise ValueError(f"extension {plugin_id!r} does not provide {capability!r}")
-        value = registration.factory(
-            ExtensionScopeContext(
-                scope=(
-                    ExtensionScope.AGENT
-                    if capability == "model.provider"
-                    else ExtensionScope.PROCESS
+        name = self._offer_name(plugin_id, capability)
+        plan = host.plan(
+            (
+                CapabilityRequirement(
+                    capability=capability,
+                    api_version=">=2,<3",
+                    name=name,
                 ),
-                scope_id="sagent-builder",
-                config=config,
             ),
-            {},
+            selections={capability: plugin_id},
+            configs={plugin_id: config},
+            scope_overrides={plugin_id: scope},
         )
-        if inspect.isawaitable(value):
-            raise TypeError(
-                f"extension {plugin_id!r} has an async factory; open it with "
-                "ExtensionHost before passing the provider to SAgentBuilder"
+        handle = await host.open_scope_hierarchy(
+            ExtensionScopeContext(
+                scope=scope,
+                scope_id=scope_id,
+            ),
+            plan,
+            parent=parent if scope != ExtensionScope.PROCESS else None,
+        )
+        handles.append(handle)
+        value = handle.providers.require(capability, name)
+        return (value, handle) if return_handle else value
+
+    def _offer_name(self, plugin_id: str, capability: str) -> str:
+        registration = self.extensions.get(plugin_id)
+        return next(
+            offer.name
+            for offer in registration.descriptor.provides
+            if offer.capability == capability
+        )
+
+    @staticmethod
+    def _selection(runtime: RuntimeConfig, capability: str) -> CapabilitySelection | None:
+        values = runtime.selections(capability)
+        if len(values) > 1:
+            raise ValueError(
+                f"capability {capability!r} does not allow multiple selections here"
             )
-        return value
+        return values[0] if values else None
+
+    def _selected_plugin(self, runtime: RuntimeConfig, capability: str) -> str | None:
+        selection = self._selection(runtime, capability)
+        return selection.plugin if selection else None
+
+    async def _create_application_services(
+        self,
+        host,
+        parent,
+        handles,
+        runtime,
+        declarations,
+        resolved,
+        *,
+        session_store,
+        credential_provider,
+    ):
+        services = {
+            "execution.scheduler": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="execution.scheduler",
+                default_plugin="sage.scheduler.ephemeral",
+            ),
+            "execution.job-runtime": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="execution.job-runtime",
+                default_plugin="sage.job.ephemeral",
+                default_config={"runners": {}},
+            ),
+            "artifact.store": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="artifact.store",
+                default_plugin="sage.artifact.ephemeral",
+            ),
+            "package.registry": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="package.registry",
+                default_plugin="sage.package-registry.ephemeral",
+            ),
+            "observability.diagnostic-sink": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="observability.diagnostic-sink",
+                default_plugin="sage.observability.noop",
+            ),
+            "observability.log-sink": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="observability.log-sink",
+                default_plugin="sage.logging.noop",
+            ),
+            "workspace.initializer": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="workspace.initializer",
+                default_plugin="sage.workspace.initializer.bare",
+            ),
+        }
+        adapters = {}
+        interface_declarations = dict(resolved.interfaces)
+        if "native" not in interface_declarations:
+            from sagents.v2.package.manifest.root import InterfaceDeclaration
+
+            interface_declarations["native"] = InterfaceDeclaration(
+                plugin="sage.protocol.native"
+            )
+        for interface_id, declaration in interface_declarations.items():
+            if not declaration.enabled:
+                continue
+            adapter = await self._instantiate(
+                host,
+                parent,
+                handles,
+                declaration.plugin,
+                self._merge_plugin_config(
+                    declarations, declaration.plugin, dict(declaration.config)
+                ),
+                "interface.protocol-adapter",
+                scope=declaration.scope or ExtensionScope.PROCESS,
+                scope_id=f"interface-{interface_id}",
+            )
+            adapters[interface_id] = adapter
+        return services, adapters
+
+    @staticmethod
+    def _composition_hash(manifest_hash, handles) -> str:
+        payload = {
+            "manifest": manifest_hash,
+            "graphs": [
+                handle.graph.resolution_hash
+                for handle in handles
+                if handle.graph.plugin_ids
+            ],
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 # Compatibility for existing embedders; new code should import the explicit

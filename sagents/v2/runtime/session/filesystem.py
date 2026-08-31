@@ -32,12 +32,11 @@ from sagents.v2.runtime.session.state import (
 )
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
-    FILESYSTEM_SESSION_STORE_FORMAT_V1,
-    FILESYSTEM_SESSION_STORE_FORMAT_V2,
-    SessionCommitEnvelope,
+    FILESYSTEM_SESSION_STORE_FORMAT_V3,
     SessionMutationEnvelope,
+    SessionAggregateSnapshotV2,
+    SessionStateDeltaMutation,
     SessionSnapshotEnvelope,
-    SessionSnapshotEnvelopeV2,
 )
 
 try:
@@ -60,8 +59,8 @@ class SessionStoreCorruptionError(SageV2Error):
     """Raised when authoritative Session state integrity cannot be established."""
 
 
-class FilesystemSessionStore(SessionStateStore):
-    """Single-host durable SessionStore backed by snapshot + mutation journal.
+class _FilesystemSessionState(SessionStateStore):
+    """Single-host persistence adapter around the state coordinator.
 
     Runtime semantics live in :class:`SessionStateStore`; this subclass
     implements only the durability hooks. This is the central invariant that
@@ -77,8 +76,6 @@ class FilesystemSessionStore(SessionStateStore):
     def __init__(
         self,
         root: str | Path,
-        *,
-        previous_v2_root: str | Path | None = None,
         **kwargs: Any,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -100,17 +97,12 @@ class FilesystemSessionStore(SessionStateStore):
         self._storage_locks: dict[str, asyncio.Lock] = {}
         self._load_lock = asyncio.Lock()
         self._closed = False
-        self._legacy_store_format: str | None = None
         self._prepare_root()
         self._writer_handle = (self.control_root / ".writer.lock").open("a+b")
         self._acquire_writer_lock()
         try:
             self._recover_transactions()
             self._normalize_existing_session_locations()
-            if previous_v2_root is not None:
-                self._migrate_previous_v2_store(
-                    Path(previous_v2_root).expanduser().resolve()
-                )
             super().__init__(**kwargs)
         except Exception:
             self._release_writer_lock()
@@ -402,17 +394,19 @@ class FilesystemSessionStore(SessionStateStore):
                     f"store metadata cannot be read: {exc}",
                 ) from exc
             stored_format = metadata.get("format")
-            if stored_format not in {
-                self.format_version,
-                FILESYSTEM_SESSION_STORE_FORMAT_V2,
-            }:
+            if stored_format != self.format_version:
+                if stored_format == FILESYSTEM_SESSION_STORE_FORMAT_V3:
+                    raise self._error(
+                        "session_store.migration_required",
+                        ErrorCategory.UNSUPPORTED_SCHEMA,
+                        "SessionStore v3 requires explicit migration: "
+                        f"sage v2 migrate --runtime-root {self.root}",
+                    )
                 raise self._error(
                     "session_store.unsupported_format",
                     ErrorCategory.UNSUPPORTED_SCHEMA,
                     f"unsupported SessionStore format {stored_format!r}",
                 )
-            if stored_format != self.format_version:
-                self._legacy_store_format = str(stored_format)
             return
         self._atomic_json_write(
             metadata_path,
@@ -541,265 +535,14 @@ class FilesystemSessionStore(SessionStateStore):
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
 
-    def _migrate_previous_v2_store(self, previous_root: Path) -> None:
-        """Compact an earlier v2 filesystem store into the v2 layout.
-
-        Migration is intentionally source-preserving until every legacy
-        Session has a validated destination snapshot.  Only then is the old
-        store removed, which also reclaims the repeated full-state journals.
-        This migrates the immediately preceding SAgents v2 format only; it is
-        not a Desktop v1 importer.
-        """
-
-        if not previous_root.exists():
-            return
-        if previous_root == self.root:
-            raise self._error(
-                "session_store.migration_layout",
-                ErrorCategory.VALIDATION,
-                "previous v2 SessionStore root must be separate from the runtime root",
-            )
-        metadata_path = previous_root / "store.json"
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise self._corrupt(
-                "session_store.migration_metadata",
-                f"previous v2 SessionStore metadata cannot be read: {exc}",
-            ) from exc
-        if metadata.get("format") != FILESYSTEM_SESSION_STORE_FORMAT_V1:
-            raise self._error(
-                "session_store.migration_format",
-                ErrorCategory.UNSUPPORTED_SCHEMA,
-                f"unsupported previous v2 SessionStore format {metadata.get('format')!r}",
-            )
-        allowed_entries = {
-            ".DS_Store",
-            ".writer.lock",
-            "idempotency",
-            "sessions",
-            "store.json",
-            "transactions",
-            "trash",
-        }
-        unexpected = {path.name for path in previous_root.iterdir()} - allowed_entries
-        if unexpected:
-            raise self._corrupt(
-                "session_store.migration_unexpected_files",
-                f"previous v2 SessionStore contains unexpected entries: {sorted(unexpected)}",
-            )
-        for pending_root in (previous_root / "transactions", previous_root / "trash"):
-            if pending_root.is_dir() and any(pending_root.iterdir()):
-                raise self._corrupt(
-                    "session_store.migration_pending_transaction",
-                    f"previous v2 SessionStore has pending recovery data in {pending_root}",
-                )
-        if fcntl is None:  # pragma: no cover - see _acquire_writer_lock.
-            raise self._error(
-                "session_store.lock_unsupported",
-                ErrorCategory.UNSUPPORTED_SCHEMA,
-                "previous v2 SessionStore migration requires an advisory-lock adapter",
-            )
-
-        previous_lock_path = previous_root / ".writer.lock"
-        previous_lock = previous_lock_path.open("a+b")
-        try:
-            try:
-                fcntl.flock(previous_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise StoreInUseError(
-                    RuntimeErrorInfo(
-                        code="session_store.in_use",
-                        category=ErrorCategory.CONFLICT,
-                        message=f"previous v2 SessionStore root is already owned: {previous_root}",
-                        safe_to_resume=True,
-                    )
-                ) from exc
-
-            previous_sessions = previous_root / "sessions"
-            migrated_states: list[tuple[str, dict[str, Any]]] = []
-            migration_items: list[
-                tuple[str, dict[str, Any], SessionCommitEnvelope, Path]
-            ] = []
-            if previous_sessions.is_dir():
-                for source_dir in sorted(previous_sessions.iterdir()):
-                    if source_dir.name == ".DS_Store":
-                        continue
-                    journal = source_dir / "journal.jsonl"
-                    if not source_dir.is_dir() or not journal.is_file():
-                        raise self._corrupt(
-                            "session_store.migration_unexpected_session",
-                            f"previous v2 Session entry is not a valid Session directory: {source_dir}",
-                        )
-                    envelope = self._read_latest_v1_envelope(journal)
-                    session_rows = envelope.state.get("sessions", ())
-                    if len(session_rows) != 1:
-                        raise self._corrupt(
-                            "session_store.aggregate_corrupt",
-                            f"previous v2 journal {journal} does not contain exactly one Session",
-                        )
-                    session_id = str(session_rows[0]["session_id"])
-                    if source_dir != previous_sessions / self._safe_segment(session_id):
-                        raise self._corrupt(
-                            "session_store.path_mismatch",
-                            f"previous v2 Session {session_id!r} is stored under the wrong directory",
-                        )
-                    migration_items.append(
-                        (session_id, envelope.state, envelope, source_dir)
-                    )
-
-                parent_by_id = {
-                    session_id: (
-                        str(state["sessions"][0]["parent_session_id"])
-                        if state["sessions"][0].get("parent_session_id") is not None
-                        else None
-                    )
-                    for session_id, state, _envelope, _source in migration_items
-                }
-
-                def migration_depth(session_id: str, trail: frozenset[str]) -> int:
-                    if session_id in trail:
-                        raise self._corrupt(
-                            "session_store.parent_cycle",
-                            f"previous v2 Session lineage contains a cycle at {session_id!r}",
-                        )
-                    parent_id = parent_by_id.get(session_id)
-                    if parent_id not in parent_by_id:
-                        return 0
-                    return 1 + migration_depth(parent_id, trail | {session_id})
-
-                migration_items.sort(
-                    key=lambda item: (migration_depth(item[0], frozenset()), item[0])
-                )
-
-                for session_id, state, envelope, source_dir in migration_items:
-                    target_dir = self._session_dir_for_state(session_id, state)
-                    target_snapshot = target_dir / "state.json"
-                    if target_snapshot.exists():
-                        current = self._read_snapshot(target_snapshot)
-                        current_rows = current.state.get("sessions", ())
-                        if (
-                            len(current_rows) != 1
-                            or current_rows[0].get("session_id") != session_id
-                            or current.current_session_revision
-                            < envelope.current_session_revision
-                            or (
-                                current.current_session_revision
-                                == envelope.current_session_revision
-                                and current.state != state
-                            )
-                        ):
-                            raise self._corrupt(
-                                "session_store.migration_conflict",
-                                f"destination Session {session_id!r} conflicts with previous v2 data",
-                            )
-                    else:
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        source_derived = source_dir / "derived"
-                        if source_derived.is_dir():
-                            shutil.copytree(
-                                source_derived,
-                                target_dir / "derived",
-                                dirs_exist_ok=True,
-                            )
-                        else:
-                            (target_dir / "derived").mkdir(exist_ok=True)
-                        self._write_snapshot(target_snapshot, state)
-                        self._read_snapshot(target_snapshot)
-                    for entry in state.get("start_idempotency", ()):
-                        self._write_start_idempotency(entry, session_id)
-                    migrated_states.append((session_id, state))
-            for session_id, state in migrated_states:
-                self._refresh_session_views(session_id, state)
-            self._fsync_directory(self.sessions_root)
-        finally:
-            if not previous_lock.closed:
-                fcntl.flock(previous_lock.fileno(), fcntl.LOCK_UN)
-                previous_lock.close()
-
-        shutil.rmtree(previous_root)
-        self._fsync_directory(previous_root.parent)
-        LOGGER.info(
-            "migrated and compacted previous v2 SessionStore: %s", previous_root
-        )
-
-    def _read_latest_v1_envelope(self, journal: Path) -> SessionCommitEnvelope:
-        """Read and validate only the latest complete v1 full-state record.
-
-        Every v1 line already contains the complete Session aggregate and its
-        own checksum. Reading gigabytes of superseded snapshots during a
-        one-time migration would add no recovery value, so migration seeks
-        backwards to the final acknowledged record.
-        """
-
-        try:
-            with journal.open("rb") as stream:
-                size = stream.seek(0, os.SEEK_END)
-                if size == 0:
-                    line = b""
-                else:
-                    stream.seek(size - 1)
-                    ends_with_newline = stream.read(1) == b"\n"
-                    record_end = (
-                        size - 1
-                        if ends_with_newline
-                        else self._previous_newline(stream, size)
-                    )
-                    if not ends_with_newline:
-                        LOGGER.warning(
-                            "ignoring incomplete legacy Session journal tail: %s",
-                            journal,
-                        )
-                    record_start = self._previous_newline(stream, record_end)
-                    stream.seek(record_start + 1)
-                    line = stream.read(record_end - record_start - 1)
-        except OSError as exc:
-            raise self._corrupt(
-                "session_store.corrupt_envelope",
-                f"legacy journal {journal} cannot be read: {exc}",
-            ) from exc
-        if not line:
-            raise self._corrupt(
-                "session_store.empty_journal",
-                f"legacy journal {journal} has no complete commit",
-            )
-        try:
-            envelope = SessionCommitEnvelope.model_validate_json(line)
-        except Exception as exc:
-            raise self._corrupt(
-                "session_store.corrupt_envelope",
-                f"legacy journal {journal} contains invalid JSON or schema: {exc}",
-            ) from exc
-        unsigned = envelope.model_dump(mode="json", exclude={"checksum"})
-        if envelope.checksum != self._checksum(unsigned):
-            raise self._corrupt(
-                "session_store.hash_mismatch",
-                f"legacy journal {journal} latest record checksum mismatch",
-            )
-        return envelope
-
-    @staticmethod
-    def _previous_newline(stream, before: int, chunk_size: int = 64 * 1024) -> int:
-        """Return the final newline offset strictly before ``before``, or -1."""
-
-        cursor = before
-        while cursor > 0:
-            start = max(0, cursor - chunk_size)
-            stream.seek(start)
-            block = stream.read(cursor - start)
-            offset = block.rfind(b"\n")
-            if offset >= 0:
-                return start + offset
-            cursor = start
-        return -1
-
     def _write_snapshot(self, path: Path, state: dict[str, Any]) -> None:
         current_revision = int(state["sessions"][0]["revision"])
+        typed_state = SessionAggregateSnapshotV2.model_validate(state)
         unsigned = {
             "format": self.format_version,
             "write_id": new_id("session_write"),
             "current_session_revision": current_revision,
-            "state": state,
+            "state": typed_state.model_dump(mode="json"),
         }
         envelope = SessionSnapshotEnvelope(
             **unsigned,
@@ -988,26 +731,24 @@ class FilesystemSessionStore(SessionStateStore):
                 (session_dir / "derived").mkdir(exist_ok=True)
 
             journal = session_dir / "journal.jsonl"
-            legacy_snapshot = (
-                not is_new
-                and self._read_snapshot(snapshot).format
-                == FILESYSTEM_SESSION_STORE_FORMAT_V2
-            )
-            compacted = is_new or previous is None or legacy_snapshot
+            compacted = is_new or previous is None
             if compacted:
                 self._write_snapshot(snapshot, state)
                 self._atomic_bytes_write(journal, b"")
                 self._journal_commits[session_id] = 0
             else:
                 delta = self._state_delta(previous, state)
+                mutation = SessionStateDeltaMutation(
+                    kind="state_delta", **delta
+                )
                 previous_revision = int(previous["sessions"][0]["revision"])
                 current_revision = int(state["sessions"][0]["revision"])
                 unsigned = {
-                    "format": "sage.filesystem-session-journal/v3",
+                    "format": "sage.filesystem-session-journal/v4",
                     "mutation_id": new_id("session_mutation"),
                     "previous_session_revision": previous_revision,
                     "current_session_revision": current_revision,
-                    "delta": delta,
+                    "mutation": mutation.model_dump(mode="json"),
                 }
                 envelope = SessionMutationEnvelope(
                     **unsigned,
@@ -1032,12 +773,6 @@ class FilesystemSessionStore(SessionStateStore):
 
             for entry in start_entries:
                 self._write_start_idempotency(entry, session_id)
-            if self._legacy_store_format is not None:
-                self._atomic_json_write(
-                    self.control_root / "store.json",
-                    {"format": self.format_version, "store_id": new_id("store")},
-                )
-                self._legacy_store_format = None
             if transaction is not None:
                 transaction.unlink(missing_ok=True)
                 self._fsync_directory(self.transactions_root)
@@ -1340,27 +1075,17 @@ class FilesystemSessionStore(SessionStateStore):
                 "session_store.idempotency_corrupt",
                 f"idempotency lookup {path} cannot be read: {exc}",
             ) from exc
-        if value.get("format") not in {
-            self.format_version,
-            FILESYSTEM_SESSION_STORE_FORMAT_V2,
-        }:
+        if value.get("format") != self.format_version:
             raise self._corrupt(
                 "session_store.idempotency_format",
                 f"idempotency lookup {path} uses an unsupported format",
             )
         return value
 
-    def _read_snapshot(
-        self, snapshot: Path
-    ) -> SessionSnapshotEnvelope | SessionSnapshotEnvelopeV2:
+    def _read_snapshot(self, snapshot: Path) -> SessionSnapshotEnvelope:
         try:
             payload = json.loads(snapshot.read_bytes())
-            envelope_type = (
-                SessionSnapshotEnvelopeV2
-                if payload.get("format") == FILESYSTEM_SESSION_STORE_FORMAT_V2
-                else SessionSnapshotEnvelope
-            )
-            envelope = envelope_type.model_validate(payload)
+            envelope = SessionSnapshotEnvelope.model_validate(payload)
         except Exception as exc:
             raise self._corrupt(
                 "session_store.corrupt_snapshot",
@@ -1376,7 +1101,7 @@ class FilesystemSessionStore(SessionStateStore):
 
     def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
         envelope = self._read_snapshot(snapshot)
-        state = deepcopy(envelope.state)
+        state = envelope.state.model_dump(mode="json")
         revision = envelope.current_session_revision
         journal = snapshot.parent / "journal.jsonl"
         if not journal.exists():
@@ -1420,7 +1145,9 @@ class FilesystemSessionStore(SessionStateStore):
                     "session_store.revision_gap",
                     f"journal {journal} is not revision-contiguous at record {index + 1}",
                 )
-            self._apply_state_delta(state, mutation.delta)
+            self._apply_state_delta(
+                state, mutation.mutation.model_dump(mode="json", exclude={"kind"})
+            )
             applied_revision = int(state["sessions"][0]["revision"])
             if applied_revision != mutation.current_session_revision:
                 raise self._corrupt(
@@ -1783,3 +1510,29 @@ class FilesystemSessionStore(SessionStateStore):
                 safe_to_resume=False,
             )
         )
+
+
+class _FilesystemSessionStoreMeta(type):
+    def __getattr__(cls, name):
+        return getattr(_FilesystemSessionState, name)
+
+
+class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
+    """Composed durable SessionStore facade.
+
+    Persistence and transactional behavior are owned components rather than a
+    public inheritance contract. Private compatibility access is delegated only
+    so migration and corruption tooling can inspect the storage adapter.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        object.__setattr__(self, "_coordinator", _FilesystemSessionState(*args, **kwargs))
+
+    def __getattr__(self, name):
+        return getattr(self._coordinator, name)
+
+    def __setattr__(self, name, value) -> None:
+        if name == "_coordinator":
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._coordinator, name, value)

@@ -173,16 +173,16 @@ class InMemoryScheduler:
         if lease_duration.total_seconds() <= 0:
             raise ValueError("lease_duration must be positive")
         async with self._condition:
-            self._assert_fence_locked(lease)
+            current = self._assert_fence_locked(lease)
             now = self._clock()
-            if lease.expires_at <= now:
-                self._expire_lease_locked(lease)
+            if current.expires_at <= now:
+                self._expire_lease_locked(current)
                 raise self._error(
                     "scheduler.lease_expired",
                     ErrorCategory.CONFLICT,
                     "worker lease has expired",
                 )
-            renewed = lease.model_copy(update={"expires_at": now + lease_duration})
+            renewed = current.model_copy(update={"expires_at": now + lease_duration})
             self._leases[lease.lease_id] = renewed
             return renewed
 
@@ -323,10 +323,14 @@ class InMemoryScheduler:
             self._items[retry.work_id] = retry
             self._push_locked(retry)
 
-    def _assert_fence_locked(self, lease: WorkerLease) -> None:
+    def _assert_fence_locked(self, lease: WorkerLease) -> WorkerLease:
         current = self._leases.get(lease.lease_id)
         if (
-            current != lease
+            current is None
+            or current.work.work_id != lease.work.work_id
+            or current.work.run_id != lease.work.run_id
+            or current.worker_id != lease.worker_id
+            or current.fencing_token != lease.fencing_token
             or self._work_lease.get(lease.work.work_id) != lease.lease_id
         ):
             raise self._error(
@@ -340,6 +344,7 @@ class InMemoryScheduler:
                 ErrorCategory.CONFLICT,
                 "a newer worker fencing token exists for this run",
             )
+        return current
 
     def _ensure_open(self) -> None:
         if self._closed:

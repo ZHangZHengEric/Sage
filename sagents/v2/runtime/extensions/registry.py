@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Generic, TypeVar, cast
+from dataclasses import dataclass, replace
+from typing import Any, Generic, TypeVar, cast
+
+from pydantic import ConfigDict, create_model
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
@@ -25,6 +27,47 @@ class ExtensionRegistry:
                     message=f"extension {plugin_id!r} is already registered",
                     safe_to_resume=True,
                 )
+            )
+        if registration.config_model is None:
+            model_name = "".join(
+                value.capitalize()
+                for value in plugin_id.replace("-", ".").split(".")
+            ) + "Config"
+            schema = registration.descriptor.config_schema or {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": True,
+            }
+            properties = dict(schema.get("properties") or {})
+            required = set(schema.get("required") or ())
+            fields = {
+                name: (
+                    _python_type(value),
+                    ... if name in required else None,
+                )
+                for name, value in properties.items()
+            }
+            generated_model = create_model(
+                model_name,
+                __config__=ConfigDict(
+                    extra=(
+                        "forbid"
+                        if schema.get("additionalProperties", True) is False
+                        else "allow"
+                    ),
+                    arbitrary_types_allowed=True,
+                ),
+                **fields,
+            )
+            registration = replace(registration, config_model=generated_model)
+        if registration.descriptor.config_schema is None:
+            registration = replace(
+                registration,
+                descriptor=registration.descriptor.model_copy(
+                    update={
+                        "config_schema": registration.config_model.model_json_schema()
+                    }
+                ),
             )
         self._registrations[plugin_id] = registration
 
@@ -57,6 +100,18 @@ class ExtensionRegistry:
 
 
 T = TypeVar("T")
+
+
+def _python_type(schema: dict[str, Any]) -> type[Any]:
+    value = schema.get("type")
+    return {
+        "string": str,
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+        "object": dict,
+    }.get(value, Any)
 
 
 @dataclass(frozen=True)

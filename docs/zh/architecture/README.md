@@ -98,8 +98,9 @@ flowchart LR
 
 ### 设计与方案
 
-1. [权限与确认设计方案](DESIGN_PERMISSIONS_AND_CONFIRMATION.md)：面向工具、沙箱与多入口的权限分级、确认流与策略模型（当前未在代码中全面实现）
-2. [sagents v2 重构设计](DESIGN_SAGENTS_V2_REFACTOR.md)：已落地独立 v2 参考内核；记录小内核、能力插件、事件事实源、AgentPackage、多协议 Adapter 与后续生产迁移边界
+1. [sagents v2 中文交互式架构导览](sagents-v2-visual-guide.html)：用可切换架构地图、Run 模拟器与数据边界图理解当前 v2 的装配、执行、持久化和多 Agent 逻辑
+2. [权限与确认设计方案](DESIGN_PERMISSIONS_AND_CONFIRMATION.md)：面向工具、沙箱与多入口的权限分级、确认流与策略模型（当前未在代码中全面实现）
+3. [sagents v2 重构设计](DESIGN_SAGENTS_V2_REFACTOR.md)：已落地独立 v2 参考内核；记录小内核、能力插件、事件事实源、AgentPackage、多协议 Adapter 与后续生产迁移边界
 
 ## 阅读建议
 

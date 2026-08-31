@@ -5,9 +5,11 @@ from sagents.v2.runtime.execution.binding import (
     ExecutionBindingRequest,
     RunExecutionBinding,
 )
+from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher
 
 __all__ = [
     "ExecutionBindingProvider",
     "ExecutionBindingRequest",
     "RunExecutionBinding",
+    "LocalWorkerDispatcher",
 ]

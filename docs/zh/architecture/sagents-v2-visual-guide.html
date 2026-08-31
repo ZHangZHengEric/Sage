@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="用一条真实运行链路理解 SAgents V2 的装配、执行、会话、事件与扩展边界。">
+  <title>SAgents V2 架构导览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef3f8;
+      --bg-strong: #f8fbff;
+      --surface: rgba(255, 255, 255, .72);
+      --surface-solid: #ffffff;
+      --surface-soft: rgba(242, 247, 252, .88);
+      --surface-deep: #e5edf5;
+      --text: #112033;
+      --text-soft: #536579;
+      --text-faint: #718196;
+      --line: rgba(72, 91, 113, .18);
+      --line-strong: rgba(72, 91, 113, .3);
+      --blue: #1769e0;
+      --blue-soft: #dcecff;
+      --cyan: #0a8fa3;
+      --cyan-soft: #d8f5f6;
+      --violet: #7357d9;
+      --violet-soft: #eae4ff;
+      --orange: #bd6412;
+      --orange-soft: #fff0d8;
+      --green: #16734d;
+      --green-soft: #daf3e8;
+      --red: #b33b45;
+      --red-soft: #ffe1e5;
+      --shadow: 0 20px 60px rgba(32, 56, 85, .12), 0 2px 12px rgba(32, 56, 85, .06);
+      --shadow-small: 0 8px 28px rgba(32, 56, 85, .1);
+      --glass-blur: blur(24px) saturate(145%);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+      --sans: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      html[data-theme="auto"] {
+        color-scheme: dark;
+        --bg: #081019;
+        --bg-strong: #0c1520;
+        --surface: rgba(22, 34, 48, .72);
+        --surface-solid: #142131;
+        --surface-soft: rgba(27, 42, 58, .78);
+        --surface-deep: #1b2a3c;
+        --text: #edf5ff;
+        --text-soft: #afbdcd;
+        --text-faint: #8292a7;
+        --line: rgba(186, 207, 230, .14);
+        --line-strong: rgba(186, 207, 230, .26);
+        --blue: #72a9ff;
+        --blue-soft: #18355b;
+        --cyan: #65d3dc;
+        --cyan-soft: #123d45;
+        --violet: #b4a1ff;
+        --violet-soft: #302951;
+        --orange: #ffb968;
+        --orange-soft: #4a321b;
+        --green: #69d2a1;
+        --green-soft: #163e31;
+        --red: #ff9aa1;
+        --red-soft: #4c242b;
+        --shadow: 0 24px 70px rgba(0, 0, 0, .32), 0 2px 12px rgba(0, 0, 0, .22);
+        --shadow-small: 0 10px 30px rgba(0, 0, 0, .24);
+      }
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #081019;
+      --bg-strong: #0c1520;
+      --surface: rgba(22, 34, 48, .72);
+      --surface-solid: #142131;
+      --surface-soft: rgba(27, 42, 58, .78);
+      --surface-deep: #1b2a3c;
+      --text: #edf5ff;
+      --text-soft: #afbdcd;
+      --text-faint: #8292a7;
+      --line: rgba(186, 207, 230, .14);
+      --line-strong: rgba(186, 207, 230, .26);
+      --blue: #72a9ff;
+      --blue-soft: #18355b;
+      --cyan: #65d3dc;
+      --cyan-soft: #123d45;
+      --violet: #b4a1ff;
+      --violet-soft: #302951;
+      --orange: #ffb968;
+      --orange-soft: #4a321b;
+      --green: #69d2a1;
+      --green-soft: #163e31;
+      --red: #ff9aa1;
+      --red-soft: #4c242b;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .32), 0 2px 12px rgba(0, 0, 0, .22);
+      --shadow-small: 0 10px 30px rgba(0, 0, 0, .24);
+    }
+
+    html[data-theme="light"] { color-scheme: light; }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: clip;
+      background:
+        radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--blue) 16%, transparent) 0, transparent 28rem),
+        radial-gradient(circle at 88% 20%, color-mix(in srgb, var(--violet) 13%, transparent) 0, transparent 25rem),
+        radial-gradient(circle at 60% 88%, color-mix(in srgb, var(--cyan) 11%, transparent) 0, transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; }
+    a { color: inherit; }
+    :focus-visible { outline: 3px solid color-mix(in srgb, var(--blue) 58%, transparent); outline-offset: 3px; }
+
+    .ambient {
+      position: fixed;
+      width: 28rem;
+      height: 28rem;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: .18;
+      pointer-events: none;
+      z-index: -1;
+    }
+    .ambient.one { background: var(--blue); top: 18vh; left: -16rem; }
+    .ambient.two { background: var(--violet); top: 54vh; right: -18rem; }
+
+    .topbar {
+      position: sticky;
+      z-index: 50;
+      top: 12px;
+      width: min(1160px, calc(100% - 24px));
+      margin: 12px auto 0;
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 10px 8px 18px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      box-shadow: var(--shadow-small);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 750; letter-spacing: -.02em; white-space: nowrap; }
+    .brand-mark { width: 28px; height: 28px; color: var(--blue); }
+    .nav-links { display: flex; align-items: center; gap: 4px; }
+    .nav-links a {
+      padding: 8px 11px;
+      border-radius: 11px;
+      text-decoration: none;
+      color: var(--text-soft);
+      font-size: 14px;
+      transition: color .2s ease, background .2s ease;
+    }
+    .nav-links a:hover, .nav-links a[aria-current="true"] { color: var(--text); background: var(--surface-soft); }
+    .icon-button {
+      width: 40px;
+      height: 40px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      color: var(--text);
+      background: var(--surface-soft);
+      cursor: pointer;
+      transition: border-color .2s ease, background .2s ease;
+    }
+    .icon-button:hover { border-color: var(--line-strong); background: var(--surface-solid); }
+    .icon-button svg { width: 19px; height: 19px; }
+
+    main { width: min(1160px, calc(100% - 32px)); margin: 0 auto; }
+    section { scroll-margin-top: 92px; }
+    .hero {
+      min-height: 680px;
+      display: grid;
+      grid-template-columns: 1.02fr .98fr;
+      align-items: center;
+      gap: 58px;
+      padding: 92px 0 72px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--blue-soft) 72%, transparent);
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: .03em;
+    }
+    .eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 12%, transparent); }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin: 24px 0 24px; font-size: clamp(48px, 6vw, 78px); line-height: 1.03; letter-spacing: -.055em; max-width: 780px; }
+    h1 .gradient { color: var(--blue); background: linear-gradient(110deg, var(--blue), var(--violet)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero-copy { max-width: 650px; color: var(--text-soft); font-size: clamp(17px, 2vw, 20px); }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+    .primary-button, .secondary-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 15px;
+      text-decoration: none;
+      font-weight: 700;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+    .primary-button { color: #fff; background: linear-gradient(120deg, #1769e0, #6956d8); box-shadow: 0 12px 28px rgba(44, 93, 194, .23); }
+    .primary-button:hover { box-shadow: 0 16px 36px rgba(44, 93, 194, .32); }
+    .secondary-button { color: var(--text); border-color: var(--line); background: var(--surface); backdrop-filter: var(--glass-blur); }
+    .secondary-button:hover { background: var(--surface-solid); border-color: var(--line-strong); }
+    .primary-button svg, .secondary-button svg { width: 18px; height: 18px; }
+
+    .hero-model {
+      position: relative;
+      min-height: 500px;
+      display: grid;
+      place-items: center;
+    }
+    .orbit {
+      position: absolute;
+      border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent);
+      border-radius: 50%;
+    }
+    .orbit.a { width: 445px; height: 445px; animation: spin 28s linear infinite; }
+    .orbit.b { width: 330px; height: 330px; border-style: dashed; animation: spin 19s linear infinite reverse; }
+    .orbit.a::before, .orbit.b::before { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 7px color-mix(in srgb, var(--blue) 13%, transparent); top: 17%; left: 5%; }
+    .orbit.b::before { background: var(--violet); top: auto; left: auto; right: 8%; bottom: 18%; box-shadow: 0 0 0 7px color-mix(in srgb, var(--violet) 13%, transparent); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .core-card {
+      position: relative;
+      z-index: 2;
+      width: min(340px, 82vw);
+      padding: 26px;
+      border: 1px solid var(--line-strong);
+      border-radius: 30px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .core-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(140deg, rgba(255,255,255,.34), transparent 42%); }
+    .core-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .core-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 16px; color: var(--blue); background: var(--blue-soft); }
+    .core-icon svg { width: 26px; height: 26px; }
+    .status { display: inline-flex; align-items: center; gap: 7px; color: var(--green); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 13%, transparent); }
+    .core-title { margin: 24px 0 3px; font-size: 22px; letter-spacing: -.02em; }
+    .core-code { color: var(--text-soft); font: 13px/1.6 var(--mono); }
+    .core-path { display: grid; gap: 8px; margin-top: 22px; }
+    .core-path div { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); color: var(--text-soft); font-size: 13px; }
+    .core-path span { width: 22px; height: 22px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 7px; background: var(--surface-solid); color: var(--blue); font: 700 11px var(--mono); }
+
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+    .section-kicker { margin-bottom: 8px; color: var(--blue); font: 700 13px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    h2 { margin-bottom: 0; font-size: clamp(32px, 4vw, 50px); line-height: 1.1; letter-spacing: -.045em; }
+    .section-note { max-width: 450px; margin: 0; color: var(--text-soft); }
+
+    .truth-banner {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 26px;
+      padding: 20px;
+      border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line));
+      border-radius: var(--radius-lg);
+      background: color-mix(in srgb, var(--green-soft) 68%, var(--surface));
+    }
+    .truth-banner .icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 15px; color: var(--green); background: var(--surface); }
+    .truth-banner svg { width: 23px; height: 23px; }
+    .truth-banner strong { display: block; margin-bottom: 3px; font-size: 17px; }
+    .truth-banner p { margin: 0; color: var(--text-soft); }
+
+    .terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 100px; }
+    .term {
+      min-height: 190px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: 0 9px 30px rgba(32, 56, 85, .055);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .term-label { width: 34px; height: 34px; display: grid; place-items: center; margin-bottom: 28px; border-radius: 11px; color: var(--blue); background: var(--blue-soft); font: 750 13px var(--mono); }
+    .term:nth-child(2) .term-label { color: var(--violet); background: var(--violet-soft); }
+    .term:nth-child(3) .term-label { color: var(--orange); background: var(--orange-soft); }
+    .term:nth-child(4) .term-label { color: var(--cyan); background: var(--cyan-soft); }
+    .term h3 { margin-bottom: 8px; font-size: 20px; }
+    .term p { margin: 0; color: var(--text-soft); font-size: 14px; }
+
+    .map-section { margin-bottom: 108px; }
+    .segmented {
+      display: flex;
+      width: fit-content;
+      max-width: 100%;
+      gap: 4px;
+      padding: 5px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      backdrop-filter: var(--glass-blur);
+    }
+    .segmented button {
+      flex: 0 0 auto;
+      min-height: 38px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 10px;
+      color: var(--text-soft);
+      background: transparent;
+      cursor: pointer;
+      transition: color .2s ease, background .2s ease, box-shadow .2s ease;
+    }
+    .segmented button:hover { color: var(--text); }
+    .segmented button[aria-selected="true"] { color: var(--text); background: var(--surface-solid); box-shadow: 0 3px 12px rgba(26, 46, 70, .1); font-weight: 700; }
+    .architecture-shell {
+      margin-top: 18px;
+      padding: 20px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .architecture-panel { display: none; min-height: 465px; }
+    .architecture-panel.active { display: grid; grid-template-columns: 1fr 315px; gap: 18px; }
+    .architecture-panel.active > * { min-width: 0; }
+    .diagram {
+      position: relative;
+      min-width: 0;
+      max-width: 100%;
+      min-height: 425px;
+      display: grid;
+      align-content: center;
+      gap: 16px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        var(--surface-soft);
+      background-size: 32px 32px;
+    }
+    .diagram-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; gap: 22px; }
+    .diagram-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .diagram-row.five { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+    .node {
+      position: relative;
+      z-index: 2;
+      min-height: 88px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      background: var(--surface-solid);
+      box-shadow: 0 8px 18px rgba(38, 56, 78, .08);
+    }
+    .node.accent { border-color: color-mix(in srgb, var(--blue) 42%, var(--line)); background: color-mix(in srgb, var(--blue-soft) 58%, var(--surface-solid)); }
+    .node.authority { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); background: color-mix(in srgb, var(--green-soft) 64%, var(--surface-solid)); }
+    .node.derived { border-style: dashed; border-color: color-mix(in srgb, var(--violet) 38%, var(--line)); }
+    .node small { color: var(--text-faint); font: 11px/1.3 var(--mono); }
+    .node strong { margin-top: 5px; font-size: 14px; line-height: 1.3; }
+    .arrow-right::after { content: ""; position: absolute; z-index: 1; width: 22px; height: 1px; right: -23px; top: 50%; background: var(--line-strong); }
+    .arrow-right::before { content: ""; position: absolute; z-index: 2; width: 6px; height: 6px; right: -22px; top: calc(50% - 3px); border-top: 1px solid var(--text-faint); border-right: 1px solid var(--text-faint); transform: rotate(45deg); }
+    .layer-stack { display: grid; gap: 10px; }
+    .layer { display: grid; grid-template-columns: 130px 1fr; gap: 18px; align-items: center; padding: 15px 18px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-solid); }
+    .layer strong { font-size: 14px; }
+    .layer span { color: var(--text-soft); font: 12px/1.5 var(--mono); }
+    .layer:nth-child(1) { border-left: 4px solid var(--blue); }
+    .layer:nth-child(2) { border-left: 4px solid var(--violet); }
+    .layer:nth-child(3) { border-left: 4px solid var(--cyan); }
+    .layer:nth-child(4) { border-left: 4px solid var(--green); }
+    .layer:nth-child(5) { border-left: 4px solid var(--orange); }
+    .map-explain { padding: 22px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface-soft); }
+    .map-explain .counter { color: var(--blue); font: 700 12px var(--mono); }
+    .map-explain h3 { margin: 12px 0 10px; font-size: 23px; letter-spacing: -.025em; }
+    .map-explain p { color: var(--text-soft); font-size: 14px; }
+    .rule-list { display: grid; gap: 10px; margin-top: 20px; }
+    .rule { display: flex; gap: 10px; color: var(--text-soft); font-size: 13px; }
+    .rule svg { width: 17px; height: 17px; flex: 0 0 auto; margin-top: 2px; color: var(--green); }
+
+    .simulator-section { margin-bottom: 108px; }
+    .simulator {
+      display: grid;
+      grid-template-columns: 285px 1fr;
+      min-height: 600px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: var(--glass-blur);
+    }
+    .sim-sidebar { padding: 20px; border-right: 1px solid var(--line); background: var(--surface-soft); }
+    .sim-sidebar, .sim-stage { min-width: 0; }
+    .sim-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .sim-head strong { font-size: 15px; }
+    .sim-controls { display: flex; gap: 7px; }
+    .sim-controls button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-solid); cursor: pointer; transition: border-color .2s ease, background .2s ease; }
+    .sim-controls button:hover { border-color: var(--line-strong); background: var(--surface-deep); }
+    .sim-controls svg { width: 16px; height: 16px; }
+    .step-list { display: grid; gap: 5px; }
+    .step-button { width: 100%; display: grid; grid-template-columns: 31px 1fr; gap: 10px; align-items: center; padding: 10px; border: 0; border-radius: 13px; color: var(--text-soft); text-align: left; background: transparent; cursor: pointer; transition: color .2s ease, background .2s ease; }
+    .step-button:hover { color: var(--text); background: var(--surface); }
+    .step-button[aria-current="step"] { color: var(--text); background: var(--surface-solid); box-shadow: 0 4px 13px rgba(37, 61, 89, .08); }
+    .step-number { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; font: 700 11px var(--mono); }
+    .step-button.done .step-number { color: var(--green); border-color: color-mix(in srgb, var(--green) 30%, var(--line)); background: var(--green-soft); }
+    .step-name { font-size: 13px; font-weight: 700; }
+    .sim-stage { padding: 30px; display: flex; flex-direction: column; }
+    .sim-title-row { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+    .sim-title-row h3 { margin-bottom: 6px; font-size: 28px; letter-spacing: -.03em; }
+    .sim-title-row p { margin: 0; color: var(--text-soft); }
+    .run-pill { flex: 0 0 auto; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--green); background: var(--green-soft); font: 700 11px var(--mono); }
+    .sim-flow { display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; gap: 18px; margin: 38px 0; }
+    .flow-box { position: relative; min-height: 126px; display: flex; flex-direction: column; justify-content: center; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-soft); transition: border-color .25s ease, background .25s ease, box-shadow .25s ease; }
+    .flow-box.active { border-color: color-mix(in srgb, var(--blue) 50%, var(--line)); background: color-mix(in srgb, var(--blue-soft) 62%, var(--surface)); box-shadow: 0 12px 28px color-mix(in srgb, var(--blue) 12%, transparent); }
+    .flow-box::after { content: ""; position: absolute; width: 18px; height: 1px; right: -19px; background: var(--line-strong); }
+    .flow-box:last-child::after { display: none; }
+    .flow-box small { color: var(--text-faint); font: 11px var(--mono); }
+    .flow-box strong { margin-top: 7px; font-size: 15px; }
+    .flow-box span { margin-top: 4px; color: var(--text-soft); font-size: 12px; }
+    .sim-detail { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: auto; }
+    .detail-card { min-height: 150px; padding: 17px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-soft); }
+    .detail-card .label { color: var(--text-faint); font: 700 11px var(--mono); letter-spacing: .06em; }
+    .detail-card strong { display: block; margin: 12px 0 7px; font-size: 14px; }
+    .detail-card p, .detail-card code { margin: 0; color: var(--text-soft); font-size: 12px; line-height: 1.6; }
+    .detail-card code { font-family: var(--mono); word-break: break-word; }
+
+    .boundaries { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; margin-bottom: 108px; }
+    .boundary-card { padding: 28px; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-small); backdrop-filter: var(--glass-blur); }
+    .boundary-card h3 { margin-bottom: 7px; font-size: 25px; }
+    .boundary-card > p { color: var(--text-soft); }
+    .boundary-list { display: grid; gap: 9px; margin-top: 24px; }
+    .boundary-row { display: grid; grid-template-columns: 33px 1fr auto; gap: 11px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); }
+    .boundary-row svg { width: 18px; height: 18px; color: var(--green); }
+    .boundary-row span { font-size: 13px; font-weight: 650; }
+    .boundary-row code { color: var(--text-faint); font: 11px var(--mono); }
+    .derived-card .boundary-row svg { color: var(--violet); }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; color: var(--text-soft); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; background: var(--green); }
+    .legend span:last-child i { background: transparent; border: 1px dashed var(--violet); }
+
+    .modes-section { margin-bottom: 108px; }
+    .modes-shell { display: grid; grid-template-columns: 340px 1fr; gap: 18px; }
+    .mode-picker { display: grid; gap: 8px; }
+    .mode-button { display: grid; grid-template-columns: 43px 1fr auto; align-items: center; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 17px; color: var(--text); text-align: left; background: var(--surface); cursor: pointer; transition: background .2s ease, border-color .2s ease; }
+    .mode-button:hover { border-color: var(--line-strong); }
+    .mode-button[aria-selected="true"] { border-color: color-mix(in srgb, var(--blue) 40%, var(--line)); background: color-mix(in srgb, var(--blue-soft) 52%, var(--surface)); }
+    .mode-icon { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 13px; color: var(--blue); background: var(--blue-soft); }
+    .mode-icon svg { width: 21px; height: 21px; }
+    .mode-button strong { display: block; font-size: 14px; }
+    .mode-button small { color: var(--text-faint); }
+    .mode-arrow { color: var(--text-faint); }
+    .mode-display { min-height: 420px; padding: 30px; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow); backdrop-filter: var(--glass-blur); }
+    .mode-display h3 { margin: 8px 0 8px; font-size: 28px; }
+    .mode-display > p { max-width: 650px; color: var(--text-soft); }
+    .mini-flow { display: flex; align-items: center; justify-content: center; gap: 36px; min-height: 210px; margin-top: 24px; padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-soft); }
+    .agent-node { position: relative; min-width: 112px; padding: 16px; border: 1px solid var(--line-strong); border-radius: 16px; text-align: center; background: var(--surface-solid); box-shadow: 0 8px 20px rgba(34, 56, 80, .08); }
+    .agent-node .avatar { width: 38px; height: 38px; display: grid; place-items: center; margin: 0 auto 9px; border-radius: 13px; color: var(--blue); background: var(--blue-soft); }
+    .agent-node svg { width: 20px; height: 20px; }
+    .agent-node strong { font-size: 13px; }
+    .agent-node code { display: block; margin-top: 4px; color: var(--text-faint); font: 10px var(--mono); }
+    .agent-node.child::before { content: ""; position: absolute; width: 36px; height: 1px; left: -37px; top: 50%; background: var(--line-strong); }
+
+    .safety-section { margin-bottom: 108px; }
+    .safety-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .safety-step { position: relative; min-height: 210px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-small); }
+    .safety-step::after { content: ""; position: absolute; right: -15px; top: 50%; width: 15px; height: 1px; background: var(--line-strong); }
+    .safety-step:last-child::after { display: none; }
+    .safety-step .index { color: var(--orange); font: 750 12px var(--mono); }
+    .safety-step h3 { margin: 24px 0 9px; font-size: 18px; }
+    .safety-step p { margin: 0; color: var(--text-soft); font-size: 13px; }
+
+    .source-section { margin-bottom: 80px; }
+    .source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .source-link { display: block; min-width: 0; min-height: 132px; padding: 20px; border: 1px solid var(--line); border-radius: 18px; text-decoration: none; background: var(--surface); transition: background .2s ease, border-color .2s ease; }
+    .source-link:hover { background: var(--surface-solid); border-color: var(--line-strong); }
+    .source-link code { color: var(--blue); font: 12px var(--mono); overflow-wrap: anywhere; }
+    .source-link strong { display: block; margin: 16px 0 5px; font-size: 15px; }
+    .source-link span { color: var(--text-soft); font-size: 12px; }
+
+    footer { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 44px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; color: var(--text-faint); font-size: 12px; }
+    footer code { font-family: var(--mono); }
+
+    @media (max-width: 980px) {
+      .hero { grid-template-columns: 1fr; padding-top: 72px; }
+      .hero-model { min-height: 430px; }
+      .terms { grid-template-columns: repeat(2, 1fr); }
+      .architecture-panel.active { grid-template-columns: 1fr; }
+      .map-explain { min-height: auto; }
+      .simulator { grid-template-columns: 230px 1fr; }
+      .sim-flow, .sim-detail { grid-template-columns: 1fr; }
+      .flow-box { min-height: 82px; }
+      .flow-box::after { display: none; }
+      .boundaries { grid-template-columns: 1fr; }
+      .modes-shell { grid-template-columns: 285px 1fr; }
+      .safety-flow { grid-template-columns: repeat(2, 1fr); }
+      .safety-step::after { display: none; }
+    }
+
+    @media (max-width: 720px) {
+      .topbar { top: 8px; width: calc(100% - 16px); margin-top: 8px; padding-left: 13px; }
+      .brand span { display: none; }
+      .nav-links { flex: 1; overflow-x: auto; }
+      .nav-links a { padding: 8px; font-size: 12px; }
+      main { width: min(100% - 22px, 1160px); }
+      .hero { min-height: auto; gap: 20px; padding: 72px 0 64px; }
+      h1 { font-size: clamp(45px, 14vw, 64px); }
+      .hero-model { min-height: 380px; overflow: hidden; }
+      .orbit.a { width: 365px; height: 365px; }
+      .orbit.b { width: 270px; height: 270px; }
+      .section-head { align-items: start; flex-direction: column; }
+      .terms { grid-template-columns: 1fr; margin-bottom: 78px; }
+      .term { min-height: auto; }
+      .diagram { padding: 16px; overflow-x: auto; }
+      .diagram-row, .diagram-row.three, .diagram-row.five { min-width: 650px; }
+      .layer { grid-template-columns: 1fr; gap: 4px; }
+      .architecture-shell { padding: 11px; }
+      .simulator { grid-template-columns: 1fr; }
+      .sim-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .step-list { width: 100%; min-width: 0; grid-template-columns: repeat(7, 44px); overflow-x: auto; }
+      .step-button { grid-template-columns: 1fr; padding: 7px; }
+      .step-name { display: none; }
+      .sim-stage { padding: 22px 16px; }
+      .sim-title-row { flex-direction: column; }
+      .sim-detail { grid-template-columns: 1fr; }
+      .modes-shell { grid-template-columns: 1fr; }
+      .mode-picker { grid-template-columns: repeat(4, minmax(160px, 1fr)); overflow-x: auto; }
+      .mini-flow { justify-content: flex-start; overflow-x: auto; }
+      .source-grid { grid-template-columns: 1fr; }
+      footer { flex-direction: column; }
+    }
+
+    @media (max-width: 480px) {
+      .nav-links a:nth-child(3), .nav-links a:nth-child(4) { display: none; }
+      .hero-actions { display: grid; }
+      .primary-button, .secondary-button { width: 100%; }
+      .truth-banner { grid-template-columns: 1fr; }
+      .safety-flow { grid-template-columns: 1fr; }
+      .boundary-row { grid-template-columns: 28px 1fr; }
+      .boundary-row code { grid-column: 2; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient one"></div>
+  <div class="ambient two"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="返回页面顶部">
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 3 27.3 9.5v13L16 29 4.7 22.5v-13L16 3Z" stroke="currentColor" stroke-width="2"/>
+        <path d="m10.5 12.7 5.5-3.2 5.5 3.2v6.6L16 22.5l-5.5-3.2v-6.6Z" fill="currentColor" opacity=".16" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="16" cy="16" r="2.3" fill="currentColor"/>
+      </svg>
+      <span>SAgents V2 架构导览</span>
+    </a>
+    <nav class="nav-links" aria-label="页面导航">
+      <a href="#mental">心智模型</a>
+      <a href="#map">架构地图</a>
+      <a href="#run">运行一遍</a>
+      <a href="#boundaries">数据边界</a>
+    </nav>
+    <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色主题" title="切换深浅色主题">
+      <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+    </button>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <div class="eyebrow"><span class="eyebrow-dot"></span>基于当前 sagents/v2 工作树</div>
+        <h1 id="hero-title">一条真实链路，理解 <span class="gradient">SAgents V2</span></h1>
+        <p class="hero-copy">把它想成一套可嵌入的智能体运行内核：上层应用负责“产品”，V2 负责让一个已知 Session 里的 Run 被可靠地装配、执行、记录、暂停和恢复。</p>
+        <div class="hero-actions">
+          <a class="primary-button" href="#run">
+            运行一次请求
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+          <a class="secondary-button" href="#map">
+            查看完整地图
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6.5 9 3l6 3.5L21 3v14.5L15 21l-6-3.5L3 21V6.5Z"/><path d="M9 3v14.5M15 6.5V21"/></svg>
+          </a>
+        </div>
+      </div>
+      <div class="hero-model" aria-label="SAgents V2 核心关系示意">
+        <div class="orbit a"></div>
+        <div class="orbit b"></div>
+        <article class="core-card">
+          <div class="core-top">
+            <div class="core-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 9h8M8 12h5M8 15h7"/></svg></div>
+            <span class="status">RUNNING</span>
+          </div>
+          <h2 class="core-title">Session 是事实，Request 是投影</h2>
+          <div class="core-code">session_id: known-session<br>run_id: run_01<br>revision: 12 → 13</div>
+          <div class="core-path">
+            <div><span>1</span>读取 Session 权威历史</div>
+            <div><span>2</span>组装本次模型请求</div>
+            <div><span>3</span>提交事件后再向外发布</div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="mental" aria-labelledby="mental-title">
+      <div class="section-head">
+        <div><div class="section-kicker">01 / Mental model</div><h2 id="mental-title">先记住四个名词</h2></div>
+        <p class="section-note">绝大多数调用链，都是这四层关系的展开。</p>
+      </div>
+      <div class="truth-banner">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 4 7v5c0 4.6 3.1 7.8 8 9 4.9-1.2 8-4.4 8-9V7l-8-4Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg></div>
+        <div><strong>唯一要先抓住的原则</strong><p>Session 中已提交的状态与事件才是事实；给模型看的 messages、摘要、缓存和 UI 都是可以重建的视图。</p></div>
+      </div>
+      <div class="terms">
+        <article class="term"><div class="term-label">P</div><h3>Package</h3><p><code>sage.yaml</code> 声明要用哪个 Agent、模型、工具、Skill、限制和插件。</p></article>
+        <article class="term"><div class="term-label">S</div><h3>Session</h3><p>一段持久对话的并发与历史边界，拥有 canonical history。</p></article>
+        <article class="term"><div class="term-label">R</div><h3>Run</h3><p>Session 内的一次执行尝试，可以完成、失败、取消，也可以暂停后恢复。</p></article>
+        <article class="term"><div class="term-label">E</div><h3>Runtime Event</h3><p>已经发生并被接受的事实流；宿主用它渲染文本、工具、交互与状态。</p></article>
+      </div>
+    </section>
+
+    <section id="map" class="map-section" aria-labelledby="map-title">
+      <div class="section-head">
+        <div><div class="section-kicker">02 / Architecture map</div><h2 id="map-title">从四个角度看同一个内核</h2></div>
+        <div class="segmented" role="tablist" aria-label="架构视角">
+          <button type="button" role="tab" aria-selected="true" aria-controls="panel-compose" id="tab-compose" data-panel="compose">装配</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="panel-runtime" id="tab-runtime" data-panel="runtime">执行</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="panel-data" id="tab-data" data-panel="data">数据</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="panel-extension" id="tab-extension" data-panel="extension">扩展</button>
+        </div>
+      </div>
+
+      <div class="architecture-shell">
+        <div class="architecture-panel active" id="panel-compose" role="tabpanel" aria-labelledby="tab-compose">
+          <div class="diagram">
+            <div class="diagram-row">
+              <div class="node arrow-right"><small>DECLARATION</small><strong>sage.yaml</strong></div>
+              <div class="node accent arrow-right"><small>COMPOSITION ROOT</small><strong>SAgentBuilder</strong></div>
+              <div class="node arrow-right"><small>OWNERSHIP</small><strong>SAgentApplication</strong></div>
+              <div class="node"><small>ENTRYPOINT</small><strong>SAgent</strong></div>
+            </div>
+            <div class="layer-stack">
+              <div class="layer"><strong>解析清单</strong><span>Agent · model route · tool · skill · policy ceiling</span></div>
+              <div class="layer"><strong>解析插件</strong><span>registry → resolver → scope handle</span></div>
+              <div class="layer"><strong>注入能力</strong><span>SessionStore · ModelProvider · ToolProvider · Memory</span></div>
+              <div class="layer"><strong>启动资源</strong><span>Scheduler · WorkerDispatcher · protocol adapters</span></div>
+              <div class="layer"><strong>统一关闭</strong><span>SAgentApplication.close()</span></div>
+            </div>
+          </div>
+          <aside class="map-explain"><div class="counter">VIEW 01</div><h3>Builder 只装配一次</h3><p>它把声明式 Package 变成完全注入的 Application。执行阶段使用已解析的接口，不在每一步偷偷查找或替换实现。</p><div class="rule-list"><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>插件缺失在构建阶段失败</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Application 拥有进程级资源</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>SAgent 只暴露运行与观察入口</span></div></div></aside>
+        </div>
+
+        <div class="architecture-panel" id="panel-runtime" role="tabpanel" aria-labelledby="tab-runtime" hidden>
+          <div class="diagram">
+            <div class="diagram-row five">
+              <div class="node arrow-right"><small>HOST</small><strong>StartRun</strong></div>
+              <div class="node accent arrow-right"><small>FACADE</small><strong>SAgent</strong></div>
+              <div class="node authority arrow-right"><small>LIFECYCLE</small><strong>RuntimePort</strong></div>
+              <div class="node arrow-right"><small>DRIVER</small><strong>Agent / Flow</strong></div>
+              <div class="node"><small>OBSERVE</small><strong>RuntimeEvent</strong></div>
+            </div>
+            <div class="diagram-row three">
+              <div class="node"><small>REQUEST VIEW</small><strong>Context → Model</strong></div>
+              <div class="node"><small>SIDE EFFECT</small><strong>Policy → Tool</strong></div>
+              <div class="node"><small>CONTROL</small><strong>Complete / Suspend</strong></div>
+            </div>
+          </div>
+          <aside class="map-explain"><div class="counter">VIEW 02</div><h3>Facade 不知道谁在驾驶</h3><p><code>SAgent</code> 面向的是统一的 <code>RunDriver</code>。普通 Agent Loop 和 Flow 都满足同一执行契约，共用 Runtime 生命周期和事件协议。</p><div class="rule-list"><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>关闭事件流只会 detach</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>suspended 不是终态</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>协议适配器只投影事件</span></div></div></aside>
+        </div>
+
+        <div class="architecture-panel" id="panel-data" role="tabpanel" aria-labelledby="tab-data" hidden>
+          <div class="diagram">
+            <div class="diagram-row three">
+              <div class="node authority"><small>AUTHORITATIVE</small><strong>Session aggregate</strong></div>
+              <div class="node authority"><small>AUTHORITATIVE</small><strong>Mutation journal</strong></div>
+              <div class="node authority"><small>CONCURRENCY</small><strong>revision / CAS</strong></div>
+            </div>
+            <div class="diagram-row three">
+              <div class="node derived"><small>DERIVED</small><strong>Context summary</strong></div>
+              <div class="node derived"><small>DIAGNOSTIC</small><strong>LLM request record</strong></div>
+              <div class="node derived"><small>PRODUCT OWNED</small><strong>Desktop Session index</strong></div>
+            </div>
+          </div>
+          <aside class="map-explain"><div class="counter">VIEW 03</div><h3>恢复只信权威状态</h3><p>摘要、token 估算、模型诊断和产品索引可以删除或重建；它们失败时，不能改写已经确认的 Session 提交。</p><div class="rule-list"><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>一个已知 session_id 直达目录</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>V2 不管理全局会话列表</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>CAS 防止并发覆盖</span></div></div></aside>
+        </div>
+
+        <div class="architecture-panel" id="panel-extension" role="tabpanel" aria-labelledby="tab-extension" hidden>
+          <div class="diagram">
+            <div class="diagram-row three">
+              <div class="node accent"><small>MICROKERNEL</small><strong>Extension Registry</strong></div>
+              <div class="node"><small>RESOLUTION</small><strong>Registration + Scope</strong></div>
+              <div class="node"><small>LIFECYCLE</small><strong>open → use → close</strong></div>
+            </div>
+            <div class="diagram-row five">
+              <div class="node derived"><strong>Model</strong></div>
+              <div class="node derived"><strong>Tool</strong></div>
+              <div class="node derived"><strong>Skill</strong></div>
+              <div class="node derived"><strong>Memory</strong></div>
+              <div class="node derived"><strong>Session Store</strong></div>
+            </div>
+          </div>
+          <aside class="map-explain"><div class="counter">VIEW 04</div><h3>语义留在内核，实现放回领域</h3><p><code>runtime/extensions</code> 只管注册、解析和作用域；OpenAI Provider 属于 model，Filesystem Store 属于 session。</p><div class="rule-list"><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>核心不反向依赖 app</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Package 是显式插件白名单</span></div><div class="rule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>替换实现不改变运行语义</span></div></div></aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="run" class="simulator-section" aria-labelledby="run-title">
+      <div class="section-head">
+        <div><div class="section-kicker">03 / Run simulator</div><h2 id="run-title">亲手跑一遍 Run</h2></div>
+        <p class="section-note">选择步骤，观察调用链、权威写入与对外事件如何一起变化。</p>
+      </div>
+      <div class="simulator">
+        <aside class="sim-sidebar">
+          <div class="sim-head"><strong>运行步骤</strong><div class="sim-controls"><button id="sim-play" type="button" aria-label="自动播放"><svg class="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg></button><button id="sim-reset" type="button" aria-label="重置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v6h6M5.5 15A7 7 0 1 0 6 7.5L4 10"/></svg></button></div></div>
+          <div class="step-list" id="step-list"></div>
+        </aside>
+        <div class="sim-stage" aria-live="polite">
+          <div class="sim-title-row"><div><h3 id="sim-title"></h3><p id="sim-copy"></p></div><span class="run-pill" id="sim-state"></span></div>
+          <div class="sim-flow"><div class="flow-box" id="flow-host"><small>HOST / API</small><strong>应用入口</strong><span id="host-status">等待命令</span></div><div class="flow-box" id="flow-runtime"><small>SAGENTS CORE</small><strong>Runtime + Driver</strong><span id="runtime-status">尚未接受</span></div><div class="flow-box" id="flow-provider"><small>PROVIDERS</small><strong>Model + Tool</strong><span id="provider-status">未调用</span></div></div>
+          <div class="sim-detail"><article class="detail-card"><div class="label">READ</div><strong>此刻读取</strong><p id="sim-read"></p></article><article class="detail-card"><div class="label">WRITE</div><strong>权威写入</strong><p id="sim-write"></p></article><article class="detail-card"><div class="label">EVENT</div><strong>宿主看到</strong><code id="sim-event"></code></article></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="boundaries" aria-labelledby="boundaries-title">
+      <div class="section-head"><div><div class="section-kicker">04 / Data boundaries</div><h2 id="boundaries-title">哪些能恢复，哪些能重建</h2></div><p class="section-note">判断一个模块是否关键，先问：删掉它，会不会改变 Session 的事实？</p></div>
+      <div class="boundaries">
+        <article class="boundary-card"><h3>权威数据</h3><p>决定 Session 与 Run 真实状态，写入受 revision / CAS 与幂等键保护。</p><div class="boundary-list"><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Session aggregate</span><code>authoritative</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Run / checkpoint / suspension</span><code>recoverable</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>已确认 Runtime Events</span><code>replayable</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Tool call / result 配对</span><code>canonical</code></div></div></article>
+        <article class="boundary-card derived-card"><h3>派生与外部数据</h3><p>为性能、诊断或产品体验服务，但不能成为恢复 Session 的第二事实源。</p><div class="boundary-list"><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M6 4h12l1 3v13H5V7l1-3Z"/><path d="M9 11h6"/></svg><span>Context summary / token cache</span><code>derived</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M6 4h12l1 3v13H5V7l1-3Z"/><path d="M9 11h6"/></svg><span>模型请求诊断</span><code>diagnostic</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M6 4h12l1 3v13H5V7l1-3Z"/><path d="M9 11h6"/></svg><span>长期 Memory</span><code>independent</code></div><div class="boundary-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M6 4h12l1 3v13H5V7l1-3Z"/><path d="M9 11h6"/></svg><span>应用层 Session 索引</span><code>product-owned</code></div></div></article>
+      </div>
+    </section>
+
+    <section class="modes-section" aria-labelledby="modes-title">
+      <div class="section-head"><div><div class="section-kicker">05 / One core, many drivers</div><h2 id="modes-title">多 Agent 不是另一套内核</h2></div><p class="section-note">Simple、Fibre、Team 和 Flow 最终都回到同一套 Session、Run、Tool 与 Event 语义。</p></div>
+      <div class="modes-shell">
+        <div class="mode-picker" role="tablist" aria-label="执行模式" id="mode-picker"></div>
+        <div class="mode-display" aria-live="polite"><div class="section-kicker" id="mode-kicker"></div><h3 id="mode-title"></h3><p id="mode-copy"></p><div class="mini-flow" id="mode-flow"></div></div>
+      </div>
+    </section>
+
+    <section class="safety-section" aria-labelledby="safety-title">
+      <div class="section-head"><div><div class="section-kicker">06 / Side-effect safety</div><h2 id="safety-title">工具调用为什么要有“栅栏”</h2></div><p class="section-note">网络断开时，远端操作可能已经成功。V2 先记录 dispatching，再执行，再确认或协调。</p></div>
+      <div class="safety-flow"><article class="safety-step"><span class="index">01</span><h3>记录即将执行</h3><p>先提交 <code>tool.call.dispatching</code>，留下不可忽略的副作用边界。</p></article><article class="safety-step"><span class="index">02</span><h3>调用 ToolExecutor</h3><p>携带 operation_id 与 idempotency_key，执行选定的真实实现。</p></article><article class="safety-step"><span class="index">03</span><h3>结果不确定</h3><p>标记 <code>tool.call.unknown</code>，不自动把调用再发一遍。</p></article><article class="safety-step"><span class="index">04</span><h3>协调或暂停</h3><p>支持 reconcile 就查询真实结果；否则 checkpoint 后请求人工决策。</p></article></div>
+    </section>
+
+    <section class="source-section" aria-labelledby="source-title">
+      <div class="section-head"><div><div class="section-kicker">07 / Source map</div><h2 id="source-title">沿着真实入口继续读</h2></div><p class="section-note">建议按调用链阅读，而不是从目录树第一行开始。</p></div>
+      <div class="source-grid">
+        <a class="source-link" href="../../../sagents/v2/sagent.py"><code>01 · sagents/v2/sagent.py</code><strong>公开运行入口</strong><span>start、stream、subscribe、resume 与 detach 语义</span></a>
+        <a class="source-link" href="../../../sagents/v2/builder.py"><code>02 · sagents/v2/builder.py</code><strong>组合根</strong><span>Package、插件、Provider、Application 的装配</span></a>
+        <a class="source-link" href="../../../sagents/v2/agent/engine.py"><code>03 · sagents/v2/agent/engine.py</code><strong>Agent Loop</strong><span>模型、工具、策略、继续与暂停的主循环</span></a>
+        <a class="source-link" href="../../../sagents/v2/runtime/kernel.py"><code>04 · sagents/v2/runtime/kernel.py</code><strong>生命周期内核</strong><span>合法状态迁移与 SessionStore 边界</span></a>
+        <a class="source-link" href="../../../sagents/v2/context/assembler.py"><code>05 · sagents/v2/context/assembler.py</code><strong>上下文投影</strong><span>稳定段、运行时上下文、历史与预算压缩</span></a>
+        <a class="source-link" href="../../../sagents/v2/ARCHITECTURE.md"><code>06 · sagents/v2/ARCHITECTURE.md</code><strong>依赖规则</strong><span>领域模块、单 Session 权威和扩展边界</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>SAgents V2 中文交互式架构导览</span><span>依据当前工作树生成 · <code>2026-08-31</code></span></footer>
+
+  <script>
+    const root = document.documentElement;
+    const themeButton = document.getElementById('theme-toggle');
+    const themeOrder = ['auto', 'light', 'dark'];
+    const savedTheme = localStorage.getItem('sagents-v2-guide-theme');
+    if (themeOrder.includes(savedTheme)) root.dataset.theme = savedTheme;
+    function updateThemeLabel() {
+      const names = { auto: '跟随系统', light: '浅色', dark: '深色' };
+      themeButton.setAttribute('aria-label', `当前${names[root.dataset.theme]}，点击切换主题`);
+      themeButton.title = `当前：${names[root.dataset.theme]}`;
+    }
+    updateThemeLabel();
+    themeButton.addEventListener('click', () => {
+      const next = themeOrder[(themeOrder.indexOf(root.dataset.theme) + 1) % themeOrder.length];
+      root.dataset.theme = next;
+      localStorage.setItem('sagents-v2-guide-theme', next);
+      updateThemeLabel();
+    });
+
+    const mapTabs = [...document.querySelectorAll('[data-panel]')];
+    mapTabs.forEach((tab) => tab.addEventListener('click', () => {
+      mapTabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
+      document.querySelectorAll('.architecture-panel').forEach((panel) => {
+        const active = panel.id === `panel-${tab.dataset.panel}`;
+        panel.classList.toggle('active', active);
+        panel.hidden = !active;
+      });
+    }));
+
+    const runSteps = [
+      { title: '宿主提交 StartRun', copy: '应用把用户输入、agent_id、session_id、调用模式与幂等键交给 SAgent。', state: 'ACCEPTING', read: 'sage.yaml 已解析结果 + RequestContext', write: '创建 Run，固定 session 边界与 base sequence', event: 'run.accepted', active: 'host', statuses: ['提交 StartRun', '校验并接受', '未调用'] },
+      { title: 'Runtime 接受并排队', copy: 'RuntimePort 通过 SessionStore 做合法状态迁移；Dispatcher 决定何时由 Driver 开始执行。', state: 'QUEUED', read: 'Session revision + idempotency_key', write: 'RunState.QUEUED + 新 revision', event: 'run.queued', active: 'runtime', statuses: ['已收到 handle', '持久化 QUEUED', '未调用'] },
+      { title: '重建 Ledger 与上下文', copy: '先从权威历史恢复 conversation facts，再为本次请求新鲜组装 system、runtime context、工具和预算视图。', state: 'RUNNING', read: 'canonical Session history + Context Providers', write: 'turn.started / step.started', event: 'turn.started → step.started', active: 'runtime', statuses: ['观察事件', '构造 ModelRequest', '等待请求'] },
+      { title: '模型流式响应', copy: 'ModelProvider 输出 text、reasoning 与 tool calls；增量先批量提交，再作为 RuntimeEvent 被宿主观察。', state: 'RUNNING', read: 'provider-facing messages + visible tools', write: 'message.delta / reasoning.delta / usage', event: 'message.delta × N', active: 'provider', statuses: ['渲染增量', '提交 item 事件', 'ModelProvider.stream'] },
+      { title: '策略判断与工具执行', copy: 'Tool call 先经过 policy。允许后先提交 dispatching，再越过副作用边界调用 ToolExecutor。', state: 'RUNNING', read: 'ToolDefinition + actor + invocation_mode', write: 'policy.decision + tool.call.dispatching', event: 'tool.call.started', active: 'provider', statuses: ['展示工具状态', '建立副作用栅栏', 'ToolExecutor.execute'] },
+      { title: '结果回填并决定继续', copy: '工具结果作为 canonical item 回到 Ledger；ContinuationPolicy 决定继续下一 Step、请求交互或结束。', state: 'RUNNING', read: 'ToolExecutionResult + loop checkpoint state', write: 'tool.call.completed + continuation decision', event: 'tool.call.completed', active: 'runtime', statuses: ['更新工具卡片', '评估下一动作', '结果已返回'] },
+      { title: '提交完成并可重放', copy: 'Run 达到终态后，Session 中的历史和事件可恢复；协议适配器可从 cursor 重放同一事实流。', state: 'COMPLETED', read: '最终 checkpoint + usage + stop reason', write: 'turn.completed + run.completed', event: 'run.completed', active: 'host', statuses: ['收到终态', '提交完成', '已释放本次调用'] }
+    ];
+    const stepList = document.getElementById('step-list');
+    let currentStep = 0;
+    let playTimer = null;
+    runSteps.forEach((step, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'step-button';
+      button.innerHTML = `<span class="step-number">${String(index + 1).padStart(2, '0')}</span><span class="step-name">${step.title}</span>`;
+      button.addEventListener('click', () => { stopPlay(); selectStep(index); });
+      stepList.appendChild(button);
+    });
+    function selectStep(index) {
+      currentStep = index;
+      const step = runSteps[index];
+      [...stepList.children].forEach((button, i) => {
+        button.setAttribute('aria-current', i === index ? 'step' : 'false');
+        button.classList.toggle('done', i < index || index === runSteps.length - 1);
+      });
+      document.getElementById('sim-title').textContent = step.title;
+      document.getElementById('sim-copy').textContent = step.copy;
+      document.getElementById('sim-state').textContent = step.state;
+      document.getElementById('sim-read').textContent = step.read;
+      document.getElementById('sim-write').textContent = step.write;
+      document.getElementById('sim-event').textContent = step.event;
+      ['host', 'runtime', 'provider'].forEach((name) => document.getElementById(`flow-${name}`).classList.toggle('active', name === step.active));
+      document.getElementById('host-status').textContent = step.statuses[0];
+      document.getElementById('runtime-status').textContent = step.statuses[1];
+      document.getElementById('provider-status').textContent = step.statuses[2];
+    }
+    function stopPlay() {
+      clearInterval(playTimer);
+      playTimer = null;
+      document.querySelector('#sim-play .play-icon').innerHTML = '<path d="m8 5 11 7-11 7V5Z"/>';
+      document.getElementById('sim-play').setAttribute('aria-label', '自动播放');
+    }
+    document.getElementById('sim-play').addEventListener('click', () => {
+      if (playTimer) { stopPlay(); return; }
+      document.querySelector('#sim-play .play-icon').innerHTML = '<path d="M7 5h4v14H7zM14 5h4v14h-4z"/>';
+      document.getElementById('sim-play').setAttribute('aria-label', '暂停播放');
+      playTimer = setInterval(() => {
+        if (currentStep >= runSteps.length - 1) { stopPlay(); return; }
+        selectStep(currentStep + 1);
+      }, 1700);
+    });
+    document.getElementById('sim-reset').addEventListener('click', () => { stopPlay(); selectStep(0); });
+    selectStep(0);
+
+    const modes = [
+      { id: 'simple', name: 'Simple', label: '单一 Agent Loop', kicker: 'SIMPLE / ONE DRIVER', copy: '一个 Agent 直接在模型、策略与工具之间循环，直到完成、失败或需要用户交互。', nodes: [['入口 Agent', 'root Run']] },
+      { id: 'fibre', name: 'Fibre', label: '动态委派', kicker: 'FIBRE / DYNAMIC DELEGATION', copy: '容器 Agent 可以在当前 Session 范围内动态生成描述并创建 child Run；这些成员不会进入宿主的全局 Agent 目录。', nodes: [['容器 Agent', 'parent Run'], ['动态成员 A', 'child Run'], ['动态成员 B', 'child Run']] },
+      { id: 'team', name: 'Team', label: '固定团队', kicker: 'TEAM / DECLARED ROSTER', copy: '入口 Agent 从 Package 已声明的成员中委派任务。团队改变的是协调策略，不改变底层 Run 生命周期。', nodes: [['Team Lead', 'parent Run'], ['成员 A', 'child Run'], ['成员 B', 'child Run']] },
+      { id: 'flow', name: 'Flow', label: '图驱动执行', kicker: 'FLOW / GRAPH DRIVER', copy: 'Flow 使用图节点驱动步骤，但仍通过相同 RuntimePort 提交状态，通过相同 RuntimeEvent 对外表达进度。', nodes: [['Flow Driver', 'root Run'], ['Agent Node', 'same contracts'], ['Tool Node', 'same events']] }
+    ];
+    const modePicker = document.getElementById('mode-picker');
+    modes.forEach((mode, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mode-button';
+      button.setAttribute('role', 'tab');
+      button.innerHTML = `<span class="mode-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="7" r="3"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/></svg></span><span><strong>${mode.name}</strong><small>${mode.label}</small></span><span class="mode-arrow">›</span>`;
+      button.addEventListener('click', () => selectMode(index));
+      modePicker.appendChild(button);
+    });
+    function selectMode(index) {
+      const mode = modes[index];
+      [...modePicker.children].forEach((button, i) => button.setAttribute('aria-selected', String(i === index)));
+      document.getElementById('mode-kicker').textContent = mode.kicker;
+      document.getElementById('mode-title').textContent = mode.name;
+      document.getElementById('mode-copy').textContent = mode.copy;
+      document.getElementById('mode-flow').innerHTML = mode.nodes.map((node, i) => `<div class="agent-node ${i ? 'child' : ''}"><div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg></div><strong>${node[0]}</strong><code>${node[1]}</code></div>`).join('');
+    }
+    selectMode(0);
+
+    const navLinks = [...document.querySelectorAll('.nav-links a')];
+    const observed = navLinks.map((link) => document.querySelector(link.getAttribute('href'))).filter(Boolean);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible) return;
+      navLinks.forEach((link) => link.setAttribute('aria-current', String(link.getAttribute('href') === `#${visible.target.id}`)));
+    }, { rootMargin: '-20% 0px -65%', threshold: [0, .2, .5] });
+    observed.forEach((section) => observer.observe(section));
+  </script>
+</body>
+</html>

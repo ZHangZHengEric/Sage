@@ -49,10 +49,6 @@ def builtin_extension_registry() -> ExtensionRegistry:
                     "type": "object",
                     "properties": {
                         "root": {"type": "string", "minLength": 1},
-                        "previous_v2_root": {
-                            "type": "string",
-                            "minLength": 1,
-                        },
                     },
                     "required": ["root"],
                     "additionalProperties": False,
@@ -66,7 +62,6 @@ def builtin_extension_registry() -> ExtensionRegistry:
             ),
             factory=lambda context, dependencies: FilesystemSessionStore(
                 context.config["root"],
-                previous_v2_root=context.config.get("previous_v2_root"),
             ),
         )
     )

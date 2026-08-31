@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../state/workspace_controller.dart';
 import '../usage_models.dart';
@@ -46,38 +47,32 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1080),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _text('概览', 'Overview'),
-                          key: const ValueKey('settings-content-title'),
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.w700),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final title = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _text('概览', 'Overview'),
+                        key: const ValueKey('settings-content-title'),
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _text('本机运行数据统计', 'Local runtime usage'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _text('本机运行数据统计', 'Local runtime usage'),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _RangeSelector(
+                      ),
+                    ],
+                  );
+                  final range = _RangeSelector(
                     selected: _days,
                     onSelected: _changeRange,
                     zh: _zh,
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
+                  );
+                  final refresh = IconButton(
                     key: const ValueKey('usage-refresh'),
                     tooltip: _text('刷新', 'Refresh'),
                     onPressed: widget.controller.usageOverviewLoading
@@ -87,8 +82,31 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
                     icon: widget.controller.usageOverviewLoading
                         ? const CupertinoActivityIndicator(radius: 8)
                         : const Icon(CupertinoIcons.refresh, size: 18),
-                  ),
-                ],
+                  );
+                  if (constraints.maxWidth < 620) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(child: title),
+                            refresh,
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        range,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: title),
+                      range,
+                      const SizedBox(width: 4),
+                      refresh,
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -162,6 +180,14 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
                         '${overview.tools.length} 种工具',
                         '${overview.tools.length} tools used',
                       ),
+                    ),
+                    _Metric(
+                      _text('平均首字延迟', 'Avg TTFT'),
+                      _duration(totals.averageFirstTokenLatencyMs),
+                    ),
+                    _Metric(
+                      _text('Token 输出速度', 'Token throughput'),
+                      _rate(totals.outputTokensPerSecond),
                     ),
                   ],
                 ),
@@ -276,10 +302,10 @@ class _RangeSelector extends StatelessWidget {
 }
 
 class _Metric {
-  const _Metric(this.label, this.value, this.detail);
+  const _Metric(this.label, this.value, [this.detail]);
   final String label;
   final String value;
-  final String detail;
+  final String? detail;
 }
 
 class _MetricStrip extends StatelessWidget {
@@ -289,57 +315,47 @@ class _MetricStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final compact = constraints.maxWidth < 620;
-      final colors = Theme.of(context).colorScheme;
-      return Container(
+      final columnCount = constraints.maxWidth < 620
+          ? 2
+          : constraints.maxWidth < 920
+          ? 3
+          : metrics.length;
+      final rows = <Widget>[];
+      for (var start = 0; start < metrics.length; start += columnCount) {
+        final end = math.min(start + columnCount, metrics.length);
+        rows.add(
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                for (
+                  var index = start;
+                  index < start + columnCount;
+                  index++
+                ) ...[
+                  Expanded(
+                    child: index < end
+                        ? _MetricCell(metric: metrics[index])
+                        : const SizedBox.shrink(),
+                  ),
+                  if (index != start + columnCount - 1)
+                    const VerticalDivider(width: 1),
+                ],
+              ],
+            ),
+          ),
+        );
+        if (end < metrics.length) rows.add(const Divider(height: 12));
+      }
+      return GlassCard(
+        key: const ValueKey('usage-metric-strip'),
         padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 12,
+          horizontal: constraints.maxWidth < 620 ? 8 : 12,
           vertical: 11,
         ),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: colors.outlineVariant.withValues(alpha: .7),
-          ),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: compact
-            ? Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(child: _MetricCell(metric: metrics[0])),
-                      const SizedBox(
-                        height: 54,
-                        child: VerticalDivider(width: 1),
-                      ),
-                      Expanded(child: _MetricCell(metric: metrics[1])),
-                    ],
-                  ),
-                  const Divider(height: 12),
-                  Row(
-                    children: [
-                      Expanded(child: _MetricCell(metric: metrics[2])),
-                      const SizedBox(
-                        height: 54,
-                        child: VerticalDivider(width: 1),
-                      ),
-                      Expanded(child: _MetricCell(metric: metrics[3])),
-                    ],
-                  ),
-                ],
-              )
-            : Row(
-                children: [
-                  for (var index = 0; index < metrics.length; index++) ...[
-                    Expanded(child: _MetricCell(metric: metrics[index])),
-                    if (index != metrics.length - 1)
-                      const SizedBox(
-                        height: 54,
-                        child: VerticalDivider(width: 1),
-                      ),
-                  ],
-                ],
-              ),
+        shape: const LiquidRoundedSuperellipse(borderRadius: 14),
+        useOwnLayer: true,
+        settings: _usageGlass(context),
+        child: Column(children: rows),
       );
     },
   );
@@ -373,17 +389,19 @@ class _MetricCell extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.labelMedium,
           ),
-          const SizedBox(height: 2),
-          Text(
-            metric.detail,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colors.onSurfaceVariant,
-              fontWeight: FontWeight.w400,
+          if (metric.detail case final detail?) ...[
+            const SizedBox(height: 2),
+            Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w400,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -456,19 +474,18 @@ class _TokenLegend extends StatelessWidget {
   final bool zh;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
+  Widget build(BuildContext context) => Wrap(
+    spacing: 12,
+    runSpacing: 6,
     children: [
       _LegendDot(
         color: Theme.of(context).colorScheme.primary,
         label: zh ? '非缓存输入' : 'Uncached input',
       ),
-      const SizedBox(width: 12),
       _LegendDot(
         color: Theme.of(context).colorScheme.secondary,
         label: zh ? '缓存输入' : 'Cached input',
       ),
-      const SizedBox(width: 12),
       _LegendDot(
         color: Theme.of(context).colorScheme.tertiary,
         label: zh ? '输出' : 'Output',
@@ -1176,6 +1193,36 @@ String _compact(int value) {
   if (value < 1000000) return '${_trim(value / 1000)}K';
   if (value < 1000000000) return '${_trim(value / 1000000)}M';
   return '${_trim(value / 1000000000)}B';
+}
+
+String _duration(double? milliseconds) {
+  if (milliseconds == null) return '—';
+  if (milliseconds < 1000) return '${milliseconds.round()} ms';
+  final seconds = milliseconds / 1000;
+  return '${seconds < 10 ? seconds.toStringAsFixed(2) : seconds.toStringAsFixed(1)} s';
+}
+
+String _rate(double? tokensPerSecond) {
+  if (tokensPerSecond == null) return '—';
+  return '${_trim(tokensPerSecond)} token/s';
+}
+
+LiquidGlassSettings _usageGlass(BuildContext context) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  return LiquidGlassSettings(
+    visibility: dark ? 0.86 : 0.9,
+    glassColor: dark
+        ? const Color(0xFF2B2C2E).withValues(alpha: 0.84)
+        : Colors.white.withValues(alpha: 0.92),
+    thickness: 4,
+    blur: 3,
+    chromaticAberration: 0,
+    lightIntensity: 0.1,
+    saturation: 1,
+    glowIntensity: 0,
+    standardOpacityMultiplier: dark ? 0.88 : 0.92,
+    shadowElevation: 0.04,
+  );
 }
 
 String _integerText(int value) {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -32,7 +32,7 @@ from sagents.v2.contracts.events import (
     RunEventData,
     RuntimeEvent,
 )
-from sagents.v2.contracts.common import utc_now
+from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.commands import (
     CancelRun,
     InputItem,
@@ -68,6 +68,29 @@ from sagents.v2.memory import (
     LLMMemoryRecallQueryGenerator,
 )
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
+from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason, WorkItem
+
+
+@asynccontextmanager
+async def desktop_execution_lease(service: DesktopV2Service, run_id: str):
+    work_id = new_id("test_work")
+    await service.scheduler.submit(
+        WorkItem(
+            work_id=work_id,
+            run_id=run_id,
+            available_at=utc_now(),
+            idempotency_key=work_id,
+        )
+    )
+    lease = await service.scheduler.claim(
+        "test-worker", lease_duration=timedelta(seconds=30), wait_timeout=0
+    )
+    assert lease is not None
+    async with service.driver_session_store.lease_scope(lease):
+        yield
+    await service.scheduler.release(
+        lease, LeaseReleaseReason.COMPLETED, requeue=False
+    )
 
 
 @pytest.mark.parametrize(
@@ -84,6 +107,28 @@ def test_desktop_settings_reject_unknown_frontend_language():
 
 
 @pytest.mark.asyncio
+async def test_desktop_composition_hash_includes_component_selection_and_config(tmp_path):
+    service = DesktopV2Service(tmp_path)
+    defaults = DesktopV2Settings()
+    changed = defaults.model_copy(
+        update={
+            "component_selections": {
+                **defaults.component_selections,
+                "context.token-estimator": "sage.context.token-estimator.heuristic",
+            },
+            "component_configs": {
+                "context.token-estimator": {"mode": "precise"}
+            },
+        }
+    )
+
+    assert service._desktop_spec_hash(
+        "sha256:manifest", defaults
+    ) != service._desktop_spec_hash("sha256:manifest", changed)
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_build_loop_closes_provisioned_sandbox_on_composition_failure(
     tmp_path: Path, monkeypatch
 ):
@@ -94,7 +139,7 @@ async def test_build_loop_closes_provisioned_sandbox_on_composition_failure(
         kwargs["sandbox_observer"](sandbox)
         raise RuntimeError("composition failed")
 
-    monkeypatch.setattr(service, "_build_loop_impl", fail_after_provision)
+    monkeypatch.setattr(service, "_compose_run_driver", fail_after_provision)
     with pytest.raises(RuntimeError, match="composition failed"):
         await service._build_loop(
             agent=object(),
@@ -162,18 +207,31 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_usage_overview_aggregates_tokens_agents_turns_and_tools(
+async def test_usage_overview_skips_corrupt_session_and_aggregates_healthy_usage(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path / "sage")
     await service.list_agents("user_1")
     now = utc_now()
     service.session_index.list = AsyncMock(
-        return_value=(SimpleNamespace(session_id="session_1"),)
+        return_value=(
+            SimpleNamespace(session_id="session_corrupt"),
+            SimpleNamespace(session_id="session_1"),
+        )
     )
-    service.session_store.list_session_runs = AsyncMock(
-        return_value=(SimpleNamespace(run_id="run_1"),)
-    )
+
+    async def list_session_runs(session_id: str):
+        if session_id == "session_corrupt":
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="session_store.hash_mismatch",
+                    category=ErrorCategory.CORRUPT_STATE,
+                    message="snapshot checksum mismatch",
+                )
+            )
+        return (SimpleNamespace(run_id="run_1"),)
+
+    service.session_store.list_session_runs = AsyncMock(side_effect=list_session_runs)
     service.session_store.get_start_command = AsyncMock(
         return_value=SimpleNamespace(agent_id="sage")
     )
@@ -199,6 +257,8 @@ async def test_usage_overview_aggregates_tokens_agents_turns_and_tools(
                 "status": "completed",
                 "session_id": "session_1",
                 "run_id": "run_1",
+                "started_at": (now - timedelta(seconds=3.9)).isoformat(),
+                "first_token_at": (now - timedelta(seconds=2.9)).isoformat(),
                 "completed_at": now.isoformat(),
                 "metadata": {"agent_id": "sage", "model_binding": "primary"},
                 "request": {"model": "gpt-test", "messages": []},
@@ -228,6 +288,8 @@ async def test_usage_overview_aggregates_tokens_agents_turns_and_tools(
         "turns": 1,
         "tool_calls": 1,
         "sessions": 1,
+        "average_first_token_latency_ms": 1000.0,
+        "output_tokens_per_second": 10.0,
     }
     assert value["models"][0]["name"] == "gpt-test"
     assert value["agents"][0]["name"] == "Sage"
@@ -1287,9 +1349,30 @@ async def test_skills_are_discovered_and_imported_by_native_filesystem_provider(
     assert result["imported_names"] == ["review"]
     review = next(value for value in catalog if value["name"] == "review")
     assert review["description"] == "Review code"
+    assert review["can_delete"] is True
+    builtin = next(value for value in catalog if value["name"] == "skill-creator")
+    assert builtin["can_delete"] is False
     assert "# Review" in await service.get_skill_content("review", "user_1")
     with pytest.raises(ValueError, match="already exists"):
         await service.import_skill_folder(str(source), "user_1")
+
+    await service.patch_agent_settings(
+        "sage",
+        AgentSettingsPatch(available_skills=["review"]),
+        "user_1",
+    )
+    deleted = await service.delete_skill("review", "user_1")
+
+    assert deleted == {"deleted_name": "review"}
+    assert not (service.skill_root / "review").exists()
+    assert "review" not in {
+        value["name"] for value in await service.list_skill_catalog("user_1")
+    }
+    assert (await service.get_agent_settings("sage", "user_1"))[
+        "available_skills"
+    ] == []
+    with pytest.raises(ValueError, match="Imported Skill not found"):
+        await service.delete_skill("skill-creator", "user_1")
     await service.session_store.close()
 
 
@@ -1587,6 +1670,7 @@ async def test_plan_mode_is_a_read_only_run_contract(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(10)
 async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path):
     service = DesktopV2Service(tmp_path)
     await service.list_agents("user_1")
@@ -1686,7 +1770,8 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
         service._context("user_1"),
     )
 
-    result = await loop.execute(handle.run_id, service._context("user_1"))
+    async with desktop_execution_lease(service, handle.run_id):
+        result = await loop.execute(handle.run_id, service._context("user_1"))
     events = await service.session_store.read_events(handle.run_id)
     decisions = [
         event.data.reason_code
@@ -1702,6 +1787,7 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(10)
 async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
     service = DesktopV2Service(tmp_path)
     await service.list_agents("user_1")
@@ -1767,9 +1853,10 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
         ),
         service._context("user_1"),
     )
-    suspended_plan = await plan_loop.execute(
-        plan_handle.run_id, service._context("user_1")
-    )
+    async with desktop_execution_lease(service, plan_handle.run_id):
+        suspended_plan = await plan_loop.execute(
+            plan_handle.run_id, service._context("user_1")
+        )
     assert suspended_plan.state.value == "suspended"
     suspension = await service.session_store.get_suspension(
         suspended_plan.suspension_id
@@ -1790,7 +1877,10 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
         ),
         service._context("user_1"),
     )
-    plan_result = await plan_loop.resume(plan_handle.run_id, service._context("user_1"))
+    async with desktop_execution_lease(service, plan_handle.run_id):
+        plan_result = await plan_loop.resume(
+            plan_handle.run_id, service._context("user_1")
+        )
     assert plan_result.state.value == "completed"
     await plan_sandbox.close()
 
@@ -1853,9 +1943,10 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
         service._context("user_1"),
     )
 
-    goal_result = await goal_loop.execute(
-        goal_handle.run_id, service._context("user_1")
-    )
+    async with desktop_execution_lease(service, goal_handle.run_id):
+        goal_result = await goal_loop.execute(
+            goal_handle.run_id, service._context("user_1")
+        )
     goal_events = await service.session_store.read_events(goal_handle.run_id)
     terminal = await service.session_store.get_run_result(goal_handle.run_id)
 
@@ -2030,6 +2121,7 @@ async def test_ephemeral_sandbox_keeps_an_isolated_configured_workspace(
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(10)
 async def test_desktop_turn_status_drives_the_real_continuation_policy(
     tmp_path: Path,
 ):
@@ -2081,7 +2173,8 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(
         service._context("user_1"),
     )
 
-    result = await loop.execute(handle.run_id, service._context("user_1"))
+    async with desktop_execution_lease(service, handle.run_id):
+        result = await loop.execute(handle.run_id, service._context("user_1"))
     events = await service.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
 

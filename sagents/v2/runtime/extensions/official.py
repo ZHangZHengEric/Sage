@@ -338,7 +338,9 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         "sage.scheduler.ephemeral",
         "In-memory scheduler",
         "execution.scheduler",
-        lambda context, dependencies: InMemoryScheduler(**context.config),
+        lambda context, dependencies: InMemoryScheduler(
+            max_pending_items=int(context.config.get("max_pending_items", 1024))
+        ),
         scopes={ExtensionScope.PROCESS},
     )
     _one(

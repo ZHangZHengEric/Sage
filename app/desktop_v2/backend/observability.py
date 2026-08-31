@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
-from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
+from sagents.v2.runtime.extensions import (
+    CapabilityRequirement,
+    ExtensionHost,
+    ExtensionScope,
+    ExtensionScopeContext,
+)
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
 from sagents.v2.runtime.observability import FilesystemLogSink, LogSink
 
@@ -32,28 +36,34 @@ def create_desktop_log_sink(runtime_root: Path) -> tuple[str, LogSink]:
 
     registry = builtin_extension_registry()
     try:
-        registration = registry.get(selected)
-        if LOG_CAPABILITY not in {
-            offer.capability for offer in registration.descriptor.provides
-        }:
-            raise ValueError(f"{selected!r} is not a structured log sink")
-        value = registration.factory(
-            ExtensionScopeContext(
-                scope=ExtensionScope.PROCESS,
-                scope_id="desktop-v2",
-                config={
+        host = ExtensionHost(registry)
+        plan = host.plan(
+            (
+                CapabilityRequirement(
+                    capability=LOG_CAPABILITY,
+                    api_version="2",
+                ),
+            ),
+            selections={LOG_CAPABILITY: selected},
+            configs={
+                selected: {
                     "root": str(runtime_root / "logs"),
                     "filename": "sage.jsonl",
                     "max_bytes": 10 * 1024 * 1024,
                     "backup_count": 5,
                     "min_level": "info",
-                },
-            ),
-            {},
+                }
+            },
+            scope_overrides={selected: ExtensionScope.PROCESS},
         )
-        if inspect.isawaitable(value):
-            raise TypeError("Desktop log sink factories must be synchronous")
-        return selected, value
+        handle = host.open_scope_sync(
+            ExtensionScopeContext(
+                scope=ExtensionScope.PROCESS,
+                scope_id="desktop-v2",
+            ),
+            plan,
+        )
+        return selected, handle.providers.require_unique(LOG_CAPABILITY)
     except Exception:
         # Startup logging must remain available even if a persisted optional
         # plugin selection was removed or became unavailable.

@@ -18,6 +18,10 @@ workspace/
 !sagents/v2/workspace/
 !sagents/v2/workspace/**
 agent_sessions
+# Legacy runtime roots created when local storage resolves against the checkout.
+/agents/
+/sessions/
+/users/
 deploy/monitoring/prometheus.local.yml
 deploy/monitoring/prometheus.generated.yml
 mcp_servers/search/api_doc

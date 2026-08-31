@@ -343,8 +343,17 @@ class WorkspaceController extends ChangeNotifier {
     await Future.wait([refreshSkills(), refreshFiles()]);
   }
 
-  Future<void> selectConversation(String id) async {
-    if (selectedConversationId == id && selectedSubSessionId.isEmpty) return;
+  Future<void> selectConversation(String groupId, String id) async {
+    final conversation = _visibleConversations(
+      groupId,
+    ).where((value) => value.id == id).firstOrNull;
+    if (conversation == null) return;
+    if (selectedGroupId == groupId &&
+        selectedConversationId == id &&
+        selectedSubSessionId.isEmpty) {
+      return;
+    }
+    selectedGroupId = groupId;
     selectedConversationId = id;
     selectedSubSessionId = '';
     _adoptConversationAgent();
@@ -629,8 +638,10 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> removeSelectedProject() async {
-    final project = selectedGroup.project;
+  Future<void> removeProject(String projectId) async {
+    final project = settings.projects
+        .where((value) => value.id == projectId)
+        .firstOrNull;
     if (project == null) return;
     try {
       await _api.removeProject(project.id);
@@ -639,16 +650,30 @@ class WorkspaceController extends ChangeNotifier {
             .where((value) => value.id != project.id)
             .toList(),
       );
-      selectedGroupId = agentWorkspaceId;
-      if (_visibleConversations(selectedGroupId).isEmpty) {
-        createConversation(notify: false);
+      if (selectedGroupId == project.id) {
+        selectedGroupId = agentWorkspaceId;
+        if (_visibleConversations(selectedGroupId).isEmpty) {
+          createConversation(notify: false);
+        }
+        selectedConversationId = _visibleConversations(
+          selectedGroupId,
+        ).first.id;
+        selectedSubSessionId = '';
+        _adoptConversationAgent();
+        selectedFile = null;
+        selectedFileContent = null;
+        await refreshFiles();
       }
-      selectedConversationId = _visibleConversations(selectedGroupId).first.id;
-      await refreshFiles();
     } on Object catch (exception) {
       error = exception.toString();
     }
     notifyListeners();
+  }
+
+  Future<void> removeSelectedProject() async {
+    final project = selectedGroup.project;
+    if (project == null) return;
+    await removeProject(project.id);
   }
 
   Future<void> saveSettings(DesktopSettings value) async {
@@ -742,6 +767,27 @@ class WorkspaceController extends ChangeNotifier {
       skillCatalog = await _api.listSkillCatalog();
       notifyListeners();
       return imported;
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteSkill(String skillName) async {
+    try {
+      await _api.deleteSkill(skillName);
+      skillCatalog = await _api.listSkillCatalog();
+      final configuredAgent = agentConfiguration;
+      if (configuredAgent != null) {
+        agentConfiguration = await _api.getAgentConfiguration(
+          configuredAgent.id,
+        );
+      }
+      if (selectedAgentId.isNotEmpty) {
+        skills = await _api.listSkills(selectedAgentId);
+      }
+      notifyListeners();
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();

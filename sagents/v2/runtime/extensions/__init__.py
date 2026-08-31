@@ -1,6 +1,7 @@
 """SAgents V2 module for runtime/extensions/__init__.py."""
 
 from sagents.v2.runtime.extensions.contracts import (
+    CapabilityKey,
     CapabilityOffer,
     CapabilityRequirement,
     ExtensionDependency,
@@ -9,9 +10,11 @@ from sagents.v2.runtime.extensions.contracts import (
     ExtensionRegistration,
     ExtensionScope,
     ExtensionScopeContext,
+    ProviderSet,
     StopReason,
 )
 from sagents.v2.runtime.extensions.host import (
+    ExtensionCompositionPlan,
     ExtensionHost,
 )
 from sagents.v2.runtime.extensions.discovery import (
@@ -30,12 +33,14 @@ from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
 
 __all__ = [
     "CapabilityOffer",
+    "CapabilityKey",
     "CapabilityRequirement",
     "ExtensionDependency",
     "ExtensionDescriptor",
     "ExtensionAvailability",
     "ENTRY_POINT_GROUP",
     "ExtensionHost",
+    "ExtensionCompositionPlan",
     "ExtensionRegistration",
     "ExtensionRegistry",
     "ExtensionResolver",
@@ -43,6 +48,7 @@ __all__ = [
     "ExtensionScopeContext",
     "ExtensionScopeHandle",
     "ResolvedExtensionGraph",
+    "ProviderSet",
     "StopReason",
     "TypedExtensionRegistry",
     "load_installed_extension",

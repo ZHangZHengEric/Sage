@@ -12,7 +12,7 @@ from sagents.v2.model import ModelProvider
 from sagents.v2.memory import NoopMemoryProvider
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import PluginDeclaration
-from sagents.v2.package.manifest.runtime import ProviderSelection
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
@@ -93,9 +93,11 @@ def _package_with_declared_model_plugin():
 
 
 @pytest.mark.parametrize("use_resolved_manifest", [False, True])
-def test_declared_entry_point_is_loaded_and_configured(
+@pytest.mark.asyncio
+async def test_declared_entry_point_is_loaded_and_configured(
     tmp_path: Path, monkeypatch, use_resolved_manifest: bool
 ):
+    monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
     provider = ScriptedModelProvider(())
     observed_configs: list[dict[str, Any]] = []
     registration = _model_registration(provider, observed_configs=observed_configs)
@@ -109,20 +111,23 @@ def test_declared_entry_point_is_loaded_and_configured(
         CompositionResolver().resolve(package) if use_resolved_manifest else package
     )
 
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .build(build_input)
     )
 
-    assert agent.driver_factory("run_1").model is provider
+    assert application.entrypoint().driver_factory("run_1").model.provider is provider
     assert observed_configs[0]["gateway_region"] == "cn-east"
     assert observed_configs[0]["route"]["model"] == "test-model"
+    await application.close()
 
 
-def test_manually_registered_declared_plugin_does_not_require_entry_point(
+@pytest.mark.asyncio
+async def test_manually_registered_declared_plugin_does_not_require_entry_point(
     tmp_path: Path, monkeypatch
 ):
+    monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
     provider = ScriptedModelProvider(())
     registration = _model_registration(provider)
 
@@ -130,17 +135,19 @@ def test_manually_registered_declared_plugin_does_not_require_entry_point(
         raise AssertionError("manual registrations must win before discovery")
 
     monkeypatch.setattr(discovery.metadata, "entry_points", unexpected_discovery)
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .register(registration)
         .build(_package_with_declared_model_plugin())
     )
 
-    assert agent.driver_factory("run_1").model is provider
+    assert application.entrypoint().driver_factory("run_1").model.provider is provider
+    await application.close()
 
 
-def test_resolved_manifest_preserves_runtime_plugin_selection(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_resolved_manifest_preserves_runtime_plugin_selection(tmp_path, monkeypatch):
     observed_configs: list[dict[str, Any]] = []
 
     def factory(context, dependencies):
@@ -178,17 +185,19 @@ def test_resolved_manifest_preserves_runtime_plugin_selection(tmp_path, monkeypa
             ),
             "runtime": package.runtime.model_copy(
                 update={
-                    "memory_provider": ProviderSelection(
-                        plugin="acme.memory.private-store",
-                        config={"namespace": "agent"},
-                    )
+                    "capabilities": {
+                        "memory.provider": CapabilitySelection(
+                            plugin="acme.memory.private-store",
+                            config={"namespace": "agent"},
+                        )
+                    }
                 }
             ),
         }
     )
     resolved = CompositionResolver().resolve(package)
 
-    (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
@@ -196,6 +205,7 @@ def test_resolved_manifest_preserves_runtime_plugin_selection(tmp_path, monkeypa
     )
 
     assert observed_configs == [{"namespace": "agent"}]
+    await application.close()
 
 
 @pytest.mark.parametrize(

@@ -89,6 +89,19 @@ def test_builtin_inventory_contains_only_real_factories():
     )
 
 
+def test_every_registered_plugin_has_a_pydantic_config_boundary():
+    registry = builtin_extension_registry()
+
+    assert all(
+        registration.config_model is not None
+        for registration in registry.registrations()
+    )
+    assert all(
+        registration.config_model.model_json_schema()["type"] == "object"
+        for registration in registry.registrations()
+    )
+
+
 def test_duplicate_registration_is_rejected():
     registry = ExtensionRegistry()
     registration = ExtensionRegistration(
