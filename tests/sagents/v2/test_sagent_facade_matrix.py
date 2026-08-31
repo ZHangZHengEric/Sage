@@ -15,10 +15,13 @@ from sagents.v2.model import (
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.testing.runtime import ephemeral_runtime
+from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher
+from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 
 
 CONTEXT = RequestContext(
@@ -160,6 +163,43 @@ async def test_scheduler_submit_failure_is_a_durable_typed_run_failure():
 
 
 @pytest.mark.asyncio
+async def test_exact_terminal_start_retry_does_not_resubmit_scheduler_work():
+    runtime = ephemeral_runtime()
+    scheduler = InMemoryScheduler()
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    factory_calls = 0
+
+    def factory(run_id):
+        nonlocal factory_calls
+        factory_calls += 1
+        return AgentLoopEngine(
+            runtime=runtime,
+            model=ScriptedModelProvider(
+                (ScriptedModelStep(events=(completed("done"),)),)
+            ),
+            tool_catalog=InMemoryToolCatalog(()),
+            tool_executor=InMemoryToolExecutor({}, {}),
+        )
+
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=factory,
+        dispatcher=dispatcher,
+    )
+    request = command("stable-retry")
+    run_ids = []
+    for _ in range(4):
+        stream = await agent.run_stream(request, CONTEXT)
+        run_ids.append(stream.handle.run_id)
+        assert (await stream.wait()).state == RunState.COMPLETED
+        await asyncio.sleep(0)
+
+    assert len(set(run_ids)) == 1
+    assert factory_calls == 1
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
 async def test_completed_execution_is_removed_from_facade_task_registry():
     runtime = ephemeral_runtime()
 
@@ -178,6 +218,39 @@ async def test_completed_execution_is_removed_from_facade_task_registry():
     assert (await stream.wait()).state == RunState.COMPLETED
     await asyncio.sleep(0)
     assert agent._tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_close_failure_can_retry_without_reclosing_successful_resources():
+    calls = []
+
+    class Resource:
+        def __init__(self, name, *, fail_once=False):
+            self.name = name
+            self.fail_once = fail_once
+
+        async def close(self):
+            calls.append(self.name)
+            if self.fail_once:
+                self.fail_once = False
+                raise OSError("temporarily unavailable")
+
+    transient = Resource("transient", fail_once=True)
+    stable = Resource("stable")
+    agent = SAgent(
+        runtime=ephemeral_runtime(),
+        driver_factory=lambda run_id: None,
+        owned_resources=(transient, stable),
+    )
+
+    with pytest.raises(RuntimeError, match="failed to close"):
+        await agent.close()
+    with pytest.raises(SageV2Error) as closing:
+        await agent.start_run(command("after-close-failure"), CONTEXT)
+    assert closing.value.info.code == "agent.closing"
+    await agent.close()
+
+    assert calls == ["stable", "transient", "transient"]
 
 
 @pytest.mark.asyncio

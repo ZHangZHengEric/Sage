@@ -9,7 +9,7 @@ from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
-from sagents.v2.contracts.run_state import RunState
+from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.session import (
     EphemeralSessionStore,
@@ -131,3 +131,57 @@ async def test_lease_for_another_run_cannot_mutate_target_run():
                 idempotency_key="wrong_execute",
             )
     assert caught.value.info.code == "scheduler.fence_rejected"
+
+
+@pytest.mark.asyncio
+async def test_root_lease_can_create_and_execute_descendant_runs_only():
+    _, scheduler, fenced, runtime, handle = await setup()
+    lease = await scheduler.claim(
+        "worker", lease_duration=timedelta(seconds=5), wait_timeout=0
+    )
+    async with fenced.lease_scope(lease):
+        child = await runtime.start_run(
+            StartRun(
+                session_id=handle.session_id,
+                agent_id="agent_child",
+                input=(
+                    InputItem(role="user", content=(TextBlock(text="child"),)),
+                ),
+                resolved_spec_hash="sha256:child",
+                idempotency_key="child",
+                parent_run_id=handle.run_id,
+                session_concurrency_mode=SessionConcurrencyMode.FORK,
+            ),
+            CONTEXT,
+        )
+        child_run = await runtime.start_execution(
+            run_id=child.run_id,
+            expected_revision=child.run_revision,
+            context=CONTEXT,
+            idempotency_key="execute-child",
+        )
+        grandchild = await runtime.start_run(
+            StartRun(
+                session_id=child.session_id,
+                agent_id="agent_grandchild",
+                input=(
+                    InputItem(
+                        role="user", content=(TextBlock(text="grandchild"),)
+                    ),
+                ),
+                resolved_spec_hash="sha256:grandchild",
+                idempotency_key="grandchild",
+                parent_run_id=child.run_id,
+                session_concurrency_mode=SessionConcurrencyMode.FORK,
+            ),
+            CONTEXT,
+        )
+        grandchild_run = await runtime.start_execution(
+            run_id=grandchild.run_id,
+            expected_revision=grandchild.run_revision,
+            context=CONTEXT,
+            idempotency_key="execute-grandchild",
+        )
+
+    assert child_run.state == RunState.RUNNING
+    assert grandchild_run.state == RunState.RUNNING

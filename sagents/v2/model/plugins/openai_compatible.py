@@ -34,7 +34,8 @@ from sagents.v2.contracts.items import (
     TextBlock,
     UsageSummary,
 )
-from sagents.v2.model.wire import wire_value
+from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
+from sagents.v2.model.wire import provider_error, wire_json_value, wire_value
 
 
 class OpenAICompatibleConfig(StrictModel):
@@ -154,6 +155,7 @@ class OpenAICompatibleModelProvider:
         upstream = None
         text = ""
         reasoning = ""
+        reasoning_details: Any = None
         response_id = new_id("model_response")
         finish_reason = "unknown"
         usage = UsageSummary()
@@ -161,6 +163,7 @@ class OpenAICompatibleModelProvider:
         observed_choice_fields: set[str] = set()
         observed_delta_fields: set[str] = set()
         observed_delta_field_types: dict[str, set[str]] = {}
+        response_started = False
         try:
             upstream = await self._client.chat.completions.create(**kwargs)
             async for chunk in upstream:
@@ -219,10 +222,28 @@ class OpenAICompatibleModelProvider:
                             "analysis",
                         )
                     if reasoning_content:
-                        reasoning += reasoning_content
-                        yield ModelStreamEvent(
-                            kind=ModelEventKind.REASONING_DELTA,
-                            delta=reasoning_content,
+                        reasoning, reasoning_delta = self._merge_stream_text(
+                            reasoning, reasoning_content
+                        )
+                        if reasoning_delta:
+                            response_started = True
+                            yield ModelStreamEvent(
+                                kind=ModelEventKind.REASONING_DELTA,
+                                delta=reasoning_delta,
+                            )
+                    latest_reasoning_details = wire_value(
+                        delta, "reasoning_details"
+                    )
+                    if latest_reasoning_details is None:
+                        latest_reasoning_details = wire_value(
+                            wire_value(choice, "message"), "reasoning_details"
+                        )
+                    if latest_reasoning_details is not None:
+                        # Providers that stream this field commonly send a
+                        # cumulative structure. Preserve the latest complete
+                        # value rather than concatenating duplicate chunks.
+                        reasoning_details = wire_json_value(
+                            latest_reasoning_details
                         )
                     content = self._first_wire_text(delta, "content", "text")
                     if not content and not text:
@@ -234,11 +255,13 @@ class OpenAICompatibleModelProvider:
                     if not content and not text:
                         content = self._first_wire_text(delta, "refusal")
                     if content:
+                        response_started = True
                         text += content
                         yield ModelStreamEvent(
                             kind=ModelEventKind.TEXT_DELTA, delta=content
                         )
                     for tool_delta in wire_value(delta, "tool_calls", ()) or ():
+                        response_started = True
                         index = int(wire_value(tool_delta, "index", 0) or 0)
                         accumulator = tool_fragments.setdefault(
                             index, {"id": "", "name": "", "arguments": ""}
@@ -257,7 +280,7 @@ class OpenAICompatibleModelProvider:
         except SageV2Error:
             raise
         except Exception as exc:
-            raise self._provider_error(exc) from exc
+            raise provider_error(exc, response_started=response_started) from exc
         finally:
             if upstream is not None:
                 closer = getattr(upstream, "close", None) or getattr(
@@ -341,6 +364,23 @@ class OpenAICompatibleModelProvider:
                     "provider_id": self.config.provider_id,
                     "model": self.config.model,
                 },
+                provider_state=make_provider_state(
+                    "openai_compatible",
+                    {
+                        **(
+                            {"reasoning_content": reasoning}
+                            if reasoning
+                            else {}
+                        ),
+                        **(
+                            {"reasoning_details": reasoning_details}
+                            if reasoning_details is not None
+                            else {}
+                        ),
+                    },
+                )
+                if reasoning or reasoning_details is not None
+                else {},
             ),
         )
 
@@ -354,6 +394,14 @@ class OpenAICompatibleModelProvider:
             if text:
                 return text
         return ""
+
+    @staticmethod
+    def _merge_stream_text(accumulated: str, incoming: str) -> tuple[str, str]:
+        """Normalize providers that stream cumulative reasoning snapshots."""
+
+        if accumulated and incoming.startswith(accumulated):
+            return incoming, incoming[len(accumulated) :]
+        return accumulated + incoming, incoming
 
     @classmethod
     def _coerce_wire_text(cls, value: Any) -> str:
@@ -446,6 +494,14 @@ class OpenAICompatibleModelProvider:
     @classmethod
     def _message(cls, message: ModelMessage) -> dict[str, Any]:
         value: dict[str, Any] = {"role": message.role}
+        if message.role == "assistant":
+            state = read_provider_state(
+                message.provider_state, "openai_compatible"
+            )
+            if state is not None:
+                for key in ("reasoning_content", "reasoning_details"):
+                    if key in state:
+                        value[key] = state[key]
         if message.role == "tool":
             value["tool_call_id"] = message.tool_call_id
         if message.tool_calls:
@@ -489,30 +545,6 @@ class OpenAICompatibleModelProvider:
         if isinstance(block, ResourceRefBlock):
             return {"type": "text", "text": f"[resource: {block.uri}]"}
         raise TypeError(f"unsupported content block {type(block)!r}")
-
-    @staticmethod
-    def _provider_error(exc: Exception) -> SageV2Error:
-        status = getattr(exc, "status_code", None)
-        retryable = status in {408, 409, 429} or (
-            isinstance(status, int) and status >= 500
-        )
-        return SageV2Error(
-            RuntimeErrorInfo(
-                code="model.provider_transient"
-                if retryable
-                else "model.provider_permanent",
-                category=(
-                    ErrorCategory.PROVIDER_TRANSIENT
-                    if retryable
-                    else ErrorCategory.PROVIDER_PERMANENT
-                ),
-                message=str(exc),
-                retryable=retryable,
-                safe_to_resume=True,
-                provider_code=str(status) if status is not None else None,
-            )
-        )
-
 
 class OpenAIChatCompletionsConfig(OpenAICompatibleConfig):
     """Explicitly named configuration for the Chat Completions wire protocol.

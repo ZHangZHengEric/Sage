@@ -49,6 +49,13 @@ class ReconcileState(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ToolCancellationState(str, Enum):
+    CANCELLED = "cancelled"
+    TOO_LATE = "too_late"
+    UNKNOWN = "unknown"
+    NOT_SUPPORTED = "not_supported"
+
+
 class ToolDefinition(StrictModel):
     name: ToolName
     description: str
@@ -91,3 +98,9 @@ class ReconcileResult(StrictModel):
     state: ReconcileState
     result: ToolExecutionResult | None = None
     error: RuntimeErrorInfo | None = None
+
+
+class ToolCancellationResult(StrictModel):
+    operation_id: Identifier
+    state: ToolCancellationState
+    message: str | None = None

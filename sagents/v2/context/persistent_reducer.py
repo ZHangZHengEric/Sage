@@ -12,6 +12,7 @@ from sagents.v2.context.contracts import (
     ContextBudget,
     ContextProjection,
     ContextReductionScope,
+    ContextUnitCompactor,
 )
 from sagents.v2.context.summary import (
     ConversationSummarizer,
@@ -26,6 +27,7 @@ from sagents.v2.context.token_estimator import (
     JsonHeuristicTokenEstimator,
     TokenEstimator,
 )
+from sagents.v2.context.unit_compactor import ReferenceContextUnitCompactor
 from sagents.v2.model.contracts import ModelMessage
 
 
@@ -46,6 +48,7 @@ class PersistentSummaryContextReducer:
         summary_target_tokens: int = 1_024,
         protected_recent_units: int = 4,
         max_summary_source_tokens: int = 24_000,
+        unit_compactor: ContextUnitCompactor | None = None,
     ) -> None:
         if summary_target_tokens <= 0:
             raise ValueError("summary_target_tokens must be positive")
@@ -57,6 +60,9 @@ class PersistentSummaryContextReducer:
         self.summary_target_tokens = summary_target_tokens
         self.protected_recent_units = protected_recent_units
         self.max_summary_source_tokens = max_summary_source_tokens
+        self.unit_compactor = unit_compactor or ReferenceContextUnitCompactor(
+            self.estimator
+        )
 
     async def reduce(
         self,
@@ -70,10 +76,15 @@ class PersistentSummaryContextReducer:
                 "context.summary_scope_required",
                 "persistent summary reduction requires a Session/Run scope",
             )
-        maximum = budget.max_input_tokens - budget.reserve_output_tokens
+        maximum = (
+            budget.max_input_tokens
+            - budget.reserve_output_tokens
+            - budget.reserve_input_tokens
+        )
         if maximum <= 0:
             raise self._error(
-                "context.invalid_budget", "output reserve consumes input budget"
+                "context.invalid_budget",
+                "output and final-request reserves consume the input budget",
             )
         systems = tuple(message for message in messages if message.role == "system")
         payload = tuple(message for message in messages if message.role != "system")
@@ -108,8 +119,30 @@ class PersistentSummaryContextReducer:
             )
 
         units = self._units(remaining)
-        removable_count = max(0, len(units) - self.protected_recent_units)
+        removable_count = self._removable_prefix_count(units)
         if removable_count == 0:
+            compacted = await self._compact_units(units)
+            if compacted is not None:
+                compacted_messages = tuple(
+                    message for unit in compacted for message in unit
+                )
+                result = (*systems, *compacted_messages)
+                if not self._over(result, maximum, budget.max_messages):
+                    changed = tuple(
+                        original
+                        for original, replacement in zip(
+                            remaining, compacted_messages, strict=True
+                        )
+                        if original != replacement
+                    )
+                    return ContextProjection(
+                        messages=result,
+                        historical_messages=changed,
+                        estimated_tokens=self.estimator.estimate(result),
+                        source_message_count=len(messages),
+                        dropped_message_count=len(changed),
+                        strategy="reference_compaction",
+                    )
             raise self._error(
                 "context.budget_exhausted",
                 "protected system, summary, and recent conversation exceed the model budget",
@@ -147,6 +180,7 @@ class PersistentSummaryContextReducer:
             text=text,
             estimator=self.estimator,
         )
+        self._require_compression_gain(previous, tuple(selected), summary)
         result = (*systems, self._summary_message(summary), *remaining)
         while self._over(result, maximum, budget.max_messages):
             if len(units) <= self.protected_recent_units:
@@ -168,6 +202,7 @@ class PersistentSummaryContextReducer:
                 text=text,
                 estimator=self.estimator,
             )
+            self._require_compression_gain(previous, tuple(selected), summary)
             result = (*systems, self._summary_message(summary), *remaining)
 
         saved = await self.store.save(
@@ -296,6 +331,53 @@ class PersistentSummaryContextReducer:
         return self.estimator.estimate(messages) > maximum or (
             max_messages is not None and len(messages) > max_messages
         )
+
+    def _removable_prefix_count(
+        self, units: list[tuple[ModelMessage, ...]]
+    ) -> int:
+        """Protect recent units and the latest real user request as one suffix."""
+
+        recent_boundary = max(0, len(units) - self.protected_recent_units)
+        latest_user_unit = next(
+            (
+                index
+                for index in range(len(units) - 1, -1, -1)
+                if any(message.role == "user" for message in units[index])
+            ),
+            len(units),
+        )
+        return min(recent_boundary, latest_user_unit)
+
+    async def _compact_units(
+        self, units: list[tuple[ModelMessage, ...]]
+    ) -> list[tuple[ModelMessage, ...]] | None:
+        compacted = []
+        changed = False
+        for unit in units:
+            replacement = await self.unit_compactor.compact(unit)
+            compacted.append(replacement or unit)
+            changed = changed or replacement is not None
+        return compacted if changed else None
+
+    def _require_compression_gain(
+        self,
+        previous: ConversationSummary | None,
+        selected: tuple[ModelMessage, ...],
+        summary: ConversationSummary,
+    ) -> None:
+        """Judge only the reducible source; request reservations never enter here."""
+
+        source = (
+            *((self._summary_message(previous),) if previous else ()),
+            *selected,
+        )
+        source_tokens = self.estimator.estimate(source)
+        summary_tokens = self.estimator.estimate((self._summary_message(summary),))
+        if summary_tokens >= source_tokens:
+            raise self._error(
+                "context.summary_not_reducing",
+                "summary did not reduce the compressible conversation content",
+            )
 
     @staticmethod
     def _units(messages: tuple[ModelMessage, ...]):

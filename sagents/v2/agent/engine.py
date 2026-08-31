@@ -51,9 +51,11 @@ from sagents.v2.agent.policy.tool_policy import (
     ToolPolicyContext,
 )
 from sagents.v2.tool.contracts import (
+    CancelSemantics,
     ReconcileResult,
     ReconcileState,
     ToolCall,
+    ToolCancellationState,
     ToolExecutionResult,
 )
 from sagents.v2.tool.provider import ToolCatalog, ToolExecutor
@@ -168,6 +170,8 @@ class AgentLoopEngine:
                 context_assembler=self.context_assembler,
                 tool_catalog=self.tool_catalog,
                 tool_selection_policy=self.tool_selection_policy,
+                token_estimator=getattr(self.context_assembler, "estimator", None),
+                context_budget=getattr(self.context_assembler, "budget", None),
             )
         )
         self.ledger_rebuilder = ledger_rebuilder or SessionHistoryLedgerBuilder(
@@ -692,6 +696,8 @@ class AgentLoopEngine:
         context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
+        context_overflow_retries = 0
+        additional_input_reserve_tokens = 0
         while run.state == RunState.RUNNING:
             # Phase 1: observe control-plane state only at a safe boundary. A
             # pause never snapshots the middle of arbitrary Python mutation.
@@ -748,6 +754,7 @@ class AgentLoopEngine:
                 messages=state.messages,
                 pending_continuation_reason=state.pending_continuation_reason,
                 language=context.language,
+                additional_input_reserve_tokens=additional_input_reserve_tokens,
             )
             request = prepared_step.request
             tools = prepared_step.tools
@@ -758,6 +765,49 @@ class AgentLoopEngine:
                     run, request, context, state, step_id
                 )
             except SageV2Error as exc:
+                if (
+                    exc.info.code == "model.context_window_exceeded"
+                    and exc.info.retryable
+                    and context_overflow_retries == 0
+                    and getattr(self.context_assembler, "budget", None) is not None
+                ):
+                    context_overflow_retries = 1
+                    estimated = int(
+                        request.metadata.get("request_budget", {}).get(
+                            "estimated_input_tokens", 0
+                        )
+                    )
+                    additional_input_reserve_tokens = max(512, estimated // 10)
+                    retry_error = exc.info.model_copy(
+                        update={
+                            "metadata": {
+                                **exc.info.metadata,
+                                "adaptive_input_reserve_tokens": (
+                                    additional_input_reserve_tokens
+                                ),
+                                "transparent_retry_attempt": 1,
+                                "transparent_retry_limit": 1,
+                            }
+                        }
+                    )
+                    run = await self._commit_running(
+                        run,
+                        context,
+                        (
+                            EventDraft(
+                                type="step.retry_scheduled",
+                                turn_id=state.turn_id,
+                                step_id=step_id,
+                                data=StepEventData(
+                                    state="retry_scheduled",
+                                    attempt=1,
+                                    retry_at=self.clock(),
+                                    error=retry_error,
+                                ),
+                            ),
+                        ),
+                    )
+                    continue
                 if (
                     exc.info.code == "model.empty_semantic_response"
                     and empty_response_retries
@@ -825,13 +875,14 @@ class AgentLoopEngine:
                 return partial_suspension
             assert response is not None
             empty_response_retries = 0
+            context_overflow_retries = 0
+            additional_input_reserve_tokens = 0
             messages = state.messages
-            # Reasoning is recorded as its own canonical Item and intentionally
-            # excluded from the provider-visible ledger. Do not append an empty
-            # assistant message for a reasoning-only response: it cannot be
-            # reconstructed from Item events and repeated empty assistant turns
-            # can make OpenAI-compatible providers return another blank turn.
-            if response.text or response.tool_calls:
+            # Human-readable reasoning remains a separate canonical Item, while
+            # opaque provider continuation state is attached to the assistant
+            # ledger entry. Providers such as MiniMax, OpenAI Responses, and
+            # Anthropic require that state after a tool call.
+            if response.text or response.tool_calls or response.provider_state:
                 messages = (
                     *messages,
                     ModelMessage(
@@ -840,6 +891,7 @@ class AgentLoopEngine:
                             (TextBlock(text=response.text),) if response.text else ()
                         ),
                         tool_calls=response.tool_calls,
+                        provider_state=response.provider_state,
                     ),
                 )
             state = state.model_copy(
@@ -1151,6 +1203,54 @@ class AgentLoopEngine:
             run, request, context, state, step_id
         )
 
+    async def _control_aware_model_events(self, stream, run, command):
+        """Poll durable control/deadline state without cancelling socket reads."""
+
+        iterator = stream.__aiter__()
+        pending = None
+        poll_seconds = 0.1
+        try:
+            while True:
+                if pending is None:
+                    pending = asyncio.create_task(anext(iterator))
+                timeout = poll_seconds
+                deadline_expired = False
+                if command.config.deadline_seconds is not None:
+                    remaining = command.config.deadline_seconds - max(
+                        0.0, (self.clock() - run.created_at).total_seconds()
+                    )
+                    if remaining <= 0:
+                        deadline_expired = True
+                        timeout = 0
+                    else:
+                        timeout = min(timeout, remaining)
+                done, _ = await asyncio.wait({pending}, timeout=timeout)
+                if done:
+                    try:
+                        event = pending.result()
+                    except StopAsyncIteration:
+                        return
+                    pending = None
+                    yield event, None
+                    continue
+                if deadline_expired:
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="budget.deadline",
+                            category=ErrorCategory.VALIDATION,
+                            message=tr("error.budget.deadline", None),
+                            safe_to_resume=True,
+                        )
+                    )
+                current = await self.runtime.get_run(run.run_id)
+                if current.state != RunState.RUNNING:
+                    yield None, current
+                    return
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
     async def stream_model_step(self, run, request, context, state, step_id):
         """Normalize one provider stream into canonical Item lifecycle events.
 
@@ -1168,6 +1268,8 @@ class AgentLoopEngine:
         reasoning_started = False
         response = None
         stream = self.model.stream(request)
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        controlled_events = self._control_aware_model_events(stream, run, command)
 
         async def commit_delta_batch(batch_run, drafts):
             try:
@@ -1192,8 +1294,8 @@ class AgentLoopEngine:
 
         batcher = StreamEventBatcher(run, commit_delta_batch)
         try:
-            async for model_event in stream:
-                current = await self.runtime.get_run(run.run_id)
+            async for model_event, observed_run in controlled_events:
+                current = observed_run or await self.runtime.get_run(run.run_id)
                 await batcher.observe_run(current)
                 if current.state == RunState.SUSPEND_REQUESTED:
                     run = await batcher.flush()
@@ -1237,6 +1339,8 @@ class AgentLoopEngine:
                 if current.state in TERMINAL_RUN_STATES:
                     return current, None, current
                 run = current
+                if model_event is None:
+                    continue
                 if model_event.kind == ModelEventKind.TEXT_DELTA:
                     drafts = []
                     if not text_started:
@@ -1297,11 +1401,17 @@ class AgentLoopEngine:
             try:
                 run = await batcher.flush()
             finally:
-                # Provider streams may own sockets/tasks.  A persistence error
-                # while flushing the final delta must not bypass their cleanup.
-                closer = getattr(stream, "aclose", None)
-                if closer is not None:
-                    await closer()
+                try:
+                    # Stop the pending `anext` task before asking its source
+                    # stream to close; Python async generators reject aclose
+                    # while an iteration task is still running.
+                    await controlled_events.aclose()
+                finally:
+                    # Provider streams may own sockets/tasks. A persistence
+                    # error while flushing must not bypass their cleanup.
+                    closer = getattr(stream, "aclose", None)
+                    if closer is not None:
+                        await closer()
         if response is None:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -1331,7 +1441,7 @@ class AgentLoopEngine:
                     data=ItemEventData(operation="completed", item=item),
                 )
             )
-        if response.text or text_started:
+        if response.text or text_started or response.provider_state:
             text_value = response.text or text
             item = self._item(
                 text_item_id,
@@ -1339,7 +1449,9 @@ class AgentLoopEngine:
                 state.turn_id,
                 step_id,
                 MessageItemData(
-                    role="assistant", content=(TextBlock(text=text_value),)
+                    role="assistant",
+                    content=((TextBlock(text=text_value),) if text_value else ()),
+                    provider_state=response.provider_state,
                 ),
             )
             drafts.append(
@@ -1431,6 +1543,87 @@ class AgentLoopEngine:
             run, call, context, turn_id, step_id=step_id, state=state
         )
 
+    async def _execute_tool_with_control(self, run, call, context):
+        """Interrupt only when both Tool metadata and Executor permit it."""
+
+        definition = await self.tool_catalog.get_tool(
+            call.tool_name, run_id=run.run_id
+        )
+        execution = asyncio.create_task(self.tool_executor.execute(call, context))
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        cancellable = definition.cancel_semantics in {
+            CancelSemantics.COOPERATIVE,
+            CancelSemantics.FORCEABLE,
+        }
+        cancel = getattr(self.tool_executor, "cancel", None)
+        monitor_control = cancellable and callable(cancel)
+        try:
+            while True:
+                if not monitor_control:
+                    return run, await execution
+                done, _ = await asyncio.wait({execution}, timeout=0.1)
+                if done:
+                    return await self.runtime.get_run(run.run_id), execution.result()
+                current = await self.runtime.get_run(run.run_id)
+                deadline_expired = (
+                    command.config.deadline_seconds is not None
+                    and (self.clock() - current.created_at).total_seconds()
+                    >= command.config.deadline_seconds
+                )
+                if current.state == RunState.RUNNING and not deadline_expired:
+                    continue
+                if current.state not in {
+                    RunState.SUSPEND_REQUESTED,
+                    *TERMINAL_RUN_STATES,
+                } and not deadline_expired:
+                    continue
+                cancellation = await cancel(call.operation_id, context)
+                if cancellation.state == ToolCancellationState.CANCELLED:
+                    execution.cancel()
+                    await asyncio.gather(execution, return_exceptions=True)
+                    if current.state in TERMINAL_RUN_STATES:
+                        return current, None
+                    error = (
+                        RuntimeErrorInfo(
+                            code="budget.deadline",
+                            category=ErrorCategory.VALIDATION,
+                            message=tr("error.budget.deadline", context.language),
+                            safe_to_resume=True,
+                        )
+                        if deadline_expired
+                        else RuntimeErrorInfo(
+                            code="tool.cancelled_for_pause",
+                            category=ErrorCategory.CANCELLED,
+                            message=(
+                                "tool execution was cooperatively cancelled for pause"
+                            ),
+                            safe_to_resume=True,
+                        )
+                    )
+                    return current, ToolExecutionResult(
+                        tool_call_id=call.tool_call_id,
+                        operation_id=call.operation_id,
+                        content=(TextBlock(text=error.message),),
+                        error=error,
+                        metadata={"cancellation_confirmed": True},
+                    )
+                if cancellation.state == ToolCancellationState.UNKNOWN:
+                    # The original execution channel is still our strongest
+                    # evidence source. Keep waiting for it; if it fails with an
+                    # uncertain-side-effect error, the normal reconcile path
+                    # records that fact without duplicating the operation.
+                    monitor_control = False
+                    continue
+                # TOO_LATE/NOT_SUPPORTED means the operation must settle; do
+                # not keep issuing cancellation requests on every poll.
+                monitor_control = False
+        finally:
+            if not execution.done():
+                # This only runs when the parent task itself is torn down. It
+                # does not claim that the external side effect was cancelled.
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+
     async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
@@ -1473,7 +1666,11 @@ class AgentLoopEngine:
             ),
         )
         try:
-            result = await self.tool_executor.execute(call, context)
+            run, result = await self._execute_tool_with_control(
+                run, call, context
+            )
+            if result is None:
+                return run, None
         except SageV2Error as exc:
             localized = localize_error(exc.info, context.language)
             if exc.info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
@@ -1556,6 +1753,29 @@ class AgentLoopEngine:
                 ),
                 None,
             )
+        current = await self.runtime.get_run(run.run_id)
+        if current.state in TERMINAL_RUN_STATES:
+            return current, None
+        run = current
+        if run.state == RunState.SUSPEND_REQUESTED:
+            run = await self._commit_tool_result(
+                run,
+                call,
+                result,
+                context,
+                turn_id,
+                step_id=step_id,
+                declined=result.error is not None
+                and result.error.code == "tool.cancelled_for_pause",
+                expected_states={RunState.SUSPEND_REQUESTED},
+            )
+            assert state is not None
+            paused_state = state.model_copy(
+                update={
+                    "messages": (*state.messages, self._tool_result_message(result))
+                }
+            )
+            return await self._suspend_at_safe_point(run, paused_state, context), None
         run = await self._commit_tool_result(
             run, call, result, context, turn_id, step_id=step_id
         )
@@ -1886,6 +2106,7 @@ class AgentLoopEngine:
         step_id=None,
         declined=False,
         event_type_override=None,
+        expected_states=None,
     ):
         """Atomically commit the Tool lifecycle result and model-visible Item."""
 
@@ -1915,6 +2136,7 @@ class AgentLoopEngine:
                 tool_call_id=call.tool_call_id,
                 content=result.content,
                 error=result.error,
+                metadata=result.metadata,
             ),
             status=status,
         )
@@ -1951,6 +2173,7 @@ class AgentLoopEngine:
                     data=ItemEventData(operation="completed", item=item),
                 ),
             ),
+            expected_states=expected_states,
         )
 
     async def _suspend_for_tool_uncertainty(
@@ -2515,6 +2738,7 @@ class AgentLoopEngine:
             role="tool",
             tool_call_id=result.tool_call_id,
             content=content,
+            metadata=result.metadata,
         )
 
     @staticmethod

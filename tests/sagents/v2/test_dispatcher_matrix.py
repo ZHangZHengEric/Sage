@@ -13,10 +13,16 @@ from sagents.v2.contracts.principals import (
 )
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher
-from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.runtime.execution.scheduler import (
+    FilesystemScheduler,
+    InMemoryScheduler,
+    WorkItem,
+)
+from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.session import EphemeralSessionStore, LeaseFencedSessionStore
 from sagents.v2.sagent import SAgent
 
@@ -51,6 +57,66 @@ class FakeAgent:
     async def _fail_driver_crash(self, run_id, error, context):
         del run_id, error, context
         return SimpleNamespace(state=RunState.FAILED)
+
+
+class RecoveryAgent(FakeAgent):
+    def __init__(self, runtime: HarnessRuntime) -> None:
+        super().__init__()
+        self.runtime = runtime
+        self.executions: list[tuple[str, bool]] = []
+
+    def _ensure_execution(self, run_id, context, *, resume):
+        async def execute():
+            self.executions.append((run_id, resume))
+            current = await self.runtime.get_run(run_id)
+            return await self.runtime.fail_run(
+                run_id=run_id,
+                expected_revision=current.revision,
+                error=RuntimeErrorInfo(
+                    code="test.recovered_execution",
+                    category=ErrorCategory.INTERNAL,
+                    message="recovered execution reached the driver",
+                ),
+                context=context,
+                idempotency_key=f"test-recovered:{run_id}",
+            )
+
+        return asyncio.create_task(execute())
+
+
+def start_command(idempotency_key: str) -> StartRun:
+    return StartRun(
+        agent_id="agent",
+        input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
+        resolved_spec_hash="sha256:test",
+        idempotency_key=idempotency_key,
+    )
+
+
+async def wait_for_terminal(runtime: HarnessRuntime, run_id: str):
+    async with asyncio.timeout(2):
+        while True:
+            snapshot = await runtime.get_run(run_id)
+            if snapshot.state in {RunState.FAILED, RunState.COMPLETED}:
+                return snapshot
+            await asyncio.sleep(0.01)
+
+
+async def persist_dispatch_work(root, handle, *, resume: bool = False) -> None:
+    scheduler = FilesystemScheduler(root)
+    await scheduler.submit(
+        WorkItem(
+            work_id=f"work-{handle.run_id}",
+            run_id=handle.run_id,
+            available_at=utc_now(),
+            idempotency_key=f"dispatch:{handle.run_id}",
+            payload={
+                "resume": resume,
+                "request_context": CONTEXT.model_dump(mode="json"),
+            },
+        )
+    )
+    await scheduler.close()
 
 
 @pytest.mark.asyncio
@@ -226,3 +292,51 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
     assert closed.is_set()
     await agent.close()
     await scheduler.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_restores_queued_work_after_process_restart(tmp_path):
+    runtime = HarnessRuntime(EphemeralSessionStore())
+    handle = await runtime.start_run(start_command("recover-queued"), CONTEXT)
+    await persist_dispatch_work(tmp_path, handle)
+
+    scheduler = FilesystemScheduler(tmp_path)
+    agent = RecoveryAgent(runtime)
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    dispatcher.attach_recovery_agent(agent)
+    await dispatcher.start()
+
+    snapshot = await wait_for_terminal(runtime, handle.run_id)
+    assert snapshot.state == RunState.FAILED
+    assert agent.executions == [(handle.run_id, False)]
+    assert await scheduler.pending_count() == 0
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
+    runtime = HarnessRuntime(EphemeralSessionStore())
+    handle = await runtime.start_run(start_command("recover-running"), CONTEXT)
+    running = await runtime.start_execution(
+        run_id=handle.run_id,
+        expected_revision=handle.run_revision,
+        context=CONTEXT,
+        idempotency_key="recover-running:start",
+    )
+    assert running.state == RunState.RUNNING
+    await persist_dispatch_work(tmp_path, handle)
+
+    scheduler = FilesystemScheduler(tmp_path)
+    agent = RecoveryAgent(runtime)
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    dispatcher.attach_recovery_agent(agent)
+    await dispatcher.start()
+
+    snapshot = await wait_for_terminal(runtime, handle.run_id)
+    result = await runtime.get_run_result(handle.run_id)
+    assert snapshot.state == RunState.FAILED
+    assert result.error is not None
+    assert result.error.code == "execution.worker_restarted"
+    assert agent.executions == []
+    assert await scheduler.pending_count() == 0
+    await dispatcher.close()

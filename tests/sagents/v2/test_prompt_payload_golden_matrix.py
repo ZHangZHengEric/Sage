@@ -177,5 +177,7 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
     assert chat["max_tokens"] == 512
     assert responses["max_output_tokens"] == 512
     assert anthropic["max_tokens"] == 512
-    for payload in (chat, responses, anthropic):
+    for payload in (chat, responses):
         assert "cache_control" not in json.dumps(payload, sort_keys=True)
+    assert anthropic["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert anthropic["tools"][-1]["cache_control"] == {"type": "ephemeral"}

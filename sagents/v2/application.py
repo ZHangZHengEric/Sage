@@ -23,6 +23,30 @@ class ApplicationResource(Protocol):
     async def close(self) -> None: ...
 
 
+@dataclass(frozen=True, order=True)
+class ResolvedProviderBinding:
+    """One inspectable capability binding with no secret configuration."""
+
+    capability: str
+    name: str
+    api_version: str
+    plugin_id: str | None
+    scope: str
+    source: str
+
+
+@dataclass(frozen=True)
+class ResolvedApplicationPlan:
+    """Frozen final composition identity exposed by an application root."""
+
+    package_id: str
+    manifest_hash: str
+    entrypoint_agent_id: str
+    providers: tuple[ResolvedProviderBinding, ...]
+    dependencies: tuple[tuple[str, str], ...]
+    composition_hash: str
+
+
 @dataclass
 class InterfaceRunStream:
     """Protocol-projected view of a Native run stream."""
@@ -58,19 +82,30 @@ class SAgentApplication:
         services: Mapping[str, Any],
         adapters: Mapping[str, ProtocolAdapter],
         composition_hash: str,
+        resolved_plan: ResolvedApplicationPlan | None = None,
         owned_resources: tuple[ApplicationResource, ...] = (),
     ) -> None:
         if entrypoint_agent_id not in agents:
             raise ValueError(f"unknown application entrypoint {entrypoint_agent_id!r}")
         self._agents = dict(agents)
         self._entrypoint_agent_id = entrypoint_agent_id
-        self._scope_handles = scope_handles
+        self._scope_handles = list(scope_handles)
         self._services = dict(services)
         self._adapters = dict(adapters)
         self.composition_hash = composition_hash
-        self._owned_resources = owned_resources
+        self.resolved_plan = resolved_plan or ResolvedApplicationPlan(
+            package_id="unknown",
+            manifest_hash="unknown",
+            entrypoint_agent_id=entrypoint_agent_id,
+            providers=(),
+            dependencies=(),
+            composition_hash=composition_hash,
+        )
+        self._owned_resources = list(owned_resources)
+        self._pending_agents = list(self._agents.values())
         self._close_lock = asyncio.Lock()
         self._closed = False
+        self._closing = False
 
     def entrypoint(self) -> SAgent:
         self._ensure_open()
@@ -131,23 +166,48 @@ class SAgentApplication:
         async with self._close_lock:
             if self._closed:
                 return
+            self._closing = True
             errors: list[Exception] = []
-            for resource in reversed(self._owned_resources):
+            pending_resources = list(reversed(self._owned_resources))
+            for index, resource in enumerate(pending_resources):
                 try:
                     await resource.close()
                 except Exception as exc:
                     errors.append(exc)
-            for agent in self._agents.values():
-                try:
-                    await agent.close()
-                except Exception as exc:
-                    errors.append(exc)
-            for handle in reversed(self._scope_handles):
-                try:
-                    await handle.close(StopReason.HOST_SHUTDOWN)
-                except Exception as exc:
-                    errors.append(exc)
-            self._closed = True
+                    self._owned_resources = list(
+                        reversed(pending_resources[index:])
+                    )
+                    break
+            else:
+                self._owned_resources = []
+            if not self._owned_resources:
+                for index, agent in enumerate(self._pending_agents):
+                    try:
+                        await agent.close()
+                    except Exception as exc:
+                        errors.append(exc)
+                        self._pending_agents = self._pending_agents[index:]
+                        break
+                else:
+                    self._pending_agents = []
+            if not self._owned_resources and not self._pending_agents:
+                pending_handles = list(reversed(self._scope_handles))
+                for index, handle in enumerate(pending_handles):
+                    try:
+                        await handle.close(StopReason.HOST_SHUTDOWN)
+                    except Exception as exc:
+                        errors.append(exc)
+                        self._scope_handles = list(
+                            reversed(pending_handles[index:])
+                        )
+                        break
+                else:
+                    self._scope_handles = []
+            self._closed = not (
+                self._owned_resources
+                or self._pending_agents
+                or self._scope_handles
+            )
             if errors:
                 raise RuntimeError(
                     f"{len(errors)} application scope(s) failed to close"
@@ -170,3 +230,5 @@ class SAgentApplication:
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("SAgentApplication is closed")
+        if self._closing:
+            raise RuntimeError("SAgentApplication is closing")

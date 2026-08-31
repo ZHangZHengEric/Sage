@@ -27,6 +27,7 @@ from sagents.v2.model import (
     resolve_model_protocol,
 )
 from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
+from sagents.v2.contracts.provider_state import make_provider_state
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
 
@@ -126,6 +127,15 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
     }
     stream = FakeAsyncStream(
         (
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "reasoning",
+                    "id": "reasoning_1",
+                    "encrypted_content": "opaque-state",
+                    "summary": [],
+                },
+            },
             {"type": "response.reasoning_summary_text.delta", "delta": "think"},
             {"type": "response.output_text.delta", "delta": "answer"},
             {
@@ -196,6 +206,19 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
     )
     assert completed.usage.cached_input_tokens == 3
     assert completed.usage.reasoning_tokens == 2
+    assert completed.provider_state == make_provider_state(
+        "openai_responses",
+        {
+            "reasoning_items": [
+                {
+                    "type": "reasoning",
+                    "id": "reasoning_1",
+                    "encrypted_content": "opaque-state",
+                    "summary": [],
+                }
+            ]
+        },
+    )
     assert stream.closed is True
 
     outgoing = responses.calls[0]
@@ -203,6 +226,7 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
     assert outgoing["tool_choice"] == "required"
     assert outgoing["text"] == {"format": {"type": "json_object"}}
     assert outgoing["reasoning"] == {"effort": "high"}
+    assert outgoing["include"] == ["reasoning.encrypted_content"]
     assert outgoing["tools"][0] == {
         "type": "function",
         "name": "lookup",
@@ -220,6 +244,30 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
         "type": "function_call_output",
         "call_id": "call_old",
         "output": '{"result":1}',
+    }
+
+    replay = provider.diagnostic_request(
+        request(
+            messages=(
+                ModelMessage(role="user", content=(TextBlock(text="go"),)),
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=completed.tool_calls,
+                    provider_state=completed.provider_state,
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_1",
+                    content=(TextBlock(text="result"),),
+                ),
+            )
+        )
+    )
+    assert replay["input"][1] == {
+        "type": "reasoning",
+        "id": "reasoning_1",
+        "encrypted_content": "opaque-state",
+        "summary": [],
     }
 
 
@@ -276,16 +324,31 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
             {
                 "type": "content_block_start",
                 "index": 0,
-                "content_block": {"type": "text", "text": ""},
+                "content_block": {"type": "thinking", "thinking": ""},
             },
             {
                 "type": "content_block_delta",
                 "index": 0,
-                "delta": {"type": "text_delta", "text": "answer"},
+                "delta": {"type": "thinking_delta", "thinking": "think"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "signature_delta", "signature": "signed"},
             },
             {
                 "type": "content_block_start",
                 "index": 1,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "text_delta", "text": "answer"},
+            },
+            {
+                "type": "content_block_start",
+                "index": 2,
                 "content_block": {
                     "type": "tool_use",
                     "id": "call_1",
@@ -295,12 +358,12 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
             },
             {
                 "type": "content_block_delta",
-                "index": 1,
+                "index": 2,
                 "delta": {"type": "input_json_delta", "partial_json": '{"q":'},
             },
             {
                 "type": "content_block_delta",
-                "index": 1,
+                "index": 2,
                 "delta": {"type": "input_json_delta", "partial_json": '"new"}'},
             },
             {
@@ -327,6 +390,15 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     assert completed is not None
     assert completed.response_id == "message_1"
     assert completed.text == "answer"
+    assert completed.reasoning == "think"
+    assert completed.provider_state == make_provider_state(
+        "anthropic_messages",
+        {
+            "thinking_blocks": [
+                {"type": "thinking", "thinking": "think", "signature": "signed"}
+            ]
+        },
+    )
     assert completed.finish_reason == "tool_use"
     assert completed.tool_calls[0].arguments == {"q": "new"}
     assert completed.usage.input_tokens == 20
@@ -354,6 +426,28 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
         }
     ]
     assert outgoing["tools"][0]["input_schema"] == {"type": "object"}
+    replay = provider.diagnostic_request(
+        request(
+            messages=(
+                ModelMessage(role="user", content=(TextBlock(text="go"),)),
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=completed.tool_calls,
+                    provider_state=completed.provider_state,
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_1",
+                    content=(TextBlock(text="result"),),
+                ),
+            )
+        )
+    )
+    assert replay["messages"][1]["content"][0] == {
+        "type": "thinking",
+        "thinking": "think",
+        "signature": "signed",
+    }
 
 
 def test_anthropic_thinking_uses_native_adaptive_effort_parameters():

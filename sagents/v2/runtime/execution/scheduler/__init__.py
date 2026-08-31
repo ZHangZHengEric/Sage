@@ -7,10 +7,16 @@ from sagents.v2.runtime.execution.scheduler.contracts import (
     WorkerLease,
 )
 from sagents.v2.runtime.execution.scheduler.memory import InMemoryScheduler
+from sagents.v2.runtime.execution.scheduler.filesystem import (
+    FilesystemScheduler,
+    SchedulerInUseError,
+)
 from sagents.v2.runtime.execution.scheduler.provider import Scheduler
 
 __all__ = [
     "InMemoryScheduler",
+    "FilesystemScheduler",
+    "SchedulerInUseError",
     "LeaseReleaseReason",
     "Scheduler",
     "SchedulerCapabilities",

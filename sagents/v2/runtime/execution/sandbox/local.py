@@ -38,11 +38,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxState,
     TerminateMode,
 )
-from sagents.v2.runtime.execution.sandbox.read_only_shell import (
-    validate_read_only_shell_command,
-)
-
-
 def _grant_payload(grant: SandboxGrant) -> bytes:
     return json.dumps(
         grant.model_dump(mode="json", exclude={"signature"}),
@@ -156,14 +151,16 @@ class _LocalProcessRuntime:
         if not policy.enabled:
             raise PermissionError("process execution is disabled")
         if policy.read_only:
-            if (
-                request.argv[:2] not in {("bash", "-c"), ("sh", "-c")}
-                or len(request.argv) != 3
-            ):
-                raise PermissionError(
-                    "read-only process mode accepts only a validated shell command"
-                )
-            validate_read_only_shell_command(request.argv[2])
+            # This provider intentionally reports IsolationLevel.NONE.  A
+            # command allowlist cannot make a host shell read-only: shell
+            # expansion, symlinks, Git helpers, and executable behavior can
+            # all reach outside the mapped workspace.  Fail closed instead of
+            # advertising a security boundary that this provider cannot
+            # enforce. Providers with a real OS sandbox may implement the
+            # read-only ProcessPolicy contract themselves.
+            raise PermissionError(
+                "read-only process execution requires an isolated sandbox"
+            )
         executable = request.argv[0]
         if policy.allowed_executables and executable not in policy.allowed_executables:
             raise PermissionError(f"executable {executable!r} is not allowed")

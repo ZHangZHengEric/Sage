@@ -21,6 +21,14 @@ from sagents.v2.runtime.extensions import (
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.agent.policy import ExplicitStatusContinuationPolicy
+from sagents.v2.context import (
+    ModelConversationSummarizer,
+    PersistentSummaryContextReducer,
+    ReferenceContextUnitCompactor,
+    SessionDerivedConversationSummaryStore,
+    UnicodeHeuristicTokenEstimator,
+)
 from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
@@ -87,6 +95,81 @@ async def test_application_composition_hash_includes_builder_storage_config(
 
     assert second.composition_hash != first_hash
     await second.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_composes_selected_context_and_continuation_plugins(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.selected-components",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    capabilities = {
+        **package.runtime.capabilities,
+        "context.token-estimator": CapabilitySelection(
+            plugin="sage.context.token-estimator.unicode-heuristic"
+        ),
+        "context.summary-store": CapabilitySelection(
+            plugin="sage.context.summary-store.session-derived",
+            config={"session_store": "untrusted-manifest-value"},
+        ),
+        "context.summarizer": CapabilitySelection(
+            plugin="sage.context.summarizer.model",
+            config={"model": "untrusted-manifest-value"},
+        ),
+        "context.reducer": CapabilitySelection(
+            plugin="sage.context.reducer.persistent-summary",
+            config={
+                "estimator": "untrusted-manifest-value",
+                "store": "untrusted-manifest-value",
+                "summarizer": "untrusted-manifest-value",
+            },
+        ),
+        "agent.continuation-policy": CapabilitySelection(
+            plugin="sage.agent.continuation.explicit-status"
+        ),
+    }
+    route = package.models["primary"]
+    route = route.model_copy(
+        update={
+            "limits": route.limits.model_copy(update={"context_window": 32_000})
+        }
+    )
+    package = package.model_copy(
+        update={
+            "models": {**package.models, "primary": route},
+            "runtime": package.runtime.model_copy(
+                update={"capabilities": capabilities}
+            )
+        }
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    loop = application.entrypoint().driver_factory("run_1")
+    reducer = loop.context_assembler.reducer
+    continuation = loop.continuation_policy.base.base
+
+    assert isinstance(
+        loop.context_assembler.estimator, UnicodeHeuristicTokenEstimator
+    )
+    assert isinstance(reducer, PersistentSummaryContextReducer)
+    assert reducer.estimator is loop.context_assembler.estimator
+    assert isinstance(reducer.unit_compactor, ReferenceContextUnitCompactor)
+    assert reducer.unit_compactor.estimator is loop.context_assembler.estimator
+    assert isinstance(reducer.store, SessionDerivedConversationSummaryStore)
+    assert reducer.store.session_store is loop.runtime.session_store
+    assert isinstance(reducer.summarizer, ModelConversationSummarizer)
+    assert reducer.summarizer.model is loop.model
+    assert isinstance(continuation, ExplicitStatusContinuationPolicy)
+    await application.close()
 
 
 @pytest.mark.parametrize(
@@ -341,6 +424,23 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
         .with_execution_binding_provider(bindings)
         .build(package)
     )
+    deferred = {
+        (value.capability, value.plugin_id, value.scope, value.source)
+        for value in application.resolved_plan.providers
+        if value.source == "plugin-deferred"
+    }
+    assert (
+        "tool.catalog",
+        "sage.tool.official",
+        "run",
+        "plugin-deferred",
+    ) in deferred
+    assert (
+        "tool.executor",
+        "sage.tool.official",
+        "run",
+        "plugin-deferred",
+    ) in deferred
     agent = application.entrypoint()
     agent_id = package.entrypoint.agent
     stream = await agent.run_stream(

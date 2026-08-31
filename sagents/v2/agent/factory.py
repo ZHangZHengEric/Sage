@@ -10,7 +10,7 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationSignalProvider,
 )
 from sagents.v2.agent.policy.tool_policy import DefaultToolPolicy
-from sagents.v2.context.assembler import DefaultContextAssembler
+from sagents.v2.context.assembler import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.context.contracts import ContextBudget, ContextSegmentProvider
 from sagents.v2.context.runtime_metadata import RunMetadataContextProvider
@@ -25,6 +25,7 @@ from sagents.v2.goal import (
     GoalStateService,
 )
 from sagents.v2.memory import MemoryService
+from sagents.v2.memory import MemoryRecallQueryGenerator
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.resolver import ResolvedSageManifest
 from sagents.v2.plan import PlanCompletionGatePolicy, PlanContextProvider
@@ -98,6 +99,42 @@ class AgentCompositionFactory:
             workspace=workspace,
             activations=activations,
             workspace_root=workspace_root,
+        )
+
+    def create_engine(
+        self,
+        *,
+        model: ModelProvider,
+        tool_catalog: ToolCatalog,
+        tool_executor: ToolExecutor,
+        context_assembler: ContextAssembler,
+        tool_policy: DefaultToolPolicy | None = None,
+        continuation_policy: ContinuationPolicy | None = None,
+        continuation_signal_provider: ContinuationSignalProvider | None = None,
+        tool_selection_policy: ToolSelectionPolicy | None = None,
+        tool_selection_model: ModelProvider | None = None,
+        step_request_builder: AgentStepRequestBuilder | None = None,
+        automatic_memory_recall: bool = False,
+        memory_recall_limit: int = 5,
+        memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
+    ) -> AgentLoopEngine:
+        """Wire already-selected ports into the single canonical Loop engine."""
+
+        return AgentLoopEngine(
+            runtime=self.runtime,
+            model=model,
+            tool_catalog=tool_catalog,
+            tool_executor=tool_executor,
+            tool_policy=tool_policy,
+            continuation_policy=continuation_policy,
+            continuation_signal_provider=continuation_signal_provider,
+            tool_selection_policy=tool_selection_policy,
+            tool_selection_model=tool_selection_model,
+            step_request_builder=step_request_builder,
+            automatic_memory_recall=automatic_memory_recall,
+            memory_recall_limit=memory_recall_limit,
+            memory_recall_query_generator=memory_recall_query_generator,
+            context_assembler=context_assembler,
         )
 
     def create_loop(
@@ -192,8 +229,7 @@ class AgentCompositionFactory:
                 selected_continuation_policy,
                 goal_state_service,
             )
-        return AgentLoopEngine(
-            runtime=self.runtime,
+        return self.create_engine(
             model=model,
             tool_catalog=InvocationGrantToolCatalog(
                 tool_catalog,

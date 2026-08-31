@@ -216,7 +216,7 @@ async def test_local_process_denies_unlisted_executable(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_read_only_process_allows_inspection_pipeline(tmp_path: Path):
+async def test_read_only_process_fails_closed_without_os_isolation(tmp_path: Path):
     (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
     issuer, handle = await provision(
         tmp_path,
@@ -235,10 +235,8 @@ async def test_read_only_process_allows_inspection_pipeline(tmp_path: Path):
         argv=request.argv,
     )
 
-    result = await handle.process.run(request, intent=intent, grant=grant)
-
-    assert result.exit_code == 0
-    assert b"needle" in result.stdout
+    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
+        await handle.process.run(request, intent=intent, grant=grant)
 
 
 @pytest.mark.asyncio
@@ -270,7 +268,7 @@ async def test_read_only_process_rejects_mutating_shell_commands(
         argv=request.argv,
     )
 
-    with pytest.raises(PermissionError, match="read-only"):
+    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
         await handle.process.run(request, intent=intent, grant=grant)
 
     assert not (tmp_path / "changed.txt").exists()

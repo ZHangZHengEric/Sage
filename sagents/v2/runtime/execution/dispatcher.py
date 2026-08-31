@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from sagents.v2.contracts.principals import RequestContext
-from sagents.v2.contracts.run_state import RunSnapshot, RunState
+from sagents.v2.contracts.run_state import (
+    RunSnapshot,
+    RunState,
+    TERMINAL_RUN_STATES,
+)
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.execution.scheduler import (
@@ -25,6 +29,7 @@ class _DispatchRequest:
     context: RequestContext
     resume: bool
     result: asyncio.Future[RunSnapshot]
+    recovered: bool = False
 
 
 class LocalWorkerDispatcher:
@@ -51,7 +56,15 @@ class LocalWorkerDispatcher:
         self._requests: dict[str, _DispatchRequest] = {}
         self._workers: list[asyncio.Task[None]] = []
         self._active_tenants: dict[str | None, int] = {}
+        self._recovery_agent = None
         self._closed = False
+
+    def attach_recovery_agent(self, agent) -> None:
+        """Bind the Application Agent used for durable orphan WorkItems."""
+
+        if self._recovery_agent is not None and self._recovery_agent is not agent:
+            raise RuntimeError("dispatcher recovery Agent is already attached")
+        self._recovery_agent = agent
 
     async def start(self) -> None:
         if self._closed:
@@ -102,7 +115,10 @@ class LocalWorkerDispatcher:
                         f"run:{handle.run_id}:"
                         f"{'resume' if resume else 'start'}:{revision}"
                     ),
-                    payload={"resume": resume},
+                    payload={
+                        "resume": resume,
+                        "request_context": context.model_dump(mode="json"),
+                    },
                 )
             )
             if not accepted:
@@ -153,13 +169,17 @@ class LocalWorkerDispatcher:
                 continue
             request = self._requests.get(lease.work.run_id)
             if request is None:
-                await self.scheduler.release(
-                    lease, LeaseReleaseReason.CANCELLED, requeue=False
-                )
-                continue
+                request = self._restore_request(lease)
+                if request is None:
+                    await self.scheduler.release(
+                        lease, LeaseReleaseReason.CANCELLED, requeue=False
+                    )
+                    continue
+                self._requests[lease.work.run_id] = request
             self._active_tenants[tenant] = self._active_tenants.get(tenant, 0) + 1
             renewer = asyncio.create_task(self._renew(lease))
             execution = None
+            snapshot = None
             try:
                 scope = (
                     self.lease_scope_factory(lease)
@@ -167,29 +187,65 @@ class LocalWorkerDispatcher:
                     else _NullAsyncScope()
                 )
                 async with scope:
-                    execution = request.agent._ensure_execution(
-                        lease.work.run_id,
-                        request.context,
-                        resume=request.resume,
-                    )
-                    done, _ = await asyncio.wait(
-                        {execution, renewer}, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    if renewer in done:
-                        renewal_error = renewer.exception()
-                        execution.cancel()
-                        await asyncio.gather(execution, return_exceptions=True)
-                        if renewal_error is None:
-                            renewal_error = RuntimeError(
-                                "scheduler lease renewer stopped"
-                            )
-                        await request.agent._fail_driver_crash(
-                            lease.work.run_id,
-                            renewal_error,
-                            request.context,
+                    if request.recovered:
+                        recovered = await request.agent.runtime.get_run(
+                            lease.work.run_id
                         )
-                        raise renewal_error
-                    snapshot = execution.result()
+                        if (
+                            recovered.state in TERMINAL_RUN_STATES
+                            or recovered.state == RunState.SUSPENDED
+                        ):
+                            snapshot = recovered
+                            execution = None
+                        elif recovered.state in {
+                            RunState.RUNNING,
+                            RunState.SUSPEND_REQUESTED,
+                        }:
+                            error = RuntimeErrorInfo(
+                                code="execution.worker_restarted",
+                                category=ErrorCategory.RESOURCE_LOST,
+                                message=(
+                                    "worker process restarted without a safe checkpoint"
+                                ),
+                                safe_to_resume=True,
+                            )
+                            snapshot = await request.agent.runtime.fail_run(
+                                run_id=recovered.run_id,
+                                expected_revision=recovered.revision,
+                                error=error,
+                                context=request.context,
+                                idempotency_key=(
+                                    f"worker-restarted:{recovered.run_id}:"
+                                    f"{recovered.revision}"
+                                ),
+                            )
+                            execution = None
+                        else:
+                            request.resume = recovered.state == RunState.RESUMING
+                    if snapshot is None:
+                        execution = request.agent._ensure_execution(
+                            lease.work.run_id,
+                            request.context,
+                            resume=request.resume,
+                        )
+                        done, _ = await asyncio.wait(
+                            {execution, renewer}, return_when=asyncio.FIRST_COMPLETED
+                        )
+                        if renewer in done:
+                            renewal_error = renewer.exception()
+                            execution.cancel()
+                            await asyncio.gather(execution, return_exceptions=True)
+                            if renewal_error is None:
+                                renewal_error = RuntimeError(
+                                    "scheduler lease renewer stopped"
+                                )
+                            await request.agent._fail_driver_crash(
+                                lease.work.run_id,
+                                renewal_error,
+                                request.context,
+                            )
+                            raise renewal_error
+                        snapshot = execution.result()
                 reason = {
                     RunState.COMPLETED: LeaseReleaseReason.COMPLETED,
                     RunState.FAILED: LeaseReleaseReason.FAILED,
@@ -225,6 +281,24 @@ class LocalWorkerDispatcher:
                 if self._active_tenants[tenant] == 0:
                     self._active_tenants.pop(tenant)
                 self._requests.pop(lease.work.run_id, None)
+
+    def _restore_request(self, lease: WorkerLease) -> _DispatchRequest | None:
+        if self._recovery_agent is None:
+            return None
+        raw_context = lease.work.payload.get("request_context")
+        if not isinstance(raw_context, dict):
+            return None
+        context = RequestContext.model_validate(raw_context)
+        result = asyncio.get_running_loop().create_future()
+        # Recovered work has no in-process caller awaiting this Future.
+        result.add_done_callback(self._consume_detached_result)
+        return _DispatchRequest(
+            agent=self._recovery_agent,
+            context=context,
+            resume=bool(lease.work.payload.get("resume")),
+            result=result,
+            recovered=True,
+        )
 
     async def _finish_shutdown_request(
         self,
@@ -266,6 +340,13 @@ class LocalWorkerDispatcher:
             current = await self.scheduler.renew(
                 current, lease_duration=self.lease_duration
             )
+
+    @staticmethod
+    def _consume_detached_result(result: asyncio.Future[RunSnapshot]) -> None:
+        """Retrieve orphan completion errors so asyncio does not log them later."""
+
+        if not result.cancelled():
+            result.exception()
 
     @staticmethod
     def _shutdown_error() -> SageV2Error:

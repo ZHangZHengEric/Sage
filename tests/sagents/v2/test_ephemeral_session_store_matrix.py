@@ -451,6 +451,71 @@ async def test_job_pause_uses_durable_prepare_state_before_terminal_suspend_comm
 
 
 @pytest.mark.asyncio
+async def test_job_pause_backend_failure_settles_run_as_failed():
+    runtime, session_id, run_id = await running_runtime()
+    checkpoint, interaction, suspension = suspension_records(session_id, run_id)
+
+    class Jobs:
+        async def handle_run_pause(self, requested_run_id):
+            assert requested_run_id == run_id
+            raise OSError("pause backend unavailable")
+
+    runtime.job_runtime = Jobs()
+    failed = await runtime.commit_suspension(
+        run_id=run_id,
+        expected_revision=1,
+        checkpoint=checkpoint,
+        suspension=suspension,
+        interaction=interaction,
+        context=CONTEXT,
+        idempotency_key="suspend-pause-failure",
+    )
+
+    assert failed.state == RunState.FAILED
+    result = await runtime.session_store.get_run_result(run_id)
+    assert result.error is not None
+    assert result.error.code == "job.pause_failed"
+    assert [
+        event.type for event in await runtime.session_store.read_events(run_id)
+    ][-2:] == ["run.pause_requested", "run.failed"]
+
+
+@pytest.mark.asyncio
+async def test_job_pause_cancellation_does_not_strand_suspend_requested():
+    runtime, session_id, run_id = await running_runtime()
+    checkpoint, interaction, suspension = suspension_records(session_id, run_id)
+    entered = asyncio.Event()
+
+    class Jobs:
+        async def handle_run_pause(self, requested_run_id):
+            assert requested_run_id == run_id
+            entered.set()
+            await asyncio.Event().wait()
+
+    runtime.job_runtime = Jobs()
+    task = asyncio.create_task(
+        runtime.commit_suspension(
+            run_id=run_id,
+            expected_revision=1,
+            checkpoint=checkpoint,
+            suspension=suspension,
+            interaction=interaction,
+            context=CONTEXT,
+            idempotency_key="suspend-pause-cancelled",
+        )
+    )
+    await entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await runtime.get_run(run_id)).state == RunState.FAILED
+    result = await runtime.session_store.get_run_result(run_id)
+    assert result.error is not None
+    assert result.error.code == "job.pause_failed"
+
+
+@pytest.mark.asyncio
 async def test_pause_resume_requires_matching_suspension_and_preserves_replay_history():
     runtime, session_id, run_id = await running_runtime()
     pause = await runtime.pause_run(

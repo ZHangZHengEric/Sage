@@ -6,6 +6,7 @@ import asyncio
 import heapq
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any, Protocol
 
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
@@ -37,6 +38,7 @@ class InMemoryScheduler:
         *,
         max_pending_items: int = 1024,
         clock: Callable[[], datetime] = utc_now,
+        state_store: "SchedulerStateStore | None" = None,
     ) -> None:
         if max_pending_items < 1:
             raise ValueError("max_pending_items must be positive")
@@ -53,6 +55,11 @@ class InMemoryScheduler:
         self._cancelled: set[str] = set()
         self._sequence = 0
         self._closed = False
+        self._state_store = state_store
+        if state_store is not None:
+            restored = state_store.load()
+            if restored is not None:
+                self._load_state(restored)
 
     async def capabilities(self) -> SchedulerCapabilities:
         return SchedulerCapabilities(
@@ -90,6 +97,7 @@ class InMemoryScheduler:
             self._items[work.work_id] = work
             self._idempotency[work.idempotency_key] = work.work_id
             self._push_locked(work)
+            await self._persist_locked()
             self._condition.notify_all()
             return True
 
@@ -107,7 +115,7 @@ class InMemoryScheduler:
             async with self._condition:
                 while True:
                     self._ensure_open()
-                    self._reap_expired_locked()
+                    reaped = self._reap_expired_locked()
                     work = self._pop_available_locked()
                     if work is not None:
                         now = self._clock()
@@ -124,7 +132,10 @@ class InMemoryScheduler:
                         self._leases[lease.lease_id] = lease
                         self._work_lease[work.work_id] = lease.lease_id
                         self._run_lease[work.run_id] = lease.lease_id
+                        await self._persist_locked()
                         return lease
+                    if reaped:
+                        await self._persist_locked()
                     delay = self._seconds_until_next_locked()
                     if delay is None:
                         await self._condition.wait()
@@ -143,9 +154,11 @@ class InMemoryScheduler:
         if wait_timeout == 0:
             async with self._condition:
                 self._ensure_open()
-                self._reap_expired_locked()
+                reaped = self._reap_expired_locked()
                 work = self._pop_available_locked()
                 if work is None:
+                    if reaped:
+                        await self._persist_locked()
                     return None
                 now = self._clock()
                 token = self._fence_counters.get(work.run_id, 0) + 1
@@ -161,6 +174,7 @@ class InMemoryScheduler:
                 self._leases[lease.lease_id] = lease
                 self._work_lease[work.work_id] = lease.lease_id
                 self._run_lease[work.run_id] = lease.lease_id
+                await self._persist_locked()
                 return lease
         try:
             return await asyncio.wait_for(wait_for_claim(), timeout=wait_timeout)
@@ -184,6 +198,7 @@ class InMemoryScheduler:
                 )
             renewed = current.model_copy(update={"expires_at": now + lease_duration})
             self._leases[lease.lease_id] = renewed
+            await self._persist_locked()
             return renewed
 
     async def release(
@@ -206,11 +221,14 @@ class InMemoryScheduler:
                 self._push_locked(retry)
             else:
                 self._items.pop(lease.work.work_id, None)
+            await self._persist_locked()
             self._condition.notify_all()
 
     async def assert_fence(self, lease: WorkerLease) -> None:
         async with self._condition:
-            self._reap_expired_locked()
+            reaped = self._reap_expired_locked()
+            if reaped:
+                await self._persist_locked()
             self._assert_fence_locked(lease)
 
     async def cancel(self, work_id: str) -> bool:
@@ -224,6 +242,7 @@ class InMemoryScheduler:
                 if lease is not None:
                     self._run_lease.pop(lease.work.run_id, None)
             self._items.pop(work_id, None)
+            await self._persist_locked()
             self._condition.notify_all()
             return True
 
@@ -231,6 +250,7 @@ class InMemoryScheduler:
         async with self._condition:
             count = self._reap_expired_locked()
             if count:
+                await self._persist_locked()
                 self._condition.notify_all()
             return count
 
@@ -246,6 +266,58 @@ class InMemoryScheduler:
         async with self._condition:
             self._closed = True
             self._condition.notify_all()
+
+    async def _persist_locked(self) -> None:
+        if self._state_store is not None:
+            await self._state_store.save(self._dump_state_locked())
+
+    def _dump_state_locked(self) -> dict[str, Any]:
+        return {
+            "format": "sage.scheduler-state/v1",
+            "pending": [list(value) for value in self._pending],
+            "items": [
+                value.model_dump(mode="json") for value in self._items.values()
+            ],
+            "idempotency": dict(self._idempotency),
+            "leases": [
+                value.model_dump(mode="json") for value in self._leases.values()
+            ],
+            "fence_counters": dict(self._fence_counters),
+            "cancelled": sorted(self._cancelled),
+            "sequence": self._sequence,
+        }
+
+    def _load_state(self, state: dict[str, Any]) -> None:
+        if state.get("format") != "sage.scheduler-state/v1":
+            raise ValueError("unsupported Scheduler state format")
+        self._pending = [tuple(value) for value in state.get("pending", ())]
+        heapq.heapify(self._pending)
+        self._items = {
+            value.work_id: value
+            for row in state.get("items", ())
+            for value in (WorkItem.model_validate(row),)
+        }
+        self._idempotency = {
+            str(key): str(value)
+            for key, value in dict(state.get("idempotency") or {}).items()
+        }
+        self._leases = {
+            value.lease_id: value
+            for row in state.get("leases", ())
+            for value in (WorkerLease.model_validate(row),)
+        }
+        self._work_lease = {
+            lease.work.work_id: lease.lease_id for lease in self._leases.values()
+        }
+        self._run_lease = {
+            lease.work.run_id: lease.lease_id for lease in self._leases.values()
+        }
+        self._fence_counters = {
+            str(key): int(value)
+            for key, value in dict(state.get("fence_counters") or {}).items()
+        }
+        self._cancelled = {str(value) for value in state.get("cancelled", ())}
+        self._sequence = int(state.get("sequence") or 0)
 
     def _push_locked(self, work: WorkItem) -> None:
         self._sequence += 1
@@ -371,3 +443,9 @@ class InMemoryScheduler:
                 safe_to_resume=True,
             )
         )
+
+
+class SchedulerStateStore(Protocol):
+    def load(self) -> dict[str, Any] | None: ...
+
+    async def save(self, state: dict[str, Any]) -> None: ...

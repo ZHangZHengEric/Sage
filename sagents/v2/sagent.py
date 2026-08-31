@@ -93,11 +93,12 @@ class SAgent:
         self.driver_factory = driver_factory
         self.memory_service = memory_service
         self.memory_scope = dict(memory_scope or {})
-        self._owned_resources = owned_resources
+        self._owned_resources = list(owned_resources)
         self._dispatcher = dispatcher
         self._tasks: dict[str, asyncio.Task[RunSnapshot]] = {}
         self._drivers: dict[str, RunDriver] = {}
         self._closed = False
+        self._closing = False
 
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run and start its driver without creating an observer."""
@@ -105,10 +106,11 @@ class SAgent:
         self._ensure_open()
         command = self._with_memory_scope(command, context)
         handle = await self.runtime.start_run(command, context)
-        if self._dispatcher is None:
-            self._ensure_execution(handle.run_id, context, resume=False)
-        else:
-            await self._submit_or_fail(handle, context, resume=False)
+        if handle.state not in TERMINAL_RUN_STATES and handle.state != RunState.SUSPENDED:
+            if self._dispatcher is None:
+                self._ensure_execution(handle.run_id, context, resume=False)
+            else:
+                await self._submit_or_fail(handle, context, resume=False)
         return handle
 
     async def run_stream(
@@ -119,11 +121,14 @@ class SAgent:
         self._ensure_open()
         command = self._with_memory_scope(command, context)
         handle = await self.runtime.start_run(command, context)
-        execution = (
-            self._ensure_execution(handle.run_id, context, resume=False)
-            if self._dispatcher is None
-            else await self._submit_or_fail(handle, context, resume=False)
-        )
+        if handle.state in TERMINAL_RUN_STATES or handle.state == RunState.SUSPENDED:
+            execution = await self._settled_execution(handle.run_id)
+        else:
+            execution = (
+                self._ensure_execution(handle.run_id, context, resume=False)
+                if self._dispatcher is None
+                else await self._submit_or_fail(handle, context, resume=False)
+            )
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
@@ -260,6 +265,16 @@ class SAgent:
                     pass
             raise
 
+    async def _settled_execution(
+        self, run_id: str
+    ) -> asyncio.Future[RunSnapshot]:
+        """Return an already-resolved Future for an idempotent terminal retry."""
+
+        snapshot = await self.runtime.get_run(run_id)
+        result = asyncio.get_running_loop().create_future()
+        result.set_result(snapshot)
+        return result
+
     def attach_dispatcher(self, dispatcher) -> None:
         """Bind the Application-owned execution entrypoint exactly once."""
 
@@ -288,26 +303,49 @@ class SAgent:
                     safe_to_resume=True,
                 )
             )
-        for driver in tuple(self._drivers.values()):
+        self._closing = True
+        errors: list[Exception] = []
+        for run_id, driver in tuple(self._drivers.items()):
             closer = getattr(driver, "close", None)
             if closer is None:
+                self._drivers.pop(run_id, None)
                 continue
-            result = closer()
-            if inspect.isawaitable(result):
-                await result
-        self._drivers.clear()
-        seen: set[int] = set()
-        for resource in reversed(self._owned_resources):
-            if id(resource) in seen:
-                continue
-            seen.add(id(resource))
-            closer = getattr(resource, "close", None)
-            if closer is None:
-                continue
-            result = closer()
-            if inspect.isawaitable(result):
-                await result
-        self._closed = True
+            try:
+                result = closer()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                errors.append(exc)
+            else:
+                if self._drivers.get(run_id) is driver:
+                    self._drivers.pop(run_id, None)
+        if not self._drivers:
+            pending_resources = list(reversed(self._owned_resources))
+            seen: set[int] = set()
+            for index, resource in enumerate(pending_resources):
+                if id(resource) in seen:
+                    continue
+                seen.add(id(resource))
+                closer = getattr(resource, "close", None)
+                if closer is None:
+                    continue
+                try:
+                    result = closer()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as exc:
+                    errors.append(exc)
+                    self._owned_resources = list(
+                        reversed(pending_resources[index:])
+                    )
+                    break
+            else:
+                self._owned_resources = []
+        self._closed = not self._drivers and not self._owned_resources
+        if errors:
+            raise RuntimeError(
+                f"{len(errors)} SAgent resource(s) failed to close"
+            ) from errors[0]
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -316,6 +354,15 @@ class SAgent:
                     code="agent.closed",
                     category=ErrorCategory.RESOURCE_LOST,
                     message="SAgent is closed",
+                    safe_to_resume=True,
+                )
+            )
+        if self._closing:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="agent.closing",
+                    category=ErrorCategory.RESOURCE_LOST,
+                    message="SAgent is closing",
                     safe_to_resume=True,
                 )
             )

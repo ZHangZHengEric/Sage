@@ -128,6 +128,7 @@ class SessionEventModelProjector:
                                 **source.metadata,
                                 **self._metadata(event, item.item_id),
                             },
+                            provider_state=source.provider_state,
                         ),
                         step_key=step_key,
                     )
@@ -167,7 +168,10 @@ class SessionEventModelProjector:
                             role="tool",
                             tool_call_id=source.tool_call_id,
                             content=content,
-                            metadata=self._metadata(event, item.item_id),
+                            metadata={
+                                **source.metadata,
+                                **self._metadata(event, item.item_id),
+                            },
                         ),
                         step_key=step_key,
                     )
