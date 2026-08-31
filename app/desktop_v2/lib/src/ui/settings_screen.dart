@@ -3369,25 +3369,78 @@ class _SettingsMasterDetail extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       if (constraints.maxWidth < 700) {
+        _SettingsChoice? selectedChoice;
+        for (final item in items) {
+          if (item.id == selectedId) {
+            selectedChoice = item;
+            break;
+          }
+        }
+        final removableChoice =
+            selectedChoice?.removable == true && onRemove != null
+            ? selectedChoice
+            : null;
+        final pickerWidth = removableChoice != null
+            ? constraints.maxWidth - 42
+            : constraints.maxWidth;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SettingsPicker<String>(
-              key: selectorKey,
-              width: constraints.maxWidth,
-              value: items.any((value) => value.id == selectedId)
-                  ? selectedId
-                  : (items.isEmpty ? '' : items.first.id),
-              options: [
-                for (final item in items)
-                  _PickerOption(
-                    value: item.id,
-                    label: item.group.isEmpty
-                        ? item.label
-                        : '${item.group} · ${item.label}',
+            Row(
+              children: [
+                _SettingsPicker<String>(
+                  key: selectorKey,
+                  width: pickerWidth,
+                  value: items.any((value) => value.id == selectedId)
+                      ? selectedId
+                      : (items.isEmpty ? '' : items.first.id),
+                  options: [
+                    for (final item in items)
+                      _PickerOption(
+                        value: item.id,
+                        label: item.group.isEmpty
+                            ? item.label
+                            : '${item.group} · ${item.label}',
+                      ),
+                  ],
+                  onChanged: onSelected,
+                ),
+                if (removableChoice != null) ...[
+                  const SizedBox(width: 8),
+                  Semantics(
+                    button: true,
+                    label: context.l10n.text('settings.deleteNamed', {
+                      'name': removableChoice.label,
+                    }),
+                    child: removableChoice.busy
+                        ? const SizedBox.square(
+                            dimension: 34,
+                            child: Center(
+                              child: CupertinoActivityIndicator(radius: 7),
+                            ),
+                          )
+                        : Tooltip(
+                            message: context.l10n.text('settings.deleteNamed', {
+                              'name': removableChoice.label,
+                            }),
+                            child: GlassIconButton(
+                              key: ValueKey(
+                                '${removableChoice.removeKeyPrefix}-${removableChoice.id}',
+                              ),
+                              size: 34,
+                              iconSize: 15,
+                              shape: GlassIconButtonShape.roundedSquare,
+                              borderRadius: 9,
+                              onPressed: () => onRemove!(removableChoice.id),
+                              icon: Icon(
+                                CupertinoIcons.trash,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
                   ),
+                ],
               ],
-              onChanged: onSelected,
             ),
             const SizedBox(height: 22),
             Expanded(
@@ -5403,6 +5456,7 @@ class _SkillSettingsState extends State<_SkillSettings> {
   String? _loadingName;
   String? _loadError;
   bool _importing = false;
+  String? _deletingName;
   _SkillDocumentMode _mode = _SkillDocumentMode.rendered;
 
   @override
@@ -5507,6 +5561,107 @@ class _SkillSettingsState extends State<_SkillSettings> {
     }
   }
 
+  Future<void> _deleteSkill(String name) async {
+    if (_deletingName != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: GlassCard(
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 16),
+            shape: const LiquidRoundedSuperellipse(borderRadius: 20),
+            useOwnLayer: true,
+            settings: _glass(dialogContext),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  dialogContext.l10n.text('settings.deleteNamed', {
+                    'name': name,
+                  }),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    dialogContext,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: Text(dialogContext.l10n.text('common.cancel')),
+                    ),
+                    const SizedBox(width: 8),
+                    GlassButton.custom(
+                      key: const ValueKey('settings-skill-delete-confirm'),
+                      width: 84,
+                      height: 36,
+                      label: dialogContext.l10n.text('common.delete'),
+                      onTap: () => Navigator.pop(dialogContext, true),
+                      shape: const LiquidRoundedRectangle(borderRadius: 10),
+                      settings: _glass(dialogContext),
+                      child: Text(
+                        dialogContext.l10n.text('common.delete'),
+                        style: TextStyle(
+                          color: Theme.of(dialogContext).colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingName = name);
+    try {
+      await widget.controller.deleteSkill(name);
+      if (!mounted) return;
+      _contents.remove(name);
+      final catalog = widget.controller.skillCatalog;
+      final next = catalog.any((value) => value.name == name)
+          ? name
+          : (catalog.isEmpty ? '' : catalog.first.name);
+      setState(() {
+        _selectedName = next;
+        _mode = _SkillDocumentMode.rendered;
+        _loadError = null;
+      });
+      await _loadContent(next, refresh: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.l10n.text('skill.deleteSuccess', {'name': name}),
+            ),
+          ),
+        );
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.l10n.text('skill.deleteFailed', {'name': name}),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _deletingName = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     SkillSummary? selected;
@@ -5535,10 +5690,17 @@ class _SkillSettingsState extends State<_SkillSettings> {
             selectorKey: const ValueKey('settings-skill-picker'),
             items: [
               for (final value in widget.values)
-                _SettingsChoice(id: value.name, label: value.name),
+                _SettingsChoice(
+                  id: value.name,
+                  label: value.name,
+                  removable: value.canDelete,
+                  busy: _deletingName == value.name,
+                  removeKeyPrefix: 'settings-skill-delete',
+                ),
             ],
             selectedId: selected.name,
             onSelected: _select,
+            onRemove: _deleteSkill,
             detail: _SkillDocument(
               skill: selected,
               content: content,

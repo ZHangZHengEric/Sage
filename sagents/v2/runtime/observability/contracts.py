@@ -35,6 +35,14 @@ class DiagnosticSink(Protocol):
         response: ModelResponse,
     ) -> None: ...
 
+    async def record_model_first_token(
+        self,
+        *,
+        session_id: str,
+        request: ModelRequest,
+        observed_at: datetime,
+    ) -> None: ...
+
     async def fail_model_request(
         self, *, session_id: str, request: ModelRequest, error: Exception
     ) -> None: ...
@@ -47,6 +55,9 @@ class NoopDiagnosticSink:
         return None
 
     async def complete_model_request(self, **kwargs: Any) -> None:
+        return None
+
+    async def record_model_first_token(self, **kwargs: Any) -> None:
         return None
 
     async def fail_model_request(self, **kwargs: Any) -> None:

@@ -14,8 +14,6 @@ from sagents.v2.context.token_estimator import (
     JsonHeuristicTokenEstimator,
     TiktokenTokenEstimator,
     TokenEstimator,
-    TokenEstimatorDescriptor,
-    TokenEstimatorRegistry,
     UnicodeHeuristicTokenEstimator,
 )
 from sagents.v2.context.contracts import (
@@ -75,8 +73,6 @@ __all__ = [
     "JsonHeuristicTokenEstimator",
     "TiktokenTokenEstimator",
     "TokenEstimator",
-    "TokenEstimatorDescriptor",
-    "TokenEstimatorRegistry",
     "UnicodeHeuristicTokenEstimator",
     "StaticContextProvider",
     "SessionEventModelProjector",

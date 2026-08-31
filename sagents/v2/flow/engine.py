@@ -76,6 +76,18 @@ class FlowRuntime:
         self.condition_evaluator = condition_evaluator or self._default_condition
         self.clock = clock
         self.max_node_visits = max_node_visits
+        from sagents.v2.runtime.lifecycle import DurableRunLifecycle
+
+        self.lifecycle = DurableRunLifecycle(runtime)
+        from sagents.v2.flow.coordinators import (
+            FlowNodeExecutor,
+            ParallelBranchCoordinator,
+            SubflowCoordinator,
+        )
+
+        self.node_executor = FlowNodeExecutor(self)
+        self.parallel_coordinator = ParallelBranchCoordinator(self)
+        self.subflow_coordinator = SubflowCoordinator(self)
 
     async def execute(
         self, run_id: str, flow_id: str, context: RequestContext
@@ -458,6 +470,25 @@ class FlowRuntime:
         node_execution_id=None,
         resumed=False,
     ):
+        return await self.node_executor.invoke(
+            run,
+            state,
+            node,
+            context,
+            node_execution_id=node_execution_id,
+            resumed=resumed,
+        )
+
+    async def invoke_node(
+        self,
+        run,
+        state,
+        node,
+        context,
+        *,
+        node_execution_id=None,
+        resumed=False,
+    ):
         if node.type == "agent":
             runner = self.agent_nodes.get(node.agent or "")
         elif node.type == "tool":
@@ -569,6 +600,13 @@ class FlowRuntime:
         )
 
     async def _run_parallel(self, run, flow, root_state, state, node, context):
+        return await self.parallel_coordinator.run(
+            run, flow, root_state, state, node, context
+        )
+
+    async def run_parallel_branches(
+        self, run, flow, root_state, state, node, context
+    ):
         """Run or resume a parallel batch without losing suspended branches."""
 
         branch_ids = tuple(node.config.get("branches") or ())
@@ -901,6 +939,11 @@ class FlowRuntime:
         )
 
     async def _enter_subflow(self, run, state, active, node, context):
+        return await self.subflow_coordinator.enter(
+            run, state, active, node, context
+        )
+
+    async def enter_subflow(self, run, state, active, node, context):
         """Push the parent frame and begin a child Flow with its own execution id."""
 
         subflow = self._flow(node.flow or "")
@@ -943,6 +986,9 @@ class FlowRuntime:
         )
 
     async def _exit_subflow(self, run, state, child, context):
+        return await self.subflow_coordinator.exit(run, state, child, context)
+
+    async def exit_subflow(self, run, state, child, context):
         """Pop a completed child frame and publish its result to the parent node."""
 
         parent_node_id = child.parent_node_id
@@ -1316,11 +1362,10 @@ class FlowRuntime:
         )
 
     async def _complete(self, run, state, context):
-        result = await self.runtime.session_store.commit_run(
-            run_id=run.run_id,
-            expected_revision=run.revision,
-            expected_states={RunState.RUNNING},
+        return await self.lifecycle.commit(
+            run,
             new_state=RunState.COMPLETED,
+            expected_states={RunState.RUNNING},
             drafts=(
                 EventDraft(
                     type="flow.completed",
@@ -1332,7 +1377,6 @@ class FlowRuntime:
             context=context,
             idempotency_key=f"flow-complete:{state.flow_execution_id}",
         )
-        return result.run
 
     async def _fail(self, run, state, error, context):
         error = localize_error(error, context.language)
@@ -1355,15 +1399,14 @@ class FlowRuntime:
             }
         )
         active = self._active_view(state)
-        result = await self.runtime.session_store.commit_run(
-            run_id=current.run_id,
-            expected_revision=current.revision,
+        return await self.lifecycle.commit(
+            current,
+            new_state=RunState.FAILED,
             expected_states={
                 RunState.RUNNING,
                 RunState.SUSPEND_REQUESTED,
                 RunState.RESUMING,
             },
-            new_state=RunState.FAILED,
             drafts=(
                 EventDraft(
                     type="flow.node.failed",
@@ -1382,7 +1425,6 @@ class FlowRuntime:
             context=context,
             idempotency_key=f"flow-fail:{state.flow_execution_id}:{error.code}",
         )
-        return result.run
 
     async def _suspend_for_error_recovery(self, run, state, error, context):
         active = self._active_view(state)
@@ -1463,16 +1505,14 @@ class FlowRuntime:
         )
 
     async def _commit(self, run, context, drafts):
-        result = await self.runtime.session_store.commit_run(
-            run_id=run.run_id,
-            expected_revision=run.revision,
-            expected_states={RunState.RUNNING},
+        return await self.lifecycle.commit(
+            run,
             new_state=RunState.RUNNING,
+            expected_states={RunState.RUNNING},
             drafts=drafts,
             context=context,
             idempotency_key=new_id("flow_commit"),
         )
-        return result.run
 
     def _flow(self, flow_id):
         try:

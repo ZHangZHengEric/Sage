@@ -132,6 +132,34 @@ async def test_unhandled_driver_crash_becomes_typed_terminal_failure():
 
 
 @pytest.mark.asyncio
+async def test_scheduler_submit_failure_is_a_durable_typed_run_failure():
+    runtime = ephemeral_runtime()
+
+    class FailingDispatcher:
+        async def submit(self, agent, handle, context, *, resume=False):
+            del agent, handle, context, resume
+            raise RuntimeError("queue unavailable")
+
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=lambda run_id: None,
+        dispatcher=FailingDispatcher(),
+    )
+    submitted = command("scheduler-submit-failure").model_copy(
+        update={"session_id": "session_scheduler_submit_failure"}
+    )
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        await agent.start_run(submitted, CONTEXT)
+
+    runs = await runtime.session_store.list_session_runs(submitted.session_id)
+    assert len(runs) == 1
+    assert runs[0].state == RunState.FAILED
+    result = await runtime.session_store.get_run_result(runs[0].run_id)
+    assert result.error is not None
+    assert result.error.code == "scheduler.submit_failed"
+
+
+@pytest.mark.asyncio
 async def test_completed_execution_is_removed_from_facade_task_registry():
     runtime = ephemeral_runtime()
 

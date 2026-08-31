@@ -20,25 +20,16 @@ from sagents.v2.contracts import (
     StartRun,
 )
 from sagents.v2.sagent import SAgent, SAgentRunStream
+from sagents.v2.application import SAgentApplication, InterfaceRunStream
 from sagents.v2.builder import SAgentBuilder
 from sagents.v2.runtime.execution import (
     ExecutionBindingProvider,
     ExecutionBindingRequest,
     RunExecutionBinding,
 )
-from sagents.v2.host import (
-    AgentHost,
-    AgentPackageSource,
-    AgentRef,
-    AgentRuntimeFactory,
-)
 
 __all__ = [
     "ActorRef",
-    "AgentHost",
-    "AgentPackageSource",
-    "AgentRef",
-    "AgentRuntimeFactory",
     "EventCursor",
     "ExecutionBindingProvider",
     "ExecutionBindingRequest",
@@ -53,6 +44,8 @@ __all__ = [
     "SessionMergeStrategy",
     "StartRun",
     "SAgent",
+    "SAgentApplication",
     "SAgentBuilder",
     "SAgentRunStream",
+    "InterfaceRunStream",
 ]

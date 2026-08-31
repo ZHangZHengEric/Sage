@@ -37,6 +37,10 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
             ScriptedModelStep(
                 events=(
                     ModelStreamEvent(
+                        kind=ModelEventKind.TEXT_DELTA,
+                        delta="done",
+                    ),
+                    ModelStreamEvent(
                         kind=ModelEventKind.COMPLETED,
                         response=response,
                     ),
@@ -91,6 +95,8 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     assert record["metadata"]["api_key"] == "[REDACTED]"
     assert record["request"]["messages"][0]["authorization"] == "[REDACTED]"
     assert record["request"]["extra_body"]["api_key"] == "[REDACTED]"
+    assert record["started_at"] <= record["first_token_at"]
+    assert record["first_token_at"] <= record["completed_at"]
     assert "provider" not in record
     assert "wire_request" not in record
     assert "provider_metadata" not in record["response"]

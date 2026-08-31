@@ -4,13 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from sagents.v2 import RunExecutionBinding, SAgent, SAgentBuilder
+from sagents.v2 import RunExecutionBinding, SAgentApplication, SAgentBuilder
 from sagents.v2.builder import _ExecutionBoundDriver
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.package.presets import BuiltinPackageFactory
-from sagents.v2.package.manifest.runtime import ProviderSelection
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.manifest.agents import AgentMemoryBehavior
 from sagents.v2.memory import NoopMemoryProvider
 from sagents.v2.runtime.extensions import (
@@ -38,29 +38,33 @@ from sagents.v2.testing.plugins.scripted_model import (
 from sagents.v2.tool.plugins.official import OfficialToolRuntime
 
 
-def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.builder",
         model="test-model",
         base_url="https://model.invalid/v1",
     )
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
         .build(package)
     )
 
-    assert isinstance(agent, SAgent)
+    assert isinstance(application, SAgentApplication)
+    agent = application.entrypoint()
     assert agent.runtime.session_store.capabilities["global_session_index"] is False
+    await application.close()
 
 
 @pytest.mark.parametrize(
     ("preset", "memory_enabled"),
     [("assistant", False), ("coder", True)],
 )
-def test_search_memory_assignment_controls_recall_and_auto_write(
+@pytest.mark.asyncio
+async def test_search_memory_assignment_controls_recall_and_auto_write(
     tmp_path: Path, preset: str, memory_enabled: bool
 ):
     package = BuiltinPackageFactory.create(
@@ -83,13 +87,14 @@ def test_search_memory_assignment_controls_recall_and_auto_write(
     package = package.model_copy(
         update={"agents": {**package.agents, agent_id: definition}}
     )
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / preset / "session-store")
         .with_memory_provider(NoopMemoryProvider())
         .with_model_provider(ScriptedModelProvider(()))
         .build(package)
     )
+    agent = application.entrypoint()
     loop = agent.driver_factory("run_1")
 
     assert loop.automatic_memory_recall is memory_enabled
@@ -100,9 +105,14 @@ def test_search_memory_assignment_controls_recall_and_auto_write(
     assert (agent.memory_service is not None) is memory_enabled
     assert agent.memory_scope["recall"] is memory_enabled
     assert agent.memory_scope["auto_write"] is memory_enabled
+    await application.close()
 
 
-def test_registered_third_party_model_plugin_is_selected_by_model_route(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_registered_third_party_model_plugin_is_selected_by_model_route(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.custom-model",
@@ -146,14 +156,16 @@ def test_registered_third_party_model_plugin_is_selected_by_model_route(tmp_path
         factory=lambda context, dependencies: provider,
     )
 
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .register(registration)
         .build(package)
     )
 
-    assert agent.driver_factory("run_1").model is provider
+    model = application.entrypoint().driver_factory("run_1").model
+    assert model.provider is provider
+    await application.close()
 
 
 @pytest.mark.asyncio
@@ -167,7 +179,13 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
     package = package.model_copy(
         update={
             "runtime": package.runtime.model_copy(
-                update={"tool_provider": ProviderSelection(plugin="sage.tool.official")}
+                update={
+                    "capabilities": {
+                        "tool.catalog": CapabilitySelection(
+                            plugin="sage.tool.official", name="official"
+                        )
+                    }
+                }
             )
         }
     )
@@ -178,7 +196,7 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
         .with_model_provider(ScriptedModelProvider(()))
     )
     with pytest.raises(ValueError, match="with_tool_runtime"):
-        builder.build(package)
+        await builder.build(package)
 
     issuer = SandboxGrantIssuer()
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -198,10 +216,11 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
         ),
         run_id="run_1",
     )
-    agent = builder.with_tool_runtime(OfficialToolRuntime(handle, issuer)).build(
-        package
-    )
-    assert isinstance(agent, SAgent)
+    application = await builder.with_tool_runtime(
+        OfficialToolRuntime(handle, issuer)
+    ).build(package)
+    assert isinstance(application, SAgentApplication)
+    await application.close()
 
 
 @pytest.mark.asyncio
@@ -217,7 +236,13 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
     package = package.model_copy(
         update={
             "runtime": package.runtime.model_copy(
-                update={"tool_provider": ProviderSelection(plugin="sage.tool.official")}
+                update={
+                    "capabilities": {
+                        "tool.catalog": CapabilitySelection(
+                            plugin="sage.tool.official", name="official"
+                        )
+                    }
+                }
             )
         }
     )
@@ -279,13 +304,14 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
             ),
         )
     )
-    agent = (
+    application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(model)
         .with_execution_binding_provider(bindings)
         .build(package)
     )
+    agent = application.entrypoint()
     agent_id = package.entrypoint.agent
     stream = await agent.run_stream(
         StartRun(
@@ -303,7 +329,7 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
     assert bindings.requests[0].run_id == result.run_id
     assert bindings.bindings[0].sandbox.ref.owner_run_id == result.run_id
     assert bindings.bindings[0].closed is True
-    await agent.close()
+    await application.close()
 
 
 @pytest.mark.asyncio

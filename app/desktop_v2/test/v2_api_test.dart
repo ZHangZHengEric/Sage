@@ -158,6 +158,50 @@ void main() {
     expect((await received.future).queryParameters['lang'], 'zh-CN');
   });
 
+  test('skill catalog exposes ownership and deletion uses DELETE', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    final requests = <String>[];
+
+    server.listen((request) async {
+      requests.add('${request.method} ${request.uri.path}');
+      request.response.headers.contentType = ContentType.json;
+      if (request.method == 'GET') {
+        request.response.write(
+          jsonEncode({
+            'code': 0,
+            'data': [
+              {
+                'name': 'review',
+                'description': 'Review code',
+                'can_delete': true,
+              },
+            ],
+          }),
+        );
+      } else {
+        request.response.write(
+          jsonEncode({
+            'code': 0,
+            'data': {'deleted_name': 'review'},
+          }),
+        );
+      }
+      await request.response.close();
+    });
+
+    final api = V2ApiClient(
+      baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+    );
+    addTearDown(api.close);
+
+    final catalog = await api.listSkillCatalog();
+    await api.deleteSkill('review');
+
+    expect(catalog.single.canDelete, isTrue);
+    expect(requests, ['GET /api/v2/skills', 'DELETE /api/v2/skills/review']);
+  });
+
   test('usage overview sends the range and decodes aggregate data', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
@@ -177,6 +221,8 @@ void main() {
               'cached_input_tokens': 40,
               'total_tokens': 142,
               'turns': 2,
+              'average_first_token_latency_ms': 725.5,
+              'output_tokens_per_second': 32.0,
             },
             'daily': [],
             'models': [],
@@ -207,6 +253,8 @@ void main() {
     expect(overview.totals.cachedInputTokens, 40);
     expect(overview.totals.nonCachedInputTokens, 60);
     expect(overview.totals.promptCacheUtilization, .4);
+    expect(overview.totals.averageFirstTokenLatencyMs, 725.5);
+    expect(overview.totals.outputTokensPerSecond, 32.0);
   });
 
   test(

@@ -104,6 +104,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
     default_user_id = get_default_cli_user_id()
     default_max_loop_count = get_default_cli_max_loop_count()
 
+    v2_parser = subparsers.add_parser("v2", help="Manage SAgents v2 runtime data")
+    v2_subparsers = v2_parser.add_subparsers(dest="v2_command", required=True)
+    v2_migrate = v2_subparsers.add_parser(
+        "migrate", help="Explicitly migrate a v3 SessionStore to v4"
+    )
+    v2_migrate.add_argument("--runtime-root", required=True)
+    v2_migrate.add_argument("--dry-run", action="store_true")
+    v2_migrate.add_argument(
+        "--manifest",
+        default=None,
+        help="Also generate sage.v2.yaml from this sage/v1 manifest",
+    )
+    v2_migrate.add_argument("--verbose", action="store_true")
+
     run_parser = subparsers.add_parser("run", help="Run a single Sage task")
     run_parser.add_argument("task", help="Task prompt to execute")
     run_parser.add_argument("--session-id", dest="session_id")

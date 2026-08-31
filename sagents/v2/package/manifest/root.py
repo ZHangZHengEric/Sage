@@ -12,6 +12,7 @@ from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.flows import FlowDefinition
 from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.package.manifest.runtime import PolicyConfig, RuntimeConfig
+from sagents.v2.runtime.extensions.contracts import ExtensionScope
 
 
 class ManifestMetadata(StrictModel):
@@ -27,7 +28,10 @@ class PluginDeclaration(StrictModel):
 
 
 class InterfaceDeclaration(StrictModel):
+    plugin: Identifier
+    name: Identifier | None = None
     enabled: bool = True
+    scope: ExtensionScope | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -37,7 +41,7 @@ class TestDeclaration(StrictModel):
 
 
 class SageManifest(StrictModel):
-    schema_version: str = "sage/v1"
+    schema_version: Literal["sage/v2"] = "sage/v2"
     kind: Literal["application", "agent-package"] = "agent-package"
     metadata: ManifestMetadata
     credentials: dict[Identifier, CredentialDeclaration] = Field(default_factory=dict)

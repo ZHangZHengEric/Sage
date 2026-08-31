@@ -37,6 +37,8 @@ class UsageTotals {
     this.turns = 0,
     this.toolCalls = 0,
     this.sessions = 0,
+    this.averageFirstTokenLatencyMs,
+    this.outputTokensPerSecond,
   });
 
   final int inputTokens;
@@ -49,6 +51,8 @@ class UsageTotals {
   final int turns;
   final int toolCalls;
   final int sessions;
+  final double? averageFirstTokenLatencyMs;
+  final double? outputTokensPerSecond;
 
   int get nonCachedInputTokens =>
       inputTokens > cachedInputTokens ? inputTokens - cachedInputTokens : 0;
@@ -70,6 +74,8 @@ class UsageTotals {
     turns: _integer(json['turns']),
     toolCalls: _integer(json['tool_calls']),
     sessions: _integer(json['sessions']),
+    averageFirstTokenLatencyMs: _number(json['average_first_token_latency_ms']),
+    outputTokensPerSecond: _number(json['output_tokens_per_second']),
   );
 }
 
@@ -177,6 +183,9 @@ class ToolUsage {
 
 int _integer(Object? value, [int fallback = 0]) =>
     value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
+
+double? _number(Object? value) =>
+    value is num ? value.toDouble() : double.tryParse('$value');
 
 Map<String, Object?> _map(Object? value) =>
     value is Map ? value.cast<String, Object?>() : const {};

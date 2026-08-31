@@ -50,12 +50,6 @@ from sagents.v2.flow import FlowNodeResult, FlowRuntime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
 from sagents.v2.runtime.session.filesystem import FilesystemSessionStore
-from sagents.v2.runtime.session.journal import (
-    FILESYSTEM_SESSION_STORE_FORMAT,
-    FILESYSTEM_SESSION_STORE_FORMAT_V2,
-    FILESYSTEM_SESSION_STORE_FORMAT_V1,
-    SessionCommitEnvelope,
-)
 
 
 CONTEXT = RequestContext(
@@ -521,53 +515,6 @@ def test_truncated_v3_journal_tail_is_ignored_but_middle_checksum_is_not(tmp_pat
     asyncio.run(corrupted.close())
 
 
-def test_v2_snapshot_upgrades_atomically_on_first_successful_write(tmp_path):
-    path = tmp_path / "session-store"
-
-    async def create():
-        store = FilesystemSessionStore(path)
-        result = await store.create_run(command("v2-base"), CONTEXT)
-        await store.close()
-        return result
-
-    created = asyncio.run(create())
-    session_dir = path / "sessions" / created.handle.session_id
-    snapshot_path = session_dir / "state.json"
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    snapshot["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V2
-    snapshot["checksum"] = FilesystemSessionStore._checksum(
-        {key: value for key, value in snapshot.items() if key != "checksum"}
-    )
-    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-    (session_dir / "journal.jsonl").write_bytes(b"")
-    metadata_path = path / ".session-store" / "store.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V2
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-
-    upgraded = FilesystemSessionStore(path)
-    asyncio.run(
-        upgraded.create_run(
-            command(
-                "v2-upgrade",
-                session_id=created.handle.session_id,
-                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
-            ),
-            CONTEXT,
-        )
-    )
-    asyncio.run(upgraded.close())
-
-    assert (
-        json.loads(snapshot_path.read_text(encoding="utf-8"))["format"]
-        == FILESYSTEM_SESSION_STORE_FORMAT
-    )
-    assert (
-        json.loads(metadata_path.read_text(encoding="utf-8"))["format"]
-        == FILESYSTEM_SESSION_STORE_FORMAT
-    )
-
-
 @pytest.mark.asyncio
 async def test_readable_session_views_are_repaired_from_authoritative_state(tmp_path):
     path = tmp_path / "session-store"
@@ -585,71 +532,6 @@ async def test_readable_session_views_are_repaired_from_authoritative_state(tmp_
 
     assert (session_dir / "session.json").is_file()
     assert (session_dir / "runs" / created.handle.run_id / "events.jsonl").is_file()
-
-
-@pytest.mark.asyncio
-async def test_previous_v2_store_is_compacted_into_runtime_sessions(tmp_path):
-    seed_root = tmp_path / "seed"
-    seed = FilesystemSessionStore(seed_root)
-    created = await seed.create_run(command(), CONTEXT)
-    state = seed._dump_session_state_locked(created.handle.session_id)
-    await seed.close()
-
-    runtime_root = tmp_path / "runtime"
-    previous_root = runtime_root / "session-store"
-    previous_session = previous_root / "sessions" / created.handle.session_id
-    previous_session.mkdir(parents=True)
-    (previous_session / "derived").mkdir()
-    (previous_session / "derived" / "marker.txt").write_text(
-        "preserved", encoding="utf-8"
-    )
-    (previous_root / "store.json").write_text(
-        json.dumps({"format": FILESYSTEM_SESSION_STORE_FORMAT_V1}),
-        encoding="utf-8",
-    )
-    journal = previous_session / "journal.jsonl"
-    previous_revision = 0
-    rows = []
-    current_revision = int(state["sessions"][0]["revision"])
-    for sequence in range(1, 6):
-        unsigned = {
-            "format": FILESYSTEM_SESSION_STORE_FORMAT_V1,
-            "transaction_id": f"legacy-{sequence}",
-            "journal_sequence": sequence,
-            "previous_session_revision": previous_revision,
-            "current_session_revision": current_revision,
-            "state": state,
-        }
-        envelope = SessionCommitEnvelope(
-            **unsigned,
-            checksum=FilesystemSessionStore._checksum(unsigned),
-        )
-        rows.append(
-            FilesystemSessionStore._canonical_json(envelope.model_dump(mode="json"))
-        )
-        previous_revision = current_revision
-    journal.write_bytes(b"\n".join(rows) + b'\n{"interrupted":')
-    previous_size = journal.stat().st_size
-
-    migrated = FilesystemSessionStore(
-        runtime_root,
-        previous_v2_root=previous_root,
-    )
-    restored = await migrated.get_session(created.handle.session_id)
-    duplicate = await migrated.create_run(command(), CONTEXT)
-    await migrated.close()
-
-    target = runtime_root / "sessions" / created.handle.session_id
-    assert restored.session_id == created.handle.session_id
-    assert duplicate.duplicate is True
-    assert not previous_root.exists()
-    assert (target / "state.json").stat().st_size < previous_size // 2
-    assert (target / "session.json").is_file()
-    assert (target / "runs" / created.handle.run_id / "events.jsonl").is_file()
-    assert (target / "derived" / "marker.txt").read_text(encoding="utf-8") == (
-        "preserved"
-    )
-    assert (runtime_root / ".session-store" / "store.json").is_file()
 
 
 WRITE_TOOL = ToolDefinition(

@@ -64,8 +64,9 @@ class HarnessRuntime:
     store as long as it preserves the declared atomic lifecycle semantics.
     """
 
-    def __init__(self, session_store: SessionStore) -> None:
+    def __init__(self, session_store: SessionStore, *, job_runtime=None) -> None:
         self.session_store = session_store
+        self.job_runtime = job_runtime
 
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run request; execution is started separately by a driver."""
@@ -245,6 +246,9 @@ class HarnessRuntime:
         must share one SessionStore transaction. A partially recorded suspension
         would be observable but impossible to resume safely.
         """
+
+        if self.job_runtime is not None:
+            await self.job_runtime.handle_run_pause(run_id)
 
         drafts: list[EventDraft] = [
             EventDraft(

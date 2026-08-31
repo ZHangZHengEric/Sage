@@ -180,8 +180,27 @@ class AgentLoopEngine:
         )
         self.delegated_run_controller = delegated_run_controller
         self.clock = clock
+        from sagents.v2.runtime.lifecycle import DurableRunLifecycle
+
+        self.lifecycle = DurableRunLifecycle(runtime)
+        from sagents.v2.agent.coordinators import (
+            AgentRunCoordinator,
+            ModelStepExecutor,
+            RunControlCoordinator,
+            ToolCallCoordinator,
+        )
+
+        self.run_coordinator = AgentRunCoordinator(self)
+        self.model_step_executor = ModelStepExecutor(self)
+        self.tool_call_coordinator = ToolCallCoordinator(self)
+        self.run_control_coordinator = RunControlCoordinator(self)
 
     async def execute(self, run_id: str, context: RequestContext) -> RunSnapshot:
+        return await self.run_coordinator.execute(run_id, context)
+
+    async def execute_coordinated(
+        self, run_id: str, context: RequestContext
+    ) -> RunSnapshot:
         """Start the first Turn for a newly accepted Run."""
 
         run = await self.runtime.get_run(run_id)
@@ -414,6 +433,11 @@ class AgentLoopEngine:
         return run, state
 
     async def resume(self, run_id: str, context: RequestContext) -> RunSnapshot:
+        return await self.run_coordinator.resume(run_id, context)
+
+    async def resume_coordinated(
+        self, run_id: str, context: RequestContext
+    ) -> RunSnapshot:
         """Restore a suspended Loop and finish its pending barrier before driving.
 
         Approval and uncertain-side-effect checkpoints resume differently. An
@@ -1123,6 +1147,11 @@ class AgentLoopEngine:
         )
 
     async def _stream_model(self, run, request, context, state, step_id):
+        return await self.model_step_executor.execute(
+            run, request, context, state, step_id
+        )
+
+    async def stream_model_step(self, run, request, context, state, step_id):
         """Normalize one provider stream into canonical Item lifecycle events.
 
         A cooperative pause closes the provider stream, commits any visible
@@ -1396,6 +1425,13 @@ class AgentLoopEngine:
         )
 
     async def _dispatch_tool(
+        self, run, call, context, turn_id, step_id=None, state=None
+    ):
+        return await self.tool_call_coordinator.dispatch(
+            run, call, context, turn_id, step_id=step_id, state=state
+        )
+
+    async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
         """Cross the tool side-effect barrier and settle or reconcile its result.
@@ -2090,6 +2126,11 @@ class AgentLoopEngine:
         )
 
     async def _suspend_at_safe_point(self, run, state, context):
+        return await self.run_control_coordinator.suspend_at_safe_point(
+            run, state, context
+        )
+
+    async def commit_safe_point_suspension(self, run, state, context):
         """Commit a manual-pause checkpoint between externally visible actions."""
 
         checkpoint, suspension = self._checkpoint_records(
@@ -2312,11 +2353,10 @@ class AgentLoopEngine:
         return result.run
 
     async def _complete(self, run, state, step_id, context):
-        result = await self.runtime.session_store.commit_run(
-            run_id=run.run_id,
-            expected_revision=run.revision,
-            expected_states={RunState.RUNNING},
+        completed = await self.lifecycle.commit(
+            run,
             new_state=RunState.COMPLETED,
+            expected_states={RunState.RUNNING},
             drafts=(
                 EventDraft(
                     type="step.completed",
@@ -2338,7 +2378,7 @@ class AgentLoopEngine:
             idempotency_key=f"loop-complete:{run.run_id}:{state.step_number}",
         )
         self.tool_selection_policy.release_run(run.run_id)
-        return result.run
+        return completed
 
     async def _fail(self, run, state, step_id, error, context):
         error = localize_error(error, context.language)
@@ -2375,15 +2415,14 @@ class AgentLoopEngine:
                 }
             }
         )
-        result = await self.runtime.session_store.commit_run(
-            run_id=current.run_id,
-            expected_revision=current.revision,
+        failed = await self.lifecycle.commit(
+            current,
+            new_state=RunState.FAILED,
             expected_states={
                 RunState.RUNNING,
                 RunState.SUSPEND_REQUESTED,
                 RunState.RESUMING,
             },
-            new_state=RunState.FAILED,
             drafts=(
                 EventDraft(
                     type="step.failed",
@@ -2407,21 +2446,19 @@ class AgentLoopEngine:
             idempotency_key=f"loop-fail:{run.run_id}:{state.step_number}:{error.code}",
         )
         self.tool_selection_policy.release_run(run.run_id)
-        return result.run
+        return failed
 
     async def _commit_running(
         self, run, context, drafts, *, expected_states=None
     ) -> RunSnapshot:
-        result = await self.runtime.session_store.commit_run(
-            run_id=run.run_id,
-            expected_revision=run.revision,
+        return await self.lifecycle.commit(
+            run,
             expected_states=expected_states or {RunState.RUNNING},
             new_state=run.state,
             drafts=drafts,
             context=context,
             idempotency_key=new_id("loop_commit"),
         )
-        return result.run
 
     def _item(
         self, item_id, run_id, turn_id, step_id, data, status=ItemStatus.COMPLETED

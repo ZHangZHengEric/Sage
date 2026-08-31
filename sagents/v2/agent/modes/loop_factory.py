@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.context import DefaultContextAssembler
@@ -28,7 +29,8 @@ from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 
 ModelProviderFactory = Callable[[AgentDescriptor, str], ModelProvider]
 ModeLoopComposer = Callable[
-    [AgentDescriptor, str, ToolCatalog, ToolExecutor], AgentLoopEngine
+    [AgentDescriptor, str, ToolCatalog, ToolExecutor],
+    AgentLoopEngine | Awaitable[AgentLoopEngine],
 ]
 
 
@@ -113,6 +115,13 @@ class ModeAwareAgentLoopFactory:
         executor = CompositeToolExecutor(tuple(executors))
         if self.loop_composer is not None:
             loop = self.loop_composer(descriptor, run_id, catalog, executor)
+            if inspect.isawaitable(loop):
+                close = getattr(loop, "close", None)
+                if close is not None:
+                    close()
+                raise RuntimeError(
+                    "async loop composers require create_loop_async()"
+                )
             loop.delegated_run_controller = self.child_executor
             return loop
         return AgentLoopEngine(
@@ -126,3 +135,45 @@ class ModeAwareAgentLoopFactory:
             ),
             delegated_run_controller=self.child_executor,
         )
+
+    async def create_loop_async(
+        self, descriptor: AgentDescriptor, run_id: str
+    ) -> AgentLoopEngine:
+        """Compose a loop while allowing an async host composition callback."""
+
+        catalogs: list[ToolCatalog] = [
+            InvocationGrantToolCatalog(
+                self.base_catalog,
+                descriptor.tools,
+                self.runtime.session_store.get_start_command,
+                fallback_invocation_mode=self.fallback_invocation_mode,
+            )
+        ]
+        executors: list[ToolExecutor] = [self.base_executor]
+        if descriptor.allow_delegation and descriptor.mode in {
+            AgentMode.FIBRE,
+            AgentMode.TEAM,
+        }:
+            key = (descriptor.agent_id, descriptor.mode)
+            coordinator = self._coordinators.get(key)
+            if coordinator is None:
+                coordinator = MultiAgentCoordinator(
+                    mode=descriptor.mode,
+                    registry=self.registry,
+                    executor=self.child_executor,
+                    max_concurrency=self.max_delegation_concurrency,
+                    workspace_policy=self.workspace_policy,
+                )
+                self._coordinators[key] = coordinator
+            suite = MultiAgentToolPlugin(coordinator=coordinator, runtime=self.runtime)
+            catalogs.append(suite.catalog)
+            executors.append(suite.executor)
+        catalog = CompositeToolCatalog(tuple(catalogs))
+        executor = CompositeToolExecutor(tuple(executors))
+        if self.loop_composer is not None:
+            loop = self.loop_composer(descriptor, run_id, catalog, executor)
+            if inspect.isawaitable(loop):
+                loop = await loop
+            loop.delegated_run_controller = self.child_executor
+            return loop
+        return self.create_loop(descriptor, run_id)

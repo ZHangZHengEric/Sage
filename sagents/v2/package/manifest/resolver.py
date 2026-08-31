@@ -13,7 +13,12 @@ from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.agents import AgentEntrypoint, AgentMemoryBehavior
 from sagents.v2.package.manifest.flows import FlowDefinition
-from sagents.v2.package.manifest.root import PluginDeclaration, SageManifest
+from sagents.v2.package.manifest.credentials import CredentialDeclaration
+from sagents.v2.package.manifest.root import (
+    InterfaceDeclaration,
+    PluginDeclaration,
+    SageManifest,
+)
 from sagents.v2.package.manifest.runtime import RuntimeConfig
 
 
@@ -53,6 +58,8 @@ class ResolvedSageManifest(StrictModel):
     policy_ceilings: dict[Identifier, PolicyCeiling]
     plugins: tuple[PluginDeclaration, ...] = ()
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    credentials: dict[Identifier, CredentialDeclaration] = Field(default_factory=dict)
+    interfaces: dict[Identifier, InterfaceDeclaration] = Field(default_factory=dict)
 
 
 class CompositionResolver:
@@ -166,6 +173,8 @@ class CompositionResolver:
             policy_ceilings=ceilings,
             plugins=manifest.plugins,
             runtime=manifest.runtime,
+            credentials=dict(manifest.credentials),
+            interfaces=dict(manifest.interfaces),
         )
 
     def resolve_run_config(

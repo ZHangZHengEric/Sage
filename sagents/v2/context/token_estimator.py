@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import math
 import unicodedata
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Protocol
-
-from pydantic import Field
-
-from sagents.v2.contracts.common import StrictModel
 from sagents.v2.model.contracts import ModelMessage
 
 
@@ -20,16 +14,6 @@ class TokenEstimator(Protocol):
     """Synchronous, side-effect-free estimator used on every projection pass."""
 
     def estimate(self, messages: tuple[ModelMessage, ...]) -> int: ...
-
-
-class TokenEstimatorDescriptor(StrictModel):
-    estimator_id: str
-    name: str
-    value: str
-    available: bool = True
-    exact_for: tuple[str, ...] = ()
-    dependencies: tuple[str, ...] = ()
-    config_schema: dict[str, Any] = Field(default_factory=dict)
 
 
 class JsonHeuristicTokenEstimator:
@@ -169,108 +153,3 @@ class CallableTokenEstimator:
         if value < 0:
             raise ValueError("token estimator cannot return a negative value")
         return value
-
-
-@dataclass(frozen=True)
-class _Registration:
-    descriptor: TokenEstimatorDescriptor
-    factory: Callable[[dict[str, Any]], TokenEstimator]
-
-
-class TokenEstimatorRegistry:
-    """Small explicit registry used by composition roots and Desktop settings."""
-
-    def __init__(self, *, include_builtins: bool = True) -> None:
-        self._registrations: dict[str, _Registration] = {}
-        if include_builtins:
-            self._register_builtins()
-
-    def register(
-        self,
-        descriptor: TokenEstimatorDescriptor,
-        factory: Callable[[dict[str, Any]], TokenEstimator],
-    ) -> None:
-        if descriptor.estimator_id in self._registrations:
-            raise ValueError(
-                f"token estimator {descriptor.estimator_id!r} is already registered"
-            )
-        self._registrations[descriptor.estimator_id] = _Registration(
-            descriptor=descriptor, factory=factory
-        )
-
-    def descriptors(self) -> tuple[TokenEstimatorDescriptor, ...]:
-        return tuple(
-            registration.descriptor
-            for _, registration in sorted(self._registrations.items())
-        )
-
-    def create(
-        self, estimator_id: str, config: dict[str, Any] | None = None
-    ) -> TokenEstimator:
-        try:
-            registration = self._registrations[estimator_id]
-        except KeyError as exc:
-            raise ValueError(f"unknown token estimator {estimator_id!r}") from exc
-        if not registration.descriptor.available:
-            dependencies = ", ".join(registration.descriptor.dependencies)
-            raise RuntimeError(
-                f"token estimator {estimator_id!r} is unavailable; install {dependencies}"
-            )
-        return registration.factory(dict(config or {}))
-
-    def extend(
-        self,
-        registrations: Iterable[
-            tuple[
-                TokenEstimatorDescriptor,
-                Callable[[dict[str, Any]], TokenEstimator],
-            ]
-        ],
-    ) -> None:
-        for descriptor, factory in registrations:
-            self.register(descriptor, factory)
-
-    def _register_builtins(self) -> None:
-        self.register(
-            TokenEstimatorDescriptor(
-                estimator_id="json-heuristic",
-                name="JSON heuristic",
-                value="Conservative zero-dependency estimate of full message payloads.",
-                config_schema={
-                    "type": "object",
-                    "properties": {
-                        "bytes_per_token": {"type": "number", "exclusiveMinimum": 0},
-                        "message_overhead": {"type": "integer", "minimum": 0},
-                    },
-                },
-            ),
-            lambda config: JsonHeuristicTokenEstimator(**config),
-        )
-        self.register(
-            TokenEstimatorDescriptor(
-                estimator_id="unicode-heuristic",
-                name="Unicode heuristic",
-                value="Balances ASCII and CJK/symbol text without external packages.",
-                config_schema={"type": "object", "additionalProperties": True},
-            ),
-            lambda config: UnicodeHeuristicTokenEstimator(**config),
-        )
-        available = importlib.util.find_spec("tiktoken") is not None
-        self.register(
-            TokenEstimatorDescriptor(
-                estimator_id="tiktoken",
-                name="Tiktoken",
-                value="Uses OpenAI's tokenizer tables for supported model families.",
-                available=available,
-                exact_for=("OpenAI tokenizer-compatible models",),
-                dependencies=("tiktoken",),
-                config_schema={
-                    "type": "object",
-                    "properties": {
-                        "model": {"type": "string"},
-                        "encoding_name": {"type": "string"},
-                    },
-                },
-            ),
-            lambda config: TiktokenTokenEstimator(**config),
-        )

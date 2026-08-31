@@ -193,6 +193,10 @@ class V2ApiClient {
     return raw is List ? [for (final item in raw) item.toString()] : const [];
   }
 
+  Future<void> deleteSkill(String skillName) async {
+    await _json('DELETE', '/api/v2/skills/${Uri.encodeComponent(skillName)}');
+  }
+
   Future<List<ModelProviderSummary>> listModelProviders() async {
     final value = await _json('GET', '/api/v2/model-providers');
     return value is List

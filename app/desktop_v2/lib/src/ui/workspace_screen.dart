@@ -460,9 +460,9 @@ class _ProjectRailState extends State<_ProjectRail> {
       _ConversationTile(
         conversation: conversation,
         selected:
+            widget.controller.selectedGroupId == groupId &&
             widget.controller.selectedConversationId == conversation.id &&
             !widget.controller.viewingSubSession,
-        indented: !agentWorkspace,
         hasChildren: hasChildren,
         expanded: expanded,
         onToggleExpanded: hasChildren
@@ -476,7 +476,7 @@ class _ProjectRailState extends State<_ProjectRail> {
             ? widget.controller.selectAgentWorkspaceConversation(
                 conversation.id,
               )
-            : widget.controller.selectConversation(conversation.id),
+            : widget.controller.selectConversation(groupId, conversation.id),
         onArchive: () =>
             widget.controller.archiveConversation(groupId, conversation.id),
         onDelete: () => _deleteConversation(context, groupId, conversation),
@@ -559,6 +559,9 @@ class _ProjectRailState extends State<_ProjectRail> {
                         onTap: () => _selectProject(group),
                         onToggleExpanded: () => _selectProject(group),
                         onNewConversation: widget.controller.createConversation,
+                        onRemoveProject: () => unawaited(
+                          widget.controller.removeProject(group.id),
+                        ),
                       ),
                     );
                   },
@@ -645,6 +648,8 @@ class _ProjectRailState extends State<_ProjectRail> {
                       onTap: () => _selectProject(group),
                       onToggleExpanded: () => _toggleProject(group),
                       onNewConversation: widget.controller.createConversation,
+                      onRemoveProject: () =>
+                          unawaited(widget.controller.removeProject(group.id)),
                     ),
                     if (_isExpanded(group))
                       for (final conversation in group.conversations)
@@ -838,6 +843,7 @@ class _WorkspaceHeader extends StatelessWidget {
     required this.onTap,
     required this.onToggleExpanded,
     required this.onNewConversation,
+    required this.onRemoveProject,
   });
 
   final WorkspaceGroup group;
@@ -846,69 +852,94 @@ class _WorkspaceHeader extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onToggleExpanded;
   final VoidCallback onNewConversation;
+  final VoidCallback onRemoveProject;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Semantics(
-      selected: selected,
-      button: true,
-      child: InkWell(
-        key: ValueKey('workspace-header:${group.id}'),
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Container(
-          height: 39,
-          padding: const EdgeInsets.only(left: 8, right: 4),
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                group.project == null
-                    ? CupertinoIcons.sparkles
-                    : CupertinoIcons.square_stack_3d_up,
-                size: 16,
-                color: colors.onSurface,
+    return GlassMenu(
+      key: ValueKey('project-context-menu:${group.id}'),
+      menuWidth: 176,
+      menuBorderRadius: 16,
+      itemBorderRadius: 10,
+      autoAdjustToScreen: true,
+      menuPadding: const EdgeInsets.all(8),
+      menuAlignment: GlassMenuAlignment.topRight,
+      settings: _composerGlassSettings(context),
+      triggerBuilder: (context, toggleMenu) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapDown: (_) => toggleMenu(),
+        child: Semantics(
+          selected: selected,
+          button: true,
+          child: InkWell(
+            key: ValueKey('workspace-header:${group.id}'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Container(
+              height: 39,
+              padding: const EdgeInsets.only(left: 8, right: 4),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  group.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontSize: 13.5,
+              child: Row(
+                children: [
+                  Icon(
+                    group.project == null
+                        ? CupertinoIcons.sparkles
+                        : CupertinoIcons.square_stack_3d_up,
+                    size: 16,
                     color: colors.onSurface,
-                    fontWeight: FontWeight.w700,
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      group.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontSize: 13.5,
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    _SidebarIconButton(
+                      tooltip: context.l10n.text('workspace.newConversation'),
+                      icon: CupertinoIcons.square_pencil,
+                      keyValue: 'project-new-conversation:${group.id}',
+                      onTap: onNewConversation,
+                    ),
+                  _SidebarIconButton(
+                    tooltip: context.l10n.text(
+                      expanded
+                          ? 'workspace.collapseProject'
+                          : 'workspace.expandProject',
+                    ),
+                    icon: expanded
+                        ? CupertinoIcons.chevron_down
+                        : CupertinoIcons.chevron_right,
+                    keyValue: 'project-disclosure:${group.id}',
+                    onTap: onToggleExpanded,
+                  ),
+                ],
               ),
-              if (selected)
-                _SidebarIconButton(
-                  tooltip: context.l10n.text('workspace.newConversation'),
-                  icon: CupertinoIcons.square_pencil,
-                  keyValue: 'project-new-conversation:${group.id}',
-                  onTap: onNewConversation,
-                ),
-              _SidebarIconButton(
-                tooltip: context.l10n.text(
-                  expanded
-                      ? 'workspace.collapseProject'
-                      : 'workspace.expandProject',
-                ),
-                icon: expanded
-                    ? CupertinoIcons.chevron_down
-                    : CupertinoIcons.chevron_right,
-                keyValue: 'project-disclosure:${group.id}',
-                onTap: onToggleExpanded,
-              ),
-            ],
+            ),
           ),
         ),
       ),
+      items: [
+        GlassMenuItem(
+          key: ValueKey('project-remove:${group.id}'),
+          title: context.l10n.text('workspace.removeProject'),
+          height: 38,
+          isDestructive: true,
+          icon: const Icon(CupertinoIcons.folder_badge_minus, size: 16),
+          onTap: onRemoveProject,
+        ),
+      ],
     );
   }
 }
@@ -920,7 +951,6 @@ class _ConversationTile extends StatefulWidget {
     required this.onTap,
     required this.onArchive,
     required this.onDelete,
-    this.indented = true,
     this.hasChildren = false,
     this.expanded = false,
     this.onToggleExpanded,
@@ -931,7 +961,6 @@ class _ConversationTile extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onArchive;
   final VoidCallback onDelete;
-  final bool indented;
   final bool hasChildren;
   final bool expanded;
   final VoidCallback? onToggleExpanded;
@@ -967,7 +996,7 @@ class _ConversationTileState extends State<_ConversationTile> {
           onTap: widget.onTap,
           child: Container(
             height: 31,
-            padding: const EdgeInsets.only(left: 12, right: 8),
+            padding: const EdgeInsets.only(left: 4, right: 8),
             decoration: BoxDecoration(
               color: widget.selected
                   ? colors.onSurface.withValues(alpha: 0.095)
@@ -976,7 +1005,6 @@ class _ConversationTileState extends State<_ConversationTile> {
             ),
             child: Row(
               children: [
-                if (widget.indented) const SizedBox(width: 16),
                 if (widget.hasChildren)
                   InkWell(
                     key: ValueKey(
@@ -1468,10 +1496,13 @@ class _MessageListState extends State<_MessageList> {
     for (final message in conversation.messages) {
       if (message.processOnly) continue;
       children.add(_MessageBubble(key: ValueKey(message.id), message: message));
-      for (final panel in conversation.processPanels.where(
-        (value) =>
-            value.anchorMessageId == message.id && _shouldShowPanel(value),
-      )) {
+      final attachedPanels = conversation.processPanels
+          .where(
+            (value) =>
+                value.anchorMessageId == message.id && _shouldShowPanel(value),
+          )
+          .toList(growable: false);
+      for (final panel in attachedPanels) {
         attachedPanelIds.add(panel.id);
         children.add(const SizedBox(height: 14));
         children.add(
@@ -1483,7 +1514,7 @@ class _MessageListState extends State<_MessageList> {
           ),
         );
       }
-      children.add(const SizedBox(height: 26));
+      children.add(SizedBox(height: attachedPanels.isEmpty ? 26 : 16));
     }
     for (final panel in conversation.processPanels.where(
       (value) =>

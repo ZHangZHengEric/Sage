@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import sys
+import json
 from typing import Iterable, Optional
 
 from app.cli.commands.management import (
@@ -45,6 +46,10 @@ from app.cli.runtime.stats import (
 )
 from app.cli.runtime.stream import (
     _stream_request,
+)
+from sagents.v2.runtime.session.migration import (
+    migrate_manifest_v1,
+    migrate_runtime_root,
 )
 
 
@@ -120,6 +125,21 @@ async def _main_async(args: argparse.Namespace) -> int:
             return _config_init_command(args)
         if args.command == "provider":
             return await _provider_command(args)
+        if args.command == "v2" and args.v2_command == "migrate":
+            report = await asyncio.to_thread(
+                migrate_runtime_root,
+                args.runtime_root,
+                dry_run=args.dry_run,
+            )
+            payload = {
+                **report.__dict__,
+                "source": str(report.source),
+                "backup": str(report.backup) if report.backup else None,
+            }
+            if args.manifest:
+                payload["manifest"] = str(migrate_manifest_v1(args.manifest))
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            return 0
         if args.command == "tui":
             return _tui_command(args)
         raise ValueError(f"Unsupported command: {args.command}")

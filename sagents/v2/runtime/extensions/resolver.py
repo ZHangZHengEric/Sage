@@ -31,6 +31,7 @@ class ResolvedExtensionGraph:
     plugin_ids: tuple[str, ...]
     start_order: tuple[str, ...]
     capabilities: tuple[ResolvedCapability, ...]
+    dependencies: tuple[tuple[str, str], ...]
     resolution_hash: str
 
 
@@ -136,6 +137,14 @@ class ExtensionResolver:
                 ],
                 "start_order": order,
                 "capabilities": [value.__dict__ for value in resolved_capabilities],
+                "dependencies": [
+                    [consumer, provider]
+                    for consumer, provider in sorted(
+                        (consumer, provider)
+                        for consumer, providers in dependencies.items()
+                        for provider in providers
+                    )
+                ],
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -144,11 +153,18 @@ class ExtensionResolver:
             plugin_ids=tuple(sorted(selected)),
             start_order=order,
             capabilities=resolved_capabilities,
+            dependencies=tuple(
+                sorted(
+                    (consumer, provider)
+                    for consumer, providers in dependencies.items()
+                    for provider in providers
+                )
+            ),
             resolution_hash=f"sha256:{hashlib.sha256(encoded).hexdigest()}",
         )
 
 
-_VERSION = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?")
+_VERSION = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
 
 
 def _version_tuple(version: str) -> tuple[int, int, int]:

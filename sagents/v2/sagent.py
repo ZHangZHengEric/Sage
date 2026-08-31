@@ -58,7 +58,7 @@ class SAgentRunStream:
 
     handle: RunHandle
     events: AsyncIterator[RuntimeEvent]
-    _execution: asyncio.Task[RunSnapshot]
+    _execution: asyncio.Future[RunSnapshot]
 
     async def detach(self) -> None:
         """Detach only this observer; execution ownership stays with Runtime."""
@@ -83,12 +83,14 @@ class SAgent:
         memory_service: MemoryService | None = None,
         memory_scope: dict | None = None,
         owned_resources: tuple[object, ...] = (),
+        dispatcher=None,
     ) -> None:
         self.runtime = runtime
         self.driver_factory = driver_factory
         self.memory_service = memory_service
         self.memory_scope = dict(memory_scope or {})
         self._owned_resources = owned_resources
+        self._dispatcher = dispatcher
         self._tasks: dict[str, asyncio.Task[RunSnapshot]] = {}
         self._drivers: dict[str, RunDriver] = {}
         self._closed = False
@@ -99,7 +101,10 @@ class SAgent:
         self._ensure_open()
         command = self._with_memory_scope(command, context)
         handle = await self.runtime.start_run(command, context)
-        self._ensure_execution(handle.run_id, context, resume=False)
+        if self._dispatcher is None:
+            self._ensure_execution(handle.run_id, context, resume=False)
+        else:
+            await self._submit_or_fail(handle, context, resume=False)
         return handle
 
     async def run_stream(
@@ -110,7 +115,11 @@ class SAgent:
         self._ensure_open()
         command = self._with_memory_scope(command, context)
         handle = await self.runtime.start_run(command, context)
-        execution = self._ensure_execution(handle.run_id, context, resume=False)
+        execution = (
+            self._ensure_execution(handle.run_id, context, resume=False)
+            if self._dispatcher is None
+            else await self._submit_or_fail(handle, context, resume=False)
+        )
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
@@ -134,6 +143,29 @@ class SAgent:
 
         self._ensure_open()
         execution = self._ensure_execution(handle.run_id, context, resume=resume)
+        return SAgentRunStream(
+            handle=handle,
+            events=self._terminal_stream(
+                EventCursor(run_id=handle.run_id, run_sequence=0)
+            ),
+            _execution=execution,
+        )
+
+    async def schedule_accepted_run(
+        self,
+        handle: RunHandle,
+        context: RequestContext,
+        *,
+        resume: bool = False,
+    ) -> SAgentRunStream:
+        """Submit an already accepted Run through the configured dispatcher."""
+
+        self._ensure_open()
+        if self._dispatcher is None:
+            return self.drive_accepted_run(handle, context, resume=resume)
+        execution = await self._dispatcher.submit(
+            self, handle, context, resume=resume
+        )
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
@@ -174,14 +206,62 @@ class SAgent:
 
     async def continue_run(
         self, run_id: str, context: RequestContext
-    ) -> asyncio.Task[RunSnapshot]:
+    ) -> asyncio.Future[RunSnapshot]:
         """Restart local execution after resume was durably accepted."""
 
         self._ensure_open()
         run = await self.runtime.get_run(run_id)
         if run.state != RunState.RESUMING:
             raise ValueError(f"run must be resuming, got {run.state.value}")
-        return self._ensure_execution(run_id, context, resume=True)
+        if self._dispatcher is None:
+            return self._ensure_execution(run_id, context, resume=True)
+        return await self._submit_or_fail(run, context, resume=True)
+
+    async def _submit_or_fail(self, run, context, *, resume):
+        """Make an accepted scheduling failure a durable typed Run fact."""
+
+        try:
+            return await self._dispatcher.submit(
+                self, run, context, resume=resume
+            )
+        except Exception as exc:
+            current = await self.runtime.get_run(run.run_id)
+            if current.state not in TERMINAL_RUN_STATES and current.state not in {
+                RunState.SUSPENDED,
+                RunState.SUSPEND_REQUESTED,
+            }:
+                error = (
+                    exc.info
+                    if isinstance(exc, SageV2Error)
+                    else RuntimeErrorInfo(
+                        code="scheduler.submit_failed",
+                        category=ErrorCategory.RESOURCE_LOST,
+                        message=str(exc),
+                        safe_to_resume=True,
+                    )
+                )
+                try:
+                    await self.runtime.fail_run(
+                        run_id=run.run_id,
+                        expected_revision=current.revision,
+                        error=error,
+                        context=context,
+                        idempotency_key=(
+                            f"scheduler-submit-failed:{run.run_id}:"
+                            f"{current.revision}"
+                        ),
+                    )
+                except SageV2Error:
+                    # A concurrent control command may already have moved the Run.
+                    pass
+            raise
+
+    def attach_dispatcher(self, dispatcher) -> None:
+        """Bind the Application-owned execution entrypoint exactly once."""
+
+        if self._dispatcher is not None and self._dispatcher is not dispatcher:
+            raise RuntimeError("SAgent already has an execution dispatcher")
+        self._dispatcher = dispatcher
 
     def subscribe_events(self, cursor: EventCursor) -> AsyncIterator[RuntimeEvent]:
         """Observe an existing Run after an exclusive replay cursor."""
@@ -299,18 +379,22 @@ class SAgent:
                     result, context, self.runtime.session_store
                 )
         except asyncio.CancelledError:
+            await self._close_driver(run_id, driver)
             raise
         except Exception as exc:
             result = await self._fail_driver_crash(run_id, exc, context)
-        if result.state in TERMINAL_RUN_STATES:
-            closer = getattr(driver, "close", None)
-            if closer is not None:
-                closed = closer()
-                if inspect.isawaitable(closed):
-                    await closed
-            if self._drivers.get(run_id) is driver:
-                self._drivers.pop(run_id, None)
+        if result.state in TERMINAL_RUN_STATES or result.state == RunState.SUSPENDED:
+            await self._close_driver(run_id, driver)
         return result
+
+    async def _close_driver(self, run_id, driver) -> None:
+        closer = getattr(driver, "close", None)
+        if closer is not None:
+            closed = closer()
+            if inspect.isawaitable(closed):
+                await closed
+        if self._drivers.get(run_id) is driver:
+            self._drivers.pop(run_id, None)
 
     async def _fail_driver_crash(self, run_id, exc, context):
         """Record a driver crash without overwriting a concurrent pause/cancel."""

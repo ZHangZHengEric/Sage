@@ -18,6 +18,7 @@ import 'package:sage_desktop_v2/src/state/workspace_controller.dart';
 import 'package:sage_desktop_v2/src/usage_models.dart';
 import 'package:sage_desktop_v2/src/ui/file_preview.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
+import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
 class _FakeApi extends V2ApiClient {
   final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
@@ -28,7 +29,9 @@ class _FakeApi extends V2ApiClient {
   DesktopSettings? lastSettings;
   String? lastDeletedModelId;
   String? lastDeletedAgentId;
+  String? lastDeletedSkillName;
   String? lastDeletedSessionId;
+  String? lastRemovedProjectId;
   Map<String, Object?>? lastRunBody;
   int workspaceTreeCalls = 0;
   int workspaceFileCalls = 0;
@@ -40,6 +43,7 @@ class _FakeApi extends V2ApiClient {
   Map<String, Object?>? lastSelectedComponentConfig;
   int sessionTreeSnapshotCalls = 0;
   int sessionTreeSubscriptionCalls = 0;
+  bool skillDeleted = false;
   WorkspaceFileContent workspaceFileContent = WorkspaceFileContent(
     bytes: Uint8List.fromList('Sage v2 workspace'.codeUnits),
     mediaType: 'text/plain',
@@ -79,6 +83,8 @@ class _FakeApi extends V2ApiClient {
         turns: 5,
         toolCalls: 4,
         sessions: 2,
+        averageFirstTokenLatencyMs: 725.5,
+        outputTokensPerSecond: 32.0,
       ),
       daily: [
         UsageDay(
@@ -119,9 +125,9 @@ class _FakeApi extends V2ApiClient {
   }
 
   @override
-  Future<List<SkillSummary>> listSkills(String agentId) async => const [
-    SkillSummary(name: 'code-review'),
-  ];
+  Future<List<SkillSummary>> listSkills(String agentId) async => skillDeleted
+      ? const []
+      : const [SkillSummary(name: 'code-review', canDelete: true)];
 
   @override
   Future<AgentConfiguration> getAgentConfiguration(String agentId) async =>
@@ -136,7 +142,7 @@ class _FakeApi extends V2ApiClient {
         deepThinking: true,
         thinkingLevel: 'medium',
         availableTools: const ['read_file'],
-        availableSkills: const ['code-review'],
+        availableSkills: skillDeleted ? const [] : const ['code-review'],
         shellPolicy: const ShellPolicySummary(
           autoExecuteKeywords: ['git push (non-force)', 'relative rm -rf'],
           approvalKeywords: ['git reset --hard', 'git clean'],
@@ -201,9 +207,15 @@ class _FakeApi extends V2ApiClient {
   ];
 
   @override
-  Future<List<SkillSummary>> listSkillCatalog() async => const [
-    SkillSummary(name: 'code-review', description: 'Review code safely'),
-  ];
+  Future<List<SkillSummary>> listSkillCatalog() async => skillDeleted
+      ? const []
+      : const [
+          SkillSummary(
+            name: 'code-review',
+            description: 'Review code safely',
+            canDelete: true,
+          ),
+        ];
 
   @override
   Future<String> getSkillContent(String skillName) async => '''---
@@ -218,7 +230,14 @@ Inspect the complete diff before reporting findings.
   @override
   Future<List<String>> importSkillFolder(String path) async {
     importedSkillFolder = path;
+    skillDeleted = false;
     return const ['code-review'];
+  }
+
+  @override
+  Future<void> deleteSkill(String skillName) async {
+    lastDeletedSkillName = skillName;
+    skillDeleted = true;
   }
 
   @override
@@ -648,6 +667,11 @@ Inspect the complete diff before reporting findings.
     lastSettings = settings;
     desktopSettings = settings;
     return settings;
+  }
+
+  @override
+  Future<void> removeProject(String projectId) async {
+    lastRemovedProjectId = projectId;
   }
 
   @override
@@ -2930,6 +2954,22 @@ void main() {
           controller.selectedGroupId,
           WorkspaceController.agentWorkspaceId,
         );
+        final recentConversationTile = find.byKey(
+          ValueKey('conversation-tile:${controller.selectedConversationId}'),
+        );
+        final recentConversationIcon = find.descendant(
+          of: recentConversationTile,
+          matching: find.byIcon(CupertinoIcons.bubble_left),
+        );
+        final newConversationIcon = find.descendant(
+          of: find.byKey(const ValueKey('new-agent-workspace-conversation')),
+          matching: find.byIcon(CupertinoIcons.square_pencil),
+        );
+        expect(
+          tester.getCenter(recentConversationIcon).dx -
+              tester.getCenter(newConversationIcon).dx,
+          inInclusiveRange(10, 14),
+        );
 
         await tester.tap(
           find.byKey(const ValueKey('workspace-header:project_demo')),
@@ -2947,6 +2987,23 @@ void main() {
         );
 
         expect(conversationTile, findsOneWidget);
+        final projectIcon = find.descendant(
+          of: find.byKey(const ValueKey('workspace-header:project_demo')),
+          matching: find.byIcon(CupertinoIcons.square_stack_3d_up),
+        );
+        final projectConversationIcon = find.descendant(
+          of: conversationTile,
+          matching: find.byIcon(CupertinoIcons.bubble_left),
+        );
+        expect(
+          tester.getCenter(projectConversationIcon).dx -
+              tester.getCenter(projectIcon).dx,
+          inInclusiveRange(12, 14),
+        );
+        expect(
+          tester.getCenter(projectConversationIcon).dx,
+          tester.getCenter(recentConversationIcon).dx,
+        );
         expect(
           find.descendant(
             of: disclosure,
@@ -2986,6 +3043,25 @@ void main() {
         );
         expect(conversationTile, findsOneWidget);
 
+        // A visible conversation under an inactive project must select both
+        // the project and the conversation. Updating only the conversation id
+        // leaves the center pane with no matching conversation to render.
+        await tester.tap(conversationTile);
+        await tester.pumpAndSettle();
+        expect(controller.selectedGroupId, 'project_demo');
+        expect(controller.selectedDisplayConversation, isNotNull);
+        expect(
+          controller.selectedDisplayConversation?.id,
+          controller.selectedConversationId,
+        );
+
+        await tester.tap(recentNewConversation);
+        await tester.pumpAndSettle();
+        expect(
+          controller.selectedGroupId,
+          WorkspaceController.agentWorkspaceId,
+        );
+
         await tester.tap(
           find.byKey(const ValueKey('workspace-header:project_demo')),
         );
@@ -3008,6 +3084,56 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(conversationTile, findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'project right-click menu removes an inactive project in ${brightness.name} mode',
+      (tester) async {
+        tester.view.physicalSize = const Size(1440, 900);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final api = _FakeApi();
+        final controller = await _controller(api: api);
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+
+        final projectHeader = find.byKey(
+          const ValueKey('workspace-header:project_demo'),
+        );
+        expect(projectHeader, findsOneWidget);
+        expect(
+          controller.selectedGroupId,
+          WorkspaceController.agentWorkspaceId,
+        );
+
+        await tester.tap(projectHeader, buttons: kSecondaryMouseButton);
+        await tester.pumpAndSettle();
+
+        final removeProject = find.byKey(
+          const ValueKey('project-remove:project_demo'),
+        );
+        expect(removeProject, findsOneWidget);
+        expect(find.text('移除项目'), findsOneWidget);
+
+        await tester.tap(removeProject);
+        await tester.pumpAndSettle();
+
+        expect(api.lastRemovedProjectId, 'project_demo');
+        expect(projectHeader, findsNothing);
+        expect(
+          controller.selectedGroupId,
+          WorkspaceController.agentWorkspaceId,
+        );
+        expect(controller.selectedDisplayConversation, isNotNull);
         expect(tester.takeException(), isNull);
       },
     );
@@ -3109,6 +3235,13 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('检查一下代码').last).dy),
     );
     expect(processTop, lessThan(tester.getTopLeft(find.text('完成')).dy));
+    final processBottom = tester
+        .getBottomLeft(find.byKey(const ValueKey('process-panel')))
+        .dy;
+    final finalMessageTop = tester
+        .getTopLeft(find.byKey(const ValueKey('item_1')))
+        .dy;
+    expect(finalMessageTop - processBottom, 16);
 
     await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
     await tester.pump();
@@ -4222,6 +4355,11 @@ void main() {
     expect(find.text('15K'), findsWidgets);
     expect(find.text('Prompt Cache 利用率'), findsOneWidget);
     expect(find.text('33.3%'), findsWidgets);
+    expect(find.text('平均首字延迟'), findsOneWidget);
+    expect(find.text('726 ms'), findsOneWidget);
+    expect(find.text('Token 输出速度'), findsOneWidget);
+    expect(find.text('32 token/s'), findsOneWidget);
+    expect(find.byKey(const ValueKey('usage-metric-strip')), findsOneWidget);
     expect(find.byKey(const ValueKey('usage-token-chart')), findsOneWidget);
     expect(find.text('模型消耗'), findsOneWidget);
     expect(find.text('Agent 消耗'), findsOneWidget);
@@ -4248,6 +4386,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.lastUsageDays, 7);
   });
+
+  for (final brightness in [Brightness.light, Brightness.dark]) {
+    testWidgets(
+      'usage latency metrics stay responsive in ${brightness.name} mode',
+      (tester) async {
+        tester.view.physicalSize = const Size(375, 720);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final controller = await _controller();
+        addTearDown(controller.dispose);
+        await controller.loadUsageOverview();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(brightness: brightness),
+            home: Scaffold(
+              body: Padding(
+                padding: const EdgeInsets.all(16),
+                child: UsageOverviewSettings(controller: controller),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Avg TTFT'), findsOneWidget);
+        expect(find.text('Token throughput'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('usage-metric-strip')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets(
     'archived conversations stay out of recents and can be restored',
@@ -4611,6 +4787,47 @@ void main() {
       expect(find.textContaining('name: code-review'), findsOneWidget);
     },
   );
+
+  testWidgets('imported skill can be deleted after confirmation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('技能').first);
+    await tester.pumpAndSettle();
+
+    final deleteButton = find.byKey(
+      const ValueKey('settings-skill-delete-code-review'),
+    );
+    expect(deleteButton, findsOneWidget);
+    await tester.tap(deleteButton);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('settings-skill-delete-confirm')),
+      findsOneWidget,
+    );
+    expect(find.text('删除“code-review”？'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('settings-skill-delete-confirm')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.lastDeletedSkillName, 'code-review');
+    expect(deleteButton, findsNothing);
+    expect(find.text('已删除 code-review'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('agent settings use a flat compact agent selector', (
     tester,
@@ -5365,6 +5582,10 @@ void main() {
 
       expect(
         find.byKey(const ValueKey('settings-skill-document')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('settings-skill-delete-code-review')),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);

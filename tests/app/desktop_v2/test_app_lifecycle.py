@@ -78,3 +78,18 @@ def test_health_identifies_the_exact_sidecar_build():
         "revision": 3,
         "build_id": "source-test-build",
     }
+
+
+def test_delete_skill_route_forwards_the_authenticated_desktop_user():
+    service = _Service()
+    service.delete_skill = AsyncMock(
+        return_value={"deleted_name": "review"},
+    )
+    app = app_module.create_app(service=service)
+
+    with TestClient(app) as client:
+        response = client.delete("/api/v2/skills/review")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"deleted_name": "review"}
+    service.delete_skill.assert_awaited_once_with("review", "default_user")

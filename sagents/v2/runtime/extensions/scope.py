@@ -6,7 +6,12 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
-from sagents.v2.runtime.extensions.contracts import ExtensionRegistration, StopReason
+from sagents.v2.runtime.extensions.contracts import (
+    ExtensionRegistration,
+    ExtensionScopeContext,
+    ProviderSet,
+    StopReason,
+)
 from sagents.v2.runtime.extensions.resolver import ResolvedExtensionGraph
 
 
@@ -27,8 +32,11 @@ class StartedExtension:
 @dataclass
 class ExtensionScopeHandle:
     graph: ResolvedExtensionGraph
-    providers: dict[str, Any]
+    context: ExtensionScopeContext
+    providers: ProviderSet
     _started: list[StartedExtension]
+    parent: "ExtensionScopeHandle | None" = None
+    _owned_ancestors: tuple["ExtensionScopeHandle", ...] = ()
     _closed: bool = False
 
     async def close(self, reason: StopReason = StopReason.SCOPE_CLOSED) -> None:
@@ -41,9 +49,18 @@ class ExtensionScopeHandle:
                     result = value.registration.stop(value.instance, reason)
                 else:
                     stop = getattr(value.instance, "stop", None)
-                    result = stop(reason) if stop is not None else None
+                    if stop is not None:
+                        result = stop(reason)
+                    else:
+                        close = getattr(value.instance, "close", None)
+                        result = close() if close is not None else None
                 if inspect.isawaitable(result):
                     await result
+            except Exception as exc:
+                errors.append(exc)
+        for handle in reversed(self._owned_ancestors):
+            try:
+                await handle.close(reason)
             except Exception as exc:
                 errors.append(exc)
         self._closed = True

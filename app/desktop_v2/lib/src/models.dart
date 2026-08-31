@@ -69,14 +69,20 @@ class AgentSummary {
 }
 
 class SkillSummary {
-  const SkillSummary({required this.name, this.description = ''});
+  const SkillSummary({
+    required this.name,
+    this.description = '',
+    this.canDelete = false,
+  });
 
   final String name;
   final String description;
+  final bool canDelete;
 
   factory SkillSummary.fromJson(Map<String, Object?> json) => SkillSummary(
     name: json['name']?.toString() ?? '',
     description: json['description']?.toString() ?? '',
+    canDelete: json['can_delete'] == true,
   );
 }
 

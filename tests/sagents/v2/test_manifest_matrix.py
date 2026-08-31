@@ -19,7 +19,7 @@ from sagents.v2.package.manifest.resolver import CompositionResolver
 
 
 VALID = """
-schema_version: sage/v1
+schema_version: sage/v2
 kind: application
 metadata:
   id: com.example.coder
@@ -41,9 +41,12 @@ models:
       context_window: 128000
 runtime:
   preset: standard
-  scheduler:
-    max_concurrent_runs: 8
-    max_concurrent_runs_per_tenant: 2
+  capabilities:
+    execution.scheduler:
+      plugin: sage.scheduler.ephemeral
+      config:
+        max_concurrent_runs: 8
+        max_concurrent_runs_per_tenant: 2
 plugins:
   - id: acme.model.private-gateway
 policies:
@@ -70,15 +73,18 @@ agents:
 entrypoint:
   agent: main
 interfaces:
-  native: {enabled: true}
-  ag_ui: {enabled: true}
+  native: {plugin: sage.protocol.native, enabled: true}
+  ag_ui: {plugin: sage.protocol.ag-ui, enabled: true}
 tests:
   scenarios: []
 environments:
   development:
     runtime:
-      scheduler:
-        max_concurrent_runs: 2
+      capabilities:
+        execution.scheduler:
+          plugin: sage.scheduler.ephemeral
+          config:
+            max_concurrent_runs: 2
 """
 
 
@@ -98,7 +104,8 @@ def test_valid_single_file_resolves_to_secret_free_immutable_specs():
     assert resolved.policy_ceilings["main"].max_total_tokens == 5000
     assert resolved.model_routes["primary"]["model"] == "test-model"
     assert resolved.plugins[0].id == "acme.model.private-gateway"
-    assert resolved.runtime.scheduler.max_concurrent_runs == 8
+    scheduler = resolved.runtime.selections("execution.scheduler")[0]
+    assert scheduler.config["max_concurrent_runs"] == 8
     assert "TEST_MODEL_KEY" not in str(resolved.model_routes)
     assert resolved.manifest_hash.startswith("sha256:")
 
@@ -160,11 +167,12 @@ def test_reference_validation_matrix(replacement, error_code):
 
 def test_environment_overlay_only_changes_allowed_domains():
     manifest = SageManifestLoader().loads(VALID, environment="development")
-    assert manifest.runtime.scheduler.max_concurrent_runs == 2
+    scheduler = manifest.runtime.selections("execution.scheduler")[0]
+    assert scheduler.config["max_concurrent_runs"] == 2
     assert manifest.metadata.id == "com.example.coder"
 
     forbidden = VALID.replace(
-        "    runtime:\n      scheduler:\n        max_concurrent_runs: 2",
+        "    runtime:\n      capabilities:\n        execution.scheduler:\n          plugin: sage.scheduler.ephemeral\n          config:\n            max_concurrent_runs: 2",
         "    metadata:\n      id: com.attacker.changed",
     )
     with pytest.raises(SageV2Error) as denied:
