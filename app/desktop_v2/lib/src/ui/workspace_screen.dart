@@ -2910,7 +2910,6 @@ class _InteractionCardState extends State<_InteractionCard> {
   final Map<String, TextEditingController> _questionControllers = {};
   final Map<String, Object?> _questionAnswers = {};
   bool _submitting = false;
-  bool _showTechnicalDetails = false;
 
   Future<void> _reply(String decision) async {
     if (_submitting) return;
@@ -3091,31 +3090,6 @@ class _InteractionCardState extends State<_InteractionCard> {
         riskCategory == 'destructive_filesystem' ||
         riskCategory == 'filesystem_delete' ||
         riskCategory == 'external_side_effect';
-    final technicalToggle = presentation == null
-        ? null
-        : TextButton.icon(
-            key: const ValueKey('interaction-technical-toggle'),
-            onPressed: () =>
-                setState(() => _showTechnicalDetails = !_showTechnicalDetails),
-            style: TextButton.styleFrom(
-              minimumSize: Size.zero,
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-            ),
-            icon: Icon(
-              _showTechnicalDetails
-                  ? CupertinoIcons.chevron_up
-                  : CupertinoIcons.chevron_down,
-              size: 12,
-            ),
-            label: Text(
-              _approvalCardText(
-                _showTechnicalDetails ? 'hideDetails' : 'showDetails',
-                language,
-              ),
-            ),
-          );
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 580),
@@ -3253,20 +3227,12 @@ class _InteractionCardState extends State<_InteractionCard> {
                     ),
                     if (presentation.preview case final preview?) ...[
                       const SizedBox(height: 7),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              presentation.previewLabel ?? '',
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: colors.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                          technicalToggle!,
-                        ],
+                      Text(
+                        presentation.previewLabel ?? '',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Container(
@@ -3297,41 +3263,7 @@ class _InteractionCardState extends State<_InteractionCard> {
                           ),
                         ),
                       ),
-                    ] else
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 5),
-                          child: technicalToggle!,
-                        ),
-                      ),
-                    if (_showTechnicalDetails)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Container(
-                          key: const ValueKey('interaction-technical-details'),
-                          width: double.infinity,
-                          constraints: const BoxConstraints(maxHeight: 150),
-                          padding: const EdgeInsets.all(9),
-                          decoration: BoxDecoration(
-                            color: colors.surfaceContainerLowest.withValues(
-                              alpha: 0.45,
-                            ),
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: SingleChildScrollView(
-                            child: SelectableText(
-                              presentation.technicalDetails,
-                              style: TextStyle(
-                                color: colors.onSurfaceVariant,
-                                fontFamily: 'monospace',
-                                fontSize: 11.5,
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                    ],
                   ],
                   if (approval &&
                       displayedRiskReason != null &&
@@ -5955,8 +5887,6 @@ String _riskLabel(
 String _approvalCardText(String key, String language) {
   final zh = language == 'zh';
   return switch (key) {
-    'showDetails' => zh ? '查看技术详情' : 'Show technical details',
-    'hideDetails' => zh ? '收起技术详情' : 'Hide technical details',
     'noSideEffect' => zh ? '无副作用' : 'No side effects',
     'readOnly' => zh ? '只读操作' : 'Read only',
     'writeOperation' => zh ? '写入操作' : 'Writes data',

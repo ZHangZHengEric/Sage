@@ -278,6 +278,47 @@ async def test_reopen_does_not_materialize_a_global_session_collection(tmp_path)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_loaded_marker", ["parent", "child"])
+async def test_delete_session_repairs_stale_loaded_markers(
+    tmp_path, missing_loaded_marker
+):
+    path = tmp_path / f"stale-loaded-marker-{missing_loaded_marker}"
+    store = FilesystemSessionStore(path)
+    parent = await store.create_run(command("parent"), CONTEXT)
+    child = await store.create_run(
+        command(
+            "fork-child",
+            session_id=parent.handle.session_id,
+            mode=SessionConcurrencyMode.FORK,
+        ),
+        CONTEXT,
+    )
+
+    for created, key in ((parent, "cancel-parent"), (child, "cancel-child")):
+        await store.commit_run(
+            run_id=created.handle.run_id,
+            expected_revision=created.handle.run_revision,
+            expected_states={RunState.QUEUED},
+            new_state=RunState.CANCELLED,
+            drafts=(),
+            context=CONTEXT,
+            idempotency_key=key,
+        )
+
+    stale_session_id = {
+        "parent": parent.handle.session_id,
+        "child": child.handle.session_id,
+    }[missing_loaded_marker]
+    store._loaded_session_ids.remove(stale_session_id)
+
+    await store.delete_session(parent.handle.session_id)
+
+    assert parent.handle.session_id not in store._sessions
+    assert child.handle.session_id not in store._sessions
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_fork_sessions_are_nested_and_parent_delete_cascades(tmp_path):
     path = tmp_path / "session-store"
     store = FilesystemSessionStore(path)

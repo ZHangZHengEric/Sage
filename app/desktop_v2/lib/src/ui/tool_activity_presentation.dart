@@ -722,7 +722,6 @@ String _browserActionLabel(String action, String language) {
 class ApprovalToolPresentation {
   const ApprovalToolPresentation({
     required this.summary,
-    required this.technicalDetails,
     this.preview,
     this.previewLabel,
     this.facts = const [],
@@ -732,7 +731,6 @@ class ApprovalToolPresentation {
   final String? preview;
   final String? previewLabel;
   final List<String> facts;
-  final String technicalDetails;
 }
 
 ApprovalToolPresentation approvalToolPresentation(
@@ -807,7 +805,6 @@ ApprovalToolPresentation approvalToolPresentation(
     preview: preview?.trim().isEmpty ?? true ? null : preview,
     previewLabel: previewLabel,
     facts: facts,
-    technicalDetails: _prettyJson(arguments),
   );
 }
 
@@ -865,14 +862,6 @@ List<String> _patchFiles(String patch) => RegExp(
   r'^\*\*\* (?:Add|Update|Delete) File: (.+)$',
   multiLine: true,
 ).allMatches(patch).map((match) => match.group(1)!.trim()).toList();
-
-String _prettyJson(Map<String, Object?> arguments) {
-  try {
-    return const JsonEncoder.withIndent('  ').convert(arguments);
-  } on JsonUnsupportedObjectError {
-    return arguments.toString();
-  }
-}
 
 String _approvalText(String key, String language, [int? value]) {
   if (value != null) {
