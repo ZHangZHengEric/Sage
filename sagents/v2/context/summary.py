@@ -28,6 +28,7 @@ class ConversationSummary(StrictModel):
 
     summary_id: str
     context_key: str
+    session_id: str
     revision: int = Field(ge=1)
     source_digest: str
     covered_message_digests: tuple[str, ...]
@@ -42,7 +43,9 @@ class ConversationSummary(StrictModel):
 class ConversationSummaryStore(Protocol):
     """Persistence port; implementations need not use a filesystem."""
 
-    async def get(self, context_key: str) -> ConversationSummary | None: ...
+    async def get(
+        self, context_key: str, *, session_id: str | None = None
+    ) -> ConversationSummary | None: ...
 
     async def save(
         self,
@@ -52,7 +55,11 @@ class ConversationSummaryStore(Protocol):
     ) -> ConversationSummary: ...
 
     async def delete(
-        self, context_key: str, *, expected_revision: int | None = None
+        self,
+        context_key: str,
+        *,
+        expected_revision: int | None = None,
+        session_id: str | None = None,
     ) -> None: ...
 
 
@@ -63,7 +70,10 @@ class InMemoryConversationSummaryStore:
         self._values: dict[str, ConversationSummary] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, context_key: str) -> ConversationSummary | None:
+    async def get(
+        self, context_key: str, *, session_id: str | None = None
+    ) -> ConversationSummary | None:
+        del session_id
         async with self._lock:
             return self._values.get(context_key)
 
@@ -84,8 +94,13 @@ class InMemoryConversationSummaryStore:
             return summary
 
     async def delete(
-        self, context_key: str, *, expected_revision: int | None = None
+        self,
+        context_key: str,
+        *,
+        expected_revision: int | None = None,
+        session_id: str | None = None,
     ) -> None:
+        del session_id
         async with self._lock:
             current = self._values.get(context_key)
             if current is None:
@@ -111,10 +126,17 @@ class SessionDerivedConversationSummaryStore:
         self.session_store = session_store
         self._lock = asyncio.Lock()
 
-    async def get(self, context_key: str) -> ConversationSummary | None:
+    async def get(
+        self, context_key: str, *, session_id: str | None = None
+    ) -> ConversationSummary | None:
+        resolved_session_id = session_id or self._legacy_session_id(context_key)
         value = await self.session_store.get_derived_state(
-            self._session_id(context_key), self.namespace, context_key
+            resolved_session_id, self.namespace, context_key
         )
+        if isinstance(value, dict) and "session_id" not in value:
+            # V1 derived summaries predate the explicit Session ownership
+            # field. They are non-authoritative and safe to upgrade on read.
+            value = {**value, "session_id": resolved_session_id}
         return ConversationSummary.model_validate(value) if value is not None else None
 
     async def save(
@@ -124,14 +146,14 @@ class SessionDerivedConversationSummaryStore:
         expected_revision: int | None,
     ) -> ConversationSummary:
         async with self._lock:
-            current = await self.get(summary.context_key)
+            current = await self.get(summary.context_key, session_id=summary.session_id)
             current_revision = current.revision if current is not None else None
             if current_revision != expected_revision:
                 raise ValueError(
                     "conversation summary revision changed during compaction"
                 )
             await self.session_store.put_derived_state(
-                self._session_id(summary.context_key),
+                summary.session_id,
                 self.namespace,
                 summary.context_key,
                 summary.model_dump(mode="json"),
@@ -139,10 +161,14 @@ class SessionDerivedConversationSummaryStore:
             return summary
 
     async def delete(
-        self, context_key: str, *, expected_revision: int | None = None
+        self,
+        context_key: str,
+        *,
+        expected_revision: int | None = None,
+        session_id: str | None = None,
     ) -> None:
         async with self._lock:
-            current = await self.get(context_key)
+            current = await self.get(context_key, session_id=session_id)
             if current is None:
                 return
             if expected_revision is not None and current.revision != expected_revision:
@@ -150,11 +176,13 @@ class SessionDerivedConversationSummaryStore:
                     "conversation summary revision changed before deletion"
                 )
             await self.session_store.delete_derived_state(
-                self._session_id(context_key), self.namespace, context_key
+                current.session_id, self.namespace, context_key
             )
 
     @staticmethod
-    def _session_id(context_key: str) -> str:
+    def _legacy_session_id(context_key: str) -> str:
+        """Read keys written before summaries carried an explicit Session ID."""
+
         return context_key.split(":snapshot:", 1)[0]
 
 
@@ -163,6 +191,19 @@ class SummarizationRequest(StrictModel):
     messages: tuple[ModelMessage, ...]
     previous_summary: str | None = None
     target_tokens: int = Field(gt=0)
+
+    @property
+    def response_language(self) -> str:
+        return _summary_language(self.scope.response_language)
+
+
+def _summary_language(value: str | None) -> str:
+    normalized = str(value or "en").strip().lower().replace("_", "-")
+    if normalized.startswith("zh"):
+        return "zh"
+    if normalized.startswith("pt"):
+        return "pt"
+    return "en"
 
 
 class ConversationSummarizer(Protocol):
@@ -173,11 +214,24 @@ class ExtractiveConversationSummarizer:
     """Deterministic zero-network fallback that preserves exact recent facts."""
 
     async def summarize(self, request: SummarizationRequest) -> str:
+        labels = {
+            "en": (
+                "Previous summary:",
+                "New history:",
+                "Tool calls:",
+                "[...history condensed...]",
+            ),
+            "zh": ("之前的摘要：", "新增历史：", "工具调用：", "[……历史已压缩……]"),
+            "pt": (
+                "Resumo anterior:",
+                "Novo histórico:",
+                "Chamadas de ferramentas:",
+                "[...histórico condensado...]",
+            ),
+        }[request.response_language]
         lines = []
         if request.previous_summary:
-            lines.extend(
-                ["Previous summary:", request.previous_summary.strip(), "New history:"]
-            )
+            lines.extend([labels[0], request.previous_summary.strip(), labels[1]])
         for message in request.messages:
             label = message.role.upper()
             content = self._content(message)
@@ -186,7 +240,7 @@ class ExtractiveConversationSummarizer:
                     f"{call.name}({json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)})"
                     for call in message.tool_calls
                 )
-                content = f"{content}\nTool calls: {calls}".strip()
+                content = f"{content}\n{labels[2]} {calls}".strip()
             lines.append(f"{label}: {content}".strip())
         # Character bounding is deliberately conservative and deterministic.
         maximum = max(256, request.target_tokens * 4)
@@ -195,7 +249,7 @@ class ExtractiveConversationSummarizer:
             return value
         head = value[: maximum // 3]
         tail = value[-(maximum - len(head) - 32) :]
-        return f"{head}\n[...history condensed...]\n{tail}"
+        return f"{head}\n{labels[3]}\n{tail}"
 
     @staticmethod
     def _content(message: ModelMessage) -> str:
@@ -284,6 +338,11 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         parts.append("</history>")
         capabilities = await self.model.capabilities(self.model_binding)
         source = "\n".join(parts)
+        language_instruction = {
+            "en": "Write all summary prose in English.",
+            "zh": "所有摘要性文字使用中文。",
+            "pt": "Escreva todo o texto do resumo em português.",
+        }[request.response_language]
         last_error = ""
         for attempt in range(2):
             retry = (
@@ -299,7 +358,17 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                 messages=(
                     ModelMessage(
                         role="system",
-                        content=(TextBlock(text=self._SYSTEM_PROMPT + retry),),
+                        content=(
+                            TextBlock(
+                                text=(
+                                    self._SYSTEM_PROMPT
+                                    + "\n"
+                                    + language_instruction
+                                    + " Preserve identifiers, paths, commands, errors, and quoted user text verbatim."
+                                    + retry
+                                )
+                            ),
+                        ),
                     ),
                     ModelMessage(role="user", content=(TextBlock(text=source),)),
                 ),
@@ -307,7 +376,11 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                     self._SCHEMA if capabilities.supports_structured_output else None
                 ),
                 max_output_tokens=request.target_tokens,
-                metadata={"purpose": "conversation_summary", "attempt": attempt + 1},
+                metadata={
+                    "purpose": "conversation_summary",
+                    "attempt": attempt + 1,
+                    "response_language": request.response_language,
+                },
             )
             completed = None
             async for event in self.model.stream(model_request):
@@ -417,6 +490,7 @@ def create_summary(
     return ConversationSummary(
         summary_id=previous.summary_id if previous else new_id("context_summary"),
         context_key=scope.context_key,
+        session_id=scope.session_id,
         revision=(previous.revision + 1) if previous else 1,
         source_digest=f"sha256:{hashlib.sha256(source_payload).hexdigest()}",
         covered_message_digests=covered_digests,

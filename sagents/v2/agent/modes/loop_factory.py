@@ -18,6 +18,7 @@ from sagents.v2.tool import (
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
+    DelegationConcurrencyLimiter,
     AgentMode,
     AgentRegistry,
     MultiAgentCoordinator,
@@ -47,6 +48,7 @@ class ModeAwareAgentLoopFactory:
         registry: AgentRegistry,
         resolved_spec_hash: str,
         max_delegation_concurrency: int = 4,
+        delegation_concurrency_limiter: DelegationConcurrencyLimiter | None = None,
         loop_composer: ModeLoopComposer | None = None,
         workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
         fallback_invocation_mode: str | None = None,
@@ -59,10 +61,12 @@ class ModeAwareAgentLoopFactory:
         self.registry = registry
         self.resolved_spec_hash = resolved_spec_hash
         self.max_delegation_concurrency = max_delegation_concurrency
+        self.delegation_concurrency_limiter = delegation_concurrency_limiter
         self.loop_composer = loop_composer
         self.workspace_policy = workspace_policy
         self.fallback_invocation_mode = fallback_invocation_mode
         self._coordinators: dict[tuple[str, AgentMode], MultiAgentCoordinator] = {}
+
         async def build_child(descriptor, run_id, context):
             if child_loop_factory is not None:
                 value = child_loop_factory(descriptor, run_id, context)
@@ -105,6 +109,7 @@ class ModeAwareAgentLoopFactory:
                     registry=self.registry,
                     executor=self.child_executor,
                     max_concurrency=self.max_delegation_concurrency,
+                    concurrency_limiter=self.delegation_concurrency_limiter,
                     workspace_policy=self.workspace_policy,
                 )
                 self._coordinators[key] = coordinator
@@ -119,10 +124,9 @@ class ModeAwareAgentLoopFactory:
                 close = getattr(loop, "close", None)
                 if close is not None:
                     close()
-                raise RuntimeError(
-                    "async loop composers require create_loop_async()"
-                )
+                raise RuntimeError("async loop composers require create_loop_async()")
             loop.delegated_run_controller = self.child_executor
+            loop.expected_resolved_spec_hash = self.resolved_spec_hash
             return loop
         return AgentLoopEngine(
             runtime=self.runtime,
@@ -134,6 +138,7 @@ class ModeAwareAgentLoopFactory:
                 history_reader=self.runtime.session_store,
             ),
             delegated_run_controller=self.child_executor,
+            expected_resolved_spec_hash=self.resolved_spec_hash,
         )
 
     async def create_loop_async(
@@ -162,6 +167,7 @@ class ModeAwareAgentLoopFactory:
                     registry=self.registry,
                     executor=self.child_executor,
                     max_concurrency=self.max_delegation_concurrency,
+                    concurrency_limiter=self.delegation_concurrency_limiter,
                     workspace_policy=self.workspace_policy,
                 )
                 self._coordinators[key] = coordinator
@@ -175,5 +181,6 @@ class ModeAwareAgentLoopFactory:
             if inspect.isawaitable(loop):
                 loop = await loop
             loop.delegated_run_controller = self.child_executor
+            loop.expected_resolved_spec_hash = self.resolved_spec_hash
             return loop
         return self.create_loop(descriptor, run_id)

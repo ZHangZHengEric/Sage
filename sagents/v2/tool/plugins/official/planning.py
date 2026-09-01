@@ -46,6 +46,7 @@ class PlanningTools:
         description="Replace the current structured task list.",
         input_schema=_TODO_WRITE_INPUT_SCHEMA,
         side_effect_level=SideEffectLevel.WRITE,
+        plan_safe=True,
     )
     async def todo_write(
         self,
@@ -126,6 +127,7 @@ class PlanningTools:
             "additionalProperties": False,
         },
         strict=True,
+        plan_safe=True,
     )
     async def goal_submit(
         self,

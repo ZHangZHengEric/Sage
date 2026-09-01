@@ -318,6 +318,28 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
 
+    async def list_dispatchable_runs(self):
+        """Load only snapshots advertising an active root execution intent."""
+
+        active = {"queued", "running", "suspend_requested", "resuming"}
+        for snapshot in self.sessions_root.rglob("state.json"):
+            state = self._peek_snapshot_state(snapshot)
+            should_load = False
+            for run in state.get("runs", ()):
+                command = run.get("start_command") or {}
+                if (
+                    run.get("state") in active
+                    and command.get("parent_run_id") is None
+                    and run.get("request_context") is not None
+                ):
+                    should_load = True
+                    break
+            if should_load:
+                rows = state.get("sessions", ())
+                if len(rows) == 1 and rows[0].get("session_id"):
+                    await self._ensure_session_loaded(str(rows[0]["session_id"]))
+        return await super().list_dispatchable_runs()
+
     async def list_descendant_sessions(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
@@ -795,9 +817,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 self._journal_commits[session_id] = 0
             else:
                 delta = self._state_delta(previous, state)
-                mutation = SessionStateDeltaMutation(
-                    kind="state_delta", **delta
-                )
+                mutation = SessionStateDeltaMutation(kind="state_delta", **delta)
                 previous_revision = int(previous["sessions"][0]["revision"])
                 current_revision = int(state["sessions"][0]["revision"])
                 unsigned = {
@@ -1142,18 +1162,30 @@ class _FilesystemSessionState(SessionStoreCoordinator):
     def _read_snapshot(self, snapshot: Path) -> SessionSnapshotEnvelope:
         try:
             payload = json.loads(snapshot.read_bytes())
-            envelope = SessionSnapshotEnvelope.model_validate(payload)
         except Exception as exc:
             raise self._corrupt(
                 "session_store.corrupt_snapshot",
-                f"snapshot {snapshot} contains invalid JSON or schema: {exc}",
+                f"snapshot {snapshot} contains invalid JSON: {exc}",
             ) from exc
-        unsigned = envelope.model_dump(mode="json", exclude={"checksum"})
-        if envelope.checksum != self._checksum(unsigned):
+        if not isinstance(payload, dict):
+            raise self._corrupt(
+                "session_store.corrupt_snapshot",
+                f"snapshot {snapshot} must contain a JSON object",
+            )
+        stored_checksum = payload.get("checksum")
+        unsigned = {key: value for key, value in payload.items() if key != "checksum"}
+        if stored_checksum != self._checksum(unsigned):
             raise self._corrupt(
                 "session_store.hash_mismatch",
                 f"snapshot {snapshot} checksum mismatch",
             )
+        try:
+            envelope = SessionSnapshotEnvelope.model_validate(payload)
+        except Exception as exc:
+            raise self._corrupt(
+                "session_store.corrupt_snapshot",
+                f"snapshot {snapshot} contains an invalid schema: {exc}",
+            ) from exc
         return envelope
 
     def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
@@ -1183,18 +1215,33 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 break
             complete_count += 1
             try:
-                mutation = SessionMutationEnvelope.model_validate_json(line)
+                payload = json.loads(line)
             except Exception as exc:
                 raise self._corrupt(
                     "session_store.journal_corrupt",
-                    f"journal {journal} record {index + 1} is invalid: {exc}",
+                    f"journal {journal} record {index + 1} contains invalid JSON: {exc}",
                 ) from exc
-            unsigned = mutation.model_dump(mode="json", exclude={"checksum"})
-            if mutation.checksum != self._checksum(unsigned):
+            if not isinstance(payload, dict):
+                raise self._corrupt(
+                    "session_store.journal_corrupt",
+                    f"journal {journal} record {index + 1} must contain a JSON object",
+                )
+            stored_checksum = payload.get("checksum")
+            unsigned = {
+                key: value for key, value in payload.items() if key != "checksum"
+            }
+            if stored_checksum != self._checksum(unsigned):
                 raise self._corrupt(
                     "session_store.hash_mismatch",
                     f"journal {journal} record {index + 1} checksum mismatch",
                 )
+            try:
+                mutation = SessionMutationEnvelope.model_validate(payload)
+            except Exception as exc:
+                raise self._corrupt(
+                    "session_store.journal_corrupt",
+                    f"journal {journal} record {index + 1} contains an invalid schema: {exc}",
+                ) from exc
             if mutation.current_session_revision <= revision:
                 continue
             if mutation.previous_session_revision != revision:
@@ -1512,7 +1559,9 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
     """
 
     def __init__(self, *args, **kwargs) -> None:
-        object.__setattr__(self, "_coordinator", _FilesystemSessionState(*args, **kwargs))
+        object.__setattr__(
+            self, "_coordinator", _FilesystemSessionState(*args, **kwargs)
+        )
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

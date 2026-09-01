@@ -83,6 +83,7 @@ from sagents.v2.runtime.session.contracts import (
     CommitResult,
     EventDraft,
     RunCreationResult,
+    DispatchableRun,
     SteerClaimResult,
 )
 
@@ -122,6 +123,7 @@ class _RunRow:
     suspension_id: str | None = None
     checkpoint_id: str | None = None
     start_command: StartRun | None = None
+    request_context: RequestContext | None = None
 
 
 @dataclass(eq=False)
@@ -208,6 +210,7 @@ class SessionStoreCoordinator:
         """
 
         async with self._lock:
+            self._validate_external_input_roles(command.input, context)
             # Start idempotency is scoped to tenant + principal + key. Reusing a
             # key with a different payload is a conflict, not a duplicate.
             idempotency_scope = (
@@ -238,6 +241,7 @@ class SessionStoreCoordinator:
                 parent = self._sessions.get(command.session_id)
                 if parent is None:
                     raise self._not_found("session.not_found", command.session_id)
+                self._authorize_session_actor_locked(command.session_id, context)
                 parent_session_id = command.session_id
                 fork_base_revision = (
                     parent.revision
@@ -270,6 +274,8 @@ class SessionStoreCoordinator:
                     parent_session_id=parent_session_id,
                 )
                 self._sessions[session_id] = session
+            else:
+                self._authorize_session_actor_locked(session_id, context)
 
             requested_base = command.base_session_revision
             base_revision = (
@@ -333,6 +339,7 @@ class SessionStoreCoordinator:
                 created_at=now,
                 updated_at=now,
                 start_command=command,
+                request_context=context,
             )
             self._runs[run_id] = row
             self._run_events[run_id] = []
@@ -415,6 +422,10 @@ class SessionStoreCoordinator:
             digest = self._digest(command.model_dump(mode="json"))
             previous = self._session_commit_command_results.get(key)
             if previous is not None:
+                previous_row = self._runs.get(command.run_id)
+                if previous_row is None:
+                    raise self._not_found("run.not_found", command.run_id)
+                self._authorize_session_actor_locked(previous_row.session_id, context)
                 self._require_same_idempotent_request(
                     self._session_commit_command_digests[key], digest
                 )
@@ -423,6 +434,7 @@ class SessionStoreCoordinator:
             row = self._runs.get(command.run_id)
             if row is None:
                 raise self._not_found("run.not_found", command.run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
             if row.revision != command.expected_run_revision:
                 raise self._conflict(
                     "run.revision_conflict",
@@ -541,6 +553,16 @@ class SessionStoreCoordinator:
             )
             previous = self._session_commit_command_results.get(key)
             if previous is not None:
+                previous_proposal = self._session_commit_proposals.get(
+                    command.proposal_id
+                )
+                if previous_proposal is None:
+                    raise self._not_found(
+                        "session.commit_proposal_not_found", command.proposal_id
+                    )
+                self._authorize_session_actor_locked(
+                    previous_proposal.session_id, context
+                )
                 self._require_same_idempotent_request(
                     self._session_commit_command_digests[key], digest
                 )
@@ -563,6 +585,7 @@ class SessionStoreCoordinator:
                 )
 
             row = self._runs[proposal.source_run_id]
+            self._authorize_session_actor_locked(row.session_id, context)
             session = self._sessions[proposal.session_id]
             source_events = tuple(
                 event
@@ -731,6 +754,7 @@ class SessionStoreCoordinator:
             )
             previous = self._command_results.get(command_key)
             if previous is not None:
+                self._authorize_session_actor_locked(previous.run.session_id, context)
                 self._require_same_idempotent_request(
                     self._command_digests[command_key], command_digest
                 )
@@ -743,6 +767,7 @@ class SessionStoreCoordinator:
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
             if row.revision != expected_revision:
                 # Revision conflict is the local fencing mechanism: an old
                 # worker cannot commit after another command advanced the Run.
@@ -851,6 +876,8 @@ class SessionStoreCoordinator:
             cost_total = 0.0
             has_cost = False
             models: list[str] = []
+            usage_events = 0
+            reported_usage_events = 0
             error = None
             for event in self._run_events[run_id]:
                 data = event.data
@@ -862,6 +889,9 @@ class SessionStoreCoordinator:
                     else:
                         artifacts[data.artifact.artifact_id] = data.artifact
                 elif data.kind == "usage":
+                    usage_events += 1
+                    if data.usage.reported:
+                        reported_usage_events += 1
                     input_tokens += data.usage.input_tokens
                     output_tokens += data.usage.output_tokens
                     cached_tokens += data.usage.cached_input_tokens
@@ -881,6 +911,9 @@ class SessionStoreCoordinator:
                 final_items=tuple(items.values()),
                 artifacts=tuple(artifacts.values()),
                 usage=UsageSummary(
+                    reported=(
+                        usage_events > 0 and reported_usage_events == usage_events
+                    ),
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cached_input_tokens=cached_tokens,
@@ -1035,6 +1068,36 @@ class SessionStoreCoordinator:
             )
             return tuple(self._run_snapshot(row) for row in rows)
 
+    async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]:
+        """Return root execution intents whose Scheduler work can be rebuilt."""
+
+        async with self._lock:
+            active = {
+                RunState.QUEUED,
+                RunState.RUNNING,
+                RunState.SUSPEND_REQUESTED,
+                RunState.RESUMING,
+            }
+            rows = sorted(
+                (
+                    row
+                    for row in self._runs.values()
+                    if row.state in active
+                    and row.request_context is not None
+                    and row.start_command is not None
+                    and row.start_command.parent_run_id is None
+                ),
+                key=lambda row: (row.created_at, row.run_id),
+            )
+            return tuple(
+                DispatchableRun(
+                    run=self._run_snapshot(row),
+                    context=row.request_context,
+                )
+                for row in rows
+                if row.request_context is not None
+            )
+
     async def list_descendant_sessions(
         self, session_id: str
     ) -> tuple[SessionSnapshot, ...]:
@@ -1176,6 +1239,7 @@ class SessionStoreCoordinator:
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
             if previous is not None:
+                self._authorize_session_actor_locked(previous.run.session_id, context)
                 self._require_same_idempotent_request(
                     self._command_digests[command_key], command_digest
                 )
@@ -1188,6 +1252,8 @@ class SessionStoreCoordinator:
             row = self._runs.get(command.run_id)
             if row is None:
                 raise self._not_found("run.not_found", command.run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
+            self._validate_external_input_roles(command.input, context)
             if row.revision != command.expected_revision:
                 raise self._conflict(
                     "run.revision_conflict",
@@ -1265,6 +1331,7 @@ class SessionStoreCoordinator:
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
             pending = tuple(
                 entry
                 for entry in self._steer_inbox.get(run_id, ())
@@ -1383,6 +1450,7 @@ class SessionStoreCoordinator:
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
             if previous is not None:
+                self._authorize_session_actor_locked(previous.run.session_id, context)
                 self._require_same_idempotent_request(
                     self._command_digests[command_key], command_digest
                 )
@@ -1396,6 +1464,7 @@ class SessionStoreCoordinator:
             row = self._runs.get(command.run_id)
             if row is None:
                 raise self._not_found("run.not_found", command.run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
             if row.revision != command.expected_revision:
                 raise self._conflict(
                     "run.revision_conflict",
@@ -1549,6 +1618,7 @@ class SessionStoreCoordinator:
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
             if previous is not None:
+                self._authorize_session_actor_locked(previous.run.session_id, context)
                 self._require_same_idempotent_request(
                     self._command_digests[command_key], command_digest
                 )
@@ -1561,6 +1631,7 @@ class SessionStoreCoordinator:
             row = self._runs.get(command.run_id)
             if row is None:
                 raise self._not_found("run.not_found", command.run_id)
+            self._authorize_session_actor_locked(row.session_id, context)
             if row.revision != command.expected_revision:
                 raise self._conflict(
                     "run.revision_conflict",
@@ -1732,6 +1803,11 @@ class SessionStoreCoordinator:
                         if row.start_command is not None
                         else None
                     ),
+                    "request_context": (
+                        row.request_context.model_dump(mode="json")
+                        if row.request_context is not None
+                        else None
+                    ),
                 }
                 for row in self._runs.values()
             ],
@@ -1865,6 +1941,11 @@ class SessionStoreCoordinator:
                         if row.start_command is not None
                         else None
                     ),
+                    "request_context": (
+                        row.request_context.model_dump(mode="json")
+                        if row.request_context is not None
+                        else None
+                    ),
                 }
                 for row in self._runs.values()
                 if row.run_id in run_ids
@@ -1996,6 +2077,11 @@ class SessionStoreCoordinator:
                 start_command=(
                     StartRun.model_validate(value["start_command"])
                     if value.get("start_command") is not None
+                    else None
+                ),
+                request_context=(
+                    RequestContext.model_validate(value["request_context"])
+                    if value.get("request_context") is not None
                     else None
                 ),
             )
@@ -2171,6 +2257,87 @@ class SessionStoreCoordinator:
         self, session_id: str, deleted_session_ids: frozenset[str]
     ) -> None:
         """Durability hook for removing one authoritative Session tree."""
+
+    def _authorize_session_actor_locked(
+        self, session_id: str, context: RequestContext
+    ) -> None:
+        """Enforce the durable Session owner at every context-bearing mutation.
+
+        Older aggregates did not store a dedicated owner column, but every
+        acknowledged Run stores its RequestContext or at least durable events
+        with the original actor.  Deriving the owner from those facts preserves
+        backwards compatibility without leaving legacy Sessions unprotected.
+        """
+
+        actor = context.actor
+        if "session.admin" in actor.scopes:
+            return
+        owner = next(
+            (
+                row.request_context.actor
+                for row in sorted(
+                    (
+                        value
+                        for value in self._runs.values()
+                        if value.session_id == session_id
+                        and value.request_context is not None
+                    ),
+                    key=lambda value: (value.created_at, value.run_id),
+                )
+            ),
+            None,
+        )
+        if owner is None:
+            owner = next(
+                (
+                    event.actor
+                    for event in self._session_events.get(session_id, ())
+                    if event.type == "run.accepted"
+                ),
+                None,
+            )
+        if owner is None:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="session.owner_not_established",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message="target Session has no verifiable durable owner",
+                    safe_to_resume=False,
+                )
+            )
+        if (
+            owner.tenant_id != actor.tenant_id
+            or owner.principal_id != actor.principal_id
+        ):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="session.actor_not_authorized",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message="actor does not own the target Session",
+                    safe_to_resume=True,
+                )
+            )
+
+    @staticmethod
+    def _validate_external_input_roles(items, context: RequestContext) -> None:
+        """Keep privileged prompt roles behind an explicit trusted-host scope."""
+
+        privileged = tuple(
+            item.role for item in items if item.role in {"system", "developer"}
+        )
+        if privileged and "session.trusted_input" not in context.actor.scopes:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="session.privileged_input_role_denied",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message=(
+                        "system/developer input is reserved for trusted host "
+                        "context composition"
+                    ),
+                    safe_to_resume=True,
+                    metadata={"roles": sorted(set(privileged))},
+                )
+            )
 
     def _prepare_events_locked(
         self,

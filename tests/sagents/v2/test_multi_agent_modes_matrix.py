@@ -42,6 +42,7 @@ from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
     AgentMode,
     AgentRegistry,
+    DelegationConcurrencyLimiter,
     DelegationBatch,
     DelegationResult,
     DelegationTask,
@@ -1289,3 +1290,33 @@ async def test_child_agent_approval_suspends_parent_flow_and_resumes_same_node()
         "flow.node.completed",
     ]
     assert len({event.node_execution_id for event in node_events}) == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_delegation_limiter_enforces_tenant_budget():
+    limiter = DelegationConcurrencyLimiter(max_concurrency=4, max_per_tenant=2)
+    active = 0
+    peak = 0
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    lock = asyncio.Lock()
+
+    async def work():
+        nonlocal active, peak
+        async with limiter.slot("tenant_1"):
+            async with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == 2:
+                    entered.set()
+            await release.wait()
+            async with lock:
+                active -= 1
+
+    tasks = [asyncio.create_task(work()) for _ in range(4)]
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    await asyncio.sleep(0)
+    assert peak == 2
+    release.set()
+    await asyncio.gather(*tasks)
+    assert limiter._tenants == {}

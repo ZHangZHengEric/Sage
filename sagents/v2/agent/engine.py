@@ -148,6 +148,7 @@ class AgentLoopEngine:
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         tool_selection_model: ModelProvider | None = None,
         delegated_run_controller=None,
+        expected_resolved_spec_hash: str | None = None,
         clock: Callable = utc_now,
     ) -> None:
         self.runtime = runtime
@@ -183,6 +184,7 @@ class AgentLoopEngine:
             memory_recall_query_generator or DirectMemoryRecallQueryGenerator()
         )
         self.delegated_run_controller = delegated_run_controller
+        self.expected_resolved_spec_hash = expected_resolved_spec_hash
         self.clock = clock
         from sagents.v2.runtime.lifecycle import DurableRunLifecycle
 
@@ -208,6 +210,7 @@ class AgentLoopEngine:
         """Start the first Turn for a newly accepted Run."""
 
         run = await self.runtime.get_run(run_id)
+        self._assert_resolved_spec_compatible(run.resolved_spec_hash)
         if run.state == RunState.QUEUED:
             run = await self.runtime.start_execution(
                 run_id=run_id,
@@ -439,6 +442,201 @@ class AgentLoopEngine:
     async def resume(self, run_id: str, context: RequestContext) -> RunSnapshot:
         return await self.run_coordinator.resume(run_id, context)
 
+    async def recover_interrupted(
+        self, run_id: str, context: RequestContext
+    ) -> RunSnapshot | None:
+        """Recover a process-lost Tool barrier without replaying the Tool.
+
+        Returns ``None`` when the durable ledger contains no crossed side-effect
+        barrier.  In that case the dispatcher may settle the uncheckpointed
+        model/control work as resource loss.  Once ``tool.call.started`` exists,
+        however, only reconciliation or explicit human resolution is safe.
+        """
+
+        run = await self.runtime.get_run(run_id)
+        self._assert_resolved_spec_compatible(run.resolved_spec_hash)
+        if run.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+            return run
+        command = await self.runtime.session_store.get_start_command(run_id)
+        context = self._context_for_command(context, command)
+        events = await self.runtime.session_store.read_events(run_id)
+        settled_types = {
+            "tool.call.succeeded",
+            "tool.call.failed",
+            "tool.call.cancelled",
+            "tool.call.reconciled",
+        }
+        settled_operations = {
+            event.data.operation_id
+            for event in events
+            if event.type in settled_types
+            and isinstance(event.data, ToolEventData)
+            and event.data.operation_id is not None
+        }
+        started = next(
+            (
+                event
+                for event in reversed(events)
+                if event.type == "tool.call.started"
+                and isinstance(event.data, ToolEventData)
+                and event.data.operation_id not in settled_operations
+            ),
+            None,
+        )
+        if started is None:
+            return None
+        tool_data = started.data
+        proposal = next(
+            (
+                event
+                for event in reversed(events)
+                if event.type == "tool.call.proposed"
+                and isinstance(event.data, ToolEventData)
+                and event.data.operation_id == tool_data.operation_id
+            ),
+            None,
+        )
+        proposal_missing = proposal is None or proposal.data.arguments is None
+        call = ToolCall(
+            tool_call_id=tool_data.tool_call_id,
+            tool_name=tool_data.tool_name,
+            # Dispatch has already crossed the side-effect barrier. A damaged
+            # pre-dispatch projection must never turn that into a safe replay.
+            arguments={} if proposal_missing else proposal.data.arguments,
+            operation_id=tool_data.operation_id,
+            idempotency_key=tool_data.idempotency_key,
+            owner_run_id=run.run_id,
+            owner_agent_id=command.agent_id,
+            owner_session_id=run.session_id,
+        )
+        messages = await self.ledger_rebuilder.rebuild(
+            command,
+            run_id=run_id,
+            through_run_sequence=run.last_run_sequence,
+        )
+        step_number = next(
+            (
+                event.data.attempt
+                for event in reversed(events)
+                if event.type == "step.started"
+                and event.step_id == started.step_id
+                and isinstance(event.data, StepEventData)
+            ),
+            1,
+        )
+        state = AgentLoopCheckpointState(
+            turn_id=started.turn_id or new_id("turn"),
+            step_number=step_number,
+            messages=messages,
+            pending_flow_boundary=command.config.flow_boundary,
+        )
+        unknown_event = next(
+            (
+                event
+                for event in reversed(events)
+                if event.type == "tool.call.unknown"
+                and isinstance(event.data, ToolEventData)
+                and event.data.operation_id == call.operation_id
+            ),
+            None,
+        )
+        uncertainty = (
+            RuntimeErrorInfo(
+                code="tool.recovery_ledger_incomplete",
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                message=(
+                    "worker restarted after tool dispatch, but the durable "
+                    "proposal arguments are unavailable"
+                ),
+                safe_to_resume=True,
+                metadata={
+                    "tool_name": call.tool_name,
+                    "operation_id": call.operation_id,
+                },
+            )
+            if proposal_missing
+            else unknown_event.data.error
+            if unknown_event is not None and unknown_event.data.error is not None
+            else RuntimeErrorInfo(
+                code="tool.outcome_unknown_after_worker_restart",
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                message=(
+                    "worker restarted after tool dispatch; the external outcome "
+                    "must be reconciled"
+                ),
+                safe_to_resume=True,
+                metadata={
+                    "tool_name": call.tool_name,
+                    "operation_id": call.operation_id,
+                },
+            )
+        )
+        if unknown_event is None:
+            run = await self._record_tool_unknown(
+                run,
+                call,
+                uncertainty,
+                context,
+                state.turn_id,
+                started.step_id,
+            )
+        try:
+            definition = await self.tool_catalog.get_tool(
+                call.tool_name, run_id=run_id
+            )
+        except Exception:
+            definition = None
+        if definition is not None and definition.supports_reconciliation:
+            run, result = await self._reconcile_or_suspend_tool(
+                run,
+                call,
+                context,
+                state.turn_id,
+                started.step_id,
+                state,
+                uncertainty,
+            )
+            if result is None:
+                return run
+            state = state.model_copy(
+                update={
+                    "messages": (
+                        *state.messages,
+                        self._tool_result_message(result),
+                    ),
+                    "step_number": state.step_number + 1,
+                    "expanded_tool_names": (
+                        self.tool_selection_policy.expanded_tools(run.run_id)
+                    ),
+                }
+            )
+            run = await self._commit_running(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="step.completed",
+                        turn_id=state.turn_id,
+                        step_id=started.step_id,
+                        data=StepEventData(
+                            state="completed", attempt=step_number
+                        ),
+                    ),
+                ),
+            )
+            return await self._drive(run, state, context)
+        return await self._suspend_for_tool_uncertainty(
+            run,
+            state,
+            call,
+            uncertainty,
+            context,
+            started.step_id,
+            supports_reconciliation=(
+                definition is not None and definition.supports_reconciliation
+            ),
+        )
+
     async def resume_coordinated(
         self, run_id: str, context: RequestContext
     ) -> RunSnapshot:
@@ -457,6 +655,10 @@ class AgentLoopEngine:
         suspension = await self.runtime.session_store.get_suspension(run.suspension_id)
         checkpoint = await self.runtime.session_store.get_checkpoint(
             suspension.checkpoint_id
+        )
+        self._assert_resolved_spec_compatible(
+            run.resolved_spec_hash,
+            checkpoint_hash=checkpoint.resolved_spec_hash,
         )
         if checkpoint.checkpoint_codec_version not in {
             "agent-loop/1",
@@ -2177,10 +2379,24 @@ class AgentLoopEngine:
         )
 
     async def _suspend_for_tool_uncertainty(
-        self, run, state, call, error, context, step_id, definition
+        self,
+        run,
+        state,
+        call,
+        error,
+        context,
+        step_id,
+        definition=None,
+        *,
+        supports_reconciliation: bool | None = None,
     ):
         """Require explicit reconciliation when a Tool outcome is unknowable."""
 
+        can_reconcile = (
+            bool(definition.supports_reconciliation)
+            if supports_reconciliation is None and definition is not None
+            else bool(supports_reconciliation)
+        )
         interaction_id = new_id("interaction")
         pending_state = state.model_copy(
             update={
@@ -2197,7 +2413,7 @@ class AgentLoopEngine:
             interaction_id=interaction_id,
         )
         decisions = ["confirm_succeeded", "mark_failed", "cancel"]
-        if definition.supports_reconciliation:
+        if can_reconcile:
             decisions.insert(0, "reconcile")
         interaction = InteractionRequest(
             interaction_id=interaction_id,
@@ -2218,7 +2434,7 @@ class AgentLoopEngine:
                 "tool_name": call.tool_name,
                 "operation_id": call.operation_id,
                 "idempotency_key": call.idempotency_key,
-                "supports_reconciliation": definition.supports_reconciliation,
+                "supports_reconciliation": can_reconcile,
                 "error_code": error.code,
             },
             requested_at=self.clock(),
@@ -2766,6 +2982,38 @@ class AgentLoopEngine:
                 break
             count += 1
         return count
+
+    def _assert_resolved_spec_compatible(
+        self, run_hash: str, *, checkpoint_hash: str | None = None
+    ) -> None:
+        """Fail closed when a Run is routed to a different resolved runtime.
+
+        A persisted hash is only useful when the executing composition checks
+        it.  This prevents a queued Run or checkpoint from silently resuming
+        against changed tools, policies, prompts, or model bindings.
+        """
+
+        expected = self.expected_resolved_spec_hash
+        if expected is None:
+            return
+        observed = {run_hash}
+        if checkpoint_hash is not None:
+            observed.add(checkpoint_hash)
+        if observed == {expected}:
+            return
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="loop.resolved_spec_incompatible",
+                category=ErrorCategory.UNSUPPORTED_SCHEMA,
+                message="run was created by an incompatible resolved runtime",
+                safe_to_resume=False,
+                metadata={
+                    "expected_resolved_spec_hash": expected,
+                    "run_resolved_spec_hash": run_hash,
+                    "checkpoint_resolved_spec_hash": checkpoint_hash,
+                },
+            )
+        )
 
     @staticmethod
     def _conflict(code, message):

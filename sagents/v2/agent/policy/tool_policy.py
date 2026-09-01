@@ -120,6 +120,22 @@ class DefaultToolPolicy:
                 policy_hash=self.policy_hash,
                 reason=f"actor lacks required scopes: {missing_scopes}",
             )
+        if (
+            context.invocation_mode == "plan"
+            and context.definition.side_effect_level
+            not in {SideEffectLevel.NONE, SideEffectLevel.READ}
+            and not context.definition.plan_safe
+            # Backward-compatible identity for hosts that construct the
+            # built-in control definition without the newer plan_safe field.
+            and context.definition.name != "goal_submit"
+        ):
+            return ToolPolicyDecision(
+                action=ToolPolicyAction.DENY,
+                decision_id=decision_id,
+                policy_version=self.policy_version,
+                policy_hash=self.policy_hash,
+                reason="Plan mode forbids tools with external side effects",
+            )
         assessment = (
             self.operation_assessor(context)
             if self.operation_assessor is not None

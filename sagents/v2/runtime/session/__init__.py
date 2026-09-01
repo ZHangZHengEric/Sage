@@ -2,6 +2,7 @@
 
 from sagents.v2.runtime.session.contracts import (
     CommitResult,
+    DispatchableRun,
     EventDraft,
     RunCreationResult,
     SessionStore,
@@ -32,6 +33,7 @@ from sagents.v2.runtime.session.subscriptions import SubscriptionHub
 
 __all__ = [
     "CommitResult",
+    "DispatchableRun",
     "EventDraft",
     "EphemeralSessionStore",
     "FilesystemSessionStore",

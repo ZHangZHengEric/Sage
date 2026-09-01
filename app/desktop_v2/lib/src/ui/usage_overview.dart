@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
+import '../localization/app_localizations.dart';
 import '../state/workspace_controller.dart';
 import '../usage_models.dart';
 
@@ -147,6 +148,10 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (overview.dataQuality.partial) ...[
+                  _UsagePartialNotice(quality: overview.dataQuality),
+                  const SizedBox(height: 14),
+                ],
                 _MetricStrip(
                   metrics: [
                     _Metric(
@@ -168,10 +173,7 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
                     _Metric(
                       'Turns',
                       _compact(totals.turns),
-                      _text(
-                        '${totals.modelRequests} 次模型请求 · ${totals.sessions} 个会话',
-                        '${totals.modelRequests} model requests · ${totals.sessions} sessions',
-                      ),
+                      _modelRequestDetail(totals),
                     ),
                     _Metric(
                       _text('工具调用', 'Tool calls'),
@@ -182,12 +184,20 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
                       ),
                     ),
                     _Metric(
-                      _text('平均首字延迟', 'Avg TTFT'),
-                      _duration(totals.averageFirstTokenLatencyMs),
+                      'TTFT P50',
+                      _duration(totals.firstTokenLatencyP50Ms),
+                      _percentileDetail(
+                        _duration(totals.firstTokenLatencyP95Ms),
+                        totals.firstTokenLatencySamples,
+                      ),
                     ),
                     _Metric(
-                      _text('Token 输出速度', 'Token throughput'),
-                      _rate(totals.outputTokensPerSecond),
+                      'Token/s P50',
+                      _rate(totals.outputTokensPerSecondP50),
+                      _percentileDetail(
+                        _rate(totals.outputTokensPerSecondP95),
+                        totals.outputTokensPerSecondSamples,
+                      ),
                     ),
                   ],
                 ),
@@ -270,6 +280,65 @@ class _UsageOverviewSettingsState extends State<UsageOverviewSettings> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  String _modelRequestDetail(UsageTotals totals) {
+    final key = totals.failedModelRequests == 0
+        ? 'usage.requestSummary'
+        : 'usage.requestSummaryWithFailures';
+    return context.l10n.text(key, {
+      'requests': totals.modelRequests,
+      'failed': totals.failedModelRequests,
+      'sessions': totals.sessions,
+    });
+  }
+
+  String _percentileDetail(String p95, int samples) =>
+      'P95 $p95 · n=${_compact(samples)}';
+}
+
+class _UsagePartialNotice extends StatelessWidget {
+  const _UsagePartialNotice({required this.quality});
+
+  final UsageDataQuality quality;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final message = context.l10n.text('usage.partialData', {
+      'count': quality.skippedSessions,
+    });
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: message,
+      child: GlassCard(
+        key: const ValueKey('usage-partial-data-notice'),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: const LiquidRoundedSuperellipse(borderRadius: 12),
+        useOwnLayer: true,
+        settings: _usageGlass(context),
+        child: Row(
+          children: [
+            Icon(
+              CupertinoIcons.exclamationmark_triangle,
+              size: 17,
+              color: colors.tertiary,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                message,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

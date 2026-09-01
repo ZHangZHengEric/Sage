@@ -26,6 +26,7 @@ from sagents.v2.agent.policy.legacy_v1_judge_prompt import (
     LEGACY_V1_TASK_COMPLETE_TEMPLATE,
 )
 from sagents.v2.contracts.common import StrictModel, new_id
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.items import (
     AudioBlock,
     FileBlock,
@@ -483,6 +484,7 @@ class LLMJudgeContinuationPolicy:
         self._budget = BudgetRule()
         self._flow = FlowBoundaryRule()
         self._pending_tools = ToolOrTextRuleForPendingCalls()
+        self._fallback = ToolOrTextRule()
 
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
         budget = await self._budget.evaluate(context)
@@ -522,10 +524,47 @@ class LLMJudgeContinuationPolicy:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if self._is_permanent_judge_failure(exc):
+                deterministic = await self._fallback.evaluate(context)
+                assert deterministic is not None
+                info = exc.info
+                return deterministic.model_copy(
+                    update={
+                        "reason_code": "judge.fallback_provider_permanent",
+                        "reason": (
+                            "Judge request was permanently rejected; "
+                            "deterministic settled-response rule applied"
+                        ),
+                        "usage": getattr(exc, "usage", UsageSummary()),
+                        "metadata": {
+                            "policy": "llm_judge",
+                            "implementation": "v1",
+                            "fallback": "judge_provider_permanent",
+                            "judge_error_code": info.code,
+                            "judge_error_category": info.category.value,
+                            **(
+                                {"judge_provider_code": info.provider_code}
+                                if info.provider_code is not None
+                                else {}
+                            ),
+                        },
+                    }
+                )
             return LLMContinuationJudge._invalid(
                 f"completion Judge failed: {type(exc).__name__}",
                 getattr(exc, "usage", UsageSummary()),
             )
+
+    @staticmethod
+    def _is_permanent_judge_failure(exc: Exception) -> bool:
+        return isinstance(exc, SageV2Error) and exc.info.category in {
+            ErrorCategory.AUTHENTICATION,
+            ErrorCategory.AUTHORIZATION,
+            ErrorCategory.POLICY_DENIED,
+            ErrorCategory.PROVIDER_PERMANENT,
+            ErrorCategory.UNSUPPORTED_SCHEMA,
+            ErrorCategory.VALIDATION,
+        }
 
 
 class HybridContinuationPolicy:

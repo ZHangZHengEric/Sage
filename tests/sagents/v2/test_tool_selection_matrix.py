@@ -123,6 +123,7 @@ async def test_llm_policy_prepares_once_and_uses_exact_valid_names():
     assert result.strategy == "llm"
     assert "weather_lookup" in {tool.name for tool in result.tools}
     assert len(model.requests) == 1
+    assert model.requests[0].max_output_tokens is None
 
 
 @pytest.mark.asyncio

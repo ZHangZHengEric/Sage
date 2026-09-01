@@ -88,13 +88,15 @@ class PersistentSummaryContextReducer:
             )
         systems = tuple(message for message in messages if message.role == "system")
         payload = tuple(message for message in messages if message.role != "system")
-        stored = await self.store.get(scope.context_key)
+        stored = await self.store.get(scope.context_key, session_id=scope.session_id)
         previous, remaining = self._validated_previous(stored, payload)
         if stored is not None and previous is None:
             # The context key was reused with a rewritten prefix.  Stale derived
             # state must not block creating a summary for the new canonical view.
             await self.store.delete(
-                scope.context_key, expected_revision=stored.revision
+                scope.context_key,
+                expected_revision=stored.revision,
+                session_id=scope.session_id,
             )
         summary_message = self._summary_message(previous) if previous else None
         current = (
@@ -113,9 +115,7 @@ class PersistentSummaryContextReducer:
                 messages,
                 current,
                 previous,
-                historical_messages=payload[
-                    : len(previous.covered_message_digests)
-                ],
+                historical_messages=payload[: len(previous.covered_message_digests)],
             )
 
         units = self._units(remaining)
@@ -332,9 +332,7 @@ class PersistentSummaryContextReducer:
             max_messages is not None and len(messages) > max_messages
         )
 
-    def _removable_prefix_count(
-        self, units: list[tuple[ModelMessage, ...]]
-    ) -> int:
+    def _removable_prefix_count(self, units: list[tuple[ModelMessage, ...]]) -> int:
         """Protect recent units and the latest real user request as one suffix."""
 
         recent_boundary = max(0, len(units) - self.protected_recent_units)

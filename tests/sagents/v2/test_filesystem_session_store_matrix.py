@@ -490,6 +490,38 @@ def test_snapshot_checksum_corruption_is_detected_on_open(tmp_path):
     asyncio.run(reopened.close())
 
 
+def test_snapshot_checksum_is_compatible_with_new_optional_fields(tmp_path):
+    path = tmp_path / "session-store"
+
+    async def create():
+        repository = FilesystemSessionStore(path)
+        created = await repository.create_run(command(), CONTEXT)
+        await repository.close()
+        return created
+
+    created = asyncio.run(create())
+    snapshot = next((path / "sessions").glob("*/state.json"))
+    envelope = json.loads(snapshot.read_text(encoding="utf-8"))
+    assert envelope["state"]["runs"]
+    assert all("request_context" in run for run in envelope["state"]["runs"])
+    for run in envelope["state"]["runs"]:
+        run.pop("request_context", None)
+    unsigned = {key: value for key, value in envelope.items() if key != "checksum"}
+
+    checksum_store = FilesystemSessionStore(path)
+    envelope["checksum"] = checksum_store._checksum(unsigned)
+    asyncio.run(checksum_store.close())
+    snapshot.write_text(
+        json.dumps(envelope, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    reopened = FilesystemSessionStore(path)
+    restored = asyncio.run(reopened.get_run(created.handle.run_id))
+    assert restored.state == RunState.QUEUED
+    asyncio.run(reopened.close())
+
+
 def test_interrupted_temporary_snapshot_is_ignored(tmp_path):
     path = tmp_path / "session-store"
 

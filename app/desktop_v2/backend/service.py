@@ -19,11 +19,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from sagents.llm.model_capabilities import build_llm_extra_body
+from sagents.llm.model_capabilities import (
+    build_llm_extra_body,
+    is_openai_reasoning_model,
+)
 from app.desktop_v2.backend.catalog import (
     DesktopAgentRecord,
     DesktopCatalogStore,
     DesktopMcpRecord,
+    DesktopModelCompatibilityProfile,
     DesktopModelProviderRecord,
     JsonDesktopCatalogStore,
     default_agent_config,
@@ -47,6 +51,7 @@ from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
     AgentMode,
     AgentRegistry,
+    DelegationConcurrencyLimiter,
     SessionDynamicAgentRoster,
     WorkspaceSharingPolicy,
 )
@@ -132,7 +137,15 @@ from sagents.v2.runtime.credentials import CredentialMaterial
 from sagents.v2.model import (
     RecordingModelProvider,
     model_protocol_descriptor,
+    probe_model_capabilities,
+    probe_model_connection,
+    probe_model_json_object,
+    probe_model_tool_calling,
     resolve_model_protocol,
+)
+from sagents.v2.model.protocols import create_registered_model_provider
+from sagents.v2.model.plugins.openai_compatible import (
+    default_chat_completion_token_field,
 )
 from sagents.v2.runtime.extensions import (
     CapabilityRequirement,
@@ -196,6 +209,30 @@ _PLAN_BLOCKED_TOOLS = frozenset(
     }
 )
 LOGGER = logging.getLogger(__name__)
+
+_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+_OUTPUT_TOKEN_FALLBACKS = (
+    65_536,
+    32_768,
+    16_384,
+    8_192,
+    4_096,
+    2_048,
+    1_024,
+    512,
+    256,
+    128,
+)
+_REASONING_DISABLE_EXTRAS: dict[str, dict[str, Any]] = {
+    "omit": {},
+    "reasoning_effort_none": {"reasoning_effort": "none"},
+    "thinking_type_disabled": {"thinking": {"type": "disabled"}},
+    "enable_thinking_false": {"enable_thinking": False},
+    "thinking_false": {"thinking": False},
+    "chat_template_enable_thinking_false": {
+        "chat_template_kwargs": {"enable_thinking": False}
+    },
+}
 _ACTIVE_EXTENSION_SCOPE_HANDLES: ContextVar[list[Any] | None] = ContextVar(
     "desktop_v2_active_extension_scope_handles", default=None
 )
@@ -437,7 +474,7 @@ def _continuation_component_config(plugin_id: str) -> dict[str, Any]:
             "status_source": "none",
             "explicit_statuses": [],
             "uses_llm_judge": True,
-            "judge_failure": "continue",
+            "judge_failure": "deterministic_fallback_on_permanent_error",
         }
     if plugin_id == "sage.agent.continuation.hybrid":
         return {
@@ -622,7 +659,9 @@ def _component_cache_fingerprint(value: Any) -> str:
         if isinstance(candidate, dict):
             return {
                 str(key): normalize(item, seen)
-                for key, item in sorted(candidate.items(), key=lambda pair: str(pair[0]))
+                for key, item in sorted(
+                    candidate.items(), key=lambda pair: str(pair[0])
+                )
             }
         if isinstance(candidate, (list, tuple)):
             return [normalize(item, seen) for item in candidate]
@@ -723,11 +762,13 @@ class ModelProviderPatch(BaseModel):
     api_keys: list[str] | None = None
     supports_multimodal: bool | None = None
     supports_structured_output: bool | None = None
+    supports_tool_calling: bool | None = None
     is_default: bool | None = None
     max_tokens: int | None = Field(default=None, gt=0)
     temperature: float | None = None
     top_p: float | None = None
     max_model_len: int | None = Field(default=None, gt=0)
+    compatibility_profile: DesktopModelCompatibilityProfile | None = None
     model_config = {"extra": "forbid"}
 
 
@@ -741,16 +782,20 @@ class ModelProviderCreate(BaseModel):
     api_keys: list[str] = Field(default_factory=list)
     supports_multimodal: bool = True
     supports_structured_output: bool = True
+    supports_tool_calling: bool = True
     is_default: bool = False
     max_tokens: int = Field(default=8192, gt=0)
     temperature: float | None = None
     top_p: float | None = None
     max_model_len: int = Field(default=128_000, gt=0)
+    compatibility_profile: DesktopModelCompatibilityProfile | None = None
     model_config = {"extra": "forbid"}
 
 
 class RunMessage(BaseModel):
-    role: Literal["user", "assistant", "system", "developer"]
+    # System/developer instructions are composed by trusted Context providers.
+    # The Desktop request boundary accepts conversation facts only.
+    role: Literal["user", "assistant"]
     text: str
 
 
@@ -1016,16 +1061,16 @@ class _DesktopRunResources:
             return
         self._closed = True
         errors: list[BaseException] = []
-        try:
-            await self.sandbox_handle.close()
-        except BaseException as exc:
-            errors.append(exc)
         for handle in reversed(self.scope_handles):
             try:
                 await handle.close()
             except BaseException as exc:
                 errors.append(exc)
         self.scope_handles.clear()
+        try:
+            await self.sandbox_handle.close()
+        except BaseException as exc:
+            errors.append(exc)
         if errors:
             raise errors[0]
 
@@ -1047,18 +1092,14 @@ class _DesktopDriver:
         self._binding_close_task: asyncio.Task[None] | None = None
 
     async def execute(self, run_id: str, context: RequestContext):
-        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(
-            self.sandbox_handle.scope_handles
-        )
+        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(self.sandbox_handle.scope_handles)
         try:
             return await self.loop.execute(run_id, context)
         finally:
             _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
     async def resume(self, run_id: str, context: RequestContext):
-        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(
-            self.sandbox_handle.scope_handles
-        )
+        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(self.sandbox_handle.scope_handles)
         try:
             return await self.loop.resume(run_id, context)
         finally:
@@ -1098,6 +1139,81 @@ class _DesktopDriver:
             raise
         if controller_error is not None:
             raise controller_error
+
+
+class _DesktopRecoveryAgent:
+    """Recompose a Desktop driver for a durable Run with lost scheduler work."""
+
+    def __init__(self, service: "DesktopV2Service") -> None:
+        self.service = service
+        self.runtime = service.driver_runtime
+
+    def _ensure_execution(self, run_id, context, *, resume):
+        return asyncio.create_task(
+            self._execute(run_id, context, resume=resume),
+            name=f"desktop-recovery:{run_id}",
+        )
+
+    async def _compose_driver(self, run_id, context):
+        command = await self.service.session_store.get_start_command(run_id)
+        user_id = context.actor.principal_id
+        agent = await self.service._agent(command.agent_id, user_id)
+        provider = await self.service._provider(agent, user_id)
+        workspace = await self.service.workspace_root(
+            command.config.metadata.get("workspace_id"), command.agent_id
+        )
+        _, loop, sandbox_handle = await self.service._build_loop(
+            agent=agent,
+            provider=provider,
+            workspace=workspace,
+            preferred_skills=tuple(
+                command.config.metadata.get("preferred_skills") or ()
+            ),
+            approval_mode=str(
+                command.config.metadata.get("approval_mode") or "high_risk"
+            ),
+            invocation_mode=command.invocation_mode or "normal",
+            session_id=(await self.runtime.get_run(run_id)).session_id,
+            run_id=run_id,
+            resolved_spec_hash=command.resolved_spec_hash,
+            component_snapshot=command.config.metadata.get("runtime_components"),
+        )
+        driver = _DesktopDriver(self.service, loop, workspace, sandbox_handle)
+        self.service._drivers[run_id] = driver
+        return driver, agent
+
+    async def _execute(self, run_id, context, *, resume):
+        driver, agent = await self._compose_driver(run_id, context)
+        memory_enabled = _agent_memory_enabled(
+            agent,
+            self.service.memory_plugin_id,
+            self.service.session_memory_plugin_id,
+        )
+        facade = SAgent(
+            runtime=self.runtime,
+            driver_factory=lambda _: driver,
+            memory_service=(self.service.memory_service if memory_enabled else None),
+            memory_scope={"recall": False, "auto_write": memory_enabled},
+        )
+        try:
+            execution = facade._ensure_execution(run_id, context, resume=resume)
+            return await execution
+        finally:
+            if self.service._drivers.get(run_id) is driver:
+                self.service._drivers.pop(run_id, None)
+
+    async def _recover_interrupted_run(self, run_id, context):
+        driver, _ = await self._compose_driver(run_id, context)
+        try:
+            return await driver.loop.recover_interrupted(run_id, context)
+        finally:
+            await driver.close()
+            if self.service._drivers.get(run_id) is driver:
+                self.service._drivers.pop(run_id, None)
+
+    async def _fail_driver_crash(self, run_id, error, context):
+        facade = SAgent(runtime=self.runtime, driver_factory=lambda _: None)
+        return await facade._fail_driver_crash(run_id, error, context)
 
 
 class DesktopV2Service:
@@ -1165,6 +1281,11 @@ class DesktopV2Service:
             max_concurrent_runs_per_tenant=2,
             lease_scope_factory=self.driver_session_store.lease_scope,
         )
+        self.delegation_limiter = DelegationConcurrencyLimiter(
+            max_concurrency=8,
+            max_per_tenant=2,
+        )
+        self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self))
         self.dynamic_agent_roster = SessionDynamicAgentRoster(self.session_store)
         self.summary_store_plugin_id, self.summary_store = self._process_component(
             "context.summary-store",
@@ -1296,11 +1417,13 @@ class DesktopV2Service:
 
     async def initialize_agent_workspace(self) -> Path:
         settings = await self.get_settings()
-        return await self._ensure_agent_workspace(
+        workspace = await self._ensure_agent_workspace(
             settings.agent_workspace_path,
             component_selections=settings.component_selections,
             language=settings.language,
         )
+        await self.dispatcher.start()
+        return workspace
 
     async def close(self) -> None:
         observers = tuple(self._run_observers.values())
@@ -1415,8 +1538,12 @@ class DesktopV2Service:
         active_sessions: set[str] = set()
         first_token_latency_total_ms = 0.0
         first_token_latency_samples = 0
+        first_token_latencies_ms: list[float] = []
         output_generation_total_ms = 0.0
         output_token_intervals = 0
+        output_token_rates: list[float] = []
+        skipped_event_sessions: set[str] = set()
+        skipped_diagnostic_sessions: set[str] = set()
 
         agent_records = await self.catalog.list_agents(user_id)
         agent_names = {value.agent_id: value.name for value in agent_records}
@@ -1424,25 +1551,53 @@ class DesktopV2Service:
 
         for session in indexed_sessions:
             session_id = session.session_id
-            # Usage is a best-effort projection. One unreadable Session must not
-            # prevent healthy Sessions from contributing to the report.
+            runs = ()
+            events = ()
+            requests = ()
+            # Runtime events and model diagnostics are independent best-effort
+            # projections. Failure in one source must not discard valid data
+            # already persisted by the other source.
             try:
                 runs = await self.session_store.list_session_runs(session_id)
-                events = await self.session_store.read_session_events(session_id)
-                requests = await self.diagnostics.list_model_requests(
-                    session_id=session_id
-                )
             except (OSError, ValueError, SageV2Error) as error:
+                skipped_event_sessions.add(session_id)
                 self.logger.warning(
-                    "usage.session_skipped",
-                    "Skipped unreadable Session while aggregating usage",
+                    "usage.runs_skipped",
+                    "Skipped unreadable Runs while aggregating usage",
                     attributes={
                         "session_id": session_id,
                         "error_type": type(error).__name__,
                         "error": str(error),
                     },
                 )
-                continue
+            try:
+                events = await self.session_store.read_session_events(session_id)
+            except (OSError, ValueError, SageV2Error) as error:
+                skipped_event_sessions.add(session_id)
+                self.logger.warning(
+                    "usage.events_skipped",
+                    "Skipped unreadable events while aggregating usage",
+                    attributes={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                    },
+                )
+            try:
+                requests = await self.diagnostics.list_model_requests(
+                    session_id=session_id
+                )
+            except (OSError, ValueError, SageV2Error) as error:
+                skipped_diagnostic_sessions.add(session_id)
+                self.logger.warning(
+                    "usage.diagnostics_skipped",
+                    "Skipped unreadable model diagnostics while aggregating usage",
+                    attributes={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                    },
+                )
 
             run_agents: dict[str, str] = {}
             for run in runs:
@@ -1489,9 +1644,12 @@ class DesktopV2Service:
                 if first_token_latency_ms is not None:
                     first_token_latency_total_ms += first_token_latency_ms
                     first_token_latency_samples += 1
+                    first_token_latencies_ms.append(first_token_latency_ms)
                 if generation_ms is not None and token_intervals > 0:
                     output_generation_total_ms += generation_ms
                     output_token_intervals += token_intervals
+                    if generation_ms > 0:
+                        output_token_rates.append(token_intervals * 1000 / generation_ms)
 
                 # Diagnostics v2 keeps provider/routing details in one compact
                 # metadata object. Retain the v1 provider fallback so existing
@@ -1566,14 +1724,35 @@ class DesktopV2Service:
             if first_token_latency_samples
             else None
         )
+        totals["first_token_latency_p50_ms"] = _usage_percentile(
+            first_token_latencies_ms, 0.50
+        )
+        totals["first_token_latency_p95_ms"] = _usage_percentile(
+            first_token_latencies_ms, 0.95
+        )
+        totals["first_token_latency_samples"] = len(first_token_latencies_ms)
         totals["output_tokens_per_second"] = (
             round(output_token_intervals * 1000 / output_generation_total_ms, 2)
             if output_generation_total_ms > 0
             else None
         )
+        totals["output_tokens_per_second_p50"] = _usage_percentile(
+            output_token_rates, 0.50
+        )
+        totals["output_tokens_per_second_p95"] = _usage_percentile(
+            output_token_rates, 0.95
+        )
+        totals["output_tokens_per_second_samples"] = len(output_token_rates)
+        skipped_sessions = skipped_event_sessions | skipped_diagnostic_sessions
         return {
             "range_days": days,
             "generated_at": now.isoformat(),
+            "data_quality": {
+                "partial": bool(skipped_sessions),
+                "skipped_sessions": len(skipped_sessions),
+                "skipped_event_sessions": len(skipped_event_sessions),
+                "skipped_diagnostic_sessions": len(skipped_diagnostic_sessions),
+            },
             "totals": totals,
             "daily": list(daily.values()),
             "models": sorted(
@@ -2021,11 +2200,17 @@ class DesktopV2Service:
                 "api_key_configured": bool(value.api_key),
                 "supports_multimodal": value.supports_multimodal,
                 "supports_structured_output": bool(value.supports_structured_output),
+                "supports_tool_calling": bool(value.supports_tool_calling),
                 "is_default": value.is_default,
                 "max_tokens": value.max_tokens,
                 "temperature": value.temperature,
                 "top_p": value.top_p,
                 "max_model_len": value.max_model_len,
+                "compatibility_profile": (
+                    value.compatibility_profile.model_dump(mode="json")
+                    if value.compatibility_profile is not None
+                    else None
+                ),
             }
             for value in values
         ]
@@ -2085,16 +2270,72 @@ class DesktopV2Service:
             api_key=keys[0] if keys else "",
             supports_multimodal=request.supports_multimodal,
             supports_structured_output=request.supports_structured_output,
+            supports_tool_calling=request.supports_tool_calling,
             is_default=make_default,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             top_p=request.top_p,
             max_model_len=request.max_model_len,
+            compatibility_profile=request.compatibility_profile,
         )
         self._validate_model_route(candidate)
+        self._validate_model_compatibility_profile(candidate)
         await self.catalog.save_model_provider(candidate)
         values = await self.list_model_providers(user_id)
         return next(value for value in values if value["id"] == candidate.id)
+
+    async def verify_model_provider_capabilities(
+        self,
+        request: ModelProviderCreate | ModelProviderPatch,
+        user_id: str,
+        *,
+        provider_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Probe a draft route without persisting it to the Desktop catalog."""
+
+        if provider_id is None:
+            if not isinstance(request, ModelProviderCreate):
+                raise ValueError("New model capability checks require a complete route")
+            keys = [value.strip() for value in request.api_keys if value.strip()]
+            if len(keys) > 1:
+                raise ValueError("Desktop model providers accept one API key")
+            candidate = DesktopModelProviderRecord(
+                id=new_id("model_probe"),
+                user_id=user_id,
+                name=request.name.strip(),
+                protocol=request.protocol,
+                model=request.model.strip(),
+                base_url=request.base_url.strip(),
+                api_key=keys[0] if keys else "",
+                supports_multimodal=request.supports_multimodal,
+                supports_structured_output=request.supports_structured_output,
+                supports_tool_calling=request.supports_tool_calling,
+                is_default=False,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                max_model_len=request.max_model_len,
+            )
+        else:
+            provider = await self.catalog.get_model_provider(provider_id, user_id)
+            if provider is None:
+                raise ValueError("Provider not found")
+            if not isinstance(request, ModelProviderPatch):
+                raise ValueError("Existing model capability checks require a patch")
+            updates = request.model_dump(exclude_unset=True, exclude={"api_keys"})
+            if "compatibility_profile" in request.model_fields_set:
+                updates["compatibility_profile"] = request.compatibility_profile
+            if request.api_keys is not None:
+                keys = [value.strip() for value in request.api_keys if value.strip()]
+                if len(keys) > 1:
+                    raise ValueError("Desktop model providers accept one API key")
+                updates["api_key"] = keys[0] if keys else ""
+            candidate = provider.model_copy(update=updates)
+
+        self._validate_model_route(candidate)
+        if not candidate.api_key:
+            raise ValueError("An API key is required for capability validation")
+        return await self._probe_model_provider_capabilities(candidate)
 
     async def patch_model_provider(
         self, provider_id: str, patch: ModelProviderPatch, user_id: str
@@ -2103,14 +2344,34 @@ class DesktopV2Service:
         if provider is None:
             raise ValueError("Provider not found")
         updates = patch.model_dump(exclude_unset=True, exclude={"api_keys"})
+        if "compatibility_profile" in patch.model_fields_set:
+            updates["compatibility_profile"] = patch.compatibility_profile
+        route_fields = {
+            "protocol",
+            "model",
+            "base_url",
+            "api_key",
+            "max_tokens",
+            "max_model_len",
+            "temperature",
+            "top_p",
+            "supports_multimodal",
+            "supports_structured_output",
+            "supports_tool_calling",
+        }
+        if route_fields.intersection(updates) and "compatibility_profile" not in updates:
+            updates["compatibility_profile"] = None
         if patch.api_keys is not None:
             keys = [value.strip() for value in patch.api_keys if value.strip()]
             if len(keys) > 1:
                 raise ValueError("Desktop model providers accept one API key")
             updates["api_key"] = keys[0] if keys else ""
+            if "compatibility_profile" not in updates:
+                updates["compatibility_profile"] = None
         updates["updated_at"] = utc_now()
         candidate = provider.model_copy(update=updates)
         self._validate_model_route(candidate)
+        self._validate_model_compatibility_profile(candidate)
         if candidate.is_default and not provider.is_default:
             for value in await self.catalog.list_model_providers(user_id):
                 if value.id != provider_id and value.is_default:
@@ -2143,6 +2404,437 @@ class DesktopV2Service:
             ),
         )
         model_protocol_descriptor(route.provider)
+
+    @staticmethod
+    def _model_compatibility_fingerprint(
+        provider: DesktopModelProviderRecord,
+    ) -> str:
+        payload = {
+            "protocol": provider.protocol,
+            "base_url": provider.base_url.rstrip("/"),
+            "model": provider.model,
+            "max_tokens": provider.max_tokens,
+            "max_model_len": provider.max_model_len,
+            "temperature": provider.temperature,
+            "top_p": provider.top_p,
+            "credential_sha256": hashlib.sha256(
+                provider.api_key.encode("utf-8")
+            ).hexdigest(),
+        }
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    @classmethod
+    def _validate_model_compatibility_profile(
+        cls,
+        provider: DesktopModelProviderRecord,
+    ) -> None:
+        profile = provider.compatibility_profile
+        if profile is None:
+            return
+        expected = cls._model_compatibility_fingerprint(provider)
+        if profile.route_fingerprint != expected:
+            raise ValueError(
+                "model compatibility verification does not match the saved route"
+            )
+        if (
+            provider.protocol == "openai-chat-completions"
+            and profile.max_output_tokens_field is None
+        ):
+            raise ValueError(
+                "OpenAI Chat Completions compatibility requires an output token field"
+            )
+        if (
+            provider.protocol != "openai-chat-completions"
+            and profile.max_output_tokens_field is not None
+        ):
+            raise ValueError(
+                "output token field compatibility only applies to Chat Completions"
+            )
+        if profile.schema_version >= 2:
+            if profile.effective_max_output_tokens is None:
+                raise ValueError(
+                    "model compatibility verification requires an effective output limit"
+                )
+            if profile.effective_max_output_tokens > provider.max_tokens:
+                raise ValueError(
+                    "effective output limit cannot exceed the configured output limit"
+                )
+            overlap = set(profile.supported_reasoning_efforts).intersection(
+                profile.unsupported_reasoning_efforts
+            )
+            if overlap:
+                raise ValueError(
+                    "reasoning effort compatibility results cannot overlap"
+                )
+
+    @staticmethod
+    async def _probe_model_provider_capabilities(
+        provider: DesktopModelProviderRecord,
+    ) -> dict[str, Any]:
+        credential = CredentialMaterial(
+            credential_id="desktop_model_probe",
+            secret=SecretStr(provider.api_key),
+            source="desktop-settings",
+        )
+        created_providers: list[Any] = []
+
+        def create_probe_provider(
+            *,
+            max_output_tokens: int,
+            maximum_field: str | None = None,
+            reasoning_effort: str | None = None,
+            request_extra: dict[str, Any] | None = None,
+        ):
+            extra = dict(request_extra or {})
+            if (
+                provider.protocol == "openai-chat-completions"
+                and maximum_field is not None
+            ):
+                extra["max_output_tokens_field"] = maximum_field
+            route = ModelRoute(
+                provider=provider.protocol,
+                base_url=provider.base_url,
+                credential="desktop_model_probe",
+                model=provider.model,
+                request=ModelRequestDefaults(
+                    max_output_tokens=max_output_tokens,
+                    temperature=provider.temperature,
+                    top_p=provider.top_p,
+                    reasoning_effort=reasoning_effort,
+                    extra=extra,
+                ),
+                limits=ModelLimits(
+                    context_window=provider.max_model_len,
+                    max_output_tokens=max_output_tokens,
+                ),
+                capabilities=ModelCapabilityDeclaration(
+                    multimodal=True,
+                    structured_output=True,
+                    tool_calling=True,
+                    reasoning=True,
+                    parallel_tool_calls=True,
+                ),
+            )
+            model_provider = create_registered_model_provider(
+                route,
+                credential,
+                provider_instance_id=provider.id,
+            )
+            created_providers.append(model_provider)
+            return model_provider
+
+        def serialize_outcome(outcome) -> dict[str, Any]:
+            return {
+                "supported": outcome.supported,
+                **outcome.model_dump(
+                    mode="json",
+                    exclude={"name", "status"},
+                    exclude_none=True,
+                    exclude_defaults=True,
+                ),
+                "status": outcome.status.value,
+            }
+
+        candidates = (provider.max_tokens,) + tuple(
+            value for value in _OUTPUT_TOKEN_FALLBACKS if value < provider.max_tokens
+        )
+        negotiation_provider = create_probe_provider(
+            max_output_tokens=provider.max_tokens
+        )
+        connection_outcome = None
+        effective_max_output_tokens = provider.max_tokens
+        try:
+            for candidate in candidates:
+                connection_outcome = await probe_model_connection(
+                    negotiation_provider,
+                    model_binding=provider.id,
+                    max_output_tokens=candidate,
+                )
+                if connection_outcome.supported:
+                    effective_max_output_tokens = candidate
+                    break
+                if str(connection_outcome.provider_code or "") not in {"400", "422"}:
+                    break
+            if connection_outcome is None or not connection_outcome.supported:
+                details = (
+                    serialize_outcome(connection_outcome)
+                    if connection_outcome is not None
+                    else {}
+                )
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="model.capability_probe_all_failed",
+                        category=ErrorCategory.VALIDATION,
+                        message="model connection and request dialect negotiation failed",
+                        safe_to_resume=True,
+                        metadata={
+                            "connection": details,
+                            "probes": {"connection": details},
+                        },
+                    )
+                )
+
+            resolved_maximum_field = None
+            if provider.protocol == "openai-chat-completions":
+                resolved_maximum_field = getattr(
+                    negotiation_provider, "resolved_max_output_tokens_field", None
+                ) or default_chat_completion_token_field(provider.model)
+
+            model_provider = create_probe_provider(
+                max_output_tokens=effective_max_output_tokens,
+                maximum_field=resolved_maximum_field,
+            )
+            report = await probe_model_capabilities(
+                model_provider,
+                model_binding=provider.id,
+                max_output_tokens=effective_max_output_tokens,
+            )
+            probes = {
+                outcome.name: serialize_outcome(outcome)
+                for outcome in report.outcomes
+            }
+            if not report.valid:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="model.capability_probe_all_failed",
+                        category=ErrorCategory.VALIDATION,
+                        message="all model capability probes failed",
+                        safe_to_resume=True,
+                        metadata={"probes": probes},
+                    )
+                )
+
+            reasoning_prompt = (
+                "Think carefully about 17 multiplied by 19, then reply with the "
+                "number only."
+            )
+            omit_outcome = await probe_model_connection(
+                model_provider,
+                model_binding=provider.id,
+                max_output_tokens=effective_max_output_tokens,
+                prompt=reasoning_prompt,
+            )
+            disable_strategy = "omit"
+            disable_outcomes = {"omit": serialize_outcome(omit_outcome)}
+            omit_has_reasoning = bool(omit_outcome.metadata.get("has_reasoning"))
+            selected_auxiliary_json_outcome = report.outcome("json_object")
+            if omit_outcome.supported and omit_has_reasoning:
+                for strategy, extra in _REASONING_DISABLE_EXTRAS.items():
+                    if strategy == "omit":
+                        continue
+                    candidate_provider = create_probe_provider(
+                        max_output_tokens=effective_max_output_tokens,
+                        maximum_field=resolved_maximum_field,
+                        request_extra=extra,
+                    )
+                    outcome = await probe_model_connection(
+                        candidate_provider,
+                        model_binding=provider.id,
+                        max_output_tokens=effective_max_output_tokens,
+                        prompt=reasoning_prompt,
+                    )
+                    disable_outcomes[strategy] = serialize_outcome(outcome)
+                    if (
+                        outcome.supported
+                        and outcome.metadata.get("has_text") is True
+                        and outcome.metadata.get("has_reasoning") is not True
+                    ):
+                        json_outcome = await probe_model_json_object(
+                            candidate_provider,
+                            model_binding=provider.id,
+                            max_output_tokens=effective_max_output_tokens,
+                        )
+                        disable_outcomes[strategy]["auxiliary_json"] = (
+                            serialize_outcome(json_outcome)
+                        )
+                        if json_outcome.supported:
+                            disable_strategy = strategy
+                            selected_auxiliary_json_outcome = json_outcome
+                            break
+
+            effort_strategy_results: dict[str, dict[str, Any]] = {}
+            for effort_strategy in (
+                "reasoning_effort",
+                "chat_template_reasoning_effort",
+            ):
+                reasoning_outcomes: dict[str, dict[str, Any]] = {}
+                supported_reasoning_efforts: list[str] = []
+                text_only_reasoning_efforts: list[str] = []
+                unsupported_reasoning_efforts: list[str] = []
+                for effort in _REASONING_EFFORTS:
+                    nested_strategy = (
+                        effort_strategy == "chat_template_reasoning_effort"
+                    )
+                    effort_provider = create_probe_provider(
+                        max_output_tokens=effective_max_output_tokens,
+                        maximum_field=resolved_maximum_field,
+                        reasoning_effort=None if nested_strategy else effort,
+                        request_extra=(
+                            {
+                                "chat_template_kwargs": {
+                                    "thinking": True,
+                                    "reasoning_effort": effort,
+                                }
+                            }
+                            if nested_strategy
+                            else None
+                        ),
+                    )
+                    outcome = await probe_model_connection(
+                        effort_provider,
+                        model_binding=provider.id,
+                        max_output_tokens=effective_max_output_tokens,
+                        prompt=reasoning_prompt,
+                    )
+                    text_result = serialize_outcome(outcome)
+                    reasoning_outcomes[effort] = {"text": text_result}
+                    reasoning_observed = bool(
+                        outcome.metadata.get("has_reasoning")
+                        or outcome.metadata.get("reasoning_tokens")
+                    )
+                    text_supported = outcome.supported and (
+                        not nested_strategy or reasoning_observed
+                    )
+                    if text_supported:
+                        text_only_reasoning_efforts.append(effort)
+                    tool_outcome = None
+                    if text_supported and report.supports_tools:
+                        tool_outcome = await probe_model_tool_calling(
+                            effort_provider,
+                            model_binding=provider.id,
+                            max_output_tokens=effective_max_output_tokens,
+                        )
+                        reasoning_outcomes[effort]["with_tools"] = (
+                            serialize_outcome(tool_outcome)
+                        )
+                    runtime_supported = text_supported and (
+                        not report.supports_tools
+                        or (tool_outcome is not None and tool_outcome.supported)
+                    )
+                    (
+                        supported_reasoning_efforts
+                        if runtime_supported
+                        else unsupported_reasoning_efforts
+                    ).append(effort)
+                effort_strategy_results[effort_strategy] = {
+                    "supported": supported_reasoning_efforts,
+                    "text_only": text_only_reasoning_efforts,
+                    "unsupported": unsupported_reasoning_efforts,
+                    "outcomes": reasoning_outcomes,
+                }
+
+            top_level_efforts = effort_strategy_results["reasoning_effort"]
+            nested_efforts = effort_strategy_results[
+                "chat_template_reasoning_effort"
+            ]
+            top_supported = top_level_efforts["supported"]
+            nested_supported = nested_efforts["supported"]
+            reasoning_effort_strategy = "reasoning_effort"
+            if nested_supported and (
+                not top_supported
+                or (
+                    len(top_supported) == len(_REASONING_EFFORTS)
+                    and len(nested_supported) < len(top_supported)
+                )
+            ):
+                reasoning_effort_strategy = "chat_template_reasoning_effort"
+            selected_efforts = effort_strategy_results[reasoning_effort_strategy]
+            supported_reasoning_efforts = selected_efforts["supported"]
+            text_only_reasoning_efforts = selected_efforts["text_only"]
+            unsupported_reasoning_efforts = selected_efforts["unsupported"]
+            reasoning_outcomes = selected_efforts["outcomes"]
+
+            explicit_disable = disable_strategy != "omit"
+            if omit_has_reasoning:
+                reasoning_behavior = "controllable" if explicit_disable else "always"
+            else:
+                reasoning_behavior = (
+                    "controllable" if supported_reasoning_efforts else "none"
+                )
+            reasoning_control = {
+                "supported": explicit_disable or bool(supported_reasoning_efforts),
+                "status": "supported"
+                if explicit_disable or supported_reasoning_efforts
+                else "unsupported",
+                "probed": True,
+                "behavior": reasoning_behavior,
+                "disable_strategy": disable_strategy,
+                "effort_strategy": reasoning_effort_strategy,
+                "disable_outcomes": disable_outcomes,
+                "supported_efforts": supported_reasoning_efforts,
+                "text_only_efforts": text_only_reasoning_efforts,
+                "unsupported_efforts": unsupported_reasoning_efforts,
+                "effort_outcomes": reasoning_outcomes,
+                "effort_strategy_outcomes": effort_strategy_results,
+                "auxiliary_json": serialize_outcome(
+                    selected_auxiliary_json_outcome
+                ),
+            }
+            probes["reasoning_control"] = reasoning_control
+            successful_probes = list(report.successful_probes)
+            failed_probes = list(report.failed_probes)
+            if reasoning_control["supported"]:
+                successful_probes.append("reasoning_control")
+            elif "reasoning_control" not in failed_probes:
+                failed_probes.append("reasoning_control")
+            compatibility_profile = DesktopModelCompatibilityProfile(
+                route_fingerprint=DesktopV2Service._model_compatibility_fingerprint(
+                    provider
+                ),
+                max_output_tokens_field=resolved_maximum_field,
+                effective_max_output_tokens=effective_max_output_tokens,
+                reasoning_disable_strategy=disable_strategy,
+                reasoning_behavior=reasoning_behavior,
+                reasoning_effort_strategy=reasoning_effort_strategy,
+                supported_reasoning_efforts=tuple(supported_reasoning_efforts),
+                text_only_reasoning_efforts=tuple(text_only_reasoning_efforts),
+                unsupported_reasoning_efforts=tuple(unsupported_reasoning_efforts),
+                supports_json_object=report.supports_json_object,
+                auxiliary_json_compatible=(
+                    selected_auxiliary_json_outcome.supported
+                ),
+                successful_probes=tuple(successful_probes),
+                failed_probes=tuple(failed_probes),
+            )
+            return {
+                "valid": True,
+                "successful_probes": successful_probes,
+                "failed_probes": failed_probes,
+                "skipped_probes": [],
+                "connection": probes["connection"],
+                "requested_max_output_tokens": provider.max_tokens,
+                "effective_max_output_tokens": effective_max_output_tokens,
+                "supports_multimodal": report.supports_multimodal,
+                "supports_structured_output": report.supports_structured_output,
+                "supports_json_object": report.supports_json_object,
+                "supports_tool_calling": report.supports_tools,
+                "multimodal": probes["multimodal"],
+                "structured_output": probes["structured_output"],
+                "json_object": probes["json_object"],
+                "tool_calling": probes["tool_calling"],
+                "reasoning_control": reasoning_control,
+                "compatibility_profile": compatibility_profile.model_dump(mode="json"),
+                "probes": probes,
+                "model": provider.model,
+                "base_url": provider.base_url,
+            }
+        finally:
+            closed_clients: set[int] = set()
+            for value in created_providers:
+                client = getattr(value, "raw_client", None)
+                if client is None or id(client) in closed_clients:
+                    continue
+                closed_clients.add(id(client))
+                close = getattr(client, "aclose", None) or getattr(
+                    client, "close", None
+                )
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
 
     async def get_agent_settings(self, agent_id: str, user_id: str) -> dict[str, Any]:
         agent = await self._agent(agent_id, user_id)
@@ -2712,9 +3404,7 @@ class DesktopV2Service:
                 parent=self._process_scope,
             )
             try:
-                initializer = handle.providers.require_unique(
-                    "workspace.initializer"
-                )
+                initializer = handle.providers.require_unique("workspace.initializer")
                 initialize = initializer.initialize
                 if inspect.iscoroutinefunction(initialize):
                     result = initialize(workspace)
@@ -2853,9 +3543,7 @@ class DesktopV2Service:
                 session_id=request.session_id,
                 run_id=accepted_handle.run_id,
                 resolved_spec_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get(
-                    "runtime_components"
-                ),
+                component_snapshot=command.config.metadata.get("runtime_components"),
             )
             driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             memory_enabled = _agent_memory_enabled(
@@ -2877,9 +3565,7 @@ class DesktopV2Service:
                 facade,
                 agent_id=request.agent_id,
                 composition_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get(
-                    "runtime_components"
-                ),
+                component_snapshot=command.config.metadata.get("runtime_components"),
             )
             stream = await application.entrypoint().schedule_accepted_run(
                 accepted_handle, context
@@ -3224,9 +3910,7 @@ class DesktopV2Service:
                 session_id=(await self.runtime.get_run(run_id)).session_id,
                 run_id=run_id,
                 resolved_spec_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get(
-                    "runtime_components"
-                ),
+                component_snapshot=command.config.metadata.get("runtime_components"),
             )
             driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             self._drivers[run_id] = driver
@@ -3496,16 +4180,21 @@ class DesktopV2Service:
                 _DesktopRunResources(sandbox_handle, scope_handles),
             )
         except BaseException as exc:
-            for sandbox_handle in reversed(provisioned):
-                try:
-                    await sandbox_handle.close()
-                except BaseException as close_exc:
-                    raise exc from close_exc
+            cleanup_errors: list[BaseException] = []
+            # Run-scoped services may still own jobs against the sandbox, so
+            # release them before tearing down the execution boundary.
             for handle in reversed(scope_handles):
                 try:
                     await handle.close()
                 except BaseException as close_exc:
-                    raise exc from close_exc
+                    cleanup_errors.append(close_exc)
+            for sandbox_handle in reversed(provisioned):
+                try:
+                    await sandbox_handle.close()
+                except BaseException as close_exc:
+                    cleanup_errors.append(close_exc)
+            if cleanup_errors:
+                raise exc from cleanup_errors[0]
             raise
         finally:
             _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
@@ -3564,11 +4253,12 @@ class DesktopV2Service:
                     "component_selections": dict(
                         component_snapshot.get("selections") or {}
                     ),
-                    "component_configs": dict(
-                        component_snapshot.get("configs") or {}
-                    ),
+                    "component_configs": dict(component_snapshot.get("configs") or {}),
                 }
             )
+        current_resolved_spec_hash = self._desktop_spec_hash(
+            resolved.manifest_hash, settings
+        )
         estimator_id = settings.component_selections.get(
             "context.token-estimator",
             _DESKTOP_COMPONENT_DEFAULTS["context.token-estimator"],
@@ -3726,6 +4416,15 @@ class DesktopV2Service:
                 _DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"],
             ),
         )
+        if (
+            continuation_plugin_id
+            in {
+                "sage.agent.continuation.llm-judge",
+                "sage.agent.continuation.hybrid",
+            }
+            and not self._auxiliary_json_compatible(judge_provider)
+        ):
+            continuation_plugin_id = "sage.agent.continuation.deterministic"
         factory = AgentCompositionFactory(
             self.driver_runtime,
             context_components=ContextComponentBundle(
@@ -3862,6 +4561,11 @@ class DesktopV2Service:
                 "tool.selection-policy", legacy_plugin_id
             ),
         )
+        if (
+            tool_selection_plugin_id == "sage.tool-selection.llm"
+            and not self._auxiliary_json_compatible(judge_provider)
+        ):
+            tool_selection_plugin_id = "sage.tool-selection.lexical"
         configured_tool_selection = settings.component_configs.get(
             "tool.selection-policy"
         )
@@ -3887,6 +4591,9 @@ class DesktopV2Service:
             goal_state_service=goal_state_service,
             tool_selection_policy=tool_selection_policy,
         )
+        active_scope_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+        if active_scope_handles is not None:
+            active_scope_handles.append(official_runtime)
         official_tools = self._official_tools(official_runtime)
         skill_tool = SkillToolPlugin(loader)
         catalogs = (
@@ -3918,10 +4625,7 @@ class DesktopV2Service:
                     continuation_plugin_id == "sage.agent.continuation.llm-judge"
                     and value == "turn_status"
                 )
-                and not (
-                    invocation_mode == "plan"
-                    and value in _PLAN_BLOCKED_TOOLS
-                )
+                and not (invocation_mode == "plan" and value in _PLAN_BLOCKED_TOOLS)
             ),
             skills=tuple(valid_skills),
             allow_delegation=not force_leaf,
@@ -3954,10 +4658,7 @@ class DesktopV2Service:
                     continuation_plugin_id == "sage.agent.continuation.llm-judge"
                     and value == "turn_status"
                 )
-                and not (
-                    invocation_mode == "plan"
-                    and value in _PLAN_BLOCKED_TOOLS
-                )
+                and not (invocation_mode == "plan" and value in _PLAN_BLOCKED_TOOLS)
             )
             member_skills = tuple(
                 value
@@ -4153,6 +4854,7 @@ class DesktopV2Service:
                     history_reader=self.driver_session_store,
                     projection_observer=self.session_memory_service,
                 ),
+                expected_resolved_spec_hash=current_resolved_spec_hash,
             )
 
         async def compose_child_loop(descriptor, child_run_id, child_context):
@@ -4202,14 +4904,17 @@ class DesktopV2Service:
             base_catalog=native_catalog,
             base_executor=native_executor,
             registry=member_registry,
-            resolved_spec_hash=resolved_spec_hash or resolved.manifest_hash,
+            resolved_spec_hash=current_resolved_spec_hash,
             max_delegation_concurrency=4,
+            delegation_concurrency_limiter=self.delegation_limiter,
             loop_composer=compose_mode_loop,
             workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
             fallback_invocation_mode=invocation_mode,
             child_loop_factory=compose_child_loop,
         )
-        loop = await mode_factory.create_loop_async(root_descriptor, run_id or "pending")
+        loop = await mode_factory.create_loop_async(
+            root_descriptor, run_id or "pending"
+        )
         return resolved, loop, sandbox_handle
 
     async def _scoped_component(
@@ -4272,9 +4977,7 @@ class DesktopV2Service:
                 )
                 owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
                 (
-                    owner_handles
-                    if owner_handles is not None
-                    else self._scope_handles
+                    owner_handles if owner_handles is not None else self._scope_handles
                 ).append(agent_parent)
                 parents.append(agent_parent)
             handle = await self.extension_host.open_scope_hierarchy(
@@ -4294,9 +4997,7 @@ class DesktopV2Service:
             else:
                 owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
                 (
-                    owner_handles
-                    if owner_handles is not None
-                    else self._scope_handles
+                    owner_handles if owner_handles is not None else self._scope_handles
                 ).append(handle)
             return provider
         except BaseException:
@@ -4313,6 +5014,38 @@ class DesktopV2Service:
     def _manifest(self, agent, provider, tools, skills):
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 200))
         deep_thinking, thinking_level = self._thinking_config(agent)
+        compatibility_profile = self._verified_model_compatibility_profile(provider)
+        effective_max_output_tokens = self._effective_model_output_tokens(
+            provider, compatibility_profile
+        )
+        reasoning_effort = self._effective_reasoning_effort(
+            compatibility_profile,
+            enabled=deep_thinking,
+            requested=thinking_level,
+            legacy=thinking_level if deep_thinking else None,
+        )
+        request_extra: dict[str, Any] = {}
+        if (
+            provider.protocol == "openai-chat-completions"
+            and compatibility_profile is not None
+        ):
+            request_extra["max_output_tokens_field"] = (
+                compatibility_profile.max_output_tokens_field
+            )
+        if compatibility_profile is not None and not deep_thinking:
+            request_extra.update(
+                self._reasoning_disable_extra(
+                    compatibility_profile.reasoning_disable_strategy
+                )
+            )
+        elif compatibility_profile is not None:
+            request_extra.update(
+                self._reasoning_effort_extra(
+                    compatibility_profile,
+                    enabled=deep_thinking,
+                    requested=thinking_level,
+                )
+            )
         memory_enabled = (
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools
         )
@@ -4322,21 +5055,22 @@ class DesktopV2Service:
             credential="desktop_model",
             model=provider.model,
             request=ModelRequestDefaults(
-                max_output_tokens=provider.max_tokens,
+                max_output_tokens=effective_max_output_tokens,
                 temperature=provider.temperature,
                 top_p=provider.top_p,
-                reasoning_effort=thinking_level if deep_thinking else None,
+                reasoning_effort=reasoning_effort,
+                extra=request_extra,
             ),
             limits=ModelLimits(
                 context_window=provider.max_model_len,
-                max_output_tokens=provider.max_tokens,
+                max_output_tokens=effective_max_output_tokens,
             ),
             capabilities=ModelCapabilityDeclaration(
                 multimodal=provider.supports_multimodal,
                 structured_output=provider.supports_structured_output,
-                tool_calling=True,
+                tool_calling=provider.supports_tool_calling,
                 reasoning=True,
-                parallel_tool_calls=True,
+                parallel_tool_calls=provider.supports_tool_calling,
             ),
         )
         return SageManifest(
@@ -4362,7 +5096,7 @@ class DesktopV2Service:
                         or "You are a helpful Sage agent."
                     ),
                     models={"primary": "primary"},
-                    tools=tools,
+                    tools=tools if provider.supports_tool_calling else (),
                     skills=skills,
                     budgets=AgentBudgets(max_steps=max_steps),
                     memory=AgentMemoryBehavior(
@@ -4378,43 +5112,101 @@ class DesktopV2Service:
     async def _model_provider(
         self, provider, agent, *, enable_thinking: bool | None = None
     ):
-        model_lower = provider.model.lower()
-        max_field = (
-            "max_completion_tokens"
-            if model_lower.startswith(("gpt-5", "o1", "o3", "o4"))
-            else "max_tokens"
-        )
         deep_thinking, thinking_level = self._thinking_config(agent)
         if enable_thinking is not None:
             deep_thinking = enable_thinking
-        reasoning_effort = thinking_level if deep_thinking else None
         request_extra: dict[str, Any] = {}
+        compatibility_profile = self._verified_model_compatibility_profile(provider)
+        effective_max_output_tokens = self._effective_model_output_tokens(
+            provider, compatibility_profile
+        )
+        reasoning_effort = self._effective_reasoning_effort(
+            compatibility_profile,
+            enabled=deep_thinking,
+            requested=thinking_level,
+            legacy=thinking_level if deep_thinking else None,
+        )
         if provider.protocol == "openai-chat-completions":
-            request_extra["max_output_tokens_field"] = max_field
-            if enable_thinking is not None:
-                # V1 sent explicit provider-compatible thinking controls. Merely
-                # omitting reasoning_effort does not disable thinking on many
-                # OpenAI-compatible endpoints, so preserve that behavior here.
+            if compatibility_profile is not None:
+                request_extra["max_output_tokens_field"] = (
+                    compatibility_profile.max_output_tokens_field
+                )
+                if not deep_thinking:
+                    request_extra.update(
+                        self._reasoning_disable_extra(
+                            compatibility_profile.reasoning_disable_strategy
+                        )
+                    )
+                else:
+                    request_extra.update(
+                        self._reasoning_effort_extra(
+                            compatibility_profile,
+                            enabled=True,
+                            requested=thinking_level,
+                        )
+                    )
+            elif enable_thinking is not None:
+                request_extra["reasoning_parameter_fallback"] = (
+                    enable_thinking is False
+                )
+                # There is no portable "thinking disabled" field. In
+                # particular, minimal is still reasoning and some compatible
+                # gateways reject reasoning_effort entirely. Auxiliary
+                # requests therefore use provider defaults for OpenAI
+                # reasoning models; vendor-specific disable controls remain for
+                # protocols where Sage has an explicit mapping.
+                if enable_thinking or not is_openai_reasoning_model(provider.model):
+                    request_extra.update(
+                        build_llm_extra_body(
+                            provider.model,
+                            base_url=provider.base_url,
+                            enable_thinking=enable_thinking,
+                            thinking_level=(
+                                thinking_level if enable_thinking else None
+                            ),
+                            default_off="minimal",
+                        )
+                    )
+        elif provider.protocol == "openai-responses":
+            if compatibility_profile is not None and not deep_thinking:
                 request_extra.update(
-                    build_llm_extra_body(
-                        provider.model,
-                        base_url=provider.base_url,
-                        enable_thinking=enable_thinking,
-                        thinking_level=(thinking_level if enable_thinking else None),
-                        default_off="minimal",
+                    self._reasoning_disable_extra(
+                        compatibility_profile.reasoning_disable_strategy
                     )
                 )
-        elif provider.protocol == "openai-responses" and enable_thinking is False:
-            # OpenAI reasoning models do not expose a disabled state; minimal is
-            # the smallest supported effort for auxiliary Judge requests.
-            reasoning_effort = "minimal"
+            elif compatibility_profile is not None:
+                request_extra.update(
+                    self._reasoning_effort_extra(
+                        compatibility_profile,
+                        enabled=True,
+                        requested=thinking_level,
+                    )
+                )
+            elif enable_thinking is not None:
+                request_extra["reasoning_parameter_fallback"] = (
+                    enable_thinking is False
+                )
+        elif compatibility_profile is not None and not deep_thinking:
+            request_extra.update(
+                self._reasoning_disable_extra(
+                    compatibility_profile.reasoning_disable_strategy
+                )
+            )
+        elif compatibility_profile is not None:
+            request_extra.update(
+                self._reasoning_effort_extra(
+                    compatibility_profile,
+                    enabled=True,
+                    requested=thinking_level,
+                )
+            )
         route = ModelRoute(
             provider=provider.protocol,
             base_url=provider.base_url,
             credential="desktop_model",
             model=provider.model,
             request=ModelRequestDefaults(
-                max_output_tokens=provider.max_tokens,
+                max_output_tokens=effective_max_output_tokens,
                 temperature=provider.temperature,
                 top_p=provider.top_p,
                 reasoning_effort=reasoning_effort,
@@ -4422,14 +5214,14 @@ class DesktopV2Service:
             ),
             limits=ModelLimits(
                 context_window=provider.max_model_len,
-                max_output_tokens=provider.max_tokens,
+                max_output_tokens=effective_max_output_tokens,
             ),
             capabilities=ModelCapabilityDeclaration(
                 multimodal=provider.supports_multimodal,
                 structured_output=provider.supports_structured_output,
-                tool_calling=True,
+                tool_calling=provider.supports_tool_calling,
                 reasoning=True,
-                parallel_tool_calls=True,
+                parallel_tool_calls=provider.supports_tool_calling,
             ),
         )
         protocol = resolve_model_protocol(route.provider)
@@ -4449,6 +5241,85 @@ class DesktopV2Service:
                 "provider_instance_id": provider.id,
             },
         )
+
+    @classmethod
+    def _verified_model_compatibility_profile(
+        cls,
+        provider: DesktopModelProviderRecord,
+    ) -> DesktopModelCompatibilityProfile | None:
+        profile = provider.compatibility_profile
+        if profile is None:
+            return None
+        if profile.route_fingerprint != cls._model_compatibility_fingerprint(provider):
+            return None
+        return profile
+
+    @staticmethod
+    def _effective_model_output_tokens(
+        provider: DesktopModelProviderRecord,
+        profile: DesktopModelCompatibilityProfile | None,
+    ) -> int:
+        if profile is not None and profile.effective_max_output_tokens is not None:
+            return profile.effective_max_output_tokens
+        return provider.max_tokens
+
+    @classmethod
+    def _auxiliary_json_compatible(
+        cls,
+        provider: DesktopModelProviderRecord,
+    ) -> bool:
+        profile = cls._verified_model_compatibility_profile(provider)
+        return (
+            profile is None
+            or profile.schema_version < 2
+            or profile.auxiliary_json_compatible
+        )
+
+    @staticmethod
+    def _effective_reasoning_effort(
+        profile: DesktopModelCompatibilityProfile | None,
+        *,
+        enabled: bool,
+        requested: str,
+        legacy: str | None,
+    ) -> str | None:
+        if not enabled:
+            return None
+        if profile is None:
+            return legacy
+        if profile.schema_version < 2:
+            return None
+        if profile.reasoning_effort_strategy != "reasoning_effort":
+            return None
+        if requested in profile.supported_reasoning_efforts:
+            return requested
+        return None
+
+    @staticmethod
+    def _reasoning_disable_extra(strategy: str) -> dict[str, Any]:
+        return dict(_REASONING_DISABLE_EXTRAS.get(strategy, {}))
+
+    @staticmethod
+    def _reasoning_effort_extra(
+        profile: DesktopModelCompatibilityProfile,
+        *,
+        enabled: bool,
+        requested: str,
+    ) -> dict[str, Any]:
+        if (
+            enabled
+            and profile.schema_version >= 2
+            and profile.reasoning_effort_strategy
+            == "chat_template_reasoning_effort"
+            and requested in profile.supported_reasoning_efforts
+        ):
+            return {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": requested,
+                }
+            }
+        return {}
 
     async def _fast_provider(
         self,
@@ -4571,19 +5442,14 @@ class DesktopV2Service:
         if invocation_grants:
             base_tools = tuple(
                 name
-                for name in run_config.enabled_tools
+                for name in (run_config.enabled_tools or ())
                 if not (
-                    request.invocation_mode == "plan"
-                    and name in _PLAN_BLOCKED_TOOLS
+                    request.invocation_mode == "plan" and name in _PLAN_BLOCKED_TOOLS
                 )
             )
             enabled_tools = (
                 *base_tools,
-                *(
-                    name
-                    for name in invocation_grants
-                    if name not in base_tools
-                ),
+                *(name for name in invocation_grants if name not in base_tools),
             )
             run_config = run_config.model_copy(
                 update={
@@ -4915,6 +5781,20 @@ def _usage_record_time(record: dict[str, Any]) -> datetime | None:
     return _usage_timestamp(record.get("completed_at") or record.get("started_at"))
 
 
+def _usage_percentile(samples: list[float], percentile: float) -> float | None:
+    """Return a linearly interpolated percentile for one usage sample series."""
+
+    if not samples:
+        return None
+    ordered = sorted(samples)
+    position = (len(ordered) - 1) * min(1.0, max(0.0, percentile))
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    value = ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+    return round(value, 2)
+
+
 def _usage_latency_observation(
     record: dict[str, Any], *, output_tokens: int
 ) -> tuple[float | None, float | None, int]:
@@ -4939,13 +5819,10 @@ def _usage_latency_observation(
             seconds = (completed_at - first_token_at).total_seconds()
             if seconds >= 0:
                 generation_ms = seconds * 1000
-        elif (
-            first_token_latency_ms is not None
-            and isinstance(record.get("duration_sec"), (int, float))
+        elif first_token_latency_ms is not None and isinstance(
+            record.get("duration_sec"), (int, float)
         ):
-            seconds = float(record["duration_sec"]) - (
-                first_token_latency_ms / 1000
-            )
+            seconds = float(record["duration_sec"]) - (first_token_latency_ms / 1000)
             if seconds >= 0:
                 generation_ms = seconds * 1000
     return first_token_latency_ms, generation_ms, token_intervals

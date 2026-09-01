@@ -35,6 +35,7 @@ from sagents.v2.skill import (
     ActiveSkillsContextProvider,
     AvailableSkillsContextProvider,
     FilteredSkillCatalog,
+    InvocationGrantSkillCatalog,
     SkillActivationRepository,
     SkillCatalog,
     SkillLoader,
@@ -94,7 +95,10 @@ class AgentCompositionFactory:
                 )
             )
         return SkillLoader(
-            catalog=FilteredSkillCatalog(catalog, selected),
+            catalog=InvocationGrantSkillCatalog(
+                FilteredSkillCatalog(catalog, selected),
+                self.runtime.session_store.get_start_command,
+            ),
             source=source,
             workspace=workspace,
             activations=activations,
@@ -117,6 +121,7 @@ class AgentCompositionFactory:
         automatic_memory_recall: bool = False,
         memory_recall_limit: int = 5,
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
+        expected_resolved_spec_hash: str | None = None,
     ) -> AgentLoopEngine:
         """Wire already-selected ports into the single canonical Loop engine."""
 
@@ -135,6 +140,7 @@ class AgentCompositionFactory:
             memory_recall_limit=memory_recall_limit,
             memory_recall_query_generator=memory_recall_query_generator,
             context_assembler=context_assembler,
+            expected_resolved_spec_hash=expected_resolved_spec_hash,
         )
 
     def create_loop(
@@ -257,6 +263,7 @@ class AgentCompositionFactory:
                 history_reader=self.runtime.session_store,
                 projection_observer=session_memory_service,
             ),
+            expected_resolved_spec_hash=resolved.manifest_hash,
         )
 
 

@@ -30,6 +30,7 @@ from sagents.v2.context import (
     UnicodeHeuristicTokenEstimator,
 )
 from sagents.v2.runtime.execution import ExecutionBindingRequest
+from sagents.v2.runtime.session import EphemeralSessionStore
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
@@ -68,6 +69,79 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_builder_fails_when_selected_provider_cannot_meet_required_guarantee(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-required-guarantees",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    package = package.model_copy(
+        update={
+            "runtime": package.runtime.model_copy(
+                update={
+                    "required_guarantees": {
+                        "execution.scheduler": {
+                            "durable_across_process_restart": True
+                        }
+                    }
+                }
+            )
+        }
+    )
+
+    with pytest.raises(SageV2Error) as unsatisfied:
+        await (
+            SAgentBuilder()
+            .with_defaults(session_root=tmp_path / "session-store")
+            .with_model_provider(ScriptedModelProvider(()))
+            .build(package)
+        )
+
+    assert (
+        unsatisfied.value.info.code
+        == "runtime.capability_guarantee_unsatisfied"
+    )
+    assert unsatisfied.value.info.metadata["capability"] == "execution.scheduler"
+
+
+@pytest.mark.asyncio
+async def test_builder_reads_mapping_capabilities_from_an_injected_provider(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-live-mapping-guarantees",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    package = package.model_copy(
+        update={
+            "runtime": package.runtime.model_copy(
+                update={
+                    "required_guarantees": {
+                        "session.store": {
+                            "durable_across_process_restart": False
+                        }
+                    }
+                }
+            )
+        }
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "unused-store")
+        .with_session_store(EphemeralSessionStore())
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    await application.close()
+
+
+@pytest.mark.asyncio
 async def test_application_composition_hash_includes_builder_storage_config(
     tmp_path: Path,
 ):
@@ -95,6 +169,28 @@ async def test_application_composition_hash_includes_builder_storage_config(
 
     assert second.composition_hash != first_hash
     await second.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_loop_fences_on_the_full_application_composition_hash(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-loop-composition-hash",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    loop = application.entrypoint().driver_factory("run_1")
+    assert loop.expected_resolved_spec_hash == application.composition_hash
+    await application.close()
 
 
 @pytest.mark.asyncio

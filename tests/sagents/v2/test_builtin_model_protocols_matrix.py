@@ -117,6 +117,19 @@ class FakeResponses:
         return self.stream
 
 
+class SequencedResponses:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
 @pytest.mark.asyncio
 async def test_openai_responses_maps_items_tools_and_stream_events():
     usage = {
@@ -206,6 +219,8 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
     )
     assert completed.usage.cached_input_tokens == 3
     assert completed.usage.reasoning_tokens == 2
+    assert completed.usage.reported is True
+    assert completed.usage.provider_usage == usage
     assert completed.provider_state == make_provider_state(
         "openai_responses",
         {
@@ -245,7 +260,6 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
         "call_id": "call_old",
         "output": '{"result":1}',
     }
-
     replay = provider.diagnostic_request(
         request(
             messages=(
@@ -269,6 +283,53 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
         "encrypted_content": "opaque-state",
         "summary": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_retries_rejected_reasoning_control_once():
+    error = RuntimeError("reasoning is unsupported by this deployment")
+    error.status_code = 422
+    responses = SequencedResponses(
+        [
+            error,
+            FakeAsyncStream(
+                (
+                    {
+                        "type": "response.output_text.delta",
+                        "delta": "done",
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {"id": "response_1", "status": "completed"},
+                    },
+                )
+            ),
+        ]
+    )
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(
+            model="gpt-test",
+            capabilities=CAPABILITIES,
+            reasoning_effort="minimal",
+            reasoning_parameter_fallback=True,
+        ),
+        client=SimpleNamespace(responses=responses),
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    assert len(responses.calls) == 2
+    assert responses.calls[0]["reasoning"] == {"effort": "minimal"}
+    assert "reasoning" not in responses.calls[1]
+    assert "include" not in responses.calls[1]
+    completed = events[-1].response
+    assert completed is not None
+    assert completed.provider_metadata["compatibility_fallback"] == {
+        "kind": "reasoning_controls_omitted",
+        "removed": ["reasoning"],
+        "provider_status": 422,
+    }
+    assert "reasoning" not in provider.diagnostic_request(request())
 
 
 class FakeHTTPResponse:
@@ -404,6 +465,12 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     assert completed.usage.input_tokens == 20
     assert completed.usage.output_tokens == 7
     assert completed.usage.cached_input_tokens == 4
+    assert completed.usage.reported is True
+    assert completed.usage.provider_usage == {
+        "input_tokens": 20,
+        "cache_read_input_tokens": 4,
+        "output_tokens": 7,
+    }
     assert client.response.status_checked is True
 
     method, url, call = client.calls[0]
@@ -536,3 +603,38 @@ def test_builtin_factory_uses_model_route_as_authoritative_protocol_selection(
 def test_registry_selection_rejects_unknown_protocol_instead_of_guessing_from_model_name():
     with pytest.raises(ValueError, match="unknown built-in model protocol"):
         resolve_model_protocol("unknown")
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_field"),
+    [
+        ("gpt-5.6-luna", "max_completion_tokens"),
+        ("o4-mini", "max_completion_tokens"),
+        ("gpt-4o", "max_tokens"),
+        ("third-party-model", "max_tokens"),
+    ],
+)
+def test_chat_completions_factory_auto_selects_initial_token_field(
+    model, expected_field
+):
+    route = ModelRoute(
+        provider="openai-chat-completions",
+        model=model,
+        request=ModelRequestDefaults(max_output_tokens=128),
+    )
+    registration = builtin_extension_registry().get(
+        "sage.model.openai-chat-completions"
+    )
+
+    provider = registration.factory(
+        ExtensionScopeContext(
+            scope=ExtensionScope.AGENT,
+            scope_id="agent_test",
+            config={"route": route.model_dump(mode="json"), "client": object()},
+        ),
+        {},
+    )
+
+    assert provider.config.max_output_tokens_field == "auto"
+    outgoing = provider.diagnostic_request(request(max_output_tokens=128))
+    assert outgoing[expected_field] == 128

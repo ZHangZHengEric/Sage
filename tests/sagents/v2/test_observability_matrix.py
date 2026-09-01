@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import TextBlock, UsageSummary
 from sagents.v2.model import ModelRequest, RecordingModelProvider
 from sagents.v2.model.contracts import (
     ModelEventKind,
@@ -30,7 +30,20 @@ from sagents.v2.testing.plugins.scripted_model import (
 async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
     response = ModelResponse(
-        response_id="response_1", text="done", finish_reason="stop"
+        response_id="response_1",
+        text="done",
+        finish_reason="stop",
+        usage=UsageSummary(
+            reported=True,
+            input_tokens=10,
+            output_tokens=5,
+            models=("model_1",),
+            provider_usage={
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_write_tokens": 1,
+            },
+        ),
     )
     provider = ScriptedModelProvider(
         (
@@ -100,6 +113,20 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     assert "provider" not in record
     assert "wire_request" not in record
     assert "provider_metadata" not in record["response"]
+    assert record["response"]["usage"] == {
+        "reported": True,
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cached_input_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost": None,
+        "models": ["model_1"],
+        "provider_usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_write_tokens": 1,
+        },
+    }
     assert await sink.list_model_requests(session_id="session_1") == (record,)
     request_paths = list(
         (

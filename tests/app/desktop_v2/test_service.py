@@ -10,9 +10,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.desktop_v2.backend.catalog import DesktopMcpRecord
+from app.desktop_v2.backend.catalog import (
+    DesktopMcpRecord,
+    DesktopModelCompatibilityProfile,
+)
 from app.desktop_v2.backend.service import (
     _DesktopDriver,
+    _usage_percentile,
     AgentCreate,
     AgentRosterContextProvider,
     AgentSettingsPatch,
@@ -40,7 +44,7 @@ from sagents.v2.contracts.commands import (
     RunConfig,
     StartRun,
 )
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
 from sagents.v2.contracts.session_commit import (
     SessionCommitProposalStatus,
@@ -54,6 +58,8 @@ from sagents.v2.agent.policy import (
 )
 from sagents.v2.model import (
     ModelEventKind,
+    ModelMessage,
+    ModelRequest,
     ModelResponse,
     ModelStreamEvent,
     ModelToolCall,
@@ -89,9 +95,7 @@ async def desktop_execution_lease(service: DesktopV2Service, run_id: str):
     assert lease is not None
     async with service.driver_session_store.lease_scope(lease):
         yield
-    await service.scheduler.release(
-        lease, LeaseReleaseReason.COMPLETED, requeue=False
-    )
+    await service.scheduler.release(lease, LeaseReleaseReason.COMPLETED, requeue=False)
 
 
 @pytest.mark.parametrize(
@@ -107,8 +111,17 @@ def test_desktop_settings_reject_unknown_frontend_language():
         DesktopV2Settings(language="unsupported")  # type: ignore[arg-type]
 
 
+def test_usage_percentile_is_interpolated_and_handles_empty_samples():
+    assert _usage_percentile([], 0.95) is None
+    assert _usage_percentile([240.0], 0.95) == 240.0
+    assert _usage_percentile([400.0, 100.0, 300.0, 200.0], 0.50) == 250.0
+    assert _usage_percentile([400.0, 100.0, 300.0, 200.0], 0.95) == 385.0
+
+
 @pytest.mark.asyncio
-async def test_desktop_composition_hash_includes_component_selection_and_config(tmp_path):
+async def test_desktop_composition_hash_includes_component_selection_and_config(
+    tmp_path,
+):
     service = DesktopV2Service(tmp_path)
     defaults = DesktopV2Settings()
     changed = defaults.model_copy(
@@ -117,15 +130,45 @@ async def test_desktop_composition_hash_includes_component_selection_and_config(
                 **defaults.component_selections,
                 "context.token-estimator": "sage.context.token-estimator.heuristic",
             },
-            "component_configs": {
-                "context.token-estimator": {"mode": "precise"}
-            },
+            "component_configs": {"context.token-estimator": {"mode": "precise"}},
         }
     )
 
     assert service._desktop_spec_hash(
         "sha256:manifest", defaults
     ) != service._desktop_spec_hash("sha256:manifest", changed)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_rebuilt_desktop_loop_checks_current_composition_not_stored_hash(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path / "sage")
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
+    )
+    agent = await service._agent("sage", "user_1")
+    provider = await service._provider(agent, "user_1")
+    workspace = await service.workspace_root(None, "sage")
+
+    resolved, loop, resources = await service._build_loop(
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+        preferred_skills=(),
+        approval_mode="high_risk",
+        run_id="run_recovery_hash",
+        resolved_spec_hash="sha256:stored-old-composition",
+    )
+    settings = await service.get_settings()
+
+    assert loop.expected_resolved_spec_hash == service._desktop_spec_hash(
+        resolved.manifest_hash, settings
+    )
+    assert loop.expected_resolved_spec_hash != "sha256:stored-old-composition"
+    await resources.close()
     await service.close()
 
 
@@ -142,9 +185,7 @@ async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path)
         agent_id="agent_1",
         composition_hash="sha256:desktop-plan",
         component_snapshot={
-            "selections": {
-                "context.reducer": "sage.context.reducer.window"
-            }
+            "selections": {"context.reducer": "sage.context.reducer.window"}
         },
     )
     bindings = {
@@ -336,7 +377,7 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_usage_overview_skips_corrupt_session_and_aggregates_healthy_usage(
+async def test_usage_overview_salvages_diagnostics_when_events_are_corrupt(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path / "sage")
@@ -349,23 +390,24 @@ async def test_usage_overview_skips_corrupt_session_and_aggregates_healthy_usage
         )
     )
 
+    def corrupt_state() -> SageV2Error:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="session_store.hash_mismatch",
+                category=ErrorCategory.CORRUPT_STATE,
+                message="snapshot checksum mismatch",
+            )
+        )
+
     async def list_session_runs(session_id: str):
         if session_id == "session_corrupt":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="session_store.hash_mismatch",
-                    category=ErrorCategory.CORRUPT_STATE,
-                    message="snapshot checksum mismatch",
-                )
-            )
+            raise corrupt_state()
         return (SimpleNamespace(run_id="run_1"),)
 
-    service.session_store.list_session_runs = AsyncMock(side_effect=list_session_runs)
-    service.session_store.get_start_command = AsyncMock(
-        return_value=SimpleNamespace(agent_id="sage")
-    )
-    service.session_store.read_session_events = AsyncMock(
-        return_value=(
+    async def read_session_events(session_id: str):
+        if session_id == "session_corrupt":
+            raise corrupt_state()
+        return (
             SimpleNamespace(
                 occurred_at=now,
                 type="turn.started",
@@ -379,9 +421,27 @@ async def test_usage_overview_skips_corrupt_session_and_aggregates_healthy_usage
                 data=SimpleNamespace(tool_name="read_file"),
             ),
         )
-    )
-    service.diagnostics.list_model_requests = AsyncMock(
-        return_value=(
+
+    async def list_model_requests(*, session_id: str):
+        if session_id == "session_corrupt":
+            return (
+                {
+                    "status": "completed",
+                    "session_id": session_id,
+                    "run_id": "run_corrupt",
+                    "started_at": now.isoformat(),
+                    "metadata": {"agent_id": "sage"},
+                    "request": {"model": "gpt-test", "messages": []},
+                    "response": {
+                        "usage": {
+                            "input_tokens": 5,
+                            "output_tokens": 1,
+                            "models": ["gpt-test"],
+                        }
+                    },
+                },
+            )
+        return (
             {
                 "status": "completed",
                 "session_id": "session_1",
@@ -402,29 +462,93 @@ async def test_usage_overview_skips_corrupt_session_and_aggregates_healthy_usage
                 },
             },
         )
+
+    service.session_store.list_session_runs = AsyncMock(side_effect=list_session_runs)
+    service.session_store.get_start_command = AsyncMock(
+        return_value=SimpleNamespace(agent_id="sage")
     )
+    service.session_store.read_session_events = AsyncMock(
+        side_effect=read_session_events
+    )
+    service.diagnostics.list_model_requests = AsyncMock(side_effect=list_model_requests)
 
     value = await service.usage_overview("user_1", days=7, timezone_offset_minutes=480)
 
     assert value["totals"] == {
-        "input_tokens": 120,
-        "output_tokens": 30,
+        "input_tokens": 125,
+        "output_tokens": 31,
         "cached_input_tokens": 40,
         "reasoning_tokens": 10,
-        "total_tokens": 150,
-        "model_requests": 1,
+        "total_tokens": 156,
+        "model_requests": 2,
         "failed_model_requests": 0,
         "turns": 1,
         "tool_calls": 1,
-        "sessions": 1,
+        "sessions": 2,
         "average_first_token_latency_ms": 1000.0,
+        "first_token_latency_p50_ms": 1000.0,
+        "first_token_latency_p95_ms": 1000.0,
+        "first_token_latency_samples": 1,
         "output_tokens_per_second": 10.0,
+        "output_tokens_per_second_p50": 10.0,
+        "output_tokens_per_second_p95": 10.0,
+        "output_tokens_per_second_samples": 1,
     }
     assert value["models"][0]["name"] == "gpt-test"
     assert value["agents"][0]["name"] == "Sage"
-    assert value["agents"][0]["total_tokens"] == 150
+    assert value["agents"][0]["total_tokens"] == 156
     assert value["tools"] == [{"name": "read_file", "count": 1}]
-    assert value["daily"][-1]["total_tokens"] == 150
+    assert value["daily"][-1]["total_tokens"] == 156
+    assert value["data_quality"] == {
+        "partial": True,
+        "skipped_sessions": 1,
+        "skipped_event_sessions": 1,
+        "skipped_diagnostic_sessions": 0,
+    }
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_usage_overview_keeps_events_when_diagnostics_are_unreadable(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path / "sage")
+    await service.list_agents("user_1")
+    now = utc_now()
+    service.session_index.list = AsyncMock(
+        return_value=(SimpleNamespace(session_id="session_1"),)
+    )
+    service.session_store.list_session_runs = AsyncMock(
+        return_value=(SimpleNamespace(run_id="run_1"),)
+    )
+    service.session_store.get_start_command = AsyncMock(
+        return_value=SimpleNamespace(agent_id="sage")
+    )
+    service.session_store.read_session_events = AsyncMock(
+        return_value=(
+            SimpleNamespace(
+                occurred_at=now,
+                type="turn.started",
+                run_id="run_1",
+                data=SimpleNamespace(),
+            ),
+        )
+    )
+    service.diagnostics.list_model_requests = AsyncMock(
+        side_effect=OSError("diagnostics unavailable")
+    )
+
+    value = await service.usage_overview("user_1", days=7)
+
+    assert value["totals"]["turns"] == 1
+    assert value["totals"]["sessions"] == 1
+    assert value["totals"]["model_requests"] == 0
+    assert value["data_quality"] == {
+        "partial": True,
+        "skipped_sessions": 1,
+        "skipped_event_sessions": 0,
+        "skipped_diagnostic_sessions": 1,
+    }
     await service.session_store.close()
 
 
@@ -462,6 +586,7 @@ async def test_model_provider_can_be_created(tmp_path: Path):
             model="claude-test",
             base_url="https://anthropic.test",
             api_keys=["secret"],
+            supports_tool_calling=False,
             max_tokens=4096,
             max_model_len=100_000,
         ),
@@ -471,6 +596,7 @@ async def test_model_provider_can_be_created(tmp_path: Path):
     assert created["name"] == "Secondary"
     assert created["protocol"] == "anthropic-messages"
     assert created["api_key_configured"] is True
+    assert created["supports_tool_calling"] is False
     assert created["is_default"] is False
 
     await service.patch_model_provider(
@@ -482,6 +608,953 @@ async def test_model_provider_can_be_created(tmp_path: Path):
         created["id"]
     ]
     await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_model_manifest_omits_tools_when_probe_marked_them_unsupported(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(supports_tool_calling=False),
+        "user_1",
+    )
+    agent = await service._agent("sage", "user_1")
+    provider = await service.catalog.get_model_provider("model_main", "user_1")
+    assert provider is not None
+
+    manifest = service._manifest(agent, provider, ("todo_write",), ())
+
+    route = manifest.models["primary"]
+    assert route.capabilities.tool_calling is False
+    assert route.capabilities.parallel_tool_calls is False
+    assert manifest.agents[agent.agent_id].tools == ()
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_verified_model_compatibility_persists_and_drives_runtime_routes(
+    tmp_path: Path,
+):
+    root = tmp_path / "sage"
+    service = DesktopV2Service(root)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            protocol="openai-chat-completions",
+            model="custom-reasoning-model",
+            base_url="https://gateway.test/openai/v1",
+            api_keys=["secret"],
+        ),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+    profile = DesktopModelCompatibilityProfile(
+        route_fingerprint=service._model_compatibility_fingerprint(candidate),
+        max_output_tokens_field="max_tokens",
+        effective_max_output_tokens=candidate.max_tokens,
+        reasoning_behavior="controllable",
+        supported_reasoning_efforts=("low",),
+        supports_json_object=True,
+        auxiliary_json_compatible=True,
+        successful_probes=("connection", "tool_calling"),
+    )
+
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(compatibility_profile=profile),
+        "user_1",
+    )
+    stored = await service.catalog.get_model_provider("model_main", "user_1")
+    assert stored is not None
+    assert service._auxiliary_json_compatible(stored) is True
+    agent = await service._agent("sage", "user_1")
+
+    manifest = service._manifest(agent, stored, (), ())
+    assert manifest.models["primary"].request.extra == {
+        "max_output_tokens_field": "max_tokens"
+    }
+    assert manifest.models["primary"].request.reasoning_effort is None
+    judge_provider = await service._model_provider(
+        stored, agent, enable_thinking=False
+    )
+    assert judge_provider.config.max_output_tokens_field == "max_tokens"
+    assert judge_provider.config.reasoning_parameter_fallback is False
+    outgoing = judge_provider.diagnostic_request(
+        ModelRequest(
+            request_id="judge_request",
+            run_id="judge_run",
+            model_binding="fast",
+            messages=(
+                ModelMessage(role="user", content=(TextBlock(text="judge"),)),
+            ),
+            max_output_tokens=64,
+        )
+    )
+    assert outgoing["max_tokens"] == 64
+    assert "max_completion_tokens" not in outgoing
+    assert "extra_body" not in outgoing
+    await service.close()
+
+    restored_service = DesktopV2Service(root)
+    restored = await restored_service.catalog.get_model_provider(
+        "model_main", "user_1"
+    )
+    assert restored is not None
+    assert restored.compatibility_profile == profile
+    await restored_service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_route_change_invalidates_old_compatibility_profile(tmp_path: Path):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            protocol="openai-chat-completions",
+            api_keys=["secret"],
+        ),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+    profile = DesktopModelCompatibilityProfile(
+        route_fingerprint=service._model_compatibility_fingerprint(candidate),
+        max_output_tokens_field="max_completion_tokens",
+        effective_max_output_tokens=candidate.max_tokens,
+    )
+    assert service._model_compatibility_fingerprint(
+        candidate.model_copy(update={"api_key": "rotated-secret"})
+    ) != service._model_compatibility_fingerprint(candidate)
+    assert service._model_compatibility_fingerprint(
+        candidate.model_copy(update={"max_model_len": candidate.max_model_len + 1})
+    ) != service._model_compatibility_fingerprint(candidate)
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(compatibility_profile=profile),
+        "user_1",
+    )
+
+    await service.patch_model_provider(
+        "model_main", ModelProviderPatch(model="changed-model"), "user_1"
+    )
+
+    changed = await service.catalog.get_model_provider("model_main", "user_1")
+    assert changed is not None
+    assert changed.compatibility_profile is None
+    with pytest.raises(ValueError, match="does not match the saved route"):
+        await service.patch_model_provider(
+            "model_main",
+            ModelProviderPatch(compatibility_profile=profile),
+            "user_1",
+        )
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_check_uses_draft_and_does_not_persist(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(api_keys=["stored-secret"]),
+        "user_1",
+    )
+    before = await service.catalog.get_model_provider("model_main", "user_1")
+    assert before is not None
+    probe = AsyncMock(
+        return_value={
+            "connection": {"supported": True},
+            "supports_multimodal": False,
+            "supports_structured_output": True,
+        }
+    )
+    service._probe_model_provider_capabilities = probe  # type: ignore[method-assign]
+
+    result = await service.verify_model_provider_capabilities(
+        ModelProviderPatch(model="draft-model", base_url="https://draft.test/v1"),
+        "user_1",
+        provider_id="model_main",
+    )
+
+    candidate = probe.await_args.args[0]
+    assert candidate.model == "draft-model"
+    assert candidate.base_url == "https://draft.test/v1"
+    assert candidate.api_key == "stored-secret"
+    assert result["supports_multimodal"] is False
+    after = await service.catalog.get_model_provider("model_main", "user_1")
+    assert after is not None
+    assert after.model == before.model
+    assert after.base_url == before.base_url
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_new_model_capability_check_does_not_create_provider(tmp_path: Path):
+    service = DesktopV2Service(tmp_path)
+    before = await service.list_model_providers("user_1")
+    service._probe_model_provider_capabilities = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "connection": {"supported": True},
+            "supports_multimodal": True,
+            "supports_structured_output": True,
+        }
+    )
+
+    await service.verify_model_provider_capabilities(
+        ModelProviderCreate(
+            name="Draft",
+            model="draft-model",
+            base_url="https://draft.test/v1",
+            api_keys=["draft-secret"],
+        ),
+        "user_1",
+    )
+
+    after = await service.list_model_providers("user_1")
+    assert [value["id"] for value in after] == [value["id"] for value in before]
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_checks_connection_image_and_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(api_keys=["secret"]),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        def __init__(self):
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            if request.response_schema is not None or request.response_format is not None:
+                text = '{"ok":true}'
+            elif any(
+                isinstance(block, ImageBlock)
+                for message in request.messages
+                for block in message.content
+            ):
+                text = "red"
+            else:
+                text = "OK"
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    finish_reason="completed",
+                ),
+            )
+
+    probe_provider = ProbeProvider()
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda *args, **kwargs: probe_provider,
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+
+    assert result["connection"]["supported"] is True
+    assert result["supports_multimodal"] is True
+    assert result["supports_structured_output"] is True
+    assert result["reasoning_control"]["probed"] is True
+    assert result["reasoning_control"]["supported"] is True
+    assert result["reasoning_control"]["disable_strategy"] == "omit"
+    assert result["reasoning_control"]["supported_efforts"] == [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert result["valid"] is True
+    assert result["successful_probes"] == [
+        "connection",
+        "multimodal",
+        "structured_output",
+        "json_object",
+        "reasoning_control",
+    ]
+    assert result["failed_probes"] == ["tool_calling"]
+    assert result["skipped_probes"] == []
+    assert len(probe_provider.requests) == 19
+    probe_provider.raw_client.aclose.assert_awaited_once()
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_records_supported_reasoning_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            protocol="openai-chat-completions",
+            model="gpt-5.6-luna",
+            base_url="https://azure-luna.test/openai/v1",
+            api_keys=["secret"],
+        ),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeConfig:
+        def __init__(
+            self,
+            *,
+            reasoning_effort=None,
+            reasoning_parameter_fallback=True,
+        ):
+            self.reasoning_effort = reasoning_effort
+            self.reasoning_parameter_fallback = reasoning_parameter_fallback
+
+        def model_copy(self, *, update):
+            return ProbeConfig(
+                reasoning_effort=update.get("reasoning_effort", self.reasoning_effort),
+                reasoning_parameter_fallback=update.get(
+                    "reasoning_parameter_fallback",
+                    self.reasoning_parameter_fallback,
+                ),
+            )
+
+    class ProbeProvider:
+        def __init__(self):
+            self.config = ProbeConfig()
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            if self.config.reasoning_effort == "none":
+                error = RuntimeError("reasoning_effort is unsupported")
+                error.status_code = 422
+                raise error
+            text = (
+                '{"ok":true}'
+                if request.response_schema is not None or request.response_format is not None
+                else "red"
+                if any(
+                    isinstance(block, ImageBlock)
+                    for message in request.messages
+                    for block in message.content
+                )
+                else "OK"
+            )
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    finish_reason="completed",
+                ),
+            )
+
+    probe_provider = ProbeProvider()
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda *args, **kwargs: probe_provider,
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+
+    assert result["reasoning_control"]["probed"] is True
+    assert result["reasoning_control"]["supported"] is True
+    assert result["reasoning_control"]["supported_efforts"] == [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert result["valid"] is True
+    assert result["successful_probes"] == [
+        "connection",
+        "multimodal",
+        "structured_output",
+        "json_object",
+        "reasoning_control",
+    ]
+    assert result["failed_probes"] == ["tool_calling"]
+    assert result["skipped_probes"] == []
+    assert result["compatibility_profile"]["max_output_tokens_field"] == (
+        "max_completion_tokens"
+    )
+    assert result["compatibility_profile"]["reasoning_disable_strategy"] == "omit"
+    assert result["compatibility_profile"]["effective_max_output_tokens"] == 8192
+    assert result["compatibility_profile"]["route_fingerprint"] == (
+        service._model_compatibility_fingerprint(candidate)
+    )
+    assert len(probe_provider.requests) == 19
+    probe_provider.raw_client.aclose.assert_awaited_once()
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_calibrates_luna_and_runtime_omits_rejected_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            protocol="openai-chat-completions",
+            model="gpt-5.6-luna",
+            base_url="https://azure-luna.test/openai/v1",
+            api_keys=["secret"],
+            max_tokens=8193,
+        ),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        def __init__(self, route):
+            self.route = route
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+            self.resolved_max_output_tokens_field = "max_completion_tokens"
+
+        async def stream(self, request):
+            if (request.max_output_tokens or 0) > 8192:
+                error = RuntimeError("configured output limit is unsupported")
+                error.status_code = 422
+                raise error
+            if self.route.request.reasoning_effort is not None:
+                error = RuntimeError("reasoning_effort is unsupported")
+                error.status_code = 422
+                raise error
+            extra = {
+                key: value
+                for key, value in self.route.request.extra.items()
+                if key != "max_output_tokens_field"
+            }
+            if extra:
+                error = RuntimeError("reasoning disable control is unsupported")
+                error.status_code = 422
+                raise error
+            if request.tools:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_probe",
+                            name="sage_capability_probe",
+                            arguments={"value": "OK"},
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            elif request.response_schema is not None:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text='{"ok":true}',
+                    reasoning="internal",
+                    finish_reason="stop",
+                )
+            elif any(
+                isinstance(block, ImageBlock)
+                for message in request.messages
+                for block in message.content
+            ):
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text="red",
+                    reasoning="internal",
+                    finish_reason="stop",
+                )
+            else:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text="323",
+                    reasoning="internal",
+                    finish_reason="stop",
+                )
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda route, *args, **kwargs: ProbeProvider(route),
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+
+    profile = DesktopModelCompatibilityProfile.model_validate(
+        result["compatibility_profile"]
+    )
+    assert profile.effective_max_output_tokens == 8192
+    assert profile.max_output_tokens_field == "max_completion_tokens"
+    assert profile.reasoning_behavior == "always"
+    assert profile.reasoning_disable_strategy == "omit"
+    assert profile.supported_reasoning_efforts == ()
+    assert profile.unsupported_reasoning_efforts == (
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    )
+
+    verified = candidate.model_copy(update={"compatibility_profile": profile})
+    agent = await service._agent("sage", "user_1")
+    agent = agent.model_copy(
+        update={
+            "config": {
+                **agent.config,
+                "deepThinking": True,
+                "thinkingLevel": "low",
+            }
+        }
+    )
+    route = service._manifest(agent, verified, (), ()).models["primary"]
+    assert route.request.max_output_tokens == 8192
+    assert route.request.reasoning_effort is None
+    assert route.request.extra == {
+        "max_output_tokens_field": "max_completion_tokens"
+    }
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_requires_reasoning_to_work_with_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            protocol="openai-chat-completions",
+            model="gpt-5.6-luna",
+            base_url="https://azure-luna.test/openai/v1",
+            api_keys=["secret"],
+            max_tokens=8193,
+        ),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        resolved_max_output_tokens_field = "max_completion_tokens"
+
+        def __init__(self, route):
+            self.route = route
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+
+        async def stream(self, request):
+            effort = self.route.request.reasoning_effort
+            if effort is not None and request.tools:
+                error = RuntimeError("reasoning with tools is unsupported")
+                error.status_code = 422
+                raise error
+            if request.tools:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_probe",
+                            name="sage_capability_probe",
+                            arguments={"value": "OK"},
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            else:
+                is_image = any(
+                    isinstance(block, ImageBlock)
+                    for message in request.messages
+                    for block in message.content
+                )
+                text = (
+                    '{"ok":true}'
+                    if request.response_schema or request.response_format
+                    else "red"
+                    if is_image
+                    else "323"
+                )
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    reasoning="internal" if effort is not None else "",
+                    finish_reason="stop",
+                )
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda route, *args, **kwargs: ProbeProvider(route),
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+    profile = DesktopModelCompatibilityProfile.model_validate(
+        result["compatibility_profile"]
+    )
+
+    assert profile.reasoning_behavior == "none"
+    assert profile.supported_reasoning_efforts == ()
+    assert profile.text_only_reasoning_efforts == (
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    )
+    assert result["reasoning_control"]["text_only_efforts"] == list(
+        profile.text_only_reasoning_efforts
+    )
+    assert all(
+        not result["reasoning_control"]["effort_outcomes"][effort][
+            "with_tools"
+        ]["supported"]
+        for effort in profile.text_only_reasoning_efforts
+    )
+
+    verified = candidate.model_copy(update={"compatibility_profile": profile})
+    agent = await service._agent("sage", "user_1")
+    agent = agent.model_copy(
+        update={
+            "config": {
+                **agent.config,
+                "deepThinking": True,
+                "thinkingLevel": "low",
+            }
+        }
+    )
+    route = service._manifest(agent, verified, ("turn_status",), ()).models[
+        "primary"
+    ]
+    assert route.request.reasoning_effort is None
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_persists_nested_reasoning_effort_dialect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        resolved_max_output_tokens_field = "max_tokens"
+
+        def __init__(self, route):
+            self.route = route
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+
+        async def stream(self, request):
+            template = self.route.request.extra.get("chat_template_kwargs")
+            nested_effort = template.get("reasoning_effort") if template else None
+            if nested_effort is not None and nested_effort not in {
+                "low",
+                "high",
+                "max",
+            }:
+                error = RuntimeError("invalid template reasoning effort")
+                error.status_code = 422
+                raise error
+            if request.tools:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_probe",
+                            name="sage_capability_probe",
+                            arguments={"value": "OK"},
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            else:
+                is_image = any(
+                    isinstance(block, ImageBlock)
+                    for message in request.messages
+                    for block in message.content
+                )
+                text = (
+                    '{"ok":true}'
+                    if request.response_schema or request.response_format
+                    else "red"
+                    if is_image
+                    else "323"
+                )
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    reasoning=(
+                        "internal"
+                        if self.route.request.reasoning_effort is not None
+                        or nested_effort is not None
+                        else ""
+                    ),
+                    finish_reason="stop",
+                )
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda route, *args, **kwargs: ProbeProvider(route),
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+    profile = DesktopModelCompatibilityProfile.model_validate(
+        result["compatibility_profile"]
+    )
+    assert profile.reasoning_effort_strategy == "chat_template_reasoning_effort"
+    assert profile.supported_reasoning_efforts == ("low", "high", "max")
+
+    verified = candidate.model_copy(update={"compatibility_profile": profile})
+    agent = await service._agent("sage", "user_1")
+    agent = agent.model_copy(
+        update={
+            "config": {
+                **agent.config,
+                "deepThinking": True,
+                "thinkingLevel": "high",
+            }
+        }
+    )
+    route = service._manifest(agent, verified, ("turn_status",), ()).models[
+        "primary"
+    ]
+    assert route.request.reasoning_effort is None
+    assert route.request.extra["chat_template_kwargs"] == {
+        "thinking": True,
+        "reasoning_effort": "high",
+    }
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_persists_effective_reasoning_disable_control(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        resolved_max_output_tokens_field = None
+
+        def __init__(self, route):
+            self.route = route
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+
+        async def stream(self, request):
+            if request.tools:
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_probe",
+                            name="sage_capability_probe",
+                            arguments={"value": "OK"},
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            else:
+                is_image = any(
+                    isinstance(block, ImageBlock)
+                    for message in request.messages
+                    for block in message.content
+                )
+                text = (
+                    '{"ok":true}'
+                    if request.response_schema or request.response_format
+                    else "red"
+                    if is_image
+                    else "323"
+                )
+                disabled = self.route.request.extra.get("enable_thinking") is False
+                response = ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    reasoning="" if disabled else "internal",
+                    finish_reason="stop",
+                )
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda route, *args, **kwargs: ProbeProvider(route),
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+    profile = DesktopModelCompatibilityProfile.model_validate(
+        result["compatibility_profile"]
+    )
+    assert profile.reasoning_behavior == "controllable"
+    assert profile.reasoning_disable_strategy == "enable_thinking_false"
+
+    verified = candidate.model_copy(update={"compatibility_profile": profile})
+    agent = await service._agent("sage", "user_1")
+    route = service._manifest(agent, verified, (), ()).models["primary"]
+    assert route.request.reasoning_effort is None
+    assert route.request.extra["enable_thinking"] is False
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_returns_partial_results_after_probe_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(api_keys=["secret"]),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeConfig:
+        reasoning_effort = None
+        reasoning_parameter_fallback = False
+
+        def model_copy(self, *, update):
+            value = ProbeConfig()
+            value.reasoning_effort = update.get("reasoning_effort")
+            value.reasoning_parameter_fallback = update.get(
+                "reasoning_parameter_fallback", False
+            )
+            return value
+
+    class ProbeProvider:
+        def __init__(self):
+            self.config = ProbeConfig()
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            is_image = any(
+                isinstance(block, ImageBlock)
+                for message in request.messages
+                for block in message.content
+            )
+            if self.config.reasoning_effort == "none" or request.response_schema:
+                error = RuntimeError("Provider rejected this probe")
+                error.status_code = 422
+                raise error
+            text = (
+                '{"ok":true}'
+                if request.response_format is not None
+                else "red"
+                if is_image
+                else "OK"
+            )
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id=new_id("response"),
+                    text=text,
+                    finish_reason="completed",
+                ),
+            )
+
+    probe_provider = ProbeProvider()
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda *args, **kwargs: probe_provider,
+    )
+
+    result = await service._probe_model_provider_capabilities(candidate)
+
+    assert result["valid"] is True
+    assert result["successful_probes"] == [
+        "connection",
+        "multimodal",
+        "json_object",
+        "reasoning_control",
+    ]
+    assert result["failed_probes"] == ["structured_output", "tool_calling"]
+    assert result["skipped_probes"] == []
+    assert result["connection"]["supported"] is True
+    assert result["supports_multimodal"] is True
+    assert result["supports_structured_output"] is False
+    probe_provider.raw_client.aclose.assert_awaited_once()
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_probe_is_invalid_only_when_all_probes_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(api_keys=["secret"]),
+        "user_1",
+    )
+    candidate = await service.catalog.get_model_provider("model_main", "user_1")
+    assert candidate is not None
+
+    class ProbeProvider:
+        def __init__(self):
+            self.raw_client = SimpleNamespace(aclose=AsyncMock())
+            self.requests = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            error = RuntimeError("Provider rejected this probe")
+            error.status_code = 422
+            raise error
+            yield  # pragma: no cover
+
+    probe_provider = ProbeProvider()
+    monkeypatch.setattr(
+        "app.desktop_v2.backend.service.create_registered_model_provider",
+        lambda *args, **kwargs: probe_provider,
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await service._probe_model_provider_capabilities(candidate)
+
+    assert caught.value.info.code == "model.capability_probe_all_failed"
+    assert caught.value.info.category == ErrorCategory.VALIDATION
+    probes = caught.value.info.metadata["probes"]
+    assert probes["connection"]["supported"] is False
+    assert len(probe_provider.requests) == 7
+    probe_provider.raw_client.aclose.assert_awaited_once()
+    await service.close()
 
 
 @pytest.mark.asyncio
@@ -1171,11 +2244,46 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
         ],
         "uses_confidence": False,
         "uses_llm_judge": True,
-        "judge_failure": "continue",
+        "judge_failure": "deterministic_fallback_on_permanent_error",
     }
     assert "turn_status" not in {tool.name for tool in tools}
 
     await sandbox.close()
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_openai_reasoning_judge_omits_reasoning_controls(tmp_path: Path):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    await service.patch_model_provider(
+        "model_main",
+        ModelProviderPatch(
+            model="gpt-5.6-luna",
+            base_url="https://azure-luna.test/openai/v1",
+            api_keys=["test-key"],
+        ),
+        "user_1",
+    )
+    agent = await service._agent("sage", "user_1")
+    provider_record = await service._provider(agent, "user_1")
+
+    judge_provider = await service._model_provider(
+        provider_record, agent, enable_thinking=False
+    )
+    request = ModelRequest(
+        request_id="judge_request",
+        run_id="judge_run",
+        model_binding="fast",
+        messages=(ModelMessage(role="user", content=(TextBlock(text="judge"),)),),
+        response_format="json_object",
+    )
+    wire_request = judge_provider.diagnostic_request(request)
+
+    assert judge_provider.config.reasoning_effort is None
+    assert judge_provider.config.reasoning_parameter_fallback is True
+    assert judge_provider.config.extra_body == {}
+    assert "extra_body" not in wire_request
     await service.close()
 
 
@@ -1892,7 +3000,7 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
         StartRun(
             agent_id="sage",
             input=(InputItem(role="user", content=(TextBlock(text="Do it"),)),),
-            resolved_spec_hash=resolved.manifest_hash,
+                resolved_spec_hash=loop.expected_resolved_spec_hash,
             idempotency_key="desktop-goal-mode",
             invocation_mode="goal",
         ),
@@ -1976,7 +3084,7 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
         StartRun(
             agent_id="sage",
             input=(InputItem(role="user", content=(TextBlock(text="Plan it"),)),),
-            resolved_spec_hash=plan_resolved.manifest_hash,
+                resolved_spec_hash=plan_loop.expected_resolved_spec_hash,
             idempotency_key="desktop-plan-before-goal",
             invocation_mode="plan",
         ),
@@ -2065,7 +3173,7 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
             session_id=plan_handle.session_id,
             agent_id="sage",
             input=(InputItem(role="user", content=(TextBlock(text="Execute it"),)),),
-            resolved_spec_hash=goal_resolved.manifest_hash,
+                resolved_spec_hash=goal_loop.expected_resolved_spec_hash,
             idempotency_key="desktop-confirm-plan",
             invocation_mode="goal",
         ),
@@ -2296,7 +3404,7 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(
         StartRun(
             agent_id="sage",
             input=(InputItem(role="user", content=(TextBlock(text="Do it"),)),),
-            resolved_spec_hash=resolved.manifest_hash,
+                resolved_spec_hash=loop.expected_resolved_spec_hash,
             idempotency_key="desktop-turn-status",
         ),
         service._context("user_1"),

@@ -51,6 +51,7 @@ class OpenAIResponsesConfig(StrictModel):
     timeout_seconds: float = 120
     store: bool = False
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    reasoning_parameter_fallback: bool = False
 
 
 class OpenAIResponsesModelProvider:
@@ -80,6 +81,7 @@ class OpenAIResponsesModelProvider:
                 base_url=config.base_url,
                 timeout=config.timeout_seconds,
             )
+        self._reasoning_control_rejected = False
 
     @property
     def raw_client(self) -> Any:
@@ -117,7 +119,10 @@ class OpenAIResponsesModelProvider:
             payload["temperature"] = temperature
         if self.config.default_top_p is not None:
             payload["top_p"] = self.config.default_top_p
-        if self.config.reasoning_effort is not None:
+        if (
+            self.config.reasoning_effort is not None
+            and not self._reasoning_control_rejected
+        ):
             payload["reasoning"] = {"effort": self.config.reasoning_effort}
             if not self.config.store:
                 payload["include"] = ["reasoning.encrypted_content"]
@@ -147,8 +152,21 @@ class OpenAIResponsesModelProvider:
         tool_fragments: dict[str, dict[str, str]] = {}
         reasoning_items: dict[str, dict[str, Any]] = {}
         response_started = False
+        compatibility_fallback: dict[str, Any] | None = None
         try:
-            upstream = await self._client.responses.create(**payload)
+            try:
+                upstream = await self._client.responses.create(**payload)
+            except Exception as exc:
+                fallback_payload = self._reasoning_fallback_request(payload, exc)
+                if fallback_payload is None:
+                    raise
+                upstream = await self._client.responses.create(**fallback_payload)
+                self._reasoning_control_rejected = True
+                compatibility_fallback = {
+                    "kind": "reasoning_controls_omitted",
+                    "removed": ["reasoning"],
+                    "provider_status": self._provider_status(exc),
+                }
             async for event in upstream:
                 event_type = str(wire_value(event, "type", ""))
                 if event_type == "response.output_text.delta":
@@ -176,12 +194,8 @@ class OpenAIResponsesModelProvider:
                     item = wire_value(event, "item")
                     if wire_value(item, "type") in {"function_call", "reasoning"}:
                         response_started = True
-                    self._record_reasoning_item(
-                        reasoning_items, item
-                    )
-                    self._record_tool_item(
-                        tool_fragments, item, replace=False
-                    )
+                    self._record_reasoning_item(reasoning_items, item)
+                    self._record_tool_item(tool_fragments, item, replace=False)
                     continue
                 if event_type == "response.function_call_arguments.delta":
                     key = self._tool_key(event)
@@ -256,6 +270,11 @@ class OpenAIResponsesModelProvider:
                     "provider_id": self.config.provider_id,
                     "model": self.config.model,
                     "api": "responses",
+                    **(
+                        {"compatibility_fallback": compatibility_fallback}
+                        if compatibility_fallback is not None
+                        else {}
+                    ),
                 },
                 provider_state=make_provider_state(
                     "openai_responses",
@@ -265,6 +284,29 @@ class OpenAIResponsesModelProvider:
                 else {},
             ),
         )
+
+    def _reasoning_fallback_request(
+        self, payload: dict[str, Any], exc: Exception
+    ) -> dict[str, Any] | None:
+        if not self.config.reasoning_parameter_fallback:
+            return None
+        if self._provider_status(exc) not in {400, 422}:
+            return None
+        if "reasoning" not in payload:
+            return None
+        fallback = dict(payload)
+        fallback.pop("reasoning", None)
+        include = fallback.get("include")
+        if include == ["reasoning.encrypted_content"]:
+            fallback.pop("include", None)
+        return fallback
+
+    @staticmethod
+    def _provider_status(exc: Exception) -> int | None:
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        return status if isinstance(status, int) else None
 
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities
@@ -327,9 +369,7 @@ class OpenAIResponsesModelProvider:
                 continue
             replayed_reasoning = False
             if message.role == "assistant":
-                state = read_provider_state(
-                    message.provider_state, "openai_responses"
-                )
+                state = read_provider_state(message.provider_state, "openai_responses")
                 if state is not None:
                     reasoning_items = state.get("reasoning_items")
                     if isinstance(reasoning_items, list):
@@ -463,7 +503,9 @@ class OpenAIResponsesModelProvider:
     def _usage(self, raw: Any) -> UsageSummary:
         input_details = wire_value(raw, "input_tokens_details")
         output_details = wire_value(raw, "output_tokens_details")
+        normalized = wire_json_value(raw)
         return UsageSummary(
+            reported=True,
             input_tokens=int(wire_value(raw, "input_tokens", 0) or 0),
             output_tokens=int(wire_value(raw, "output_tokens", 0) or 0),
             cached_input_tokens=int(wire_value(input_details, "cached_tokens", 0) or 0),
@@ -471,6 +513,7 @@ class OpenAIResponsesModelProvider:
                 wire_value(output_details, "reasoning_tokens", 0) or 0
             ),
             models=(self.config.model,),
+            provider_usage=normalized if isinstance(normalized, dict) else {},
         )
 
     @staticmethod

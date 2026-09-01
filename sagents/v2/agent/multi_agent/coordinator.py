@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -22,6 +24,42 @@ from sagents.v2.agent.multi_agent.contracts import (
 from sagents.v2.agent.multi_agent.registry import AgentRegistry
 
 
+@dataclass
+class _TenantLimiter:
+    semaphore: asyncio.Semaphore
+    users: int = 0
+
+
+class DelegationConcurrencyLimiter:
+    """Composition-scoped global and tenant concurrency budget for child Runs."""
+
+    def __init__(self, *, max_concurrency: int, max_per_tenant: int) -> None:
+        if max_concurrency < 1 or max_per_tenant < 1:
+            raise ValueError("delegation concurrency limits must be positive")
+        self._global = asyncio.Semaphore(max_concurrency)
+        self._max_per_tenant = max_per_tenant
+        self._tenants: dict[str | None, _TenantLimiter] = {}
+        self._lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def slot(self, tenant_id: str | None):
+        async with self._lock:
+            tenant = self._tenants.setdefault(
+                tenant_id,
+                _TenantLimiter(asyncio.Semaphore(self._max_per_tenant)),
+            )
+            tenant.users += 1
+        try:
+            async with self._global:
+                async with tenant.semaphore:
+                    yield
+        finally:
+            async with self._lock:
+                tenant.users -= 1
+                if tenant.users == 0 and self._tenants.get(tenant_id) is tenant:
+                    self._tenants.pop(tenant_id, None)
+
+
 class MultiAgentCoordinator:
     """Validate delegation and run child tasks under an explicit mode policy.
 
@@ -37,6 +75,7 @@ class MultiAgentCoordinator:
         registry: AgentRegistry,
         executor: ChildRunExecutor,
         max_concurrency: int = 4,
+        concurrency_limiter: DelegationConcurrencyLimiter | None = None,
         workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
     ) -> None:
         if mode not in {AgentMode.FIBRE, AgentMode.TEAM}:
@@ -47,7 +86,10 @@ class MultiAgentCoordinator:
         self.registry = registry
         self.executor = executor
         self.workspace_policy = workspace_policy
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._concurrency_limiter = concurrency_limiter or DelegationConcurrencyLimiter(
+            max_concurrency=max_concurrency,
+            max_per_tenant=max_concurrency,
+        )
         self._session_owners: dict[str, str] = {}
         self._session_lock = asyncio.Lock()
 
@@ -96,7 +138,7 @@ class MultiAgentCoordinator:
                     )
 
         async def one(task, descriptor):
-            async with self._semaphore:
+            async with self._concurrency_limiter.slot(context.actor.tenant_id):
                 result = await self.executor.run_child(
                     descriptor,
                     task,

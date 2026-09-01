@@ -66,16 +66,40 @@ class LocalWorkerDispatcher:
             raise RuntimeError("dispatcher recovery Agent is already attached")
         self._recovery_agent = agent
 
-    async def start(self) -> None:
+    async def start(self, *, recover: bool = True) -> None:
         if self._closed:
             raise RuntimeError("local worker dispatcher is closed")
         self._workers = [worker for worker in self._workers if not worker.done()]
         if self._workers:
             return
+        if recover:
+            await self._restore_dispatchable_work()
         self._workers = [
             asyncio.create_task(self._worker(index), name=f"sage-worker:{index}")
             for index in range(self.max_concurrent_runs)
         ]
+
+    async def _restore_dispatchable_work(self) -> None:
+        """Rebuild missing Scheduler entries from authoritative Run intents."""
+
+        if self._recovery_agent is None:
+            return
+        store = self._recovery_agent.runtime.session_store
+        reader = getattr(store, "list_dispatchable_runs", None)
+        if reader is None:
+            return
+        for intent in await reader():
+            try:
+                await self.scheduler.submit(
+                    self._work_item(
+                        intent.run,
+                        intent.context,
+                        resume=intent.run.state == RunState.RESUMING,
+                    )
+                )
+            except SageV2Error as exc:
+                if exc.info.code != "scheduler.work_id_conflict":
+                    raise
 
     async def submit(
         self,
@@ -87,7 +111,7 @@ class LocalWorkerDispatcher:
     ) -> asyncio.Future[RunSnapshot]:
         if self._closed:
             raise RuntimeError("local worker dispatcher is closed")
-        await self.start()
+        await self.start(recover=False)
         current = self._requests.get(handle.run_id)
         if current is not None:
             return current.result
@@ -104,36 +128,34 @@ class LocalWorkerDispatcher:
             revision = getattr(handle, "revision", None)
             if revision is None:
                 revision = getattr(handle, "run_revision", 0)
-            accepted = await self.scheduler.submit(
-                WorkItem(
-                    work_id=f"work-{handle.run_id}",
-                    run_id=handle.run_id,
-                    tenant_id=context.actor.tenant_id,
-                    priority=0,
-                    available_at=utc_now(),
-                    idempotency_key=(
-                        f"run:{handle.run_id}:"
-                        f"{'resume' if resume else 'start'}:{revision}"
-                    ),
-                    payload={
-                        "resume": resume,
-                        "request_context": context.model_dump(mode="json"),
-                    },
-                )
+            await self.scheduler.submit(
+                self._work_item(handle, context, resume=resume, revision=revision)
             )
-            if not accepted:
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="scheduler.duplicate_submission",
-                        category=ErrorCategory.CONFLICT,
-                        message="scheduler rejected a duplicate WorkItem submission",
-                        safe_to_resume=True,
-                    )
-                )
         except Exception:
             self._requests.pop(handle.run_id, None)
             raise
         return result
+
+    @staticmethod
+    def _work_item(handle, context, *, resume: bool, revision=None) -> WorkItem:
+        if revision is None:
+            revision = getattr(handle, "revision", None)
+        if revision is None:
+            revision = getattr(handle, "run_revision", 0)
+        return WorkItem(
+            work_id=f"work-{handle.run_id}",
+            run_id=handle.run_id,
+            tenant_id=context.actor.tenant_id,
+            priority=0,
+            available_at=utc_now(),
+            idempotency_key=(
+                f"run:{handle.run_id}:{'resume' if resume else 'start'}:{revision}"
+            ),
+            payload={
+                "resume": resume,
+                "request_context": context.model_dump(mode="json"),
+            },
+        )
 
     async def close(self) -> None:
         if self._closed:
@@ -159,7 +181,10 @@ class LocalWorkerDispatcher:
             if lease is None:
                 continue
             tenant = lease.work.tenant_id
-            if self._active_tenants.get(tenant, 0) >= self.max_concurrent_runs_per_tenant:
+            if (
+                self._active_tenants.get(tenant, 0)
+                >= self.max_concurrent_runs_per_tenant
+            ):
                 await self.scheduler.release(
                     lease,
                     LeaseReleaseReason.WORKER_SHUTDOWN,
@@ -201,24 +226,49 @@ class LocalWorkerDispatcher:
                             RunState.RUNNING,
                             RunState.SUSPEND_REQUESTED,
                         }:
-                            error = RuntimeErrorInfo(
-                                code="execution.worker_restarted",
-                                category=ErrorCategory.RESOURCE_LOST,
-                                message=(
-                                    "worker process restarted without a safe checkpoint"
-                                ),
-                                safe_to_resume=True,
+                            recover_barrier = getattr(
+                                request.agent, "_recover_interrupted_run", None
                             )
-                            snapshot = await request.agent.runtime.fail_run(
-                                run_id=recovered.run_id,
-                                expected_revision=recovered.revision,
-                                error=error,
-                                context=request.context,
-                                idempotency_key=(
-                                    f"worker-restarted:{recovered.run_id}:"
-                                    f"{recovered.revision}"
-                                ),
-                            )
+                            if recover_barrier is not None:
+                                try:
+                                    snapshot = await recover_barrier(
+                                        recovered.run_id, request.context
+                                    )
+                                except Exception as exc:
+                                    error = RuntimeErrorInfo(
+                                        code="execution.barrier_recovery_failed",
+                                        category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                                        message=(
+                                            "worker restarted after a possible side "
+                                            "effect and barrier recovery failed"
+                                        ),
+                                        safe_to_resume=False,
+                                        metadata={"recovery_error": str(exc)},
+                                    )
+                                    snapshot = (
+                                        await self._fail_recovered_execution_tree(
+                                            request.agent.runtime,
+                                            recovered,
+                                            request.context,
+                                            error,
+                                        )
+                                    )
+                            if snapshot is None:
+                                error = RuntimeErrorInfo(
+                                    code="execution.worker_restarted",
+                                    category=ErrorCategory.RESOURCE_LOST,
+                                    message=(
+                                        "worker process restarted without a safe "
+                                        "checkpoint or crossed tool barrier"
+                                    ),
+                                    safe_to_resume=False,
+                                )
+                                snapshot = await self._fail_recovered_execution_tree(
+                                    request.agent.runtime,
+                                    recovered,
+                                    request.context,
+                                    error,
+                                )
                             execution = None
                         else:
                             request.resume = recovered.state == RunState.RESUMING
@@ -281,6 +331,65 @@ class LocalWorkerDispatcher:
                 if self._active_tenants[tenant] == 0:
                     self._active_tenants.pop(tenant)
                 self._requests.pop(lease.work.run_id, None)
+
+    async def _fail_recovered_execution_tree(
+        self, runtime, root, context: RequestContext, root_error: RuntimeErrorInfo
+    ) -> RunSnapshot:
+        """Settle inline child Runs before failing an uncheckpointed root.
+
+        Delegated children share the root worker lease. A process loss therefore
+        invalidates every active descendant in that execution tree; leaving one
+        RUNNING would advertise resumability without a surviving driver.
+        """
+
+        sessions = await runtime.session_store.list_descendant_sessions(root.session_id)
+        candidates = []
+        for session in sessions:
+            candidates.extend(
+                await runtime.session_store.list_session_runs(session.session_id)
+            )
+        for child in candidates:
+            if child.state in TERMINAL_RUN_STATES or child.state == RunState.SUSPENDED:
+                continue
+            if not await self._has_run_ancestor(
+                runtime.session_store, child.run_id, root.run_id
+            ):
+                continue
+            error = RuntimeErrorInfo(
+                code="execution.parent_worker_restarted",
+                category=ErrorCategory.RESOURCE_LOST,
+                message="parent worker restarted without the child Run driver",
+                safe_to_resume=True,
+            )
+            await runtime.fail_run(
+                run_id=child.run_id,
+                expected_revision=child.revision,
+                error=error,
+                context=context,
+                idempotency_key=(
+                    f"parent-worker-restarted:{root.run_id}:"
+                    f"{child.run_id}:{child.revision}"
+                ),
+            )
+        return await runtime.fail_run(
+            run_id=root.run_id,
+            expected_revision=root.revision,
+            error=root_error,
+            context=context,
+            idempotency_key=f"worker-restarted:{root.run_id}:{root.revision}",
+        )
+
+    @staticmethod
+    async def _has_run_ancestor(session_store, run_id: str, ancestor: str) -> bool:
+        candidate = run_id
+        seen: set[str] = set()
+        while candidate and candidate not in seen:
+            seen.add(candidate)
+            command = await session_store.get_start_command(candidate)
+            if command.parent_run_id == ancestor:
+                return True
+            candidate = command.parent_run_id
+        return False
 
     def _restore_request(self, lease: WorkerLease) -> _DispatchRequest | None:
         if self._recovery_agent is None:

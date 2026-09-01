@@ -9,7 +9,10 @@ from sagents.v2.agent.multi_agent.contracts import (
     DelegationTask,
     WorkspaceSharingPolicy,
 )
-from sagents.v2.agent.multi_agent.coordinator import MultiAgentCoordinator
+from sagents.v2.agent.multi_agent.coordinator import (
+    DelegationConcurrencyLimiter,
+    MultiAgentCoordinator,
+)
 from sagents.v2.agent.multi_agent.registry import AgentRegistry
 from sagents.v2.agent.multi_agent.context import AgentRosterContextProvider
 from sagents.v2.agent.multi_agent.session_roster import SessionDynamicAgentRoster
@@ -23,6 +26,7 @@ __all__ = [
     "DelegationBatch",
     "DelegationResult",
     "DelegationTask",
+    "DelegationConcurrencyLimiter",
     "MultiAgentCoordinator",
     "SessionDynamicAgentRoster",
     "WorkspaceSharingPolicy",

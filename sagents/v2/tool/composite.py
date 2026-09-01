@@ -77,13 +77,18 @@ class InvocationGrantToolCatalog:
         try:
             command = await self._command_reader(run_id)
             mode = str(getattr(command, "invocation_mode", None) or "normal")
+            configured = getattr(getattr(command, "config", None), "enabled_tools", None)
         except SageV2Error as exc:
             if self._fallback_invocation_mode is None or not exc.info.code.endswith(
                 ".not_found"
             ):
                 raise
             mode = self._fallback_invocation_mode
-        return self._base_allowed | self._MODE_GRANTS.get(mode, frozenset())
+            configured = None
+        base = self._base_allowed
+        if configured is not None:
+            base &= frozenset(configured)
+        return base | self._MODE_GRANTS.get(mode, frozenset())
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         allowed = await self._allowed(run_id)

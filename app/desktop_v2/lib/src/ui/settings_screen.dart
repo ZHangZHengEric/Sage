@@ -801,6 +801,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     };
     final currentProviderId = agent.llmProviderId ?? '';
     final currentFastProviderId = agent.fastLlmProviderId ?? '';
+    final selectedProvider = currentProviderId.isNotEmpty
+        ? providersById[currentProviderId]
+        : providers.cast<ModelProviderSummary?>().firstWhere(
+            (value) => value?.isDefault == true,
+            orElse: () => providers.isEmpty ? null : providers.first,
+          );
+    final hasUsageProfile = selectedProvider?.hasVerifiedUsageProfile == true;
+    final reasoningBehavior = selectedProvider?.reasoningBehavior;
+    final supportedThinkingLevels = hasUsageProfile
+        ? selectedProvider!.supportedReasoningEfforts
+        : _thinkingLevels;
+    final canToggleDeepThinking =
+        !hasUsageProfile || reasoningBehavior == 'controllable';
+    final effectiveDeepThinking = switch (reasoningBehavior) {
+      'always' => true,
+      'none' => false,
+      _ => agent.deepThinking,
+    };
+    final effectiveThinkingLevel =
+        supportedThinkingLevels.contains(agent.thinkingLevel)
+        ? agent.thinkingLevel
+        : (supportedThinkingLevels.isEmpty
+              ? null
+              : supportedThinkingLevels.first);
     final memberCandidates = [
       for (final value in widget.controller.agents)
         if (value.id != agent.id) value,
@@ -948,11 +972,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         label: '${value.name} · ${value.model}',
                                       ),
                                   ],
-                                  onChanged: (value) => _saveAgent({
-                                    'llm_provider_id': value.isEmpty
-                                        ? null
-                                        : value,
-                                  }),
+                                  onChanged: (value) {
+                                    final nextProvider = value.isEmpty
+                                        ? providers
+                                              .cast<ModelProviderSummary?>()
+                                              .firstWhere(
+                                                (item) =>
+                                                    item?.isDefault == true,
+                                                orElse: () => providers.isEmpty
+                                                    ? null
+                                                    : providers.first,
+                                              )
+                                        : providersById[value];
+                                    final patch = <String, Object?>{
+                                      'llm_provider_id': value.isEmpty
+                                          ? null
+                                          : value,
+                                    };
+                                    if (nextProvider?.hasVerifiedUsageProfile ==
+                                        true) {
+                                      final behavior =
+                                          nextProvider?.reasoningBehavior;
+                                      if (behavior == 'always') {
+                                        patch['deep_thinking'] = true;
+                                      } else if (behavior == 'none') {
+                                        patch['deep_thinking'] = false;
+                                      }
+                                      final efforts = nextProvider!
+                                          .supportedReasoningEfforts;
+                                      if (efforts.isNotEmpty &&
+                                          !efforts.contains(
+                                            agent.thinkingLevel,
+                                          )) {
+                                        patch['thinking_level'] = efforts.first;
+                                      }
+                                    }
+                                    _saveAgent(patch);
+                                  },
                                 )
                               : Text(
                                   _providerLabel(
@@ -1099,30 +1155,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           control: _editingAgent
                               ? SizedBox(
                                   width: 190,
-                                  child: GlassSegmentedControl(
-                                    key: const ValueKey('agent-deep-thinking'),
-                                    height: 34,
-                                    segments: [
-                                      GlassSegment(
-                                        label: context.l10n.text(
-                                          'common.disable',
+                                  child: Opacity(
+                                    opacity: canToggleDeepThinking ? 1 : 0.5,
+                                    child: IgnorePointer(
+                                      ignoring: !canToggleDeepThinking,
+                                      child: GlassSegmentedControl(
+                                        key: const ValueKey(
+                                          'agent-deep-thinking',
                                         ),
+                                        height: 34,
+                                        segments: [
+                                          GlassSegment(
+                                            label: context.l10n.text(
+                                              'common.disable',
+                                            ),
+                                          ),
+                                          GlassSegment(
+                                            label: context.l10n.text(
+                                              'common.enable',
+                                            ),
+                                          ),
+                                        ],
+                                        selectedIndex: effectiveDeepThinking
+                                            ? 1
+                                            : 0,
+                                        onSegmentSelected: (index) {
+                                          final patch = <String, Object?>{
+                                            'deep_thinking': index == 1,
+                                          };
+                                          if (index == 1 &&
+                                              effectiveThinkingLevel != null &&
+                                              effectiveThinkingLevel !=
+                                                  agent.thinkingLevel) {
+                                            patch['thinking_level'] =
+                                                effectiveThinkingLevel;
+                                          }
+                                          _saveAgent(patch);
+                                        },
                                       ),
-                                      GlassSegment(
-                                        label: context.l10n.text(
-                                          'common.enable',
-                                        ),
-                                      ),
-                                    ],
-                                    selectedIndex: agent.deepThinking ? 1 : 0,
-                                    onSegmentSelected: (index) => _saveAgent({
-                                      'deep_thinking': index == 1,
-                                    }),
+                                    ),
                                   ),
                                 )
                               : Text(
                                   context.l10n.text(
-                                    agent.deepThinking
+                                    effectiveDeepThinking
                                         ? 'common.enable'
                                         : 'common.disable',
                                   ),
@@ -1131,29 +1207,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _SettingsRow(
                           label: context.l10n.text('agent.thinkingLevel'),
                           control: _editingAgent
-                              ? _SettingsPicker<String>(
-                                  key: const ValueKey('agent-thinking-level'),
-                                  value: agent.thinkingLevel,
-                                  width: 220,
-                                  enabled: agent.deepThinking,
-                                  options: [
-                                    for (final value in _thinkingLevels)
-                                      _PickerOption(
-                                        value: value,
-                                        label: _thinkingLevelLabel(
-                                          value,
+                              ? effectiveThinkingLevel == null
+                                    ? Text(context.l10n.text('common.default'))
+                                    : _SettingsPicker<String>(
+                                        key: const ValueKey(
+                                          'agent-thinking-level',
+                                        ),
+                                        value: effectiveThinkingLevel,
+                                        width: 220,
+                                        enabled: effectiveDeepThinking,
+                                        options: [
+                                          for (final value
+                                              in supportedThinkingLevels)
+                                            _PickerOption(
+                                              value: value,
+                                              label: _thinkingLevelLabel(
+                                                value,
+                                                context.l10n,
+                                              ),
+                                            ),
+                                        ],
+                                        onChanged: (value) => _saveAgent({
+                                          'thinking_level': value,
+                                        }),
+                                      )
+                              : Text(
+                                  effectiveThinkingLevel == null
+                                      ? context.l10n.text('common.default')
+                                      : _thinkingLevelLabel(
+                                          effectiveThinkingLevel,
                                           context.l10n,
                                         ),
-                                      ),
-                                  ],
-                                  onChanged: (value) =>
-                                      _saveAgent({'thinking_level': value}),
-                                )
-                              : Text(
-                                  _thinkingLevelLabel(
-                                    agent.thinkingLevel,
-                                    context.l10n,
-                                  ),
                                 ),
                         ),
                       ],
@@ -4736,6 +4820,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
   bool _editing = false;
   bool _creating = false;
   bool _saving = false;
+  bool _checking = false;
   bool _dirty = false;
   bool _apiKeyVisible = false;
   bool _revealingApiKey = false;
@@ -4745,6 +4830,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
   String _protocol = 'openai-responses';
   String? _detectionError;
   bool _detected = false;
+  bool _supportsMultimodal = false;
+  bool _supportsStructuredOutput = false;
+  bool _supportsToolCalling = true;
+  Map<String, Object?>? _compatibilityProfile;
   final _name = TextEditingController();
   final _baseUrl = TextEditingController();
   final _model = TextEditingController();
@@ -4795,6 +4884,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
     _temperature.text = value.temperature?.toString() ?? '';
     _topP.text = value.topP?.toString() ?? '';
     _maxModelLength.text = value.maxModelLength?.toString() ?? '';
+    _supportsMultimodal = value.supportsMultimodal;
+    _supportsStructuredOutput = value.supportsStructuredOutput;
+    _supportsToolCalling = value.supportsToolCalling;
+    _compatibilityProfile = null;
     _dirty = false;
   }
 
@@ -4907,6 +5000,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _dirty = true;
       _detectionError = null;
       _detected = false;
+      _compatibilityProfile = null;
+      _supportsMultimodal = false;
+      _supportsStructuredOutput = false;
+      _supportsToolCalling = false;
     });
   }
 
@@ -4930,6 +5027,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _apiKeyVisible = false;
       _detectionError = null;
       _detected = false;
+      _compatibilityProfile = null;
+      _supportsMultimodal = false;
+      _supportsStructuredOutput = false;
+      _supportsToolCalling = false;
     });
   }
 
@@ -4969,8 +5070,12 @@ class _ModelSettingsState extends State<_ModelSettings> {
     };
   }
 
-  Future<void> _verifyAndApply() async {
-    if (!mounted || (!_creating && _selectedId.isEmpty) || _saving || !_dirty) {
+  Future<void> _verifyCapabilities() async {
+    if (!mounted ||
+        (!_creating && _selectedId.isEmpty) ||
+        _saving ||
+        _checking ||
+        !_dirty) {
       return;
     }
     final providerId = _selectedId;
@@ -4982,31 +5087,78 @@ class _ModelSettingsState extends State<_ModelSettings> {
       return;
     }
     setState(() {
-      _saving = true;
+      _checking = true;
       _detectionError = null;
       _detected = false;
+      _compatibilityProfile = null;
     });
+    try {
+      final result = await widget.controller.verifyModelProviderCapabilities(
+        patch,
+        providerId: _creating ? null : providerId,
+      );
+      if (!mounted || (!_creating && providerId != _selectedId)) return;
+      setState(() {
+        _supportsMultimodal = result['supports_multimodal'] == true;
+        _supportsStructuredOutput =
+            result['supports_structured_output'] == true;
+        _supportsToolCalling = result['supports_tool_calling'] == true;
+        final compatibility = result['compatibility_profile'];
+        _compatibilityProfile = compatibility is Map
+            ? compatibility.cast<String, Object?>()
+            : null;
+        _detected = true;
+      });
+    } on Object {
+      if (mounted && providerId == _selectedId) {
+        setState(
+          () => _detectionError = context.l10n.text('model.invalidConfig'),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (!mounted ||
+        (!_creating && _selectedId.isEmpty) ||
+        _saving ||
+        _checking ||
+        !_dirty ||
+        !_detected) {
+      return;
+    }
+    final providerId = _selectedId;
+    final patch = _draftPatch();
+    if (patch == null) return;
+    patch
+      ..['supports_multimodal'] = _supportsMultimodal
+      ..['supports_structured_output'] = _supportsStructuredOutput
+      ..['supports_tool_calling'] = _supportsToolCalling;
+    if (_compatibilityProfile case final compatibility?) {
+      patch['compatibility_profile'] = compatibility;
+    }
+    setState(() => _saving = true);
     try {
       if (_creating) {
         final created = await widget.controller.createModelProvider(patch);
         if (!mounted) return;
         _selectedId = created.id;
-        _syncedId = '';
-        _creating = false;
       } else {
         await widget.controller.patchModelProvider(providerId, patch);
       }
-      if (mounted) {
-        setState(() {
-          _dirty = false;
-          _detected = false;
-          _editing = false;
-          _creating = false;
-          _syncedId = '';
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _dirty = false;
+        _detected = false;
+        _compatibilityProfile = null;
+        _editing = false;
+        _creating = false;
+        _syncedId = '';
+      });
     } on Object {
-      if (mounted && providerId == _selectedId) {
+      if (mounted && (_creating || providerId == _selectedId)) {
         setState(
           () => _detectionError = context.l10n.text('model.invalidConfig'),
         );
@@ -5017,7 +5169,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
   }
 
   void _toggleEditing() {
-    if (_saving) return;
+    if (_saving || _checking) return;
     setState(() {
       if (_editing) {
         _syncedId = '';
@@ -5028,6 +5180,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _editing = !_editing;
       _detectionError = null;
       _detected = false;
+      _compatibilityProfile = null;
     });
   }
 
@@ -5049,10 +5202,14 @@ class _ModelSettingsState extends State<_ModelSettings> {
           baseUrl: 'https://api.openai.com/v1',
           supportsMultimodal: true,
           supportsStructuredOutput: true,
+          supportsToolCalling: true,
           maxTokens: 8192,
           maxModelLength: 128000,
         );
     if (!_creating) _sync(displayed);
+    final activeCompatibilityProfile =
+        _compatibilityProfile ??
+        (!_dirty ? displayed.compatibilityProfile : null);
     Widget field(
       String label,
       String value,
@@ -5165,14 +5322,39 @@ class _ModelSettingsState extends State<_ModelSettings> {
           if (_editing) ...[
             _SettingsActionButton(
               key: const ValueKey('settings-model-cancel'),
-              onTap: _saving ? null : _toggleEditing,
+              onTap: _saving || _checking ? null : _toggleEditing,
               icon: const Icon(CupertinoIcons.xmark, size: 15),
               label: context.l10n.text('common.cancel'),
             ),
             const SizedBox(width: 10),
             _SettingsActionButton(
+              key: const ValueKey('settings-model-capability-check'),
+              width: 124,
+              onTap: _saving || _checking || !_dirty
+                  ? null
+                  : _verifyCapabilities,
+              icon: _checking
+                  ? const CupertinoActivityIndicator(radius: 7)
+                  : Icon(
+                      _detected
+                          ? CupertinoIcons.checkmark_circle_fill
+                          : CupertinoIcons.checkmark_shield,
+                      size: 15,
+                    ),
+              label: context.l10n.text(
+                _checking
+                    ? 'common.validating'
+                    : _detected
+                    ? 'model.capabilitiesVerified'
+                    : 'model.verifyCapabilities',
+              ),
+            ),
+            const SizedBox(width: 10),
+            _SettingsActionButton(
               key: const ValueKey('settings-model-save'),
-              onTap: _saving || !_dirty ? null : _verifyAndApply,
+              onTap: _saving || _checking || !_dirty || !_detected
+                  ? null
+                  : _save,
               icon: const Icon(CupertinoIcons.checkmark, size: 15),
               label: context.l10n.text('common.save'),
             ),
@@ -5243,6 +5425,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
             _revealingApiKey = false;
             _detectionError = null;
             _detected = false;
+            _compatibilityProfile = null;
             _dirty = false;
           }),
           onRemove: _deleteProvider,
@@ -5321,24 +5504,17 @@ class _ModelSettingsState extends State<_ModelSettings> {
                 displayed.maxModelLength?.toString() ?? '',
                 _maxModelLength,
               ),
-              _SettingsRow(
-                label: context.l10n.text('model.capabilities'),
-                control: Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  alignment: WrapAlignment.end,
-                  children: [
-                    _SettingsTag(label: context.l10n.text('model.text')),
-                    if (displayed.supportsMultimodal)
-                      _SettingsTag(
-                        label: context.l10n.text('model.multimodal'),
-                      ),
-                    if (displayed.supportsStructuredOutput)
-                      _SettingsTag(
-                        label: context.l10n.text('model.structured'),
-                      ),
-                  ],
-                ),
+              _ModelCapabilityResult(
+                profile: activeCompatibilityProfile,
+                supportsMultimodal: _editing
+                    ? _supportsMultimodal
+                    : displayed.supportsMultimodal,
+                supportsStructuredOutput: _editing
+                    ? _supportsStructuredOutput
+                    : displayed.supportsStructuredOutput,
+                supportsToolCalling: _editing
+                    ? _supportsToolCalling
+                    : displayed.supportsToolCalling,
               ),
             ],
           ),
@@ -5353,6 +5529,367 @@ String _modelProtocolLabel(String value) => switch (value) {
   'anthropic-messages' => 'Anthropic Messages',
   _ => 'OpenAI Responses',
 };
+
+class _ModelCapabilityResult extends StatelessWidget {
+  const _ModelCapabilityResult({
+    required this.profile,
+    required this.supportsMultimodal,
+    required this.supportsStructuredOutput,
+    required this.supportsToolCalling,
+  });
+
+  final Map<String, Object?>? profile;
+  final bool supportsMultimodal;
+  final bool supportsStructuredOutput;
+  final bool supportsToolCalling;
+
+  List<String> _list(String key) {
+    final value = profile?[key];
+    if (value is! List) return const [];
+    return value.map((item) => item.toString()).toList(growable: false);
+  }
+
+  String _joined(String key, SageLocalizations l10n, {bool thinking = false}) {
+    final values = _list(key);
+    if (values.isEmpty) return '—';
+    return values
+        .map((value) => thinking ? _thinkingLevelLabel(value, l10n) : value)
+        .join(' · ');
+  }
+
+  bool? _profileCapability(String key) {
+    if (profile == null || !profile!.containsKey(key)) return null;
+    return profile![key] == true;
+  }
+
+  String _reasoningBehavior(BuildContext context) =>
+      switch (profile?['reasoning_behavior']?.toString()) {
+        'always' => context.l10n.text('model.reasoningAlways'),
+        'controllable' => context.l10n.text('model.reasoningControllable'),
+        'none' => context.l10n.text('model.reasoningNone'),
+        final value when value != null && value.isNotEmpty => value,
+        _ => '—',
+      };
+
+  String _disableStrategy() =>
+      switch (profile?['reasoning_disable_strategy']?.toString()) {
+        'reasoning_effort_none' => 'reasoning_effort=none',
+        'thinking_type_disabled' => 'thinking.type=disabled',
+        'enable_thinking_false' => 'enable_thinking=false',
+        'thinking_false' => 'thinking=false',
+        'chat_template_enable_thinking_false' =>
+          'chat_template_kwargs.enable_thinking=false',
+        'omit' => 'omit',
+        final value when value != null && value.isNotEmpty => value,
+        _ => '—',
+      };
+
+  String _effortStrategy() => switch (profile?['reasoning_effort_strategy']
+      ?.toString()) {
+    'chat_template_reasoning_effort' => 'chat_template_kwargs.reasoning_effort',
+    'reasoning_effort' => 'reasoning_effort',
+    final value when value != null && value.isNotEmpty => value,
+    _ => '—',
+  };
+
+  String _verifiedAt() {
+    final value = profile?['verified_at']?.toString();
+    if (value == null || value.isEmpty) return '';
+    return value.replaceFirst('T', ' ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
+    final verified = profile != null;
+    final capabilities = <Widget>[
+      _CapabilityStatusTag(label: l10n.text('model.text'), supported: true),
+      _CapabilityStatusTag(
+        label: l10n.text('model.multimodal'),
+        supported: supportsMultimodal,
+      ),
+      _CapabilityStatusTag(
+        label: l10n.text('model.structured'),
+        supported: supportsStructuredOutput,
+      ),
+      _CapabilityStatusTag(
+        label: 'JSON Object',
+        supported: _profileCapability('supports_json_object'),
+      ),
+      _CapabilityStatusTag(
+        label: l10n.text('model.toolCalling'),
+        supported: supportsToolCalling,
+      ),
+      _CapabilityStatusTag(
+        label: l10n.text('model.auxiliaryJson'),
+        supported: _profileCapability('auxiliary_json_compatible'),
+      ),
+    ];
+    final metrics = verified
+        ? <_CapabilityMetricData>[
+            _CapabilityMetricData(
+              l10n.text('model.outputTokenField'),
+              profile?['max_output_tokens_field']?.toString() ?? '—',
+              technical: true,
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.verifiedOutputLimit'),
+              profile?['effective_max_output_tokens']?.toString() ?? '—',
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.reasoningBehavior'),
+              _reasoningBehavior(context),
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.disableStrategy'),
+              _disableStrategy(),
+              technical: true,
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.effortStrategy'),
+              _effortStrategy(),
+              technical: true,
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.agentEfforts'),
+              _joined('supported_reasoning_efforts', l10n, thinking: true),
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.textOnlyEfforts'),
+              _joined('text_only_reasoning_efforts', l10n, thinking: true),
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.unsupportedEfforts'),
+              _joined('unsupported_reasoning_efforts', l10n, thinking: true),
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.successfulProbes'),
+              _joined('successful_probes', l10n),
+              technical: true,
+            ),
+            _CapabilityMetricData(
+              l10n.text('model.failedProbes'),
+              _joined('failed_probes', l10n),
+              technical: true,
+              failed: _list('failed_probes').isNotEmpty,
+            ),
+          ]
+        : const <_CapabilityMetricData>[];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: GlassCard(
+        key: const ValueKey('settings-model-capability-result'),
+        padding: const EdgeInsets.all(14),
+        shape: const LiquidRoundedSuperellipse(borderRadius: 16),
+        useOwnLayer: true,
+        settings: _glass(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final title = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      verified
+                          ? CupertinoIcons.checkmark_shield_fill
+                          : CupertinoIcons.shield,
+                      size: 16,
+                      color: verified
+                          ? colors.primary
+                          : colors.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      l10n.text('model.capabilities'),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                );
+                final status = Text(
+                  verified
+                      ? [
+                          l10n.text('model.capabilitiesVerified'),
+                          if (_verifiedAt().isNotEmpty) _verifiedAt(),
+                        ].join(' · ')
+                      : l10n.text('model.notVerified'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                );
+                if (constraints.maxWidth < 480) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [title, const SizedBox(height: 5), status],
+                  );
+                }
+                return Row(
+                  children: [
+                    title,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: status,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            Wrap(spacing: 7, runSpacing: 7, children: capabilities),
+            if (metrics.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Divider(height: 1, color: colors.outlineVariant),
+              ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 760
+                      ? 3
+                      : constraints.maxWidth >= 460
+                      ? 2
+                      : 1;
+                  final width =
+                      (constraints.maxWidth - (columns - 1) * 10) / columns;
+                  return Wrap(
+                    spacing: 10,
+                    runSpacing: 12,
+                    children: [
+                      for (final metric in metrics)
+                        SizedBox(
+                          width: width,
+                          child: _CapabilityMetric(metric: metric),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CapabilityStatusTag extends StatelessWidget {
+  const _CapabilityStatusTag({required this.label, required this.supported});
+
+  final String label;
+  final bool? supported;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final status = supported == null
+        ? context.l10n.text('model.notVerified')
+        : context.l10n.text(
+            supported! ? 'model.supported' : 'model.unsupported',
+          );
+    final color = supported == true
+        ? colors.primary
+        : supported == false
+        ? colors.error
+        : colors.onSurfaceVariant;
+    return Semantics(
+      label: '$label, $status',
+      child: ExcludeSemantics(
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 30),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.34)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                supported == true
+                    ? CupertinoIcons.checkmark_circle_fill
+                    : supported == false
+                    ? CupertinoIcons.xmark_circle_fill
+                    : CupertinoIcons.question_circle,
+                size: 13,
+                color: color,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CapabilityMetricData {
+  const _CapabilityMetricData(
+    this.label,
+    this.value, {
+    this.technical = false,
+    this.failed = false,
+  });
+
+  final String label;
+  final String value;
+  final bool technical;
+  final bool failed;
+}
+
+class _CapabilityMetric extends StatelessWidget {
+  const _CapabilityMetric({required this.metric});
+
+  final _CapabilityMetricData metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      label: '${metric.label}, ${metric.value}',
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              metric.label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              metric.value,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: metric.failed ? colors.error : colors.onSurface,
+                fontWeight: FontWeight.w600,
+                fontFamily: metric.technical ? 'Menlo' : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _CatalogSettings<T> extends StatefulWidget {
   const _CatalogSettings({

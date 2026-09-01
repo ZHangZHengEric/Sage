@@ -25,6 +25,11 @@ CapabilityBinding = CapabilitySelection | tuple[CapabilitySelection, ...]
 class RuntimeConfig(StrictModel):
     preset: Identifier = "standard"
     capabilities: dict[Identifier, CapabilityBinding] = Field(default_factory=dict)
+    # Operational guarantees are requirements, not documentation.  The
+    # builder fails closed when the selected provider cannot prove each value.
+    required_guarantees: dict[Identifier, dict[Identifier, Any]] = Field(
+        default_factory=dict
+    )
 
     def selections(self, capability: str) -> tuple[CapabilitySelection, ...]:
         value = self.capabilities.get(capability)

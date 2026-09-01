@@ -1201,6 +1201,22 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, Object?>> verifyModelProviderCapabilities(
+    Map<String, Object?> draft, {
+    String? providerId,
+  }) async {
+    try {
+      return await _api.verifyModelProviderCapabilities(
+        draft,
+        providerId: providerId,
+      );
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<String> revealModelProviderApiKey(String providerId) async {
     try {
       return await _api.revealModelProviderApiKey(providerId);
@@ -1686,12 +1702,14 @@ class WorkspaceController extends ChangeNotifier {
       conversation.status = RunStatus.suspending;
     } else if (type == 'run.suspended') {
       conversation.status = RunStatus.suspended;
+      _pauseProcessPanel(conversation, pausedAt: occurredAt);
       if (conversation.pendingInteraction == null) {
         unawaited(_hydrateInteraction(conversation));
       }
     } else if (type == 'run.resumed') {
       conversation.status = RunStatus.running;
       conversation.pendingInteraction = null;
+      _resumeProcessPanel(conversation, resumedAt: occurredAt);
     } else if (type == 'run.completed') {
       _applyTerminalState(
         conversation,
@@ -1921,6 +1939,34 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  void _pauseProcessPanel(Conversation conversation, {DateTime? pausedAt}) {
+    final panel = conversation.processPanels
+        .where((value) => value.running)
+        .lastOrNull;
+    if (panel == null) return;
+    panel.running = false;
+    panel.completedAt = pausedAt ?? DateTime.now();
+  }
+
+  void _resumeProcessPanel(Conversation conversation, {DateTime? resumedAt}) {
+    final panel = conversation.processPanels
+        .where(
+          (value) =>
+              conversation.runId.isNotEmpty &&
+              value.runId == conversation.runId,
+        )
+        .lastOrNull;
+    if (panel == null || panel.running) return;
+    final resumeTime = resumedAt ?? DateTime.now();
+    final frozenAt = panel.completedAt;
+    if (frozenAt != null) {
+      final activeElapsed = frozenAt.difference(panel.startedAt);
+      panel.startedAt = resumeTime.subtract(activeElapsed);
+    }
+    panel.completedAt = null;
+    panel.running = true;
+  }
+
   void _trackToolResult(Conversation conversation, Map<String, Object?> data) {
     final rawItem = data['item'];
     if (rawItem is! Map) return;
@@ -2006,6 +2052,11 @@ class WorkspaceController extends ChangeNotifier {
         );
       } else {
         conversation.status = nextStatus;
+        if (nextStatus == RunStatus.suspended) {
+          _pauseProcessPanel(conversation, pausedAt: completedAt);
+        } else if (nextStatus == RunStatus.running) {
+          _resumeProcessPanel(conversation, resumedAt: completedAt);
+        }
       }
     }
   }

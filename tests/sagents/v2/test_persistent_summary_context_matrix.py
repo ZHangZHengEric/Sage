@@ -10,7 +10,9 @@ from sagents.v2.context import (
     InMemoryConversationSummaryStore,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
+    SessionDerivedConversationSummaryStore,
 )
+from sagents.v2.context.assembler import DefaultContextAssembler
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.model import (
     ModelEventKind,
@@ -50,6 +52,47 @@ def scope(context_key="session_1"):
         run_id="run_1",
         source_sequence=12,
     )
+
+
+def test_summary_context_key_is_bounded_and_opaque_for_legal_identifiers():
+    session_id = "tenant:snapshot:" + "x" * 176
+    key = DefaultContextAssembler._summary_context_key(
+        session_id, run_id="run:snapshot:child"
+    )
+
+    assert key.startswith("context_")
+    assert len(key) == 72
+    assert session_id not in key
+
+
+@pytest.mark.asyncio
+async def test_session_derived_store_upgrades_legacy_summary_on_read():
+    class LegacyDerivedState:
+        async def get_derived_state(self, session_id, namespace, key):
+            assert (session_id, namespace, key) == (
+                "session_1",
+                "context-summary",
+                "context_legacy",
+            )
+            return {
+                "summary_id": "summary_1",
+                "context_key": "context_legacy",
+                "revision": 1,
+                "source_digest": "sha256:legacy",
+                "covered_message_digests": ["sha256:message"],
+                "source_message_count": 1,
+                "text": "legacy summary",
+                "estimated_tokens": 3,
+                "source_sequence": 4,
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }
+
+    store = SessionDerivedConversationSummaryStore(LegacyDerivedState())
+    summary = await store.get("context_legacy", session_id="session_1")
+
+    assert summary is not None
+    assert summary.session_id == "session_1"
 
 
 def ledger():
@@ -207,12 +250,8 @@ async def test_latest_real_user_and_everything_after_it_are_never_summarized():
         protected_recent_units=1,
     )
     source = (
-        ModelMessage(
-            role="user", content=(TextBlock(text="old question " * 100),)
-        ),
-        ModelMessage(
-            role="assistant", content=(TextBlock(text="old answer " * 100),)
-        ),
+        ModelMessage(role="user", content=(TextBlock(text="old question " * 100),)),
+        ModelMessage(role="assistant", content=(TextBlock(text="old answer " * 100),)),
         ModelMessage(role="user", content=(TextBlock(text="latest question"),)),
         ModelMessage(role="assistant", content=(TextBlock(text="draft response"),)),
     )
@@ -312,4 +351,33 @@ async def test_model_summarizer_retries_and_returns_the_structured_contract():
     assert model.requests[1].metadata == {
         "purpose": "conversation_summary",
         "attempt": 2,
+        "response_language": "en",
     }
+
+
+@pytest.mark.asyncio
+async def test_model_summarizer_propagates_chinese_response_language():
+    payload = {
+        "summary": "目标与已验证状态",
+        "decisions": [],
+        "open_tasks": [],
+        "files_touched": [],
+        "commands_run": [],
+        "important_errors": [],
+        "user_requirements": [],
+    }
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),)
+    )
+    summarizer = ModelConversationSummarizer(model)
+
+    await summarizer.summarize(
+        SummarizationRequest(
+            scope=scope().model_copy(update={"response_language": "zh-CN"}),
+            messages=ledger()[1:4],
+            target_tokens=512,
+        )
+    )
+
+    assert model.requests[0].metadata["response_language"] == "zh"
+    assert "使用中文" in model.requests[0].messages[0].content[0].text

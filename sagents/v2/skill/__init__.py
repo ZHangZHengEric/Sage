@@ -20,7 +20,11 @@ from sagents.v2.skill.plugins.ephemeral import (
     InMemorySkillWorkspace,
 )
 from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
-from sagents.v2.skill.provider import FilteredSkillCatalog, SkillLoader
+from sagents.v2.skill.provider import (
+    FilteredSkillCatalog,
+    InvocationGrantSkillCatalog,
+    SkillLoader,
+)
 from sagents.v2.skill.tool import SkillLoadTool
 
 __all__ = [
@@ -30,6 +34,7 @@ __all__ = [
     "InMemorySkillActivationRepository",
     "InMemorySkillProvider",
     "InMemorySkillWorkspace",
+    "InvocationGrantSkillCatalog",
     "FilesystemSkillProvider",
     "LoadedSkill",
     "SkillActivationRepository",

@@ -397,7 +397,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
 
     async def _replace_locations(self, connection, session_id, compact) -> None:
         await connection.execute(
-            f"DELETE FROM {self._table("locations")} WHERE session_id = $1",
+            f"DELETE FROM {self._table('locations')} WHERE session_id = $1",
             session_id,
         )
         location_rows = []
@@ -420,7 +420,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self, connection, session_id, compact
     ) -> None:
         await connection.execute(
-            f"DELETE FROM {self._table("start_idempotency")} WHERE session_id = $1",
+            f"DELETE FROM {self._table('start_idempotency')} WHERE session_id = $1",
             session_id,
         )
         rows = [
@@ -460,14 +460,14 @@ class _PostgresSessionState(SessionStoreCoordinator):
         removed = self._persisted_session_runs.get(session_id, set()) - set(events)
         for run_id in removed:
             await connection.execute(
-                f"DELETE FROM {self._table("run_events")} WHERE run_id = $1",
+                f"DELETE FROM {self._table('run_events')} WHERE run_id = $1",
                 run_id,
             )
         for run_id, rows in events.items():
             persisted = next_sequences.get(run_id, 0)
             if persisted > len(rows):
                 await connection.execute(
-                    f"DELETE FROM {self._table("run_events")} WHERE run_id = $1",
+                    f"DELETE FROM {self._table('run_events')} WHERE run_id = $1",
                     run_id,
                 )
                 persisted = 0
@@ -846,7 +846,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         assert self._pool is not None
         async with self._pool.acquire() as connection:
             compact = await connection.fetchval(
-                f"SELECT compact_state FROM {self._table("sessions")} WHERE session_id = $1",
+                f"SELECT compact_state FROM {self._table('sessions')} WHERE session_id = $1",
                 session_id,
             )
             if compact is None:

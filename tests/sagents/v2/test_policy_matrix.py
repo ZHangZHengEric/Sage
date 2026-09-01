@@ -255,7 +255,13 @@ async def test_continuation_decision_hash_is_stable_and_sensitive():
     assert first.stable_hash() != changed.stable_hash()
 
 
-def tool_definition(level=SideEffectLevel.NONE, *, scopes=(), requires_approval=False):
+def tool_definition(
+    level=SideEffectLevel.NONE,
+    *,
+    scopes=(),
+    requires_approval=False,
+    plan_safe=False,
+):
     return ToolDefinition(
         name="tool",
         description="test",
@@ -263,6 +269,7 @@ def tool_definition(level=SideEffectLevel.NONE, *, scopes=(), requires_approval=
         side_effect_level=level,
         required_scopes=scopes,
         requires_approval=requires_approval,
+        plan_safe=plan_safe,
     )
 
 
@@ -457,6 +464,33 @@ async def test_auto_approval_never_bypasses_actor_scope():
     )
 
     assert decision.action == ToolPolicyAction.DENY
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_denies_write_even_with_auto_approval():
+    decision = await DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE
+    ).decide(
+        tool_context(tool_definition(SideEffectLevel.WRITE)).model_copy(
+            update={"invocation_mode": "plan"}
+        )
+    )
+
+    assert decision.action == ToolPolicyAction.DENY
+    assert "Plan mode" in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_allows_explicit_run_control_mutation():
+    decision = await DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE
+    ).decide(
+        tool_context(tool_definition(SideEffectLevel.WRITE, plan_safe=True)).model_copy(
+            update={"invocation_mode": "plan"}
+        )
+    )
+
+    assert decision.action == ToolPolicyAction.ALLOW
 
 
 @pytest.mark.asyncio

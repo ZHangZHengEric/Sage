@@ -365,7 +365,11 @@ class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
                     ),
                 ),
             ),
-            max_output_tokens=1_000,
+            # Let the verified model route supply its effective output budget.
+            # Reasoning-only models can consume a small fixed cap before they
+            # emit the JSON body, which turns a usable route into an empty
+            # Tool-selection response.
+            max_output_tokens=None,
             response_format="json_object",
             tool_choice="none",
             metadata={"purpose": "tool_selection"},

@@ -12,12 +12,13 @@ from sagents.v2.skill import (
     InMemorySkillActivationRepository,
     InMemorySkillProvider,
     InMemorySkillWorkspace,
+    InvocationGrantSkillCatalog,
     SkillBundle,
     SkillDescriptor,
     SkillLoader,
 )
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
@@ -165,6 +166,37 @@ async def test_filtered_catalog_prevents_loading_outside_manifest_ceiling():
         activations=activations,
     )
 
+    with pytest.raises(SageV2Error) as denied:
+        await loader.load("beta", run_id="run_1")
+
+    assert denied.value.info.code == "skill.not_enabled"
+    assert provider.fetches == []
+    assert workspace.materializations == []
+
+
+@pytest.mark.asyncio
+async def test_durable_run_skill_grant_blocks_unselected_skill_materialization():
+    provider, workspace, activations, _ = loader_for(
+        bundle("alpha", "# Alpha"), bundle("beta", "# Beta")
+    )
+
+    async def command_reader(run_id):
+        del run_id
+        return command().model_copy(
+            update={"config": RunConfig(enabled_skills=("alpha",))}
+        )
+
+    loader = SkillLoader(
+        catalog=InvocationGrantSkillCatalog(provider, command_reader),
+        source=provider,
+        workspace=workspace,
+        activations=activations,
+    )
+
+    assert [
+        value.name
+        for value in await loader.catalog.list_skills(run_id="run_1")
+    ] == ["alpha"]
     with pytest.raises(SageV2Error) as denied:
         await loader.load("beta", run_id="run_1")
 

@@ -60,7 +60,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.events import ItemEventData
+from sagents.v2.contracts.events import ItemEventData, ToolEventData
 from sagents.v2.contracts.items import (
     ItemStatus,
     TextBlock,
@@ -75,6 +75,7 @@ from sagents.v2.contracts.principals import (
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.context import ContextBudget, DefaultContextAssembler
 from sagents.v2.testing.runtime import ephemeral_runtime
+from sagents.v2.runtime.session.contracts import EventDraft
 
 
 CONTEXT = RequestContext(
@@ -267,6 +268,206 @@ async def setup_loop(
         loop_kwargs["context_assembler"] = context_assembler
     loop = AgentLoopEngine(**loop_kwargs)
     return runtime, handle, loop, executor
+
+
+@pytest.mark.asyncio
+async def test_loop_rejects_run_from_a_different_resolved_spec():
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+    runtime, handle, _, executor = await setup_loop(model)
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
+        tool_executor=executor,
+        expected_resolved_spec_hash="sha256:different",
+    )
+
+    with pytest.raises(SageV2Error) as incompatible:
+        await loop.execute(handle.run_id, CONTEXT)
+
+    assert incompatible.value.info.code == "loop.resolved_spec_incompatible"
+    assert incompatible.value.info.safe_to_resume is False
+    assert (await runtime.get_run(handle.run_id)).state == RunState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier():
+    dispatched = asyncio.Event()
+    never_finish = asyncio.Event()
+
+    async def interrupted_handler(call, context):
+        del call, context
+        dispatched.set()
+        await never_finish.wait()
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed(calls=(tool_call(),)),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(READ_TOOL,),
+        handlers={"read_value": interrupted_handler},
+    )
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(dispatched.wait(), timeout=1)
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+    assert (await runtime.get_run(handle.run_id)).state == RunState.RUNNING
+
+    unexpected_dispatches = 0
+
+    async def must_not_replay(call, context):
+        del call, context
+        nonlocal unexpected_dispatches
+        unexpected_dispatches += 1
+        return ToolExecutionResult(
+            tool_call_id="unexpected",
+            operation_id="unexpected",
+        )
+
+    recovered_loop = AgentLoopEngine(
+        runtime=runtime,
+        model=ScriptedModelProvider(()),
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=InMemoryToolExecutor(
+            {"read_value": READ_TOOL}, {"read_value": must_not_replay}
+        ),
+        expected_resolved_spec_hash="sha256:agent",
+    )
+    recovered = await recovered_loop.recover_interrupted(handle.run_id, CONTEXT)
+
+    assert recovered is not None
+    assert recovered.state == RunState.SUSPENDED
+    assert unexpected_dispatches == 0
+    suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
+    interaction = await runtime.session_store.get_interaction(
+        suspension.interaction_id
+    )
+    assert interaction.payload["reason"] == "tool_outcome_unknown"
+    assert "reconcile" not in interaction.allowed_decisions
+
+
+@pytest.mark.asyncio
+async def test_worker_restart_suspends_when_started_tool_lost_its_proposal():
+    runtime, handle, _, _ = await setup_loop(ScriptedModelProvider(()))
+    running = await runtime.start_execution(
+        run_id=handle.run_id,
+        expected_revision=handle.run_revision,
+        context=CONTEXT,
+        idempotency_key="missing-proposal:start",
+    )
+    committed = await runtime.session_store.commit_run(
+        run_id=running.run_id,
+        expected_revision=running.revision,
+        expected_states={RunState.RUNNING},
+        new_state=RunState.RUNNING,
+        drafts=(
+            EventDraft(
+                type="tool.call.started",
+                turn_id="turn_1",
+                step_id="step_1",
+                data=ToolEventData(
+                    tool_call_id="call_1",
+                    tool_name="read_value",
+                    state="started",
+                    operation_id="operation_1",
+                    idempotency_key="tool_1",
+                ),
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="missing-proposal:event",
+    )
+    assert committed.run.state == RunState.RUNNING
+    recovered_loop = AgentLoopEngine(
+        runtime=runtime,
+        model=ScriptedModelProvider(()),
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=InMemoryToolExecutor({"read_value": READ_TOOL}, {}),
+        expected_resolved_spec_hash="sha256:agent",
+    )
+
+    recovered = await recovered_loop.recover_interrupted(handle.run_id, CONTEXT)
+
+    assert recovered is not None
+    assert recovered.state == RunState.SUSPENDED
+    suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
+    interaction = await runtime.session_store.get_interaction(
+        suspension.interaction_id
+    )
+    assert interaction.payload["error_code"] == "tool.recovery_ledger_incomplete"
+    assert interaction.allowed_decisions == (
+        "confirm_succeeded",
+        "mark_failed",
+        "cancel",
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_restart_reconciles_supported_tool_without_replaying_it():
+    reconcilable = READ_TOOL.model_copy(update={"supports_reconciliation": True})
+    dispatched = asyncio.Event()
+    never_finish = asyncio.Event()
+
+    async def interrupted_handler(call, context):
+        del call, context
+        dispatched.set()
+        await never_finish.wait()
+
+    runtime, handle, loop, _ = await setup_loop(
+        ScriptedModelProvider(
+            (ScriptedModelStep(events=(completed(calls=(tool_call(),)),)),)
+        ),
+        tools=(reconcilable,),
+        handlers={"read_value": interrupted_handler},
+    )
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(dispatched.wait(), timeout=1)
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
+    class RecoveryExecutor:
+        def __init__(self):
+            self.reconciled = []
+            self.executed = 0
+
+        async def execute(self, call, context):
+            del call, context
+            self.executed += 1
+            raise AssertionError("recovery must not replay the tool")
+
+        async def reconcile(self, operation_id, context):
+            del context
+            self.reconciled.append(operation_id)
+            return ReconcileResult(
+                operation_id=operation_id,
+                state=ReconcileState.SUCCEEDED,
+                result=ToolExecutionResult(
+                    tool_call_id="call_1",
+                    operation_id=operation_id,
+                    content=(TextBlock(text="recovered result"),),
+                ),
+            )
+
+    recovery_executor = RecoveryExecutor()
+    recovered_loop = AgentLoopEngine(
+        runtime=runtime,
+        model=ScriptedModelProvider(
+            (ScriptedModelStep(events=(completed("done after recovery"),)),)
+        ),
+        tool_catalog=InMemoryToolCatalog((reconcilable,)),
+        tool_executor=recovery_executor,
+        expected_resolved_spec_hash="sha256:agent",
+    )
+
+    recovered = await recovered_loop.recover_interrupted(handle.run_id, CONTEXT)
+
+    assert recovered is not None
+    assert recovered.state == RunState.COMPLETED
+    assert len(recovery_executor.reconciled) == 1
+    assert recovery_executor.executed == 0
 
 
 @pytest.mark.asyncio

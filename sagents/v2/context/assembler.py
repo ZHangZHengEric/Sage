@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Protocol
 
@@ -245,14 +247,19 @@ class DefaultContextAssembler:
             scope = None
             if run_id is not None and self.history is not None:
                 run = await self.history.reader.get_run(run_id)
-                context_key = run.session_id
+                context_key = self._summary_context_key(run.session_id)
                 if run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED:
-                    context_key = f"{run.session_id}:snapshot:{run.run_id}"
+                    context_key = self._summary_context_key(
+                        run.session_id, run_id=run.run_id
+                    )
                 scope = ContextReductionScope(
                     context_key=context_key,
                     session_id=run.session_id,
                     run_id=run.run_id,
                     source_sequence=run.base_session_sequence,
+                    response_language=str(
+                        command.config.metadata.get("response_language") or "en"
+                    ),
                 )
             effective_budget = self._with_reservation(
                 self.budget,
@@ -270,6 +277,21 @@ class DefaultContextAssembler:
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(run_id, projection)
         return projection
+
+    @staticmethod
+    def _summary_context_key(session_id: str, *, run_id: str | None = None) -> str:
+        """Return a bounded opaque key without reparsing caller identifiers."""
+
+        identity = {"session_id": session_id, "snapshot_run_id": run_id}
+        digest = hashlib.sha256(
+            json.dumps(
+                identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return f"context_{digest}"
 
     @staticmethod
     def _with_reservation(
@@ -348,8 +370,7 @@ class DefaultContextAssembler:
     def _wrap_user_context(original: ModelMessage, runtime_text: str) -> ModelMessage:
         original = DefaultContextAssembler._unwrap_user_context(original)
         prefix_text = (
-            f"<runtime_context>\n{runtime_text}\n</runtime_context>"
-            "\n\n<user_request>\n"
+            f"<runtime_context>\n{runtime_text}\n</runtime_context>\n\n<user_request>\n"
         )
         # Prefix and suffix the original block list instead of flattening text
         # and moving images/files behind it. Provider adapters therefore see
@@ -357,9 +378,7 @@ class DefaultContextAssembler:
         if len(original.content) == 1 and isinstance(original.content[0], TextBlock):
             content: tuple[ContentBlock, ...] = (
                 TextBlock(
-                    text=(
-                        f"{prefix_text}{original.content[0].text}\n</user_request>"
-                    )
+                    text=(f"{prefix_text}{original.content[0].text}\n</user_request>")
                 ),
             )
         else:
@@ -432,9 +451,7 @@ class DefaultContextAssembler:
                 flags=re.IGNORECASE | re.DOTALL,
             )
             if match is not None:
-                content = [
-                    content[0].model_copy(update={"text": match.group(1)})
-                ]
+                content = [content[0].model_copy(update={"text": match.group(1)})]
                 changed = True
         else:
             first = content[0]

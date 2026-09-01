@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 
 from sagents.v2.skill.contracts import (
     LoadedSkill,
@@ -40,6 +39,45 @@ class FilteredSkillCatalog:
                     code="skill.not_enabled",
                     category=ErrorCategory.POLICY_DENIED,
                     message=f"skill {name!r} is outside the run policy ceiling",
+                    safe_to_resume=True,
+                )
+            )
+        return await self.inner.get_skill(name, run_id=run_id)
+
+
+class InvocationGrantSkillCatalog:
+    """Intersect the Agent ceiling with the durable per-Run Skill grant."""
+
+    def __init__(
+        self,
+        inner: SkillCatalog,
+        command_reader: Callable[[str], Awaitable[object]],
+    ) -> None:
+        self.inner = inner
+        self.command_reader = command_reader
+
+    async def _allowed(self, run_id: str) -> frozenset[str] | None:
+        command = await self.command_reader(run_id)
+        configured = getattr(
+            getattr(command, "config", None), "enabled_skills", None
+        )
+        return None if configured is None else frozenset(configured)
+
+    async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
+        values = await self.inner.list_skills(run_id=run_id)
+        allowed = await self._allowed(run_id)
+        if allowed is None:
+            return values
+        return tuple(value for value in values if value.name in allowed)
+
+    async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
+        allowed = await self._allowed(run_id)
+        if allowed is not None and name not in allowed:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="skill.not_enabled",
+                    category=ErrorCategory.POLICY_DENIED,
+                    message=f"skill {name!r} is outside this run's resolved grant",
                     safe_to_resume=True,
                 )
             )

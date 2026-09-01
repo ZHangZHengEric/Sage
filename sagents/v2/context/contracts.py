@@ -106,6 +106,7 @@ class ContextReductionScope(StrictModel):
     session_id: Identifier
     run_id: Identifier
     source_sequence: int = Field(default=0, ge=0)
+    response_language: str = "en"
 
 
 class ContextReducer(Protocol):
