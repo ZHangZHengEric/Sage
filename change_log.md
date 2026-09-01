@@ -2,6 +2,10 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 15:40** PG 改为单进程：去掉 NOTIFY，multi_process_writes=False；PG/MySQL 表统一 sagent_ 前缀。
+
+- **2026-09-01 15:28** 新增单进程可选插件 sage.session.mysql：复用 coordinator、事件追加、GET_LOCK，multi_process_writes=False。
+
 - **2026-09-01 15:05** sage.session.postgres 完成 PG-1 行级 CAS 与 PG-2 LISTEN/NOTIFY，去掉 advisory lock。
 
 - **2026-09-01 14:52** sage.session.postgres 去掉 SAGE_V2_POSTGRES_DSN；DSN 必须写在插件声明的 dsn 字段。

@@ -52,6 +52,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.memory.recall-query.llm",
         "sage.session.filesystem",
         "sage.session.postgres",
+        "sage.session.mysql",
         "sage.session.ephemeral",
         "sage.session-memory.noop",
         "sage.session-memory.sqlite-bm25",
@@ -102,11 +103,11 @@ def test_builtin_inventory_contains_only_real_factories():
     )
     assert (
         inventory["sage.session.postgres"]["capabilities"]["multi_process_writes"]
-        is True
+        is False
     )
     assert (
-        inventory["sage.session.postgres"]["capabilities"]["cross_process_subscribe"]
-        is True
+        inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"]
+        is False
     )
 
 

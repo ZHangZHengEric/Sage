@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import pytest
@@ -15,16 +14,13 @@ from sagents.v2.contracts.principals import (
     RequestContext,
     TraceContext,
 )
-from sagents.v2.contracts.run_state import (
-    EventCursor,
-    RunState,
-    SessionConcurrencyMode,
-)
+from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
 from sagents.v2.runtime.session.postgres import (
     PostgresSessionStore,
+    StoreInUseError,
     _PostgresSessionState,
 )
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
@@ -78,14 +74,14 @@ def test_postgres_plugin_requires_dsn_in_declaration():
         value["plugin_id"]: value for value in builtin_extension_registry().inventory()
     }
     plugin = inventory["sage.session.postgres"]
-    assert plugin["version"] == "2.1.0"
+    assert plugin["version"] == "2.2.0"
     assert plugin["capabilities"]["durable"] is True
     assert plugin["capabilities"]["global_session_index"] is False
-    assert plugin["capabilities"]["multi_process_writes"] is True
-    assert plugin["capabilities"]["cross_process_subscribe"] is True
+    assert plugin["capabilities"]["multi_process_writes"] is False
     assert "dsn" in plugin["config_schema"]["required"]
     assert "dsn_env" not in plugin["config_schema"]["properties"]
     assert "lock_key" not in plugin["config_schema"]["properties"]
+    assert "table_prefix" in plugin["config_schema"]["properties"]
     assert "SAGE_V2_POSTGRES_DSN" not in str(plugin)
 
 
@@ -96,14 +92,17 @@ def test_postgres_store_requires_explicit_dsn():
         PostgresSessionStore("   ")
 
 
-def test_postgres_capabilities_claim_cas_and_notify_without_connecting():
+def test_postgres_capabilities_claim_single_process_without_connecting():
     store = PostgresSessionStore("postgresql://unused/unused", schema="sage_v2_demo")
     assert store.capabilities["durable_across_process_restart"] is True
-    assert store.capabilities["multi_process_writes"] is True
-    assert store.capabilities["cross_process_subscribe"] is True
+    assert store.capabilities["multi_process_writes"] is False
+    assert store.capabilities["cross_process_subscribe"] is False
     assert store.capabilities["global_session_index"] is False
-    assert store.notify_channel == "sage_sess_sage_v2_demo"
+    assert store.table_prefix == "sagent"
+    assert store._table("sessions") == "sage_v2_demo.sagent_sessions"
     assert not hasattr(store, "list_sessions")
+    with pytest.raises(ValueError, match="table_prefix"):
+        PostgresSessionStore("postgresql://unused/unused", table_prefix="Bad-Prefix")
 
 
 def test_filter_session_state_drops_only_one_tree():
@@ -198,7 +197,7 @@ async def test_restart_round_trip_and_idempotent_start(postgres_dsn):
     )
 
     assert second.capabilities["durable_across_process_restart"] is True
-    assert second.capabilities["multi_process_writes"] is True
+    assert second.capabilities["multi_process_writes"] is False
     assert run.state == RunState.QUEUED
     assert session.revision == 1
     assert [event.type for event in events] == [
@@ -242,83 +241,16 @@ async def test_run_events_are_appended_across_commits(postgres_dsn):
 
 
 @pytest.mark.asyncio
-async def test_dual_store_cas_rejects_one_writer(postgres_dsn):
+async def test_advisory_lock_rejects_a_second_writer(postgres_dsn):
     schema = _schema()
     first = PostgresSessionStore(postgres_dsn, schema=schema)
+    await first.create_run(command(), CONTEXT)
     second = PostgresSessionStore(postgres_dsn, schema=schema)
-    created = await first.create_run(command(), CONTEXT)
-    await second.get_run(created.handle.run_id)
-
-    async def advance(store, key: str):
-        return await store.commit_run(
-            run_id=created.handle.run_id,
-            expected_revision=created.handle.run_revision,
-            expected_states={RunState.QUEUED},
-            new_state=RunState.RUNNING,
-            drafts=(),
-            context=CONTEXT,
-            idempotency_key=key,
-        )
-
-    results = await asyncio.gather(
-        advance(first, "start-a"),
-        advance(second, "start-b"),
-        return_exceptions=True,
-    )
-    successes = [value for value in results if not isinstance(value, BaseException)]
-    failures = [value for value in results if isinstance(value, SageV2Error)]
-    assert len(successes) == 1
-    assert len(failures) == 1
-    assert failures[0].info.code in {
-        "run.revision_conflict",
-        "session.revision_conflict",
-    }
-    first_run = await first.get_run(created.handle.run_id)
-    second_run = await second.get_run(created.handle.run_id)
-    assert first_run.state == RunState.RUNNING
-    assert second_run.state == RunState.RUNNING
-    assert first_run.revision == second_run.revision
+    with pytest.raises(StoreInUseError) as exc_info:
+        await second.create_run(command("other"), CONTEXT)
+    assert exc_info.value.info.code == "session_store.in_use"
     await first.close()
     await second.close()
-
-
-@pytest.mark.asyncio
-async def test_second_store_follows_events_via_notify(postgres_dsn):
-    schema = _schema()
-    writer = PostgresSessionStore(postgres_dsn, schema=schema)
-    follower = PostgresSessionStore(postgres_dsn, schema=schema)
-    created = await writer.create_run(command(), CONTEXT)
-
-    async def consume():
-        events = []
-        async for event in follower.subscribe_events(
-            EventCursor(run_id=created.handle.run_id, run_sequence=0)
-        ):
-            events.append(event)
-            if event.type == "run.started":
-                break
-        return events
-
-    task = asyncio.create_task(consume())
-    await asyncio.sleep(0.05)
-    await writer.commit_run(
-        run_id=created.handle.run_id,
-        expected_revision=created.handle.run_revision,
-        expected_states={RunState.QUEUED},
-        new_state=RunState.RUNNING,
-        drafts=(),
-        context=CONTEXT,
-        idempotency_key="start-execution",
-    )
-    events = await asyncio.wait_for(task, timeout=3)
-    assert [event.type for event in events][:4] == [
-        "run.accepted",
-        "run.queued",
-        "message.completed",
-        "run.started",
-    ]
-    await writer.close()
-    await follower.close()
 
 
 @pytest.mark.asyncio
@@ -452,7 +384,7 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
     store = application.service("session.store")
     assert store.schema_name == schema
     assert store.capabilities["durable_across_process_restart"] is True
-    assert store.capabilities["multi_process_writes"] is True
+    assert store.capabilities["multi_process_writes"] is False
     bindings = {
         (value.capability, value.plugin_id)
         for value in application.resolved_plan.providers
