@@ -7,14 +7,14 @@ from sagents.v2.runtime.session.contracts import (
     SessionStore,
     SteerClaimResult,
 )
-from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
-from sagents.v2.runtime.session.filesystem import (
+from sagents.v2.runtime.session.plugins import (
+    EphemeralSessionStore,
     FilesystemSessionStore,
+    MysqlSessionStore,
+    PostgresSessionStore,
     SessionStoreCorruptionError,
     StoreInUseError,
 )
-from sagents.v2.runtime.session.mysql import MysqlSessionStore
-from sagents.v2.runtime.session.postgres import PostgresSessionStore
 from sagents.v2.runtime.session.fencing import LeaseFencedSessionStore
 from sagents.v2.runtime.session.migration import (
     MigrationReport,

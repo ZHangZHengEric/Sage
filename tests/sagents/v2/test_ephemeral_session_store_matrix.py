@@ -40,7 +40,7 @@ from sagents.v2.contracts.run_state import (
 )
 from sagents.v2.runtime.kernel import HarnessRuntime
 from sagents.v2.testing.runtime import ephemeral_runtime
-from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
+from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
 
 
 NOW = datetime(2026, 8, 25, tzinfo=timezone.utc)

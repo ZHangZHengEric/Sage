@@ -18,7 +18,7 @@ from sagents.v2.contracts.run_state import RunState
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
-from sagents.v2.runtime.session.mysql import (
+from sagents.v2.runtime.session.plugins.mysql import (
     MysqlSessionStore,
     StoreInUseError,
     parse_mysql_dsn,

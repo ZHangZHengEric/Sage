@@ -1,7 +1,7 @@
 """Explicit lightweight runtime composition for tests and examples."""
 
 from sagents.v2.runtime.kernel import HarnessRuntime
-from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
+from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
 
 
 def ephemeral_runtime(**store_options) -> HarnessRuntime:

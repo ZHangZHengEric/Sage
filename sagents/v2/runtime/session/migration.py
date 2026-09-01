@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 from sagents.v2.contracts.events import RuntimeEvent
-from sagents.v2.runtime.session.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
