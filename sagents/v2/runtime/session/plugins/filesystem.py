@@ -992,12 +992,14 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         async with self._load_lock:
             if session_id in self._loaded_session_ids:
                 return
-            snapshot = self._session_dir(session_id) / "state.json"
-            if not snapshot.exists():
-                if missing_ok:
-                    return
-                raise self._not_found("session.not_found", session_id)
             async with self._lock:
+                if self._repair_loaded_session_marker_locked(session_id):
+                    return
+                snapshot = self._session_dir(session_id) / "state.json"
+                if not snapshot.exists():
+                    if missing_ok:
+                        return
+                    raise self._not_found("session.not_found", session_id)
                 await asyncio.to_thread(self._load_one_session, snapshot, session_id)
 
     async def _ensure_descendants_loaded(self, session_id: str) -> None:
@@ -1028,11 +1030,26 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     child_session_id = str(rows[0].get("session_id", ""))
                     if child_session_id in self._loaded_session_ids:
                         continue
+                    if self._repair_loaded_session_marker_locked(child_session_id):
+                        continue
                     await asyncio.to_thread(
                         self._load_one_session,
                         snapshot,
                         expected_session_id=child_session_id,
                     )
+
+    def _repair_loaded_session_marker_locked(self, session_id: str) -> bool:
+        """Treat the in-memory aggregate as authoritative for this process.
+
+        Loading a Session is atomic under ``_lock``.  If its aggregate is
+        already present, a missing lazy-load marker is stale bookkeeping, not
+        permission to merge the same durable aggregate a second time.
+        """
+
+        if session_id not in self._sessions:
+            return False
+        self._loaded_session_ids.add(session_id)
+        return True
 
     async def _ensure_resource_loaded(
         self, collection: str, identity_key: str, identity: str

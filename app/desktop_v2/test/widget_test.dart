@@ -4388,67 +4388,58 @@ void main() {
     },
   );
 
-  testWidgets('file approval uses a compact preview and folds raw arguments', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1200, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    SharedPreferences.setMockInitialValues({
-      'sage.desktop_v2.conversations.v1': jsonEncode({
-        WorkspaceController.agentWorkspaceId: [
-          _persistedSuspendedConversation(),
-        ],
-      }),
-    });
-    final controller = WorkspaceController(
-      api: _FileWriteSuspendedRunApi(),
-      preferencesLoader: SharedPreferences.getInstance,
-    );
-    addTearDown(controller.dispose);
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'file approval shows a compact user-facing preview in ${brightness.name} appearance',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 900);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [
+              _persistedSuspendedConversation(),
+            ],
+          }),
+        });
+        final controller = WorkspaceController(
+          api: _FileWriteSuspendedRunApi(),
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
 
-    await tester.pumpWidget(SageDesktopV2App(controller: controller));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
 
-    expect(find.text('写入文件'), findsOneWidget);
-    expect(find.text('/workspace/quicksort.py'), findsOneWidget);
-    expect(find.text('内容预览'), findsOneWidget);
-    expect(find.text('写入操作'), findsOneWidget);
-    expect(find.text('49 个字符'), findsOneWidget);
-    expect(find.text('3 行'), findsOneWidget);
-    expect(find.textContaining('def quicksort(values):'), findsOneWidget);
-    expect(find.textContaining('internal-marker'), findsNothing);
-    expect(
-      tester.getCenter(find.text('/workspace/quicksort.py')).dy,
-      closeTo(tester.getCenter(find.text('49 个字符')).dy, 2),
+        expect(find.text('写入文件'), findsOneWidget);
+        expect(find.text('/workspace/quicksort.py'), findsOneWidget);
+        expect(find.text('内容预览'), findsOneWidget);
+        expect(find.text('写入操作'), findsOneWidget);
+        expect(find.text('49 个字符'), findsOneWidget);
+        expect(find.text('3 行'), findsOneWidget);
+        expect(find.textContaining('def quicksort(values):'), findsOneWidget);
+        expect(find.textContaining('internal-marker'), findsNothing);
+        expect(
+          tester.getCenter(find.text('/workspace/quicksort.py')).dy,
+          closeTo(tester.getCenter(find.text('49 个字符')).dy, 2),
+        );
+        expect(
+          find.byKey(const ValueKey('interaction-technical-toggle')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('interaction-technical-details')),
+          findsNothing,
+        );
+        expect(find.textContaining('internal-marker'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
     );
-    expect(
-      tester.getCenter(find.text('内容预览')).dy,
-      closeTo(
-        tester
-            .getCenter(
-              find.descendant(
-                of: find.byKey(const ValueKey('interaction-technical-toggle')),
-                matching: find.text('查看技术详情'),
-              ),
-            )
-            .dy,
-        2,
-      ),
-    );
-
-    await tester.tap(
-      find.byKey(const ValueKey('interaction-technical-toggle')),
-    );
-    await tester.pump();
-    expect(
-      find.byKey(const ValueKey('interaction-technical-details')),
-      findsOneWidget,
-    );
-    expect(find.textContaining('internal-marker'), findsOneWidget);
-  });
+  }
 
   testWidgets(
     'plan submission shows full text and approval selects goal mode',
