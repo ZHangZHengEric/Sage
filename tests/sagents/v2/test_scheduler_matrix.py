@@ -9,9 +9,9 @@ from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
     WorkItem,
 )
-from sagents.v2.runtime.execution.scheduler.memory import InMemoryScheduler
-from sagents.v2.runtime.execution.scheduler.filesystem import (
+from sagents.v2.runtime.execution.scheduler import (
     FilesystemScheduler,
+    InMemoryScheduler,
     SchedulerInUseError,
 )
 from sagents.v2.contracts.errors import SageV2Error

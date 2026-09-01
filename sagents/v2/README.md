@@ -279,6 +279,7 @@ Replaceable implementations are registered with an
 - Skill provider
 - Context reducer or summarizer
 - Scheduler, job runtime, sandbox, and protocol adapters
+- Diagnostic, log, and trace sinks
 
 Production plugins can be published through the `sage.extensions` Python entry
 point group. Direct registration and direct provider injection are useful for
@@ -301,6 +302,7 @@ the dependency and lifecycle rules.
 
 ```text
 sagents/v2/
+├── 使用手册.md            # Chinese capability integration guide
 ├── sagent.py              # public start, observe, continue facade
 ├── builder.py             # package resolution and dependency composition
 ├── contracts/             # commands, events, items, and state models
@@ -320,11 +322,12 @@ sagents/v2/
 
 Recommended reading order:
 
-1. `sagent.py`
-2. `builder.py`
-3. `contracts/commands.py` and `contracts/events.py`
-4. `agent/engine.py`
-5. `runtime/kernel.py`
+1. [`使用手册.md`](使用手册.md) — capability selection and configuration (Chinese)
+2. `sagent.py`
+3. `builder.py`
+4. `contracts/commands.py` and `contracts/events.py`
+5. `agent/engine.py`
+6. `runtime/kernel.py`
 
 For dependency rules and authoritative-data boundaries, read
 [`ARCHITECTURE.md`](ARCHITECTURE.md). For behavior examples, the tests under

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 
-from sagents.v2.context.token_estimator import (
-    JsonHeuristicTokenEstimator,
-    TokenEstimator,
-)
+from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage
 

@@ -42,6 +42,22 @@ class _AgentCoordinatorEngine(Protocol):
         state: AgentLoopCheckpointState | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]: ...
 
+    async def trace_run(
+        self, run_id: str, context: RequestContext, *, resumed: bool, body
+    ) -> RunSnapshot: ...
+
+    async def trace_tool_call(
+        self,
+        run: RunSnapshot,
+        call: ToolCall,
+        context: RequestContext,
+        turn_id: str,
+        step_id: str | None = None,
+        state: AgentLoopCheckpointState | None = None,
+        *,
+        body,
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]: ...
+
     async def commit_safe_point_suspension(
         self,
         run: RunSnapshot,
@@ -57,10 +73,14 @@ class AgentRunCoordinator:
         self.engine = engine
 
     async def execute(self, run_id: str, context: RequestContext) -> RunSnapshot:
-        return await self.engine.execute_coordinated(run_id, context)
+        return await self.engine.trace_run(
+            run_id, context, resumed=False, body=self.engine.execute_coordinated
+        )
 
     async def resume(self, run_id: str, context: RequestContext) -> RunSnapshot:
-        return await self.engine.resume_coordinated(run_id, context)
+        return await self.engine.trace_run(
+            run_id, context, resumed=True, body=self.engine.resume_coordinated
+        )
 
 
 class ModelStepExecutor:
@@ -97,8 +117,14 @@ class ToolCallCoordinator:
         step_id: str | None = None,
         state: AgentLoopCheckpointState | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
-        return await self.engine.dispatch_tool_call(
-            run, call, context, turn_id, step_id=step_id, state=state
+        return await self.engine.trace_tool_call(
+            run,
+            call,
+            context,
+            turn_id,
+            step_id=step_id,
+            state=state,
+            body=self.engine.dispatch_tool_call,
         )
 
 

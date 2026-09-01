@@ -122,6 +122,7 @@ class AgentCompositionFactory:
         memory_recall_limit: int = 5,
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         expected_resolved_spec_hash: str | None = None,
+        trace_sink=None,
     ) -> AgentLoopEngine:
         """Wire already-selected ports into the single canonical Loop engine."""
 
@@ -141,6 +142,7 @@ class AgentCompositionFactory:
             memory_recall_query_generator=memory_recall_query_generator,
             context_assembler=context_assembler,
             expected_resolved_spec_hash=expected_resolved_spec_hash,
+            trace_sink=trace_sink,
         )
 
     def create_loop(
@@ -164,6 +166,7 @@ class AgentCompositionFactory:
         goal_state_service: GoalStateService | None = None,
         additional_runtime_tools: tuple[str, ...] = (),
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
+        trace_sink=None,
     ) -> AgentLoopEngine:
         """Create the standard single-Agent Loop from resolved capabilities."""
 
@@ -264,6 +267,7 @@ class AgentCompositionFactory:
                 projection_observer=session_memory_service,
             ),
             expected_resolved_spec_hash=resolved.manifest_hash,
+            trace_sink=trace_sink,
         )
 
 

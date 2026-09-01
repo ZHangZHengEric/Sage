@@ -212,6 +212,7 @@ async def setup_loop(
     automatic_memory_recall=False,
     memory_recall_query_generator=None,
     context_assembler=None,
+    trace_sink=None,
 ):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(
@@ -266,6 +267,8 @@ async def setup_loop(
         loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
     if context_assembler is not None:
         loop_kwargs["context_assembler"] = context_assembler
+    if trace_sink is not None:
+        loop_kwargs["trace_sink"] = trace_sink
     loop = AgentLoopEngine(**loop_kwargs)
     return runtime, handle, loop, executor
 

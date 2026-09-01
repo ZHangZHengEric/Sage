@@ -12,10 +12,8 @@ from typing import Protocol
 
 from sagents.v2.context import ContextAssembler
 from sagents.v2.context.contracts import ContextBudget, ContextRequestReservation
-from sagents.v2.context.token_estimator import (
-    JsonHeuristicTokenEstimator,
-    TokenEstimator,
-)
+from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import (
     ErrorCategory,

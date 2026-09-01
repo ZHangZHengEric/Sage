@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from sagents.v2.runtime.execution.jobs.memory import InMemoryJobRuntime
+from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.jobs import (
     JobCompletion,

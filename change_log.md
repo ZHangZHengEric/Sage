@@ -2,6 +2,12 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 18:45** execution/workspace/credentials/artifact/context 实现迁入各自 plugins/。
+
+- **2026-09-01 18:43** 观测落地：诊断含时延；OTLP 一条 Session 线含多 Agent；接入见使用手册。
+
+- **2026-09-01 18:07** 新增 sage.logging.stdout：按行输出脱敏 JSONL，供容器/Server 采集。
+
 - **2026-09-01 17:47** 文件不存在改为 warning，不再打 traceback。
 
 - **2026-09-01 15:48** filesystem/ephemeral SessionStore 也迁入 runtime/session/plugins，四种后端同目录。

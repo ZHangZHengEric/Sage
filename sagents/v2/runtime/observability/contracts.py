@@ -120,3 +120,75 @@ class NoopLogSink:
 
     def close(self) -> None:
         return None
+
+
+class TraceStatus(str, Enum):
+    UNSET = "unset"
+    OK = "ok"
+    ERROR = "error"
+
+
+class TraceKind(str, Enum):
+    INTERNAL = "internal"
+    CLIENT = "client"
+    SERVER = "server"
+
+
+class TraceEvent(StrictModel):
+    name: str
+    timestamp: datetime = Field(default_factory=utc_now)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class TraceSpan(StrictModel):
+    """Vendor-neutral span shared by Runtime, hosts, and export plugins."""
+
+    format_version: str = "sage.trace/v1"
+    trace_id: str
+    span_id: str
+    parent_span_id: str | None = None
+    name: str
+    kind: TraceKind = TraceKind.INTERNAL
+    start_time: datetime = Field(default_factory=utc_now)
+    end_time: datetime | None = None
+    status: TraceStatus = TraceStatus.UNSET
+    session_id: str | None = None
+    run_id: str | None = None
+    turn_id: str | None = None
+    step_id: str | None = None
+    tool_call_id: str | None = None
+    request_id: str | None = None
+    correlation_id: str | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    events: list[TraceEvent] = Field(default_factory=list)
+    error: LogError | None = None
+
+
+class TraceSink(Protocol):
+    """Replaceable best-effort projection for distributed traces."""
+
+    format_version: str
+
+    def start_span(self, span: TraceSpan) -> None: ...
+
+    def add_event(self, span_id: str, event: TraceEvent) -> None: ...
+
+    def end_span(self, span: TraceSpan) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class NoopTraceSink:
+    format_version = "sage.trace/v1"
+
+    def start_span(self, span: TraceSpan) -> None:
+        del span
+
+    def add_event(self, span_id: str, event: TraceEvent) -> None:
+        del span_id, event
+
+    def end_span(self, span: TraceSpan) -> None:
+        del span
+
+    def close(self) -> None:
+        return None

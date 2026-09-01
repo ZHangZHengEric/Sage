@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from sagents.v2.runtime.credentials.contracts import CredentialRef
-from sagents.v2.runtime.credentials.providers import (
+from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
 )

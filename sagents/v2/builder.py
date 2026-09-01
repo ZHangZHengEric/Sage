@@ -441,6 +441,7 @@ class SAgentBuilder:
             return (await session_store.get_run(run_id)).session_id
 
         diagnostic_sink = services["observability.diagnostic-sink"]
+        trace_sink = services["observability.trace-sink"]
         models_by_agent = {
             member_id: (
                 provider
@@ -448,6 +449,7 @@ class SAgentBuilder:
                 else RecordingModelProvider(
                     provider,
                     sink=diagnostic_sink,
+                    trace_sink=trace_sink,
                     session_id_resolver=resolve_session_id,
                     provider_metadata={"agent_id": member_id},
                 )
@@ -695,6 +697,7 @@ class SAgentBuilder:
                             allow_delegation=descriptor.allow_delegation,
                         ),
                     ),
+                    trace_sink=services["observability.trace-sink"],
                 )
 
             def compose(descriptor, child_run_id, catalog, executor):
@@ -793,6 +796,7 @@ class SAgentBuilder:
                 delegation_concurrency_limiter=delegation_limiter,
                 loop_composer=compose,
                 child_loop_factory=child_factory,
+                trace_sink=services["observability.trace-sink"],
             )
             return mode_factory.create_loop(root_descriptor, run_id)
 
@@ -1333,6 +1337,15 @@ class SAgentBuilder:
                 declarations,
                 capability="observability.log-sink",
                 default_plugin="sage.logging.noop",
+            ),
+            "observability.trace-sink": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="observability.trace-sink",
+                default_plugin="sage.trace.noop",
             ),
             "workspace.initializer": await self._create_capability(
                 host,

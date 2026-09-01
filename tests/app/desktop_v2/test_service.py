@@ -1777,7 +1777,11 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     }
     assert {
         value["plugin_id"] for value in by_id["observability.log-sink"]["plugins"]
-    } == {"sage.logging.filesystem", "sage.logging.noop"}
+    } == {
+        "sage.logging.filesystem",
+        "sage.logging.noop",
+        "sage.logging.stdout",
+    }
     assert by_id["workspace.initializer"]["active"]["plugin_id"] == (
         "sage.workspace.initializer.claw"
     )

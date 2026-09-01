@@ -23,11 +23,9 @@ from sagents.v2.context.summary import (
     create_summary,
     message_digest,
 )
-from sagents.v2.context.token_estimator import (
-    JsonHeuristicTokenEstimator,
-    TokenEstimator,
-)
-from sagents.v2.context.unit_compactor import ReferenceContextUnitCompactor
+from sagents.v2.context.plugins.reference import ReferenceContextUnitCompactor
+from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model.contracts import ModelMessage
 
 
