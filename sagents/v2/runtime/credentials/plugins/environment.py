@@ -23,6 +23,8 @@ from sagents.v2.runtime.credentials.contracts import (
 class EnvironmentCredentialProvider:
     """Env access never leaks into Kernel/AgentLoop."""
 
+    plugin_id = "sage.credentials.environment"
+
     def __init__(
         self,
         declarations: Mapping[str, CredentialDeclaration],

@@ -20,6 +20,7 @@ from sagents.v2.interfaces.protocols.contracts import (
 class McpProtocolAdapter:
     """Maps only MCP-correlated progress/elicitation; MCP is not a Run protocol."""
 
+    plugin_id = "sage.protocol.mcp"
     protocol = "mcp"
     version = "2026-07-28"
 

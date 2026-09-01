@@ -8,6 +8,7 @@ from sagents.v2.session_memory.contracts import (
 
 
 class NoopSessionMemoryProvider:
+    plugin_id = "sage.session-memory.noop"
     api_version = "2"
 
     async def capabilities(self) -> SessionMemoryCapabilities:

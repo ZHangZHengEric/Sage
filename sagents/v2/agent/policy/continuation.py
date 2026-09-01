@@ -377,6 +377,8 @@ class CompositeContinuationPolicy:
     commit events, which keeps replay and scenario tests deterministic.
     """
 
+    plugin_id = "sage.agent.continuation.deterministic"
+
     def __init__(self, rules: tuple[ContinuationRule, ...] | None = None) -> None:
         self.rules = rules or (
             BudgetRule(),
@@ -409,6 +411,8 @@ class ToolOrTextRuleForPendingCalls:
 
 class ExplicitStatusContinuationPolicy(CompositeContinuationPolicy):
     """Require turn_status for completion while preserving safety boundaries."""
+
+    plugin_id = "sage.agent.continuation.explicit-status"
 
     def __init__(self, *, repeat_threshold: int = 3) -> None:
         super().__init__(

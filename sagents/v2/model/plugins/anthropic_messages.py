@@ -64,6 +64,8 @@ class AnthropicMessagesModelProvider:
     those semantics instead of routing Claude through an OpenAI-compatible shim.
     """
 
+    plugin_id = "sage.model.anthropic-messages"
+
     def __init__(
         self,
         config: AnthropicMessagesConfig,

@@ -399,6 +399,7 @@ class _MemoryHandle:
 class InMemorySandboxProvider:
     """Provide deterministic conformance isolation, never an OS security boundary."""
 
+    plugin_id = "sage.sandbox.ephemeral"
     provider_id = "sage.sandbox.memory"
     provider_version = "3.0.0"
 

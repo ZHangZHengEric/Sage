@@ -11,6 +11,8 @@ from sagents.v2.interfaces.protocols.contracts import (
 
 
 class NativeProtocolAdapter:
+    plugin_id = "sage.protocol.native"
+
     async def capabilities(self) -> AdapterCapabilities:
         return AdapterCapabilities(
             protocol="sage-native",

@@ -35,6 +35,7 @@ class InMemoryScheduler:
     concurrency is bounded here so the reference still exercises those rules.
     """
 
+    plugin_id = "sage.scheduler.ephemeral"
     api_version = "2"
 
     def __init__(

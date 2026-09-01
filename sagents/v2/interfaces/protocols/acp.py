@@ -29,6 +29,7 @@ from sagents.v2.interfaces.protocols.contracts import (
 class AcpProtocolAdapter:
     """ACP projection with LossReports for unsupported Run/Flow semantics."""
 
+    plugin_id = "sage.protocol.acp"
     protocol = "acp"
     version = "1"
 

@@ -41,6 +41,7 @@ from sagents.v2.interfaces.protocols.contracts import (
 class AgUiProtocolAdapter:
     """AG-UI event adapter with explicit Sage extensions for kernel-only facts."""
 
+    plugin_id = "sage.protocol.ag-ui"
     protocol = "ag-ui"
     version = "0.1"
 

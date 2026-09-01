@@ -16,6 +16,8 @@ from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
 class FilesystemSkillProvider:
     """Discover direct child folders containing `SKILL.md`, then fetch lazily."""
 
+    plugin_id = "sage.skill.filesystem"
+
     def __init__(
         self,
         roots: tuple[str | Path, ...],

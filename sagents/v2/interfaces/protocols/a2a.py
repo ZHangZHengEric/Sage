@@ -22,6 +22,7 @@ from sagents.v2.interfaces.protocols.contracts import (
 class A2AProtocolAdapter:
     """Task-oriented projection that explicitly loses Step/Tool/Flow detail."""
 
+    plugin_id = "sage.protocol.a2a"
     protocol = "a2a"
     # Latest published stable line; the development specification is newer and
     # must not be advertised as a supported wire version until conformance lands.

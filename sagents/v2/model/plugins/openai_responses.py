@@ -62,6 +62,8 @@ class OpenAIResponsesModelProvider:
     but this adapter never relies on `previous_response_id` for correctness.
     """
 
+    plugin_id = "sage.model.openai-responses"
+
     def __init__(
         self,
         config: OpenAIResponsesConfig,

@@ -10,7 +10,9 @@ from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.model import ModelMessage, ModelToolCall
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.session_memory import (
+    NoopSessionMemoryProvider,
     SessionMemoryQuery,
     SessionMemoryRecord,
     SessionMemoryService,
@@ -288,3 +290,14 @@ async def test_search_memory_can_return_session_results_without_long_term_provid
     assert result["long_term_results"] == []
     assert result["results"] == result["session_results"]
     assert result["results"][0]["memory_type"] == "session"
+
+
+@pytest.mark.parametrize(
+    "implementation",
+    [NoopSessionMemoryProvider, SqliteBm25SessionMemoryProvider],
+)
+def test_session_memory_plugin_id_matches_official_registry(implementation):
+    registration = builtin_extension_registry().get(implementation.plugin_id)
+    assert "session-memory.provider" in {
+        offer.capability for offer in registration.descriptor.provides
+    }
