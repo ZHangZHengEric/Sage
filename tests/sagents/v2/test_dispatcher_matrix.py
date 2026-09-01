@@ -63,6 +63,26 @@ class FakeAgent:
         return SimpleNamespace(state=RunState.FAILED)
 
 
+class CountingScheduler(InMemoryScheduler):
+    def __init__(self):
+        super().__init__()
+        self.claim_calls = 0
+        self.successful_claims = 0
+        self.quota_requeues = 0
+
+    async def claim(self, *args, **kwargs):
+        self.claim_calls += 1
+        lease = await super().claim(*args, **kwargs)
+        if lease is not None:
+            self.successful_claims += 1
+        return lease
+
+    async def release(self, lease, reason, *, requeue=False):
+        if requeue:
+            self.quota_requeues += 1
+        await super().release(lease, reason, requeue=requeue)
+
+
 class RecoveryAgent(FakeAgent):
     def __init__(self, runtime: HarnessRuntime) -> None:
         super().__init__()
@@ -147,6 +167,31 @@ async def test_execution_survives_lease_renewal_and_worker_remains_available():
     assert (await asyncio.wait_for(second, timeout=2)).state == RunState.COMPLETED
     assert len(dispatcher._workers) == 1
     assert not dispatcher._workers[0].done()
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_quota_does_not_claim_and_requeue_in_a_spin_loop():
+    scheduler = CountingScheduler()
+    dispatcher = LocalWorkerDispatcher(
+        scheduler,
+        max_concurrent_runs=4,
+        max_concurrent_runs_per_tenant=1,
+    )
+    agent = FakeAgent(delay=0.05)
+    results = [
+        await dispatcher.submit(
+            agent,
+            SimpleNamespace(run_id=f"quota-run-{index}", run_revision=0),
+            CONTEXT,
+        )
+        for index in range(4)
+    ]
+
+    await asyncio.wait_for(asyncio.gather(*results), timeout=2)
+    assert scheduler.successful_claims == 4
+    assert scheduler.quota_requeues == 0
+    assert scheduler.claim_calls <= 8
     await dispatcher.close()
 
 
@@ -252,7 +297,7 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
     scheduler = InMemoryScheduler()
     store = EphemeralSessionStore()
     fenced = LeaseFencedSessionStore(store, scheduler)
-    control_runtime = HarnessRuntime(store)
+    control_runtime = HarnessRuntime(fenced)
     started = asyncio.Event()
     closed = asyncio.Event()
 

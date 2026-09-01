@@ -267,6 +267,40 @@ counters for single-host restart recovery. Queued work can be redispatched;
 uncheckpointed running work fails explicitly instead of being replayed. This
 does not claim a distributed scheduler or a durable JobRuntime.
 
+Worker fencing is a semantic plugin contract rather than a built-in database
+transaction. A Scheduler used by `SAgentBuilder` must support
+`execute_fenced(lease, operation)`, keeping the validated lease authoritative
+until the SessionStore mutation completes. In-memory and filesystem schedulers
+provide single-process/single-host implementations. A server plugin may use its
+own database transaction or distributed lock, and advertises multi-host claim
+support independently through `supports_distributed_claims`.
+
+Tenant concurrency is enforced inside the same atomic `claim` through
+`SchedulerClaimPolicy.max_active_per_tenant`. The built-in schedulers advertise
+`supports_atomic_tenant_quota: true`; Builder rejects a configured tenant limit
+when a selected Scheduler cannot enforce it without claim/requeue spinning.
+
+`SessionStore` itself is a trusted internal port. HTTP/RPC/WebSocket adapters
+should obtain `application.service("session.access")` and use its
+context-bearing read, subscribe, checkpoint, interaction, and delete methods;
+they should not expose raw ID-only SessionStore reads to tenants.
+
+The reference Scheduler bounds completed idempotency metadata with
+`max_retained_terminal_items` (default `4096`) and persists one global monotonic
+fence sequence rather than a map that grows once per Run. In-memory JobRuntime
+automatically retains terminal Jobs for 24 hours, at most 4096 Jobs and 256 MiB
+of terminal output, while protecting a configurable output reconnect window.
+In-memory and local-workspace sandbox providers retain at most 1024 detached
+terminal metadata records for 24 hours. Suspended or attached resources are not
+swept. Explicit `purge_terminal`/`purge_terminated` methods remain available;
+local-workspace retention never deletes host workspace contents.
+
+Distributed plugins report `multi_process_writes`, `cross_process_subscribe`,
+`transactional_outbox`, and `atomic_session_cas` independently. The built-in
+SQL stores remain single-process writers. `sagents.v2.testing` exposes reusable
+Scheduler and SessionStore conformance probes for exclusive claims, fencing,
+tenant quota, atomic mutation/event visibility, and cursor recovery.
+
 ## Extending V2
 
 Replaceable implementations are registered with an

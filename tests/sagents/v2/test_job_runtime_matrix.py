@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -31,6 +32,17 @@ async def blocking_runner(spec, emit, cancelled):
     await emit("progress", b"started")
     await asyncio.Event().wait()
     return JobCompletion()
+
+
+class MutableClock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now += timedelta(seconds=seconds)
 
 
 def runtime(max_concurrent=4):
@@ -183,6 +195,63 @@ async def test_runner_exception_is_typed_job_failure_and_keeps_prior_output():
     assert failed.error is not None
     assert failed.error.code == "job.runner_failed"
     assert b"".join(chunk.data for chunk in output) == b"before-error"
+
+
+@pytest.mark.asyncio
+async def test_terminal_jobs_can_be_purged_after_host_retention_boundary():
+    jobs = runtime()
+    first = await jobs.submit(job_spec("first", run_id="run_purge"))
+    second = await jobs.submit(job_spec("second", run_id="run_keep"))
+    await asyncio.gather(jobs.wait(first.job_id), jobs.wait(second.job_id))
+
+    assert await jobs.purge_terminal(owner_run_id="run_purge") == 1
+    with pytest.raises(SageV2Error) as missing:
+        await jobs.inspect(first.job_id)
+    assert missing.value.info.code == "job.not_found"
+    assert (await jobs.inspect(second.job_id)).state == JobState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_automatic_terminal_retention_enforces_ttl_count_and_output_bytes():
+    clock = MutableClock()
+    jobs = InMemoryJobRuntime(
+        {"echo": echo_runner},
+        clock=clock,
+        terminal_ttl_seconds=10,
+        max_retained_terminal_jobs=2,
+        max_retained_output_bytes=6,
+        output_reconnect_window_seconds=1,
+    )
+    first = await jobs.submit(
+        job_spec("first", payload={"parts": ["aaaa"]})
+    )
+    await jobs.wait(first.job_id)
+    clock.advance(2)
+    second = await jobs.submit(
+        job_spec("second", payload={"parts": ["bbbb"]})
+    )
+    await jobs.wait(second.job_id)
+
+    # Eight terminal output bytes exceed the six-byte cap, so the oldest Job
+    # and its cursor are reclaimed while the newest remains readable.
+    with pytest.raises(SageV2Error) as output_evicted:
+        await jobs.read_output(JobCursor(job_id=first.job_id))
+    assert output_evicted.value.info.code == "job.not_found"
+    assert await jobs.read_output(JobCursor(job_id=second.job_id))
+
+    clock.advance(11)
+    third = await jobs.submit(job_spec("third", payload={"parts": ["c"]}))
+    await jobs.wait(third.job_id)
+    with pytest.raises(SageV2Error) as ttl_evicted:
+        await jobs.inspect(second.job_id)
+    assert ttl_evicted.value.info.code == "job.not_found"
+
+    caps = await jobs.capabilities()
+    assert caps.supports_automatic_terminal_retention is True
+    assert caps.terminal_ttl_seconds == 10
+    assert caps.max_retained_terminal_jobs == 2
+    assert caps.max_retained_output_bytes == 6
+    assert caps.output_reconnect_window_seconds == 1
 
 
 @pytest.mark.asyncio

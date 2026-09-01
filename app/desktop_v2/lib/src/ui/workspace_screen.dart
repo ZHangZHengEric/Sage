@@ -1256,6 +1256,7 @@ class _ThreadPanel extends StatelessWidget {
           else ...[
             Expanded(
               child: _MessageList(
+                controller: controller,
                 conversation: conversation,
                 subSessions:
                     controller.selectedConversation?.subSessions ?? const [],
@@ -1389,8 +1390,13 @@ class _ThreadHeader extends StatelessWidget {
 }
 
 class _MessageList extends StatefulWidget {
-  const _MessageList({required this.conversation, this.subSessions = const []});
+  const _MessageList({
+    required this.controller,
+    required this.conversation,
+    this.subSessions = const [],
+  });
 
+  final WorkspaceController controller;
   final Conversation conversation;
   final List<Conversation> subSessions;
 
@@ -1495,7 +1501,28 @@ class _MessageListState extends State<_MessageList> {
     final attachedPanelIds = <String>{};
     for (final message in conversation.messages) {
       if (message.processOnly) continue;
-      children.add(_MessageBubble(key: ValueKey(message.id), message: message));
+      final panel = message.role == 'assistant'
+          ? _panelForMessage(message)
+          : null;
+      children.add(
+        _MessageBubble(
+          key: ValueKey(message.id),
+          message: message,
+          onEdit:
+              widget.controller.canRewriteLastUserMessage(conversation, message)
+              ? (value) =>
+                    widget.controller.rewriteLastUserMessage(message.id, value)
+              : null,
+          onBranch:
+              panel != null &&
+                  panel.runId.isNotEmpty &&
+                  !panel.running &&
+                  panel.completedAt != null &&
+                  !widget.controller.viewingSubSession
+              ? () => widget.controller.branchFromRun(panel.runId)
+              : null,
+        ),
+      );
       final attachedPanels = conversation.processPanels
           .where(
             (value) =>
@@ -1557,6 +1584,29 @@ class _MessageListState extends State<_MessageList> {
         panel.activities.isNotEmpty ||
         _processMessagesFor(panel).isNotEmpty ||
         _subSessionsFor(panel).isNotEmpty;
+  }
+
+  RuntimeProcessPanel? _panelForMessage(ChatMessage message) {
+    final messageIndex = conversation.messages.indexWhere(
+      (value) => value.id == message.id,
+    );
+    if (messageIndex < 0) return null;
+    RuntimeProcessPanel? result;
+    var resultAnchorIndex = -1;
+    for (final panel in conversation.processPanels) {
+      final anchorIndex = conversation.messages.indexWhere(
+        (value) => value.id == panel.anchorMessageId,
+      );
+      if (anchorIndex < 0 || anchorIndex >= messageIndex) continue;
+      final hasLaterUser = conversation.messages
+          .sublist(anchorIndex + 1, messageIndex)
+          .any((value) => value.role == 'user');
+      if (!hasLaterUser && anchorIndex > resultAnchorIndex) {
+        result = panel;
+        resultAnchorIndex = anchorIndex;
+      }
+    }
+    return result;
   }
 
   List<ChatMessage> _processMessagesFor(RuntimeProcessPanel panel) {
@@ -1755,12 +1805,58 @@ class _ToolActivityShimmerState extends State<_ToolActivityShimmer>
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, super.key});
+class _MessageBubble extends StatefulWidget {
+  const _MessageBubble({
+    required this.message,
+    this.onEdit,
+    this.onBranch,
+    super.key,
+  });
 
   final ChatMessage message;
+  final Future<void> Function(String value)? onEdit;
+  final Future<bool> Function()? onBranch;
+
+  @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  late final TextEditingController _editor = TextEditingController(
+    text: widget.message.text,
+  );
+  bool _editing = false;
+  bool _submitting = false;
+
+  ChatMessage get message => widget.message;
 
   Future<void> _copy() => Clipboard.setData(ClipboardData(text: message.text));
+
+  @override
+  void didUpdateWidget(covariant _MessageBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editing && oldWidget.message.text != widget.message.text) {
+      _editor.text = widget.message.text;
+    }
+  }
+
+  @override
+  void dispose() {
+    _editor.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitEdit() async {
+    final value = _editor.text.trim();
+    if (value.isEmpty || _submitting || widget.onEdit == null) return;
+    setState(() => _submitting = true);
+    try {
+      await widget.onEdit!(value);
+      if (mounted) setState(() => _editing = false);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1776,29 +1872,111 @@ class _MessageBubble extends StatelessWidget {
           children: [
             Align(
               alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                constraints: BoxConstraints(maxWidth: user ? 608 : 760),
-                padding: user
-                    ? const EdgeInsets.symmetric(horizontal: 15, vertical: 12)
-                    : EdgeInsets.zero,
-                decoration: BoxDecoration(
-                  color: user
-                      ? colors.surfaceContainerHighest.withValues(alpha: 0.48)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: MarkdownBody(
-                  data: message.text + (message.streaming ? '\n\n▍' : ''),
-                  selectable: true,
-                  styleSheet: _messageMarkdownStyle(context),
-                ),
-              ),
+              child: _editing
+                  ? GlassCard(
+                      key: ValueKey('message-edit-card:${message.id}'),
+                      width: min(608, MediaQuery.sizeOf(context).width - 68),
+                      padding: const EdgeInsets.all(12),
+                      shape: const LiquidRoundedSuperellipse(borderRadius: 18),
+                      useOwnLayer: true,
+                      settings: _composerGlassSettings(context),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          TextField(
+                            key: ValueKey('message-edit-field:${message.id}'),
+                            controller: _editor,
+                            autofocus: true,
+                            minLines: 2,
+                            maxLines: 8,
+                            onSubmitted: (_) => _submitEdit(),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextButton(
+                                onPressed: _submitting
+                                    ? null
+                                    : () => setState(() => _editing = false),
+                                child: Text(context.l10n.text('common.cancel')),
+                              ),
+                              const SizedBox(width: 8),
+                              GlassButton.custom(
+                                key: ValueKey(
+                                  'message-edit-submit:${message.id}',
+                                ),
+                                width: 76,
+                                height: 34,
+                                label: context.l10n.text('common.save'),
+                                enabled: !_submitting,
+                                onTap: _submitEdit,
+                                shape: const LiquidRoundedRectangle(
+                                  borderRadius: 10,
+                                ),
+                                settings: _composerGlassSettings(context),
+                                child: _submitting
+                                    ? const CupertinoActivityIndicator(
+                                        radius: 7,
+                                      )
+                                    : Text(context.l10n.text('common.save')),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  : Container(
+                      constraints: BoxConstraints(maxWidth: user ? 608 : 760),
+                      padding: user
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 15,
+                              vertical: 12,
+                            )
+                          : EdgeInsets.zero,
+                      decoration: BoxDecoration(
+                        color: user
+                            ? colors.surfaceContainerHighest.withValues(
+                                alpha: 0.48,
+                              )
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: MarkdownBody(
+                        data: message.text + (message.streaming ? '\n\n▍' : ''),
+                        selectable: true,
+                        styleSheet: _messageMarkdownStyle(context),
+                      ),
+                    ),
             ),
             const SizedBox(height: 5),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _ThreadCopyButton(onTap: _copy),
+                _ThreadActionButton(
+                  keyValue: 'message-copy:${message.id}',
+                  icon: CupertinoIcons.doc_on_doc,
+                  tooltip: context.l10n.text('common.copy'),
+                  onTap: _copy,
+                ),
+                if (widget.onEdit != null) ...[
+                  const SizedBox(width: 4),
+                  _ThreadActionButton(
+                    keyValue: 'message-edit:${message.id}',
+                    icon: CupertinoIcons.pencil,
+                    tooltip: context.l10n.text('common.edit'),
+                    onTap: () => setState(() => _editing = true),
+                  ),
+                ],
+                if (widget.onBranch != null) ...[
+                  const SizedBox(width: 4),
+                  _ThreadActionButton(
+                    keyValue: 'message-branch:${message.id}',
+                    icon: CupertinoIcons.arrow_branch,
+                    tooltip: context.l10n.text('workspace.branchToNewChat'),
+                    onTap: () => widget.onBranch!(),
+                  ),
+                ],
                 const SizedBox(width: 7),
                 Text(
                   _messageTime(message.createdAt),
@@ -2104,11 +2282,18 @@ List<_ProcessStreamEntry> _processStreamEntries(
         entries.add(_SingleProcessActivityEntry(item.activity));
         continue;
       }
+      if (pendingActivities.isNotEmpty &&
+          _activityCategory(pendingActivities.first) !=
+              _activityCategory(item.activity)) {
+        flushActivities();
+      }
       pendingActivities.add(item.activity);
       continue;
     }
+    final message = (item as _ProcessMessageItem).message;
+    if (message.text.trim().isEmpty) continue;
     flushActivities();
-    entries.add(_ProcessMessageEntry((item as _ProcessMessageItem).message));
+    entries.add(_ProcessMessageEntry(message));
   }
   flushActivities();
   return entries;
@@ -2627,26 +2812,43 @@ class _ThreadScrollToBottomButton extends StatelessWidget {
   );
 }
 
-class _ThreadCopyButton extends StatelessWidget {
-  const _ThreadCopyButton({required this.onTap});
+class _ThreadActionButton extends StatelessWidget {
+  const _ThreadActionButton({
+    required this.keyValue,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
+  final String keyValue;
+  final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Tooltip(
-      message: context.l10n.text('common.copy'),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(9),
-        onTap: onTap,
-        child: SizedBox(
-          width: 24,
-          height: 24,
-          child: Icon(
-            CupertinoIcons.doc_on_doc,
-            size: 12.5,
-            color: colors.onSurfaceVariant.withValues(alpha: 0.76),
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: InkWell(
+          key: ValueKey(keyValue),
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: colors.onSurface.withValues(alpha: 0.055),
+          focusColor: colors.primary.withValues(alpha: 0.1),
+          highlightColor: colors.onSurface.withValues(alpha: 0.075),
+          splashColor: colors.onSurface.withValues(alpha: 0.08),
+          onTap: onTap,
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child: Icon(
+              icon,
+              size: 12.5,
+              color: colors.onSurfaceVariant.withValues(alpha: 0.62),
+            ),
           ),
         ),
       ),
@@ -4880,9 +5082,6 @@ class _FilePanelState extends State<_FilePanel> {
                 final file = controller.selectedFile;
                 if (file != null) controller.referenceWorkspaceNode(file);
               },
-              onRemoveProject: controller.selectedGroup.project == null
-                  ? null
-                  : controller.removeSelectedProject,
             ),
             const Divider(height: 1),
             Expanded(
@@ -4955,7 +5154,6 @@ class _FileBrowserHeader extends StatelessWidget {
     this.onToggleTree,
     required this.onRefresh,
     required this.onReference,
-    this.onRemoveProject,
   });
 
   final String groupName;
@@ -4968,7 +5166,6 @@ class _FileBrowserHeader extends StatelessWidget {
   final VoidCallback? onToggleTree;
   final VoidCallback onRefresh;
   final VoidCallback onReference;
-  final VoidCallback? onRemoveProject;
 
   @override
   Widget build(BuildContext context) {
@@ -5072,14 +5269,6 @@ class _FileBrowserHeader extends StatelessWidget {
             icon: CupertinoIcons.arrow_clockwise,
             onTap: onRefresh,
           ),
-          if (onRemoveProject != null) ...[
-            const SizedBox(width: 4),
-            _HeaderIconButton(
-              keyValue: 'workspace-remove-project',
-              icon: CupertinoIcons.folder_badge_minus,
-              onTap: onRemoveProject!,
-            ),
-          ],
           const SizedBox(width: 14),
         ],
       ),

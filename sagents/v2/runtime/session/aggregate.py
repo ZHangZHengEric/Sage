@@ -15,8 +15,15 @@ from sagents.v2.runtime.session.journal import (
 _IDENTITIES = {
     "sessions": ("session_id",),
     "runs": ("run_id",),
-    "start_idempotency": ("tenant_id", "principal_id", "idempotency_key"),
+    "start_idempotency": (
+        "tenant_id",
+        "principal_type",
+        "principal_id",
+        "idempotency_key",
+    ),
     "command_results": ("run_id", "idempotency_key"),
+    "execution_resources": ("run_id",),
+    "execution_resource_command_results": ("run_id", "idempotency_key"),
     "checkpoints": ("checkpoint_id",),
     "suspensions": ("suspension_id",),
     "interactions": ("interaction_id",),

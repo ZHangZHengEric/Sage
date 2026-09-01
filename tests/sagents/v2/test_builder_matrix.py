@@ -30,6 +30,7 @@ from sagents.v2.context import (
     UnicodeHeuristicTokenEstimator,
 )
 from sagents.v2.runtime.execution import ExecutionBindingRequest
+from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 from sagents.v2.runtime.session import EphemeralSessionStore
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
@@ -139,6 +140,66 @@ async def test_builder_reads_mapping_capabilities_from_an_injected_provider(
     )
 
     await application.close()
+
+
+@pytest.mark.asyncio
+async def test_live_capability_conflict_cannot_be_masked_by_descriptor(tmp_path: Path):
+    class ContradictoryScheduler(InMemoryScheduler):
+        async def capabilities(self):
+            observed = await super().capabilities()
+            return observed.model_copy(update={"supports_priority": False})
+
+    registration = ExtensionRegistration(
+        descriptor=ExtensionDescriptor(
+            plugin_id="test.scheduler.contradictory",
+            version="2.0.0",
+            name="Contradictory Scheduler",
+            provides=(
+                CapabilityOffer(capability="execution.scheduler", api_version="2"),
+            ),
+            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+            capabilities={
+                "supports_priority": True,
+                "supports_atomic_tenant_quota": True,
+            },
+        ),
+        factory=lambda context, dependencies: ContradictoryScheduler(),
+    )
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-capability-conflict",
+        model="test-model",
+    )
+    package = package.model_copy(
+        update={
+            "runtime": package.runtime.model_copy(
+                update={
+                    "capabilities": {
+                        **package.runtime.capabilities,
+                        "execution.scheduler": CapabilitySelection(
+                            plugin="test.scheduler.contradictory"
+                        ),
+                    },
+                    "required_guarantees": {
+                        "execution.scheduler": {"supports_priority": True}
+                    },
+                }
+            )
+        }
+    )
+
+    with pytest.raises(SageV2Error) as conflict:
+        await (
+            SAgentBuilder()
+            .with_defaults(session_root=tmp_path / "sessions")
+            .register(registration)
+            .with_model_provider(ScriptedModelProvider(()))
+            .build(package)
+        )
+
+    assert conflict.value.info.code == "runtime.capability_descriptor_conflict"
+    assert conflict.value.info.metadata["declared"]
+    assert conflict.value.info.metadata["observed"]["supports_priority"] is False
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,7 @@ from sagents.v2.contracts.session_commit import (
 )
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.memory.service import MemoryService
+from sagents.v2.runtime.session import AuthorizedSessionAccess
 
 
 LOGGER = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class SAgent:
         memory_scope: dict | None = None,
         owned_resources: tuple[object, ...] = (),
         dispatcher=None,
+        session_access: AuthorizedSessionAccess | None = None,
     ) -> None:
         self.runtime = runtime
         self.driver_factory = driver_factory
@@ -95,6 +97,9 @@ class SAgent:
         self.memory_scope = dict(memory_scope or {})
         self._owned_resources = list(owned_resources)
         self._dispatcher = dispatcher
+        self._session_access = session_access or AuthorizedSessionAccess(
+            runtime.session_store, runtime=runtime
+        )
         self._tasks: dict[str, asyncio.Task[RunSnapshot]] = {}
         self._drivers: dict[str, RunDriver] = {}
         self._closed = False
@@ -132,7 +137,7 @@ class SAgent:
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
-                EventCursor(run_id=handle.run_id, run_sequence=0)
+                EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
             _execution=execution,
         )
@@ -155,7 +160,7 @@ class SAgent:
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
-                EventCursor(run_id=handle.run_id, run_sequence=0)
+                EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
             _execution=execution,
         )
@@ -178,7 +183,7 @@ class SAgent:
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
-                EventCursor(run_id=handle.run_id, run_sequence=0)
+                EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
             _execution=execution,
         )
@@ -282,11 +287,13 @@ class SAgent:
             raise RuntimeError("SAgent already has an execution dispatcher")
         self._dispatcher = dispatcher
 
-    def subscribe_events(self, cursor: EventCursor) -> AsyncIterator[RuntimeEvent]:
+    def subscribe_events(
+        self, cursor: EventCursor, context: RequestContext
+    ) -> AsyncIterator[RuntimeEvent]:
         """Observe an existing Run after an exclusive replay cursor."""
 
         self._ensure_open()
-        return self._terminal_stream(cursor)
+        return self._terminal_stream(cursor, context)
 
     async def close(self) -> None:
         """Release owned provider resources after every local Run has stopped."""
@@ -452,9 +459,24 @@ class SAgent:
                 LOGGER.exception("failed to close cancelled Run driver %s", run_id)
             raise
         except Exception as exc:
-            result = await self._fail_driver_crash(run_id, exc, context)
+            current = await self.runtime.get_run(run_id)
+            if (
+                isinstance(exc, SageV2Error)
+                and exc.info.retryable
+                and current.state == RunState.RESUMING
+                and exc.info.code == "sandbox.restore_failed"
+            ):
+                result = current
+            else:
+                result = await self._fail_driver_crash(run_id, exc, context)
         if result.state in TERMINAL_RUN_STATES or result.state == RunState.SUSPENDED:
             try:
+                if result.state == RunState.SUSPENDED:
+                    suspended = getattr(driver, "on_suspended", None)
+                    if suspended is not None:
+                        settled = suspended(context)
+                        if inspect.isawaitable(settled):
+                            await settled
                 await self._close_driver(run_id, driver)
             except BaseException:
                 # Terminal state is already an authoritative durable fact.
@@ -518,10 +540,10 @@ class SAgent:
                 idempotency_key=f"driver-crashed:{run_id}:{latest.revision}",
             )
 
-    async def _terminal_stream(self, cursor):
+    async def _terminal_stream(self, cursor, context: RequestContext):
         """Stop at a response boundary, not merely at terminal Run states."""
 
-        async for event in self.runtime.subscribe_events(cursor):
+        async for event in self._session_access.subscribe_events(cursor, context):
             yield event
             # Suspension is a transport boundary, not a terminal Run state. A
             # caller must be able to close this response, persist its cursor,

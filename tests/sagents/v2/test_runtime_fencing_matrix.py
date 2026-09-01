@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -103,6 +104,83 @@ async def test_expired_old_worker_cannot_commit_after_new_fencing_token_exists()
     assert [event.type for event in await fenced.read_events(handle.run_id)].count(
         "run.started"
     ) == 1
+
+
+@pytest.mark.asyncio
+async def test_replacement_cannot_cross_an_inflight_fenced_commit():
+    clock = Clock()
+
+    class BlockingStore:
+        def __init__(self):
+            self.store = EphemeralSessionStore(clock=clock)
+            self.commit_entered = asyncio.Event()
+            self.release_commit = asyncio.Event()
+            self.block_commits = False
+
+        @property
+        def capabilities(self):
+            return self.store.capabilities
+
+        def __getattr__(self, name):
+            return getattr(self.store, name)
+
+        async def commit_run(self, **kwargs):
+            if self.block_commits:
+                self.commit_entered.set()
+                await self.release_commit.wait()
+            return await self.store.commit_run(**kwargs)
+
+    scheduler = InMemoryScheduler(clock=clock)
+    base = BlockingStore()
+    fenced = LeaseFencedSessionStore(base, scheduler)
+    runtime = HarnessRuntime(fenced)
+    handle = await runtime.start_run(
+        StartRun(
+            agent_id="agent_1",
+            input=(InputItem(role="user", content=(TextBlock(text="run"),)),),
+            resolved_spec_hash="sha256:agent",
+            idempotency_key="atomic-start",
+        ),
+        CONTEXT,
+    )
+    await scheduler.submit(
+        WorkItem(
+            work_id="atomic-work",
+            run_id=handle.run_id,
+            available_at=clock.now,
+            idempotency_key="atomic-work",
+        )
+    )
+    old = await scheduler.claim(
+        "old", lease_duration=timedelta(seconds=5), wait_timeout=0
+    )
+    base.block_commits = True
+
+    async def commit_old_worker():
+        async with fenced.lease_scope(old):
+            return await runtime.start_execution(
+                run_id=handle.run_id,
+                expected_revision=handle.run_revision,
+                context=CONTEXT,
+                idempotency_key="atomic-execute",
+            )
+
+    committing = asyncio.create_task(commit_old_worker())
+    await base.commit_entered.wait()
+    clock.now += timedelta(seconds=6)
+    replacement = asyncio.create_task(
+        scheduler.claim(
+            "new", lease_duration=timedelta(seconds=5), wait_timeout=0
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert not replacement.done()
+    base.release_commit.set()
+    assert (await committing).state == RunState.RUNNING
+    new = await replacement
+    assert new is not None
+    assert new.fencing_token > old.fencing_token
 
 
 @pytest.mark.asyncio

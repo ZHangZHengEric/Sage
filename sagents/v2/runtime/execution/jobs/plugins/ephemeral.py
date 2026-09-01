@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sagents.v2.runtime.execution.jobs.provider import JobRunner
 from sagents.v2.contracts.common import new_id, utc_now
@@ -58,14 +58,32 @@ class InMemoryJobRuntime:
         runners: Mapping[str, JobRunner],
         *,
         max_concurrent_jobs: int = 32,
+        terminal_ttl_seconds: int = 86_400,
+        max_retained_terminal_jobs: int = 4096,
+        max_retained_output_bytes: int = 256 * 1024 * 1024,
+        output_reconnect_window_seconds: int = 300,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         if max_concurrent_jobs < 1:
             raise ValueError("max_concurrent_jobs must be positive")
+        if terminal_ttl_seconds < 1:
+            raise ValueError("terminal_ttl_seconds must be positive")
+        if (
+            max_retained_terminal_jobs < 0
+            or max_retained_output_bytes < 0
+            or output_reconnect_window_seconds < 0
+        ):
+            raise ValueError("terminal retention limits must be non-negative")
         self._runners = dict(runners)
         self._owner_runners: dict[tuple[str, str], JobRunner] = {}
         self._max_concurrent = max_concurrent_jobs
         self._clock = clock
+        self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
+        self._max_retained_terminal_jobs = max_retained_terminal_jobs
+        self._max_retained_output_bytes = max_retained_output_bytes
+        self._output_reconnect_window = timedelta(
+            seconds=output_reconnect_window_seconds
+        )
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(max_concurrent_jobs)
         self._rows: dict[str, _JobRow] = {}
@@ -105,12 +123,21 @@ class InMemoryJobRuntime:
             supports_adoption=True,
             supports_suspend=False,
             supports_output_cursor=True,
+            supports_terminal_purge=True,
+            supports_automatic_terminal_retention=True,
             max_concurrent_jobs=self._max_concurrent,
+            terminal_ttl_seconds=int(self._terminal_ttl.total_seconds()),
+            max_retained_terminal_jobs=self._max_retained_terminal_jobs,
+            max_retained_output_bytes=self._max_retained_output_bytes,
+            output_reconnect_window_seconds=int(
+                self._output_reconnect_window.total_seconds()
+            ),
         )
 
     async def submit(self, spec: JobSpec) -> JobHandle:
         async with self._lock:
             self._ensure_open()
+            self._sweep_terminal_locked()
             key = (spec.owner_run_id, spec.idempotency_key)
             existing = self._idempotency.get(key)
             if existing is not None:
@@ -138,6 +165,7 @@ class InMemoryJobRuntime:
                 kind=spec.kind,
                 state=JobState.CREATED,
                 pause_behavior=spec.pause_behavior,
+                execution_affinity=spec.execution_affinity,
                 output_cursor=JobCursor(job_id=job_id, offset=0),
             )
             row = _JobRow(
@@ -239,6 +267,15 @@ class InMemoryJobRuntime:
             await asyncio.gather(*(self.inspect(job_id) for job_id in job_ids))
         )
 
+    async def list_run_jobs(self, run_id: str) -> tuple[JobSnapshot, ...]:
+        async with self._lock:
+            self._sweep_terminal_locked()
+            return tuple(
+                self._snapshot(row)
+                for row in self._rows.values()
+                if row.spec.owner_run_id == run_id
+            )
+
     async def mark_orphaned(self, job_id: str) -> JobSnapshot:
         async with self._lock:
             row = self._row(job_id)
@@ -270,6 +307,23 @@ class InMemoryJobRuntime:
             row.state = JobState.RUNNING
             row.updated_at = self._clock()
             return self._snapshot(row)
+
+    async def purge_terminal(self, *, owner_run_id: str) -> int:
+        """Forget settled jobs after the host's replay/output retention horizon."""
+
+        async with self._lock:
+            job_ids = {
+                job_id
+                for job_id, row in self._rows.items()
+                if row.spec.owner_run_id == owner_run_id
+                and row.state in TERMINAL_JOB_STATES
+            }
+            for job_id in job_ids:
+                self._rows.pop(job_id, None)
+            for key, job_id in tuple(self._idempotency.items()):
+                if job_id in job_ids:
+                    self._idempotency.pop(key, None)
+            return len(job_ids)
 
     async def close(self) -> None:
         async with self._lock:
@@ -345,6 +399,50 @@ class InMemoryJobRuntime:
                 row.updated_at = self._clock()
         finally:
             row.completed.set()
+            async with self._lock:
+                self._sweep_terminal_locked()
+
+    def _sweep_terminal_locked(self) -> int:
+        terminal = sorted(
+            (
+                row
+                for row in self._rows.values()
+                if row.state in TERMINAL_JOB_STATES
+            ),
+            key=lambda row: (row.updated_at, row.handle.job_id),
+        )
+        now = self._clock()
+        purge_ids = {
+            row.handle.job_id
+            for row in terminal
+            if now - row.updated_at
+            >= max(self._terminal_ttl, self._output_reconnect_window)
+        }
+        retained = [row for row in terminal if row.handle.job_id not in purge_ids]
+        eligible = [
+            row
+            for row in retained
+            if now - row.updated_at >= self._output_reconnect_window
+        ]
+        while len(retained) > self._max_retained_terminal_jobs and eligible:
+            removed = eligible.pop(0)
+            retained.remove(removed)
+            purge_ids.add(removed.handle.job_id)
+        retained_output = sum(row.output_size for row in retained)
+        eligible = [row for row in eligible if row in retained]
+        while eligible and retained_output > self._max_retained_output_bytes:
+            removed = eligible.pop(0)
+            retained.remove(removed)
+            purge_ids.add(removed.handle.job_id)
+            retained_output -= removed.output_size
+        if not purge_ids:
+            return 0
+        for job_id in purge_ids:
+            self._rows.pop(job_id, None)
+        for key, job_id in tuple(self._idempotency.items()):
+            if job_id in purge_ids:
+                self._idempotency.pop(key, None)
+        return len(purge_ids)
 
     def _snapshot_handle(self, row: _JobRow) -> JobHandle:
         return row.handle.model_copy(

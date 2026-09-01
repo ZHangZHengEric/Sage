@@ -112,6 +112,10 @@ def test_builtin_inventory_contains_only_real_factories():
         inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"]
         is False
     )
+    for plugin_id in ("sage.sandbox.ephemeral", "sage.sandbox.local-workspace"):
+        assert inventory[plugin_id]["version"] == "3.0.0"
+        assert inventory[plugin_id]["provides"][0]["capability"] == "execution.sandbox"
+        assert inventory[plugin_id]["provides"][0]["api_version"] == "3"
 
 
 def test_every_registered_plugin_has_a_pydantic_config_boundary():

@@ -38,6 +38,9 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxCheckpointRef,
     SandboxGrant,
     SandboxRef,
+    SandboxReleaseDisposition,
+    SandboxReleaseReceipt,
+    SandboxReleaseRequest,
     SandboxSnapshot,
     SandboxState,
     TerminateMode,
@@ -385,17 +388,19 @@ class _MemoryHandle:
             row = self._provider._row(self.ref.sandbox_id)
             row.attached_clients = max(0, row.attached_clients - 1)
             self._closed = True
+            self._provider._sweep_terminated()
 
     async def destroy(self) -> None:
         await self._provider.terminate(self.ref, TerminateMode.FORCE)
-        self._closed = True
+        await self.close()
+        self._provider._sweep_terminated()
 
 
 class InMemorySandboxProvider:
     """Provide deterministic conformance isolation, never an OS security boundary."""
 
     provider_id = "sage.sandbox.memory"
-    provider_version = "2.0.0"
+    provider_version = "3.0.0"
 
     def __init__(
         self,
@@ -404,9 +409,17 @@ class InMemorySandboxProvider:
         process_handlers: Mapping[str, MemoryProcessHandler] | None = None,
         network_handlers: Mapping[str, MemoryNetworkHandler] | None = None,
         clock: Callable[[], datetime] = utc_now,
+        terminal_ttl_seconds: int = 86_400,
+        max_retained_terminal_items: int = 1024,
     ) -> None:
+        if terminal_ttl_seconds < 1:
+            raise ValueError("terminal_ttl_seconds must be positive")
+        if max_retained_terminal_items < 0:
+            raise ValueError("max_retained_terminal_items must be non-negative")
         self._verification_key = verification_key
         self._clock = clock
+        self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
+        self._max_retained_terminal = max_retained_terminal_items
         self._process_handlers = dict(process_handlers or {})
         self._network_handlers = {
             self._normalize_host(host): handler
@@ -414,7 +427,8 @@ class InMemorySandboxProvider:
         }
         self._rows: dict[str, _SandboxRow] = {}
         self._checkpoints: dict[str, tuple[SandboxCheckpointRef, dict[str, bytes]]] = {}
-        self._used_nonces: set[str] = set()
+        self._used_nonces: dict[str, str] = {}
+        self._release_receipts: dict[tuple[str, str], SandboxReleaseReceipt] = {}
 
     async def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
@@ -440,11 +454,17 @@ class InMemorySandboxProvider:
             supports_snapshot=True,
             supports_reconnect=True,
             supports_secret_injection=False,
+            supported_release_dispositions=frozenset(SandboxReleaseDisposition),
+            supports_terminal_purge=True,
+            supports_automatic_terminal_retention=True,
+            terminal_ttl_seconds=int(self._terminal_ttl.total_seconds()),
+            max_retained_terminal_items=self._max_retained_terminal,
         )
 
     async def provision(
         self, spec: ResolvedSandboxSpec, context: RequestContext, *, run_id: str
     ) -> _MemoryHandle:
+        self._sweep_terminated()
         caps = await self.capabilities()
         if spec.architecture not in caps.architectures:
             raise self._error(
@@ -576,13 +596,104 @@ class InMemorySandboxProvider:
         row.attached_clients += 1
         return _MemoryHandle(self, row.ref)
 
+    async def release(
+        self, request: SandboxReleaseRequest, context: RequestContext
+    ) -> SandboxReleaseReceipt:
+        key = (request.ref.sandbox_id, request.idempotency_key)
+        previous = self._release_receipts.get(key)
+        if previous is not None:
+            return previous.model_copy(update={"duplicate": True})
+        row = self._validate_ref(request.ref)
+        if row.ref.tenant_id != context.actor.tenant_id:
+            raise self._error(
+                "sandbox.permission_denied",
+                ErrorCategory.AUTHORIZATION,
+                "tenant does not own sandbox",
+            )
+        if row.revision != request.expected_revision:
+            raise self._error(
+                "sandbox.revision_conflict",
+                ErrorCategory.CONFLICT,
+                "sandbox revision does not match release request",
+            )
+        checkpoint = None
+        if request.disposition == SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE:
+            checkpoint = await self.snapshot(request.ref)
+        if request.disposition in {
+            SandboxReleaseDisposition.TERMINATE,
+            SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE,
+        }:
+            await self.terminate(request.ref, TerminateMode.FORCE)
+        current = self._validate_ref(request.ref)
+        receipt = SandboxReleaseReceipt(
+            ref=request.ref,
+            disposition=request.disposition,
+            state=current.state,
+            checkpoint=checkpoint,
+            compute_released=current.state == SandboxState.TERMINATED,
+            released_at=self._clock(),
+        )
+        self._release_receipts[key] = receipt
+        return receipt
+
     async def terminate(self, ref: SandboxRef, mode: TerminateMode) -> None:
         row = self._validate_ref(ref)
         if row.state != SandboxState.TERMINATED:
             row.state = SandboxState.TERMINATED
             row.revision += 1
             row.updated_at = self._clock()
-            row.attached_clients = 0
+        self._sweep_terminated()
+
+    async def purge_terminated(self, ref: SandboxRef) -> None:
+        row = self._validate_ref(ref)
+        if row.state != SandboxState.TERMINATED or row.attached_clients != 0:
+            raise self._error(
+                "sandbox.invalid_state",
+                ErrorCategory.CONFLICT,
+                "only detached terminated sandboxes can be purged",
+            )
+        self._purge_row(ref.sandbox_id)
+
+    def _sweep_terminated(self) -> int:
+        terminal = sorted(
+            (
+                row
+                for row in self._rows.values()
+                if row.state == SandboxState.TERMINATED
+                and row.attached_clients == 0
+            ),
+            key=lambda row: (row.updated_at, row.ref.sandbox_id),
+        )
+        now = self._clock()
+        purge_ids = {
+            row.ref.sandbox_id
+            for row in terminal
+            if now - row.updated_at >= self._terminal_ttl
+        }
+        retained = [row for row in terminal if row.ref.sandbox_id not in purge_ids]
+        while len(retained) > self._max_retained_terminal:
+            purge_ids.add(retained.pop(0).ref.sandbox_id)
+        for sandbox_id in purge_ids:
+            self._purge_row(sandbox_id)
+        return len(purge_ids)
+
+    def _purge_row(self, sandbox_id: str) -> None:
+        self._rows.pop(sandbox_id, None)
+        self._checkpoints = {
+            checkpoint_id: record
+            for checkpoint_id, record in self._checkpoints.items()
+            if record[0].sandbox_id != sandbox_id
+        }
+        self._used_nonces = {
+            nonce: owner_sandbox_id
+            for nonce, owner_sandbox_id in self._used_nonces.items()
+            if owner_sandbox_id != sandbox_id
+        }
+        self._release_receipts = {
+            key: value
+            for key, value in self._release_receipts.items()
+            if key[0] != sandbox_id
+        }
 
     def _authorize(self, sandbox_id, operation, path, intent, grant):
         """Verify grant identity and exact operation intent at enforcement time.
@@ -671,7 +782,7 @@ class InMemorySandboxProvider:
                     ErrorCategory.AUTHORIZATION,
                     "single-use grant was already consumed",
                 )
-            self._used_nonces.add(grant.nonce)
+            self._used_nonces[grant.nonce] = row.ref.sandbox_id
         return row, normalized
 
     def _authorize_process(self, sandbox_id, request, intent, grant):
@@ -917,7 +1028,7 @@ class InMemorySandboxProvider:
                     ErrorCategory.AUTHORIZATION,
                     "single-use grant was already consumed",
                 )
-            self._used_nonces.add(grant.nonce)
+            self._used_nonces[grant.nonce] = row.ref.sandbox_id
 
     @staticmethod
     def _normalize_path(

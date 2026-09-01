@@ -14,6 +14,7 @@ class EphemeralSessionStore:
     """Process-local composed facade over the transactional coordinator."""
 
     def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("persistence_can_fail", False)
         object.__setattr__(
             self, "_coordinator", SessionStoreCoordinator(*args, **kwargs)
         )

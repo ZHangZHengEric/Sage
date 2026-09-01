@@ -64,6 +64,14 @@ class TerminateMode(str, Enum):
     FORCE = "force"
 
 
+class SandboxReleaseDisposition(str, Enum):
+    """Host-selected treatment of compute at an execution boundary."""
+
+    DETACH = "detach"
+    TERMINATE = "terminate"
+    SNAPSHOT_AND_TERMINATE = "snapshot_and_terminate"
+
+
 class ProcessCapabilities(StrictModel):
     available: bool
     supports_argv: bool = False
@@ -84,7 +92,7 @@ class ResourceLimitCapabilities(StrictModel):
 
 
 class SandboxCapabilities(StrictModel):
-    api_version: Literal["2"] = "2"
+    api_version: Literal["3"] = "3"
     isolation_level: IsolationLevel
     os: str
     architectures: tuple[str, ...]
@@ -97,6 +105,11 @@ class SandboxCapabilities(StrictModel):
     supports_snapshot: bool
     supports_reconnect: bool
     supports_secret_injection: bool
+    supported_release_dispositions: frozenset[SandboxReleaseDisposition]
+    supports_terminal_purge: bool = False
+    supports_automatic_terminal_retention: bool = False
+    terminal_ttl_seconds: int | None = Field(default=None, gt=0)
+    max_retained_terminal_items: int | None = Field(default=None, ge=0)
     max_lifetime_seconds: int | None = Field(default=None, gt=0)
 
 
@@ -159,11 +172,38 @@ class LifecyclePolicy(StrictModel):
     durability: SandboxDurability = SandboxDurability.EPHEMERAL
     idle_ttl_seconds: int | None = Field(default=None, gt=0)
     max_lifetime_seconds: int | None = Field(default=None, gt=0)
-    pause_behavior: Literal["suspend", "snapshot", "detach", "terminate"] = "terminate"
+    safe_pause_behavior: SandboxReleaseDisposition = (
+        SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE
+    )
+    unsafe_pause_behavior: SandboxReleaseDisposition = (
+        SandboxReleaseDisposition.DETACH
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_v2_pause_behavior(cls, value: Any) -> Any:
+        """Load persisted v2 policy values without accepting a v2 provider."""
+
+        if not isinstance(value, dict) or "pause_behavior" not in value:
+            return value
+        migrated = dict(value)
+        legacy = str(migrated.pop("pause_behavior"))
+        aliases = {
+            "snapshot": SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE.value,
+            "snapshot_and_terminate": SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE.value,
+            "terminate": SandboxReleaseDisposition.TERMINATE.value,
+            "retain": SandboxReleaseDisposition.DETACH.value,
+            "detach": SandboxReleaseDisposition.DETACH.value,
+        }
+        try:
+            migrated.setdefault("safe_pause_behavior", aliases[legacy])
+        except KeyError as exc:
+            raise ValueError(f"unsupported legacy pause_behavior {legacy!r}") from exc
+        return migrated
 
 
 class ResolvedSandboxSpec(StrictModel):
-    spec_version: Literal["sage.sandbox-spec/v2"] = "sage.sandbox-spec/v2"
+    spec_version: Literal["sage.sandbox-spec/v3"] = "sage.sandbox-spec/v3"
     spec_hash: str
     workspace_root: str = "/workspace"
     architecture: str
@@ -211,6 +251,41 @@ class SandboxCheckpointRef(StrictModel):
     job_refs: tuple[Identifier, ...] = ()
     created_at: datetime
     expires_at: datetime | None = None
+
+
+class SandboxReleaseRequest(StrictModel):
+    ref: SandboxRef
+    disposition: SandboxReleaseDisposition
+    reason: str
+    expected_revision: int = Field(ge=0)
+    idempotency_key: Identifier
+
+
+class SandboxReleaseReceipt(StrictModel):
+    ref: SandboxRef
+    disposition: SandboxReleaseDisposition
+    state: SandboxState
+    checkpoint: SandboxCheckpointRef | None = None
+    compute_released: bool
+    duplicate: bool = False
+    released_at: datetime
+
+    @model_validator(mode="after")
+    def validate_release_result(self) -> "SandboxReleaseReceipt":
+        if self.compute_released and self.state != SandboxState.TERMINATED:
+            raise ValueError("compute_released requires a terminated sandbox")
+        if (
+            self.disposition == SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE
+            and self.compute_released
+            and self.checkpoint is None
+        ):
+            raise ValueError("snapshot release requires a checkpoint")
+        if (
+            self.disposition == SandboxReleaseDisposition.DETACH
+            and self.compute_released
+        ):
+            raise ValueError("detach cannot claim compute was released")
+        return self
 
 
 class OperationIntent(StrictModel):

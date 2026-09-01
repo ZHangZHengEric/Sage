@@ -58,7 +58,11 @@ from sagents.v2.runtime.extensions import (
     load_installed_extension,
 )
 from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
-from sagents.v2.runtime.session import LeaseFencedSessionStore, SessionStore
+from sagents.v2.runtime.session import (
+    AuthorizedSessionAccess,
+    LeaseFencedSessionStore,
+    SessionStore,
+)
 from sagents.v2.session_memory import SessionMemoryProvider, SessionMemoryService
 from sagents.v2.sagent import SAgent
 from sagents.v2.application import (
@@ -144,6 +148,10 @@ class _ExecutionBoundDriver:
         loop = await self._ensure_loop(context)
         recover = getattr(loop, "recover_interrupted", None)
         return None if recover is None else await recover(run_id, context)
+
+    async def on_suspended(self, context) -> None:
+        if self.binding is not None:
+            await self.binding.on_suspended(context)
 
     async def close(self) -> None:
         if self.scope_handle is not None:
@@ -486,6 +494,22 @@ class SAgentBuilder:
             tool_catalog = InMemoryToolCatalog(())
             tool_executor = InMemoryToolExecutor({}, {})
         scheduler = services["execution.scheduler"]
+        scheduler_capabilities = await scheduler.capabilities()
+        if (
+            not scheduler_capabilities.supports_fencing
+            or not scheduler_capabilities.supports_atomic_fenced_mutations
+            or not callable(getattr(scheduler, "execute_fenced", None))
+        ):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="scheduler.atomic_fence_unsupported",
+                    category=ErrorCategory.UNSUPPORTED_SCHEMA,
+                    message=(
+                        "the selected Scheduler plugin must keep a validated "
+                        "worker lease authoritative across each Session mutation"
+                    ),
+                )
+            )
         driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
         goal_state_service = GoalStateService(driver_session_store)
         if self._tool_runtime is not None:
@@ -846,6 +870,9 @@ class SAgentBuilder:
                 loop_builder=loop_builder,
             )
 
+        session_access = AuthorizedSessionAccess(
+            session_store, runtime=control_runtime
+        )
         agent = SAgent(
             runtime=control_runtime,
             driver_factory=driver_factory,
@@ -859,10 +886,12 @@ class SAgentBuilder:
                 "recall": memory_enabled and memory_behavior.recall,
                 "auto_write": memory_enabled and memory_behavior.auto_write,
             },
+            session_access=session_access,
         )
         services = {
             **services,
             "session.store": session_store,
+            "session.access": session_access,
             "credentials.provider": credential_provider,
             "memory.provider": memory_provider,
             "session-memory.provider": session_memory_provider,
@@ -886,12 +915,30 @@ class SAgentBuilder:
         dispatcher_values = dict(
             scheduler_config.config if scheduler_config is not None else {}
         )
+        scheduler_capabilities = await scheduler.capabilities()
+        tenant_limit = int(
+            dispatcher_values.get("max_concurrent_runs_per_tenant", 2)
+        )
+        if not scheduler_capabilities.supports_atomic_tenant_quota:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="runtime.scheduler_tenant_quota_unsupported",
+                    category=ErrorCategory.VALIDATION,
+                    message=(
+                        "configured tenant concurrency requires atomic Scheduler "
+                        "claim quota support"
+                    ),
+                    safe_to_resume=False,
+                    metadata={
+                        "max_concurrent_runs_per_tenant": tenant_limit,
+                        "supports_atomic_tenant_quota": False,
+                    },
+                )
+            )
         dispatcher = LocalWorkerDispatcher(
             scheduler,
             max_concurrent_runs=int(dispatcher_values.get("max_concurrent_runs", 8)),
-            max_concurrent_runs_per_tenant=int(
-                dispatcher_values.get("max_concurrent_runs_per_tenant", 2)
-            ),
+            max_concurrent_runs_per_tenant=tenant_limit,
             lease_seconds=float(dispatcher_values.get("lease_seconds", 30.0)),
             lease_scope_factory=driver_session_store.lease_scope,
         )
@@ -933,7 +980,11 @@ class SAgentBuilder:
             agents={selected_agent: agent},
             entrypoint_agent_id=selected_agent,
             scope_handles=tuple(scope_handles),
-            services=services,
+            services={
+                capability: provider
+                for capability, provider in services.items()
+                if capability != "session.store"
+            },
             adapters=adapters,
             composition_hash=composition_hash,
             resolved_plan=resolved_plan,
@@ -1227,7 +1278,9 @@ class SAgentBuilder:
             (
                 CapabilityRequirement(
                     capability=capability,
-                    api_version=">=2,<3",
+                    api_version=(
+                        "3" if capability == "execution.sandbox" else ">=2,<3"
+                    ),
                     name=name,
                 ),
             ),
@@ -1415,11 +1468,11 @@ class SAgentBuilder:
             visit(handle)
 
         for capability, required in runtime.required_guarantees.items():
-            candidates: list[dict[str, Any]] = []
+            observed: dict[str, Any] | None = None
             provider = services.get(capability)
             capability_reader = getattr(provider, "capabilities", None)
             if isinstance(capability_reader, Mapping):
-                candidates.append(dict(capability_reader))
+                observed = dict(capability_reader)
             elif callable(capability_reader):
                 parameters = inspect.signature(capability_reader).parameters.values()
                 if not any(
@@ -1438,15 +1491,56 @@ class SAgentBuilder:
                     if hasattr(facts, "model_dump"):
                         facts = facts.model_dump(mode="json")
                     if isinstance(facts, Mapping):
-                        candidates.append(dict(facts))
-            candidates.extend(descriptor_facts.get(capability, ()))
+                        observed = dict(facts)
+            declared = descriptor_facts.get(capability, [])
 
-            if any(
-                all(facts.get(name) == expected for name, expected in required.items())
-                for facts in candidates
-            ):
+            if provider is not None:
+                live = observed or {}
+                conflicts = [
+                    facts
+                    for facts in declared
+                    if any(
+                        name in facts
+                        and name in live
+                        and facts[name] != live[name]
+                        for name in required
+                    )
+                ]
+                if conflicts:
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="runtime.capability_descriptor_conflict",
+                            category=ErrorCategory.VALIDATION,
+                            message=(
+                                f"declared capabilities for {capability!r} conflict "
+                                "with the instantiated provider"
+                            ),
+                            safe_to_resume=False,
+                            metadata={
+                                "capability": capability,
+                                "required": dict(required),
+                                "declared": conflicts,
+                                "observed": live,
+                            },
+                        )
+                    )
+                satisfied = all(
+                    live.get(name) == expected
+                    for name, expected in required.items()
+                )
+                candidates = [live]
+            else:
+                satisfied = any(
+                    all(
+                        facts.get(name) == expected
+                        for name, expected in required.items()
+                    )
+                    for facts in declared
+                )
+                candidates = declared
+            if satisfied:
                 continue
-            observed = {
+            reported = {
                 name: sorted(
                     {
                         json.dumps(facts.get(name), sort_keys=True, default=str)
@@ -1468,7 +1562,8 @@ class SAgentBuilder:
                     metadata={
                         "capability": capability,
                         "required": dict(required),
-                        "observed": observed,
+                        "declared": declared,
+                        "observed": observed if provider is not None else reported,
                     },
                 )
             )

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -8,12 +11,17 @@ from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestCont
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
+    LifecyclePolicy,
     LocalWorkspaceSandboxProvider,
     OperationIntent,
     ProcessPolicy,
     ProcessRequest,
     ResolvedSandboxSpec,
+    SandboxDurability,
     SandboxGrantIssuer,
+    SandboxReleaseDisposition,
+    SandboxReleaseRequest,
+    SandboxState,
 )
 
 
@@ -95,6 +103,87 @@ async def test_local_workspace_reads_and_writes_only_with_matching_signed_grants
         == b"hello"
     )
     assert (tmp_path / "note.txt").read_bytes() == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_retention_removes_only_kernel_metadata(tmp_path: Path):
+    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    def clock():
+        return now
+
+    issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!", clock=clock)
+    provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key,
+        clock=clock,
+        terminal_ttl_seconds=10,
+        max_retained_terminal_items=1,
+    )
+    resolved = ResolvedSandboxSpec(
+        spec_hash="sha256:retention",
+        architecture="native",
+        filesystem=FileSystemPolicy(
+            allowed_operations=frozenset(FileOperation),
+            max_file_bytes=1024,
+            max_total_bytes=2048,
+        ),
+        process=ProcessPolicy(enabled=False),
+        policy_hash="sha256:retention-policy",
+        metadata={"host_workspace": str(tmp_path)},
+    )
+    handle = await provider.provision(resolved, CONTEXT, run_id="run-retention")
+    host_file = tmp_path / "host-owned.txt"
+    host_file.write_text("keep", encoding="utf-8")
+    await handle.destroy()
+    now += timedelta(seconds=11)
+    await provider.provision(resolved, CONTEXT, run_id="run-trigger")
+
+    with pytest.raises(ValueError, match="unknown"):
+        await provider.inspect(handle.ref)
+    assert host_file.read_text(encoding="utf-8") == "keep"
+    caps = await provider.capabilities()
+    assert caps.supports_automatic_terminal_retention is True
+
+
+@pytest.mark.asyncio
+async def test_active_workspace_release_reprovisions_without_losing_host_files(
+    tmp_path: Path,
+):
+    issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    resolved = ResolvedSandboxSpec(
+        spec_hash="sha256:active-workspace",
+        architecture="native",
+        filesystem=FileSystemPolicy(
+            allowed_operations=frozenset(FileOperation),
+        ),
+        lifecycle=LifecyclePolicy(
+            durability=SandboxDurability.DURABLE_EXTERNAL,
+            safe_pause_behavior=SandboxReleaseDisposition.TERMINATE,
+        ),
+        policy_hash="sha256:active-workspace-policy",
+        metadata={"host_workspace": str(tmp_path)},
+    )
+    handle = await provider.provision(resolved, CONTEXT, run_id="run_1")
+    (tmp_path / "durable.txt").write_text("kept", encoding="utf-8")
+    status = await handle.status()
+
+    receipt = await provider.release(
+        SandboxReleaseRequest(
+            ref=handle.ref,
+            disposition=SandboxReleaseDisposition.TERMINATE,
+            reason="approval_required",
+            expected_revision=status.revision,
+            idempotency_key="release-active-workspace",
+        ),
+        CONTEXT,
+    )
+    recreated = await provider.provision(resolved, CONTEXT, run_id="run_1")
+
+    assert receipt.compute_released is True
+    assert receipt.state == SandboxState.TERMINATED
+    assert recreated.ref.sandbox_id != handle.ref.sandbox_id
+    assert (tmp_path / "durable.txt").read_text(encoding="utf-8") == "kept"
 
 
 @pytest.mark.asyncio
@@ -197,6 +286,59 @@ async def test_local_process_is_argv_only_allowlisted_and_output_bounded(
     assert result.exit_code == 0
     assert result.truncated is True
     assert len(result.stdout) <= 32
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(8)
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+async def test_local_process_cancellation_reaps_descendants_and_releases_slot(
+    tmp_path: Path,
+):
+    issuer, handle = await provision(tmp_path, allowed_executables=("bash",))
+    running_request = ProcessRequest(
+        argv=(
+            "bash",
+            "-c",
+            "trap '' TERM; (sleep 3; touch leaked-after-kill.txt) & wait",
+        ),
+        cwd="/workspace",
+    )
+    running_intent, running_grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=running_request.cwd,
+        executable="bash",
+        argv=running_request.argv,
+    )
+    running = asyncio.create_task(
+        handle.process.run(running_request, intent=running_intent, grant=running_grant)
+    )
+    await asyncio.sleep(0.2)
+
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, timeout=4)
+
+    echo_request = ProcessRequest(argv=("bash", "-c", "echo alive"), cwd="/workspace")
+    echo_intent, echo_grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=echo_request.cwd,
+        executable="bash",
+        argv=echo_request.argv,
+    )
+    echoed = await asyncio.wait_for(
+        handle.process.run(echo_request, intent=echo_intent, grant=echo_grant),
+        timeout=2,
+    )
+    assert echoed.stdout.strip() == b"alive"
+
+    # The child would create this file after its direct parent was killed if
+    # cancellation failed to terminate the complete process group.
+    await asyncio.sleep(1.1)
+    assert not (tmp_path / "leaked-after-kill.txt").exists()
 
 
 @pytest.mark.asyncio

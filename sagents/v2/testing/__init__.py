@@ -9,6 +9,10 @@ from sagents.v2.testing.contracts import (
 )
 from sagents.v2.testing.runner import ScenarioRunner
 from sagents.v2.testing.runtime import ephemeral_runtime
+from sagents.v2.testing.distributed import (
+    run_scheduler_conformance,
+    run_session_store_recovery_conformance,
+)
 
 __all__ = [
     "ScenarioDefinition",
@@ -18,4 +22,6 @@ __all__ = [
     "ScenarioRunner",
     "ScenarioSuiteReport",
     "ephemeral_runtime",
+    "run_scheduler_conformance",
+    "run_session_store_recovery_conformance",
 ]

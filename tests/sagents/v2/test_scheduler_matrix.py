@@ -7,6 +7,7 @@ import pytest
 
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
+    SchedulerClaimPolicy,
     WorkItem,
 )
 from sagents.v2.runtime.execution.scheduler import (
@@ -36,6 +37,7 @@ def work(
     priority: int = 0,
     delay: float = 0,
     key: str | None = None,
+    tenant_id: str | None = None,
 ):
     return WorkItem(
         work_id=f"work_{name}",
@@ -43,6 +45,7 @@ def work(
         priority=priority,
         available_at=clock.now + timedelta(seconds=delay),
         idempotency_key=key or f"key_{name}",
+        tenant_id=tenant_id,
     )
 
 
@@ -54,6 +57,42 @@ async def test_capability_contract_explicitly_marks_in_memory_durability():
     assert capabilities.durable_across_process_restart is False
     assert capabilities.supports_leases is True
     assert capabilities.supports_fencing is True
+    assert capabilities.supports_atomic_fenced_mutations is True
+    assert capabilities.supports_atomic_tenant_quota is True
+
+
+@pytest.mark.asyncio
+async def test_atomic_tenant_quota_skips_saturated_tenant_without_blocking_others():
+    clock = MutableClock()
+    scheduler = InMemoryScheduler(clock=clock)
+    policy = SchedulerClaimPolicy(max_active_per_tenant=1)
+    await scheduler.submit(work("a-first", clock, tenant_id="tenant-a"))
+    await scheduler.submit(work("a-second", clock, tenant_id="tenant-a"))
+    await scheduler.submit(work("b-first", clock, tenant_id="tenant-b"))
+
+    first = await scheduler.claim(
+        "worker-1",
+        lease_duration=timedelta(seconds=30),
+        policy=policy,
+        wait_timeout=0,
+    )
+    second = await scheduler.claim(
+        "worker-2",
+        lease_duration=timedelta(seconds=30),
+        policy=policy,
+        wait_timeout=0,
+    )
+
+    assert first is not None and first.work.work_id == "work_a-first"
+    assert second is not None and second.work.work_id == "work_b-first"
+    await scheduler.release(first, LeaseReleaseReason.COMPLETED)
+    third = await scheduler.claim(
+        "worker-3",
+        lease_duration=timedelta(seconds=30),
+        policy=policy,
+        wait_timeout=0,
+    )
+    assert third is not None and third.work.work_id == "work_a-second"
 
 
 @pytest.mark.asyncio
@@ -77,6 +116,46 @@ async def test_same_work_id_with_different_key_is_conflict():
     with pytest.raises(SageV2Error) as conflict:
         await scheduler.submit(work("1", clock, key="second"))
     assert conflict.value.info.code == "scheduler.work_id_conflict"
+
+
+@pytest.mark.asyncio
+async def test_terminal_scheduler_metadata_is_bounded_without_per_run_fence_growth():
+    clock = MutableClock()
+    scheduler = InMemoryScheduler(
+        clock=clock,
+        max_retained_terminal_items=4,
+    )
+
+    for index in range(10):
+        await scheduler.submit(work(str(index), clock))
+        lease = await scheduler.claim(
+            "worker", lease_duration=timedelta(seconds=30), wait_timeout=0
+        )
+        assert lease is not None
+        await scheduler.release(lease, LeaseReleaseReason.COMPLETED)
+
+    assert await scheduler.pending_count() == 0
+    assert len(scheduler._idempotency) == 4
+    assert len(scheduler._terminal_idempotency_keys) == 4
+    assert scheduler._fence_sequence == 10
+
+
+@pytest.mark.asyncio
+async def test_cancelled_delayed_work_does_not_leave_an_unbounded_heap():
+    clock = MutableClock()
+    scheduler = InMemoryScheduler(
+        clock=clock,
+        max_retained_terminal_items=2,
+    )
+
+    for index in range(10):
+        item = work(str(index), clock, delay=60)
+        await scheduler.submit(item)
+        assert await scheduler.cancel(item.work_id) is True
+
+    assert scheduler._pending == []
+    assert len(scheduler._idempotency) == 2
+    assert len(scheduler._cancelled) == 2
 
 
 @pytest.mark.asyncio

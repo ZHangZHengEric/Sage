@@ -275,8 +275,18 @@ lease 和 fencing counter；Dispatcher 在重启后从 WorkItem 恢复 RequestCo
 
 - 使用可跨进程恢复的 Scheduler/JobRuntime；
 - 启动时扫描并 reconcile 非终态 Run；
-- 用 lease + fencing 防止旧 worker 写入；
+- 用 lease + fencing 防止旧 worker 写入；Scheduler 插件必须实现
+  `execute_fenced(lease, operation)`，在整个 Session mutation 期间保持 lease 权威；
 - 对无法恢复的外部副作用进入 unknown/reconcile，而不是重复执行。
+
+SAgents 内核不提供数据库事务，也不绑定 PostgreSQL、MySQL 或 Redis。它只定义
+`supports_atomic_fenced_mutations` 语义能力；本地插件用进程锁实现，服务器插件可用
+自己的事务、行锁、advisory lock 或其他线性一致机制实现。是否支持多主机 claim 由独立的
+`supports_distributed_claims` 声明，不能由“支持 fencing”推断。
+
+底层 `SessionStore` 是可信内部 port。Server 的 HTTP/RPC/WebSocket 层应使用
+`application.service("session.access")`；其读取、订阅、checkpoint、interaction 和删除
+接口都要求 `RequestContext` 并校验 durable Session owner，不能直接暴露仅凭 ID 的读取。
 
 Model stream 现在保留一个未被反复取消的读取 task，并旁路轮询 durable Run 状态和
 deadline；即使 provider 没有产生 delta，pause、cancel 和 deadline 也能关闭 stream，
@@ -321,8 +331,10 @@ Run 目录下；它不能成为恢复输入。
 
 ### P1：生产执行恢复
 
-- 已增加单机 filesystem Scheduler 与 Dispatcher 启动恢复；durable JobRuntime、
-  多进程 lease provider 和未知外部副作用 reconcile 仍待生产实现；
+- 已增加单机 filesystem Scheduler、Dispatcher 启动恢复和原子 fenced mutation port；
+  durable JobRuntime 与多进程 lease provider 仍待生产插件实现；
+- Tool 一旦跨过 side-effect barrier，未明确证明 `not_applied` 的写操作异常统一进入
+  unknown/reconcile，禁止按普通失败继续；
 - 已把 deadline/cancellation 传播到 Model stream 和显式可取消 Tool；
 - 对 crash、lease takeover、未知副作用和迟到结果做故障注入测试。
 

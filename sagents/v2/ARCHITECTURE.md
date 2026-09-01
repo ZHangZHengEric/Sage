@@ -232,6 +232,16 @@ failed as `execution.worker_restarted` instead of being replayed. This is not a
 distributed lease provider or a durable JobRuntime. Capability flags must fail
 closed when a requested durability or isolation guarantee is unavailable.
 
+The framework does not implement or require a particular database transaction.
+It requires the selected Scheduler plugin to expose
+`supports_atomic_fenced_mutations` and `execute_fenced(lease, operation)`. The
+plugin must keep that lease authoritative until the supplied Session mutation
+finishes. The in-process providers do this with their scheduler lock; a future
+distributed provider may use a database transaction, row/advisory lock, or any
+other linearizable mechanism. Builder composition fails closed when this
+semantic capability is absent. `supports_distributed_claims` remains a separate
+capability and is false for the built-in schedulers.
+
 Model reads poll durable pause/cancel state and deadline without repeatedly
 cancelling the provider socket. Tool cancellation is an optional port and is
 used only when both the Tool definition declares cooperative/forceable
@@ -246,14 +256,28 @@ The framework has no concept of “all Sessions”. `SessionStore` can create or
 open one known `session_id`, manipulate its Runs, and recover that Session. It
 has no list/search/page/title/archive/favorite API.
 
+`SessionStore` is a trusted internal persistence port. Server transports must
+use the `session.access` service (`AuthorizedSessionAccess`) for reads,
+subscriptions, checkpoints, interactions, and deletion. That facade requires a
+`RequestContext` and verifies the durable Session owner before returning data.
+
+Reference runtime metadata has explicit retention boundaries. Scheduler
+terminal idempotency tombstones are count-bounded by
+`max_retained_terminal_items`, while fencing uses one persisted monotonic
+sequence instead of one counter per Run. Job and sandbox plugins expose
+incremental TTL/count/byte retention plus explicit
+`purge_terminal`/`purge_terminated`. Fresh Job output, suspended checkpoints,
+and attached sandboxes are protected from automatic reclamation.
+
 `FilesystemSessionStore` (in `runtime/session/plugins/`) does not materialize
 every Session on startup. A known
 `session_id` maps directly to one directory. Product software such as Desktop
 owns any global index. A commit exports only that Session aggregate; it no
 longer serializes all loaded Sessions before filtering. The reference
-coordinator still uses a store-level atomic lock, because replacing it with
-sharded locks must preserve Session sequence, tree deletion, CAS, and rollback
-as one proof rather than as a throughput-only change.
+coordinator uses a small topology lock for immutable Run/Session relationships
+and a sorted per-Session lock table. Different Session writes may persist in
+parallel, one Session remains strictly serialized, tree deletion revalidates
+its locked topology, and failed persistence restores only the target aggregate.
 
 Optional SQL backends live in `runtime/session/plugins/`, matching other
 replaceable providers. `sage.session.postgres` follows the same

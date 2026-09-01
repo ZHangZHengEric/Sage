@@ -24,6 +24,11 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
+def _principal_lookup_key(principal_type: str, principal_id: str) -> str:
+    identity = f"{principal_type}\0{principal_id}".encode("utf-8")
+    return f"typed:{hashlib.sha256(identity).hexdigest()}"
+
+
 class StoreInUseError(SageV2Error):
     """Raised when another writer already owns the same PostgreSQL prefix."""
 
@@ -39,6 +44,8 @@ _COMPACT_LISTS = (
     "runs",
     "start_idempotency",
     "command_results",
+    "execution_resources",
+    "execution_resource_command_results",
     "checkpoints",
     "suspensions",
     "interactions",
@@ -426,7 +433,10 @@ class _PostgresSessionState(SessionStoreCoordinator):
         rows = [
             (
                 str(entry.get("tenant_id") or ""),
-                str(entry["principal_id"]),
+                _principal_lookup_key(
+                    str(entry.get("principal_type") or ""),
+                    str(entry["principal_id"]),
+                ),
                 str(entry["idempotency_key"]),
                 session_id,
                 str(entry["run_id"]),
@@ -835,10 +845,17 @@ class _PostgresSessionState(SessionStoreCoordinator):
             return await connection.fetchval(
                 f"""
                 SELECT session_id FROM {self._table("start_idempotency")}
-                WHERE tenant_id = $1 AND principal_id = $2 AND idempotency_key = $3
+                WHERE tenant_id = $1 AND principal_id = ANY($2::text[])
+                  AND idempotency_key = $3
                 """,
                 str(context.actor.tenant_id or ""),
-                context.actor.principal_id,
+                [
+                    _principal_lookup_key(
+                        context.actor.principal_type.value,
+                        context.actor.principal_id,
+                    ),
+                    context.actor.principal_id,
+                ],
                 command.idempotency_key,
             )
 
@@ -996,6 +1013,16 @@ class _PostgresSessionState(SessionStoreCoordinator):
             "command_results": [
                 row
                 for row in state.get("command_results", ())
+                if row.get("run_id") not in run_ids
+            ],
+            "execution_resources": [
+                row
+                for row in state.get("execution_resources", ())
+                if row.get("run_id") not in run_ids
+            ],
+            "execution_resource_command_results": [
+                row
+                for row in state.get("execution_resource_command_results", ())
                 if row.get("run_id") not in run_ids
             ],
             "checkpoints": [

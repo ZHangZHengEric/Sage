@@ -1222,6 +1222,45 @@ class _ControlledProcessApi extends _FakeApi {
   }
 }
 
+class _BranchingApi extends _FakeApi {
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_branch_source',
+      'state': 'completed',
+      'revision': runId == 'run_branch_1' ? 2 : 3,
+      'accepted_session_revision': runId == 'run_branch_1' ? 4 : 8,
+      'last_run_sequence': 8,
+      'updated_at': '2026-09-01T10:00:00Z',
+    },
+  };
+
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) {
+    lastRunBody = Map<String, Object?>.of(body);
+    return Stream.fromIterable([
+      {
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_branch_child',
+          'session_id': 'session_branch_child',
+          'event_cursor': {'run_sequence': 0},
+        },
+      },
+      {
+        'protocol_version': 'sage.runtime/v2',
+        'type': 'run.completed',
+        'run_id': 'run_branch_child',
+        'session_id': 'session_branch_child',
+        'turn_id': 'turn_branch_child',
+        'run_sequence': 1,
+        'data': {'kind': 'run', 'state': 'completed'},
+      },
+    ]);
+  }
+}
+
 class _SessionTreeApi extends _ControlledProcessApi {
   final _treeEvents = StreamController<Map<String, Object?>>();
   String? repliedRunId;
@@ -1837,6 +1876,117 @@ Map<String, Object?> _persistedSuspendedConversation() => {
       'started_at': DateTime.now().toIso8601String(),
       'running': true,
       'activities': const [],
+    },
+  ],
+};
+
+Map<String, Object?> _persistedGroupedActivitiesConversation() => {
+  'id': 'conversation-grouped-activities',
+  'title': '工具分组',
+  'agent_id': 'agent_main',
+  'run_id': 'run_grouped_activities',
+  'session_id': 'session_grouped_activities',
+  'turn_id': 'turn_grouped_activities',
+  'run_sequence': 70,
+  'status': 'completed',
+  'messages': const [
+    {'id': 'user-grouped', 'role': 'user', 'text': '检查工具分组'},
+    {
+      'id': 'empty-model-boundary-1',
+      'role': 'assistant',
+      'text': '',
+      'process_only': true,
+      'sequence': 20,
+    },
+    {
+      'id': 'empty-model-boundary-2',
+      'role': 'assistant',
+      'text': '',
+      'process_only': true,
+      'sequence': 40,
+    },
+  ],
+  'process_panels': [
+    {
+      'id': 'process-grouped-activities',
+      'anchor_message_id': 'user-grouped',
+      'run_id': 'run_grouped_activities',
+      'started_at': '2026-09-01T09:00:00Z',
+      'completed_at': '2026-09-01T09:00:05Z',
+      'running': false,
+      'activities': const [
+        {
+          'id': 'call-memory',
+          'label': 'search_memory',
+          'active': false,
+          'sequence': 10,
+        },
+        {
+          'id': 'call-shell-1',
+          'label': 'execute_shell_command',
+          'active': false,
+          'sequence': 30,
+          'arguments': {'command': 'ruby -v'},
+        },
+        {
+          'id': 'call-shell-2',
+          'label': 'execute_shell_command',
+          'active': false,
+          'sequence': 50,
+          'arguments': {'command': 'bundle -v'},
+        },
+        {
+          'id': 'call-read',
+          'label': 'file_read',
+          'active': false,
+          'sequence': 60,
+          'arguments': {'path': 'Gemfile'},
+        },
+        {
+          'id': 'call-shell-3',
+          'label': 'execute_shell_command',
+          'active': false,
+          'sequence': 70,
+          'arguments': {'command': 'bundle install'},
+        },
+      ],
+    },
+  ],
+};
+
+Map<String, Object?> _persistedBranchableConversation() => {
+  'id': 'conversation-branch-source',
+  'title': '分支源对话',
+  'agent_id': 'agent_main',
+  'run_id': 'run_branch_2',
+  'session_id': 'session_branch_source',
+  'turn_id': 'turn_branch_2',
+  'run_sequence': 8,
+  'status': 'completed',
+  'messages': const [
+    {'id': 'user-branch-1', 'role': 'user', 'text': '第一轮问题'},
+    {'id': 'assistant-branch-1', 'role': 'assistant', 'text': '第一轮结果'},
+    {'id': 'user-branch-2', 'role': 'user', 'text': '第二轮问题'},
+    {'id': 'assistant-branch-2', 'role': 'assistant', 'text': '第二轮结果'},
+  ],
+  'process_panels': const [
+    {
+      'id': 'process-branch-1',
+      'anchor_message_id': 'user-branch-1',
+      'run_id': 'run_branch_1',
+      'started_at': '2026-09-01T09:00:00Z',
+      'completed_at': '2026-09-01T09:00:05Z',
+      'running': false,
+      'activities': [],
+    },
+    {
+      'id': 'process-branch-2',
+      'anchor_message_id': 'user-branch-2',
+      'run_id': 'run_branch_2',
+      'started_at': '2026-09-01T09:01:00Z',
+      'completed_at': '2026-09-01T09:01:05Z',
+      'running': false,
+      'activities': [],
     },
   ],
 };
@@ -2861,6 +3011,10 @@ void main() {
         expect(find.byKey(const ValueKey('file-tree-overlay')), findsOneWidget);
         expect(find.byKey(const ValueKey('file-tree-toggle')), findsOneWidget);
         expect(
+          find.byKey(const ValueKey('workspace-remove-project')),
+          findsNothing,
+        );
+        expect(
           find.byKey(const ValueKey('file-preview-empty')),
           findsOneWidget,
         );
@@ -3374,6 +3528,68 @@ void main() {
     );
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'process panel groups consecutive tools by category across empty model boundaries in ${brightness.name} mode',
+      (tester) async {
+        tester.platformDispatcher.localeTestValue = const Locale('zh');
+        tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+        addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [
+              _persistedGroupedActivitiesConversation(),
+            ],
+          }),
+        });
+        final controller = WorkspaceController(
+          api: _FakeApi(),
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('process-operation-group:call-shell-1')),
+          findsOneWidget,
+        );
+        expect(find.text('执行了 2 个命令，共 2 个操作'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('process-activity:call-memory')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('process-activity:call-read')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('process-activity:call-shell-3')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('process-message:empty-model-boundary-1')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('process-message:empty-model-boundary-2')),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('process panel collapses when the final body is promoted', (
     tester,
   ) async {
@@ -3869,6 +4085,191 @@ void main() {
       expect(api.lastRunBody?['session_id'], sessionId);
     },
   );
+
+  test(
+    'branch copies through the selected Run and forks on first send',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [
+            _persistedBranchableConversation(),
+          ],
+        }),
+      });
+      final api = _BranchingApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(await controller.branchFromRun('run_branch_1'), isTrue);
+      final branch = controller.selectedConversation!;
+      expect(branch.sessionId, isNull);
+      expect(branch.parentSessionId, 'session_branch_source');
+      expect(branch.parentRunId, 'run_branch_1');
+      expect(branch.forkBaseSessionRevision, 6);
+      expect(branch.messages.map((value) => value.id), [
+        'user-branch-1',
+        'assistant-branch-1',
+      ]);
+      expect(branch.processPanels.single.runId, 'run_branch_1');
+
+      await controller.send('从这里继续');
+      await pumpEventQueue();
+
+      expect(api.lastRunBody?['session_id'], 'session_branch_source');
+      expect(api.lastRunBody?['session_concurrency_mode'], 'fork');
+      expect(api.lastRunBody?['base_session_revision'], 6);
+      expect(api.lastRunBody?['fork_source_run_id'], 'run_branch_1');
+      expect(
+        ((api.lastRunBody?['messages'] as List).single as Map)['text'],
+        '从这里继续',
+      );
+      expect(branch.sessionId, 'session_branch_child');
+    },
+  );
+
+  test(
+    'rewriting the last user message replaces the current conversation',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [
+            _persistedBranchableConversation(),
+          ],
+        }),
+      });
+      final api = _BranchingApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final source = controller.selectedConversation!;
+      final conversationCount = controller.agentWorkspaceConversations.length;
+
+      await controller.rewriteLastUserMessage('user-branch-2', '改写后的第二轮问题');
+      await pumpEventQueue();
+
+      expect(controller.selectedConversation, same(source));
+      expect(controller.agentWorkspaceConversations.length, conversationCount);
+      expect(source.messages.map((value) => value.text), [
+        '第一轮问题',
+        '第一轮结果',
+        '改写后的第二轮问题',
+      ]);
+      expect(source.sessionId, 'session_branch_child');
+      expect(api.lastRunBody?['fork_source_run_id'], 'run_branch_1');
+      expect(api.lastRunBody?['session_concurrency_mode'], 'fork');
+      expect(
+        ((api.lastRunBody?['messages'] as List).single as Map)['text'],
+        '改写后的第二轮问题',
+      );
+    },
+  );
+
+  test(
+    'rewriting the first user message restarts the current conversation',
+    () async {
+      final persisted = _persistedBranchableConversation();
+      persisted['run_id'] = 'run_branch_1';
+      persisted['turn_id'] = 'turn_branch_1';
+      persisted['messages'] = (persisted['messages'] as List).take(2).toList();
+      persisted['process_panels'] = (persisted['process_panels'] as List)
+          .take(1)
+          .toList();
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [persisted],
+        }),
+      });
+      final api = _BranchingApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final source = controller.selectedConversation!;
+
+      await controller.rewriteLastUserMessage('user-branch-1', '改写后的第一轮问题');
+      await pumpEventQueue();
+
+      expect(controller.selectedConversation, same(source));
+      expect(source.messages.map((value) => value.text), ['改写后的第一轮问题']);
+      expect(api.lastRunBody, isNot(contains('session_concurrency_mode')));
+      expect(api.lastRunBody, isNot(contains('fork_source_run_id')));
+      expect(
+        api.lastRunBody?['session_id'],
+        matches(RegExp(r'^session_\d{13}_\d{6}$')),
+      );
+    },
+  );
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'message actions expose last-user edit and per-Run branch in ${brightness.name} mode',
+      (tester) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [
+              _persistedBranchableConversation(),
+            ],
+          }),
+        });
+        final controller = WorkspaceController(
+          api: _BranchingApi(),
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+
+        final editAction = find.byKey(
+          const ValueKey('message-edit:user-branch-2'),
+        );
+        final branchAction = find.byKey(
+          const ValueKey('message-branch:assistant-branch-1'),
+        );
+        expect(editAction, findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('message-edit:user-branch-1')),
+          findsNothing,
+        );
+        expect(branchAction, findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('message-branch:assistant-branch-2')),
+          findsOneWidget,
+        );
+        for (final action in [editAction, branchAction]) {
+          final inkWell = tester.widget<InkWell>(action);
+          expect(inkWell.hoverColor, isNotNull);
+          expect(inkWell.focusColor, isNotNull);
+          expect(
+            find.ancestor(of: action, matching: find.byType(GlassButton)),
+            findsNothing,
+          );
+        }
+        await tester.tap(editAction);
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('message-edit-card:user-branch-2')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets(
     'approval card shows the concrete risk and has distinct actions',

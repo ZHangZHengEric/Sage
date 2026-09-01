@@ -13,9 +13,12 @@ import hashlib
 import hmac
 import json
 import os
+import signal
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sagents.v2.contracts.common import new_id, utc_now
@@ -34,10 +37,15 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxCheckpointRef,
     SandboxGrant,
     SandboxRef,
+    SandboxReleaseDisposition,
+    SandboxReleaseReceipt,
+    SandboxReleaseRequest,
     SandboxSnapshot,
     SandboxState,
     TerminateMode,
 )
+
+
 def _grant_payload(grant: SandboxGrant) -> bytes:
     return json.dumps(
         grant.model_dump(mode="json", exclude={"signature"}),
@@ -135,6 +143,9 @@ class _LocalFileSystem:
 
 
 class _LocalProcessRuntime:
+    _TERMINATE_GRACE_SECONDS = 2.0
+    _PIPE_DRAIN_GRACE_SECONDS = 1.0
+
     def __init__(self, provider: "LocalWorkspaceSandboxProvider", row: _LocalRow):
         self.provider = provider
         self.row = row
@@ -195,6 +206,10 @@ class _LocalProcessRuntime:
                 stdin=asyncio.subprocess.PIPE if request.stdin is not None else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Shell commands commonly spawn npm/node/flutter children.  A
+                # dedicated POSIX session lets cancellation terminate the full
+                # process group instead of only the immediate bash process.
+                start_new_session=os.name == "posix",
             )
             stdout_task = asyncio.create_task(
                 self._read_bounded(process.stdout, policy.max_output_bytes)
@@ -208,25 +223,25 @@ class _LocalProcessRuntime:
                 process.stdin.close()
             timed_out = False
             try:
-                await asyncio.wait_for(process.wait(), timeout=timeout)
-            except TimeoutError:
-                timed_out = True
-                process.kill()
-                await process.wait()
-            except asyncio.CancelledError:
-                # Background Tool cancellation must not leave an unmanaged host
-                # subprocess running after its Runtime Execution task is gone.
-                process.terminate()
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=2)
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
                 except TimeoutError:
-                    process.kill()
-                    await process.wait()
-                await asyncio.gather(stdout_task, stderr_task)
+                    timed_out = True
+                    await self._terminate_process_tree(process)
+
+                (
+                    (stdout, stdout_overflow),
+                    (
+                        stderr,
+                        stderr_overflow,
+                    ),
+                ) = await self._finish_pipe_readers(process, stdout_task, stderr_task)
+            except asyncio.CancelledError:
+                # A child that inherited stdout/stderr can otherwise keep the
+                # reader tasks and the single process slot alive indefinitely.
+                await self._terminate_process_tree(process)
+                await self._cancel_pipe_readers(stdout_task, stderr_task)
                 raise
-            (stdout, stdout_overflow), (stderr, stderr_overflow) = await asyncio.gather(
-                stdout_task, stderr_task
-            )
         limit = policy.max_output_bytes
         truncated = (
             stdout_overflow or stderr_overflow or len(stdout) + len(stderr) > limit
@@ -243,6 +258,90 @@ class _LocalProcessRuntime:
             duration_seconds=time.monotonic() - started,
             truncated=truncated,
         )
+
+    async def _terminate_process_tree(
+        self, process: asyncio.subprocess.Process
+    ) -> None:
+        """Terminate the managed process and its POSIX descendants."""
+
+        if os.name != "posix":
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(
+                        process.wait(), timeout=self._TERMINATE_GRACE_SECONDS
+                    )
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
+            return
+
+        pgid = process.pid
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+        deadline = time.monotonic() + self._TERMINATE_GRACE_SECONDS
+        while self._process_group_exists(pgid) and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+
+        if self._process_group_exists(pgid):
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        if process.returncode is None:
+            try:
+                await asyncio.wait_for(
+                    process.wait(), timeout=self._PIPE_DRAIN_GRACE_SECONDS
+                )
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+
+    async def _finish_pipe_readers(self, process, stdout_task, stderr_task):
+        """Drain process output without allowing inherited pipes to hang."""
+
+        readers = (stdout_task, stderr_task)
+        _, pending = await asyncio.wait(readers, timeout=self._PIPE_DRAIN_GRACE_SECONDS)
+        if pending:
+            # The direct process exited but a descendant still owns a pipe.
+            # Background jobs are not supported by this sandbox, so reap the
+            # remaining process group before releasing the process slot.
+            await self._terminate_process_tree(process)
+            _, pending = await asyncio.wait(
+                readers, timeout=self._PIPE_DRAIN_GRACE_SECONDS
+            )
+        if pending:
+            for reader in pending:
+                reader.cancel()
+        results = await asyncio.gather(*readers, return_exceptions=True)
+        normalized = []
+        for result in results:
+            if isinstance(result, tuple):
+                normalized.append(result)
+            else:
+                normalized.append((b"", True))
+        return tuple(normalized)
+
+    @staticmethod
+    async def _cancel_pipe_readers(*readers) -> None:
+        for reader in readers:
+            if not reader.done():
+                reader.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
+
+    @staticmethod
+    def _process_group_exists(pgid: int) -> bool:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     @staticmethod
     async def _read_bounded(stream, limit: int) -> tuple[bytes, bool]:
@@ -274,6 +373,7 @@ class _LocalHandle:
         self.filesystem = _LocalFileSystem(provider, row)
         self.process = _LocalProcessRuntime(provider, row)
         self.network = _NoNetwork()
+        self._closed = False
 
     async def status(self):
         return await self.provider.inspect(self.ref)
@@ -282,24 +382,43 @@ class _LocalHandle:
         return await self.provider.snapshot(self.ref)
 
     async def close(self):
-        self.provider._rows[self.ref.sandbox_id].attached_clients = max(
-            0, self.provider._rows[self.ref.sandbox_id].attached_clients - 1
-        )
+        if not self._closed:
+            row = self.provider._rows.get(self.ref.sandbox_id)
+            if row is not None:
+                row.attached_clients = max(0, row.attached_clients - 1)
+            self._closed = True
+            self.provider._sweep_terminated()
 
     async def destroy(self):
         await self.provider.terminate(self.ref, TerminateMode.FORCE)
+        await self.close()
 
 
 class LocalWorkspaceSandboxProvider:
     """Grant-enforcing host filesystem/process provider without OS isolation."""
 
     provider_id = "sage.sandbox.local-workspace"
-    provider_version = "2.0.0"
+    provider_version = "3.0.0"
 
-    def __init__(self, verification_key: bytes) -> None:
+    def __init__(
+        self,
+        verification_key: bytes,
+        *,
+        clock: Callable[[], datetime] = utc_now,
+        terminal_ttl_seconds: int = 86_400,
+        max_retained_terminal_items: int = 1024,
+    ) -> None:
+        if terminal_ttl_seconds < 1:
+            raise ValueError("terminal_ttl_seconds must be positive")
+        if max_retained_terminal_items < 0:
+            raise ValueError("max_retained_terminal_items must be non-negative")
         self.verification_key = verification_key
+        self._clock = clock
+        self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
+        self._max_retained_terminal = max_retained_terminal_items
         self._rows: dict[str, _LocalRow] = {}
-        self._used_nonces: set[str] = set()
+        self._used_nonces: dict[str, str] = {}
+        self._release_receipts: dict[tuple[str, str], SandboxReleaseReceipt] = {}
 
     async def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
@@ -317,16 +436,27 @@ class LocalWorkspaceSandboxProvider:
             supports_snapshot=False,
             supports_reconnect=True,
             supports_secret_injection=False,
+            supported_release_dispositions=frozenset(
+                {
+                    SandboxReleaseDisposition.DETACH,
+                    SandboxReleaseDisposition.TERMINATE,
+                }
+            ),
+            supports_terminal_purge=True,
+            supports_automatic_terminal_retention=True,
+            terminal_ttl_seconds=int(self._terminal_ttl.total_seconds()),
+            max_retained_terminal_items=self._max_retained_terminal,
         )
 
     async def provision(self, spec, context, *, run_id):
+        self._sweep_terminated()
         root_value = spec.metadata.get("host_workspace")
         if not isinstance(root_value, str):
             raise ValueError("local-workspace requires metadata.host_workspace")
         root = Path(root_value).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ValueError("host_workspace must be a directory")
-        now = utc_now()
+        now = self._clock()
         ref = SandboxRef(
             sandbox_id=new_id("sandbox"),
             provider_id=self.provider_id,
@@ -350,6 +480,8 @@ class LocalWorkspaceSandboxProvider:
 
     async def attach(self, ref, context):
         row = self._row(ref)
+        if row.state == SandboxState.TERMINATED:
+            raise RuntimeError("sandbox is terminated")
         if row.ref.tenant_id != context.actor.tenant_id:
             raise PermissionError("tenant does not own sandbox")
         row.attached_clients += 1
@@ -379,8 +511,82 @@ class LocalWorkspaceSandboxProvider:
     async def restore(self, checkpoint, context):
         raise RuntimeError("local-workspace does not support snapshots")
 
+    async def release(self, request: SandboxReleaseRequest, context):
+        key = (request.ref.sandbox_id, request.idempotency_key)
+        previous = self._release_receipts.get(key)
+        if previous is not None:
+            return previous.model_copy(update={"duplicate": True})
+        row = self._row(request.ref)
+        if row.ref.tenant_id != context.actor.tenant_id:
+            raise PermissionError("tenant does not own sandbox")
+        if row.revision != request.expected_revision:
+            raise RuntimeError("sandbox revision does not match release request")
+        if request.disposition == SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE:
+            raise RuntimeError("local-workspace does not support snapshot release")
+        if request.disposition == SandboxReleaseDisposition.TERMINATE:
+            await self.terminate(request.ref, TerminateMode.FORCE)
+        receipt = SandboxReleaseReceipt(
+            ref=request.ref,
+            disposition=request.disposition,
+            state=row.state,
+            compute_released=row.state == SandboxState.TERMINATED,
+            released_at=self._clock(),
+        )
+        self._release_receipts[key] = receipt
+        return receipt
+
     async def terminate(self, ref, mode):
-        self._row(ref).state = SandboxState.TERMINATED
+        del mode
+        row = self._row(ref)
+        if row.state != SandboxState.TERMINATED:
+            row.state = SandboxState.TERMINATED
+            row.revision += 1
+            row.updated_at = self._clock()
+        self._sweep_terminated()
+
+    async def purge_terminated(self, ref) -> None:
+        row = self._row(ref)
+        if row.state != SandboxState.TERMINATED or row.attached_clients != 0:
+            raise RuntimeError("only detached terminated sandboxes can be purged")
+        self._purge_row(ref.sandbox_id)
+
+    def _sweep_terminated(self) -> int:
+        terminal = sorted(
+            (
+                row
+                for row in self._rows.values()
+                if row.state == SandboxState.TERMINATED
+                and row.attached_clients == 0
+            ),
+            key=lambda row: (row.updated_at, row.ref.sandbox_id),
+        )
+        now = self._clock()
+        purge_ids = {
+            row.ref.sandbox_id
+            for row in terminal
+            if now - row.updated_at >= self._terminal_ttl
+        }
+        retained = [row for row in terminal if row.ref.sandbox_id not in purge_ids]
+        while len(retained) > self._max_retained_terminal:
+            purge_ids.add(retained.pop(0).ref.sandbox_id)
+        for sandbox_id in purge_ids:
+            self._purge_row(sandbox_id)
+        return len(purge_ids)
+
+    def _purge_row(self, sandbox_id: str) -> None:
+        # Local workspace contents belong to the host. Retention removes only
+        # kernel metadata and consumed grant nonces.
+        self._rows.pop(sandbox_id, None)
+        self._used_nonces = {
+            nonce: owner_sandbox_id
+            for nonce, owner_sandbox_id in self._used_nonces.items()
+            if owner_sandbox_id != sandbox_id
+        }
+        self._release_receipts = {
+            key: value
+            for key, value in self._release_receipts.items()
+            if key[0] != sandbox_id
+        }
 
     def _row(self, ref):
         row = self._rows.get(ref.sandbox_id)
@@ -473,7 +679,7 @@ class LocalWorkspaceSandboxProvider:
         if operation not in grant.allowed_operations:
             raise PermissionError("sandbox grant does not allow this operation")
         if grant.single_use:
-            self._used_nonces.add(grant.nonce)
+            self._used_nonces[grant.nonce] = row.ref.sandbox_id
 
     @staticmethod
     def _total_file_bytes(row: _LocalRow) -> int:

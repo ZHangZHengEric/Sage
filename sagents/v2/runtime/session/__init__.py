@@ -17,6 +17,7 @@ from sagents.v2.runtime.session.plugins import (
     StoreInUseError,
 )
 from sagents.v2.runtime.session.fencing import LeaseFencedSessionStore
+from sagents.v2.runtime.session.access import AuthorizedSessionAccess
 from sagents.v2.runtime.session.migration import (
     MigrationReport,
     migrate_manifest_v1,
@@ -40,6 +41,7 @@ __all__ = [
     "MysqlSessionStore",
     "PostgresSessionStore",
     "LeaseFencedSessionStore",
+    "AuthorizedSessionAccess",
     "MigrationReport",
     "SessionAggregate",
     "SessionRepository",

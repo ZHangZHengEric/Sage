@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextlib import asynccontextmanager, nullcontext
 from collections.abc import AsyncIterator, Callable, Collection
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -45,6 +46,7 @@ from sagents.v2.contracts.events import (
     ItemEventData,
     RunEventData,
     RuntimeEvent,
+    SandboxEventData,
     SessionCommitEventData,
     SteeringEventData,
 )
@@ -53,7 +55,7 @@ from sagents.v2.contracts.interactions import (
     InteractionResolution,
     InteractionStatus,
 )
-from sagents.v2.contracts.principals import ActorRef, RequestContext
+from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import (
     EventCursor,
     RunHandle,
@@ -86,6 +88,10 @@ from sagents.v2.runtime.session.contracts import (
     DispatchableRun,
     SteerClaimResult,
 )
+from sagents.v2.runtime.execution.resources import (
+    ExecutionResourceRecord,
+    ExecutionResourceState,
+)
 
 
 SESSION_AGGREGATE_FORMAT = "sage.session-aggregate/v2"
@@ -100,6 +106,7 @@ class _SessionRow:
     updated_at: datetime
     active_serial_run_id: str | None = None
     parent_session_id: str | None = None
+    owner: ActorRef | None = None
     # Maps optimistic Session revisions to the last durable event visible at
     # that revision. This turns a CAS revision into a stable replay boundary for
     # snapshot and fork context construction.
@@ -159,6 +166,11 @@ class SessionStoreCoordinator:
             "supports_session_canonical_log": True,
             "supports_bounded_subscription": True,
             "supports_snapshot_publication": True,
+            "supports_actor_authorization": True,
+            "multi_process_writes": False,
+            "cross_process_subscribe": False,
+            "transactional_outbox": False,
+            "atomic_session_cas": True,
         }
 
     def __init__(
@@ -166,12 +178,19 @@ class SessionStoreCoordinator:
         *,
         clock: Callable[[], datetime] = utc_now,
         subscriber_queue_size: int = 256,
+        persistence_can_fail: bool = True,
     ) -> None:
         if subscriber_queue_size < 1:
             raise ValueError("subscriber_queue_size must be positive")
         self._clock = clock
         self._subscriber_queue_size = subscriber_queue_size
+        self._persistence_can_fail = persistence_can_fail
         self._lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._start_locks: dict[
+            tuple[str | None, PrincipalType, str, str], asyncio.Lock
+        ] = {}
+        self._topology_revision = 0
         self._sessions: dict[str, _SessionRow] = {}
         self._runs: dict[str, _RunRow] = {}
         self._run_events: dict[str, list[RuntimeEvent]] = {}
@@ -182,10 +201,19 @@ class SessionStoreCoordinator:
         self._fork_base_events: dict[str, tuple[RuntimeEvent, ...]] = {}
         # Derived state is explicitly non-authoritative and can be discarded.
         self._derived_state: dict[tuple[str, str, str], Any] = {}
-        self._start_idempotency: dict[tuple[str | None, str, str], str] = {}
-        self._start_idempotency_digests: dict[tuple[str | None, str, str], str] = {}
+        self._start_idempotency: dict[
+            tuple[str | None, PrincipalType, str, str], str
+        ] = {}
+        self._start_idempotency_digests: dict[
+            tuple[str | None, PrincipalType, str, str], str
+        ] = {}
         self._command_results: dict[tuple[str, str], CommitResult] = {}
         self._command_digests: dict[tuple[str, str], str] = {}
+        self._execution_resources: dict[str, ExecutionResourceRecord] = {}
+        self._execution_resource_command_results: dict[
+            tuple[str, str], ExecutionResourceRecord
+        ] = {}
+        self._execution_resource_command_digests: dict[tuple[str, str], str] = {}
         self._checkpoints: dict[str, Checkpoint] = {}
         self._suspensions: dict[str, Suspension] = {}
         self._interactions: dict[str, InteractionRequest] = {}
@@ -200,6 +228,202 @@ class SessionStoreCoordinator:
         self._session_commit_command_digests: dict[tuple[str, str], str] = {}
         self._subscribers: dict[str, set[_Subscriber]] = {}
 
+    @asynccontextmanager
+    async def _session_operation(self, *session_ids: str):
+        """Serialize one or more aggregates without blocking unrelated I/O."""
+
+        ordered = tuple(sorted(set(session_ids)))
+        if not ordered:
+            raise ValueError("at least one session_id is required")
+        async with self._lock:
+            locks = tuple(
+                self._session_locks.setdefault(session_id, asyncio.Lock())
+                for session_id in ordered
+            )
+        acquired: list[asyncio.Lock] = []
+        try:
+            for lock in locks:
+                await lock.acquire()
+                acquired.append(lock)
+            snapshots = (
+                {
+                    session_id: (
+                        self._dump_session_state_locked(session_id)
+                        if session_id in self._sessions
+                        else None
+                    )
+                    for session_id in ordered
+                }
+                if self._persistence_can_fail
+                else None
+            )
+            try:
+                yield
+            except BaseException:
+                if snapshots is not None:
+                    self._restore_session_snapshots_locked(snapshots)
+                raise
+        finally:
+            for lock in reversed(acquired):
+                lock.release()
+
+    @asynccontextmanager
+    async def _session_read(self, session_id: str):
+        async with self._lock:
+            lock = self._session_locks.setdefault(session_id, asyncio.Lock())
+        await lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
+
+    @asynccontextmanager
+    async def _run_session_read(self, run_id: str):
+        async with self._lock:
+            row = self._runs.get(run_id)
+            if row is None:
+                raise self._not_found("run.not_found", run_id)
+            session_id = row.session_id
+        async with self._session_read(session_id):
+            current = self._runs.get(run_id)
+            if current is None or current.session_id != session_id:
+                raise self._not_found("run.not_found", run_id)
+            yield
+
+    @asynccontextmanager
+    async def _run_session_operation(self, run_id: str):
+        async with self._lock:
+            row = self._runs.get(run_id)
+            if row is None:
+                raise self._not_found("run.not_found", run_id)
+            session_id = row.session_id
+        async with self._session_operation(session_id):
+            current = self._runs.get(run_id)
+            if current is None or current.session_id != session_id:
+                raise self._not_found("run.not_found", run_id)
+            yield
+
+    @asynccontextmanager
+    async def _proposal_session_operation(self, proposal_id: str):
+        async with self._lock:
+            proposal = self._session_commit_proposals.get(proposal_id)
+            if proposal is None:
+                raise self._not_found(
+                    "session.commit_proposal_not_found", proposal_id
+                )
+            session_id = proposal.session_id
+        async with self._session_operation(session_id):
+            current = self._session_commit_proposals.get(proposal_id)
+            if current is None or current.session_id != session_id:
+                raise self._not_found(
+                    "session.commit_proposal_not_found", proposal_id
+                )
+            yield
+
+    def _restore_session_snapshots_locked(
+        self, snapshots: dict[str, dict[str, Any] | None]
+    ) -> None:
+        """Replace only failed aggregates, preserving concurrent commits."""
+
+        session_ids = frozenset(snapshots)
+        combined = self._dump_state_locked()
+        current_run_ids = {
+            row["run_id"]
+            for row in combined["runs"]
+            if row["session_id"] in session_ids
+        }
+        snapshot_run_ids = {
+            row["run_id"]
+            for snapshot in snapshots.values()
+            if snapshot is not None
+            for row in snapshot.get("runs", ())
+        }
+        run_ids = current_run_ids | snapshot_run_ids
+        interaction_ids = {
+            row["interaction_id"]
+            for row in combined["interactions"]
+            if row["run_id"] in run_ids
+        } | {
+            row["interaction_id"]
+            for snapshot in snapshots.values()
+            if snapshot is not None
+            for row in snapshot.get("interactions", ())
+        }
+        proposal_ids = {
+            row["proposal_id"]
+            for row in combined["session_commit_proposals"]
+            if row["session_id"] in session_ids
+        } | {
+            row["proposal_id"]
+            for snapshot in snapshots.values()
+            if snapshot is not None
+            for row in snapshot.get("session_commit_proposals", ())
+        }
+        combined["sessions"] = [
+            row
+            for row in combined["sessions"]
+            if row["session_id"] not in session_ids
+        ]
+        combined["runs"] = [
+            row for row in combined["runs"] if row["run_id"] not in run_ids
+        ]
+        for key in ("run_events", "fork_base_events", "steer_inbox"):
+            combined[key] = {
+                run_id: values
+                for run_id, values in combined[key].items()
+                if run_id not in run_ids
+            }
+        combined["start_idempotency"] = [
+            row
+            for row in combined["start_idempotency"]
+            if row["run_id"] not in run_ids
+        ]
+        combined["command_results"] = [
+            row for row in combined["command_results"] if row["run_id"] not in run_ids
+        ]
+        for key in ("checkpoints", "suspensions", "interactions"):
+            combined[key] = [
+                row for row in combined[key] if row["run_id"] not in run_ids
+            ]
+        combined["interaction_resolutions"] = [
+            row
+            for row in combined["interaction_resolutions"]
+            if row["interaction_id"] not in interaction_ids
+        ]
+        combined["session_commit_proposals"] = [
+            row
+            for row in combined["session_commit_proposals"]
+            if row["proposal_id"] not in proposal_ids
+        ]
+        combined["session_commit_command_results"] = [
+            row
+            for row in combined["session_commit_command_results"]
+            if row["proposal"]["proposal_id"] not in proposal_ids
+        ]
+        for snapshot in snapshots.values():
+            if snapshot is None:
+                continue
+            for key in (
+                "sessions",
+                "runs",
+                "start_idempotency",
+                "command_results",
+                "checkpoints",
+                "suspensions",
+                "interactions",
+                "interaction_resolutions",
+                "session_commit_proposals",
+                "session_commit_command_results",
+            ):
+                combined[key].extend(snapshot.get(key, ()))
+            for key in ("run_events", "fork_base_events", "steer_inbox"):
+                combined[key].update(snapshot.get(key, {}))
+        subscribers = self._subscribers
+        derived = self._derived_state
+        self._load_state_locked(combined)
+        self._subscribers.update(subscribers)
+        self._derived_state.update(derived)
+
     async def create_run(
         self, command: StartRun, context: RequestContext
     ) -> RunCreationResult:
@@ -209,15 +433,60 @@ class SessionStoreCoordinator:
         Items, and `run.accepted`/`run.queued` must become visible together.
         """
 
+        idempotency_scope = (
+            context.actor.tenant_id,
+            context.actor.principal_type,
+            context.actor.principal_id,
+            command.idempotency_key,
+        )
         async with self._lock:
+            start_lock = self._start_locks.setdefault(
+                idempotency_scope, asyncio.Lock()
+            )
+        async with start_lock:
+            async with self._lock:
+                existing_run_id = self._start_idempotency.get(idempotency_scope)
+                existing = (
+                    self._runs.get(existing_run_id)
+                    if existing_run_id is not None
+                    else None
+                )
+            planned_session_id = (
+                existing.session_id
+                if existing is not None
+                else new_id("session")
+                if command.session_concurrency_mode == SessionConcurrencyMode.FORK
+                or command.session_id is None
+                else command.session_id
+            )
+            lock_session_ids = [planned_session_id]
+            if (
+                command.session_concurrency_mode == SessionConcurrencyMode.FORK
+                and command.session_id is not None
+            ):
+                lock_session_ids.append(command.session_id)
+            async with self._session_operation(*lock_session_ids):
+                return await self._create_run_locked(
+                    command,
+                    context,
+                    idempotency_scope=idempotency_scope,
+                    planned_session_id=planned_session_id,
+                )
+
+    async def _create_run_locked(
+        self,
+        command: StartRun,
+        context: RequestContext,
+        *,
+        idempotency_scope: tuple[str | None, PrincipalType, str, str],
+        planned_session_id: str,
+    ) -> RunCreationResult:
+        # Keep the existing atomic state-machine body grouped while the outer
+        # per-Session guard owns durability and rollback.
+        with nullcontext():
             self._validate_external_input_roles(command.input, context)
             # Start idempotency is scoped to tenant + principal + key. Reusing a
             # key with a different payload is a conflict, not a duplicate.
-            idempotency_scope = (
-                context.actor.tenant_id,
-                context.actor.principal_id,
-                command.idempotency_key,
-            )
             existing_run_id = self._start_idempotency.get(idempotency_scope)
             if existing_run_id is not None:
                 self._require_same_idempotent_request(
@@ -259,9 +528,9 @@ class SessionStoreCoordinator:
                 fork_base_events = self._canonical_history_events_locked(
                     parent.session_id, fork_base_sequence
                 )
-                session_id = new_id("session")
+                session_id = planned_session_id
             else:
-                session_id = command.session_id or new_id("session")
+                session_id = planned_session_id
 
             session = self._sessions.get(session_id)
             if session is None:
@@ -272,6 +541,11 @@ class SessionStoreCoordinator:
                     created_at=now,
                     updated_at=now,
                     parent_session_id=parent_session_id,
+                    owner=ActorRef(
+                        tenant_id=context.actor.tenant_id,
+                        principal_type=context.actor.principal_type,
+                        principal_id=context.actor.principal_id,
+                    ),
                 )
                 self._sessions[session_id] = session
             else:
@@ -417,7 +691,7 @@ class SessionStoreCoordinator:
         advanced the Session since the snapshot base.
         """
 
-        async with self._lock:
+        async with self._run_session_operation(command.run_id):
             key = (command.run_id, command.idempotency_key)
             digest = self._digest(command.model_dump(mode="json"))
             previous = self._session_commit_command_results.get(key)
@@ -543,7 +817,7 @@ class SessionStoreCoordinator:
         context: RequestContext,
         publish: bool,
     ) -> SessionCommitProposal:
-        async with self._lock:
+        async with self._proposal_session_operation(command.proposal_id):
             key = (command.proposal_id, command.idempotency_key)
             digest = self._digest(
                 {
@@ -697,7 +971,7 @@ class SessionStoreCoordinator:
     async def list_session_commit_proposals(
         self, session_id: str
     ) -> tuple[SessionCommitProposal, ...]:
-        async with self._lock:
+        async with self._session_read(session_id):
             if session_id not in self._sessions:
                 raise self._not_found("session.not_found", session_id)
             return tuple(
@@ -733,7 +1007,7 @@ class SessionStoreCoordinator:
         validated before any row or sequence is changed.
         """
 
-        async with self._lock:
+        async with self._run_session_operation(run_id):
             command_key = (run_id, idempotency_key)
             command_digest = self._digest(
                 {
@@ -854,14 +1128,176 @@ class SessionStoreCoordinator:
             return result
 
     async def get_run(self, run_id: str) -> RunSnapshot:
-        async with self._lock:
+        async with self._run_session_read(run_id):
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
             return self._run_snapshot(row)
 
-    async def get_run_result(self, run_id: str) -> RunResult:
+    async def get_execution_resource(
+        self, run_id: str
+    ) -> ExecutionResourceRecord | None:
+        async with self._run_session_read(run_id):
+            if run_id not in self._runs:
+                raise self._not_found("run.not_found", run_id)
+            return self._execution_resources.get(run_id)
+
+    async def list_pending_execution_releases(
+        self,
+    ) -> tuple[ExecutionResourceRecord, ...]:
+        pending = {
+            ExecutionResourceState.RELEASE_BLOCKED,
+            ExecutionResourceState.RELEASE_REQUESTED,
+            ExecutionResourceState.RELEASE_FAILED,
+        }
         async with self._lock:
+            return tuple(
+                sorted(
+                    (
+                        record
+                        for record in self._execution_resources.values()
+                        if record.state in pending
+                    ),
+                    key=lambda record: (record.updated_at, record.run_id),
+                )
+            )
+
+    async def list_execution_resources(
+        self,
+    ) -> tuple[ExecutionResourceRecord, ...]:
+        async with self._lock:
+            return tuple(
+                sorted(
+                    self._execution_resources.values(),
+                    key=lambda record: (record.updated_at, record.run_id),
+                )
+            )
+
+    async def commit_execution_resource(
+        self,
+        *,
+        record: ExecutionResourceRecord,
+        expected_run_revision: int,
+        expected_resource_revision: int | None,
+        event_type: str,
+        context: RequestContext,
+        idempotency_key: str,
+    ) -> ExecutionResourceRecord:
+        """CAS one Run's replaceable compute binding and append its lifecycle fact."""
+
+        allowed_events = {
+            "sandbox.ready",
+            "sandbox.resumed",
+            "sandbox.release_requested",
+            "sandbox.release_blocked",
+            "sandbox.release_failed",
+            "sandbox.released",
+            "sandbox.restore_requested",
+            "sandbox.restore_failed",
+        }
+        if event_type not in allowed_events:
+            raise ValueError(f"unsupported execution resource event {event_type!r}")
+        run_id = record.run_id
+        async with self._run_session_operation(run_id):
+            command_key = (run_id, idempotency_key)
+            command_digest = self._digest(
+                {
+                    "record": record.model_dump(mode="json"),
+                    "expected_run_revision": expected_run_revision,
+                    "expected_resource_revision": expected_resource_revision,
+                    "event_type": event_type,
+                }
+            )
+            previous_result = self._execution_resource_command_results.get(command_key)
+            if previous_result is not None:
+                run = self._runs.get(run_id)
+                if run is None:
+                    raise self._not_found("run.not_found", run_id)
+                self._authorize_session_actor_locked(run.session_id, context)
+                self._require_same_idempotent_request(
+                    self._execution_resource_command_digests[command_key],
+                    command_digest,
+                )
+                return previous_result
+
+            run = self._runs.get(run_id)
+            if run is None:
+                raise self._not_found("run.not_found", run_id)
+            self._authorize_session_actor_locked(run.session_id, context)
+            if run.revision != expected_run_revision:
+                raise self._conflict(
+                    "run.revision_conflict",
+                    f"expected run revision {expected_run_revision}, current {run.revision}",
+                )
+            previous = self._execution_resources.get(run_id)
+            current_resource_revision = previous.revision if previous is not None else None
+            if current_resource_revision != expected_resource_revision:
+                raise self._conflict(
+                    "sandbox.resource_revision_conflict",
+                    "execution resource revision changed before commit",
+                )
+            if record.sandbox_ref.owner_run_id != run_id:
+                raise ValueError("sandbox owner_run_id must match resource run_id")
+            if (
+                record.sandbox_ref.spec_hash != record.sandbox_spec.spec_hash
+                or record.sandbox_ref.policy_hash != record.sandbox_spec.policy_hash
+            ):
+                raise ValueError("sandbox ref and resolved spec hashes must match")
+            if record.run_resolved_spec_hash != run.resolved_spec_hash:
+                raise self._conflict(
+                    "sandbox.policy_stale",
+                    "resolved sandbox spec no longer matches the accepted Run",
+                )
+
+            next_revision = (current_resource_revision or 0) + 1
+            now = self._clock()
+            committed = record.model_copy(
+                update={"revision": next_revision, "updated_at": now}
+            )
+            checkpoint = committed.sandbox_checkpoint
+            event = EventDraft(
+                type=event_type,
+                data=SandboxEventData(
+                    sandbox_id=committed.sandbox_ref.sandbox_id,
+                    state=committed.state.value,
+                    generation=committed.generation,
+                    disposition=(
+                        committed.release_disposition.value
+                        if committed.release_disposition is not None
+                        else None
+                    ),
+                    checkpoint_id=(
+                        checkpoint.checkpoint_id if checkpoint is not None else None
+                    ),
+                    compute_released=committed.compute_released,
+                    blocking_job_ids=committed.blocking_job_ids,
+                    blocking_child_run_ids=committed.blocking_child_run_ids,
+                    retry_count=committed.retry_count,
+                    error=committed.error,
+                ),
+            )
+            session = self._sessions[run.session_id]
+            events = self._prepare_events_locked(
+                run,
+                session,
+                (event,),
+                context.actor,
+                context.trace.correlation_id,
+            )
+            run.revision += 1
+            run.updated_at = now
+            session.revision += 1
+            session.updated_at = now
+            self._execution_resources[run_id] = committed
+            self._execution_resource_command_results[command_key] = committed
+            self._execution_resource_command_digests[command_key] = command_digest
+            self._persist_events_locked(run, session, events)
+            await self._commit_storage_locked(run.session_id)
+            self._fanout_locked(run_id, events)
+            return committed
+
+    async def get_run_result(self, run_id: str) -> RunResult:
+        async with self._run_session_read(run_id):
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
@@ -929,7 +1365,7 @@ class SessionStoreCoordinator:
             )
 
     async def get_start_command(self, run_id: str) -> StartRun:
-        async with self._lock:
+        async with self._run_session_read(run_id):
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
@@ -938,7 +1374,7 @@ class SessionStoreCoordinator:
             return row.start_command
 
     async def get_latest_checkpoint(self, run_id: str) -> Checkpoint:
-        async with self._lock:
+        async with self._run_session_read(run_id):
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
@@ -947,14 +1383,58 @@ class SessionStoreCoordinator:
             return self._checkpoints[row.checkpoint_id]
 
     async def get_session(self, session_id: str) -> SessionSnapshot:
-        async with self._lock:
+        async with self._session_read(session_id):
             row = self._sessions.get(session_id)
             if row is None:
                 raise self._not_found("session.not_found", session_id)
             return self._session_snapshot(row)
 
+    async def authorize_session_actor(
+        self, session_id: str, context: RequestContext
+    ) -> None:
+        """Check durable ownership without exposing aggregate internals."""
+
+        async with self._session_read(session_id):
+            if session_id not in self._sessions:
+                raise self._not_found("session.not_found", session_id)
+            self._authorize_session_actor_locked(session_id, context)
+
     async def delete_session(self, session_id: str) -> None:
-        async with self._lock:
+        for _attempt in range(3):
+            async with self._lock:
+                session_ids = self._session_tree_ids_locked(session_id)
+            async with self._session_operation(*session_ids):
+                current = self._session_tree_ids_locked(session_id)
+                if current != session_ids:
+                    continue
+                await self._delete_session_tree_locked(session_id)
+                async with self._lock:
+                    self._topology_revision += 1
+                    for removed_session_id in session_ids:
+                        self._session_locks.pop(removed_session_id, None)
+                return
+        raise self._conflict(
+            "session.topology_changed",
+            "session tree changed repeatedly while deletion was acquiring locks",
+        )
+
+    def _session_tree_ids_locked(self, session_id: str) -> frozenset[str]:
+        if session_id not in self._sessions:
+            raise self._not_found("session.not_found", session_id)
+        session_ids = {session_id}
+        while True:
+            descendants = {
+                row.session_id
+                for row in self._sessions.values()
+                if row.parent_session_id in session_ids
+                and row.session_id not in session_ids
+            }
+            if not descendants:
+                return frozenset(session_ids)
+            session_ids.update(descendants)
+
+    async def _delete_session_tree_locked(self, session_id: str) -> None:
+        with nullcontext():
             session = self._sessions.get(session_id)
             if session is None:
                 raise self._not_found("session.not_found", session_id)
@@ -1020,6 +1500,12 @@ class SessionStoreCoordinator:
                 if key[0] in run_ids:
                     self._command_results.pop(key, None)
                     self._command_digests.pop(key, None)
+            for run_id in run_ids:
+                self._execution_resources.pop(run_id, None)
+            for key in tuple(self._execution_resource_command_results):
+                if key[0] in run_ids:
+                    self._execution_resource_command_results.pop(key, None)
+                    self._execution_resource_command_digests.pop(key, None)
             self._checkpoints = {
                 key: value
                 for key, value in self._checkpoints.items()
@@ -1059,7 +1545,7 @@ class SessionStoreCoordinator:
             await self._delete_storage_locked(session_id, frozenset(session_ids))
 
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]:
-        async with self._lock:
+        async with self._session_read(session_id):
             if session_id not in self._sessions:
                 raise self._not_found("session.not_found", session_id)
             rows = sorted(
@@ -1130,7 +1616,7 @@ class SessionStoreCoordinator:
     ) -> tuple[RuntimeEvent, ...]:
         if after_sequence < 0:
             raise ValueError("after_sequence must be non-negative")
-        async with self._lock:
+        async with self._session_read(session_id):
             if session_id not in self._sessions:
                 raise self._not_found("session.not_found", session_id)
             events = [
@@ -1149,7 +1635,7 @@ class SessionStoreCoordinator:
     ) -> tuple[RuntimeEvent, ...]:
         if after_sequence < 0:
             raise ValueError("after_sequence must be non-negative")
-        async with self._lock:
+        async with self._run_session_read(run_id):
             if run_id not in self._runs:
                 raise self._not_found("run.not_found", run_id)
             events = [
@@ -1166,7 +1652,7 @@ class SessionStoreCoordinator:
     async def read_fork_base_events(self, run_id: str) -> tuple[RuntimeEvent, ...]:
         """Return the immutable parent-history copy captured for a fork Run."""
 
-        async with self._lock:
+        async with self._run_session_read(run_id):
             if run_id not in self._runs:
                 raise self._not_found("run.not_found", run_id)
             return self._fork_base_events.get(run_id, ())
@@ -1234,7 +1720,7 @@ class SessionStoreCoordinator:
     ) -> CommitResult:
         """Append ordered steering input without mutating the model ledger yet."""
 
-        async with self._lock:
+        async with self._run_session_operation(command.run_id):
             command_key = (command.run_id, command.idempotency_key)
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
@@ -1327,7 +1813,7 @@ class SessionStoreCoordinator:
     ) -> SteerClaimResult:
         """Atomically mark pending steering as applied at a model safe point."""
 
-        async with self._lock:
+        async with self._run_session_operation(run_id):
             row = self._runs.get(run_id)
             if row is None:
                 raise self._not_found("run.not_found", run_id)
@@ -1435,7 +1921,7 @@ class SessionStoreCoordinator:
             )
 
     async def list_steers(self, run_id: str) -> tuple[SteerInboxEntry, ...]:
-        async with self._lock:
+        async with self._run_session_read(run_id):
             if run_id not in self._runs:
                 raise self._not_found("run.not_found", run_id)
             return tuple(self._steer_inbox.get(run_id, ()))
@@ -1445,7 +1931,7 @@ class SessionStoreCoordinator:
     ) -> CommitResult:
         """Persist one answer and atomically move the suspended Run to RESUMING."""
 
-        async with self._lock:
+        async with self._run_session_operation(command.run_id):
             command_key = (command.run_id, command.idempotency_key)
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
@@ -1613,7 +2099,7 @@ class SessionStoreCoordinator:
     ) -> CommitResult:
         """Accept explicit resume for a non-interaction suspension."""
 
-        async with self._lock:
+        async with self._run_session_operation(command.run_id):
             command_key = (command.run_id, command.idempotency_key)
             command_digest = self._digest(command.model_dump(mode="json"))
             previous = self._command_results.get(command_key)
@@ -1775,6 +2261,11 @@ class SessionStoreCoordinator:
                     "updated_at": row.updated_at.isoformat(),
                     "active_serial_run_id": row.active_serial_run_id,
                     "parent_session_id": row.parent_session_id,
+                    "owner": (
+                        row.owner.model_dump(mode="json")
+                        if row.owner is not None
+                        else None
+                    ),
                     "revision_sequences": {
                         str(revision): sequence
                         for revision, sequence in row.revision_sequences.items()
@@ -1823,8 +2314,9 @@ class SessionStoreCoordinator:
             "start_idempotency": [
                 {
                     "tenant_id": scope[0],
-                    "principal_id": scope[1],
-                    "idempotency_key": scope[2],
+                    "principal_type": scope[1].value,
+                    "principal_id": scope[2],
+                    "idempotency_key": scope[3],
                     "run_id": run_id,
                     "request_digest": self._start_idempotency_digests[scope],
                 }
@@ -1844,6 +2336,19 @@ class SessionStoreCoordinator:
                     },
                 }
                 for key, result in self._command_results.items()
+            ],
+            "execution_resources": [
+                value.model_dump(mode="json")
+                for value in self._execution_resources.values()
+            ],
+            "execution_resource_command_results": [
+                {
+                    "run_id": key[0],
+                    "idempotency_key": key[1],
+                    "request_digest": self._execution_resource_command_digests[key],
+                    "record": value.model_dump(mode="json"),
+                }
+                for key, value in self._execution_resource_command_results.items()
             ],
             "checkpoints": [
                 value.model_dump(mode="json") for value in self._checkpoints.values()
@@ -1914,6 +2419,11 @@ class SessionStoreCoordinator:
                     "updated_at": session.updated_at.isoformat(),
                     "active_serial_run_id": session.active_serial_run_id,
                     "parent_session_id": session.parent_session_id,
+                    "owner": (
+                        session.owner.model_dump(mode="json")
+                        if session.owner is not None
+                        else None
+                    ),
                     "revision_sequences": {
                         str(revision): sequence
                         for revision, sequence in session.revision_sequences.items()
@@ -1963,8 +2473,9 @@ class SessionStoreCoordinator:
             "start_idempotency": [
                 {
                     "tenant_id": scope[0],
-                    "principal_id": scope[1],
-                    "idempotency_key": scope[2],
+                    "principal_type": scope[1].value,
+                    "principal_id": scope[2],
+                    "idempotency_key": scope[3],
                     "run_id": run_id,
                     "request_digest": self._start_idempotency_digests[scope],
                 }
@@ -1985,6 +2496,21 @@ class SessionStoreCoordinator:
                     },
                 }
                 for key, result in self._command_results.items()
+                if key[0] in run_ids
+            ],
+            "execution_resources": [
+                value.model_dump(mode="json")
+                for value in self._execution_resources.values()
+                if value.run_id in run_ids
+            ],
+            "execution_resource_command_results": [
+                {
+                    "run_id": key[0],
+                    "idempotency_key": key[1],
+                    "request_digest": self._execution_resource_command_digests[key],
+                    "record": value.model_dump(mode="json"),
+                }
+                for key, value in self._execution_resource_command_results.items()
                 if key[0] in run_ids
             ],
             "checkpoints": [
@@ -2051,6 +2577,11 @@ class SessionStoreCoordinator:
                 updated_at=datetime.fromisoformat(value["updated_at"]),
                 active_serial_run_id=value.get("active_serial_run_id"),
                 parent_session_id=value.get("parent_session_id"),
+                owner=(
+                    ActorRef.model_validate(value["owner"])
+                    if value.get("owner") is not None
+                    else None
+                ),
                 revision_sequences={
                     int(revision): int(sequence)
                     for revision, sequence in value["revision_sequences"].items()
@@ -2142,6 +2673,12 @@ class SessionStoreCoordinator:
                     )
                 )
 
+        for session_id, session_row in sessions.items():
+            if session_row.owner is None:
+                session_row.owner = self._derive_session_owner(
+                    session_id, runs=runs, session_events=session_events
+                )
+
         self._sessions = sessions
         self._runs = runs
         self._run_events = run_events
@@ -2152,6 +2689,7 @@ class SessionStoreCoordinator:
         self._start_idempotency = {
             (
                 value.get("tenant_id"),
+                self._start_principal_type(value, runs),
                 value["principal_id"],
                 value["idempotency_key"],
             ): value["run_id"]
@@ -2160,6 +2698,7 @@ class SessionStoreCoordinator:
         self._start_idempotency_digests = {
             (
                 value.get("tenant_id"),
+                self._start_principal_type(value, runs),
                 value["principal_id"],
                 value["idempotency_key"],
             ): value["request_digest"]
@@ -2182,6 +2721,33 @@ class SessionStoreCoordinator:
             self._command_digests[(value["run_id"], value["idempotency_key"])] = value[
                 "request_digest"
             ]
+        self._execution_resources = {
+            value["run_id"]: ExecutionResourceRecord.model_validate(value)
+            for value in payload.get("execution_resources", ())
+        }
+        if set(self._execution_resources) - set(runs):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="session_store.corrupt_state",
+                    category=ErrorCategory.CORRUPT_STATE,
+                    message="execution resource references a missing Run",
+                )
+            )
+        self._execution_resource_command_results = {}
+        self._execution_resource_command_digests = {}
+        for value in payload.get("execution_resource_command_results", ()):
+            key = (value["run_id"], value["idempotency_key"])
+            result = ExecutionResourceRecord.model_validate(value["record"])
+            if result.run_id not in runs:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="session_store.corrupt_state",
+                        category=ErrorCategory.CORRUPT_STATE,
+                        message="execution resource command references a missing Run",
+                    )
+                )
+            self._execution_resource_command_results[key] = result
+            self._execution_resource_command_digests[key] = value["request_digest"]
         self._checkpoints = {
             value["checkpoint_id"]: Checkpoint.model_validate(value)
             for value in payload.get("checkpoints", ())
@@ -2272,29 +2838,11 @@ class SessionStoreCoordinator:
         actor = context.actor
         if "session.admin" in actor.scopes:
             return
-        owner = next(
-            (
-                row.request_context.actor
-                for row in sorted(
-                    (
-                        value
-                        for value in self._runs.values()
-                        if value.session_id == session_id
-                        and value.request_context is not None
-                    ),
-                    key=lambda value: (value.created_at, value.run_id),
-                )
-            ),
-            None,
-        )
+        session = self._sessions.get(session_id)
+        owner = session.owner if session is not None else None
         if owner is None:
-            owner = next(
-                (
-                    event.actor
-                    for event in self._session_events.get(session_id, ())
-                    if event.type == "run.accepted"
-                ),
-                None,
+            owner = self._derive_session_owner(
+                session_id, runs=self._runs, session_events=self._session_events
             )
         if owner is None:
             raise SageV2Error(
@@ -2307,6 +2855,7 @@ class SessionStoreCoordinator:
             )
         if (
             owner.tenant_id != actor.tenant_id
+            or owner.principal_type != actor.principal_type
             or owner.principal_id != actor.principal_id
         ):
             raise SageV2Error(
@@ -2317,6 +2866,64 @@ class SessionStoreCoordinator:
                     safe_to_resume=True,
                 )
             )
+
+    @staticmethod
+    def _derive_session_owner(
+        session_id: str,
+        *,
+        runs: dict[str, _RunRow],
+        session_events: dict[str, list[RuntimeEvent]],
+    ) -> ActorRef | None:
+        owner = next(
+            (
+                row.request_context.actor
+                for row in sorted(
+                    (
+                        value
+                        for value in runs.values()
+                        if value.session_id == session_id
+                        and value.request_context is not None
+                    ),
+                    key=lambda value: (value.created_at, value.run_id),
+                )
+            ),
+            None,
+        )
+        if owner is None:
+            owner = next(
+                (
+                    event.actor
+                    for event in session_events.get(session_id, ())
+                    if event.type == "run.accepted"
+                ),
+                None,
+            )
+        if owner is None:
+            return None
+        return ActorRef(
+            tenant_id=owner.tenant_id,
+            principal_type=owner.principal_type,
+            principal_id=owner.principal_id,
+        )
+
+    @staticmethod
+    def _start_principal_type(
+        value: dict[str, Any], runs: dict[str, _RunRow]
+    ) -> PrincipalType:
+        configured = value.get("principal_type")
+        if configured is not None:
+            return PrincipalType(configured)
+        run = runs.get(value["run_id"])
+        if run is not None and run.request_context is not None:
+            return run.request_context.actor.principal_type
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="session_store.owner_not_established",
+                category=ErrorCategory.CORRUPT_STATE,
+                message="legacy StartRun idempotency has no verifiable principal type",
+                safe_to_resume=False,
+            )
+        )
 
     @staticmethod
     def _validate_external_input_roles(items, context: RequestContext) -> None:

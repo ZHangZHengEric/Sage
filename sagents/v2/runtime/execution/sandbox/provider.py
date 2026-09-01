@@ -21,6 +21,8 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxCheckpointRef,
     SandboxGrant,
     SandboxRef,
+    SandboxReleaseReceipt,
+    SandboxReleaseRequest,
     SandboxSnapshot,
     TerminateMode,
 )
@@ -114,4 +116,10 @@ class SandboxProvider(Protocol):
         self, checkpoint: SandboxCheckpointRef, context: RequestContext
     ) -> SandboxHandle: ...
 
+    async def release(
+        self, request: SandboxReleaseRequest, context: RequestContext
+    ) -> SandboxReleaseReceipt: ...
+
     async def terminate(self, ref: SandboxRef, mode: TerminateMode) -> None: ...
+
+    async def purge_terminated(self, ref: SandboxRef) -> None: ...

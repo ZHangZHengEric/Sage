@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
+    SchedulerClaimPolicy,
     SchedulerCapabilities,
     WorkItem,
     WorkerLease,
@@ -20,6 +21,9 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
+
+
+_T = TypeVar("_T")
 
 
 class InMemoryScheduler:
@@ -37,12 +41,16 @@ class InMemoryScheduler:
         self,
         *,
         max_pending_items: int = 1024,
+        max_retained_terminal_items: int = 4096,
         clock: Callable[[], datetime] = utc_now,
         state_store: "SchedulerStateStore | None" = None,
     ) -> None:
         if max_pending_items < 1:
             raise ValueError("max_pending_items must be positive")
+        if max_retained_terminal_items < 0:
+            raise ValueError("max_retained_terminal_items must be non-negative")
         self._max_pending = max_pending_items
+        self._max_retained_terminal = max_retained_terminal_items
         self._clock = clock
         self._condition = asyncio.Condition()
         self._pending: list[tuple[float, int, int, str]] = []
@@ -51,8 +59,10 @@ class InMemoryScheduler:
         self._leases: dict[str, WorkerLease] = {}
         self._work_lease: dict[str, str] = {}
         self._run_lease: dict[str, str] = {}
-        self._fence_counters: dict[str, int] = {}
+        self._fence_sequence = 0
         self._cancelled: set[str] = set()
+        self._terminal_idempotency_keys: list[str] = []
+        self._terminal_idempotency_key_set: set[str] = set()
         self._sequence = 0
         self._closed = False
         self._state_store = state_store
@@ -68,7 +78,11 @@ class InMemoryScheduler:
             supports_delayed_work=True,
             supports_leases=True,
             supports_fencing=True,
+            supports_distributed_claims=False,
+            supports_atomic_tenant_quota=True,
+            supports_atomic_fenced_mutations=True,
             max_pending_items=self._max_pending,
+            max_retained_terminal_items=self._max_retained_terminal,
         )
 
     async def submit(self, work: WorkItem) -> bool:
@@ -106,6 +120,7 @@ class InMemoryScheduler:
         worker_id: str,
         *,
         lease_duration: timedelta,
+        policy: SchedulerClaimPolicy | None = None,
         wait_timeout: float | None = None,
     ) -> WorkerLease | None:
         if lease_duration.total_seconds() <= 0:
@@ -116,11 +131,11 @@ class InMemoryScheduler:
                 while True:
                     self._ensure_open()
                     reaped = self._reap_expired_locked()
-                    work = self._pop_available_locked()
+                    work = self._pop_available_locked(policy)
                     if work is not None:
                         now = self._clock()
-                        token = self._fence_counters.get(work.run_id, 0) + 1
-                        self._fence_counters[work.run_id] = token
+                        self._fence_sequence += 1
+                        token = self._fence_sequence
                         lease = WorkerLease(
                             lease_id=new_id("lease"),
                             work=work,
@@ -136,7 +151,7 @@ class InMemoryScheduler:
                         return lease
                     if reaped:
                         await self._persist_locked()
-                    delay = self._seconds_until_next_locked()
+                    delay = self._seconds_until_next_locked(policy)
                     if delay is None:
                         await self._condition.wait()
                     else:
@@ -155,14 +170,14 @@ class InMemoryScheduler:
             async with self._condition:
                 self._ensure_open()
                 reaped = self._reap_expired_locked()
-                work = self._pop_available_locked()
+                work = self._pop_available_locked(policy)
                 if work is None:
                     if reaped:
                         await self._persist_locked()
                     return None
                 now = self._clock()
-                token = self._fence_counters.get(work.run_id, 0) + 1
-                self._fence_counters[work.run_id] = token
+                self._fence_sequence += 1
+                token = self._fence_sequence
                 lease = WorkerLease(
                     lease_id=new_id("lease"),
                     work=work,
@@ -221,6 +236,7 @@ class InMemoryScheduler:
                 self._push_locked(retry)
             else:
                 self._items.pop(lease.work.work_id, None)
+                self._remember_terminal_locked(lease.work)
             await self._persist_locked()
             self._condition.notify_all()
 
@@ -231,9 +247,22 @@ class InMemoryScheduler:
                 await self._persist_locked()
             self._assert_fence_locked(lease)
 
+    async def execute_fenced(
+        self, lease: WorkerLease, operation: Callable[[], Awaitable[_T]]
+    ) -> _T:
+        """Keep the lease linearizable across one authoritative mutation."""
+
+        async with self._condition:
+            reaped = self._reap_expired_locked()
+            if reaped:
+                await self._persist_locked()
+            self._assert_fence_locked(lease)
+            return await operation()
+
     async def cancel(self, work_id: str) -> bool:
         async with self._condition:
-            if work_id not in self._items:
+            work = self._items.get(work_id)
+            if work is None:
                 return False
             self._cancelled.add(work_id)
             lease_id = self._work_lease.pop(work_id, None)
@@ -242,6 +271,11 @@ class InMemoryScheduler:
                 if lease is not None:
                     self._run_lease.pop(lease.work.run_id, None)
             self._items.pop(work_id, None)
+            self._pending = [
+                entry for entry in self._pending if entry[3] != work_id
+            ]
+            heapq.heapify(self._pending)
+            self._remember_terminal_locked(work)
             await self._persist_locked()
             self._condition.notify_all()
             return True
@@ -282,7 +316,8 @@ class InMemoryScheduler:
             "leases": [
                 value.model_dump(mode="json") for value in self._leases.values()
             ],
-            "fence_counters": dict(self._fence_counters),
+            "fence_sequence": self._fence_sequence,
+            "terminal_idempotency_keys": list(self._terminal_idempotency_keys),
             "cancelled": sorted(self._cancelled),
             "sequence": self._sequence,
         }
@@ -312,12 +347,44 @@ class InMemoryScheduler:
         self._run_lease = {
             lease.work.run_id: lease.lease_id for lease in self._leases.values()
         }
-        self._fence_counters = {
-            str(key): int(value)
-            for key, value in dict(state.get("fence_counters") or {}).items()
-        }
+        legacy_fences = [
+            int(value)
+            for value in dict(state.get("fence_counters") or {}).values()
+        ]
+        self._fence_sequence = int(
+            state.get("fence_sequence") or max(legacy_fences, default=0)
+        )
         self._cancelled = {str(value) for value in state.get("cancelled", ())}
+        configured_terminal = state.get("terminal_idempotency_keys")
+        if configured_terminal is None:
+            active_work_ids = set(self._items)
+            configured_terminal = [
+                key
+                for key, work_id in self._idempotency.items()
+                if work_id not in active_work_ids
+            ]
+        self._terminal_idempotency_keys = [
+            str(value) for value in configured_terminal
+        ]
+        self._terminal_idempotency_key_set = set(self._terminal_idempotency_keys)
+        self._prune_terminal_metadata_locked()
         self._sequence = int(state.get("sequence") or 0)
+
+    def _remember_terminal_locked(self, work: WorkItem | None) -> None:
+        if work is None or work.idempotency_key in self._terminal_idempotency_key_set:
+            return
+        self._terminal_idempotency_keys.append(work.idempotency_key)
+        self._terminal_idempotency_key_set.add(work.idempotency_key)
+        self._prune_terminal_metadata_locked()
+
+    def _prune_terminal_metadata_locked(self) -> None:
+        while len(self._terminal_idempotency_keys) > self._max_retained_terminal:
+            key = self._terminal_idempotency_keys.pop(0)
+            self._terminal_idempotency_key_set.discard(key)
+            work_id = self._idempotency.get(key)
+            if work_id is not None and work_id not in self._items:
+                self._idempotency.pop(key, None)
+                self._cancelled.discard(work_id)
 
     def _push_locked(self, work: WorkItem) -> None:
         self._sequence += 1
@@ -331,8 +398,14 @@ class InMemoryScheduler:
             ),
         )
 
-    def _pop_available_locked(self) -> WorkItem | None:
+    def _pop_available_locked(
+        self, policy: SchedulerClaimPolicy | None = None
+    ) -> WorkItem | None:
         now_timestamp = self._clock().timestamp()
+        active_by_tenant: dict[str | None, int] = {}
+        for lease in self._leases.values():
+            tenant_id = lease.work.tenant_id
+            active_by_tenant[tenant_id] = active_by_tenant.get(tenant_id, 0) + 1
         eligible: list[tuple[float, int, int, str]] = []
         skipped: list[tuple[float, int, int, str]] = []
         while self._pending:
@@ -348,6 +421,15 @@ class InMemoryScheduler:
             if self._items[work_id].run_id in self._run_lease:
                 skipped.append(entry)
                 continue
+            tenant_id = self._items[work_id].tenant_id
+            if (
+                policy is not None
+                and policy.max_active_per_tenant is not None
+                and active_by_tenant.get(tenant_id, 0)
+                >= policy.max_active_per_tenant
+            ):
+                skipped.append(entry)
+                continue
             eligible.append(entry)
         if not eligible:
             for entry in skipped:
@@ -360,7 +442,13 @@ class InMemoryScheduler:
             heapq.heappush(self._pending, entry)
         return self._items[selected_entry[3]]
 
-    def _seconds_until_next_locked(self) -> float | None:
+    def _seconds_until_next_locked(
+        self, policy: SchedulerClaimPolicy | None = None
+    ) -> float | None:
+        active_by_tenant: dict[str | None, int] = {}
+        for lease in self._leases.values():
+            tenant_id = lease.work.tenant_id
+            active_by_tenant[tenant_id] = active_by_tenant.get(tenant_id, 0) + 1
         candidates = [
             available_at
             for available_at, _, _, work_id in self._pending
@@ -368,6 +456,12 @@ class InMemoryScheduler:
             and work_id not in self._work_lease
             and work_id not in self._cancelled
             and self._items[work_id].run_id not in self._run_lease
+            and (
+                policy is None
+                or policy.max_active_per_tenant is None
+                or active_by_tenant.get(self._items[work_id].tenant_id, 0)
+                < policy.max_active_per_tenant
+            )
         ]
         if not candidates:
             return None
@@ -404,17 +498,12 @@ class InMemoryScheduler:
             or current.worker_id != lease.worker_id
             or current.fencing_token != lease.fencing_token
             or self._work_lease.get(lease.work.work_id) != lease.lease_id
+            or self._run_lease.get(lease.work.run_id) != lease.lease_id
         ):
             raise self._error(
                 "scheduler.fence_rejected",
                 ErrorCategory.CONFLICT,
                 "lease is stale or no longer owns the work item",
-            )
-        if self._fence_counters.get(lease.work.run_id) != lease.fencing_token:
-            raise self._error(
-                "scheduler.fence_rejected",
-                ErrorCategory.CONFLICT,
-                "a newer worker fencing token exists for this run",
             )
         return current
 

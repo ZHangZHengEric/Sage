@@ -22,8 +22,9 @@ from sagents.v2.contracts.run_state import (
 )
 from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionResolution
-from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.session_commit import SessionCommitProposal
+from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
 
 
 FILESYSTEM_SESSION_STORE_FORMAT_V1: Literal["sage.filesystem-session-store/v1"] = (
@@ -50,6 +51,7 @@ class SessionRowSnapshot(StrictModel):
     updated_at: datetime
     active_serial_run_id: str | None = None
     parent_session_id: str | None = None
+    owner: ActorRef | None = None
     revision_sequences: dict[str, int]
 
 
@@ -74,6 +76,7 @@ class RunRowSnapshot(StrictModel):
 
 class StartIdempotencySnapshot(StrictModel):
     tenant_id: str | None = None
+    principal_type: PrincipalType | None = None
     principal_id: str
     idempotency_key: str
     run_id: str
@@ -106,6 +109,13 @@ class CoordinatorCommandSnapshot(StrictModel):
     result_revision: int
 
 
+class ExecutionResourceCommandResultSnapshot(StrictModel):
+    run_id: str
+    idempotency_key: str
+    request_digest: str
+    record: ExecutionResourceRecord
+
+
 class SessionAggregateSnapshotV2(StrictModel):
     """Typed, transport-independent state for exactly one Session aggregate."""
 
@@ -118,6 +128,10 @@ class SessionAggregateSnapshotV2(StrictModel):
     fork_base_events: dict[str, tuple[RuntimeEvent, ...]] = {}
     start_idempotency: tuple[StartIdempotencySnapshot, ...] = ()
     command_results: tuple[CommandResultSnapshot, ...] = ()
+    execution_resources: tuple[ExecutionResourceRecord, ...] = ()
+    execution_resource_command_results: tuple[
+        ExecutionResourceCommandResultSnapshot, ...
+    ] = ()
     checkpoints: tuple[Checkpoint, ...] = ()
     suspensions: tuple[Suspension, ...] = ()
     interactions: tuple[InteractionRequest, ...] = ()

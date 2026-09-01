@@ -932,6 +932,7 @@ class Conversation {
     this.sessionId,
     this.parentSessionId,
     this.parentRunId,
+    this.forkBaseSessionRevision,
     this.parentToolCallId,
     this.runId = '',
     this.turnId = '',
@@ -958,6 +959,7 @@ class Conversation {
   String? sessionId;
   String? parentSessionId;
   String? parentRunId;
+  int? forkBaseSessionRevision;
   String? parentToolCallId;
   String runId;
   String turnId;
@@ -1030,6 +1032,8 @@ class Conversation {
       sessionId: json['session_id']?.toString(),
       parentSessionId: json['parent_session_id']?.toString(),
       parentRunId: json['parent_run_id']?.toString(),
+      forkBaseSessionRevision: (json['fork_base_session_revision'] as num?)
+          ?.toInt(),
       parentToolCallId: json['parent_tool_call_id']?.toString(),
       runId: json['run_id']?.toString() ?? '',
       turnId: json['turn_id']?.toString() ?? '',
@@ -1065,6 +1069,7 @@ class Conversation {
     'session_id': sessionId,
     'parent_session_id': parentSessionId,
     'parent_run_id': parentRunId,
+    'fork_base_session_revision': forkBaseSessionRevision,
     'parent_tool_call_id': parentToolCallId,
     'run_id': runId,
     'turn_id': turnId,

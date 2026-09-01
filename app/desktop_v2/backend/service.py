@@ -94,7 +94,7 @@ from sagents.v2.contracts.session_commit import (
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.execution import LocalWorkerDispatcher
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
-from sagents.v2.runtime.session import LeaseFencedSessionStore
+from sagents.v2.runtime.session import AuthorizedSessionAccess, LeaseFencedSessionStore
 from sagents.v2.agent import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.package.manifest.agents import (
@@ -162,13 +162,21 @@ from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
     IsolationLevel,
+    LifecyclePolicy,
     NetworkPolicy,
     OperationIntent,
     ProcessPolicy,
     ResolvedSandboxSpec,
+    SandboxDurability,
     SandboxGrantIssuer,
     SandboxHandle,
+    SandboxReleaseDisposition,
 )
+from sagents.v2.runtime.execution import (
+    ExecutionBindingLifecycleCoordinator,
+    ExecutionResourceState,
+)
+from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.skill import (
     ActiveSkillsContextProvider,
     AvailableSkillsContextProvider,
@@ -442,6 +450,10 @@ _CONTINUATION_COMPONENT_CHOICES = (
 
 def _desktop_component_scope(capability: str) -> str:
     return str(_DESKTOP_COMPONENTS.get(capability, {}).get("scope", "process"))
+
+
+def _desktop_component_api_version(capability: str) -> str:
+    return "3" if capability == "execution.sandbox" else "2"
 
 
 def _continuation_component_config(plugin_id: str) -> dict[str, Any]:
@@ -813,6 +825,7 @@ class DesktopRunRequest(BaseModel):
     idempotency_key: str | None = None
     session_concurrency_mode: SessionConcurrencyMode = SessionConcurrencyMode.SERIAL
     base_session_revision: int | None = Field(default=None, ge=0)
+    fork_source_run_id: str | None = None
 
     @model_validator(mode="after")
     def migrate_legacy_plan_mode(self):
@@ -1048,15 +1061,24 @@ class AgentRosterContextProvider:
 
 
 class _DesktopRunResources:
-    def __init__(self, sandbox_handle, scope_handles: list[Any]) -> None:
+    def __init__(
+        self, sandbox_handle, scope_handles: list[Any], lifecycle=None
+    ) -> None:
         self.sandbox_handle = sandbox_handle
         self.scope_handles = scope_handles
+        self.lifecycle = lifecycle
         self._closed = False
+        self.defer_close = False
 
     def __getattr__(self, name):
         return getattr(self.sandbox_handle, name)
 
     async def close(self) -> None:
+        if self.defer_close:
+            return
+        await self.close_now()
+
+    async def close_now(self) -> None:
         if self._closed:
             return
         self._closed = True
@@ -1082,16 +1104,20 @@ class _DesktopDriver:
         loop,
         workspace: Path,
         sandbox_handle,
+        lazy_builder=None,
     ) -> None:
         self.service = service
         self.loop = loop
         self.workspace = workspace
         self.sandbox_handle = sandbox_handle
+        self._lazy_builder = lazy_builder
+        self._compose_lock = asyncio.Lock()
         self._binding_closed = False
         self._binding_close_lock = asyncio.Lock()
         self._binding_close_task: asyncio.Task[None] | None = None
 
     async def execute(self, run_id: str, context: RequestContext):
+        await self._ensure_composed()
         token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(self.sandbox_handle.scope_handles)
         try:
             return await self.loop.execute(run_id, context)
@@ -1099,11 +1125,67 @@ class _DesktopDriver:
             _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
     async def resume(self, run_id: str, context: RequestContext):
+        await self._ensure_composed()
         token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(self.sandbox_handle.scope_handles)
         try:
             return await self.loop.resume(run_id, context)
         finally:
             _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
+
+    async def _ensure_composed(self) -> None:
+        if self.loop is not None:
+            return
+        async with self._compose_lock:
+            if self.loop is not None:
+                return
+            if self._lazy_builder is None:
+                raise RuntimeError("Desktop driver has no composition builder")
+            _resolved, loop, sandbox_handle = await self._lazy_builder()
+            self.loop = loop
+            self.sandbox_handle = sandbox_handle
+
+    async def on_suspended(self, context: RequestContext) -> None:
+        lifecycle = getattr(self.sandbox_handle, "lifecycle", None)
+        if lifecycle is not None:
+            record = await lifecycle.suspend(
+                run_id=self.sandbox_handle.ref.owner_run_id,
+                context=context,
+            )
+            if record is not None and self.service is not None:
+                log = (
+                    self.service.logger.warning
+                    if record.state == ExecutionResourceState.RELEASE_FAILED
+                    else self.service.logger.info
+                )
+                log(
+                    "sandbox.lifecycle_settled",
+                    "Sandbox suspension lifecycle settled",
+                    attributes={
+                        "run_id": record.run_id,
+                        "generation": record.generation,
+                        "state": record.state.value,
+                        "disposition": (
+                            record.release_disposition.value
+                            if record.release_disposition is not None
+                            else None
+                        ),
+                        "compute_released": record.compute_released,
+                        "blocking_job_count": len(record.blocking_job_ids),
+                        "blocking_child_run_count": len(
+                            record.blocking_child_run_ids
+                        ),
+                        "retry_count": record.retry_count,
+                    },
+                )
+            if (
+                record is not None
+                and record.state == ExecutionResourceState.RELEASE_BLOCKED
+                and record.blocking_job_ids
+            ):
+                self.sandbox_handle.defer_close = True
+                self.service._schedule_blocked_sandbox_cleanup(
+                    self.sandbox_handle, lifecycle, record, context
+                )
 
     async def close_binding(self) -> None:
         async with self._binding_close_lock:
@@ -1121,6 +1203,8 @@ class _DesktopDriver:
         await self.close_binding()
 
     async def _close_binding_once(self) -> None:
+        if self.sandbox_handle is None:
+            return
         controller = getattr(self.loop, "delegated_run_controller", None)
         controller_close = getattr(controller, "close", None)
         controller_error: BaseException | None = None
@@ -1162,23 +1246,27 @@ class _DesktopRecoveryAgent:
         workspace = await self.service.workspace_root(
             command.config.metadata.get("workspace_id"), command.agent_id
         )
-        _, loop, sandbox_handle = await self.service._build_loop(
-            agent=agent,
-            provider=provider,
-            workspace=workspace,
-            preferred_skills=tuple(
-                command.config.metadata.get("preferred_skills") or ()
-            ),
-            approval_mode=str(
-                command.config.metadata.get("approval_mode") or "high_risk"
-            ),
-            invocation_mode=command.invocation_mode or "normal",
-            session_id=(await self.runtime.get_run(run_id)).session_id,
-            run_id=run_id,
-            resolved_spec_hash=command.resolved_spec_hash,
-            component_snapshot=command.config.metadata.get("runtime_components"),
+        async def build():
+            return await self.service._build_loop(
+                agent=agent,
+                provider=provider,
+                workspace=workspace,
+                preferred_skills=tuple(
+                    command.config.metadata.get("preferred_skills") or ()
+                ),
+                approval_mode=str(
+                    command.config.metadata.get("approval_mode") or "high_risk"
+                ),
+                invocation_mode=command.invocation_mode or "normal",
+                session_id=(await self.runtime.get_run(run_id)).session_id,
+                run_id=run_id,
+                resolved_spec_hash=command.resolved_spec_hash,
+                component_snapshot=command.config.metadata.get("runtime_components"),
+            )
+
+        driver = _DesktopDriver(
+            self.service, None, workspace, None, lazy_builder=build
         )
-        driver = _DesktopDriver(self.service, loop, workspace, sandbox_handle)
         self.service._drivers[run_id] = driver
         return driver, agent
 
@@ -1337,6 +1425,7 @@ class DesktopV2Service:
         self._drivers: dict[str, _DesktopDriver] = {}
         self._run_observers: dict[str, asyncio.Task] = {}
         self._application_close_tasks: set[asyncio.Task] = set()
+        self._sandbox_cleanup_tasks: set[asyncio.Task] = set()
         self.logger.info(
             "service.initialized",
             "Desktop v2 service initialized",
@@ -1364,7 +1453,12 @@ class DesktopV2Service:
         selected = _stable_component_id(capability, selected)
         try:
             plan = self.extension_host.plan(
-                (CapabilityRequirement(capability=capability, api_version="2"),),
+                (
+                    CapabilityRequirement(
+                        capability=capability,
+                        api_version=_desktop_component_api_version(capability),
+                    ),
+                ),
                 selections={capability: selected},
                 configs={selected: config},
                 scope_overrides={selected: ExtensionScope.PROCESS},
@@ -1393,7 +1487,12 @@ class DesktopV2Service:
                 },
             )
             plan = self.extension_host.plan(
-                (CapabilityRequirement(capability=capability, api_version="2"),),
+                (
+                    CapabilityRequirement(
+                        capability=capability,
+                        api_version=_desktop_component_api_version(capability),
+                    ),
+                ),
                 selections={capability: default_plugin_id},
                 configs={default_plugin_id: config},
                 scope_overrides={default_plugin_id: ExtensionScope.PROCESS},
@@ -1423,6 +1522,7 @@ class DesktopV2Service:
             language=settings.language,
         )
         await self.dispatcher.start()
+        await self._recover_pending_sandbox_cleanups()
         return workspace
 
     async def close(self) -> None:
@@ -1432,6 +1532,11 @@ class DesktopV2Service:
             task.cancel()
         if observers:
             await asyncio.gather(*observers, return_exceptions=True)
+        cleanup_tasks = tuple(self._sandbox_cleanup_tasks)
+        for task in cleanup_tasks:
+            task.cancel()
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
         await self.dispatcher.close()
         await asyncio.sleep(0)
         close_tasks = tuple(self._application_close_tasks)
@@ -1853,7 +1958,8 @@ class DesktopV2Service:
                     "session": session.model_dump(mode="json"),
                     "run": run.model_dump(mode="json"),
                     "agent_id": command.agent_id,
-                    "parent_run_id": command.parent_run_id,
+                    "parent_run_id": command.parent_run_id
+                    or metadata.get("fork_source_run_id"),
                     "parent_tool_call_id": str(
                         metadata.get("parent_tool_call_id") or ""
                     ),
@@ -1886,7 +1992,8 @@ class DesktopV2Service:
                     "session": observation.session.model_dump(mode="json"),
                     "run": observation.run.model_dump(mode="json"),
                     "agent_id": command.agent_id,
-                    "parent_run_id": command.parent_run_id,
+                    "parent_run_id": command.parent_run_id
+                    or metadata.get("fork_source_run_id"),
                     "parent_tool_call_id": str(
                         metadata.get("parent_tool_call_id") or ""
                     ),
@@ -3500,6 +3607,7 @@ class DesktopV2Service:
             },
         )
         try:
+            request = await self._normalize_desktop_fork_request(request)
             agent = await self._agent(request.agent_id, user_id)
             provider = await self._provider(agent, user_id)
             workspace = await self.workspace_root(
@@ -3533,19 +3641,25 @@ class DesktopV2Service:
                 language=str(command.config.metadata.get("response_language") or "en"),
             )
             accepted_handle = await self.runtime.start_run(command, context)
-            resolved, loop, sandbox_handle = await self._build_loop(
-                agent=agent,
-                provider=provider,
-                workspace=workspace,
-                preferred_skills=tuple(request.preferred_skills),
-                approval_mode=request.approval_mode,
-                invocation_mode=request.invocation_mode,
-                session_id=request.session_id,
-                run_id=accepted_handle.run_id,
-                resolved_spec_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get("runtime_components"),
+            async def build_driver():
+                return await self._build_loop(
+                    agent=agent,
+                    provider=provider,
+                    workspace=workspace,
+                    preferred_skills=tuple(request.preferred_skills),
+                    approval_mode=request.approval_mode,
+                    invocation_mode=request.invocation_mode,
+                    session_id=accepted_handle.session_id,
+                    run_id=accepted_handle.run_id,
+                    resolved_spec_hash=command.resolved_spec_hash,
+                    component_snapshot=command.config.metadata.get(
+                        "runtime_components"
+                    ),
+                )
+
+            driver = _DesktopDriver(
+                self, None, workspace, None, lazy_builder=build_driver
             )
-            driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             memory_enabled = _agent_memory_enabled(
                 agent, self.memory_plugin_id, self.session_memory_plugin_id
             )
@@ -3695,6 +3809,32 @@ class DesktopV2Service:
             if stream._execution.done():
                 await self._discard_driver_if_terminal(stream.handle.run_id, driver)
             await self._index_session(stream.handle.session_id)
+
+    async def _normalize_desktop_fork_request(
+        self, request: DesktopRunRequest
+    ) -> DesktopRunRequest:
+        if request.session_concurrency_mode != SessionConcurrencyMode.FORK:
+            if request.fork_source_run_id is not None:
+                raise ValueError("fork_source_run_id requires fork concurrency mode")
+            return request
+        if not request.session_id or not request.fork_source_run_id:
+            raise ValueError("Desktop fork requires session_id and fork_source_run_id")
+        parent = await self.runtime.get_run(request.fork_source_run_id)
+        if parent.session_id != request.session_id:
+            raise ValueError("fork parent Run does not belong to the parent Session")
+        if parent.state not in TERMINAL_RUN_STATES:
+            raise ValueError("Desktop can only branch from a terminal Run result")
+        if parent.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED:
+            raise ValueError("Desktop cannot branch from an unpublished snapshot Run")
+        base_revision = parent.accepted_session_revision + parent.revision
+        if (
+            request.base_session_revision is not None
+            and request.base_session_revision != base_revision
+        ):
+            raise ValueError(
+                "fork base revision does not match the selected Run result"
+            )
+        return request.model_copy(update={"base_session_revision": base_revision})
 
     async def snapshot(self, run_id: str) -> dict[str, Any]:
         run = await self.runtime.get_run(run_id)
@@ -3877,7 +4017,7 @@ class DesktopV2Service:
         driver = self._drivers.get(run_id)
         assessor = (
             getattr(driver.loop.tool_policy, "operation_assessor", None)
-            if driver is not None
+            if driver is not None and driver.loop is not None
             else None
         )
         if isinstance(assessor, ShellCommandOperationAssessor):
@@ -3896,23 +4036,29 @@ class DesktopV2Service:
             provider = await self._provider(agent, user_id)
             workspace_id = command.config.metadata.get("workspace_id")
             workspace = await self.workspace_root(workspace_id, command.agent_id)
-            _, loop, sandbox_handle = await self._build_loop(
-                agent=agent,
-                provider=provider,
-                workspace=workspace,
-                preferred_skills=tuple(
-                    command.config.metadata.get("preferred_skills") or ()
-                ),
-                approval_mode=str(
-                    command.config.metadata.get("approval_mode") or "high_risk"
-                ),
-                invocation_mode=command.invocation_mode or "normal",
-                session_id=(await self.runtime.get_run(run_id)).session_id,
-                run_id=run_id,
-                resolved_spec_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get("runtime_components"),
+            async def build_driver():
+                return await self._build_loop(
+                    agent=agent,
+                    provider=provider,
+                    workspace=workspace,
+                    preferred_skills=tuple(
+                        command.config.metadata.get("preferred_skills") or ()
+                    ),
+                    approval_mode=str(
+                        command.config.metadata.get("approval_mode") or "high_risk"
+                    ),
+                    invocation_mode=command.invocation_mode or "normal",
+                    session_id=(await self.runtime.get_run(run_id)).session_id,
+                    run_id=run_id,
+                    resolved_spec_hash=command.resolved_spec_hash,
+                    component_snapshot=command.config.metadata.get(
+                        "runtime_components"
+                    ),
+                )
+
+            driver = _DesktopDriver(
+                self, None, workspace, None, lazy_builder=build_driver
             )
-            driver = _DesktopDriver(self, loop, workspace, sandbox_handle)
             self._drivers[run_id] = driver
         facade = SAgent(
             runtime=self.runtime,
@@ -4014,7 +4160,9 @@ class DesktopV2Service:
             entrypoint_agent_id=agent_id,
             scope_handles=(),
             services={
-                "session.store": self.session_store,
+                "session.access": AuthorizedSessionAccess(
+                    self.session_store, runtime=getattr(agent, "runtime", None)
+                ),
                 "observability.diagnostic-sink": self.diagnostics,
                 "observability.log-sink": self.log_sink,
             },
@@ -4040,6 +4188,138 @@ class DesktopV2Service:
                 )
 
         task.add_done_callback(completed)
+
+    def _schedule_blocked_sandbox_cleanup(
+        self, resources, lifecycle, record, context: RequestContext
+    ) -> None:
+        async def cleanup() -> None:
+            try:
+                await asyncio.gather(
+                    *(
+                        lifecycle.job_runtime.wait(job_id)
+                        for job_id in record.blocking_job_ids
+                    )
+                )
+                future = await self.dispatcher.submit_cleanup(
+                    run_id=record.run_id,
+                    context=context,
+                    generation=record.generation,
+                    operation=lambda: lifecycle.reconcile_run(
+                        run_id=record.run_id, context=context
+                    ),
+                )
+                settled = await future
+                if settled.state in {
+                    ExecutionResourceState.RELEASE_REQUESTED,
+                    ExecutionResourceState.RELEASE_FAILED,
+                }:
+                    self._schedule_sandbox_reconcile_loop(
+                        lifecycle=lifecycle,
+                        record=settled,
+                        context=context,
+                    )
+            finally:
+                resources.defer_close = False
+                await resources.close_now()
+
+        task = asyncio.create_task(
+            cleanup(), name=f"sandbox-cleanup:{record.run_id}:{record.generation}"
+        )
+        self._sandbox_cleanup_tasks.add(task)
+        task.add_done_callback(self._sandbox_cleanup_tasks.discard)
+
+    async def _recover_pending_sandbox_cleanups(self) -> None:
+        """Resume cleanup intents whose owning process disappeared while paused."""
+
+        for record in await self.session_store.list_pending_execution_releases():
+            if (
+                record.state == ExecutionResourceState.RELEASE_BLOCKED
+                and record.release_disposition == SandboxReleaseDisposition.DETACH
+            ):
+                continue
+            try:
+                run = await self.session_store.get_run(record.run_id)
+                session = await self.session_store.get_session(run.session_id)
+                if session.owner is None:
+                    continue
+                command = await self.session_store.get_start_command(record.run_id)
+                context = self._context(
+                    session.owner.principal_id,
+                    language=str(
+                        command.config.metadata.get("response_language") or "en"
+                    ),
+                )
+                provider = await self._scoped_component(
+                    "execution.sandbox",
+                    (
+                        "sage.sandbox.ephemeral"
+                        if record.sandbox_ref.provider_id == "sage.sandbox.memory"
+                        else record.sandbox_ref.provider_id
+                    ),
+                    scope=ExtensionScope.PROCESS,
+                    scope_id="desktop-sandbox",
+                    agent_id=command.agent_id,
+                    config={
+                        "verification_key": self._sandbox_grant_issuer.verification_key
+                    },
+                    cache_identity={
+                        "verification_key": self._sandbox_grant_issuer.verification_key
+                    },
+                )
+                lifecycle = ExecutionBindingLifecycleCoordinator(
+                    sandbox_provider=provider,
+                    session_store=self.driver_session_store,
+                    job_runtime=InMemoryJobRuntime({}),
+                )
+                self._schedule_sandbox_reconcile_loop(
+                    lifecycle=lifecycle,
+                    record=record,
+                    context=context,
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "sandbox.cleanup_recovery_failed",
+                    "Failed to schedule pending sandbox cleanup",
+                    attributes={"run_id": record.run_id, "error": str(exc)},
+                )
+
+    def _schedule_sandbox_reconcile_loop(
+        self, *, lifecycle, record, context: RequestContext
+    ) -> None:
+        async def reconcile() -> None:
+            current = record
+            attempt = current.retry_count
+            while current.state in {
+                ExecutionResourceState.RELEASE_BLOCKED,
+                ExecutionResourceState.RELEASE_REQUESTED,
+                ExecutionResourceState.RELEASE_FAILED,
+            }:
+                if current.next_retry_at is not None:
+                    delay = (current.next_retry_at - utc_now()).total_seconds()
+                    if delay > 0:
+                        await asyncio.sleep(min(delay, 300))
+                future = await self.dispatcher.submit_cleanup(
+                    run_id=current.run_id,
+                    context=context,
+                    generation=current.generation,
+                    attempt=attempt,
+                    operation=lambda: lifecycle.reconcile_run(
+                        run_id=current.run_id, context=context
+                    ),
+                )
+                current = await future
+                if (
+                    current.state == ExecutionResourceState.RELEASE_BLOCKED
+                    and current.release_disposition == SandboxReleaseDisposition.DETACH
+                ):
+                    return
+                attempt += 1
+
+        task = asyncio.create_task(
+            reconcile(), name=f"sandbox-reconcile:{record.run_id}:{record.generation}"
+        )
+        self._sandbox_cleanup_tasks.add(task)
+        task.add_done_callback(self._sandbox_cleanup_tasks.discard)
 
     async def _discard_driver_if_terminal(
         self, run_id: str, driver: _DesktopDriver
@@ -4160,7 +4440,14 @@ class DesktopV2Service:
         scope_handles: list[Any] = []
         token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(scope_handles)
         try:
-            resolved, loop, sandbox_handle = await self._compose_run_driver(
+            (
+                resolved,
+                loop,
+                sandbox_handle,
+                sandbox_provider,
+                sandbox_spec,
+                job_runtime,
+            ) = await self._compose_run_driver(
                 agent=agent,
                 provider=provider,
                 workspace=workspace,
@@ -4174,10 +4461,17 @@ class DesktopV2Service:
                 force_leaf=force_leaf,
                 sandbox_observer=provisioned.append,
             )
+            lifecycle = None
+            if run_id is not None and resolved_spec_hash is not None:
+                lifecycle = ExecutionBindingLifecycleCoordinator(
+                    sandbox_provider=sandbox_provider,
+                    session_store=self.driver_session_store,
+                    job_runtime=job_runtime,
+                )
             return (
                 resolved,
                 loop,
-                _DesktopRunResources(sandbox_handle, scope_handles),
+                _DesktopRunResources(sandbox_handle, scope_handles, lifecycle),
             )
         except BaseException as exc:
             cleanup_errors: list[BaseException] = []
@@ -4487,8 +4781,7 @@ class DesktopV2Service:
         sandbox_metadata: dict[str, Any] = {}
         if sandbox_config["workspace_mapping"] == "active_workspace":
             sandbox_metadata["host_workspace"] = str(workspace)
-        sandbox_handle = await sandbox_provider.provision(
-            ResolvedSandboxSpec(
+        sandbox_spec = ResolvedSandboxSpec(
                 spec_hash=f"sha256:{fingerprint}",
                 workspace_root=workspace_root,
                 architecture=architecture,
@@ -4524,12 +4817,49 @@ class DesktopV2Service:
                     max_output_bytes=4 * 1024 * 1024,
                 ),
                 network=NetworkPolicy(),
+                lifecycle=LifecyclePolicy(
+                    durability=(
+                        SandboxDurability.DURABLE_EXTERNAL
+                        if sandbox_config["workspace_mapping"] == "active_workspace"
+                        else SandboxDurability.SNAPSHOTABLE
+                    ),
+                    safe_pause_behavior=(
+                        SandboxReleaseDisposition.TERMINATE
+                        if sandbox_config["workspace_mapping"] == "active_workspace"
+                        else SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE
+                    ),
+                    unsafe_pause_behavior=SandboxReleaseDisposition.DETACH,
+                ),
                 policy_hash=f"sha256:{fingerprint}",
                 metadata=sandbox_metadata,
-            ),
-            self._context(agent.user_id, language=settings.language),
-            run_id=run_id or new_id("desktop_sandbox"),
         )
+        sandbox_context = self._context(agent.user_id, language=settings.language)
+        lifecycle_run_exists = False
+        if run_id is not None and resolved_spec_hash is not None:
+            try:
+                await self.driver_session_store.get_run(run_id)
+                lifecycle_run_exists = True
+            except SageV2Error as exc:
+                if exc.info.code not in {"run.not_found", "run_id.not_found"}:
+                    raise
+        if lifecycle_run_exists:
+            acquisition = ExecutionBindingLifecycleCoordinator(
+                sandbox_provider=sandbox_provider,
+                session_store=self.driver_session_store,
+                job_runtime=None,
+            )
+            sandbox_handle = await acquisition.acquire(
+                run_id=run_id,
+                spec=sandbox_spec,
+                run_resolved_spec_hash=resolved_spec_hash,
+                context=sandbox_context,
+            )
+        else:
+            sandbox_handle = await sandbox_provider.provision(
+                sandbox_spec,
+                sandbox_context,
+                run_id=run_id or new_id("desktop_sandbox"),
+            )
         sandbox_observer(sandbox_handle)
         skill_workspace = (
             LocalSkillWorkspace(workspace, workspace_root=workspace_root)
@@ -4915,7 +5245,14 @@ class DesktopV2Service:
         loop = await mode_factory.create_loop_async(
             root_descriptor, run_id or "pending"
         )
-        return resolved, loop, sandbox_handle
+        return (
+            resolved,
+            loop,
+            sandbox_handle,
+            sandbox_provider,
+            sandbox_spec,
+            official_runtime.job_runtime,
+        )
 
     async def _scoped_component(
         self,
@@ -4959,7 +5296,12 @@ class DesktopV2Service:
         handle = None
         try:
             plan = self.extension_host.plan(
-                (CapabilityRequirement(capability=capability, api_version="2"),),
+                (
+                    CapabilityRequirement(
+                        capability=capability,
+                        api_version=_desktop_component_api_version(capability),
+                    ),
+                ),
                 selections={capability: plugin_id},
                 configs={plugin_id: config},
                 scope_overrides={plugin_id: scope},
@@ -5419,6 +5761,8 @@ class DesktopV2Service:
                 "configs": dict(settings.component_configs),
             },
         }
+        if request.fork_source_run_id is not None:
+            metadata["fork_source_run_id"] = request.fork_source_run_id
         if workspace is not None:
             metadata["working_directory"] = workspace_root
             metadata["workspace_files"] = self._workspace_prompt_listing(
@@ -5577,8 +5921,11 @@ class DesktopV2Service:
             await initialize(user_id)
 
     def _skill_provider(self) -> FilesystemSkillProvider:
-        repository_skills = Path(__file__).resolve().parents[3] / "skills"
-        return FilesystemSkillProvider((self.skill_root, repository_skills))
+        module_path = Path(__file__).resolve()
+        source_skills = module_path.parents[2] / "skills"
+        bundled_skills = module_path.parents[3] / "skills"
+        builtin_skills = source_skills if source_skills.is_dir() else bundled_skills
+        return FilesystemSkillProvider((self.skill_root, builtin_skills))
 
     def _imported_skill_root(self, skill_name: str) -> Path | None:
         if not _SKILL_NAME.fullmatch(skill_name):

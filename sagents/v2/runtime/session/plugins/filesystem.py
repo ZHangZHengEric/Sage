@@ -126,12 +126,9 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         # from state.json after a crash; removing the lookup never loses data.
         start_entries = list(state.get("start_idempotency", ()))
         storage_lock = self._storage_locks.setdefault(session_id, asyncio.Lock())
-        # Keep the coordinator lock until durability is known. The state
-        # machine mutates its aggregate before invoking this hook; allowing a
-        # second Session mutation to overlap would make a failed write
-        # impossible to roll back without also disturbing that in-flight
-        # mutation. Per-Session disk queues can be restored after the state
-        # machine itself owns independent aggregates.
+        # The coordinator now owns a per-Session operation lock. Different
+        # aggregates may persist concurrently while the same aggregate remains
+        # serialized through this storage queue.
         async with storage_lock:
             previous = (
                 None
@@ -157,10 +154,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     self._persisted_states[session_id] = deepcopy(state)
                     self._storage_recovery_required.discard(session_id)
                 else:
-                    # Do not leave a failed command or its idempotency result
-                    # visible in memory. A retry must execute and persist the
-                    # transition again instead of falsely returning duplicate.
-                    self._restore_durable_state_locked()
+                    # The coordinator operation guard restores only this
+                    # Session snapshot; unrelated durable commits stay loaded.
                     raise
             else:
                 # This cache describes durable state, not merely the most
@@ -195,6 +190,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             "runs",
             "start_idempotency",
             "command_results",
+            "execution_resources",
+            "execution_resource_command_results",
             "checkpoints",
             "suspensions",
             "interactions",
@@ -222,7 +219,6 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             self._storage_locks.setdefault(value, asyncio.Lock())
             for value in sorted(deleted_session_ids)
         ]
-        self._lock.release()
         try:
             for lock in locks:
                 await lock.acquire()
@@ -235,7 +231,6 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             for lock in reversed(locks):
                 if lock.locked():
                     lock.release()
-            await self._lock.acquire()
         for value in deleted_session_ids:
             self._storage_locks.pop(value, None)
             self._persisted_states.pop(value, None)
@@ -876,6 +871,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 "idempotency_key",
             ),
             "command_results": ("run_id", "idempotency_key"),
+            "execution_resources": ("run_id",),
+            "execution_resource_command_results": ("run_id", "idempotency_key"),
             "checkpoints": ("checkpoint_id",),
             "suspensions": ("suspension_id",),
             "interactions": ("interaction_id",),
@@ -944,8 +941,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         identities = {
             "sessions": ("session_id",),
             "runs": ("run_id",),
-            "start_idempotency": ("tenant_id", "principal_id", "idempotency_key"),
+            "start_idempotency": (
+                "tenant_id",
+                "principal_type",
+                "principal_id",
+                "idempotency_key",
+            ),
             "command_results": ("run_id", "idempotency_key"),
+            "execution_resources": ("run_id",),
+            "execution_resource_command_results": ("run_id", "idempotency_key"),
             "checkpoints": ("checkpoint_id",),
             "suspensions": ("suspension_id",),
             "interactions": ("interaction_id",),
@@ -1139,10 +1143,18 @@ class _FilesystemSessionState(SessionStoreCoordinator):
     def _read_start_lookup(self, command, context) -> dict[str, Any] | None:
         identity = {
             "tenant_id": context.actor.tenant_id,
+            "principal_type": context.actor.principal_type.value,
             "principal_id": context.actor.principal_id,
             "idempotency_key": command.idempotency_key,
         }
         path = self._start_idempotency_path(identity)
+        if not path.exists():
+            # v4 lookups created before principal_type was part of the scope.
+            # Loading that aggregate is safe: the coordinator derives the old
+            # type from its trusted Run context before deciding idempotency.
+            legacy_identity = dict(identity)
+            legacy_identity.pop("principal_type")
+            path = self._start_idempotency_path(legacy_identity)
         if not path.exists():
             return None
         try:
@@ -1265,6 +1277,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         payload = {
             "format": self.format_version,
             "tenant_id": entry.get("tenant_id"),
+            "principal_type": entry.get("principal_type"),
             "principal_id": entry["principal_id"],
             "idempotency_key": entry["idempotency_key"],
             "request_digest": entry["request_digest"],
@@ -1448,13 +1461,13 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         return encoded
 
     def _start_idempotency_path(self, payload: dict[str, Any]) -> Path:
-        identity = "\0".join(
-            (
-                str(payload.get("tenant_id") or ""),
-                str(payload["principal_id"]),
-                str(payload["idempotency_key"]),
-            )
+        parts = [str(payload.get("tenant_id") or "")]
+        if "principal_type" in payload:
+            parts.append(str(payload.get("principal_type") or ""))
+        parts.extend(
+            (str(payload["principal_id"]), str(payload["idempotency_key"]))
         )
+        identity = "\0".join(parts)
         return (
             self.idempotency_root
             / f"{hashlib.sha256(identity.encode()).hexdigest()}.json"
@@ -1467,6 +1480,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             "runs",
             "start_idempotency",
             "command_results",
+            "execution_resources",
+            "execution_resource_command_results",
             "checkpoints",
             "suspensions",
             "interactions",

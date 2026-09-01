@@ -23,6 +23,7 @@ from sagents.v2.agent.policy import ContinuationSignals, InteractionDraft
 if TYPE_CHECKING:
     from sagents.v2.goal.state import GoalStateService
 from sagents.v2.contracts.jobs import (
+    JobExecutionAffinity,
     JobCompletion,
     JobCursor,
     JobPauseBehavior,
@@ -244,6 +245,7 @@ class OfficialToolRuntime:
                     "tool_call_id": invocation.call.tool_call_id,
                 },
                 pause_behavior=JobPauseBehavior.DETACH,
+                execution_affinity=JobExecutionAffinity.SANDBOX,
                 idempotency_key=invocation.call.idempotency_key,
             )
         )
