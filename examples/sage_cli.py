@@ -1315,11 +1315,10 @@ if __name__ == "__main__":
                     model_config,
                     config["system_prefix"],
                     config["workspace"],
-                    config["memory_type"],
                     tool_proxy,
                     skill_manager,
                     config,
-                    context_budget_config,  # pyright: ignore[reportCallIssue]
+                    context_budget_config,
                 )
             else:
                 await chat_fibre(
@@ -1328,11 +1327,10 @@ if __name__ == "__main__":
                     model_config,
                     config["system_prefix"],
                     config["workspace"],
-                    config["memory_type"],
                     tool_proxy,
                     skill_manager,
                     config,
-                    context_budget_config,  # pyright: ignore[reportCallIssue]
+                    context_budget_config,
                 )
         else:
             await chat_simple(
@@ -1341,11 +1339,10 @@ if __name__ == "__main__":
                 model_config,
                 config["system_prefix"],
                 config["workspace"],
-                config["memory_type"],
                 tool_proxy,
                 skill_manager,
                 config,
-                context_budget_config,  # pyright: ignore[reportCallIssue]
+                context_budget_config,
             )
 
     asyncio.run(main_async())
