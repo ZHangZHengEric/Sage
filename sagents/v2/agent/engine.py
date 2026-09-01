@@ -60,8 +60,8 @@ from sagents.v2.tool.contracts import (
     ToolExecutionResult,
 )
 from sagents.v2.tool.provider import ToolCatalog, ToolExecutor
+from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 from sagents.v2.tool.selection import (
-    RecentToolSelectionPolicy,
     ToolSelectionPolicy,
     ToolSelectionPrepareContext,
 )

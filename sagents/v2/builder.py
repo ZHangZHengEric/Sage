@@ -57,7 +57,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScopeContext,
     load_installed_extension,
 )
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session import (
     AuthorizedSessionAccess,
     LeaseFencedSessionStore,
@@ -74,7 +74,12 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
-from sagents.v2.tool.plugins.official import OfficialToolRuntime
+from sagents.v2.tool.official import OfficialToolRuntime
+from sagents.v2.runtime.observability import (
+    NoopDiagnosticSink,
+    NoopLogSink,
+    NoopTraceSink,
+)
 
 
 class _ExecutionBoundDriver:
@@ -1380,7 +1385,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="observability.diagnostic-sink",
-                default_plugin="sage.observability.noop",
+                default_plugin=NoopDiagnosticSink.plugin_id,
             ),
             "observability.log-sink": await self._create_capability(
                 host,
@@ -1389,7 +1394,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="observability.log-sink",
-                default_plugin="sage.logging.noop",
+                default_plugin=NoopLogSink.plugin_id,
             ),
             "observability.trace-sink": await self._create_capability(
                 host,
@@ -1398,7 +1403,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="observability.trace-sink",
-                default_plugin="sage.trace.noop",
+                default_plugin=NoopTraceSink.plugin_id,
             ),
             "workspace.initializer": await self._create_capability(
                 host,

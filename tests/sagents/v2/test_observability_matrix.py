@@ -19,9 +19,14 @@ from sagents.v2.runtime.observability import (
     FilesystemDiagnosticSink,
     FilesystemLogSink,
     LogLevel,
+    NoopDiagnosticSink,
+    NoopLogSink,
+    NoopTraceSink,
+    OtlpTraceSink,
     StdoutLogSink,
     StructuredLogger,
 )
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
@@ -343,6 +348,25 @@ def test_stdout_log_sink_rejects_unknown_stream():
         StdoutLogSink(stream="file")
 
 
+@pytest.mark.parametrize(
+    ("implementation", "capability"),
+    [
+        (NoopDiagnosticSink, "observability.diagnostic-sink"),
+        (FilesystemDiagnosticSink, "observability.diagnostic-sink"),
+        (NoopLogSink, "observability.log-sink"),
+        (FilesystemLogSink, "observability.log-sink"),
+        (StdoutLogSink, "observability.log-sink"),
+        (NoopTraceSink, "observability.trace-sink"),
+        (OtlpTraceSink, "observability.trace-sink"),
+    ],
+)
+def test_observability_plugin_id_matches_official_registry(implementation, capability):
+    registration = builtin_extension_registry().get(implementation.plugin_id)
+    assert capability in {
+        offer.capability for offer in registration.descriptor.provides
+    }
+
+
 @pytest.mark.asyncio
 async def test_stdout_logging_plugin_is_selectable_from_the_official_registry():
     from sagents.v2.runtime.extensions import (
@@ -351,7 +375,7 @@ async def test_stdout_logging_plugin_is_selectable_from_the_official_registry():
         ExtensionScope,
         ExtensionScopeContext,
     )
-    from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+    from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
     host = ExtensionHost(builtin_extension_registry())
     plan = host.plan(
@@ -568,7 +592,7 @@ async def test_trace_noop_plugin_is_the_default_official_sink():
         ExtensionScope,
         ExtensionScopeContext,
     )
-    from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+    from sagents.v2.runtime.extensions.official import builtin_extension_registry
     from sagents.v2.runtime.observability import NoopTraceSink, otel_available
 
     registry = builtin_extension_registry()

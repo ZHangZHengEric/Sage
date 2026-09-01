@@ -43,7 +43,7 @@ from sagents.v2.tool import (
     ToolExecutionResult,
     ToolInvocation,
 )
-from sagents.v2.tool.plugins.official.memory import MemoryTools
+from sagents.v2.tool.official.memory import MemoryTools
 
 
 CONTEXT = RequestContext(

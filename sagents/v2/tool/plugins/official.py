@@ -15,15 +15,15 @@ from sagents.v2.runtime.extensions import (
 from sagents.v2.tool.decorated import DecoratedToolProvider
 from sagents.v2.tool.decorators import decorated_tool_definition
 from sagents.v2.tool.contracts import ToolDefinition
-from sagents.v2.tool.plugins.official.filesystem import CodeSearchTools, FileSystemTools
-from sagents.v2.tool.plugins.official.interaction import InteractionTools
-from sagents.v2.tool.plugins.official.media import MediaTools
-from sagents.v2.tool.plugins.official.memory import MemoryTools
-from sagents.v2.tool.plugins.official.planning import PlanningTools
-from sagents.v2.tool.plugins.official.quality import QualityTools
-from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
-from sagents.v2.tool.plugins.official.shell import ShellTools
-from sagents.v2.tool.plugins.official.web import WebTools
+from sagents.v2.tool.official.filesystem import CodeSearchTools, FileSystemTools
+from sagents.v2.tool.official.interaction import InteractionTools
+from sagents.v2.tool.official.media import MediaTools
+from sagents.v2.tool.official.memory import MemoryTools
+from sagents.v2.tool.official.planning import PlanningTools
+from sagents.v2.tool.official.quality import QualityTools
+from sagents.v2.tool.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.official.shell import ShellTools
+from sagents.v2.tool.official.web import WebTools
 
 
 _OFFICIAL_TOOL_CLASSES = (
@@ -130,3 +130,10 @@ class OfficialToolPlugin:
     async def stop(self, reason: Any) -> None:
         del reason
         await self.runtime.close()
+
+
+__all__ = [
+    "OfficialToolPlugin",
+    "official_tool_categories",
+    "official_tool_definitions",
+]

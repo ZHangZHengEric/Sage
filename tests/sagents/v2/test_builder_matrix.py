@@ -45,7 +45,7 @@ from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
 )
-from sagents.v2.tool.plugins.official import OfficialToolRuntime
+from sagents.v2.tool.official import OfficialToolRuntime
 
 
 @pytest.mark.asyncio

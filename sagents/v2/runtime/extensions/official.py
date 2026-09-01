@@ -1,8 +1,9 @@
-"""Registrations for replaceable first-party infrastructure implementations.
+"""Single inventory of first-party plugin registrations.
 
 Implementation classes remain in their owning domains. This module only binds
-stable plugin IDs to factories so all host-selectable implementations appear in
-the same truthful ExtensionRegistry inventory.
+stable plugin IDs to factories so every host-selectable implementation appears
+in one ExtensionRegistry. Call ``builtin_extension_registry()`` for a fresh
+inventory.
 """
 
 from __future__ import annotations
@@ -76,20 +77,56 @@ from sagents.v2.runtime.extensions.contracts import (
 )
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
-from sagents.v2.tool.selection import (
-    DirectToolSelectionPolicy,
-    LLMToolSelectionPolicy,
-    LexicalToolSelectionPolicy,
-    RecentToolSelectionPolicy,
-)
+from sagents.v2.tool.plugins.selection_direct import DirectToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_lexical import LexicalToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 from sagents.v2.workspace import (
     BareWorkspaceInitializer,
     ClawWorkspaceInitializer,
 )
+from sagents.v2.memory.plugins.filesystem_bm25 import FilesystemBm25MemoryProvider
+from sagents.v2.memory.plugins.noop import NoopMemoryProvider
+from sagents.v2.memory.plugins.recall_direct import DirectMemoryRecallQueryGenerator
+from sagents.v2.memory.plugins.recall_llm import LLMMemoryRecallQueryGenerator
+from sagents.v2.model.protocols import (
+    create_registered_model_provider,
+    model_protocol_descriptors,
+)
+from sagents.v2.package.manifest.models import ModelRoute
+from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.runtime.session import (
+    EphemeralSessionStore,
+    FilesystemSessionStore,
+    MysqlSessionStore,
+    PostgresSessionStore,
+)
+from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+from sagents.v2.tool.plugins.delegation import MultiAgentToolPlugin
+from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
+from sagents.v2.tool.plugins.official import OfficialToolPlugin
+from sagents.v2.tool.plugins.skill import SkillToolPlugin
+from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
 
 
-def register_official_infrastructure(registry: ExtensionRegistry) -> None:
-    """Register every concrete host-selectable infrastructure implementation."""
+def builtin_extension_registry() -> ExtensionRegistry:
+    """Return a fresh registry whose inventory is backed by real factories."""
+
+    registry = ExtensionRegistry()
+    register_official_plugins(registry)
+    return registry
+
+
+def register_official_plugins(registry: ExtensionRegistry) -> None:
+    """Register every first-party host-selectable plugin."""
+
+    _register_session_and_memory(registry)
+    _register_tools_skills_and_flow(registry)
+    _register_infrastructure(registry)
+    _register_model_protocols(registry)
+
+
+def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     bounded_config_schema = {
         "type": "object",
@@ -105,30 +142,26 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         },
         "additionalProperties": False,
     }
-    for plugin_id, name, description, implementation, uses_model in (
+    for name, description, implementation, uses_model in (
         (
-            "sage.tool-selection.direct",
             "Show all Tools",
             "Sends every policy-allowed Tool to the model. Best for small catalogs.",
             DirectToolSelectionPolicy,
             False,
         ),
         (
-            "sage.tool-selection.llm",
             "LLM Tool selection",
             "Uses a fast model and recent context to select relevant Tools; falls back locally on failure.",
             LLMToolSelectionPolicy,
             True,
         ),
         (
-            "sage.tool-selection.lexical",
             "BM25 Tool selection",
             "Ranks Tool names, descriptions, and parameters locally like a search engine.",
             LexicalToolSelectionPolicy,
             False,
         ),
         (
-            "sage.tool-selection.recent",
             "Recently used Tools first",
             "Keeps recently called Tools first, then fills the remaining count deterministically.",
             RecentToolSelectionPolicy,
@@ -138,7 +171,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         registry.register(
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(
-                    plugin_id=plugin_id,
+                    plugin_id=implementation.plugin_id,
                     version="2.0.0",
                     name=name,
                     description=description,
@@ -243,7 +276,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        "sage.context.token-estimator.json-heuristic",
+        JsonHeuristicTokenEstimator.plugin_id,
         "JSON heuristic token estimator",
         "context.token-estimator",
         lambda context, dependencies: JsonHeuristicTokenEstimator(**context.config),
@@ -251,7 +284,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.token-estimator.unicode-heuristic",
+        UnicodeHeuristicTokenEstimator.plugin_id,
         "Unicode heuristic token estimator",
         "context.token-estimator",
         lambda context, dependencies: UnicodeHeuristicTokenEstimator(**context.config),
@@ -259,7 +292,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.token-estimator.tiktoken",
+        TiktokenTokenEstimator.plugin_id,
         "Tiktoken token estimator",
         "context.token-estimator",
         lambda context, dependencies: TiktokenTokenEstimator(**context.config),
@@ -275,7 +308,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.unit-compactor.reference",
+        ReferenceContextUnitCompactor.plugin_id,
         "Durable-reference context unit compactor",
         "context.unit-compactor",
         lambda context, dependencies: ReferenceContextUnitCompactor(
@@ -285,7 +318,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.reducer.window",
+        WindowContextReducer.plugin_id,
         "Window context reducer",
         "context.reducer",
         lambda context, dependencies: WindowContextReducer(
@@ -295,7 +328,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.reducer.persistent-summary",
+        PersistentSummaryContextReducer.plugin_id,
         "Persistent summary context reducer",
         "context.reducer",
         lambda context, dependencies: PersistentSummaryContextReducer(
@@ -315,7 +348,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.summary-store.ephemeral",
+        InMemoryConversationSummaryStore.plugin_id,
         "Ephemeral conversation summary store",
         "context.summary-store",
         lambda context, dependencies: InMemoryConversationSummaryStore(),
@@ -323,7 +356,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.summary-store.session-derived",
+        SessionDerivedConversationSummaryStore.plugin_id,
         "Session-derived conversation summary store",
         "context.summary-store",
         lambda context, dependencies: SessionDerivedConversationSummaryStore(
@@ -333,7 +366,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.summarizer.extractive",
+        ExtractiveConversationSummarizer.plugin_id,
         "Extractive conversation summarizer",
         "context.summarizer",
         lambda context, dependencies: ExtractiveConversationSummarizer(),
@@ -341,7 +374,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.context.summarizer.model",
+        ModelConversationSummarizer.plugin_id,
         "Model conversation summarizer",
         "context.summarizer",
         lambda context, dependencies: ModelConversationSummarizer(
@@ -514,7 +547,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.observability.noop",
+        NoopDiagnosticSink.plugin_id,
         "No-op diagnostic sink",
         "observability.diagnostic-sink",
         lambda context, dependencies: NoopDiagnosticSink(),
@@ -522,7 +555,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.observability.filesystem",
+        FilesystemDiagnosticSink.plugin_id,
         "Filesystem diagnostic sink",
         "observability.diagnostic-sink",
         lambda context, dependencies: FilesystemDiagnosticSink(
@@ -533,7 +566,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.logging.noop",
+        NoopLogSink.plugin_id,
         "No-op structured log sink",
         "observability.log-sink",
         lambda context, dependencies: NoopLogSink(),
@@ -541,7 +574,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.logging.filesystem",
+        FilesystemLogSink.plugin_id,
         "Rotating filesystem structured log sink",
         "observability.log-sink",
         lambda context, dependencies: FilesystemLogSink(
@@ -555,7 +588,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.logging.stdout",
+        StdoutLogSink.plugin_id,
         "Stdout structured log sink",
         "observability.log-sink",
         lambda context, dependencies: StdoutLogSink(
@@ -582,7 +615,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.trace.noop",
+        NoopTraceSink.plugin_id,
         "No-op trace sink",
         "observability.trace-sink",
         lambda context, dependencies: NoopTraceSink(),
@@ -590,7 +623,7 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.trace.otlp",
+        OtlpTraceSink.plugin_id,
         "OTLP / Jaeger trace sink",
         "observability.trace-sink",
         lambda context, dependencies: OtlpTraceSink(
@@ -803,3 +836,430 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
 
 def _bytes(value) -> bytes:
     return value if isinstance(value, bytes) else str(value).encode()
+
+
+def _register_session_and_memory(registry: ExtensionRegistry) -> None:
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.filesystem",
+                version="2.1.0",
+                name="Filesystem SessionStore",
+                description="Compact authoritative checksummed state per Session.",
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "root": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["root"],
+                    "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True,
+                    "global_session_index": False,
+                    "multi_process_writes": False,
+                    "supports_actor_authorization": True,
+                    "cross_process_subscribe": False,
+                    "transactional_outbox": False,
+                    "atomic_session_cas": True,
+                },
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: FilesystemSessionStore(
+                context.config["root"],
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.postgres",
+                version="2.2.0",
+                name="PostgreSQL SessionStore",
+                description=(
+                    "Durable per-Session PostgreSQL store with appended Run events. "
+                    "Single-process writers; no global Session index."
+                ),
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "dsn": {"type": "string", "minLength": 1},
+                        "schema_name": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["dsn"],
+                    "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True,
+                    "global_session_index": False,
+                    "multi_process_writes": False,
+                    "supports_actor_authorization": True,
+                    "cross_process_subscribe": False,
+                    "transactional_outbox": False,
+                    "atomic_session_cas": True,
+                },
+                availability=ExtensionAvailability(
+                    available=importlib.util.find_spec("asyncpg") is not None,
+                    reason=(
+                        None
+                        if importlib.util.find_spec("asyncpg") is not None
+                        else "optional asyncpg package is not installed"
+                    ),
+                ),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: PostgresSessionStore(
+                str(context.config["dsn"]),
+                schema_name=str(context.config.get("schema_name") or "sage_v2"),
+                table_prefix=str(context.config.get("table_prefix") or "sagent"),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.mysql",
+                version="2.0.0",
+                name="MySQL SessionStore",
+                description=(
+                    "Durable per-Session MySQL store with appended Run events. "
+                    "Single-process writers; no global Session index."
+                ),
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "dsn": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["dsn"],
+                    "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True,
+                    "global_session_index": False,
+                    "multi_process_writes": False,
+                    "supports_actor_authorization": True,
+                    "cross_process_subscribe": False,
+                    "transactional_outbox": False,
+                    "atomic_session_cas": True,
+                },
+                availability=ExtensionAvailability(
+                    available=importlib.util.find_spec("aiomysql") is not None,
+                    reason=(
+                        None
+                        if importlib.util.find_spec("aiomysql") is not None
+                        else "optional aiomysql package is not installed"
+                    ),
+                ),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: MysqlSessionStore(
+                str(context.config["dsn"]),
+                table_prefix=str(context.config.get("table_prefix") or "sagent"),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id=DirectMemoryRecallQueryGenerator.plugin_id,
+                version="2.0.0",
+                name="Direct user input",
+                description=(
+                    "Uses the current user input as the search_memory query without "
+                    "an additional model request."
+                ),
+                provides=(
+                    CapabilityOffer(
+                        capability="memory.recall-query", api_version="2"
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
+                ),
+                capabilities={"uses_model": False},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: DirectMemoryRecallQueryGenerator(),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id=LLMMemoryRecallQueryGenerator.plugin_id,
+                version="2.0.0",
+                name="LLM-generated keywords",
+                description=(
+                    "Uses a fast model to generate compact keywords before calling "
+                    "search_memory."
+                ),
+                provides=(
+                    CapabilityOffer(
+                        capability="memory.recall-query", api_version="2"
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.AGENT, ExtensionScope.RUN}
+                ),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "model": {},
+                        "language": {"type": "string"},
+                    },
+                    "required": ["model"],
+                    "additionalProperties": False,
+                },
+                capabilities={"uses_model": True},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: LLMMemoryRecallQueryGenerator(
+                context.config["model"],
+                language=str(context.config.get("language") or "en"),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.ephemeral",
+                version="2.0.0",
+                name="Ephemeral SessionStore",
+                description="Full lifecycle semantics without restart durability.",
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                capabilities={"durable": False, "testing": True},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: EphemeralSessionStore(),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id=NoopMemoryProvider.plugin_id,
+                version="2.0.0",
+                name="No-op Memory",
+                description="Disables long-term Memory without changing Agent logic.",
+                provides=(
+                    CapabilityOffer(capability="memory.provider", api_version="2"),
+                ),
+                supported_scopes=frozenset(
+                    {
+                        ExtensionScope.PROCESS,
+                        ExtensionScope.TENANT,
+                        ExtensionScope.AGENT,
+                    }
+                ),
+                capabilities={"durable": False},
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: NoopMemoryProvider(),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id=FilesystemBm25MemoryProvider.plugin_id,
+                version="2.1.0",
+                name="Filesystem BM25 Memory",
+                description="Durable scoped Memory records with incremental SQLite FTS5 BM25 recall.",
+                provides=(
+                    CapabilityOffer(capability="memory.provider", api_version="2"),
+                ),
+                supported_scopes=frozenset(
+                    {
+                        ExtensionScope.PROCESS,
+                        ExtensionScope.TENANT,
+                        ExtensionScope.AGENT,
+                    }
+                ),
+                config_schema={
+                    "type": "object",
+                    "properties": {"root": {"type": "string", "minLength": 1}},
+                    "required": ["root"],
+                },
+                capabilities={
+                    "durable": True,
+                    "retrieval": "bm25",
+                    "storage": "sqlite-fts5",
+                    "incremental_index": True,
+                },
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: FilesystemBm25MemoryProvider(
+                context.config["root"]
+            ),
+        )
+    )
+
+
+def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
+    registry.register(
+        ExtensionRegistration(
+            descriptor=EphemeralToolPlugin.descriptor,
+            factory=lambda context, dependencies: EphemeralToolPlugin(
+                tools=tuple(context.config.get("tools") or ()),
+                handlers=context.config.get("handlers") or {},
+            ),
+            start=lambda plugin, context, dependencies: {
+                "tool.catalog:ephemeral": plugin.catalog,
+                "tool.executor:ephemeral": plugin.executor,
+            },
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=OfficialToolPlugin.descriptor,
+            factory=lambda context, dependencies: OfficialToolPlugin(context),
+            start=lambda plugin, context, dependencies: plugin.start(
+                context, dependencies
+            ),
+            stop=lambda plugin, reason: plugin.stop(reason),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=SkillToolPlugin.descriptor,
+            factory=lambda context, dependencies: SkillToolPlugin(
+                context.config["loader"], language=context.config.get("language")
+            ),
+            start=lambda plugin, context, dependencies: {
+                "tool.catalog:skill": plugin.catalog,
+                "tool.executor:skill": plugin.executor,
+            },
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=MultiAgentToolPlugin.descriptor,
+            factory=lambda context, dependencies: MultiAgentToolPlugin(
+                coordinator=context.config["coordinator"],
+                runtime=context.config["runtime"],
+            ),
+            start=lambda plugin, context, dependencies: {
+                "tool.catalog:multi-agent": plugin.catalog,
+                "tool.executor:multi-agent": plugin.executor,
+            },
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.skill.filesystem",
+                version="2.0.0",
+                name="Filesystem Skill provider",
+                description="Lazy, bounded, symlink-safe Skill catalog and source.",
+                provides=(
+                    CapabilityOffer(
+                        capability="skill.catalog", api_version="2", name="filesystem"
+                    ),
+                    CapabilityOffer(
+                        capability="skill.source", api_version="2", name="filesystem"
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.PROCESS, ExtensionScope.AGENT}
+                ),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "roots": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["roots"],
+                },
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: FilesystemSkillProvider(
+                tuple(context.config["roots"])
+            ),
+            start=lambda provider, context, dependencies: {
+                "skill.catalog:filesystem": provider,
+                "skill.source:filesystem": provider,
+            },
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.flow.agent",
+                version="2.0.0",
+                name="Agent Flow node",
+                description="Runs a child Agent through the shared AgentLoopEngine.",
+                provides=(
+                    CapabilityOffer(
+                        capability="flow.node", api_version="2", name="agent"
+                    ),
+                ),
+                supported_scopes=frozenset({ExtensionScope.RUN}),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: NativeAgentFlowNode(**context.config),
+        )
+    )
+
+
+def _register_model_protocols(registry: ExtensionRegistry) -> None:
+    for descriptor in model_protocol_descriptors():
+        plugin_id = f"sage.model.{descriptor.protocol.value}"
+        registry.register(
+            ExtensionRegistration(
+                descriptor=ExtensionDescriptor(
+                    plugin_id=plugin_id,
+                    version="2.0.0",
+                    name=descriptor.name,
+                    description=descriptor.value,
+                    provides=(
+                        CapabilityOffer(
+                            capability="model.provider",
+                            api_version="2",
+                            name=descriptor.protocol.value,
+                        ),
+                    ),
+                    supported_scopes=frozenset(
+                        {ExtensionScope.AGENT, ExtensionScope.RUN}
+                    ),
+                    config_schema={
+                        "type": "object",
+                        "properties": {"route": {"type": "object"}},
+                        "required": ["route"],
+                    },
+                    capabilities={"protocol": descriptor.protocol.value},
+                    built_in=True,
+                ),
+                factory=_model_factory,
+            )
+        )
+
+
+def _model_factory(context, dependencies):
+    route = ModelRoute.model_validate(context.config["route"])
+    credential_data = context.config.get("credential")
+    credential = (
+        credential_data
+        if isinstance(credential_data, CredentialMaterial)
+        else CredentialMaterial.model_validate(credential_data)
+        if credential_data is not None
+        else None
+    )
+    return create_registered_model_provider(
+        route,
+        credential,
+        client=context.config.get("client"),
+        provider_instance_id=context.config.get("provider_instance_id"),
+    )

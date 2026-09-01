@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage
@@ -12,6 +12,8 @@ from sagents.v2.model.contracts import ModelMessage
 
 class ReferenceContextUnitCompactor:
     """Use a Tool-provided durable reference; never truncate arbitrary text."""
+
+    plugin_id = "sage.context.unit-compactor.reference"
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
         self.estimator = estimator or JsonHeuristicTokenEstimator()

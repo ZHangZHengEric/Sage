@@ -1,4 +1,4 @@
-"""Deterministic in-memory Tool Catalog/Executor for contract and scenario tests."""
+"""In-memory Tool Catalog/Executor plugin for tests and empty catalogs."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate
 
+from sagents.v2.runtime.extensions import (
+    CapabilityOffer,
+    ExtensionDescriptor,
+    ExtensionScope,
+)
 from sagents.v2.tool.contracts import (
     ReconcileResult,
     ReconcileState,
@@ -26,6 +31,48 @@ from sagents.v2.contracts.principals import RequestContext
 
 
 ToolHandler = Callable[[ToolCall, RequestContext], Awaitable[ToolExecutionResult]]
+
+
+class EphemeralToolPlugin:
+    """Paired in-memory catalog/executor without restart durability."""
+
+    plugin_id = "sage.tool.ephemeral"
+    descriptor = ExtensionDescriptor(
+        plugin_id=plugin_id,
+        version="2.0.0",
+        name="Ephemeral Tool provider",
+        description="In-memory Tool catalog and executor without restart durability.",
+        provides=(
+            CapabilityOffer(
+                capability="tool.catalog", api_version="2", name="ephemeral"
+            ),
+            CapabilityOffer(
+                capability="tool.executor", api_version="2", name="ephemeral"
+            ),
+        ),
+        supported_scopes=frozenset(
+            {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
+        ),
+        config_schema={
+            "type": "object",
+            "properties": {"tools": {}, "handlers": {}},
+            "additionalProperties": False,
+        },
+        capabilities={"durable": False, "testing": True},
+        built_in=True,
+    )
+
+    def __init__(
+        self,
+        tools: tuple[ToolDefinition, ...] = (),
+        handlers: Mapping[str, ToolHandler] | None = None,
+    ) -> None:
+        self.catalog = InMemoryToolCatalog(tuple(tools))
+        self.executor = InMemoryToolExecutor(
+            {tool.name: tool for tool in tools},
+            dict(handlers or {}),
+        )
+        self.definitions = tuple(tools)
 
 
 class InMemoryToolCatalog:

@@ -14,17 +14,19 @@ from sagents.v2.context.contracts import (
     ContextReductionScope,
     ContextUnitCompactor,
 )
+from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
+from sagents.v2.context.plugins.summarizer_extractive import (
+    ExtractiveConversationSummarizer,
+)
 from sagents.v2.context.summary import (
     ConversationSummarizer,
     ConversationSummary,
     ConversationSummaryStore,
-    ExtractiveConversationSummarizer,
     SummarizationRequest,
     create_summary,
     message_digest,
 )
 from sagents.v2.context.plugins.reference import ReferenceContextUnitCompactor
-from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model.contracts import ModelMessage
 
@@ -36,6 +38,8 @@ class PersistentSummaryContextReducer:
     an independent replaceable port, so an embedding host may persist it in a
     database, object store, remote service, or memory rather than a filesystem.
     """
+
+    plugin_id = "sage.context.reducer.persistent-summary"
 
     def __init__(
         self,

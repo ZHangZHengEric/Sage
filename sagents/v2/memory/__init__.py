@@ -1,11 +1,9 @@
 """Independent long-term Memory component for SAgents v2."""
 
 from sagents.v2.memory.context import MemoryContextSource
-from sagents.v2.memory.query import (
-    DirectMemoryRecallQueryGenerator,
-    LLMMemoryRecallQueryGenerator,
-    MemoryRecallQueryGenerator,
-)
+from sagents.v2.memory.plugins.recall_direct import DirectMemoryRecallQueryGenerator
+from sagents.v2.memory.plugins.recall_llm import LLMMemoryRecallQueryGenerator
+from sagents.v2.memory.query import MemoryRecallQueryGenerator
 from sagents.v2.memory.contracts import (
     MemoryCapabilities,
     MemoryDeleteResult,

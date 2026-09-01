@@ -29,7 +29,7 @@ from sagents.v2.model import (
 from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
 
 CAPABILITIES = ModelCapabilities(

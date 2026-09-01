@@ -55,9 +55,9 @@ from sagents.v2.agent.multi_agent import (
     SessionDynamicAgentRoster,
     WorkspaceSharingPolicy,
 )
+from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
-    OfficialToolRuntime,
     official_tool_categories,
     official_tool_definitions,
 )
@@ -185,7 +185,7 @@ from sagents.v2.skill import (
     SkillLoadTool,
 )
 from sagents.v2.tool import decorated_tool_definition
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.observability import (
     LogError,
     LogLevel,

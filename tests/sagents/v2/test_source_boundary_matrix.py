@@ -238,9 +238,9 @@ def test_observability_port_does_not_depend_on_sink_implementations():
 
     contracts = V2_ROOT / "runtime" / "observability" / "contracts.py"
     implementation_modules = {
-        "sagents.v2.runtime.observability.plugins.filesystem",
-        "sagents.v2.runtime.observability.plugins.logging",
-        "sagents.v2.runtime.observability.plugins.otlp",
+        f"sagents.v2.runtime.observability.plugins.{path.stem}"
+        for path in (V2_ROOT / "runtime" / "observability" / "plugins").glob("*.py")
+        if path.name != "__init__.py"
     }
     offenders = [
         f"{contracts.relative_to(V2_ROOT)}:{line}: {module}"
@@ -251,21 +251,20 @@ def test_observability_port_does_not_depend_on_sink_implementations():
 
 
 def test_observability_sinks_do_not_import_each_other():
-    """Filesystem, log, and OTLP sinks share contracts, not each other."""
+    """Each sink plugin shares contracts, not other sink implementations."""
 
-    filesystem = V2_ROOT / "runtime" / "observability" / "plugins" / "filesystem.py"
-    logging_sink = V2_ROOT / "runtime" / "observability" / "plugins" / "logging.py"
-    otlp = V2_ROOT / "runtime" / "observability" / "plugins" / "otlp.py"
-    filesystem_imports = {module for _, module in _import_targets(filesystem)}
-    logging_imports = {module for _, module in _import_targets(logging_sink)}
-    otlp_imports = {module for _, module in _import_targets(otlp)}
-
-    assert "sagents.v2.runtime.observability.plugins.logging" not in filesystem_imports
-    assert "sagents.v2.runtime.observability.plugins.otlp" not in filesystem_imports
-    assert "sagents.v2.runtime.observability.plugins.filesystem" not in logging_imports
-    assert "sagents.v2.runtime.observability.plugins.otlp" not in logging_imports
-    assert "sagents.v2.runtime.observability.plugins.filesystem" not in otlp_imports
-    assert "sagents.v2.runtime.observability.plugins.logging" not in otlp_imports
+    plugin_dir = V2_ROOT / "runtime" / "observability" / "plugins"
+    plugin_files = sorted(
+        path for path in plugin_dir.glob("*.py") if path.name != "__init__.py"
+    )
+    plugin_modules = {
+        path: f"sagents.v2.runtime.observability.plugins.{path.stem}"
+        for path in plugin_files
+    }
+    for path, module in plugin_modules.items():
+        imported = {target for _, target in _import_targets(path)}
+        offenders = sorted((set(plugin_modules.values()) - {module}) & imported)
+        assert offenders == [], f"{path.name} imports {offenders}"
 
 
 def test_agent_does_not_import_observability_sink_plugins():
@@ -329,6 +328,23 @@ def test_context_contracts_do_not_import_context_plugins():
         f"{contracts.relative_to(V2_ROOT)}:{line}: {module}"
         for line, module in _import_targets(contracts)
         if module.startswith("sagents.v2.context.plugins")
+    ]
+    assert offenders == []
+
+
+def test_domain_ports_do_not_import_their_plugin_implementations():
+    """Ports stay backend-neutral so a new implementation is only a new file."""
+
+    ports = (
+        (V2_ROOT / "context" / "summary.py", "sagents.v2.context.plugins"),
+        (V2_ROOT / "tool" / "selection.py", "sagents.v2.tool.plugins"),
+        (V2_ROOT / "memory" / "query.py", "sagents.v2.memory.plugins"),
+    )
+    offenders = [
+        f"{path.relative_to(V2_ROOT)}:{line}: {module}"
+        for path, prefix in ports
+        for line, module in _import_targets(path)
+        if module.startswith(prefix)
     ]
     assert offenders == []
 

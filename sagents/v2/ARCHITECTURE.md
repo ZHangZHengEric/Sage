@@ -62,16 +62,16 @@ Desktop/server code.
 | `runtime/kernel.py` | Legal lifecycle commands and state transitions | `SessionStore`, `JobRuntime` |
 | `runtime/session/` | One known Session, Runs, journal, CAS, resume | Session storage provider |
 | `agent/` | Model/tool loop, safe points, delegation, policies | Injected policies and domain ports |
-| `context/` | Canonical request projection, budgets, reduction, summaries | Estimator/reducer/compactor plugins in `context/plugins/` |
+| `context/` | Canonical request projection, budgets, reduction, summaries | One file per estimator/store/summarizer/reducer in `context/plugins/` |
 | `model/` | Model request/stream contract | Model provider |
-| `tool/` | Catalog, executor, selection and authorization | Paired Tool provider and policies |
+| `tool/` | Catalog, executor, selection and authorization | One file per selection policy and Tool provider in `tool/plugins/`; official implementations in `tool/official/` |
 | `skill/` | Catalog, lazy source, verification, activation | Skill provider |
-| `memory/` | Long-term recall/write coordination | Memory provider |
+| `memory/` | Long-term recall/write coordination | One file per recall-query/provider plugin in `memory/plugins/` |
 | `session_memory/` | Retrieval over omitted Session history | Session-memory provider |
 | `goal/`, `plan/` | Typed goal/plan state and completion gates | State providers and policies |
 | `flow/` | Graph execution over the same Run lifecycle | Flow-node provider |
 | `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Backends in `scheduler/plugins/`, `sandbox/plugins/`, `jobs/plugins/` |
-| `runtime/observability/` | Non-authoritative diagnostics and traces | Sink plugins in `observability/plugins/` |
+| `runtime/observability/` | Non-authoritative diagnostics and traces | One file per sink in `observability/plugins/` |
 | `runtime/extensions/` | Registration, resolution, scopes and lifecycle | Extension microkernel only |
 | `package/` | Manifest validation, policy ceilings and resolved composition input | Package source/registry |
 | `interfaces/protocols/` | Native, AG-UI, ACP, MCP and A2A projections | Protocol adapter |

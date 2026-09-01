@@ -15,6 +15,8 @@ from sagents.v2.memory.contracts import (
 class NoopMemoryProvider:
     """Safe default used until a host explicitly selects a Memory backend."""
 
+    plugin_id = "sage.memory.noop"
+
     async def capabilities(self) -> MemoryCapabilities:
         return MemoryCapabilities(durable=False, supports_delete=False)
 

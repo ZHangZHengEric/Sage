@@ -19,7 +19,7 @@ from sagents.v2.context.contracts import (
     ContextSegmentProvider,
     ContextStability,
 )
-from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.plugins.window import WindowContextReducer
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model import ModelMessage

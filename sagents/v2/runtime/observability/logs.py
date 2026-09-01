@@ -24,6 +24,21 @@ from sagents.v2.runtime.observability.contracts import (
 )
 
 
+_LEVEL_ORDER = {
+    LogLevel.DEBUG: 10,
+    LogLevel.INFO: 20,
+    LogLevel.WARNING: 30,
+    LogLevel.ERROR: 40,
+    LogLevel.CRITICAL: 50,
+}
+
+
+def record_reaches_min_level(level: LogLevel, min_level: LogLevel) -> bool:
+    """Return whether a record should be written for the configured floor."""
+
+    return _LEVEL_ORDER[level] >= _LEVEL_ORDER[min_level]
+
+
 _SENSITIVE_KEY = re.compile(
     r"authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"password|secret|credential|cookie",

@@ -24,7 +24,7 @@ from sagents.v2.agent.multi_agent import (
     MultiAgentCoordinator,
     WorkspaceSharingPolicy,
 )
-from sagents.v2.tool.plugins.official.delegation import MultiAgentToolPlugin
+from sagents.v2.tool.plugins.delegation import MultiAgentToolPlugin
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 
 
