@@ -48,8 +48,8 @@ from sagents.v2.contracts.session_commit import (
 from sagents.v2.runtime.kernel import HarnessRuntime
 from sagents.v2.flow import FlowNodeResult, FlowRuntime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
-from sagents.v2.runtime.session.ephemeral import EphemeralSessionStore
-from sagents.v2.runtime.session.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
+from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 
 
 CONTEXT = RequestContext(

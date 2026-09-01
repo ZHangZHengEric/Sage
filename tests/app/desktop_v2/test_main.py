@@ -15,7 +15,7 @@ from app.desktop_v2.backend.main import (
 from app.desktop_v2.backend.observability import create_desktop_log_sink
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.runtime.observability import FilesystemLogSink, NoopLogSink
-from sagents.v2.runtime.session.filesystem import StoreInUseError
+from sagents.v2.runtime.session import StoreInUseError
 
 
 def test_sidecar_registry_is_private_and_removed_only_by_its_owner(

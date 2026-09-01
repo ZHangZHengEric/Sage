@@ -245,7 +245,8 @@ The framework has no concept of “all Sessions”. `SessionStore` can create or
 open one known `session_id`, manipulate its Runs, and recover that Session. It
 has no list/search/page/title/archive/favorite API.
 
-`FilesystemSessionStore` does not materialize every Session on startup. A known
+`FilesystemSessionStore` (in `runtime/session/plugins/`) does not materialize
+every Session on startup. A known
 `session_id` maps directly to one directory. Product software such as Desktop
 owns any global index. A commit exports only that Session aggregate; it no
 longer serializes all loaded Sessions before filtering. The reference
@@ -253,11 +254,13 @@ coordinator still uses a store-level atomic lock, because replacing it with
 sharded locks must preserve Session sequence, tree deletion, CAS, and rollback
 as one proof rather than as a throughput-only change.
 
-`sage.session.postgres` follows the same open-by-`session_id` rule and does not
-`SELECT *` every Session at startup. Compact metadata and appended Run events
-live in `sagent_`-prefixed tables. A process-held advisory lock rejects a
-second writer. Subscribers stay in-process. A PostgreSQL store still does not
-provide a global Session index or a distributed Scheduler.
+Optional SQL backends live in `runtime/session/plugins/`, matching other
+replaceable providers. `sage.session.postgres` follows the same
+open-by-`session_id` rule and does not `SELECT *` every Session at startup.
+Compact metadata and appended Run events live in `sagent_`-prefixed tables. A
+process-held advisory lock rejects a second writer. Subscribers stay
+in-process. A PostgreSQL store still does not provide a global Session index
+or a distributed Scheduler.
 
 `sage.session.mysql` is the same open-by-`session_id` store on InnoDB, with
 `sagent_`-prefixed tables, appended Run events, and a process-held `GET_LOCK`.

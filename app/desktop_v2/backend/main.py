@@ -20,7 +20,7 @@ from app.desktop_v2.backend.runtime_protocol import (
 )
 from app.desktop_v2.backend.storage import prepare_desktop_v2_storage
 from sagents.v2.runtime.observability import StructuredLogger, install_standard_logging
-from sagents.v2.runtime.session.filesystem import StoreInUseError
+from sagents.v2.runtime.session import StoreInUseError
 
 
 _ServiceT = TypeVar("_ServiceT")

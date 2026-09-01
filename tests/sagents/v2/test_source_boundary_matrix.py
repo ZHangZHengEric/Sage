@@ -140,10 +140,10 @@ def test_session_port_does_not_depend_on_store_implementations():
 
     contracts = V2_ROOT / "runtime" / "session" / "contracts.py"
     implementation_modules = {
-        "sagents.v2.runtime.session.ephemeral",
-        "sagents.v2.runtime.session.filesystem",
-        "sagents.v2.runtime.session.postgres",
-        "sagents.v2.runtime.session.mysql",
+        "sagents.v2.runtime.session.plugins.ephemeral",
+        "sagents.v2.runtime.session.plugins.filesystem",
+        "sagents.v2.runtime.session.plugins.postgres",
+        "sagents.v2.runtime.session.plugins.mysql",
     }
 
     offenders = [
@@ -158,28 +158,28 @@ def test_session_port_does_not_depend_on_store_implementations():
 def test_session_backends_share_state_machine_without_inheriting_each_other():
     """Concrete SessionStore backends may depend only on the shared state core."""
 
-    filesystem = V2_ROOT / "runtime" / "session" / "filesystem.py"
-    postgres = V2_ROOT / "runtime" / "session" / "postgres.py"
-    mysql = V2_ROOT / "runtime" / "session" / "mysql.py"
+    filesystem = V2_ROOT / "runtime" / "session" / "plugins" / "filesystem.py"
+    postgres = V2_ROOT / "runtime" / "session" / "plugins" / "postgres.py"
+    mysql = V2_ROOT / "runtime" / "session" / "plugins" / "mysql.py"
     state = V2_ROOT / "runtime" / "session" / "state.py"
     filesystem_imports = {module for _, module in _import_targets(filesystem)}
     postgres_imports = {module for _, module in _import_targets(postgres)}
     mysql_imports = {module for _, module in _import_targets(mysql)}
     state_imports = {module for _, module in _import_targets(state)}
 
-    assert "sagents.v2.runtime.session.ephemeral" not in filesystem_imports
-    assert "sagents.v2.runtime.session.postgres" not in filesystem_imports
-    assert "sagents.v2.runtime.session.mysql" not in filesystem_imports
-    assert "sagents.v2.runtime.session.filesystem" not in postgres_imports
-    assert "sagents.v2.runtime.session.ephemeral" not in postgres_imports
-    assert "sagents.v2.runtime.session.mysql" not in postgres_imports
-    assert "sagents.v2.runtime.session.filesystem" not in mysql_imports
-    assert "sagents.v2.runtime.session.ephemeral" not in mysql_imports
-    assert "sagents.v2.runtime.session.postgres" not in mysql_imports
-    assert "sagents.v2.runtime.session.filesystem" not in state_imports
-    assert "sagents.v2.runtime.session.ephemeral" not in state_imports
-    assert "sagents.v2.runtime.session.postgres" not in state_imports
-    assert "sagents.v2.runtime.session.mysql" not in state_imports
+    assert "sagents.v2.runtime.session.plugins.ephemeral" not in filesystem_imports
+    assert "sagents.v2.runtime.session.plugins.postgres" not in filesystem_imports
+    assert "sagents.v2.runtime.session.plugins.mysql" not in filesystem_imports
+    assert "sagents.v2.runtime.session.plugins.filesystem" not in postgres_imports
+    assert "sagents.v2.runtime.session.plugins.ephemeral" not in postgres_imports
+    assert "sagents.v2.runtime.session.plugins.mysql" not in postgres_imports
+    assert "sagents.v2.runtime.session.plugins.filesystem" not in mysql_imports
+    assert "sagents.v2.runtime.session.plugins.ephemeral" not in mysql_imports
+    assert "sagents.v2.runtime.session.plugins.postgres" not in mysql_imports
+    assert "sagents.v2.runtime.session.plugins.filesystem" not in state_imports
+    assert "sagents.v2.runtime.session.plugins.ephemeral" not in state_imports
+    assert "sagents.v2.runtime.session.plugins.postgres" not in state_imports
+    assert "sagents.v2.runtime.session.plugins.mysql" not in state_imports
 
 
 def test_runtime_kernel_does_not_select_a_session_store_backend():
@@ -222,7 +222,7 @@ def test_agent_and_flow_depend_on_session_port_not_store_implementations():
         V2_ROOT / "agent" / "engine.py",
         V2_ROOT / "flow" / "engine.py",
     )
-    implementation_prefix = "sagents.v2.runtime.session.ephemeral"
+    implementation_prefix = "sagents.v2.runtime.session.plugins"
     offenders = [
         f"{path.relative_to(V2_ROOT)}:{line}: {module}"
         for path in consumers
