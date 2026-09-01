@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
-from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 
 _TODO_STATUSES = {"pending", "in_progress", "completed"}

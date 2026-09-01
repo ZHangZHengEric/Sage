@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
-from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 
 class MediaTools:

@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 
 from sagents.v2.runtime.execution.sandbox import NetworkResult
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
-from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 
 class WebTools:

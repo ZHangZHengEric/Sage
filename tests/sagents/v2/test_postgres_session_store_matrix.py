@@ -17,7 +17,7 @@ from sagents.v2.contracts.principals import (
 from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session.plugins.postgres import (
     PostgresSessionStore,
     StoreInUseError,

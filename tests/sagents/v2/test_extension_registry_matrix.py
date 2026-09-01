@@ -19,7 +19,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
     ExtensionScopeContext,
 )
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -57,6 +57,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.session-memory.noop",
         "sage.session-memory.sqlite-bm25",
         "sage.memory.noop",
+        "sage.tool.ephemeral",
         "sage.tool.mcp",
         "sage.tool.multi-agent",
         "sage.tool.official",
@@ -112,6 +113,8 @@ def test_builtin_inventory_contains_only_real_factories():
         inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"]
         is False
     )
+    assert inventory["sage.tool.ephemeral"]["capabilities"]["durable"] is False
+    assert inventory["sage.tool.ephemeral"]["capabilities"]["testing"] is True
     for plugin_id in ("sage.sandbox.ephemeral", "sage.sandbox.local-workspace"):
         assert inventory[plugin_id]["version"] == "3.0.0"
         assert inventory[plugin_id]["provides"][0]["capability"] == "execution.sandbox"
@@ -160,6 +163,24 @@ def test_registered_factory_creates_the_selected_instance():
         {},
     )
     assert value.__class__.__name__ == "NoopMemoryProvider"
+
+
+def test_ephemeral_tool_plugin_factory_exposes_paired_catalog_and_executor():
+    registry = builtin_extension_registry()
+    registration = registry.get("sage.tool.ephemeral")
+    context = ExtensionScopeContext(
+        scope=ExtensionScope.PROCESS,
+        scope_id="test-tools",
+    )
+    plugin = registration.factory(context, {})
+
+    assert plugin.__class__.__name__ == "EphemeralToolPlugin"
+    assert plugin.plugin_id == "sage.tool.ephemeral"
+    assert registration.start is not None
+    providers = registration.start(plugin, context, {})
+    assert set(providers) == {"tool.catalog:ephemeral", "tool.executor:ephemeral"}
+    assert providers["tool.catalog:ephemeral"] is plugin.catalog
+    assert providers["tool.executor:ephemeral"] is plugin.executor
 
 
 @pytest.mark.parametrize(

@@ -51,6 +51,8 @@ class DiagnosticSink(Protocol):
 class NoopDiagnosticSink:
     """Default sink used when a host does not opt into diagnostics."""
 
+    plugin_id = "sage.observability.noop"
+
     async def begin_model_request(self, **kwargs: Any) -> None:
         return None
 
@@ -113,6 +115,7 @@ class LogSink(Protocol):
 
 
 class NoopLogSink:
+    plugin_id = "sage.logging.noop"
     format_version = "sage.log/v1"
 
     def write(self, record: LogRecord) -> None:
@@ -179,6 +182,7 @@ class TraceSink(Protocol):
 
 
 class NoopTraceSink:
+    plugin_id = "sage.trace.noop"
     format_version = "sage.trace/v1"
 
     def start_span(self, span: TraceSpan) -> None:

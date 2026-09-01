@@ -21,6 +21,7 @@ from sagents.v2.runtime.observability.timing import elapsed_ms
 class FilesystemDiagnosticSink:
     """Store redacted model requests beside their owning Session and Run."""
 
+    plugin_id = "sage.observability.filesystem"
     format_version = "sage.model-diagnostics/v2"
     _kind_aliases = {
         "continuation_judge": "completion_judge",

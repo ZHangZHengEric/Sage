@@ -30,6 +30,7 @@ from sagents.v2.memory.contracts import (
 class FilesystemBm25MemoryProvider:
     """Store scoped records in SQLite and recall them with FTS5 BM25."""
 
+    plugin_id = "sage.memory.filesystem-bm25"
     api_version = "2"
     _SCHEMA_VERSION = "1"
     _LEGACY_MIGRATION_KEY = "legacy_json_migration_v1"

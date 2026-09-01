@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from sagents.v2.context.contracts import ContextProjection
-from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -17,6 +17,8 @@ from sagents.v2.contracts.errors import (
 
 class WindowContextReducer:
     """Drops oldest complete conversation units while preserving tool pairs."""
+
+    plugin_id = "sage.context.reducer.window"
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
         self.estimator = estimator or JsonHeuristicTokenEstimator()

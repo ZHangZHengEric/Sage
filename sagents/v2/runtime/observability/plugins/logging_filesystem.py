@@ -1,29 +1,22 @@
-"""Official structured-log sink implementations."""
+"""Official structured-log sink: rotating local JSONL files."""
 
 from __future__ import annotations
 
 import os
-import sys
 import threading
 from pathlib import Path
-from typing import TextIO
 
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord
-from sagents.v2.runtime.observability.logs import encode_log_record
-
-
-_LEVEL_ORDER = {
-    LogLevel.DEBUG: 10,
-    LogLevel.INFO: 20,
-    LogLevel.WARNING: 30,
-    LogLevel.ERROR: 40,
-    LogLevel.CRITICAL: 50,
-}
+from sagents.v2.runtime.observability.logs import (
+    encode_log_record,
+    record_reaches_min_level,
+)
 
 
 class FilesystemLogSink:
     """Append redacted JSONL records with bounded local file rotation."""
 
+    plugin_id = "sage.logging.filesystem"
     format_version = "sage.log/v1"
 
     def __init__(
@@ -49,7 +42,7 @@ class FilesystemLogSink:
         self._write_lock = threading.Lock()
 
     def write(self, record: LogRecord) -> None:
-        if _LEVEL_ORDER[record.level] < _LEVEL_ORDER[self.min_level]:
+        if not record_reaches_min_level(record.level, self.min_level):
             return
         encoded = encode_log_record(record).encode("utf-8")
         with self._write_lock:
@@ -74,41 +67,6 @@ class FilesystemLogSink:
             if source.exists():
                 source.replace(self.path.with_name(f"{self.path.name}.{index + 1}"))
         self.path.replace(self.path.with_name(f"{self.path.name}.1"))
-
-    def close(self) -> None:
-        return None
-
-
-class StdoutLogSink:
-    """Write one redacted JSONL record per line to stdout or stderr."""
-
-    format_version = "sage.log/v1"
-
-    def __init__(
-        self,
-        *,
-        stream: str = "stdout",
-        min_level: LogLevel | str = LogLevel.INFO,
-        output: TextIO | None = None,
-    ) -> None:
-        target = str(stream).strip().lower()
-        if target not in {"stdout", "stderr"}:
-            raise ValueError("stream must be 'stdout' or 'stderr'")
-        self.stream = target
-        self.min_level = LogLevel(min_level)
-        self._output = output
-        self._write_lock = threading.Lock()
-
-    def write(self, record: LogRecord) -> None:
-        if _LEVEL_ORDER[record.level] < _LEVEL_ORDER[self.min_level]:
-            return
-        line = encode_log_record(record)
-        with self._write_lock:
-            handle = self._output or (
-                sys.stderr if self.stream == "stderr" else sys.stdout
-            )
-            handle.write(line)
-            handle.flush()
 
     def close(self) -> None:
         return None

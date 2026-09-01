@@ -45,6 +45,7 @@ _KIND_MAP = {
 class OtlpTraceSink:
     """Export redacted spans to an OTLP collector. Never participates in recovery."""
 
+    plugin_id = "sage.trace.otlp"
     format_version = "sage.trace/v1"
 
     def __init__(

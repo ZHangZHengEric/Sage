@@ -14,6 +14,7 @@ from sagents.v2.tool.contracts import (
     ToolExecutionResult,
 )
 from sagents.v2.tool.plugins.ephemeral import (
+    EphemeralToolPlugin,
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
@@ -33,13 +34,12 @@ from sagents.v2.tool.localization import (
     localize_tool_definition,
     normalize_tool_language,
 )
+from sagents.v2.tool.plugins.selection_direct import DirectToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_lexical import LexicalToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 from sagents.v2.tool.selection import (
     DEFAULT_ALWAYS_VISIBLE_TOOLS,
-    DirectToolSelectionPolicy,
-    HybridToolSelectionPolicy,
-    LLMToolSelectionPolicy,
-    LexicalToolSelectionPolicy,
-    RecentToolSelectionPolicy,
     ToolSelectionConfig,
     ToolSelectionPolicy,
     ToolSelectionPrepareContext,
@@ -53,6 +53,7 @@ __all__ = [
     "CompositeToolCatalog",
     "CompositeToolExecutor",
     "DecoratedToolProvider",
+    "EphemeralToolPlugin",
     "ExcludingToolCatalog",
     "FilteredToolCatalog",
     "InvocationGrantToolCatalog",
@@ -80,7 +81,6 @@ __all__ = [
     "normalize_tool_language",
     "DEFAULT_ALWAYS_VISIBLE_TOOLS",
     "DirectToolSelectionPolicy",
-    "HybridToolSelectionPolicy",
     "LLMToolSelectionPolicy",
     "LexicalToolSelectionPolicy",
     "RecentToolSelectionPolicy",

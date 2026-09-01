@@ -20,9 +20,9 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.tool import ToolCall, decorated_tool_definition, tool
 from sagents.v2.tool.localization import localize_tool_definition
+from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
-    OfficialToolRuntime,
     official_tool_categories,
     official_tool_definitions,
 )

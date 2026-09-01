@@ -11,7 +11,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
     ExtensionScopeContext,
 )
-from sagents.v2.runtime.extensions.defaults import builtin_extension_registry
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.observability import FilesystemLogSink, LogSink
 
 

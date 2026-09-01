@@ -18,7 +18,7 @@ from sagents.v2.session_memory import (
     SqliteBm25SessionMemoryProvider,
 )
 from sagents.v2.tool import ToolCall, ToolInvocation
-from sagents.v2.tool.plugins.official.memory import MemoryTools
+from sagents.v2.tool.official.memory import MemoryTools
 
 
 @pytest.mark.asyncio

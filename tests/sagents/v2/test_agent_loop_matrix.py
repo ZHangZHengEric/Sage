@@ -31,10 +31,8 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
-from sagents.v2.tool.selection import (
-    HybridToolSelectionPolicy,
-    RecentToolSelectionPolicy,
-)
+from sagents.v2.tool.plugins.selection_lexical import LexicalToolSelectionPolicy
+from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 from sagents.v2.agent.policy.continuation import (
     ContinuationAction,
     ContinuationDecision,
@@ -539,7 +537,7 @@ async def test_large_catalog_is_bounded_and_expansion_changes_the_next_request()
     target = ToolDefinition(
         name="zzz_target", description="hidden target", input_schema={}
     )
-    policy = HybridToolSelectionPolicy(
+    policy = LexicalToolSelectionPolicy(
         {
             "direct_tool_count_threshold": 0,
             "max_visible_tools": 2,

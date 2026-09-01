@@ -51,7 +51,7 @@ from sagents.v2.agent.multi_agent import (
     WorkspaceSharingPolicy,
 )
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
-from sagents.v2.tool.plugins.official.delegation import MultiAgentToolPlugin
+from sagents.v2.tool.plugins.delegation import MultiAgentToolPlugin
 
 
 CONTEXT = RequestContext(

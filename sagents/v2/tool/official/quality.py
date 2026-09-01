@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
-from sagents.v2.tool.plugins.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 
 class QualityTools:
