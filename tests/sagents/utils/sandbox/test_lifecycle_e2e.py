@@ -10,7 +10,9 @@ from sagents.utils.sandbox.interface import SandboxType
 
 @pytest.mark.parametrize("mode", [SandboxType.PASSTHROUGH, SandboxType.LOCAL])
 @pytest.mark.timeout(60)
-def test_sandbox_lifecycle_syncs_skill_and_executes_python(tmp_path, mode):
+def test_sandbox_lifecycle_syncs_skill_and_executes_python(tmp_path, mode, monkeypatch):
+    # 生命周期测试不需要 uv；预装 uv 要访问 PyPI 镜像，在海外 CI 上常常独自耗尽 60s 预算。
+    monkeypatch.setenv("SAGE_SANDBOX_SKIP_UV_INSTALL", "1")
     host_skills = tmp_path / "host-skills"
     skill_dir = host_skills / "e2e-skill"
     skill_dir.mkdir(parents=True)
