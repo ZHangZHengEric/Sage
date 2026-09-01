@@ -254,11 +254,14 @@ sharded locks must preserve Session sequence, tree deletion, CAS, and rollback
 as one proof rather than as a throughput-only change.
 
 `sage.session.postgres` follows the same open-by-`session_id` rule and does not
-`SELECT *` every Session at startup. Compact metadata is CAS'd on
-`sessions.revision`; Run events are appended in the same transaction.
-Cross-process writers are fenced by that row-level CAS. Subscribers replay from
-`run_events` and treat `LISTEN/NOTIFY` as a doorbell. A PostgreSQL store still
-does not provide a global Session index or a distributed Scheduler.
+`SELECT *` every Session at startup. Compact metadata and appended Run events
+live in `sagent_`-prefixed tables. A process-held advisory lock rejects a
+second writer. Subscribers stay in-process. A PostgreSQL store still does not
+provide a global Session index or a distributed Scheduler.
+
+`sage.session.mysql` is the same open-by-`session_id` store on InnoDB, with
+`sagent_`-prefixed tables, appended Run events, and a process-held `GET_LOCK`.
+It does not claim multi-process writes or cross-process subscribe.
 
 ## Authoritative versus derived data
 

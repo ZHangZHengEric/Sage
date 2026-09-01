@@ -27,6 +27,7 @@ from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 from sagents.v2.runtime.session import (
     EphemeralSessionStore,
     FilesystemSessionStore,
+    MysqlSessionStore,
     PostgresSessionStore,
 )
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
@@ -76,12 +77,11 @@ def builtin_extension_registry() -> ExtensionRegistry:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="sage.session.postgres",
-                version="2.1.0",
+                version="2.2.0",
                 name="PostgreSQL SessionStore",
                 description=(
-                    "Durable per-Session PostgreSQL store with row-level CAS, "
-                    "appended Run events, and LISTEN/NOTIFY follow. "
-                    "No global Session index."
+                    "Durable per-Session PostgreSQL store with appended Run events. "
+                    "Single-process writers; no global Session index."
                 ),
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
@@ -92,6 +92,7 @@ def builtin_extension_registry() -> ExtensionRegistry:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "schema_name": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string", "minLength": 1},
                     },
                     "required": ["dsn"],
                     "additionalProperties": False,
@@ -99,8 +100,7 @@ def builtin_extension_registry() -> ExtensionRegistry:
                 capabilities={
                     "durable": True,
                     "global_session_index": False,
-                    "multi_process_writes": True,
-                    "cross_process_subscribe": True,
+                    "multi_process_writes": False,
                 },
                 availability=ExtensionAvailability(
                     available=importlib.util.find_spec("asyncpg") is not None,
@@ -115,6 +115,51 @@ def builtin_extension_registry() -> ExtensionRegistry:
             factory=lambda context, dependencies: PostgresSessionStore(
                 str(context.config["dsn"]),
                 schema_name=str(context.config.get("schema_name") or "sage_v2"),
+                table_prefix=str(context.config.get("table_prefix") or "sagent"),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.mysql",
+                version="2.0.0",
+                name="MySQL SessionStore",
+                description=(
+                    "Durable per-Session MySQL store with appended Run events. "
+                    "Single-process writers; no global Session index."
+                ),
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "dsn": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["dsn"],
+                    "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True,
+                    "global_session_index": False,
+                    "multi_process_writes": False,
+                },
+                availability=ExtensionAvailability(
+                    available=importlib.util.find_spec("aiomysql") is not None,
+                    reason=(
+                        None
+                        if importlib.util.find_spec("aiomysql") is not None
+                        else "optional aiomysql package is not installed"
+                    ),
+                ),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: MysqlSessionStore(
+                str(context.config["dsn"]),
+                table_prefix=str(context.config.get("table_prefix") or "sagent"),
             ),
         )
     )

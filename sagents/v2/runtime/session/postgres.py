@@ -1,14 +1,15 @@
-"""Optional PostgreSQL SessionStore with row-level CAS and LISTEN/NOTIFY.
+"""Optional single-process PostgreSQL SessionStore.
 
 The coordinator still owns sequencing, idempotency, and legal transitions.
-This adapter persists one Session tree at a time: compact metadata is CAS'd
-on ``sessions.revision``, Run events are appended, and subscribers replay
-from the table then follow ``NOTIFY``. There is no global Session index.
+This adapter persists one Session tree at a time, appends Run events, and
+rejects a second writer with an advisory lock. There is no global Session
+index and no cross-process subscribe.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from contextlib import asynccontextmanager
@@ -20,8 +21,11 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
+
+class StoreInUseError(SageV2Error):
+    """Raised when another writer already owns the same PostgreSQL prefix."""
 
 
 class SessionStoreCorruptionError(SageV2Error):
@@ -29,6 +33,7 @@ class SessionStoreCorruptionError(SageV2Error):
 
 
 _SCHEMA_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+_PREFIX = re.compile(r"^[a-z][a-z0-9_]{0,32}$")
 _COMPACT_LISTS = (
     "sessions",
     "runs",
@@ -79,7 +84,7 @@ def _decode_json(value: Any) -> Any:
 class _PostgresSessionState(SessionStoreCoordinator):
     """Row-CAS PostgreSQL adapter around the shared state coordinator."""
 
-    format_version = "sage.session.postgres/v2"
+    format_version = "sage.session.postgres/v3"
 
     def __init__(
         self,
@@ -87,6 +92,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         *,
         schema: str | None = None,
         schema_name: str | None = None,
+        table_prefix: str | None = None,
         **kwargs: Any,
     ) -> None:
         resolved = dsn.strip()
@@ -97,10 +103,14 @@ class _PostgresSessionState(SessionStoreCoordinator):
         resolved_schema = schema_name or schema or "sage_v2"
         if not _SCHEMA_NAME.fullmatch(resolved_schema):
             raise ValueError("postgres SessionStore schema is invalid")
+        prefix = table_prefix or "sagent"
+        if not _PREFIX.fullmatch(prefix):
+            raise ValueError("postgres SessionStore table_prefix is invalid")
         self.dsn = resolved
         self.schema_name = resolved_schema
+        self.table_prefix = prefix
         self._pool = None
-        self._listen_conn = None
+        self._lock_conn = None
         self._init_lock = asyncio.Lock()
         self._session_lock_guard = asyncio.Lock()
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -108,7 +118,6 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self._persisted_run_sequences: dict[str, int] = {}
         self._persisted_session_runs: dict[str, set[str]] = {}
         self._persisted_session_revisions: dict[str, int] = {}
-        self._notify_waiters: dict[str, set[asyncio.Event]] = {}
         self._closed = False
         super().__init__(**kwargs)
 
@@ -118,22 +127,29 @@ class _PostgresSessionState(SessionStoreCoordinator):
             **super().capabilities,
             "durable_across_process_restart": True,
             "storage_format_version": self.format_version,
-            "multi_process_writes": True,
+            "multi_process_writes": False,
             "global_session_index": False,
             "derived_state_authoritative": False,
-            "cross_process_subscribe": True,
+            "cross_process_subscribe": False,
         }
 
     @property
-    def notify_channel(self) -> str:
-        return f"sage_sess_{self.schema_name}"[:63]
+    def lock_key(self) -> int:
+        digest = hashlib.sha256(
+            f"{self.schema_name}:{self.table_prefix}".encode("utf-8")
+        ).digest()
+        return int.from_bytes(digest[:8], "big") % (2**63)
 
     def composition_identity(self) -> dict[str, str]:
         return {
             "plugin": "sage.session.postgres",
             "schema": self.schema_name,
+            "table_prefix": self.table_prefix,
             "format": self.format_version,
         }
+
+    def _table(self, name: str) -> str:
+        return f"{self.schema_name}.{self.table_prefix}_{name}"
 
     async def _ensure_ready(self) -> None:
         if self._pool is not None:
@@ -151,28 +167,42 @@ class _PostgresSessionState(SessionStoreCoordinator):
                     )
                 )
             asyncpg = _require_asyncpg()
-            bootstrap = await asyncpg.connect(self.dsn)
+            lock_conn = await asyncpg.connect(self.dsn)
             try:
-                await self._bootstrap(bootstrap)
-            finally:
-                await bootstrap.close()
-            self._pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=8)
-            listen_conn = await asyncpg.connect(self.dsn)
-            try:
-                await listen_conn.add_listener(self.notify_channel, self._on_notify)
+                await self._acquire_writer_lock(lock_conn)
+                await self._bootstrap(lock_conn)
+                self._pool = await asyncpg.create_pool(
+                    self.dsn, min_size=1, max_size=8
+                )
             except Exception:
-                await listen_conn.close()
-                await self._pool.close()
-                self._pool = None
+                await lock_conn.close()
                 raise
-            self._listen_conn = listen_conn
+            self._lock_conn = lock_conn
+
+    async def _acquire_writer_lock(self, connection) -> None:
+        locked = await connection.fetchval(
+            "SELECT pg_try_advisory_lock($1)", self.lock_key
+        )
+        if not locked:
+            raise StoreInUseError(
+                RuntimeErrorInfo(
+                    code="session_store.in_use",
+                    category=ErrorCategory.CONFLICT,
+                    message=(
+                        "postgres SessionStore prefix is already owned: "
+                        f"{self.schema_name}.{self.table_prefix}"
+                    ),
+                    safe_to_resume=True,
+                )
+            )
 
     async def _bootstrap(self, connection) -> None:
-        schema = self.schema_name
-        await connection.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        sessions = self._table("sessions")
+        run_events = self._table("run_events")
+        await connection.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema_name}")
         await connection.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {schema}.sessions (
+            CREATE TABLE IF NOT EXISTS {sessions} (
                 session_id TEXT PRIMARY KEY,
                 parent_session_id TEXT,
                 revision BIGINT NOT NULL,
@@ -185,9 +215,9 @@ class _PostgresSessionState(SessionStoreCoordinator):
         )
         await connection.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {schema}.run_events (
+            CREATE TABLE IF NOT EXISTS {run_events} (
                 session_id TEXT NOT NULL
-                    REFERENCES {schema}.sessions (session_id) ON DELETE CASCADE,
+                    REFERENCES {sessions} (session_id) ON DELETE CASCADE,
                 run_id TEXT NOT NULL,
                 run_sequence BIGINT NOT NULL,
                 session_sequence BIGINT,
@@ -198,29 +228,29 @@ class _PostgresSessionState(SessionStoreCoordinator):
         )
         await connection.execute(
             f"""
-            CREATE INDEX IF NOT EXISTS run_events_session_seq
-            ON {schema}.run_events (session_id, session_sequence)
+            CREATE INDEX IF NOT EXISTS {self.table_prefix}_run_events_session_seq
+            ON {run_events} (session_id, session_sequence)
             """
         )
         await connection.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {schema}.locations (
+            CREATE TABLE IF NOT EXISTS {self._table("locations")} (
                 kind TEXT NOT NULL,
                 identity TEXT NOT NULL,
                 session_id TEXT NOT NULL
-                    REFERENCES {schema}.sessions (session_id) ON DELETE CASCADE,
+                    REFERENCES {sessions} (session_id) ON DELETE CASCADE,
                 PRIMARY KEY (kind, identity)
             )
             """
         )
         await connection.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {schema}.start_idempotency (
+            CREATE TABLE IF NOT EXISTS {self._table("start_idempotency")} (
                 tenant_id TEXT NOT NULL DEFAULT '',
                 principal_id TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
                 session_id TEXT NOT NULL
-                    REFERENCES {schema}.sessions (session_id) ON DELETE CASCADE,
+                    REFERENCES {sessions} (session_id) ON DELETE CASCADE,
                 run_id TEXT NOT NULL,
                 request_digest TEXT NOT NULL,
                 PRIMARY KEY (tenant_id, principal_id, idempotency_key)
@@ -229,9 +259,9 @@ class _PostgresSessionState(SessionStoreCoordinator):
         )
         await connection.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {schema}.derived_state (
+            CREATE TABLE IF NOT EXISTS {self._table("derived_state")} (
                 session_id TEXT NOT NULL
-                    REFERENCES {schema}.sessions (session_id) ON DELETE CASCADE,
+                    REFERENCES {sessions} (session_id) ON DELETE CASCADE,
                 namespace TEXT NOT NULL,
                 key TEXT NOT NULL,
                 value JSONB NOT NULL,
@@ -240,33 +270,18 @@ class _PostgresSessionState(SessionStoreCoordinator):
             """
         )
 
-    def _on_notify(self, connection, pid, channel, payload) -> None:
-        del connection, pid, channel
-        self._wake_run(str(payload or ""))
-
-    def _wake_run(self, run_id: str) -> None:
-        for waiter in tuple(self._notify_waiters.get(run_id, ())):
-            waiter.set()
-        for waiter in tuple(self._notify_waiters.get("*", ())):
-            waiter.set()
-
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        listen_conn = self._listen_conn
+        lock_conn = self._lock_conn
         pool = self._pool
-        self._listen_conn = None
+        self._lock_conn = None
         self._pool = None
-        if listen_conn is not None:
-            try:
-                await listen_conn.remove_listener(
-                    self.notify_channel, self._on_notify
-                )
-            finally:
-                await listen_conn.close()
         if pool is not None:
             await pool.close()
+        if lock_conn is not None:
+            await lock_conn.close()
 
     @asynccontextmanager
     async def _session_scope(self, session_id: str):
@@ -284,7 +299,6 @@ class _PostgresSessionState(SessionStoreCoordinator):
             run_id: list(rows)
             for run_id, rows in state.get("run_events", {}).items()
         }
-        notify_runs = tuple(events)
         expected = self._persisted_session_revisions.get(session_id)
         new_revision = int(session_row["revision"])
         next_run_sequences: dict[str, int] = {}
@@ -294,7 +308,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 async with connection.transaction():
                     current = await connection.fetchval(
                         f"""
-                        SELECT revision FROM {self.schema_name}.sessions
+                        SELECT revision FROM {self._table("sessions")}
                         WHERE session_id = $1
                         FOR UPDATE
                         """,
@@ -308,7 +322,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                             )
                         await connection.execute(
                             f"""
-                            INSERT INTO {self.schema_name}.sessions (
+                            INSERT INTO {self._table("sessions")} (
                                 session_id, parent_session_id, revision,
                                 last_sequence, created_at, updated_at,
                                 compact_state
@@ -337,7 +351,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                             )
                         updated = await connection.execute(
                             f"""
-                            UPDATE {self.schema_name}.sessions SET
+                            UPDATE {self._table("sessions")} SET
                                 parent_session_id = $2,
                                 revision = $3,
                                 last_sequence = $4,
@@ -370,12 +384,6 @@ class _PostgresSessionState(SessionStoreCoordinator):
                     await self._replace_start_idempotency(
                         connection, session_id, compact
                     )
-                    for run_id in notify_runs:
-                        await connection.execute(
-                            "SELECT pg_notify($1, $2)",
-                            self.notify_channel,
-                            run_id,
-                        )
         except Exception as exc:
             await self._reload_session_from_storage_locked(session_id)
             asyncpg = _require_asyncpg()
@@ -386,12 +394,10 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 ) from exc
             raise
         self._remember_persisted_session(session_id, new_revision, next_run_sequences)
-        for run_id in notify_runs:
-            self._wake_run(run_id)
 
     async def _replace_locations(self, connection, session_id, compact) -> None:
         await connection.execute(
-            f"DELETE FROM {self.schema_name}.locations WHERE session_id = $1",
+            f"DELETE FROM {self._table("locations")} WHERE session_id = $1",
             session_id,
         )
         location_rows = []
@@ -403,7 +409,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         if location_rows:
             await connection.executemany(
                 f"""
-                INSERT INTO {self.schema_name}.locations
+                INSERT INTO {self._table("locations")}
                     (kind, identity, session_id)
                 VALUES ($1, $2, $3)
                 """,
@@ -414,7 +420,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self, connection, session_id, compact
     ) -> None:
         await connection.execute(
-            f"DELETE FROM {self.schema_name}.start_idempotency WHERE session_id = $1",
+            f"DELETE FROM {self._table("start_idempotency")} WHERE session_id = $1",
             session_id,
         )
         rows = [
@@ -431,7 +437,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         if rows:
             await connection.executemany(
                 f"""
-                INSERT INTO {self.schema_name}.start_idempotency (
+                INSERT INTO {self._table("start_idempotency")} (
                     tenant_id, principal_id, idempotency_key,
                     session_id, run_id, request_digest
                 )
@@ -454,14 +460,14 @@ class _PostgresSessionState(SessionStoreCoordinator):
         removed = self._persisted_session_runs.get(session_id, set()) - set(events)
         for run_id in removed:
             await connection.execute(
-                f"DELETE FROM {self.schema_name}.run_events WHERE run_id = $1",
+                f"DELETE FROM {self._table("run_events")} WHERE run_id = $1",
                 run_id,
             )
         for run_id, rows in events.items():
             persisted = next_sequences.get(run_id, 0)
             if persisted > len(rows):
                 await connection.execute(
-                    f"DELETE FROM {self.schema_name}.run_events WHERE run_id = $1",
+                    f"DELETE FROM {self._table("run_events")} WHERE run_id = $1",
                     run_id,
                 )
                 persisted = 0
@@ -469,7 +475,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             if appended:
                 await connection.executemany(
                     f"""
-                    INSERT INTO {self.schema_name}.run_events (
+                    INSERT INTO {self._table("run_events")} (
                         session_id, run_id, run_sequence, session_sequence, event
                     )
                     VALUES ($1, $2, $3, $4, $5::jsonb)
@@ -499,7 +505,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 if ordered:
                     await connection.fetch(
                         f"""
-                        SELECT session_id FROM {self.schema_name}.sessions
+                        SELECT session_id FROM {self._table("sessions")}
                         WHERE session_id = ANY($1::text[])
                         ORDER BY session_id
                         FOR UPDATE
@@ -508,7 +514,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                     )
                 await connection.execute(
                     f"""
-                    DELETE FROM {self.schema_name}.sessions
+                    DELETE FROM {self._table("sessions")}
                     WHERE session_id = ANY($1::text[])
                     """,
                     list(ordered),
@@ -526,7 +532,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._pool.acquire() as connection:
             payload = await connection.fetchval(
                 f"""
-                SELECT value FROM {self.schema_name}.derived_state
+                SELECT value FROM {self._table("derived_state")}
                 WHERE session_id = $1 AND namespace = $2 AND key = $3
                 """,
                 session_id,
@@ -548,7 +554,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._pool.acquire() as connection:
             await connection.execute(
                 f"""
-                INSERT INTO {self.schema_name}.derived_state
+                INSERT INTO {self._table("derived_state")}
                     (session_id, namespace, key, value)
                 VALUES ($1, $2, $3, $4::jsonb)
                 ON CONFLICT (session_id, namespace, key) DO UPDATE SET
@@ -571,7 +577,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._pool.acquire() as connection:
             await connection.execute(
                 f"""
-                DELETE FROM {self.schema_name}.derived_state
+                DELETE FROM {self._table("derived_state")}
                 WHERE session_id = $1 AND namespace = $2 AND key = $3
                 """,
                 session_id,
@@ -643,13 +649,6 @@ class _PostgresSessionState(SessionStoreCoordinator):
         return await super().get_latest_checkpoint(run_id)
 
     async def read_events(self, run_id, **kwargs):
-        after = int(kwargs.get("after_sequence") or 0)
-        limit = kwargs.get("limit")
-        events = await self._read_run_events_from_db(
-            run_id, after_sequence=after, limit=limit
-        )
-        if events or await self._locate_session("run_id", run_id):
-            return events
         await self._refresh_resource("run_id", run_id)
         return await super().read_events(run_id, **kwargs)
 
@@ -714,42 +713,9 @@ class _PostgresSessionState(SessionStoreCoordinator):
         return await super().request_resume(command, context)
 
     async def subscribe_events(self, cursor):
-        await self._ensure_ready()
-        session_id = await self._locate_session("run_id", cursor.run_id)
-        if session_id is not None:
-            await self._refresh_session(session_id)
-        elif cursor.run_id not in self._runs:
-            raise self._not_found("run.not_found", cursor.run_id)
-        last = cursor.run_sequence
-        waiter = asyncio.Event()
-        self._notify_waiters.setdefault(cursor.run_id, set()).add(waiter)
-        try:
-            while True:
-                events = await self._read_run_events_from_db(
-                    cursor.run_id, after_sequence=last
-                )
-                if not events and cursor.run_id in self._run_events:
-                    events = tuple(
-                        event
-                        for event in self._run_events[cursor.run_id]
-                        if event.run_sequence > last
-                    )
-                if not events:
-                    waiter.clear()
-                    try:
-                        await asyncio.wait_for(waiter.wait(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        continue
-                    continue
-                for event in events:
-                    last = event.run_sequence
-                    yield event
-        finally:
-            waiters = self._notify_waiters.get(cursor.run_id)
-            if waiters is not None:
-                waiters.discard(waiter)
-                if not waiters:
-                    self._notify_waiters.pop(cursor.run_id, None)
+        await self._refresh_resource("run_id", cursor.run_id)
+        async for event in super().subscribe_events(cursor):
+            yield event
 
     async def _refresh_resource(self, identity_key: str, identity: str) -> None:
         await self._ensure_ready()
@@ -815,11 +781,11 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 f"""
                 WITH RECURSIVE tree AS (
                     SELECT session_id
-                    FROM {self.schema_name}.sessions
+                    FROM {self._table("sessions")}
                     WHERE parent_session_id = $1
                     UNION ALL
                     SELECT child.session_id
-                    FROM {self.schema_name}.sessions AS child
+                    FROM {self._table("sessions")} AS child
                     JOIN tree ON child.parent_session_id = tree.session_id
                 )
                 SELECT session_id FROM tree
@@ -856,7 +822,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._pool.acquire() as connection:
             return await connection.fetchval(
                 f"""
-                SELECT session_id FROM {self.schema_name}.locations
+                SELECT session_id FROM {self._table("locations")}
                 WHERE kind = $1 AND identity = $2
                 """,
                 identity_key,
@@ -868,7 +834,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._pool.acquire() as connection:
             return await connection.fetchval(
                 f"""
-                SELECT session_id FROM {self.schema_name}.start_idempotency
+                SELECT session_id FROM {self._table("start_idempotency")}
                 WHERE tenant_id = $1 AND principal_id = $2 AND idempotency_key = $3
                 """,
                 str(context.actor.tenant_id or ""),
@@ -876,37 +842,11 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 command.idempotency_key,
             )
 
-    async def _read_run_events_from_db(
-        self,
-        run_id: str,
-        *,
-        after_sequence: int = 0,
-        limit: int | None = None,
-    ) -> tuple[RuntimeEvent, ...]:
-        await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
-            rows = await connection.fetch(
-                f"""
-                SELECT event FROM {self.schema_name}.run_events
-                WHERE run_id = $1 AND run_sequence > $2
-                ORDER BY run_sequence
-                LIMIT $3
-                """,
-                run_id,
-                after_sequence,
-                limit if limit is not None else 10_000,
-            )
-        events = []
-        for row in rows:
-            events.append(RuntimeEvent.model_validate(_decode_json(row["event"])))
-        return tuple(events)
-
     async def _fetch_session(self, session_id: str) -> dict[str, Any] | None:
         assert self._pool is not None
         async with self._pool.acquire() as connection:
             compact = await connection.fetchval(
-                f"SELECT compact_state FROM {self.schema_name}.sessions WHERE session_id = $1",
+                f"SELECT compact_state FROM {self._table("sessions")} WHERE session_id = $1",
                 session_id,
             )
             if compact is None:
@@ -914,7 +854,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             event_rows = await connection.fetch(
                 f"""
                 SELECT run_id, event
-                FROM {self.schema_name}.run_events
+                FROM {self._table("run_events")}
                 WHERE session_id = $1
                 ORDER BY run_id, run_sequence
                 """,
@@ -1137,4 +1077,5 @@ class PostgresSessionStore(metaclass=_PostgresSessionStoreMeta):
 __all__ = [
     "PostgresSessionStore",
     "SessionStoreCorruptionError",
+    "StoreInUseError",
 ]

@@ -60,6 +60,7 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29.0"]
+mysql = ["aiomysql>=0.2.0"]
 
 [project.urls]
 Homepage = "https://github.com/ZHangZHengEric/Sage"

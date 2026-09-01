@@ -143,6 +143,7 @@ def test_session_port_does_not_depend_on_store_implementations():
         "sagents.v2.runtime.session.ephemeral",
         "sagents.v2.runtime.session.filesystem",
         "sagents.v2.runtime.session.postgres",
+        "sagents.v2.runtime.session.mysql",
     }
 
     offenders = [
@@ -159,18 +160,26 @@ def test_session_backends_share_state_machine_without_inheriting_each_other():
 
     filesystem = V2_ROOT / "runtime" / "session" / "filesystem.py"
     postgres = V2_ROOT / "runtime" / "session" / "postgres.py"
+    mysql = V2_ROOT / "runtime" / "session" / "mysql.py"
     state = V2_ROOT / "runtime" / "session" / "state.py"
     filesystem_imports = {module for _, module in _import_targets(filesystem)}
     postgres_imports = {module for _, module in _import_targets(postgres)}
+    mysql_imports = {module for _, module in _import_targets(mysql)}
     state_imports = {module for _, module in _import_targets(state)}
 
     assert "sagents.v2.runtime.session.ephemeral" not in filesystem_imports
     assert "sagents.v2.runtime.session.postgres" not in filesystem_imports
+    assert "sagents.v2.runtime.session.mysql" not in filesystem_imports
     assert "sagents.v2.runtime.session.filesystem" not in postgres_imports
     assert "sagents.v2.runtime.session.ephemeral" not in postgres_imports
+    assert "sagents.v2.runtime.session.mysql" not in postgres_imports
+    assert "sagents.v2.runtime.session.filesystem" not in mysql_imports
+    assert "sagents.v2.runtime.session.ephemeral" not in mysql_imports
+    assert "sagents.v2.runtime.session.postgres" not in mysql_imports
     assert "sagents.v2.runtime.session.filesystem" not in state_imports
     assert "sagents.v2.runtime.session.ephemeral" not in state_imports
     assert "sagents.v2.runtime.session.postgres" not in state_imports
+    assert "sagents.v2.runtime.session.mysql" not in state_imports
 
 
 def test_runtime_kernel_does_not_select_a_session_store_backend():

@@ -236,16 +236,24 @@ are projections that can be regenerated. Older stores are never changed during
 startup; migrate explicitly with `sage v2 migrate --runtime-root <path>`.
 
 `sage.session.postgres` is an optional durable plugin (`pip install sage[postgres]`
-or `asyncpg`). It reuses the same coordinator semantics: compact Session
-metadata is CAS'd on `sessions.revision`, Run events are appended, and one
-commit is one transaction. `dsn` must be declared on the plugin selection in
-`sage.yaml` (optional `schema_name` is allowed). The runtime does not read a
-DSN environment variable. There is still no global Session index, and a PG
-store does not make the Scheduler multi-host. Cross-process writers are fenced
-by row-level CAS (`multi_process_writes: True`). Subscribers replay from
-`run_events` and follow `LISTEN/NOTIFY` on the same schema; `NOTIFY` is only a
-doorbell. Hosts that already own a connection string may also inject
-`PostgresSessionStore(dsn=...)` through `SAgentBuilder.with_session_store(...)`.
+or `asyncpg`). It reuses the same coordinator semantics, upserts compact Session
+metadata, and appends Run events. `dsn` must be declared on the plugin
+selection in `sage.yaml` (optional `schema_name` is allowed). Tables use the
+`sagent_` prefix (`sagent_sessions`, `sagent_run_events`, …). The runtime does
+not read a DSN environment variable. A process-held advisory lock rejects a
+second writer (`multi_process_writes: False`). Subscribers stay in-process.
+There is still no global Session index, and a PG store does not make the
+Scheduler multi-host. Hosts that already own a connection string may also
+inject `PostgresSessionStore(dsn=...)` through
+`SAgentBuilder.with_session_store(...)`.
+
+`sage.session.mysql` is a second optional durable plugin (`pip install sage[mysql]`
+or `aiomysql`). It also reuses the coordinator, upserts compact Session
+metadata, and appends Run events. `dsn` must be a `mysql://` URL that includes
+a database; tables use the same `sagent_` prefix. Optional `table_prefix`
+isolates a second store in a shared database. A process-held `GET_LOCK`
+rejects a second writer (`multi_process_writes: False`). Subscribers stay
+in-process. There is no global Session index.
 
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
