@@ -58,6 +58,10 @@ from sagents.v2.runtime.observability import (
     FilesystemLogSink,
     NoopDiagnosticSink,
     NoopLogSink,
+    NoopTraceSink,
+    OtlpTraceSink,
+    StdoutLogSink,
+    otel_available,
 )
 from sagents.v2.session_memory import (
     NoopSessionMemoryProvider,
@@ -479,6 +483,85 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             min_level=str(context.config.get("min_level", "info")),
         ),
         scopes={ExtensionScope.PROCESS},
+    )
+    _one(
+        registry,
+        "sage.logging.stdout",
+        "Stdout structured log sink",
+        "observability.log-sink",
+        lambda context, dependencies: StdoutLogSink(
+            stream=str(context.config.get("stream", "stdout")),
+            min_level=str(context.config.get("min_level", "info")),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "stream": {
+                    "type": "string",
+                    "enum": ["stdout", "stderr"],
+                    "default": "stdout",
+                },
+                "min_level": {
+                    "type": "string",
+                    "enum": ["debug", "info", "warning", "error", "critical"],
+                    "default": "info",
+                },
+            },
+            "additionalProperties": False,
+        },
+    )
+    _one(
+        registry,
+        "sage.trace.noop",
+        "No-op trace sink",
+        "observability.trace-sink",
+        lambda context, dependencies: NoopTraceSink(),
+        scopes={ExtensionScope.PROCESS},
+    )
+    _one(
+        registry,
+        "sage.trace.otlp",
+        "OTLP / Jaeger trace sink",
+        "observability.trace-sink",
+        lambda context, dependencies: OtlpTraceSink(
+            endpoint=str(context.config.get("endpoint") or "http://127.0.0.1:4317"),
+            service_name=str(context.config.get("service_name") or "sage"),
+            protocol=str(context.config.get("protocol") or "grpc"),
+            insecure=bool(context.config.get("insecure", True)),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        availability=ExtensionAvailability(
+            available=otel_available(),
+            reason=(
+                None
+                if otel_available()
+                else "optional opentelemetry packages are not installed"
+            ),
+        ),
+        config_schema={
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "http://127.0.0.1:4317",
+                },
+                "service_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "sage",
+                },
+                "protocol": {
+                    "type": "string",
+                    "enum": ["grpc", "http"],
+                    "default": "grpc",
+                },
+                "insecure": {"type": "boolean", "default": True},
+            },
+            "additionalProperties": False,
+        },
+        capabilities={"exports_otlp": True},
     )
     _one(
         registry,

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.contracts import DiagnosticSink
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -14,6 +14,20 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.runtime.observability.contracts import (
+    DiagnosticSink,
+    NoopTraceSink,
+    TraceKind,
+    TraceSink,
+    TraceStatus,
+)
+from sagents.v2.runtime.observability.timing import elapsed_ms
+from sagents.v2.runtime.observability.traces import (
+    SpanHandle,
+    StructuredTracer,
+    current_trace_context,
+    session_trace_id,
+)
 
 
 class RecordingModelProvider:
@@ -26,11 +40,14 @@ class RecordingModelProvider:
         sink: DiagnosticSink,
         session_id_resolver: Callable[[str], Awaitable[str]],
         provider_metadata: Mapping[str, Any] | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         self.provider = provider
         self.sink = sink
         self.session_id_resolver = session_id_resolver
         self.provider_metadata = dict(provider_metadata or {})
+        self.trace_sink = trace_sink or NoopTraceSink()
+        self.tracer = StructuredTracer(self.trace_sink, "model")
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return await self.provider.capabilities(model_binding)
@@ -40,6 +57,24 @@ class RecordingModelProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         session_id = await self.session_id_resolver(request.run_id)
+        started_at = utc_now()
+        active = current_trace_context()
+        span = self.tracer.start_span(
+            "model.request",
+            kind=TraceKind.CLIENT,
+            session_id=session_id,
+            run_id=request.run_id,
+            request_id=request.request_id,
+            trace_id=active[0] if active else session_trace_id(session_id),
+            attributes={
+                "model_binding": request.model_binding,
+                "purpose": (
+                    request.metadata.get("purpose")
+                    or self.provider_metadata.get("purpose")
+                    or "agent"
+                ),
+            },
+        )
         diagnostic_request = getattr(self.provider, "diagnostic_request", None)
         try:
             wire_request = (
@@ -56,6 +91,7 @@ class RecordingModelProvider:
                 request=request,
                 error=exc,
             )
+            _end_model_span(span, started_at, None, error=exc)
             raise
         await self.sink.begin_model_request(
             session_id=session_id,
@@ -78,6 +114,7 @@ class RecordingModelProvider:
                     request=request,
                     observed_at=first_token_at,
                 )
+            span.add_event("first_token", timestamp=first_token_at)
             first_token_persisted = True
 
         try:
@@ -99,6 +136,7 @@ class RecordingModelProvider:
                         request=request,
                         response=event.response,
                     )
+                    _end_model_span(span, started_at, first_token_at)
                     finalized = True
                 yield event
         except Exception as exc:
@@ -108,6 +146,7 @@ class RecordingModelProvider:
                 request=request,
                 error=exc,
             )
+            _end_model_span(span, started_at, first_token_at, error=exc)
             finalized = True
             raise
         finally:
@@ -118,3 +157,28 @@ class RecordingModelProvider:
                     request=request,
                     error=RuntimeError("model stream closed before completion"),
                 )
+                _end_model_span(
+                    span,
+                    started_at,
+                    first_token_at,
+                    error=RuntimeError("model stream closed before completion"),
+                )
+
+
+def _end_model_span(
+    span: SpanHandle,
+    started_at: datetime,
+    first_token_at: datetime | None,
+    *,
+    error: BaseException | None = None,
+) -> None:
+    finished = utc_now()
+    attributes = {
+        "duration_ms": elapsed_ms(started_at, finished),
+        "ttfb_ms": elapsed_ms(started_at, first_token_at),
+    }
+    span.end(
+        TraceStatus.ERROR if error is not None else TraceStatus.OK,
+        error=error,
+        attributes={key: value for key, value in attributes.items() if value is not None},
+    )

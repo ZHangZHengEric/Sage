@@ -5,7 +5,7 @@ from sagents.v2.runtime.credentials.contracts import (
     CredentialRef,
 )
 from sagents.v2.runtime.credentials.provider import CredentialProvider
-from sagents.v2.runtime.credentials.providers import (
+from sagents.v2.runtime.credentials.plugins import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
 )

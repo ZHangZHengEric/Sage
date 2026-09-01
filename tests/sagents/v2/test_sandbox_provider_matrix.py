@@ -18,7 +18,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxDurability,
     SandboxState,
 )
-from sagents.v2.runtime.execution.sandbox.memory import (
+from sagents.v2.runtime.execution.sandbox import (
     InMemorySandboxProvider,
     SandboxGrantIssuer,
 )

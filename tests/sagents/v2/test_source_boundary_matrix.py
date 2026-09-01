@@ -233,6 +233,106 @@ def test_agent_and_flow_depend_on_session_port_not_store_implementations():
     assert offenders == []
 
 
+def test_observability_port_does_not_depend_on_sink_implementations():
+    """Keep diagnostic/log/trace contracts usable without importing a sink."""
+
+    contracts = V2_ROOT / "runtime" / "observability" / "contracts.py"
+    implementation_modules = {
+        "sagents.v2.runtime.observability.plugins.filesystem",
+        "sagents.v2.runtime.observability.plugins.logging",
+        "sagents.v2.runtime.observability.plugins.otlp",
+    }
+    offenders = [
+        f"{contracts.relative_to(V2_ROOT)}:{line}: {module}"
+        for line, module in _import_targets(contracts)
+        if module in implementation_modules
+    ]
+    assert offenders == []
+
+
+def test_observability_sinks_do_not_import_each_other():
+    """Filesystem, log, and OTLP sinks share contracts, not each other."""
+
+    filesystem = V2_ROOT / "runtime" / "observability" / "plugins" / "filesystem.py"
+    logging_sink = V2_ROOT / "runtime" / "observability" / "plugins" / "logging.py"
+    otlp = V2_ROOT / "runtime" / "observability" / "plugins" / "otlp.py"
+    filesystem_imports = {module for _, module in _import_targets(filesystem)}
+    logging_imports = {module for _, module in _import_targets(logging_sink)}
+    otlp_imports = {module for _, module in _import_targets(otlp)}
+
+    assert "sagents.v2.runtime.observability.plugins.logging" not in filesystem_imports
+    assert "sagents.v2.runtime.observability.plugins.otlp" not in filesystem_imports
+    assert "sagents.v2.runtime.observability.plugins.filesystem" not in logging_imports
+    assert "sagents.v2.runtime.observability.plugins.otlp" not in logging_imports
+    assert "sagents.v2.runtime.observability.plugins.filesystem" not in otlp_imports
+    assert "sagents.v2.runtime.observability.plugins.logging" not in otlp_imports
+
+
+def test_agent_does_not_import_observability_sink_plugins():
+    """The Loop emits spans through ports; Builder selects the sink."""
+
+    engine = V2_ROOT / "agent" / "engine.py"
+    offenders = [
+        f"{engine.relative_to(V2_ROOT)}:{line}: {module}"
+        for line, module in _import_targets(engine)
+        if module.startswith("sagents.v2.runtime.observability.plugins")
+        or module == "sagents.v2.runtime.observability"
+    ]
+    assert offenders == []
+
+
+def test_execution_ports_do_not_depend_on_backend_plugins():
+    """Scheduler, sandbox, and job contracts stay backend-neutral."""
+
+    contracts = (
+        V2_ROOT / "runtime" / "execution" / "scheduler" / "contracts.py",
+        V2_ROOT / "runtime" / "execution" / "scheduler" / "provider.py",
+        V2_ROOT / "runtime" / "execution" / "sandbox" / "contracts.py",
+        V2_ROOT / "runtime" / "execution" / "sandbox" / "provider.py",
+        V2_ROOT / "runtime" / "execution" / "jobs" / "provider.py",
+    )
+    forbidden = "sagents.v2.runtime.execution."
+    plugin_suffix = ".plugins"
+    offenders = [
+        f"{path.relative_to(V2_ROOT)}:{line}: {module}"
+        for path in contracts
+        for line, module in _import_targets(path)
+        if module.startswith(forbidden) and plugin_suffix in module
+    ]
+    assert offenders == []
+
+
+def test_workspace_credentials_and_artifact_ports_do_not_import_plugins():
+    contracts = (
+        V2_ROOT / "workspace" / "contracts.py",
+        V2_ROOT / "runtime" / "credentials" / "contracts.py",
+        V2_ROOT / "runtime" / "credentials" / "provider.py",
+        V2_ROOT / "runtime" / "artifact" / "contracts.py",
+    )
+    forbidden = (
+        "sagents.v2.workspace.plugins",
+        "sagents.v2.runtime.credentials.plugins",
+        "sagents.v2.runtime.artifact.plugins",
+    )
+    offenders = [
+        f"{path.relative_to(V2_ROOT)}:{line}: {module}"
+        for path in contracts
+        for line, module in _import_targets(path)
+        if module.startswith(forbidden)
+    ]
+    assert offenders == []
+
+
+def test_context_contracts_do_not_import_context_plugins():
+    contracts = V2_ROOT / "context" / "contracts.py"
+    offenders = [
+        f"{contracts.relative_to(V2_ROOT)}:{line}: {module}"
+        for line, module in _import_targets(contracts)
+        if module.startswith("sagents.v2.context.plugins")
+    ]
+    assert offenders == []
+
+
 def test_agent_composition_does_not_discover_or_select_plugins():
     """Builder owns plugin selection; Agent composition receives resolved ports."""
 

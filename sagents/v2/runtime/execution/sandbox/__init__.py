@@ -22,11 +22,11 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxSnapshot,
     SandboxState,
 )
-from sagents.v2.runtime.execution.sandbox.memory import (
+from sagents.v2.runtime.execution.sandbox.plugins import (
     InMemorySandboxProvider,
+    LocalWorkspaceSandboxProvider,
     SandboxGrantIssuer,
 )
-from sagents.v2.runtime.execution.sandbox.local import LocalWorkspaceSandboxProvider
 from sagents.v2.runtime.execution.sandbox.provider import (
     SandboxFileSystem,
     SandboxHandle,

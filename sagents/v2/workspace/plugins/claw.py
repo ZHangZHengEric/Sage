@@ -1,10 +1,9 @@
-"""Built-in, non-destructive Agent Workspace initializers."""
+"""Seed the V1-compatible identity, memory, and Claw working layout."""
 
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Protocol
 
 from sagents.v2.workspace.claw_templates import claw_workspace_documents
 
@@ -88,23 +87,7 @@ def _is_replaceable_v2_seed(path: Path, filename: str, replacement: str) -> bool
     )
 
 
-class WorkspaceInitializer(Protocol):
-    """Prepare a new-version workspace without importing external state."""
-
-    def initialize(self, root: Path) -> tuple[str, ...]: ...
-
-
-class BareWorkspaceInitializer:
-    """Keep the workspace empty until the Agent or user creates content."""
-
-    def initialize(self, root: Path) -> tuple[str, ...]:
-        root.mkdir(parents=True, exist_ok=True)
-        return ()
-
-
 class ClawWorkspaceInitializer:
-    """Seed the V1-compatible identity, memory, and Claw working layout."""
-
     _directories = (
         "data",
         "logs",

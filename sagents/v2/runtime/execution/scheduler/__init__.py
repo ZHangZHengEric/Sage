@@ -6,9 +6,9 @@ from sagents.v2.runtime.execution.scheduler.contracts import (
     WorkItem,
     WorkerLease,
 )
-from sagents.v2.runtime.execution.scheduler.memory import InMemoryScheduler
-from sagents.v2.runtime.execution.scheduler.filesystem import (
+from sagents.v2.runtime.execution.scheduler.plugins import (
     FilesystemScheduler,
+    InMemoryScheduler,
     SchedulerInUseError,
 )
 from sagents.v2.runtime.execution.scheduler.provider import Scheduler

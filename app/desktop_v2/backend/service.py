@@ -5803,7 +5803,9 @@ def _usage_latency_observation(
     completed_at = _usage_timestamp(record.get("completed_at"))
 
     first_token_latency_ms: float | None = None
-    if started_at is not None and first_token_at is not None:
+    if isinstance(record.get("ttfb_ms"), (int, float)) and record["ttfb_ms"] >= 0:
+        first_token_latency_ms = float(record["ttfb_ms"])
+    elif started_at is not None and first_token_at is not None:
         seconds = (first_token_at - started_at).total_seconds()
         if seconds >= 0:
             first_token_latency_ms = seconds * 1000
@@ -5815,7 +5817,14 @@ def _usage_latency_observation(
     token_intervals = max(0, output_tokens - 1)
     generation_ms: float | None = None
     if token_intervals > 0:
-        if first_token_at is not None and completed_at is not None:
+        if (
+            isinstance(record.get("duration_ms"), (int, float))
+            and first_token_latency_ms is not None
+        ):
+            seconds = (float(record["duration_ms"]) - first_token_latency_ms) / 1000
+            if seconds >= 0:
+                generation_ms = seconds * 1000
+        elif first_token_at is not None and completed_at is not None:
             seconds = (completed_at - first_token_at).total_seconds()
             if seconds >= 0:
                 generation_ms = seconds * 1000

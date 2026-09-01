@@ -19,13 +19,9 @@ from sagents.v2.context.contracts import (
     ContextSegmentProvider,
     ContextStability,
 )
-from sagents.v2.context.budget import (
-    WindowContextReducer,
-)
-from sagents.v2.context.token_estimator import (
-    JsonHeuristicTokenEstimator,
-    TokenEstimator,
-)
+from sagents.v2.context.plugins.token_estimators import JsonHeuristicTokenEstimator
+from sagents.v2.context.plugins.window import WindowContextReducer
+from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model import ModelMessage
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.commands import StartRun

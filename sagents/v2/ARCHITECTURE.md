@@ -2,7 +2,8 @@
 
 SAgents V2 is organized as domain modules around a small extension kernel. The
 public composition root is `SAgentBuilder`; callers normally use only exports
-from `sagents.v2`.
+from `sagents.v2`. Host-facing capability selection is documented in
+[`使用手册.md`](使用手册.md).
 
 This document describes both the enforced architecture and the remaining
 composition debt. A capability appearing in the extension registry does not by
@@ -61,7 +62,7 @@ Desktop/server code.
 | `runtime/kernel.py` | Legal lifecycle commands and state transitions | `SessionStore`, `JobRuntime` |
 | `runtime/session/` | One known Session, Runs, journal, CAS, resume | Session storage provider |
 | `agent/` | Model/tool loop, safe points, delegation, policies | Injected policies and domain ports |
-| `context/` | Canonical request projection, budgets, reduction, summaries | Context providers, estimator, reducer, summarizer |
+| `context/` | Canonical request projection, budgets, reduction, summaries | Estimator/reducer/compactor plugins in `context/plugins/` |
 | `model/` | Model request/stream contract | Model provider |
 | `tool/` | Catalog, executor, selection and authorization | Paired Tool provider and policies |
 | `skill/` | Catalog, lazy source, verification, activation | Skill provider |
@@ -69,8 +70,8 @@ Desktop/server code.
 | `session_memory/` | Retrieval over omitted Session history | Session-memory provider |
 | `goal/`, `plan/` | Typed goal/plan state and completion gates | State providers and policies |
 | `flow/` | Graph execution over the same Run lifecycle | Flow-node provider |
-| `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Infrastructure providers |
-| `runtime/observability/` | Non-authoritative diagnostics and traces | Sinks |
+| `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Backends in `scheduler/plugins/`, `sandbox/plugins/`, `jobs/plugins/` |
+| `runtime/observability/` | Non-authoritative diagnostics and traces | Sink plugins in `observability/plugins/` |
 | `runtime/extensions/` | Registration, resolution, scopes and lifecycle | Extension microkernel only |
 | `package/` | Manifest validation, policy ceilings and resolved composition input | Package source/registry |
 | `interfaces/protocols/` | Native, AG-UI, ACP, MCP and A2A projections | Protocol adapter |
@@ -273,7 +274,8 @@ Session state/checkpoint -> authoritative lifecycle and canonical history
 active provider replay   -> authoritative for exact in-flight continuation
 derived/                 -> deletable summaries, token caches, Skill activation
 MemoryProvider           -> independent long-term Memory backend
-DiagnosticSink           -> optional request/trace diagnostics, never recovery input
+DiagnosticSink           -> optional model-request diagnostics, never recovery input
+TraceSink                -> optional Session span tree (root session + forked children), never recovery input
 Desktop index            -> product-owned list/search metadata
 ```
 

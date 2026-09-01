@@ -14,7 +14,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.runtime.execution.scheduler.memory import InMemoryScheduler
+from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler
 
 try:
     import fcntl

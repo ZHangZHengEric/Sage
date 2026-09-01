@@ -53,6 +53,7 @@ class ModeAwareAgentLoopFactory:
         workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
         fallback_invocation_mode: str | None = None,
         child_loop_factory=None,
+        trace_sink=None,
     ) -> None:
         self.runtime = runtime
         self.model_factory = model_factory
@@ -65,6 +66,7 @@ class ModeAwareAgentLoopFactory:
         self.loop_composer = loop_composer
         self.workspace_policy = workspace_policy
         self.fallback_invocation_mode = fallback_invocation_mode
+        self.trace_sink = trace_sink
         self._coordinators: dict[tuple[str, AgentMode], MultiAgentCoordinator] = {}
 
         async def build_child(descriptor, run_id, context):
@@ -127,6 +129,8 @@ class ModeAwareAgentLoopFactory:
                 raise RuntimeError("async loop composers require create_loop_async()")
             loop.delegated_run_controller = self.child_executor
             loop.expected_resolved_spec_hash = self.resolved_spec_hash
+            if getattr(loop, "trace_sink", None) is None:
+                loop.trace_sink = self.trace_sink
             return loop
         return AgentLoopEngine(
             runtime=self.runtime,
@@ -139,6 +143,7 @@ class ModeAwareAgentLoopFactory:
             ),
             delegated_run_controller=self.child_executor,
             expected_resolved_spec_hash=self.resolved_spec_hash,
+            trace_sink=self.trace_sink,
         )
 
     async def create_loop_async(
@@ -182,5 +187,7 @@ class ModeAwareAgentLoopFactory:
                 loop = await loop
             loop.delegated_run_controller = self.child_executor
             loop.expected_resolved_spec_hash = self.resolved_spec_hash
+            if getattr(loop, "trace_sink", None) is None:
+                loop.trace_sink = self.trace_sink
             return loop
         return self.create_loop(descriptor, run_id)
