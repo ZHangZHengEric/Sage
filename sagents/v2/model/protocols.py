@@ -138,15 +138,24 @@ def create_registered_model_provider(
     }
     extra = dict(route.request.extra)
     if protocol == BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS:
-        maximum_field = str(extra.pop("max_output_tokens_field", "max_tokens"))
-        if maximum_field not in {"max_tokens", "max_completion_tokens"}:
+        maximum_field = str(
+            extra.pop(
+                "max_output_tokens_field",
+                "auto",
+            )
+        )
+        if maximum_field not in {"auto", "max_tokens", "max_completion_tokens"}:
             raise ValueError(
-                "max_output_tokens_field must be max_tokens or max_completion_tokens"
+                "max_output_tokens_field must be auto, max_tokens, or "
+                "max_completion_tokens"
             )
         config = OpenAIChatCompletionsConfig(
             **common,
             reasoning_effort=route.request.reasoning_effort,
             max_output_tokens_field=maximum_field,
+            reasoning_parameter_fallback=bool(
+                extra.pop("reasoning_parameter_fallback", False)
+            ),
             extra_body=extra,
         )
         return OpenAIChatCompletionsModelProvider(config, credential, client=client)
@@ -155,6 +164,9 @@ def create_registered_model_provider(
             **common,
             reasoning_effort=route.request.reasoning_effort,
             store=bool(extra.pop("store", False)),
+            reasoning_parameter_fallback=bool(
+                extra.pop("reasoning_parameter_fallback", False)
+            ),
             extra_body=extra,
         )
         return OpenAIResponsesModelProvider(config, credential, client=client)

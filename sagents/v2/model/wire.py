@@ -40,6 +40,13 @@ def wire_json_value(value: Any) -> Any:
     dumper = getattr(value, "model_dump", None)
     if callable(dumper):
         return wire_json_value(dumper(mode="json", exclude_none=True))
+    attributes = getattr(value, "__dict__", None)
+    if isinstance(attributes, Mapping):
+        return {
+            str(key): wire_json_value(item)
+            for key, item in attributes.items()
+            if not str(key).startswith("_") and item is not None
+        }
     raise TypeError(f"provider wire value is not JSON serializable: {type(value)!r}")
 
 

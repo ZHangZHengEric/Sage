@@ -7,7 +7,9 @@ and Agent loop receive frozen interfaces and never discover global providers.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from sagents.v2.agent.multi_agent import (
     AgentMode,
     AgentRegistry,
     AgentRosterContextProvider,
+    DelegationConcurrencyLimiter,
 )
 from sagents.v2.model import ModelProvider, RecordingModelProvider
 from sagents.v2.goal import GoalStateService
@@ -137,6 +140,11 @@ class _ExecutionBoundDriver:
     async def resume(self, run_id, context):
         return await (await self._ensure_loop(context)).resume(run_id, context)
 
+    async def recover_interrupted(self, run_id, context):
+        loop = await self._ensure_loop(context)
+        recover = getattr(loop, "recover_interrupted", None)
+        return None if recover is None else await recover(run_id, context)
+
     async def close(self) -> None:
         if self.scope_handle is not None:
             await self.scope_handle.close()
@@ -173,6 +181,11 @@ class _OwnerValidatedCompatibilityDriver:
     async def resume(self, run_id, context):
         self._validate()
         return await self.loop.resume(run_id, context)
+
+    async def recover_interrupted(self, run_id, context):
+        self._validate()
+        recover = getattr(self.loop, "recover_interrupted", None)
+        return None if recover is None else await recover(run_id, context)
 
 
 class _CompositeRunResource:
@@ -423,6 +436,7 @@ class SAgentBuilder:
                 )
             )
             models_by_agent[member_id] = member_model
+
         async def resolve_session_id(run_id: str) -> str:
             return (await session_store.get_run(run_id)).session_id
 
@@ -561,9 +575,7 @@ class SAgentBuilder:
             summarizer=summarizer,
             reducer=context_reducer,
         )
-        factory = AgentCompositionFactory(
-            driver_runtime, context_components=components
-        )
+        factory = AgentCompositionFactory(driver_runtime, context_components=components)
         root_descriptor = AgentDescriptor(
             agent_id=selected_agent,
             name=selected_definition.name,
@@ -592,7 +604,13 @@ class SAgentBuilder:
             value.session_memory_service = session_memory_service
             value.goal_state_service = goal_state_service
             value.tool_selection_policy = tool_selection
-            value.job_runtime = services["execution.job-runtime"]
+            value.bind_job_runtime(services["execution.job-runtime"])
+
+        delegation_limiter = DelegationConcurrencyLimiter(
+            max_concurrency=8,
+            max_per_tenant=2,
+        )
+        runtime_composition_hash: str | None = None
 
         def make_loop(
             run_id,
@@ -690,7 +708,9 @@ class SAgentBuilder:
 
             async def compose_bound_child(descriptor, child_run_id, child_context):
                 assert self._execution_binding_provider is not None
-                command = await driver_runtime.session_store.get_start_command(child_run_id)
+                command = await driver_runtime.session_store.get_start_command(
+                    child_run_id
+                )
                 request = ExecutionBindingRequest(
                     run_id=child_run_id,
                     parent_run_id=command.parent_run_id,
@@ -707,9 +727,14 @@ class SAgentBuilder:
                     child_runtime = OfficialToolRuntime(
                         binding.sandbox,
                         binding.grant_issuer,
+                        job_runtime=services["execution.job-runtime"],
                     )
                     configure_official_runtime(child_runtime)
-                    child_catalog, child_executor, child_scope = await self._create_tools(
+                    (
+                        child_catalog,
+                        child_executor,
+                        child_scope,
+                    ) = await self._create_tools(
                         extension_host,
                         process_root,
                         scope_handles,
@@ -762,7 +787,10 @@ class SAgentBuilder:
                 base_catalog=selected_catalog,
                 base_executor=selected_executor,
                 registry=registry,
-                resolved_spec_hash=resolved.manifest_hash,
+                resolved_spec_hash=(
+                    runtime_composition_hash or resolved.manifest_hash
+                ),
+                delegation_concurrency_limiter=delegation_limiter,
                 loop_composer=compose,
                 child_loop_factory=child_factory,
             )
@@ -783,6 +811,7 @@ class SAgentBuilder:
                 official_runtime = OfficialToolRuntime(
                     binding.sandbox,
                     binding.grant_issuer,
+                    job_runtime=services["execution.job-runtime"],
                 )
                 configure_official_runtime(official_runtime)
                 bound_catalog, bound_executor, run_scope = await self._create_tools(
@@ -844,28 +873,32 @@ class SAgentBuilder:
             "context.reducer": context_reducer,
             "agent.continuation-policy": continuation_policy,
         }
+        await self._validate_required_guarantees(
+            runtime_config,
+            services=services,
+            handles=scope_handles,
+        )
         scheduler_config = self._selection(runtime_config, "execution.scheduler")
         dispatcher_values = dict(
             scheduler_config.config if scheduler_config is not None else {}
         )
         dispatcher = LocalWorkerDispatcher(
             scheduler,
-            max_concurrent_runs=int(
-                dispatcher_values.get("max_concurrent_runs", 8)
-            ),
+            max_concurrent_runs=int(dispatcher_values.get("max_concurrent_runs", 8)),
             max_concurrent_runs_per_tenant=int(
                 dispatcher_values.get("max_concurrent_runs_per_tenant", 2)
             ),
             lease_seconds=float(dispatcher_values.get("lease_seconds", 30.0)),
             lease_scope_factory=driver_session_store.lease_scope,
         )
-        agent.attach_dispatcher(dispatcher)
-        dispatcher.attach_recovery_agent(agent)
-        await dispatcher.start()
         services["execution.dispatcher"] = dispatcher
         composition_hash = self._composition_hash(
             resolved.manifest_hash, scope_handles, services
         )
+        runtime_composition_hash = composition_hash
+        agent.attach_dispatcher(dispatcher)
+        dispatcher.attach_recovery_agent(agent)
+        await dispatcher.start()
         resolved_plan = self._resolved_application_plan(
             package_id=resolved.package_id,
             manifest_hash=resolved.manifest_hash,
@@ -1125,7 +1158,9 @@ class SAgentBuilder:
             plugin_id,
             config,
             "tool.selection-policy",
-            scope=selection.scope if selection and selection.scope else ExtensionScope.AGENT,
+            scope=selection.scope
+            if selection and selection.scope
+            else ExtensionScope.AGENT,
             scope_id="agent-tool-selection",
         )
 
@@ -1217,7 +1252,9 @@ class SAgentBuilder:
         )
 
     @staticmethod
-    def _selection(runtime: RuntimeConfig, capability: str) -> CapabilitySelection | None:
+    def _selection(
+        runtime: RuntimeConfig, capability: str
+    ) -> CapabilitySelection | None:
         values = runtime.selections(capability)
         if len(values) > 1:
             raise ValueError(
@@ -1333,14 +1370,102 @@ class SAgentBuilder:
             adapters[interface_id] = adapter
         return services, adapters
 
+    async def _validate_required_guarantees(
+        self,
+        runtime: RuntimeConfig,
+        *,
+        services: Mapping[str, Any],
+        handles,
+    ) -> None:
+        """Verify manifest guarantees against live providers or descriptors."""
+
+        if not runtime.required_guarantees:
+            return
+
+        descriptor_facts: dict[str, list[dict[str, Any]]] = {}
+        visited: set[int] = set()
+
+        def visit(handle) -> None:
+            if id(handle) in visited:
+                return
+            visited.add(id(handle))
+            for ancestor in handle._owned_ancestors:
+                visit(ancestor)
+            for started in handle._started:
+                descriptor = started.registration.descriptor
+                for offer in descriptor.provides:
+                    descriptor_facts.setdefault(offer.capability, []).append(
+                        dict(descriptor.capabilities)
+                    )
+
+        for handle in handles:
+            visit(handle)
+
+        for capability, required in runtime.required_guarantees.items():
+            candidates: list[dict[str, Any]] = []
+            provider = services.get(capability)
+            capability_reader = getattr(provider, "capabilities", None)
+            if isinstance(capability_reader, Mapping):
+                candidates.append(dict(capability_reader))
+            elif callable(capability_reader):
+                parameters = inspect.signature(capability_reader).parameters.values()
+                if not any(
+                    value.default is inspect.Parameter.empty
+                    and value.kind
+                    in {
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                    }
+                    for value in parameters
+                ):
+                    facts = capability_reader()
+                    if inspect.isawaitable(facts):
+                        facts = await facts
+                    if hasattr(facts, "model_dump"):
+                        facts = facts.model_dump(mode="json")
+                    if isinstance(facts, Mapping):
+                        candidates.append(dict(facts))
+            candidates.extend(descriptor_facts.get(capability, ()))
+
+            if any(
+                all(facts.get(name) == expected for name, expected in required.items())
+                for facts in candidates
+            ):
+                continue
+            observed = {
+                name: sorted(
+                    {
+                        json.dumps(facts.get(name), sort_keys=True, default=str)
+                        for facts in candidates
+                        if name in facts
+                    }
+                )
+                for name in required
+            }
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="runtime.capability_guarantee_unsatisfied",
+                    category=ErrorCategory.VALIDATION,
+                    message=(
+                        f"selected provider for {capability!r} does not satisfy "
+                        "the required operational guarantees"
+                    ),
+                    safe_to_resume=False,
+                    metadata={
+                        "capability": capability,
+                        "required": dict(required),
+                        "observed": observed,
+                    },
+                )
+            )
+
     @staticmethod
     def _composition_hash(manifest_hash, handles, services) -> str:
         payload = {
             "manifest": manifest_hash,
             "plans": sorted(
-                handle.composition_hash
-                for handle in handles
-                if handle.graph.plugin_ids
+                handle.composition_hash for handle in handles if handle.graph.plugin_ids
             ),
             "services": {
                 capability: _service_composition_identity(provider)
@@ -1437,6 +1562,7 @@ class SAgentBuilder:
             dependencies=tuple(sorted(dependencies)),
             composition_hash=composition_hash,
         )
+
 
 def _service_composition_identity(provider: Any) -> dict[str, Any]:
     identity = getattr(provider, "composition_identity", None)

@@ -17,6 +17,7 @@ from sagents.v2.agent.policy.legacy_v1_judge_prompt import (
     LEGACY_V1_TASK_COMPLETE_TEMPLATE,
 )
 from sagents.v2.contracts.items import JsonBlock, TextBlock, UsageSummary
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.model import (
     ModelEventKind,
     ModelMessage,
@@ -222,6 +223,36 @@ async def test_llm_judge_empty_output_has_a_stable_non_parser_reason():
     assert decision.reason_code == "judge.invalid_output"
     assert decision.reason == "completion Judge returned an empty response"
     assert "line 1 column 1" not in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_permanent_provider_rejection_uses_deterministic_fallback():
+    rejected = ScriptedModelStep(
+        events=(),
+        error=RuntimeErrorInfo(
+            code="model.provider_permanent",
+            category=ErrorCategory.PROVIDER_PERMANENT,
+            message="reasoning_effort rejected",
+            provider_code="422",
+            safe_to_resume=True,
+        ),
+    )
+    model = ScriptedModelProvider((rejected,))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+
+    decision = await policy.decide(_context())
+
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "judge.fallback_provider_permanent"
+    assert decision.metadata == {
+        "policy": "llm_judge",
+        "implementation": "v1",
+        "fallback": "judge_provider_permanent",
+        "judge_error_code": "model.provider_permanent",
+        "judge_error_category": "provider_permanent",
+        "judge_provider_code": "422",
+    }
+    assert len(model.requests) == 1
 
 
 @pytest.mark.asyncio

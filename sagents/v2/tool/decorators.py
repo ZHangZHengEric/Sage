@@ -30,6 +30,7 @@ def tool(
     resume_strategy: ResumeStrategy = ResumeStrategy.REPLAY_RESULT,
     supports_reconciliation: bool = False,
     requires_approval: bool = False,
+    plan_safe: bool = False,
     required_scopes: tuple[str, ...] = (),
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Attach a complete ToolDefinition to one implementation method.
@@ -52,6 +53,7 @@ def tool(
             resume_strategy=resume_strategy,
             supports_reconciliation=supports_reconciliation,
             requires_approval=requires_approval,
+            plan_safe=plan_safe,
             required_scopes=required_scopes,
         )
 

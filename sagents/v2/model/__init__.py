@@ -10,6 +10,15 @@ from sagents.v2.model.contracts import (
     ModelToolCall,
     ModelToolDefinition,
 )
+from sagents.v2.model.capability_probe import (
+    ModelCapabilityProbeOutcome,
+    ModelCapabilityProbeReport,
+    ModelCapabilityProbeStatus,
+    probe_model_capabilities,
+    probe_model_connection,
+    probe_model_json_object,
+    probe_model_tool_calling,
+)
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.model.plugins.openai_compatible import (
     OpenAIChatCompletionsConfig,
@@ -41,6 +50,9 @@ from sagents.v2.model.middleware.recording import RecordingModelProvider
 
 __all__ = [
     "ModelCapabilities",
+    "ModelCapabilityProbeOutcome",
+    "ModelCapabilityProbeReport",
+    "ModelCapabilityProbeStatus",
     "ModelEventKind",
     "ModelMessage",
     "ModelProvider",
@@ -64,6 +76,10 @@ __all__ = [
     "OpenAIResponsesConfig",
     "OpenAIResponsesModelProvider",
     "RecordingModelProvider",
+    "probe_model_capabilities",
+    "probe_model_connection",
+    "probe_model_json_object",
+    "probe_model_tool_calling",
     "ScriptedModelProvider",
     "ScriptedModelStep",
 ]

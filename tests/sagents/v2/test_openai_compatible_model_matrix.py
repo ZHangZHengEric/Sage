@@ -60,6 +60,19 @@ class FakeCompletions:
         return self.stream
 
 
+class SequencedCompletions:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
 class FakeClient:
     def __init__(self, completions):
         self.chat = SimpleNamespace(completions=completions)
@@ -198,6 +211,7 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
     assert response.usage.input_tokens == 11
     assert response.usage.cached_input_tokens == 3
     assert response.usage.reasoning_tokens == 2
+    assert response.usage.reported is True
     assert stream.closed is True
 
     outgoing = completions.calls[0]
@@ -211,6 +225,52 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
         == '{"q":"old"}'
     )
     assert outgoing["messages"][3]["tool_call_id"] == "call_old"
+
+
+@pytest.mark.asyncio
+async def test_stream_normalizes_responses_style_usage_from_chat_gateway():
+    raw_usage = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cached_input_tokens": 2,
+        "cache_write_tokens": 1,
+    }
+    stream = FakeStream(
+        (
+            chunk(content="answer", finish="stop"),
+            {"id": "response_1", "choices": [], "usage": raw_usage},
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    response = events[-1].response
+    assert response is not None
+    assert response.usage.reported is True
+    assert response.usage.input_tokens == 10
+    assert response.usage.output_tokens == 5
+    assert response.usage.cached_input_tokens == 2
+    assert response.usage.provider_usage == raw_usage
+
+
+@pytest.mark.asyncio
+async def test_stream_marks_usage_unreported_when_gateway_omits_it():
+    stream = FakeStream((chunk(content="answer", finish="stop"),))
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    response = events[-1].response
+    assert response is not None
+    assert response.usage.reported is False
+    assert response.usage.provider_usage == {}
+    assert response.usage.input_tokens == 0
+    assert response.usage.output_tokens == 0
 
 
 @pytest.mark.asyncio
@@ -241,17 +301,13 @@ async def test_reasoning_details_use_latest_snapshot_and_replay_after_tool_call(
     assert response is not None
     assert response.reasoning == "thinking"
     assert [
-        event.delta
-        for event in events
-        if event.kind == ModelEventKind.REASONING_DELTA
+        event.delta for event in events if event.kind == ModelEventKind.REASONING_DELTA
     ] == ["think", "ing"]
     assert response.provider_state == make_provider_state(
         "openai_compatible",
         {
             "reasoning_content": "thinking",
-            "reasoning_details": [
-                {"type": "reasoning", "value": "complete"}
-            ],
+            "reasoning_details": [{"type": "reasoning", "value": "complete"}],
         },
     )
     replay = provider.diagnostic_request(
@@ -283,15 +339,11 @@ async def test_stream_accepts_common_nonstandard_text_and_reasoning_fields():
         (
             {
                 "id": "response_alt",
-                "choices": (
-                    {"delta": {"thinking": "think "}, "finish_reason": None},
-                ),
+                "choices": ({"delta": {"thinking": "think "}, "finish_reason": None},),
             },
             {
                 "id": "response_alt",
-                "choices": (
-                    {"delta": {"text": "answer"}, "finish_reason": "stop"},
-                ),
+                "choices": ({"delta": {"text": "answer"}, "finish_reason": "stop"},),
                 "usage": {"prompt_tokens": 5, "completion_tokens": 2},
             },
         )
@@ -325,9 +377,7 @@ async def test_stream_accepts_structured_content_parts_from_compatible_gateway()
                             "reasoning_content": [
                                 {"type": "reasoning_text", "text": "think "}
                             ],
-                            "content": [
-                                {"type": "text", "text": "answer"}
-                            ],
+                            "content": [{"type": "text", "text": "answer"}],
                         },
                         "finish_reason": "stop",
                     },
@@ -434,6 +484,78 @@ async def test_binding_controls_completion_token_field_and_structured_output():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "initial", "alternate"),
+    [
+        ("third-party-model", "max_tokens", "max_completion_tokens"),
+        ("gpt-5-compatible", "max_completion_tokens", "max_tokens"),
+    ],
+)
+async def test_auto_token_field_negotiates_once_and_learns_route(
+    model, initial, alternate
+):
+    error = RuntimeError("Provider rejected the request")
+    error.status_code = 422
+    completions = SequencedCompletions(
+        [
+            error,
+            FakeStream((chunk(content="first", finish="stop"),)),
+            FakeStream((chunk(content="second", finish="stop"),)),
+        ]
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(
+            model=model,
+            reasoning_effort=None,
+            max_output_tokens_field="auto",
+        ),
+        client=FakeClient(completions),
+    )
+
+    first_events = [event async for event in provider.stream(request())]
+    second_events = [event async for event in provider.stream(request())]
+
+    assert completions.calls[0][initial] == 512
+    assert alternate not in completions.calls[0]
+    assert completions.calls[1][alternate] == 512
+    assert initial not in completions.calls[1]
+    assert completions.calls[2][alternate] == 512
+    assert initial not in completions.calls[2]
+    first_response = first_events[-1].response
+    second_response = second_events[-1].response
+    assert first_response is not None
+    assert second_response is not None
+    assert first_response.provider_metadata["compatibility_fallback"] == {
+        "kind": "output_token_field_switched",
+        "from": initial,
+        "to": alternate,
+        "provider_status": 422,
+    }
+    assert "compatibility_fallback" not in second_response.provider_metadata
+    assert provider.diagnostic_request(request())[alternate] == 512
+
+
+@pytest.mark.asyncio
+async def test_explicit_token_field_does_not_negotiate():
+    error = RuntimeError("Provider rejected the request")
+    error.status_code = 422
+    completions = FakeCompletions(error=error)
+    provider = OpenAICompatibleModelProvider(
+        config(
+            reasoning_effort=None,
+            max_output_tokens_field="max_tokens",
+        ),
+        client=FakeClient(completions),
+    )
+
+    with pytest.raises(SageV2Error):
+        _ = [event async for event in provider.stream(request())]
+
+    assert len(completions.calls) == 1
+    assert completions.calls[0]["max_tokens"] == 512
+
+
+@pytest.mark.asyncio
 async def test_legacy_tool_strict_and_returns_fields_are_forwarded_exactly():
     stream = FakeStream((chunk(content="done", finish="stop"),))
     completions = FakeCompletions(stream=stream)
@@ -503,13 +625,58 @@ async def test_invalid_tool_arguments_are_typed_and_stream_is_closed(arguments, 
 async def test_provider_error_matrix(status, category, retryable):
     error = RuntimeError("credential must never be echoed")
     error.status_code = status
-    provider = OpenAICompatibleModelProvider(
-        config(), client=FakeClient(FakeCompletions(error=error))
-    )
+    completions = FakeCompletions(error=error)
+    provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
     with pytest.raises(SageV2Error) as caught:
         _ = [event async for event in provider.stream(request())]
     assert caught.value.info.category == category
     assert caught.value.info.retryable is retryable
+    assert len(completions.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_reasoning_control_422_retries_once_without_controls_and_learns_route():
+    error = RuntimeError("reasoning_effort is unsupported by this deployment")
+    error.status_code = 422
+    completions = SequencedCompletions(
+        [error, FakeStream((chunk(content="done", finish="stop"),))]
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(
+            reasoning_effort="minimal",
+            reasoning_parameter_fallback=True,
+        ),
+        client=FakeClient(completions),
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    assert len(completions.calls) == 2
+    assert completions.calls[0]["extra_body"] == {"reasoning_effort": "minimal"}
+    assert "extra_body" not in completions.calls[1]
+    response = events[-1].response
+    assert response is not None
+    assert response.provider_metadata["compatibility_fallback"] == {
+        "kind": "reasoning_controls_omitted",
+        "removed": ["reasoning_effort"],
+        "provider_status": 422,
+    }
+    assert "extra_body" not in provider.diagnostic_request(request())
+
+
+@pytest.mark.asyncio
+async def test_422_without_reasoning_controls_is_not_retried():
+    error = RuntimeError("response_format is unsupported")
+    error.status_code = 422
+    completions = FakeCompletions(error=error)
+    provider = OpenAICompatibleModelProvider(
+        config(reasoning_effort=None), client=FakeClient(completions)
+    )
+
+    with pytest.raises(SageV2Error):
+        _ = [event async for event in provider.stream(request())]
+
+    assert len(completions.calls) == 1
 
 
 @pytest.mark.asyncio

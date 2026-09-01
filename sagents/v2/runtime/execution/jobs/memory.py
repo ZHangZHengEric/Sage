@@ -45,6 +45,7 @@ class _JobRow:
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     completed: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
+    runner: JobRunner | None = None
 
 
 class InMemoryJobRuntime:
@@ -62,6 +63,7 @@ class InMemoryJobRuntime:
         if max_concurrent_jobs < 1:
             raise ValueError("max_concurrent_jobs must be positive")
         self._runners = dict(runners)
+        self._owner_runners: dict[tuple[str, str], JobRunner] = {}
         self._max_concurrent = max_concurrent_jobs
         self._clock = clock
         self._lock = asyncio.Lock()
@@ -69,6 +71,32 @@ class InMemoryJobRuntime:
         self._rows: dict[str, _JobRow] = {}
         self._idempotency: dict[tuple[str, str], str] = {}
         self._closed = False
+
+    def register_runner(
+        self, kind: str, runner: JobRunner, *, owner_run_id: str | None = None
+    ) -> None:
+        """Bind a local runner globally or to one durable Run identity."""
+
+        self._ensure_open()
+        if owner_run_id is None:
+            self._runners[kind] = runner
+        else:
+            self._owner_runners[(owner_run_id, kind)] = runner
+
+    def unregister_runner(
+        self,
+        kind: str,
+        *,
+        owner_run_id: str,
+        runner: JobRunner | None = None,
+    ) -> None:
+        """Release a Run-scoped runner without removing a newer replacement."""
+
+        key = (owner_run_id, kind)
+        current = self._owner_runners.get(key)
+        if current is None or (runner is not None and current is not runner):
+            return
+        self._owner_runners.pop(key, None)
 
     async def capabilities(self) -> JobRuntimeCapabilities:
         return JobRuntimeCapabilities(
@@ -87,7 +115,10 @@ class InMemoryJobRuntime:
             existing = self._idempotency.get(key)
             if existing is not None:
                 return self._snapshot_handle(self._rows[existing])
-            if spec.kind not in self._runners:
+            runner = self._owner_runners.get(
+                (spec.owner_run_id, spec.kind)
+            ) or self._runners.get(spec.kind)
+            if runner is None:
                 raise self._error(
                     "job.kind_unsupported",
                     ErrorCategory.VALIDATION,
@@ -114,6 +145,7 @@ class InMemoryJobRuntime:
                 handle=handle,
                 created_at=now,
                 updated_at=now,
+                runner=runner,
             )
             self._rows[job_id] = row
             self._idempotency[key] = job_id
@@ -290,9 +322,8 @@ class InMemoryJobRuntime:
                             row.output_size += len(accepted)
                             row.updated_at = self._clock()
 
-                completion = await self._runners[row.spec.kind](
-                    row.spec, emit, row.cancel_event
-                )
+                assert row.runner is not None
+                completion = await row.runner(row.spec, emit, row.cancel_event)
                 async with self._lock:
                     row.exit_code = completion.exit_code
                     row.usage = completion.usage

@@ -239,6 +239,17 @@ class V2ApiClient {
         .cast<String, Object?>(),
   );
 
+  Future<Map<String, Object?>> verifyModelProviderCapabilities(
+    Map<String, Object?> draft, {
+    String? providerId,
+  }) async {
+    final path = providerId == null
+        ? '/api/v2/model-providers/verify-capabilities'
+        : '/api/v2/model-providers/${Uri.encodeComponent(providerId)}/verify-capabilities';
+    return (await _json('POST', path, body: draft) as Map)
+        .cast<String, Object?>();
+  }
+
   Future<List<ModelProviderSummary>> deleteModelProvider(
     String providerId,
   ) async {

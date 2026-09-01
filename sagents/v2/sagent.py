@@ -408,6 +408,22 @@ class SAgent:
         )
         return task
 
+    async def _recover_interrupted_run(self, run_id, context):
+        """Ask the concrete driver to rebuild a crossed durable barrier."""
+
+        driver = self._drivers.get(run_id)
+        if driver is None:
+            driver = self.driver_factory(run_id)
+            self._drivers[run_id] = driver
+        recover = getattr(driver, "recover_interrupted", None)
+        if recover is None:
+            return None
+        try:
+            result = await recover(run_id, context)
+        finally:
+            await self._close_driver(run_id, driver)
+        return result
+
     def _discard_task(self, run_id, completed):
         if self._tasks.get(run_id) is completed:
             self._tasks.pop(run_id, None)

@@ -260,6 +260,33 @@ async def test_invocation_grant_catalog_enforces_goal_controls_for_list_and_look
 
 
 @pytest.mark.asyncio
+async def test_invocation_grant_catalog_honors_explicit_per_run_tool_grant():
+    hidden = TOOL.model_copy(update={"name": "hidden"})
+
+    async def command_reader(run_id):
+        del run_id
+        return type(
+            "Command",
+            (),
+            {
+                "invocation_mode": "normal",
+                "config": type("Config", (), {"enabled_tools": ("sum",)})(),
+            },
+        )()
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL, hidden)),
+        ("sum", "hidden"),
+        command_reader,
+    )
+
+    assert await catalog.list_tools(run_id="run_1") == (TOOL,)
+    with pytest.raises(SageV2Error) as denied:
+        await catalog.get_tool("hidden", run_id="run_1")
+    assert denied.value.info.code == "tool.not_enabled"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "arguments",
     [

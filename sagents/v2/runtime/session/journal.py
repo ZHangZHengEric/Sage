@@ -22,6 +22,7 @@ from sagents.v2.contracts.run_state import (
 )
 from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionResolution
+from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.session_commit import SessionCommitProposal
 
 
@@ -68,6 +69,7 @@ class RunRowSnapshot(StrictModel):
     suspension_id: str | None = None
     checkpoint_id: str | None = None
     start_command: StartRun | None = None
+    request_context: RequestContext | None = None
 
 
 class StartIdempotencySnapshot(StrictModel):

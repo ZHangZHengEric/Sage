@@ -9,6 +9,7 @@ from sagents.v2.contracts.principals import (
     PrincipalType,
     RequestContext,
 )
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.tool import McpServerConfig, McpToolPlugin, ToolCall
 
 
@@ -101,3 +102,37 @@ async def test_mcp_bridge_exposes_discovery_failure_instead_of_hiding_server():
     with pytest.raises(Exception, match="offline") as caught:
         await bridge.list_tools(run_id="run_1")
     assert caught.value.info.code == "mcp.discovery_failed"
+
+
+@pytest.mark.asyncio
+async def test_mcp_dispatch_transport_failure_is_an_uncertain_side_effect():
+    class FailingSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            raise ConnectionError("connection lost after dispatch")
+
+    @asynccontextmanager
+    async def factory(config):
+        del config
+        yield FailingSession()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    tool = (await bridge.list_tools(run_id="run_1"))[0]
+    call = ToolCall(
+        tool_call_id="call_1",
+        tool_name=tool.name,
+        arguments={"query": "report"},
+        operation_id="operation_1",
+        idempotency_key="dispatch-once",
+        owner_run_id="run_1",
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await bridge.execute(call, CONTEXT)
+
+    assert caught.value.info.code == "mcp.call_failed"
+    assert caught.value.info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+    assert caught.value.info.retryable is False

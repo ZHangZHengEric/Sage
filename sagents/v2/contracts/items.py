@@ -182,9 +182,15 @@ class ArtifactRef(StrictModel):
 
 
 class UsageSummary(StrictModel):
+    # ``reported`` distinguishes a provider-reported zero from the legacy
+    # default used when an endpoint omits usage altogether.  Runtime consumers
+    # use the canonical counters below; diagnostics can inspect the original
+    # provider payload without learning every compatible gateway dialect.
+    reported: bool = False
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_input_tokens: int = Field(default=0, ge=0)
     reasoning_tokens: int = Field(default=0, ge=0)
     cost: float | None = Field(default=None, ge=0)
     models: tuple[str, ...] = ()
+    provider_usage: dict[str, Any] = Field(default_factory=dict)

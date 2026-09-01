@@ -410,6 +410,19 @@ def create_app(
             )
         )
 
+    @app.post("/api/v2/model-providers/verify-capabilities")
+    async def verify_new_model_provider_capabilities(
+        value: ModelProviderCreate, request: Request
+    ):
+        return _success(
+            await _safe(
+                runtime_service.verify_model_provider_capabilities(
+                    value,
+                    get_desktop_user_id(request),
+                )
+            )
+        )
+
     @app.get("/api/v2/model-providers/{provider_id}/api-key")
     async def reveal_model_provider_api_key(provider_id: str, request: Request):
         data = await _safe(
@@ -430,6 +443,20 @@ def create_app(
             await _safe(
                 runtime_service.patch_model_provider(
                     provider_id, patch, get_desktop_user_id(request)
+                )
+            )
+        )
+
+    @app.post("/api/v2/model-providers/{provider_id}/verify-capabilities")
+    async def verify_existing_model_provider_capabilities(
+        provider_id: str, value: ModelProviderPatch, request: Request
+    ):
+        return _success(
+            await _safe(
+                runtime_service.verify_model_provider_capabilities(
+                    value,
+                    get_desktop_user_id(request),
+                    provider_id=provider_id,
                 )
             )
         )

@@ -28,6 +28,7 @@ from sagents.v2.model.wire import (
     compact_json,
     parse_tool_arguments,
     provider_error,
+    wire_json_value,
 )
 from sagents.v2.model.contracts import (
     ModelCapabilities,
@@ -165,6 +166,8 @@ class AnthropicMessagesModelProvider:
         input_tokens = 0
         output_tokens = 0
         cached_tokens = 0
+        provider_usage: dict[str, Any] = {}
+        usage_reported = False
         tools: dict[int, dict[str, str]] = {}
         thinking_blocks: dict[int, dict[str, Any]] = {}
         response_started = False
@@ -179,6 +182,11 @@ class AnthropicMessagesModelProvider:
                         message = event.get("message") or {}
                         response_id = str(message.get("id") or response_id)
                         usage = message.get("usage") or {}
+                        if usage:
+                            usage_reported = True
+                            normalized_usage = wire_json_value(usage)
+                            if isinstance(normalized_usage, dict):
+                                provider_usage.update(normalized_usage)
                         input_tokens = int(usage.get("input_tokens") or 0)
                         cached_tokens = int(usage.get("cache_read_input_tokens") or 0)
                     elif event_type == "content_block_start":
@@ -251,6 +259,11 @@ class AnthropicMessagesModelProvider:
                         delta = event.get("delta") or {}
                         finish_reason = str(delta.get("stop_reason") or finish_reason)
                         usage = event.get("usage") or {}
+                        if usage:
+                            usage_reported = True
+                            normalized_usage = wire_json_value(usage)
+                            if isinstance(normalized_usage, dict):
+                                provider_usage.update(normalized_usage)
                         output_tokens = int(usage.get("output_tokens") or output_tokens)
         except SageV2Error:
             raise
@@ -272,10 +285,12 @@ class AnthropicMessagesModelProvider:
                 tool_calls=calls,
                 finish_reason=finish_reason,
                 usage=UsageSummary(
+                    reported=usage_reported,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cached_input_tokens=cached_tokens,
                     models=(self.config.model,),
+                    provider_usage=provider_usage,
                 ),
                 provider_metadata={
                     "provider_id": self.config.provider_id,

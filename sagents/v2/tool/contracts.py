@@ -71,6 +71,10 @@ class ToolDefinition(StrictModel):
     resume_strategy: ResumeStrategy = ResumeStrategy.REPLAY_RESULT
     supports_reconciliation: bool = False
     requires_approval: bool = False
+    # Explicit escape hatch for Run-control tools whose durable mutation is
+    # part of planning itself (for example ``goal_submit``/``todo_write``).
+    # Ordinary write tools remain forbidden in Plan mode even after approval.
+    plan_safe: bool = False
     required_scopes: tuple[Identifier, ...] = ()
 
 

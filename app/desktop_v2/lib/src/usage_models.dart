@@ -1,6 +1,7 @@
 class UsageOverview {
   const UsageOverview({
     this.rangeDays = 30,
+    this.dataQuality = const UsageDataQuality(),
     this.totals = const UsageTotals(),
     this.daily = const [],
     this.models = const [],
@@ -9,6 +10,7 @@ class UsageOverview {
   });
 
   final int rangeDays;
+  final UsageDataQuality dataQuality;
   final UsageTotals totals;
   final List<UsageDay> daily;
   final List<UsageBreakdown> models;
@@ -17,12 +19,37 @@ class UsageOverview {
 
   factory UsageOverview.fromJson(Map<String, Object?> json) => UsageOverview(
     rangeDays: _integer(json['range_days'], 30),
+    dataQuality: UsageDataQuality.fromJson(_map(json['data_quality'])),
     totals: UsageTotals.fromJson(_map(json['totals'])),
     daily: _list(json['daily'], UsageDay.fromJson),
     models: _list(json['models'], UsageBreakdown.fromJson),
     agents: _list(json['agents'], UsageBreakdown.fromJson),
     tools: _list(json['tools'], ToolUsage.fromJson),
   );
+}
+
+class UsageDataQuality {
+  const UsageDataQuality({
+    this.partial = false,
+    this.skippedSessions = 0,
+    this.skippedEventSessions = 0,
+    this.skippedDiagnosticSessions = 0,
+  });
+
+  final bool partial;
+  final int skippedSessions;
+  final int skippedEventSessions;
+  final int skippedDiagnosticSessions;
+
+  factory UsageDataQuality.fromJson(Map<String, Object?> json) =>
+      UsageDataQuality(
+        partial: json['partial'] == true,
+        skippedSessions: _integer(json['skipped_sessions']),
+        skippedEventSessions: _integer(json['skipped_event_sessions']),
+        skippedDiagnosticSessions: _integer(
+          json['skipped_diagnostic_sessions'],
+        ),
+      );
 }
 
 class UsageTotals {
@@ -38,7 +65,13 @@ class UsageTotals {
     this.toolCalls = 0,
     this.sessions = 0,
     this.averageFirstTokenLatencyMs,
+    this.firstTokenLatencyP50Ms,
+    this.firstTokenLatencyP95Ms,
+    this.firstTokenLatencySamples = 0,
     this.outputTokensPerSecond,
+    this.outputTokensPerSecondP50,
+    this.outputTokensPerSecondP95,
+    this.outputTokensPerSecondSamples = 0,
   });
 
   final int inputTokens;
@@ -52,7 +85,13 @@ class UsageTotals {
   final int toolCalls;
   final int sessions;
   final double? averageFirstTokenLatencyMs;
+  final double? firstTokenLatencyP50Ms;
+  final double? firstTokenLatencyP95Ms;
+  final int firstTokenLatencySamples;
   final double? outputTokensPerSecond;
+  final double? outputTokensPerSecondP50;
+  final double? outputTokensPerSecondP95;
+  final int outputTokensPerSecondSamples;
 
   int get nonCachedInputTokens =>
       inputTokens > cachedInputTokens ? inputTokens - cachedInputTokens : 0;
@@ -75,7 +114,15 @@ class UsageTotals {
     toolCalls: _integer(json['tool_calls']),
     sessions: _integer(json['sessions']),
     averageFirstTokenLatencyMs: _number(json['average_first_token_latency_ms']),
+    firstTokenLatencyP50Ms: _number(json['first_token_latency_p50_ms']),
+    firstTokenLatencyP95Ms: _number(json['first_token_latency_p95_ms']),
+    firstTokenLatencySamples: _integer(json['first_token_latency_samples']),
     outputTokensPerSecond: _number(json['output_tokens_per_second']),
+    outputTokensPerSecondP50: _number(json['output_tokens_per_second_p50']),
+    outputTokensPerSecondP95: _number(json['output_tokens_per_second_p95']),
+    outputTokensPerSecondSamples: _integer(
+      json['output_tokens_per_second_samples'],
+    ),
   );
 }
 

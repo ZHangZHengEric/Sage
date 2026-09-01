@@ -81,6 +81,14 @@ class RunCreationResult:
 
 
 @dataclass(frozen=True)
+class DispatchableRun:
+    """Durable execution intent used to rebuild a lost Scheduler queue."""
+
+    run: RunSnapshot
+    context: RequestContext
+
+
+@dataclass(frozen=True)
 class CommitResult:
     run: RunSnapshot
     session: SessionSnapshot
@@ -122,6 +130,7 @@ class SessionStore(Protocol):
     ) -> RunCreationResult: ...
 
     async def get_run(self, run_id: str) -> RunSnapshot: ...
+    async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]: ...
     async def get_run_result(self, run_id: str) -> RunResult: ...
     async def get_session(self, session_id: str) -> SessionSnapshot: ...
     async def get_start_command(self, run_id: str) -> StartRun: ...

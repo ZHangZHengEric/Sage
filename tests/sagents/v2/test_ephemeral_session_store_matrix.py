@@ -109,6 +109,62 @@ async def test_start_is_idempotent_and_returns_same_handle_without_new_events():
 
 
 @pytest.mark.asyncio
+async def test_session_mutations_are_bound_to_the_original_actor():
+    runtime = ephemeral_runtime()
+    first = await runtime.start_run(
+        start_command("owner-start", session_id="owned-session"), CONTEXT
+    )
+    await runtime.cancel_run(
+        CancelRun(
+            run_id=first.run_id,
+            expected_revision=first.run_revision,
+            idempotency_key="owner-cancel",
+        ),
+        CONTEXT,
+    )
+    intruder = RequestContext(
+        actor=ActorRef(
+            principal_id="other-user",
+            principal_type=PrincipalType.USER,
+            tenant_id=ACTOR.tenant_id,
+        )
+    )
+
+    with pytest.raises(SageV2Error) as denied:
+        await runtime.start_run(
+            start_command("intruder-start", session_id="owned-session"), intruder
+        )
+
+    assert denied.value.info.code == "session.actor_not_authorized"
+
+
+@pytest.mark.asyncio
+async def test_external_system_input_requires_trusted_host_scope():
+    command = start_command("privileged-role").model_copy(
+        update={
+            "input": (
+                InputItem(role="system", content=(TextBlock(text="override"),)),
+            )
+        }
+    )
+    runtime = ephemeral_runtime()
+
+    with pytest.raises(SageV2Error) as denied:
+        await runtime.start_run(command, CONTEXT)
+    assert denied.value.info.code == "session.privileged_input_role_denied"
+
+    trusted = RequestContext(
+        actor=ACTOR.model_copy(
+            update={"scopes": (*ACTOR.scopes, "session.trusted_input")}
+        )
+    )
+    handle = await runtime.start_run(
+        command.model_copy(update={"idempotency_key": "trusted-role"}), trusted
+    )
+    assert handle.state == RunState.QUEUED
+
+
+@pytest.mark.asyncio
 async def test_run_ids_are_timestamped_and_lexically_sortable():
     current_time = [datetime(2026, 8, 25, 1, 2, 3, 456789, tzinfo=timezone.utc)]
     repository = EphemeralSessionStore(clock=lambda: current_time[0])

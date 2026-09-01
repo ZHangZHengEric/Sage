@@ -255,8 +255,8 @@ class _FibreToolMethods(_DelegationMethods):
                 # parent's narrowed Tool/Skill grant. Without this, a coding
                 # child is created with an empty Tool catalog and can only
                 # describe work instead of reading, writing, or testing it.
-                tools=command.config.enabled_tools,
-                skills=command.config.enabled_skills,
+                tools=command.config.enabled_tools or (),
+                skills=command.config.enabled_skills or (),
                 dynamic=True,
             )
         )

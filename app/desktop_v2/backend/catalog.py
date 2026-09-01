@@ -65,6 +65,43 @@ class DesktopAgentRecord(StrictModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class DesktopModelCompatibilityProfile(StrictModel):
+    """Verified wire contract reused by every runtime provider instance."""
+
+    schema_version: Literal[1, 2] = 2
+    route_fingerprint: str = Field(min_length=1)
+    verified_at: datetime = Field(default_factory=utc_now)
+    max_output_tokens_field: Literal["max_tokens", "max_completion_tokens"] | None = (
+        None
+    )
+    effective_max_output_tokens: int | None = Field(default=None, gt=0)
+    reasoning_disable_strategy: Literal[
+        "omit",
+        "reasoning_effort_none",
+        "thinking_type_disabled",
+        "enable_thinking_false",
+        "thinking_false",
+        "chat_template_enable_thinking_false",
+    ] = "omit"
+    reasoning_behavior: Literal["none", "always", "controllable"] = "none"
+    reasoning_effort_strategy: Literal[
+        "reasoning_effort", "chat_template_reasoning_effort"
+    ] = "reasoning_effort"
+    supported_reasoning_efforts: tuple[
+        Literal["minimal", "low", "medium", "high", "xhigh", "max"], ...
+    ] = ()
+    text_only_reasoning_efforts: tuple[
+        Literal["minimal", "low", "medium", "high", "xhigh", "max"], ...
+    ] = ()
+    unsupported_reasoning_efforts: tuple[
+        Literal["minimal", "low", "medium", "high", "xhigh", "max"], ...
+    ] = ()
+    supports_json_object: bool = False
+    auxiliary_json_compatible: bool = False
+    successful_probes: tuple[str, ...] = ()
+    failed_probes: tuple[str, ...] = ()
+
+
 class DesktopModelProviderRecord(StrictModel):
     id: str
     user_id: str
@@ -77,11 +114,13 @@ class DesktopModelProviderRecord(StrictModel):
     api_key: str = ""
     supports_multimodal: bool = True
     supports_structured_output: bool = True
+    supports_tool_calling: bool = True
     is_default: bool = False
     max_tokens: int = Field(default=8192, gt=0)
     temperature: float | None = None
     top_p: float | None = None
     max_model_len: int = Field(default=128_000, gt=0)
+    compatibility_profile: DesktopModelCompatibilityProfile | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=utc_now)
 

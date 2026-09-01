@@ -11,7 +11,7 @@ from sagents.v2.contracts.principals import (
     PrincipalType,
     RequestContext,
 )
-from sagents.v2.contracts.run_state import RunState
+from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.items import TextBlock
@@ -23,7 +23,11 @@ from sagents.v2.runtime.execution.scheduler import (
     WorkItem,
 )
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.session import EphemeralSessionStore, LeaseFencedSessionStore
+from sagents.v2.runtime.session import (
+    EphemeralSessionStore,
+    FilesystemSessionStore,
+    LeaseFencedSessionStore,
+)
 from sagents.v2.sagent import SAgent
 
 
@@ -314,6 +318,31 @@ async def test_dispatcher_restores_queued_work_after_process_restart(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_rebuilds_missing_scheduler_work_from_durable_run(tmp_path):
+    store_path = tmp_path / "sessions"
+    first_store = FilesystemSessionStore(store_path)
+    first_runtime = HarnessRuntime(first_store)
+    handle = await first_runtime.start_run(
+        start_command("recover-missing-scheduler-work"), CONTEXT
+    )
+    await first_store.close()
+
+    restored_store = FilesystemSessionStore(store_path)
+    restored_runtime = HarnessRuntime(restored_store)
+    scheduler = InMemoryScheduler()
+    agent = RecoveryAgent(restored_runtime)
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    dispatcher.attach_recovery_agent(agent)
+    await dispatcher.start()
+
+    snapshot = await wait_for_terminal(restored_runtime, handle.run_id)
+    assert snapshot.state == RunState.FAILED
+    assert agent.executions == [(handle.run_id, False)]
+    await dispatcher.close()
+    await restored_store.close()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
     runtime = HarnessRuntime(EphemeralSessionStore())
     handle = await runtime.start_run(start_command("recover-running"), CONTEXT)
@@ -339,4 +368,47 @@ async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
     assert result.error.code == "execution.worker_restarted"
     assert agent.executions == []
     assert await scheduler.pending_count() == 0
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_fails_active_inline_child_with_parent_worker(tmp_path):
+    runtime = HarnessRuntime(EphemeralSessionStore())
+    parent = await runtime.start_run(start_command("recover-tree-parent"), CONTEXT)
+    parent_running = await runtime.start_execution(
+        run_id=parent.run_id,
+        expected_revision=parent.run_revision,
+        context=CONTEXT,
+        idempotency_key="recover-tree-parent:start",
+    )
+    child = await runtime.start_run(
+        StartRun(
+            session_id=parent.session_id,
+            agent_id="child-agent",
+            input=(InputItem(role="user", content=(TextBlock(text="child work"),)),),
+            session_concurrency_mode=SessionConcurrencyMode.FORK,
+            resolved_spec_hash="sha256:test",
+            idempotency_key="recover-tree-child",
+            parent_run_id=parent.run_id,
+        ),
+        CONTEXT,
+    )
+    await runtime.start_execution(
+        run_id=child.run_id,
+        expected_revision=child.run_revision,
+        context=CONTEXT,
+        idempotency_key="recover-tree-child:start",
+    )
+    await persist_dispatch_work(tmp_path, parent)
+
+    scheduler = FilesystemScheduler(tmp_path)
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    dispatcher.attach_recovery_agent(RecoveryAgent(runtime))
+    await dispatcher.start()
+
+    await wait_for_terminal(runtime, parent_running.run_id)
+    child_result = await runtime.get_run_result(child.run_id)
+    assert child_result.outcome == RunState.FAILED
+    assert child_result.error is not None
+    assert child_result.error.code == "execution.parent_worker_restarted"
     await dispatcher.close()

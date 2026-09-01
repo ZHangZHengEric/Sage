@@ -87,6 +87,56 @@ async def test_submit_is_idempotent_and_job_completes_with_nonzero_exit_code():
 
 
 @pytest.mark.asyncio
+async def test_run_scoped_runners_do_not_overwrite_each_other():
+    jobs = InMemoryJobRuntime({})
+
+    async def first_runner(spec, emit, cancelled):
+        del spec, cancelled
+        await emit("stdout", b"first")
+        return JobCompletion()
+
+    async def second_runner(spec, emit, cancelled):
+        del spec, cancelled
+        await emit("stdout", b"second")
+        return JobCompletion()
+
+    jobs.register_runner("shell", first_runner, owner_run_id="run_1")
+    jobs.register_runner("shell", second_runner, owner_run_id="run_2")
+    first = await jobs.submit(job_spec("first", kind="shell", run_id="run_1"))
+    second = await jobs.submit(job_spec("second", kind="shell", run_id="run_2"))
+    await asyncio.gather(jobs.wait(first.job_id), jobs.wait(second.job_id))
+
+    first_output = await jobs.read_output(JobCursor(job_id=first.job_id))
+    second_output = await jobs.read_output(JobCursor(job_id=second.job_id))
+    assert b"".join(chunk.data for chunk in first_output) == b"first"
+    assert b"".join(chunk.data for chunk in second_output) == b"second"
+
+
+def test_run_scoped_runner_can_be_released_without_removing_replacement():
+    jobs = InMemoryJobRuntime({})
+
+    async def first_runner(spec, emit, cancelled):
+        del spec, emit, cancelled
+        return JobCompletion()
+
+    async def second_runner(spec, emit, cancelled):
+        del spec, emit, cancelled
+        return JobCompletion()
+
+    jobs.register_runner("shell", first_runner, owner_run_id="run_1")
+    jobs.register_runner("shell", second_runner, owner_run_id="run_1")
+    jobs.unregister_runner(
+        "shell", owner_run_id="run_1", runner=first_runner
+    )
+    assert jobs._owner_runners[("run_1", "shell")] is second_runner
+
+    jobs.unregister_runner(
+        "shell", owner_run_id="run_1", runner=second_runner
+    )
+    assert jobs._owner_runners == {}
+
+
+@pytest.mark.asyncio
 async def test_output_cursor_is_exact_incremental_and_bounded():
     jobs = runtime()
     handle = await jobs.submit(

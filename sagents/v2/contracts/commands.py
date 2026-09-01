@@ -32,8 +32,11 @@ class RunConfig(StrictModel):
     """Per-Run overrides already narrowed against the Agent policy ceiling."""
 
     model_bindings: dict[str, str] = Field(default_factory=dict)
-    enabled_tools: tuple[ToolName, ...] = ()
-    enabled_skills: tuple[SkillName, ...] = ()
+    # ``None`` means that a compatibility host did not provide a per-Run grant
+    # and the resolved Agent defaults apply.  An empty tuple is an explicit
+    # least-privilege grant of no Tools/Skills.
+    enabled_tools: tuple[ToolName, ...] | None = None
+    enabled_skills: tuple[SkillName, ...] | None = None
     max_steps: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     max_total_tokens: int | None = Field(default=None, gt=0)

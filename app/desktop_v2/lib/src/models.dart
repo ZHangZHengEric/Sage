@@ -137,11 +137,13 @@ class ModelProviderSummary {
     this.apiKeyConfigured = false,
     this.supportsMultimodal = false,
     this.supportsStructuredOutput = false,
+    this.supportsToolCalling = true,
     this.isDefault = false,
     this.maxTokens,
     this.temperature,
     this.topP,
     this.maxModelLength,
+    this.compatibilityProfile,
   });
 
   final String id;
@@ -152,11 +154,22 @@ class ModelProviderSummary {
   final bool apiKeyConfigured;
   final bool supportsMultimodal;
   final bool supportsStructuredOutput;
+  final bool supportsToolCalling;
   final bool isDefault;
   final int? maxTokens;
   final double? temperature;
   final double? topP;
   final int? maxModelLength;
+  final Map<String, Object?>? compatibilityProfile;
+
+  bool get hasVerifiedUsageProfile =>
+      (compatibilityProfile?['schema_version'] as num?)?.toInt() == 2;
+
+  String? get reasoningBehavior =>
+      compatibilityProfile?['reasoning_behavior']?.toString();
+
+  List<String> get supportedReasoningEfforts =>
+      _stringList(compatibilityProfile?['supported_reasoning_efforts']);
 
   factory ModelProviderSummary.fromJson(Map<String, Object?> json) =>
       ModelProviderSummary(
@@ -168,11 +181,15 @@ class ModelProviderSummary {
         apiKeyConfigured: json['api_key_configured'] == true,
         supportsMultimodal: json['supports_multimodal'] == true,
         supportsStructuredOutput: json['supports_structured_output'] == true,
+        supportsToolCalling: json['supports_tool_calling'] != false,
         isDefault: json['is_default'] == true,
         maxTokens: (json['max_tokens'] as num?)?.toInt(),
         temperature: (json['temperature'] as num?)?.toDouble(),
         topP: (json['top_p'] as num?)?.toDouble(),
         maxModelLength: (json['max_model_len'] as num?)?.toInt(),
+        compatibilityProfile: json['compatibility_profile'] is Map
+            ? (json['compatibility_profile'] as Map).cast<String, Object?>()
+            : null,
       );
 
   ModelProviderSummary copyWith({bool? isDefault}) => ModelProviderSummary(
@@ -184,11 +201,13 @@ class ModelProviderSummary {
     apiKeyConfigured: apiKeyConfigured,
     supportsMultimodal: supportsMultimodal,
     supportsStructuredOutput: supportsStructuredOutput,
+    supportsToolCalling: supportsToolCalling,
     isDefault: isDefault ?? this.isDefault,
     maxTokens: maxTokens,
     temperature: temperature,
     topP: topP,
     maxModelLength: maxModelLength,
+    compatibilityProfile: compatibilityProfile,
   );
 }
 

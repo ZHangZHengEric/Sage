@@ -215,6 +215,12 @@ void main() {
           'code': 0,
           'data': {
             'range_days': 7,
+            'data_quality': {
+              'partial': true,
+              'skipped_sessions': 2,
+              'skipped_event_sessions': 1,
+              'skipped_diagnostic_sessions': 1,
+            },
             'totals': {
               'input_tokens': 100,
               'output_tokens': 42,
@@ -222,7 +228,13 @@ void main() {
               'total_tokens': 142,
               'turns': 2,
               'average_first_token_latency_ms': 725.5,
+              'first_token_latency_p50_ms': 650.0,
+              'first_token_latency_p95_ms': 1200.0,
+              'first_token_latency_samples': 7,
               'output_tokens_per_second': 32.0,
+              'output_tokens_per_second_p50': 30.0,
+              'output_tokens_per_second_p95': 48.0,
+              'output_tokens_per_second_samples': 6,
             },
             'daily': [],
             'models': [],
@@ -248,13 +260,23 @@ void main() {
       isNotNull,
     );
     expect(overview.rangeDays, 7);
+    expect(overview.dataQuality.partial, isTrue);
+    expect(overview.dataQuality.skippedSessions, 2);
+    expect(overview.dataQuality.skippedEventSessions, 1);
+    expect(overview.dataQuality.skippedDiagnosticSessions, 1);
     expect(overview.totals.totalTokens, 142);
     expect(overview.totals.turns, 2);
     expect(overview.totals.cachedInputTokens, 40);
     expect(overview.totals.nonCachedInputTokens, 60);
     expect(overview.totals.promptCacheUtilization, .4);
     expect(overview.totals.averageFirstTokenLatencyMs, 725.5);
+    expect(overview.totals.firstTokenLatencyP50Ms, 650.0);
+    expect(overview.totals.firstTokenLatencyP95Ms, 1200.0);
+    expect(overview.totals.firstTokenLatencySamples, 7);
     expect(overview.totals.outputTokensPerSecond, 32.0);
+    expect(overview.totals.outputTokensPerSecondP50, 30.0);
+    expect(overview.totals.outputTokensPerSecondP95, 48.0);
+    expect(overview.totals.outputTokensPerSecondSamples, 6);
   });
 
   test(

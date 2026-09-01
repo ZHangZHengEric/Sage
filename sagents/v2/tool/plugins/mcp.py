@@ -269,7 +269,11 @@ class McpToolPlugin:
         return McpToolPlugin._error(
             code,
             f"MCP server {server.name!r} failed: {exc}",
-            ErrorCategory.PROVIDER_TRANSIENT,
+            # Once call_tool has been attempted, a timeout or transport failure
+            # cannot prove that the remote side effect did not happen.  The Agent
+            # Loop must persist an UNKNOWN barrier and require reconciliation or
+            # explicit user resolution instead of presenting a retryable failure.
+            ErrorCategory.UNCERTAIN_SIDE_EFFECT,
             metadata={"server": server.name, "protocol": server.protocol},
         )
 

@@ -128,7 +128,7 @@ async def main() -> None:
                 content=(TextBlock(text="Explain this repository."),),
             ),
         ),
-        resolved_spec_hash="local-example-v1",
+        resolved_spec_hash=application.composition_hash,
         idempotency_key="request-1",
     )
 

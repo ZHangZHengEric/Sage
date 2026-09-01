@@ -84,11 +84,20 @@ class OfficialToolRuntime:
         self.tool_catalog_resolver = tool_catalog_resolver
         self.tool_selection_policy = tool_selection_policy
         self.goal_state_service = goal_state_service
+        self._owns_job_runtime = job_runtime is None
+        self._shell_job_runner = self._run_shell_job
+        self._registered_shell_owner: str | None = None
         self.job_runtime = job_runtime or InMemoryJobRuntime(
-            {"official.shell": self._run_shell_job}
+            {"official.shell": self._shell_job_runner}
         )
         self._expanded_tools: dict[str, set[str]] = {}
         self._turn_status: dict[str, dict[str, Any]] = {}
+
+    def bind_job_runtime(self, job_runtime: JobRuntime) -> None:
+        """Bind the composition-owned lifecycle service before tool execution."""
+
+        self.job_runtime = job_runtime
+        self._owns_job_runtime = False
 
     def virtual_path(self, value: str | None) -> str:
         """Ask the active sandbox to resolve a canonical resource path."""
@@ -216,6 +225,14 @@ class OfficialToolRuntime:
         cwd = self.virtual_path(workdir)
         # A non-login shell preserves command semantics without sourcing host
         # profile files that are outside the sandbox's declared environment.
+        register_runner = getattr(self.job_runtime, "register_runner", None)
+        if register_runner is not None:
+            register_runner(
+                "official.shell",
+                self._shell_job_runner,
+                owner_run_id=invocation.call.owner_run_id,
+            )
+            self._registered_shell_owner = invocation.call.owner_run_id
         handle = await self.job_runtime.submit(
             JobSpec(
                 owner_run_id=invocation.call.owner_run_id,
@@ -239,6 +256,20 @@ class OfficialToolRuntime:
         return await self.await_shell(
             handle.job_id, block_until_ms=block_until_ms, pattern=None
         )
+
+    async def close(self) -> None:
+        """Cancel private ephemeral jobs before their sandbox is released."""
+
+        unregister_runner = getattr(self.job_runtime, "unregister_runner", None)
+        if unregister_runner is not None and self._registered_shell_owner is not None:
+            unregister_runner(
+                "official.shell",
+                owner_run_id=self._registered_shell_owner,
+                runner=self._shell_job_runner,
+            )
+            self._registered_shell_owner = None
+        if self._owns_job_runtime:
+            await self.job_runtime.close()
 
     async def _run_shell_job(self, spec, emit, cancel_event) -> JobCompletion:
         del cancel_event
