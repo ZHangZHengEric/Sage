@@ -479,6 +479,8 @@ class LLMContinuationJudge:
 class LLMJudgeContinuationPolicy:
     """V1 Judge behavior with only V2 runtime safety boundaries retained."""
 
+    plugin_id = "sage.agent.continuation.llm-judge"
+
     def __init__(self, judge: LLMContinuationJudge) -> None:
         self.judge = judge
         self._budget = BudgetRule()
@@ -569,6 +571,8 @@ class LLMJudgeContinuationPolicy:
 
 class HybridContinuationPolicy:
     """Use typed deterministic rules first and the V1 Judge for final text."""
+
+    plugin_id = "sage.agent.continuation.hybrid"
 
     def __init__(
         self,

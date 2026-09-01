@@ -17,6 +17,7 @@ from sagents.v2.session_memory.contracts import (
 
 
 class SqliteBm25SessionMemoryProvider:
+    plugin_id = "sage.session-memory.sqlite-bm25"
     api_version = "2"
 
     def __init__(self, root: str | Path) -> None:

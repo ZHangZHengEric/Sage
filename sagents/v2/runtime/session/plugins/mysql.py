@@ -1013,6 +1013,8 @@ class _MysqlSessionStoreMeta(type):
 class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
     """Composed durable MySQL SessionStore facade."""
 
+    plugin_id = "sage.session.mysql"
+
     def __init__(self, *args, **kwargs) -> None:
         object.__setattr__(self, "_coordinator", _MysqlSessionState(*args, **kwargs))
 

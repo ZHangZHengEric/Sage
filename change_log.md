@@ -2,6 +2,12 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 20:12** Builder 默认插件全部改为类 plugin_id；缺 id 的默认实现已补上。
+
+- **2026-09-01 20:10** 剩余官方实现补上 plugin_id；official.py / Builder 登记改引用类属性。
+
+- **2026-09-01 20:00** Session Memory 官方实现声明 plugin_id；official/Builder 改引用类属性。
+
 - **2026-09-01 19:58** 三个观测 Noop 按能力拆进 plugins/；contracts 只留端口，Loop 不再构造官方空实现。
 
 - **2026-09-01 19:52** 观测七个官方 sink 都声明 plugin_id；official/Builder 改引用类属性。

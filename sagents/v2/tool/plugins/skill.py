@@ -15,8 +15,9 @@ from sagents.v2.tool.decorated import DecoratedToolProvider
 class SkillToolPlugin:
     """Load Skill Tool methods without duplicating their schemas or behavior."""
 
+    plugin_id = "sage.tool.skill"
     descriptor = ExtensionDescriptor(
-        plugin_id="sage.tool.skill",
+        plugin_id=plugin_id,
         version="2.0.0",
         name="Skill Tool provider",
         description="Decorator-backed Tool operations owned by the Skill module.",

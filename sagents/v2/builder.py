@@ -14,6 +14,23 @@ from pathlib import Path
 from typing import Any
 
 from sagents.v2.agent.factory import AgentCompositionFactory
+from sagents.v2.agent.policy import CompositeContinuationPolicy
+from sagents.v2.context import (
+    ExtractiveConversationSummarizer,
+    JsonHeuristicTokenEstimator,
+    PersistentSummaryContextReducer,
+    ReferenceContextUnitCompactor,
+    SessionDerivedConversationSummaryStore,
+)
+from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
+from sagents.v2.package.registry import InMemoryAgentPackageRegistry
+from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
+from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
+from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.tool.plugins.official import OfficialToolPlugin
+from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
+from sagents.v2.workspace import BareWorkspaceInitializer
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
@@ -41,9 +58,8 @@ from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import PluginDeclaration
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.context.components import ContextComponentBundle
-from sagents.v2.memory import MemoryService
-from sagents.v2.memory import MemoryProvider
-from sagents.v2.model.protocols import resolve_model_protocol
+from sagents.v2.memory import MemoryProvider, MemoryService, NoopMemoryProvider
+from sagents.v2.model.protocols import model_protocol_descriptor
 from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.runtime.credentials import CredentialRef
@@ -60,10 +76,16 @@ from sagents.v2.runtime.extensions import (
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session import (
     AuthorizedSessionAccess,
+    FilesystemSessionStore,
     LeaseFencedSessionStore,
     SessionStore,
 )
-from sagents.v2.session_memory import SessionMemoryProvider, SessionMemoryService
+from sagents.v2.session_memory import (
+    NoopSessionMemoryProvider,
+    SessionMemoryProvider,
+    SessionMemoryService,
+    SqliteBm25SessionMemoryProvider,
+)
 from sagents.v2.sagent import SAgent
 from sagents.v2.application import (
     ResolvedApplicationPlan,
@@ -344,7 +366,7 @@ class SAgentBuilder:
         uses_binding_tools = (
             self._execution_binding_provider is not None
             and self._selected_plugin(runtime_config, "tool.catalog")
-            == "sage.tool.official"
+            == OfficialToolPlugin.plugin_id
         )
         selected_agent = agent_id or resolved.entrypoint_agent
         if selected_agent is None:
@@ -354,12 +376,12 @@ class SAgentBuilder:
         if (
             (self._tool_catalog is None or self._tool_executor is None)
             and self._selected_plugin(runtime_config, "tool.catalog")
-            == "sage.tool.official"
+            == OfficialToolPlugin.plugin_id
             and self._tool_runtime is None
             and self._execution_binding_provider is None
         ):
             raise ValueError(
-                "sage.tool.official requires with_execution_binding_provider(provider) "
+                f"{OfficialToolPlugin.plugin_id} requires with_execution_binding_provider(provider) "
                 "or the compatibility with_tool_runtime(runtime)"
             )
         session_store = self._session_store
@@ -378,7 +400,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="credentials.provider",
-            default_plugin="sage.credentials.environment",
+            default_plugin=EnvironmentCredentialProvider.plugin_id,
             default_config={"declarations": resolved.credentials},
             default_scope=ExtensionScope.PROCESS,
         )
@@ -481,7 +503,7 @@ class SAgentBuilder:
         elif (
             self._execution_binding_provider is not None
             and self._selected_plugin(runtime_config, "tool.catalog")
-            == "sage.tool.official"
+            == OfficialToolPlugin.plugin_id
         ):
             # The real provider pair is composed lazily from the actual Run
             # binding. These placeholders are never exposed to that driver.
@@ -537,7 +559,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.token-estimator",
-            default_plugin="sage.context.token-estimator.json-heuristic",
+            default_plugin=JsonHeuristicTokenEstimator.plugin_id,
             default_scope=ExtensionScope.AGENT,
         )
         summary_store = await self._create_capability(
@@ -547,7 +569,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.summary-store",
-            default_plugin="sage.context.summary-store.session-derived",
+            default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"session_store": driver_session_store},
         )
@@ -558,7 +580,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.summarizer",
-            default_plugin="sage.context.summarizer.extractive",
+            default_plugin=ExtractiveConversationSummarizer.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"model": models_by_agent[selected_agent]},
         )
@@ -569,7 +591,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.unit-compactor",
-            default_plugin="sage.context.unit-compactor.reference",
+            default_plugin=ReferenceContextUnitCompactor.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"estimator": token_estimator},
         )
@@ -580,7 +602,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.reducer",
-            default_plugin="sage.context.reducer.persistent-summary",
+            default_plugin=PersistentSummaryContextReducer.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={
                 "store": summary_store,
@@ -596,7 +618,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="agent.continuation-policy",
-            default_plugin="sage.agent.continuation.deterministic",
+            default_plugin=CompositeContinuationPolicy.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"model": models_by_agent[selected_agent]},
         )
@@ -976,7 +998,7 @@ class SAgentBuilder:
                 if injected is not None
             ),
             deferred_plugins=(
-                (("sage.tool.official", ExtensionScope.RUN),)
+                ((OfficialToolPlugin.plugin_id, ExtensionScope.RUN),)
                 if uses_binding_tools
                 else ()
             ),
@@ -1035,9 +1057,9 @@ class SAgentBuilder:
         self, host, parent, handles, runtime, declarations
     ) -> SessionStore:
         selection = self._selection(runtime, "session.store")
-        plugin_id = selection.plugin if selection else "sage.session.filesystem"
+        plugin_id = selection.plugin if selection else FilesystemSessionStore.plugin_id
         config = dict(selection.config if selection else {})
-        if plugin_id == "sage.session.filesystem" and "root" not in config:
+        if plugin_id == FilesystemSessionStore.plugin_id and "root" not in config:
             if self._session_root is None:
                 raise ValueError("filesystem SessionStore requires session_root")
             config["root"] = str(self._session_root)
@@ -1063,7 +1085,7 @@ class SAgentBuilder:
             runtime,
             declarations,
             capability="memory.provider",
-            default_plugin="sage.memory.noop",
+            default_plugin=NoopMemoryProvider.plugin_id,
             default_scope=ExtensionScope.PROCESS,
         )
 
@@ -1071,9 +1093,14 @@ class SAgentBuilder:
         self, host, parent, handles, runtime, declarations
     ) -> SessionMemoryProvider:
         selection = self._selection(runtime, "session-memory.provider")
-        plugin_id = selection.plugin if selection else "sage.session-memory.noop"
+        plugin_id = (
+            selection.plugin if selection else NoopSessionMemoryProvider.plugin_id
+        )
         config = dict(selection.config if selection else {})
-        if plugin_id == "sage.session-memory.sqlite-bm25" and "root" not in config:
+        if (
+            plugin_id == SqliteBm25SessionMemoryProvider.plugin_id
+            and "root" not in config
+        ):
             if self._session_root is None:
                 raise ValueError("SQLite Session Memory requires a root")
             config["root"] = str(self._session_root / "session-memory")
@@ -1106,8 +1133,7 @@ class SAgentBuilder:
         route_data = resolved.model_routes[route_id]
         selected_plugin = route_data.get("plugin")
         if selected_plugin is None:
-            protocol = resolve_model_protocol(route_data["provider"])
-            plugin_id = f"sage.model.{protocol.value}"
+            plugin_id = model_protocol_descriptor(route_data["provider"]).plugin_id
         else:
             plugin_id = str(selected_plugin)
         config = self._merge_plugin_config(
@@ -1158,13 +1184,13 @@ class SAgentBuilder:
         config = self._merge_plugin_config(
             declarations, selection.plugin, dict(selection.config)
         )
-        if selection.plugin == "sage.tool.official":
+        if selection.plugin == OfficialToolPlugin.plugin_id:
             runtime = config.get("runtime") or runtime_override or self._tool_runtime
             if runtime is not None:
                 config["runtime"] = runtime
             else:
                 raise ValueError(
-                    "sage.tool.official requires "
+                    f"{OfficialToolPlugin.plugin_id} requires "
                     "SAgentBuilder.with_tool_runtime(runtime)"
                 )
         catalog, handle = await self._instantiate(
@@ -1202,10 +1228,10 @@ class SAgentBuilder:
     ) -> ToolSelectionPolicy:
         selection = self._selection(runtime, "tool.selection-policy")
         plugin_id = (
-            selection.plugin if selection is not None else "sage.tool-selection.llm"
+            selection.plugin if selection is not None else LLMToolSelectionPolicy.plugin_id
         )
         if plugin_id in {"hybrid", "sage.tool-selection.hybrid"}:
-            plugin_id = "sage.tool-selection.llm"
+            plugin_id = LLMToolSelectionPolicy.plugin_id
         config = self._merge_plugin_config(
             declarations,
             plugin_id,
@@ -1348,7 +1374,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="execution.scheduler",
-                default_plugin="sage.scheduler.ephemeral",
+                default_plugin=InMemoryScheduler.plugin_id,
             ),
             "execution.job-runtime": await self._create_capability(
                 host,
@@ -1357,7 +1383,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="execution.job-runtime",
-                default_plugin="sage.job.ephemeral",
+                default_plugin=InMemoryJobRuntime.plugin_id,
                 default_config={"runners": {}},
             ),
             "artifact.store": await self._create_capability(
@@ -1367,7 +1393,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="artifact.store",
-                default_plugin="sage.artifact.ephemeral",
+                default_plugin=InMemoryArtifactStore.plugin_id,
             ),
             "package.registry": await self._create_capability(
                 host,
@@ -1376,7 +1402,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="package.registry",
-                default_plugin="sage.package-registry.ephemeral",
+                default_plugin=InMemoryAgentPackageRegistry.plugin_id,
             ),
             "observability.diagnostic-sink": await self._create_capability(
                 host,
@@ -1412,7 +1438,7 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="workspace.initializer",
-                default_plugin="sage.workspace.initializer.bare",
+                default_plugin=BareWorkspaceInitializer.plugin_id,
             ),
         }
         adapters = {}
@@ -1421,7 +1447,7 @@ class SAgentBuilder:
             from sagents.v2.package.manifest.root import InterfaceDeclaration
 
             interface_declarations["native"] = InterfaceDeclaration(
-                plugin="sage.protocol.native"
+                plugin=NativeProtocolAdapter.plugin_id
             )
         for interface_id, declaration in interface_declarations.items():
             if not declaration.enabled:

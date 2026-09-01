@@ -397,6 +397,7 @@ class _LocalHandle:
 class LocalWorkspaceSandboxProvider:
     """Grant-enforcing host filesystem/process provider without OS isolation."""
 
+    plugin_id = "sage.sandbox.local-workspace"
     provider_id = "sage.sandbox.local-workspace"
     provider_version = "3.0.0"
 

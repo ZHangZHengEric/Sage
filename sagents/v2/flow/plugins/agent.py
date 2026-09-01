@@ -21,6 +21,8 @@ from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 class NativeAgentFlowNode:
     """First-party Flow node whose body is the standard message/model/tool loop."""
 
+    plugin_id = "sage.flow.agent"
+
     def __init__(
         self,
         *,

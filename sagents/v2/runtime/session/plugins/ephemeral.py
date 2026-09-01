@@ -13,6 +13,8 @@ from sagents.v2.runtime.session.state import (
 class EphemeralSessionStore:
     """Process-local composed facade over the transactional coordinator."""
 
+    plugin_id = "sage.session.ephemeral"
+
     def __init__(self, *args, **kwargs) -> None:
         kwargs.setdefault("persistence_can_fail", False)
         object.__setattr__(

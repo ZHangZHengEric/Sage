@@ -86,6 +86,8 @@ class McpToolPlugin:
     Catalog/Executor contracts used by decorator-backed local plugins.
     """
 
+    plugin_id = "sage.tool.mcp"
+
     def __init__(
         self,
         servers: tuple[McpServerConfig, ...],

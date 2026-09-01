@@ -39,6 +39,13 @@ class BuiltinModelProtocol(str, Enum):
     ANTHROPIC_MESSAGES = "anthropic-messages"
 
 
+_PROTOCOL_PROVIDERS = {
+    BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS: OpenAIChatCompletionsModelProvider,
+    BuiltinModelProtocol.OPENAI_RESPONSES: OpenAIResponsesModelProvider,
+    BuiltinModelProtocol.ANTHROPIC_MESSAGES: AnthropicMessagesModelProvider,
+}
+
+
 class ModelProtocolDescriptor(StrictModel):
     """Non-secret metadata that hosts can expose in settings and diagnostics."""
 
@@ -51,6 +58,10 @@ class ModelProtocolDescriptor(StrictModel):
     capabilities: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def plugin_id(self) -> str:
+        return _PROTOCOL_PROVIDERS[self.protocol].plugin_id
 
 
 _DESCRIPTORS = (

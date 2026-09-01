@@ -204,7 +204,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        "sage.session-memory.noop",
+        NoopSessionMemoryProvider.plugin_id,
         "No-op Session Memory provider",
         "session-memory.provider",
         lambda context, dependencies: NoopSessionMemoryProvider(),
@@ -212,7 +212,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.session-memory.sqlite-bm25",
+        SqliteBm25SessionMemoryProvider.plugin_id,
         "SQLite BM25 Session Memory provider",
         "session-memory.provider",
         lambda context, dependencies: SqliteBm25SessionMemoryProvider(
@@ -222,7 +222,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.agent.continuation.deterministic",
+        CompositeContinuationPolicy.plugin_id,
         "Deterministic continuation policy",
         "agent.continuation-policy",
         lambda context, dependencies: CompositeContinuationPolicy(
@@ -238,7 +238,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.agent.continuation.llm-judge",
+        LLMJudgeContinuationPolicy.plugin_id,
         "No-tool-call LLM Judge completion policy",
         "agent.continuation-policy",
         lambda context, dependencies: LLMJudgeContinuationPolicy(
@@ -251,7 +251,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.agent.continuation.hybrid",
+        HybridContinuationPolicy.plugin_id,
         "Hybrid deterministic and LLM Judge policy",
         "agent.continuation-policy",
         lambda context, dependencies: HybridContinuationPolicy(
@@ -265,7 +265,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.agent.continuation.explicit-status",
+        ExplicitStatusContinuationPolicy.plugin_id,
         "Explicit turn_status completion policy",
         "agent.continuation-policy",
         lambda context, dependencies: ExplicitStatusContinuationPolicy(
@@ -387,7 +387,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        "sage.scheduler.ephemeral",
+        InMemoryScheduler.plugin_id,
         "In-memory scheduler",
         "execution.scheduler",
         lambda context, dependencies: InMemoryScheduler(
@@ -410,7 +410,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.scheduler.filesystem",
+        FilesystemScheduler.plugin_id,
         "Filesystem durable scheduler",
         "execution.scheduler",
         lambda context, dependencies: FilesystemScheduler(
@@ -434,7 +434,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.job.ephemeral",
+        InMemoryJobRuntime.plugin_id,
         "In-memory Job runtime",
         "execution.job-runtime",
         lambda context, dependencies: InMemoryJobRuntime(
@@ -476,7 +476,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.sandbox.ephemeral",
+        InMemorySandboxProvider.plugin_id,
         "In-memory sandbox provider",
         "execution.sandbox",
         lambda context, dependencies: InMemorySandboxProvider(
@@ -501,7 +501,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.sandbox.local-workspace",
+        LocalWorkspaceSandboxProvider.plugin_id,
         "Local workspace sandbox provider",
         "execution.sandbox",
         lambda context, dependencies: LocalWorkspaceSandboxProvider(
@@ -525,7 +525,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        "sage.credentials.environment",
+        EnvironmentCredentialProvider.plugin_id,
         "Environment credential provider",
         "credentials.provider",
         lambda context, dependencies: EnvironmentCredentialProvider(
@@ -536,7 +536,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.credentials.mapping",
+        MappingCredentialProvider.plugin_id,
         "Mapping credential provider",
         "credentials.provider",
         lambda context, dependencies: MappingCredentialProvider(
@@ -667,7 +667,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.workspace.initializer.claw",
+        ClawWorkspaceInitializer.plugin_id,
         "Claw Mode workspace",
         "workspace.initializer",
         lambda context, dependencies: ClawWorkspaceInitializer(
@@ -677,7 +677,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.workspace.initializer.bare",
+        BareWorkspaceInitializer.plugin_id,
         "Bare workspace",
         "workspace.initializer",
         lambda context, dependencies: BareWorkspaceInitializer(),
@@ -685,7 +685,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.artifact.ephemeral",
+        InMemoryArtifactStore.plugin_id,
         "In-memory ArtifactStore",
         "artifact.store",
         lambda context, dependencies: InMemoryArtifactStore(),
@@ -693,35 +693,35 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        "sage.package-registry.ephemeral",
+        InMemoryAgentPackageRegistry.plugin_id,
         "In-memory AgentPackage registry",
         "package.registry",
         lambda context, dependencies: InMemoryAgentPackageRegistry(),
         scopes={ExtensionScope.PROCESS},
     )
 
-    for plugin_id, name, adapter in (
-        ("sage.protocol.native", "Native protocol adapter", NativeProtocolAdapter),
-        ("sage.protocol.ag-ui", "AG-UI protocol adapter", AgUiProtocolAdapter),
-        ("sage.protocol.acp", "ACP protocol adapter", AcpProtocolAdapter),
-        ("sage.protocol.a2a", "A2A protocol adapter", A2AProtocolAdapter),
-        ("sage.protocol.mcp", "MCP protocol adapter", McpProtocolAdapter),
+    for name, adapter in (
+        ("Native protocol adapter", NativeProtocolAdapter),
+        ("AG-UI protocol adapter", AgUiProtocolAdapter),
+        ("ACP protocol adapter", AcpProtocolAdapter),
+        ("A2A protocol adapter", A2AProtocolAdapter),
+        ("MCP protocol adapter", McpProtocolAdapter),
     ):
         _one(
             registry,
-            plugin_id,
+            adapter.plugin_id,
             name,
             "interface.protocol-adapter",
             lambda context, dependencies, adapter=adapter: adapter(**context.config),
             scopes={ExtensionScope.PROCESS, ExtensionScope.RUN},
-            provider_name=plugin_id.rsplit(".", 1)[-1],
+            provider_name=adapter.plugin_id.rsplit(".", 1)[-1],
             multi_provider=True,
         )
 
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.tool.mcp",
+                plugin_id=McpToolPlugin.plugin_id,
                 version="2.0.0",
                 name="MCP Tool provider",
                 provides=(
@@ -842,7 +842,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.session.filesystem",
+                plugin_id=FilesystemSessionStore.plugin_id,
                 version="2.1.0",
                 name="Filesystem SessionStore",
                 description="Compact authoritative checksummed state per Session.",
@@ -877,7 +877,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.session.postgres",
+                plugin_id=PostgresSessionStore.plugin_id,
                 version="2.2.0",
                 name="PostgreSQL SessionStore",
                 description=(
@@ -927,7 +927,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.session.mysql",
+                plugin_id=MysqlSessionStore.plugin_id,
                 version="2.0.0",
                 name="MySQL SessionStore",
                 description=(
@@ -1035,7 +1035,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.session.ephemeral",
+                plugin_id=EphemeralSessionStore.plugin_id,
                 version="2.0.0",
                 name="Ephemeral SessionStore",
                 description="Full lifecycle semantics without restart durability.",
@@ -1161,7 +1161,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.skill.filesystem",
+                plugin_id=FilesystemSkillProvider.plugin_id,
                 version="2.0.0",
                 name="Filesystem Skill provider",
                 description="Lazy, bounded, symlink-safe Skill catalog and source.",
@@ -1197,7 +1197,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id="sage.flow.agent",
+                plugin_id=NativeAgentFlowNode.plugin_id,
                 version="2.0.0",
                 name="Agent Flow node",
                 description="Runs a child Agent through the shared AgentLoopEngine.",
@@ -1216,7 +1216,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
 
 def _register_model_protocols(registry: ExtensionRegistry) -> None:
     for descriptor in model_protocol_descriptors():
-        plugin_id = f"sage.model.{descriptor.protocol.value}"
+        plugin_id = descriptor.plugin_id
         registry.register(
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(

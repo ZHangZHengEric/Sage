@@ -1086,6 +1086,8 @@ class _PostgresSessionStoreMeta(type):
 class PostgresSessionStore(metaclass=_PostgresSessionStoreMeta):
     """Composed durable PostgreSQL SessionStore facade."""
 
+    plugin_id = "sage.session.postgres"
+
     def __init__(self, *args, **kwargs) -> None:
         object.__setattr__(
             self, "_coordinator", _PostgresSessionState(*args, **kwargs)

@@ -31,6 +31,8 @@ class InMemoryAgentPackageRegistry:
     production trust store.
     """
 
+    plugin_id = "sage.package-registry.ephemeral"
+
     def __init__(self, *, resolver=None, clock=utc_now) -> None:
         self._resolver = resolver or CompositionResolver()
         self._clock = clock

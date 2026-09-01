@@ -1590,6 +1590,8 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
     so migration and corruption tooling can inspect the storage adapter.
     """
 
+    plugin_id = "sage.session.filesystem"
+
     def __init__(self, *args, **kwargs) -> None:
         object.__setattr__(
             self, "_coordinator", _FilesystemSessionState(*args, **kwargs)
