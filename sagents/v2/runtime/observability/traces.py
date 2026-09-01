@@ -83,7 +83,7 @@ def preview_trace_value(value: Any, *, limit: int = _TRACE_PREVIEW_LIMIT) -> Any
 class SpanHandle:
     """In-flight span that records events and ends without raising."""
 
-    def __init__(self, sink: TraceSink, span: TraceSpan) -> None:
+    def __init__(self, sink: TraceSink | None, span: TraceSpan) -> None:
         self.sink = sink
         self.span = span
         self._ended = False
@@ -102,6 +102,8 @@ class SpanHandle:
             attributes=redact_log_value(dict(attributes or {})),
         )
         self.span.events.append(event)
+        if self.sink is None:
+            return
         try:
             self.sink.add_event(self.span.span_id, event)
         except Exception:
@@ -132,7 +134,8 @@ class SpanHandle:
             return
         self._ended = True
         try:
-            self.sink.end_span(self.span)
+            if self.sink is not None:
+                self.sink.end_span(self.span)
         except Exception:
             pass
         finally:
@@ -147,7 +150,7 @@ class StructuredTracer:
 
     def __init__(
         self,
-        sink: TraceSink,
+        sink: TraceSink | None,
         component: str,
         *,
         context: Mapping[str, Any] | None = None,
@@ -209,10 +212,11 @@ class StructuredTracer:
             ),
             **known,
         )
-        try:
-            self.sink.start_span(span)
-        except Exception:
-            pass
+        if self.sink is not None:
+            try:
+                self.sink.start_span(span)
+            except Exception:
+                pass
         return SpanHandle(self.sink, span)
 
 
