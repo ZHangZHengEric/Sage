@@ -235,6 +235,18 @@ journal are authoritative; readable event, run, checkpoint, and derived files
 are projections that can be regenerated. Older stores are never changed during
 startup; migrate explicitly with `sage v2 migrate --runtime-root <path>`.
 
+`sage.session.postgres` is an optional durable plugin (`pip install sage[postgres]`
+or `asyncpg`). It reuses the same coordinator semantics: compact Session
+metadata is CAS'd on `sessions.revision`, Run events are appended, and one
+commit is one transaction. `dsn` must be declared on the plugin selection in
+`sage.yaml` (optional `schema_name` is allowed). The runtime does not read a
+DSN environment variable. There is still no global Session index, and a PG
+store does not make the Scheduler multi-host. Cross-process writers are fenced
+by row-level CAS (`multi_process_writes: True`). Subscribers replay from
+`run_events` and follow `LISTEN/NOTIFY` on the same schema; `NOTIFY` is only a
+doorbell. Hosts that already own a connection string may also inject
+`PostgresSessionStore(dsn=...)` through `SAgentBuilder.with_session_store(...)`.
+
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
 workers, stores, diagnostics, and protocol adapters until `close()`.

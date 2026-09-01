@@ -58,6 +58,9 @@ dependencies = [
   "exceptiongroup>=1.2.0; python_version < '3.11'",
 ]
 
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29.0"]
+
 [project.urls]
 Homepage = "https://github.com/ZHangZHengEric/Sage"
 

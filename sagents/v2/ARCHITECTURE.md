@@ -253,6 +253,13 @@ coordinator still uses a store-level atomic lock, because replacing it with
 sharded locks must preserve Session sequence, tree deletion, CAS, and rollback
 as one proof rather than as a throughput-only change.
 
+`sage.session.postgres` follows the same open-by-`session_id` rule and does not
+`SELECT *` every Session at startup. Compact metadata is CAS'd on
+`sessions.revision`; Run events are appended in the same transaction.
+Cross-process writers are fenced by that row-level CAS. Subscribers replay from
+`run_events` and treat `LISTEN/NOTIFY` as a doorbell. A PostgreSQL store still
+does not provide a global Session index or a distributed Scheduler.
+
 ## Authoritative versus derived data
 
 ```text

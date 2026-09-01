@@ -2,6 +2,12 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 15:05** sage.session.postgres 完成 PG-1 行级 CAS 与 PG-2 LISTEN/NOTIFY，去掉 advisory lock。
+
+- **2026-09-01 14:52** sage.session.postgres 去掉 SAGE_V2_POSTGRES_DSN；DSN 必须写在插件声明的 dsn 字段。
+
+- **2026-09-01 14:48** 新增可选插件 sage.session.postgres：复用 coordinator、事件追加、单进程 advisory lock；无 Docker 部署文件。
+
 - **2026-08-27 17:32** 调整 CI 测试：知识库模块用缺失父包视为已删除；IM 边界改为静态检查懒加载，避免 2s 超时。
 
 - **2026-08-27 16:25** Task 父子一致性改由 DAO 单事务保证：派生、完成/失败历史和级联删除均原子执行，ORM 不再声明任务外键并显式保留关联索引。

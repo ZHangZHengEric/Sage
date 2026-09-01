@@ -142,6 +142,7 @@ def test_session_port_does_not_depend_on_store_implementations():
     implementation_modules = {
         "sagents.v2.runtime.session.ephemeral",
         "sagents.v2.runtime.session.filesystem",
+        "sagents.v2.runtime.session.postgres",
     }
 
     offenders = [
@@ -157,13 +158,19 @@ def test_session_backends_share_state_machine_without_inheriting_each_other():
     """Concrete SessionStore backends may depend only on the shared state core."""
 
     filesystem = V2_ROOT / "runtime" / "session" / "filesystem.py"
+    postgres = V2_ROOT / "runtime" / "session" / "postgres.py"
     state = V2_ROOT / "runtime" / "session" / "state.py"
     filesystem_imports = {module for _, module in _import_targets(filesystem)}
+    postgres_imports = {module for _, module in _import_targets(postgres)}
     state_imports = {module for _, module in _import_targets(state)}
 
     assert "sagents.v2.runtime.session.ephemeral" not in filesystem_imports
+    assert "sagents.v2.runtime.session.postgres" not in filesystem_imports
+    assert "sagents.v2.runtime.session.filesystem" not in postgres_imports
+    assert "sagents.v2.runtime.session.ephemeral" not in postgres_imports
     assert "sagents.v2.runtime.session.filesystem" not in state_imports
     assert "sagents.v2.runtime.session.ephemeral" not in state_imports
+    assert "sagents.v2.runtime.session.postgres" not in state_imports
 
 
 def test_runtime_kernel_does_not_select_a_session_store_backend():

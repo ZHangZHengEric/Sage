@@ -13,6 +13,7 @@ from sagents.v2.runtime.session.filesystem import (
     SessionStoreCorruptionError,
     StoreInUseError,
 )
+from sagents.v2.runtime.session.postgres import PostgresSessionStore
 from sagents.v2.runtime.session.fencing import LeaseFencedSessionStore
 from sagents.v2.runtime.session.migration import (
     MigrationReport,
@@ -33,6 +34,7 @@ __all__ = [
     "EventDraft",
     "EphemeralSessionStore",
     "FilesystemSessionStore",
+    "PostgresSessionStore",
     "LeaseFencedSessionStore",
     "MigrationReport",
     "SessionAggregate",

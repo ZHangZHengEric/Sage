@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 from sagents.v2.memory.plugins.noop import NoopMemoryProvider
 from sagents.v2.memory.plugins.filesystem_bm25 import FilesystemBm25MemoryProvider
 from sagents.v2.memory.query import (
@@ -16,12 +18,17 @@ from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.runtime.extensions.contracts import (
     CapabilityOffer,
+    ExtensionAvailability,
     ExtensionDescriptor,
     ExtensionRegistration,
     ExtensionScope,
 )
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
-from sagents.v2.runtime.session import EphemeralSessionStore, FilesystemSessionStore
+from sagents.v2.runtime.session import (
+    EphemeralSessionStore,
+    FilesystemSessionStore,
+    PostgresSessionStore,
+)
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
 from sagents.v2.tool.plugins.official.delegation import MultiAgentToolPlugin
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
@@ -62,6 +69,52 @@ def builtin_extension_registry() -> ExtensionRegistry:
             ),
             factory=lambda context, dependencies: FilesystemSessionStore(
                 context.config["root"],
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id="sage.session.postgres",
+                version="2.1.0",
+                name="PostgreSQL SessionStore",
+                description=(
+                    "Durable per-Session PostgreSQL store with row-level CAS, "
+                    "appended Run events, and LISTEN/NOTIFY follow. "
+                    "No global Session index."
+                ),
+                provides=(
+                    CapabilityOffer(capability="session.store", api_version="2"),
+                ),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "dsn": {"type": "string", "minLength": 1},
+                        "schema_name": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["dsn"],
+                    "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True,
+                    "global_session_index": False,
+                    "multi_process_writes": True,
+                    "cross_process_subscribe": True,
+                },
+                availability=ExtensionAvailability(
+                    available=importlib.util.find_spec("asyncpg") is not None,
+                    reason=(
+                        None
+                        if importlib.util.find_spec("asyncpg") is not None
+                        else "optional asyncpg package is not installed"
+                    ),
+                ),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: PostgresSessionStore(
+                str(context.config["dsn"]),
+                schema_name=str(context.config.get("schema_name") or "sage_v2"),
             ),
         )
     )
