@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 17:47** 文件不存在改为 warning，不再打 traceback。
+
 - **2026-09-01 15:48** filesystem/ephemeral SessionStore 也迁入 runtime/session/plugins，四种后端同目录。
 
 - **2026-09-01 15:46** sage.session.postgres/mysql 挪到 runtime/session/plugins，与其他可选实现目录对齐。

@@ -393,14 +393,17 @@ class FileSystemTool:
             }
 
         except FileNotFoundError as e:
-            logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
+            logger.warning(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.NOT_FOUND,
                 f"Failed to read file: {str(e)}",
                 file_path=file_path,
             )
         except PermissionError as e:
-            logger.error(f"FileSystemTool: 读取文件失败 {file_path}: {e}")
+            logger.error(
+                f"FileSystemTool: 读取文件失败 {file_path}: {e}",
+                exc_info=False,
+            )
             return make_tool_error(
                 ToolErrorCode.PERMISSION_DENIED,
                 f"Failed to read file: {str(e)}",
@@ -875,7 +878,7 @@ class FileSystemTool:
             return result
 
         except FileNotFoundError as e:
-            logger.error(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
+            logger.warning(f"FileSystemTool: 文件更新失败 {file_path}: {e}")
             return make_tool_error(
                 ToolErrorCode.NOT_FOUND,
                 f"Failed to update file: {str(e)}",
