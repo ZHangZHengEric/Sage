@@ -16,7 +16,6 @@ from sagents.v2.model.contracts import (
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.observability.contracts import (
     DiagnosticSink,
-    NoopTraceSink,
     TraceKind,
     TraceSink,
     TraceStatus,
@@ -46,7 +45,7 @@ class RecordingModelProvider:
         self.sink = sink
         self.session_id_resolver = session_id_resolver
         self.provider_metadata = dict(provider_metadata or {})
-        self.trace_sink = trace_sink or NoopTraceSink()
+        self.trace_sink = trace_sink
         self.tracer = StructuredTracer(self.trace_sink, "model")
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:

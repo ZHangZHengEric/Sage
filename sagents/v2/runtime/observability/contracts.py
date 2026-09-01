@@ -48,24 +48,6 @@ class DiagnosticSink(Protocol):
     ) -> None: ...
 
 
-class NoopDiagnosticSink:
-    """Default sink used when a host does not opt into diagnostics."""
-
-    plugin_id = "sage.observability.noop"
-
-    async def begin_model_request(self, **kwargs: Any) -> None:
-        return None
-
-    async def complete_model_request(self, **kwargs: Any) -> None:
-        return None
-
-    async def record_model_first_token(self, **kwargs: Any) -> None:
-        return None
-
-    async def fail_model_request(self, **kwargs: Any) -> None:
-        return None
-
-
 class LogLevel(str, Enum):
     DEBUG = "debug"
     INFO = "info"
@@ -112,17 +94,6 @@ class LogSink(Protocol):
     def write(self, record: LogRecord) -> None: ...
 
     def close(self) -> None: ...
-
-
-class NoopLogSink:
-    plugin_id = "sage.logging.noop"
-    format_version = "sage.log/v1"
-
-    def write(self, record: LogRecord) -> None:
-        del record
-
-    def close(self) -> None:
-        return None
 
 
 class TraceStatus(str, Enum):
@@ -179,20 +150,3 @@ class TraceSink(Protocol):
     def end_span(self, span: TraceSpan) -> None: ...
 
     def close(self) -> None: ...
-
-
-class NoopTraceSink:
-    plugin_id = "sage.trace.noop"
-    format_version = "sage.trace/v1"
-
-    def start_span(self, span: TraceSpan) -> None:
-        del span
-
-    def add_event(self, span_id: str, event: TraceEvent) -> None:
-        del span_id, event
-
-    def end_span(self, span: TraceSpan) -> None:
-        del span
-
-    def close(self) -> None:
-        return None

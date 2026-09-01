@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 19:58** 三个观测 Noop 按能力拆进 plugins/；contracts 只留端口，Loop 不再构造官方空实现。
+
 - **2026-09-01 19:52** 观测七个官方 sink 都声明 plugin_id；official/Builder 改引用类属性。
 
 - **2026-09-01 19:47** FilesystemLogSink / StdoutLogSink 补上 plugin_id，登记改引用类属性。

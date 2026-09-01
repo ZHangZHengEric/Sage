@@ -205,9 +205,7 @@ class AgentLoopEngine:
         self.run_control_coordinator = RunControlCoordinator(self)
 
     def _trace_sink(self):
-        from sagents.v2.runtime.observability.contracts import NoopTraceSink
-
-        return self.trace_sink or NoopTraceSink()
+        return self.trace_sink
 
     async def _root_session_id(self, session_id: str) -> str:
         from sagents.v2.runtime.observability.traces import resolve_root_session_id
