@@ -263,7 +263,7 @@ async def test_builder_can_select_mysql_session_store(mysql_dsn):
         .with_model_provider(ScriptedModelProvider(()))
         .build(package)
     )
-    store = application.service("session.store")
+    store = application.entrypoint().runtime.session_store
     assert store.table_prefix == prefix
     assert store.capabilities["durable_across_process_restart"] is True
     assert store.capabilities["multi_process_writes"] is False

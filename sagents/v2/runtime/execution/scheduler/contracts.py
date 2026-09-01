@@ -26,7 +26,21 @@ class SchedulerCapabilities(StrictModel):
     supports_delayed_work: bool
     supports_leases: bool
     supports_fencing: bool
+    supports_distributed_claims: bool = False
+    supports_atomic_tenant_quota: bool = False
+    # The provider can keep a validated lease authoritative for the complete
+    # duration of one callback.  The core does not prescribe how: an in-process
+    # provider may hold a lock, while a distributed plugin may use a database
+    # transaction, advisory lock, or another linearizable primitive.
+    supports_atomic_fenced_mutations: bool = False
     max_pending_items: int | None = Field(default=None, gt=0)
+    max_retained_terminal_items: int | None = Field(default=None, ge=0)
+
+
+class SchedulerClaimPolicy(StrictModel):
+    """Atomic eligibility policy applied by a Scheduler during claim."""
+
+    max_active_per_tenant: int | None = Field(default=None, gt=0)
 
 
 class WorkItem(StrictModel):

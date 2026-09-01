@@ -670,12 +670,6 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> removeSelectedProject() async {
-    final project = selectedGroup.project;
-    if (project == null) return;
-    await removeProject(project.id);
-  }
-
   Future<void> saveSettings(DesktopSettings value) async {
     try {
       final languageChanged = settings.language != value.language;
@@ -1267,6 +1261,188 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  bool canRewriteLastUserMessage(
+    Conversation conversation,
+    ChatMessage message,
+  ) {
+    if (viewingSubSession || !identical(conversation, selectedConversation)) {
+      return false;
+    }
+    if (_treeHasActiveRun(conversation)) return false;
+    final lastUser = conversation.messages
+        .where((value) => value.role == 'user')
+        .lastOrNull;
+    if (lastUser?.id != message.id) return false;
+    final panel = conversation.processPanels
+        .where((value) => value.anchorMessageId == message.id)
+        .lastOrNull;
+    return panel != null &&
+        panel.runId.isNotEmpty &&
+        !panel.running &&
+        panel.completedAt != null;
+  }
+
+  Future<void> rewriteLastUserMessage(
+    String messageId,
+    String replacement,
+  ) async {
+    final source = selectedConversation;
+    final prompt = replacement.trim();
+    if (source == null || prompt.isEmpty) return;
+    final message = source.messages
+        .where((value) => value.id == messageId && value.role == 'user')
+        .firstOrNull;
+    if (message == null || !canRewriteLastUserMessage(source, message)) return;
+    final targetIndex = source.processPanels.indexWhere(
+      (value) => value.anchorMessageId == messageId,
+    );
+    if (targetIndex < 0) return;
+    final previous = source.processPanels
+        .take(targetIndex)
+        .where(
+          (value) =>
+              value.runId.isNotEmpty &&
+              !value.running &&
+              value.completedAt != null,
+        )
+        .lastOrNull;
+    if (previous == null) {
+      final replacement = Conversation(
+        id: _id('conversation'),
+        agentId: source.agentId,
+        approvalMode: source.approvalMode,
+        invocationMode: source.invocationMode,
+      );
+      _replaceConversationHistory(source, replacement);
+    } else {
+      try {
+        final replacement = await _branchPrefixFromRun(source, previous.runId);
+        if (replacement == null) return;
+        _replaceConversationHistory(source, replacement);
+      } on Object catch (exception) {
+        error = exception.toString();
+        notifyListeners();
+        return;
+      }
+    }
+    await send(prompt);
+  }
+
+  Future<bool> branchFromRun(String runId) async {
+    final source = selectedConversation;
+    final sourceSessionId = source?.sessionId;
+    if (source == null ||
+        viewingSubSession ||
+        sourceSessionId == null ||
+        sourceSessionId.isEmpty ||
+        runId.isEmpty) {
+      return false;
+    }
+    try {
+      final branch = await _branchPrefixFromRun(source, runId);
+      if (branch == null) return false;
+      _insertConversation(branch);
+      return true;
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<Conversation?> _branchPrefixFromRun(
+    Conversation source,
+    String runId,
+  ) async {
+    final panelIndex = source.processPanels.indexWhere(
+      (value) =>
+          value.runId == runId && !value.running && value.completedAt != null,
+    );
+    if (panelIndex < 0) return null;
+    final snapshot = await _api.getRun(runId);
+    final rawRun = snapshot['run'];
+    if (rawRun is! Map || rawRun['run_id']?.toString() != runId) return null;
+    final state = runStatusFromWire(rawRun['state']?.toString());
+    if (!_isTerminal(state)) return null;
+    final parentSessionId = rawRun['session_id']?.toString() ?? '';
+    if (parentSessionId.isEmpty) return null;
+    final acceptedRevision = (rawRun['accepted_session_revision'] as num?)
+        ?.toInt();
+    final runRevision = (rawRun['revision'] as num?)?.toInt();
+    if (acceptedRevision == null || runRevision == null) return null;
+
+    final targetPanel = source.processPanels[panelIndex];
+    final anchorIndex = source.messages.indexWhere(
+      (value) => value.id == targetPanel.anchorMessageId,
+    );
+    if (anchorIndex < 0) return null;
+    var messageEnd = source.messages.length;
+    for (var index = anchorIndex + 1; index < source.messages.length; index++) {
+      if (source.messages[index].role == 'user') {
+        messageEnd = index;
+        break;
+      }
+    }
+    return Conversation(
+      id: _id('conversation'),
+      title: source.title,
+      agentId: source.agentId,
+      parentSessionId: parentSessionId,
+      parentRunId: runId,
+      forkBaseSessionRevision: acceptedRevision + runRevision,
+      approvalMode: source.approvalMode,
+      invocationMode: source.invocationMode,
+      messages: [
+        for (final value in source.messages.take(messageEnd))
+          ChatMessage.fromJson(value.toJson()),
+      ],
+      processPanels: [
+        for (final value in source.processPanels.take(panelIndex + 1))
+          RuntimeProcessPanel.fromJson(value.toJson()),
+      ],
+    );
+  }
+
+  void _replaceConversationHistory(
+    Conversation target,
+    Conversation replacement,
+  ) {
+    target
+      ..title = replacement.title
+      ..sessionId = null
+      ..parentSessionId = replacement.parentSessionId
+      ..parentRunId = replacement.parentRunId
+      ..forkBaseSessionRevision = replacement.forkBaseSessionRevision
+      ..parentToolCallId = null
+      ..runId = ''
+      ..turnId = ''
+      ..runSequence = 0
+      ..status = RunStatus.idle
+      ..thinking = false
+      ..messages = replacement.messages
+      ..pendingInteraction = null;
+    target.runtimeEvents.clear();
+    target.processPanels
+      ..clear()
+      ..addAll(replacement.processPanels);
+    target.subSessions.clear();
+    _attachments[target.id] = [];
+    _composerReferences[target.id] = [];
+    _persist();
+    notifyListeners();
+  }
+
+  void _insertConversation(Conversation conversation) {
+    _conversations
+        .putIfAbsent(selectedGroupId, () => [])
+        .insert(0, conversation);
+    selectedConversationId = conversation.id;
+    selectedSubSessionId = '';
+    selectedAgentId = conversation.agentId;
+    _persist();
+    notifyListeners();
+  }
+
   Future<void> send(String text) async {
     final conversation = selectedConversation;
     final prompt = text.trim();
@@ -1284,7 +1460,13 @@ class WorkspaceController extends ChangeNotifier {
       await steer(prompt);
       return;
     }
-    if (conversation.sessionId == null || conversation.sessionId!.isEmpty) {
+    final pendingFork =
+        (conversation.sessionId == null || conversation.sessionId!.isEmpty) &&
+        (conversation.parentSessionId ?? '').isNotEmpty &&
+        (conversation.parentRunId ?? '').isNotEmpty &&
+        conversation.forkBaseSessionRevision != null;
+    if (!pendingFork &&
+        (conversation.sessionId == null || conversation.sessionId!.isEmpty)) {
       conversation.sessionId = _newSessionId();
     }
     conversation.agentId = selectedAgentId;
@@ -1321,7 +1503,14 @@ class WorkspaceController extends ChangeNotifier {
       'messages': [
         {'role': 'user', 'text': prompt},
       ],
-      if (conversation.sessionId != null) 'session_id': conversation.sessionId,
+      if (pendingFork)
+        'session_id': conversation.parentSessionId
+      else if (conversation.sessionId != null)
+        'session_id': conversation.sessionId,
+      if (pendingFork) 'session_concurrency_mode': 'fork',
+      if (pendingFork)
+        'base_session_revision': conversation.forkBaseSessionRevision,
+      if (pendingFork) 'fork_source_run_id': conversation.parentRunId,
       if (selectedGroup.workspaceId.isNotEmpty)
         'workspace_id': selectedGroup.workspaceId,
       'preferred_skills': preferredSkills.toList()..sort(),
@@ -1810,6 +1999,7 @@ class WorkspaceController extends ChangeNotifier {
     final existing = conversation.messages
         .where((value) => value.id == id)
         .firstOrNull;
+    if (existing == null && text.trim().isEmpty) return;
     if (existing == null) {
       conversation.messages.add(
         ChatMessage(

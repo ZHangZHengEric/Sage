@@ -351,6 +351,47 @@ def test_legacy_plan_mode_request_migrates_to_typed_invocation_mode():
 
 
 @pytest.mark.asyncio
+async def test_desktop_fork_uses_the_selected_terminal_run_boundary(tmp_path: Path):
+    service = DesktopV2Service(tmp_path)
+    context = service._context("user_1")
+    parent = await service.runtime.start_run(
+        StartRun(
+            agent_id="sage",
+            input=(InputItem(role="user", content=(TextBlock(text="parent"),)),),
+            resolved_spec_hash="sha256:test",
+            idempotency_key="desktop-fork-parent",
+        ),
+        context,
+    )
+    await service.runtime.cancel_run(
+        CancelRun(
+            run_id=parent.run_id,
+            expected_revision=parent.run_revision,
+            idempotency_key="desktop-fork-parent-cancel",
+        ),
+        context,
+    )
+
+    normalized = await service._normalize_desktop_fork_request(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[RunMessage(role="user", text="continue")],
+            session_id=parent.session_id,
+            fork_source_run_id=parent.run_id,
+            session_concurrency_mode=SessionConcurrencyMode.FORK,
+        )
+    )
+
+    assert normalized.base_session_revision == 2
+    assert normalized.fork_source_run_id == parent.run_id
+    with pytest.raises(ValueError, match="does not match"):
+        await service._normalize_desktop_fork_request(
+            normalized.model_copy(update={"base_session_revision": 1})
+        )
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
 async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
     service = DesktopV2Service(tmp_path / "sage")
     agents = await service.list_agents("user_1")
@@ -2593,6 +2634,9 @@ async def test_skills_are_discovered_and_imported_by_native_filesystem_provider(
     assert review["can_delete"] is True
     builtin = next(value for value in catalog if value["name"] == "skill-creator")
     assert builtin["can_delete"] is False
+    assert service._skill_provider()._skill_root("skill-creator") == (
+        Path(__file__).resolve().parents[3] / "app" / "skills" / "skill-creator"
+    )
     assert "# Review" in await service.get_skill_content("review", "user_1")
     with pytest.raises(ValueError, match="already exists"):
         await service.import_skill_folder(str(source), "user_1")

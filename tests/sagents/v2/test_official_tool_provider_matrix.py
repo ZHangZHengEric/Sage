@@ -273,6 +273,24 @@ async def test_turn_status_exposes_failed_as_a_typed_terminal_state(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_stopping_run_scoped_plugin_unregisters_shell_runner(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    jobs = plugin.runtime.job_runtime
+
+    await plugin.executor.execute(
+        call(
+            "execute_shell_command",
+            {"command": "printf done", "block_until_ms": 1000},
+        ),
+        CONTEXT,
+    )
+
+    assert ("run_1", "official.shell") in jobs._owner_runners
+    await plugin.stop(None)
+    assert ("run_1", "official.shell") not in jobs._owner_runners
+
+
+@pytest.mark.asyncio
 async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
     plugin = await plugin_for(tmp_path)
 

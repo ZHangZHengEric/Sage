@@ -2,6 +2,7 @@
 
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
+    SchedulerClaimPolicy,
     SchedulerCapabilities,
     WorkItem,
     WorkerLease,
@@ -20,6 +21,7 @@ __all__ = [
     "LeaseReleaseReason",
     "Scheduler",
     "SchedulerCapabilities",
+    "SchedulerClaimPolicy",
     "WorkItem",
     "WorkerLease",
 ]

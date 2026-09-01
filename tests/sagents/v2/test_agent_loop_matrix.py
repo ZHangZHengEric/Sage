@@ -41,6 +41,10 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationSignals,
     InteractionDraft,
 )
+from sagents.v2.agent.policy.tool_policy import (
+    ApprovalStrategy,
+    DefaultToolPolicy,
+)
 from sagents.v2.agent.policy.judge import (
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
@@ -2202,6 +2206,67 @@ async def test_uncertain_tool_is_reconciled_without_duplicate_dispatch(confirmed
     assert types.index("tool.call.unknown") < types.index("tool.call.reconciling")
     assert types.index("tool.call.reconciling") < types.index("tool.call.reconciled")
     assert "tool.call.failed" not in types
+
+
+@pytest.mark.asyncio
+async def test_generic_write_failure_after_dispatch_is_unknown_not_failed():
+    class ResponseLostExecutor:
+        def __init__(self):
+            self.remote_commits = 0
+
+        async def execute(self, call, context):
+            del call, context
+            self.remote_commits += 1
+            raise RuntimeError("response lost after remote commit")
+
+    executor = ResponseLostExecutor()
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("write_value"),)),)
+            ),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model, tools=(WRITE_TOOL,))
+    loop.tool_executor = executor
+    loop.tool_policy = DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE
+    )
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+
+    assert suspended.state == RunState.SUSPENDED
+    assert executor.remote_commits == 1
+    assert "tool.call.unknown" in types
+    assert "tool.call.failed" not in types
+
+
+@pytest.mark.asyncio
+async def test_read_tool_generic_failure_remains_a_known_failure():
+    class FailedReadExecutor:
+        async def execute(self, call, context):
+            del call, context
+            raise RuntimeError("read provider unavailable")
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+            ScriptedModelStep(events=(completed("handled"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model, tools=(READ_TOOL,))
+    loop.tool_executor = FailedReadExecutor()
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    types = [
+        event.type for event in await runtime.session_store.read_events(handle.run_id)
+    ]
+
+    assert result.state == RunState.COMPLETED
+    assert "tool.call.failed" in types
+    assert "tool.call.unknown" not in types
 
 
 @pytest.mark.asyncio

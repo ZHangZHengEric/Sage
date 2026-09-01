@@ -86,6 +86,14 @@ async def running_runtime() -> tuple[HarnessRuntime, str, str]:
     return runtime, handle.session_id, handle.run_id
 
 
+def test_session_store_distributed_capabilities_are_explicit():
+    capabilities = EphemeralSessionStore().capabilities
+    assert capabilities["multi_process_writes"] is False
+    assert capabilities["cross_process_subscribe"] is False
+    assert capabilities["transactional_outbox"] is False
+    assert capabilities["atomic_session_cas"] is True
+
+
 @pytest.mark.asyncio
 async def test_start_is_idempotent_and_returns_same_handle_without_new_events():
     repository = EphemeralSessionStore()

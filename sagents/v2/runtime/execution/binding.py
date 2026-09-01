@@ -12,6 +12,9 @@ from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer, SandboxHand
 
 if TYPE_CHECKING:
     from sagents.v2.agent.multi_agent.contracts import WorkspaceSharingPolicy
+    from sagents.v2.runtime.execution.lifecycle import (
+        ExecutionBindingLifecycleCoordinator,
+    )
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class ExecutionBindingRequest:
     agent_id: str
     context: RequestContext
     parent_run_id: str | None = None
+    lifecycle: ExecutionBindingLifecycleCoordinator | None = None
     workspace_policy: WorkspaceSharingPolicy | str = "shared_parent"
 
 
@@ -108,6 +112,10 @@ class RunExecutionBinding:
         # not trigger a second provider close on retry.
         await asyncio.shield(close_task)
         self._closed = True
+
+    async def on_suspended(self, context: RequestContext) -> None:
+        if self.lifecycle is not None:
+            await self.lifecycle.suspend(run_id=self.run_id, context=context)
 
 
 class ExecutionBindingProvider(Protocol):

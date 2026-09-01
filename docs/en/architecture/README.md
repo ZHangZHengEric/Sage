@@ -95,6 +95,7 @@ Core runtime `sagents/` architecture:
 ### Design drafts (not implemented in code)
 
 1. [Permissions & Confirmation Design](DESIGN_PERMISSIONS_AND_CONFIRMATION.md): tiered permissions, confirmation flows, and policy hooks for tools, sandboxes, and Web/Desktop/CLI entries
+2. [SAgents v2 sandbox suspension, release, and restore](SAGENTS_V2_SANDBOX_LIFECYCLE.md): durable approvals, fenced cleanup, Job affinity, and Sandbox Provider v3
 
 ## Reading Tips
 

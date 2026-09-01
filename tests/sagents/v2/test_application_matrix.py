@@ -7,6 +7,7 @@ from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.testing.plugins import ScriptedModelProvider
 from sagents.v2.runtime.session import FilesystemSessionStore
+from sagents.v2.contracts.run_state import EventCursor
 
 
 @pytest.mark.asyncio
@@ -24,9 +25,16 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path: Pat
     )
 
     assert isinstance(application, SAgentApplication)
-    assert application.entrypoint().runtime.session_store is application.service(
-        "session.store"
-    )
+    assert application.service("session.access") is not None
+    with pytest.raises(KeyError):
+        application.service("session.store")
+    cursor = EventCursor(run_id="run_missing", run_sequence=0)
+    with pytest.raises(TypeError):
+        application.entrypoint().subscribe_events(cursor)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        application.subscribe_interface(  # type: ignore[call-arg]
+            "native", cursor
+        )
     assert application.service("execution.scheduler") is not None
     assert application.service("execution.job-runtime") is not None
     assert application.service("artifact.store") is not None

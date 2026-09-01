@@ -77,6 +77,7 @@ class InMemoryToolExecutor:
                     code="tool.not_found",
                     category=ErrorCategory.VALIDATION,
                     message=f"tool {call.tool_name!r} is not executable",
+                    metadata={"side_effect_state": "not_applied"},
                 )
             )
         try:
@@ -88,6 +89,7 @@ class InMemoryToolExecutor:
                     category=ErrorCategory.VALIDATION,
                     message=exc.message,
                     safe_to_resume=True,
+                    metadata={"side_effect_state": "not_applied"},
                 )
             ) from exc
 

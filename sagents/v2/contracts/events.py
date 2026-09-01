@@ -168,6 +168,13 @@ class SandboxEventData(StrictModel):
     kind: Literal["sandbox"] = "sandbox"
     sandbox_id: Identifier
     state: str
+    generation: int | None = Field(default=None, ge=1)
+    disposition: str | None = None
+    checkpoint_id: Identifier | None = None
+    compute_released: bool | None = None
+    blocking_job_ids: tuple[Identifier, ...] = ()
+    blocking_child_run_ids: tuple[Identifier, ...] = ()
+    retry_count: int | None = Field(default=None, ge=0)
     policy_decision_ref: Identifier | None = None
     violation_code: str | None = None
     error: RuntimeErrorInfo | None = None
@@ -431,6 +438,12 @@ EVENT_CATALOG.update(
             "sandbox.suspended",
             "sandbox.resumed",
             "sandbox.terminated",
+            "sandbox.release_requested",
+            "sandbox.release_blocked",
+            "sandbox.release_failed",
+            "sandbox.released",
+            "sandbox.restore_requested",
+            "sandbox.restore_failed",
             "sandbox.policy_enforced",
             "sandbox.violation",
         ),

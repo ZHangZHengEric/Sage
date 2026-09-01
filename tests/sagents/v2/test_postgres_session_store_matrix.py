@@ -381,7 +381,7 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
         .with_model_provider(ScriptedModelProvider(()))
         .build(package)
     )
-    store = application.service("session.store")
+    store = application.entrypoint().runtime.session_store
     assert store.schema_name == schema
     assert store.capabilities["durable_across_process_restart"] is True
     assert store.capabilities["multi_process_writes"] is False

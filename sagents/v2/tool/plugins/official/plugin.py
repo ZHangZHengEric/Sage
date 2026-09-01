@@ -128,4 +128,5 @@ class OfficialToolPlugin:
         }
 
     async def stop(self, reason: Any) -> None:
-        return None
+        del reason
+        await self.runtime.close()

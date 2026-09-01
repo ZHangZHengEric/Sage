@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -16,7 +17,11 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     ProcessPolicy,
     ResolvedSandboxSpec,
     SandboxDurability,
+    SandboxReleaseDisposition,
+    SandboxReleaseReceipt,
+    SandboxReleaseRequest,
     SandboxState,
+    TerminateMode,
 )
 from sagents.v2.runtime.execution.sandbox import (
     InMemorySandboxProvider,
@@ -85,6 +90,17 @@ def provider_pair(*, now=NOW):
     return issuer, provider
 
 
+class MutableClock:
+    def __init__(self) -> None:
+        self.now = NOW
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
 def intent(ref, operation: FileOperation, path: str, *, run_id: str = "run_1"):
     return OperationIntent(
         operation=operation.value,
@@ -113,7 +129,80 @@ async def test_capabilities_are_explicit_and_do_not_claim_security_or_processes(
     assert capabilities.process.available is False
     assert capabilities.supports_background_jobs is False
     assert capabilities.supports_snapshot is True
+    assert capabilities.supports_terminal_purge is True
     assert capabilities.network_modes == frozenset({NetworkMode.NONE})
+
+
+@pytest.mark.asyncio
+async def test_terminated_sandbox_state_and_consumed_nonces_can_be_purged():
+    issuer, provider = provider_pair()
+    handle = await provider.provision(spec(), CONTEXT, run_id="run_1")
+    create_intent = intent(handle.ref, FileOperation.CREATE, "temporary.txt")
+    await handle.filesystem.write_bytes(
+        "temporary.txt",
+        b"temporary",
+        intent=create_intent,
+        grant=grant(issuer, handle.ref, create_intent, FileOperation.CREATE),
+    )
+    assert len(provider._used_nonces) == 1
+
+    await handle.destroy()
+    await provider.purge_terminated(handle.ref)
+
+    assert provider._rows == {}
+    assert provider._used_nonces == {}
+    with pytest.raises(SageV2Error) as missing:
+        await provider.inspect(handle.ref)
+    assert missing.value.info.code == "sandbox.lost"
+
+
+@pytest.mark.asyncio
+async def test_automatic_sandbox_retention_preserves_attached_and_suspended_state():
+    clock = MutableClock()
+    provider = InMemorySandboxProvider(
+        b"test-key-32-bytes-minimum-length!!",
+        clock=clock,
+        terminal_ttl_seconds=10,
+        max_retained_terminal_items=1,
+    )
+    attached = await provider.provision(spec(), CONTEXT, run_id="run-attached")
+    await provider.terminate(attached.ref, mode=TerminateMode.FORCE)
+    clock.advance(11)
+    trigger = await provider.provision(spec(), CONTEXT, run_id="run-trigger")
+    assert (await provider.inspect(attached.ref)).state == SandboxState.TERMINATED
+
+    await attached.close()
+    with pytest.raises(SageV2Error) as expired:
+        await provider.inspect(attached.ref)
+    assert expired.value.info.code == "sandbox.lost"
+
+    suspended = await provider.provision(spec(), CONTEXT, run_id="run-suspended")
+    await suspended.suspend()
+    await suspended.close()
+    clock.advance(100)
+    await trigger.destroy()
+    assert (await provider.inspect(suspended.ref)).state == SandboxState.SUSPENDED
+
+    caps = await provider.capabilities()
+    assert caps.supports_automatic_terminal_retention is True
+    assert caps.terminal_ttl_seconds == 10
+    assert caps.max_retained_terminal_items == 1
+
+
+@pytest.mark.asyncio
+async def test_sandbox_terminal_count_cap_removes_oldest_detached_metadata():
+    provider = InMemorySandboxProvider(
+        b"test-key-32-bytes-minimum-length!!",
+        max_retained_terminal_items=1,
+    )
+    first = await provider.provision(spec(), CONTEXT, run_id="run-first")
+    await first.destroy()
+    second = await provider.provision(spec(), CONTEXT, run_id="run-second")
+    await second.destroy()
+
+    with pytest.raises(SageV2Error):
+        await provider.inspect(first.ref)
+    assert (await provider.inspect(second.ref)).state == SandboxState.TERMINATED
 
 
 @pytest.mark.asyncio
@@ -311,3 +400,54 @@ async def test_snapshot_restore_attach_ownership_and_terminate_lifecycle():
     with pytest.raises(SageV2Error) as lost:
         await provider.attach(restored.ref, CONTEXT)
     assert lost.value.info.code == "sandbox.lost"
+
+
+@pytest.mark.asyncio
+async def test_v3_release_is_idempotent_and_snapshot_fences_old_compute():
+    issuer, provider = provider_pair()
+    handle = await provider.provision(spec(), CONTEXT, run_id="run_1")
+    operation_intent = intent(handle.ref, FileOperation.CREATE, "state.txt")
+    old_grant = grant(
+        issuer, handle.ref, operation_intent, FileOperation.CREATE
+    )
+    snapshot = await provider.inspect(handle.ref)
+    request = SandboxReleaseRequest(
+        ref=handle.ref,
+        disposition=SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE,
+        reason="approval_required",
+        expected_revision=snapshot.revision,
+        idempotency_key="release_once",
+    )
+
+    first = await provider.release(request, CONTEXT)
+    duplicate = await provider.release(request, CONTEXT)
+
+    assert first.compute_released is True
+    assert first.state == SandboxState.TERMINATED
+    assert first.checkpoint is not None
+    assert duplicate.duplicate is True
+    assert duplicate.checkpoint == first.checkpoint
+    with pytest.raises(SageV2Error):
+        await handle.filesystem.write_bytes(
+            "state.txt",
+            b"stale",
+            intent=operation_intent,
+            grant=old_grant,
+        )
+
+
+def test_release_receipt_rejects_unconfirmed_or_inconsistent_compute_state():
+    _issuer, provider = provider_pair()
+    # Obtain a well-formed ref without reaching into provider internals.
+    async def build_ref():
+        return (await provider.provision(spec(), CONTEXT, run_id="run_1")).ref
+
+    ref = asyncio.run(build_ref())
+    with pytest.raises(ValueError):
+        SandboxReleaseReceipt(
+            ref=ref,
+            disposition=SandboxReleaseDisposition.TERMINATE,
+            state=SandboxState.READY,
+            compute_released=True,
+            released_at=NOW,
+        )

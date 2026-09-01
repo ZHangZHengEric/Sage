@@ -358,7 +358,10 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         "In-memory scheduler",
         "execution.scheduler",
         lambda context, dependencies: InMemoryScheduler(
-            max_pending_items=int(context.config.get("max_pending_items", 1024))
+            max_pending_items=int(context.config.get("max_pending_items", 1024)),
+            max_retained_terminal_items=int(
+                context.config.get("max_retained_terminal_items", 4096)
+            ),
         ),
         scopes={ExtensionScope.PROCESS},
         config_schema=_scheduler_config_schema(durable=False),
@@ -367,6 +370,9 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             "multi_process_writes": False,
             "supports_leases": True,
             "supports_fencing": True,
+            "supports_distributed_claims": False,
+            "supports_atomic_tenant_quota": True,
+            "supports_atomic_fenced_mutations": True,
         },
     )
     _one(
@@ -377,6 +383,9 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: FilesystemScheduler(
             context.config["root"],
             max_pending_items=int(context.config.get("max_pending_items", 1024)),
+            max_retained_terminal_items=int(
+                context.config.get("max_retained_terminal_items", 4096)
+            ),
         ),
         scopes={ExtensionScope.PROCESS},
         config_schema=_scheduler_config_schema(durable=True),
@@ -385,6 +394,9 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             "multi_process_writes": False,
             "supports_leases": True,
             "supports_fencing": True,
+            "supports_distributed_claims": False,
+            "supports_atomic_tenant_quota": True,
+            "supports_atomic_fenced_mutations": True,
         },
     )
     _one(
@@ -395,8 +407,39 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: InMemoryJobRuntime(
             context.config.get("runners", {}),
             max_concurrent_jobs=int(context.config.get("max_concurrent_jobs", 32)),
+            terminal_ttl_seconds=int(
+                context.config.get("terminal_ttl_seconds", 86_400)
+            ),
+            max_retained_terminal_jobs=int(
+                context.config.get("max_retained_terminal_jobs", 4096)
+            ),
+            max_retained_output_bytes=int(
+                context.config.get("max_retained_output_bytes", 256 * 1024 * 1024)
+            ),
+            output_reconnect_window_seconds=int(
+                context.config.get("output_reconnect_window_seconds", 300)
+            ),
         ),
         scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "runners": {"type": "object"},
+                "max_concurrent_jobs": {"type": "integer", "minimum": 1},
+                "terminal_ttl_seconds": {"type": "integer", "minimum": 1},
+                "max_retained_terminal_jobs": {"type": "integer", "minimum": 0},
+                "max_retained_output_bytes": {"type": "integer", "minimum": 0},
+                "output_reconnect_window_seconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                },
+            },
+            "additionalProperties": False,
+        },
+        capabilities={
+            "supports_terminal_purge": True,
+            "supports_automatic_terminal_retention": True,
+        },
     )
     _one(
         registry,
@@ -407,8 +450,21 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
             _bytes(context.config["verification_key"]),
             process_handlers=context.config.get("process_handlers"),
             network_handlers=context.config.get("network_handlers"),
+            terminal_ttl_seconds=int(
+                context.config.get("terminal_ttl_seconds", 86_400)
+            ),
+            max_retained_terminal_items=int(
+                context.config.get("max_retained_terminal_items", 1024)
+            ),
         ),
         scopes={ExtensionScope.PROCESS},
+        api_version="3",
+        version="3.0.0",
+        config_schema=_sandbox_config_schema(in_memory=True),
+        capabilities={
+            "supports_terminal_purge": True,
+            "supports_automatic_terminal_retention": True,
+        },
     )
     _one(
         registry,
@@ -416,9 +472,22 @@ def register_official_infrastructure(registry: ExtensionRegistry) -> None:
         "Local workspace sandbox provider",
         "execution.sandbox",
         lambda context, dependencies: LocalWorkspaceSandboxProvider(
-            _bytes(context.config["verification_key"])
+            _bytes(context.config["verification_key"]),
+            terminal_ttl_seconds=int(
+                context.config.get("terminal_ttl_seconds", 86_400)
+            ),
+            max_retained_terminal_items=int(
+                context.config.get("max_retained_terminal_items", 1024)
+            ),
         ),
         scopes={ExtensionScope.PROCESS},
+        api_version="3",
+        version="3.0.0",
+        config_schema=_sandbox_config_schema(in_memory=False),
+        capabilities={
+            "supports_terminal_purge": True,
+            "supports_automatic_terminal_retention": True,
+        },
     )
 
     _one(
@@ -663,17 +732,19 @@ def _one(
     availability: ExtensionAvailability | None = None,
     config_schema: dict | None = None,
     capabilities: dict | None = None,
+    api_version: str = "2",
+    version: str = "2.0.0",
 ) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id=plugin_id,
-                version="2.0.0",
+                version=version,
                 name=name,
                 provides=(
                     CapabilityOffer(
                         capability=capability,
-                        api_version="2",
+                        api_version=api_version,
                         name=provider_name,
                         multi_provider=multi_provider,
                     ),
@@ -692,6 +763,7 @@ def _one(
 def _scheduler_config_schema(*, durable: bool) -> dict:
     properties = {
         "max_pending_items": {"type": "integer", "minimum": 1},
+        "max_retained_terminal_items": {"type": "integer", "minimum": 0},
         "max_concurrent_runs": {"type": "integer", "minimum": 1},
         "max_concurrent_runs_per_tenant": {"type": "integer", "minimum": 1},
         "lease_seconds": {"type": "number", "exclusiveMinimum": 0},
@@ -704,6 +776,27 @@ def _scheduler_config_schema(*, durable: bool) -> dict:
         "type": "object",
         "properties": properties,
         "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _sandbox_config_schema(*, in_memory: bool) -> dict:
+    properties = {
+        "verification_key": {},
+        "terminal_ttl_seconds": {"type": "integer", "minimum": 1},
+        "max_retained_terminal_items": {"type": "integer", "minimum": 0},
+    }
+    if in_memory:
+        properties.update(
+            {
+                "process_handlers": {"type": "object"},
+                "network_handlers": {"type": "object"},
+            }
+        )
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": ["verification_key"],
         "additionalProperties": False,
     }
 

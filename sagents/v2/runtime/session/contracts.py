@@ -47,6 +47,7 @@ from sagents.v2.contracts.session_commit import (
     RejectSessionCommit,
     SessionCommitProposal,
 )
+from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
 
 
 @dataclass(frozen=True)
@@ -137,10 +138,28 @@ class SessionStore(Protocol):
     async def get_checkpoint(self, checkpoint_id: str) -> Checkpoint: ...
     async def get_suspension(self, suspension_id: str) -> Suspension: ...
     async def get_interaction(self, interaction_id: str) -> InteractionRequest: ...
+    async def get_execution_resource(
+        self, run_id: str
+    ) -> ExecutionResourceRecord | None: ...
+
+    async def list_pending_execution_releases(
+        self,
+    ) -> tuple[ExecutionResourceRecord, ...]: ...
+
+    async def list_execution_resources(
+        self,
+    ) -> tuple[ExecutionResourceRecord, ...]: ...
 
     async def get_interaction_resolution(
         self, interaction_id: str
     ) -> InteractionResolution: ...
+
+    async def authorize_session_actor(
+        self, session_id: str, context: RequestContext
+    ) -> None:
+        """Authorize one actor against the Session's durable owner."""
+
+        ...
 
     async def delete_session(self, session_id: str) -> None:
         """Delete a Session and every descendant after all Runs are terminal."""
@@ -218,6 +237,17 @@ class SessionStore(Protocol):
         suspension: Suspension | None = None,
         interaction: InteractionRequest | None = None,
     ) -> CommitResult: ...
+
+    async def commit_execution_resource(
+        self,
+        *,
+        record: ExecutionResourceRecord,
+        expected_run_revision: int,
+        expected_resource_revision: int | None,
+        event_type: str,
+        context: RequestContext,
+        idempotency_key: str,
+    ) -> ExecutionResourceRecord: ...
 
     async def enqueue_steer(
         self, command: SteerRun, context: RequestContext

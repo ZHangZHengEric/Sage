@@ -54,6 +54,7 @@ from sagents.v2.tool.contracts import (
     CancelSemantics,
     ReconcileResult,
     ReconcileState,
+    SideEffectLevel,
     ToolCall,
     ToolCancellationState,
     ToolExecutionResult,
@@ -2011,19 +2012,6 @@ class AgentLoopEngine:
                 return run, None
         except SageV2Error as exc:
             localized = localize_error(exc.info, context.language)
-            if exc.info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
-                run = await self._record_tool_unknown(
-                    run, call, localized, context, turn_id, step_id
-                )
-                return await self._reconcile_or_suspend_tool(
-                    run,
-                    call,
-                    context,
-                    turn_id,
-                    step_id,
-                    state,
-                    localized,
-                )
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
                 operation_id=call.operation_id,
@@ -2048,6 +2036,20 @@ class AgentLoopEngine:
             )
         if result.error is not None:
             localized = localize_error(result.error, context.language)
+            if await self._tool_failure_is_uncertain(run, call, localized):
+                uncertainty = self._as_uncertain_tool_error(localized)
+                run = await self._record_tool_unknown(
+                    run, call, uncertainty, context, turn_id, step_id
+                )
+                return await self._reconcile_or_suspend_tool(
+                    run,
+                    call,
+                    context,
+                    turn_id,
+                    step_id,
+                    state,
+                    uncertainty,
+                )
             result = result.model_copy(
                 update={
                     "error": localized,
@@ -2118,6 +2120,37 @@ class AgentLoopEngine:
             run, call, result, context, turn_id, step_id=step_id
         )
         return run, result
+
+    async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
+        """Classify post-dispatch failures without assuming a write was rolled back."""
+
+        if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
+            return True
+        if error.metadata.get("side_effect_state") == "not_applied":
+            return False
+        definition = await self.tool_catalog.get_tool(
+            call.tool_name, run_id=run.run_id
+        )
+        return definition.side_effect_level in {
+            SideEffectLevel.WRITE,
+            SideEffectLevel.REVERSIBLE,
+            SideEffectLevel.IRREVERSIBLE,
+        }
+
+    @staticmethod
+    def _as_uncertain_tool_error(error: RuntimeErrorInfo) -> RuntimeErrorInfo:
+        if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
+            return error
+        return error.model_copy(
+            update={
+                "category": ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                "retryable": False,
+                "metadata": {
+                    **error.metadata,
+                    "original_category": error.category.value,
+                },
+            }
+        )
 
     async def _resume_delegated_tool(self, run, state, decision, payload, context):
         if self.delegated_run_controller is None:

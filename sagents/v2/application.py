@@ -153,13 +153,16 @@ class SAgentApplication:
         self,
         interface: str,
         cursor: EventCursor,
+        context: RequestContext,
         *,
         agent_id: str | None = None,
     ) -> AsyncIterator[AdapterResult]:
         """Replay canonical RuntimeEvents through one declared protocol adapter."""
 
         self._ensure_open()
-        native = self.agent(agent_id or self._entrypoint_agent_id).subscribe_events(cursor)
+        native = self.agent(agent_id or self._entrypoint_agent_id).subscribe_events(
+            cursor, context
+        )
         return self._project(native, self._adapter(interface))
 
     async def close(self) -> None:

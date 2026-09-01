@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
@@ -17,6 +19,7 @@ from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.execution.scheduler import (
     LeaseReleaseReason,
+    SchedulerClaimPolicy,
     Scheduler,
     WorkItem,
     WorkerLease,
@@ -30,6 +33,12 @@ class _DispatchRequest:
     resume: bool
     result: asyncio.Future[RunSnapshot]
     recovered: bool = False
+
+
+@dataclass
+class _CleanupRequest:
+    operation: Callable[[], Awaitable[Any]]
+    result: asyncio.Future[Any]
 
 
 class LocalWorkerDispatcher:
@@ -54,8 +63,11 @@ class LocalWorkerDispatcher:
         self.lease_duration = timedelta(seconds=lease_seconds)
         self.lease_scope_factory = lease_scope_factory
         self._requests: dict[str, _DispatchRequest] = {}
+        self._cleanup_requests: dict[str, _CleanupRequest] = {}
         self._workers: list[asyncio.Task[None]] = []
-        self._active_tenants: dict[str | None, int] = {}
+        self._claim_policy = SchedulerClaimPolicy(
+            max_active_per_tenant=max_concurrent_runs_per_tenant
+        )
         self._recovery_agent = None
         self._closed = False
 
@@ -136,6 +148,48 @@ class LocalWorkerDispatcher:
             raise
         return result
 
+    async def submit_cleanup(
+        self,
+        *,
+        run_id: str,
+        context: RequestContext,
+        generation: int,
+        attempt: int = 0,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> asyncio.Future[Any]:
+        """Run one resource cleanup under the same per-Run Scheduler fence."""
+
+        if self._closed:
+            raise RuntimeError("local worker dispatcher is closed")
+        await self.start(recover=False)
+        work_id = f"cleanup-{run_id}-{generation}-{attempt}"
+        current = self._cleanup_requests.get(work_id)
+        if current is not None:
+            return current.result
+        result = asyncio.get_running_loop().create_future()
+        self._cleanup_requests[work_id] = _CleanupRequest(
+            operation=operation,
+            result=result,
+        )
+        try:
+            await self.scheduler.submit(
+                WorkItem(
+                    work_id=work_id,
+                    run_id=run_id,
+                    tenant_id=context.actor.tenant_id,
+                    priority=-10,
+                    available_at=utc_now(),
+                    idempotency_key=(
+                        f"sandbox-cleanup:{run_id}:{generation}:{attempt}"
+                    ),
+                    payload={"kind": "sandbox_cleanup", "generation": generation},
+                )
+            )
+        except Exception:
+            self._cleanup_requests.pop(work_id, None)
+            raise
+        return result
+
     @staticmethod
     def _work_item(handle, context, *, resume: bool, revision=None) -> WorkItem:
         if revision is None:
@@ -169,6 +223,10 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 await self._finish_shutdown_request(run_id, request)
         self._requests.clear()
+        for request in self._cleanup_requests.values():
+            if not request.result.done():
+                request.result.cancel()
+        self._cleanup_requests.clear()
 
     async def _worker(self, index: int) -> None:
         worker_id = f"local-{index}"
@@ -176,21 +234,14 @@ class LocalWorkerDispatcher:
             lease = await self.scheduler.claim(
                 worker_id,
                 lease_duration=self.lease_duration,
+                policy=self._claim_policy,
                 wait_timeout=1.0,
             )
             if lease is None:
                 continue
-            tenant = lease.work.tenant_id
-            if (
-                self._active_tenants.get(tenant, 0)
-                >= self.max_concurrent_runs_per_tenant
-            ):
-                await self.scheduler.release(
-                    lease,
-                    LeaseReleaseReason.WORKER_SHUTDOWN,
-                    requeue=True,
-                )
-                await asyncio.sleep(0)
+            cleanup = self._cleanup_requests.get(lease.work.work_id)
+            if cleanup is not None:
+                await self._execute_cleanup(lease, cleanup)
                 continue
             request = self._requests.get(lease.work.run_id)
             if request is None:
@@ -201,7 +252,6 @@ class LocalWorkerDispatcher:
                     )
                     continue
                 self._requests[lease.work.run_id] = request
-            self._active_tenants[tenant] = self._active_tenants.get(tenant, 0) + 1
             renewer = asyncio.create_task(self._renew(lease))
             execution = None
             snapshot = None
@@ -302,16 +352,33 @@ class LocalWorkerDispatcher:
                     RunState.CANCELLED: LeaseReleaseReason.CANCELLED,
                     RunState.SUSPENDED: LeaseReleaseReason.SUSPENDED,
                 }.get(snapshot.state, LeaseReleaseReason.FAILED)
-                await self.scheduler.release(lease, reason, requeue=False)
+                await self.scheduler.release(
+                    lease,
+                    reason,
+                    requeue=snapshot.state == RunState.RESUMING,
+                )
                 if not request.result.done():
                     request.result.set_result(snapshot)
             except asyncio.CancelledError:
                 if execution is not None and not execution.done():
                     execution.cancel()
                     await asyncio.gather(execution, return_exceptions=True)
-                await self._finish_shutdown_request(
-                    lease.work.run_id, request, lease=lease
+                # ``async with scope`` has already unwound at this point.  A
+                # driver backed directly by LeaseFencedSessionStore still needs
+                # the same lease while its terminal shutdown fact is committed.
+                shutdown_scope = (
+                    self.lease_scope_factory(lease)
+                    if self.lease_scope_factory is not None
+                    else _NullAsyncScope()
                 )
+                try:
+                    async with shutdown_scope:
+                        await self._finish_shutdown_request(
+                            lease.work.run_id, request, lease=lease
+                        )
+                except BaseException as exc:
+                    if not request.result.done():
+                        request.result.set_exception(exc)
                 raise
             except Exception as exc:
                 if not request.result.done():
@@ -327,10 +394,56 @@ class LocalWorkerDispatcher:
             finally:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
-                self._active_tenants[tenant] -= 1
-                if self._active_tenants[tenant] == 0:
-                    self._active_tenants.pop(tenant)
                 self._requests.pop(lease.work.run_id, None)
+
+    async def _execute_cleanup(
+        self, lease: WorkerLease, request: _CleanupRequest
+    ) -> None:
+        renewer = asyncio.create_task(self._renew(lease))
+        operation = None
+        try:
+            scope = (
+                self.lease_scope_factory(lease)
+                if self.lease_scope_factory is not None
+                else _NullAsyncScope()
+            )
+            async with scope:
+                operation = asyncio.create_task(request.operation())
+                done, _ = await asyncio.wait(
+                    {operation, renewer}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if renewer in done:
+                    operation.cancel()
+                    await asyncio.gather(operation, return_exceptions=True)
+                    raise renewer.exception() or RuntimeError(
+                        "scheduler lease renewer stopped"
+                    )
+                value = operation.result()
+            await self.scheduler.release(
+                lease, LeaseReleaseReason.COMPLETED, requeue=False
+            )
+            if not request.result.done():
+                request.result.set_result(value)
+        except asyncio.CancelledError:
+            if operation is not None and not operation.done():
+                operation.cancel()
+                await asyncio.gather(operation, return_exceptions=True)
+            if not request.result.done():
+                request.result.cancel()
+            raise
+        except Exception as exc:
+            if not request.result.done():
+                request.result.set_exception(exc)
+            try:
+                await self.scheduler.release(
+                    lease, LeaseReleaseReason.FAILED, requeue=False
+                )
+            except Exception:
+                pass
+        finally:
+            renewer.cancel()
+            await asyncio.gather(renewer, return_exceptions=True)
+            self._cleanup_requests.pop(lease.work.work_id, None)
 
     async def _fail_recovered_execution_tree(
         self, runtime, root, context: RequestContext, root_error: RuntimeErrorInfo
