@@ -2,6 +2,10 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-02 10:30** 桌面恢复 sandbox 清理时直接用 SandboxRef.provider_id，去掉 sage.sandbox.memory 兼容映射。
+
+- **2026-09-02 10:28** 内存 sandbox 的 provider_id 改为 sage.sandbox.ephemeral，与对外插件 id 对齐。
+
 - **2026-09-01 20:25** 插件约定 PluginIdentity：类上声明 id/名称/描述，official 注册从类属性读取。
 
 - **2026-09-01 20:12** Builder 默认插件全部改为类 plugin_id；缺 id 的默认实现已补上。

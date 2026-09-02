@@ -402,7 +402,7 @@ class InMemorySandboxProvider:
     plugin_id = "sage.sandbox.ephemeral"
     name = "In-memory sandbox provider"
     description = "In-process sandbox for tests and ephemeral runs."
-    provider_id = "sage.sandbox.memory"
+    provider_id = plugin_id
     provider_version = "3.0.0"
 
     def __init__(

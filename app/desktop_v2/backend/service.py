@@ -4251,11 +4251,7 @@ class DesktopV2Service:
                 )
                 provider = await self._scoped_component(
                     "execution.sandbox",
-                    (
-                        "sage.sandbox.ephemeral"
-                        if record.sandbox_ref.provider_id == "sage.sandbox.memory"
-                        else record.sandbox_ref.provider_id
-                    ),
+                    record.sandbox_ref.provider_id,
                     scope=ExtensionScope.PROCESS,
                     scope_id="desktop-sandbox",
                     agent_id=command.agent_id,
