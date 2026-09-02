@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Sage Agents v2 public API.
 
 The v2 package is intentionally independent from the legacy runtime.  Importing

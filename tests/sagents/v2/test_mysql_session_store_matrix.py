@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 
@@ -91,6 +92,23 @@ def test_parse_mysql_dsn_requires_database():
     assert parsed["user"] == "user"
     assert parsed["password"] == "p@ss"
     assert parsed["db"] == "sage_app"
+    with pytest.raises(ValueError, match="mysql://"):
+        parse_mysql_dsn("mariadb://user@db.example/sage_app")
+
+
+@pytest.mark.asyncio
+async def test_mysql_store_fails_closed_after_writer_lock_connection_loss():
+    class ClosedConnection:
+        closed = True
+
+    state = _MysqlSessionState("mysql://root@127.0.0.1/sage")
+    state._pool = object()
+    state._lock_conn = ClosedConnection()
+
+    with pytest.raises(SageV2Error) as exc_info:
+        await state._ensure_ready()
+
+    assert exc_info.value.info.code == "session_store.writer_lock_lost"
 
 
 class _FakeCursor:
@@ -223,7 +241,10 @@ async def test_builder_rejects_mysql_plugin_without_dsn():
 
 @pytest.fixture
 def mysql_dsn():
-    pytest.skip("live MySQL tests require an explicit plugin dsn")
+    dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN", "").strip()
+    if not dsn:
+        pytest.skip("set SAGE_V2_TEST_MYSQL_DSN to run live MySQL tests")
+    return dsn
 
 
 @pytest.mark.asyncio

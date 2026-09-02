@@ -122,6 +122,8 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self._pool = None
         self._lock_conn = None
         self._init_lock = asyncio.Lock()
+        self._writer_connection_lock = asyncio.Lock()
+        self._writer_lock_lost = False
         self._session_lock_guard = asyncio.Lock()
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._loaded_session_ids: set[str] = set()
@@ -162,10 +164,20 @@ class _PostgresSessionState(SessionStoreCoordinator):
         return f"{self.schema_name}.{self.table_prefix}_{name}"
 
     async def _ensure_ready(self) -> None:
+        if self._writer_lock_lost:
+            raise self._writer_lock_lost_error()
         if self._pool is not None:
+            if self._lock_conn is None or self._lock_conn.is_closed():
+                self._writer_lock_lost = True
+                raise self._writer_lock_lost_error()
             return
         async with self._init_lock:
+            if self._writer_lock_lost:
+                raise self._writer_lock_lost_error()
             if self._pool is not None:
+                if self._lock_conn is None or self._lock_conn.is_closed():
+                    self._writer_lock_lost = True
+                    raise self._writer_lock_lost_error()
                 return
             if self._closed:
                 raise SageV2Error(
@@ -181,7 +193,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             try:
                 await self._acquire_writer_lock(lock_conn)
                 await self._bootstrap(lock_conn)
-                self._pool = await asyncpg.create_pool(
+                pool = await asyncpg.create_pool(
                     self.dsn, min_size=1, max_size=8
                 )
                 LOGGER.info(
@@ -193,6 +205,32 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 await lock_conn.close()
                 raise
             self._lock_conn = lock_conn
+            self._pool = pool
+
+    def _writer_lock_lost_error(self) -> SageV2Error:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="session_store.writer_lock_lost",
+                category=ErrorCategory.RESOURCE_LOST,
+                message="postgres SessionStore lost its single-writer lock connection",
+                safe_to_resume=True,
+            )
+        )
+
+    @asynccontextmanager
+    async def _writer_connection(self):
+        await self._ensure_ready()
+        async with self._writer_connection_lock:
+            connection = self._lock_conn
+            if connection is None or connection.is_closed():
+                self._writer_lock_lost = True
+                raise self._writer_lock_lost_error()
+            try:
+                yield connection
+            except BaseException:
+                if connection.is_closed():
+                    self._writer_lock_lost = True
+                raise
 
     async def _acquire_writer_lock(self, connection) -> None:
         locked = await connection.fetchval(
@@ -289,14 +327,15 @@ class _PostgresSessionState(SessionStoreCoordinator):
         if self._closed:
             return
         self._closed = True
-        lock_conn = self._lock_conn
-        pool = self._pool
-        self._lock_conn = None
-        self._pool = None
-        if pool is not None:
-            await pool.close()
-        if lock_conn is not None:
-            await lock_conn.close()
+        async with self._writer_connection_lock:
+            lock_conn = self._lock_conn
+            pool = self._pool
+            self._lock_conn = None
+            self._pool = None
+            if pool is not None:
+                await pool.close()
+            if lock_conn is not None and not lock_conn.is_closed():
+                await lock_conn.close()
 
     @asynccontextmanager
     async def _session_scope(self, session_id: str):
@@ -317,9 +356,8 @@ class _PostgresSessionState(SessionStoreCoordinator):
         expected = self._persisted_session_revisions.get(session_id)
         new_revision = int(session_row["revision"])
         next_run_sequences: dict[str, int] = {}
-        assert self._pool is not None
         try:
-            async with self._pool.acquire() as connection:
+            async with self._writer_connection() as connection:
                 async with connection.transaction():
                     current = await connection.fetchval(
                         f"""
@@ -517,8 +555,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
     ) -> None:
         await self._ensure_ready()
         ordered = tuple(sorted(deleted_session_ids))
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             async with connection.transaction():
                 if ordered:
                     await connection.fetch(
@@ -568,8 +605,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             await self._refresh_session(session_id)
             await super().put_derived_state(session_id, namespace, key, value)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             await connection.execute(
                 f"""
                 INSERT INTO {self._table("derived_state")}
@@ -591,8 +627,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             await self._refresh_session(session_id)
             await super().delete_derived_state(session_id, namespace, key)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             await connection.execute(
                 f"""
                 DELETE FROM {self._table("derived_state")}
@@ -606,8 +641,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
     async def forget_session(self, session_id: str) -> None:
         await super().forget_session(session_id)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             await connection.execute(
                 f"DELETE FROM {self._table('derived_state')} WHERE session_id = $1",
                 session_id,

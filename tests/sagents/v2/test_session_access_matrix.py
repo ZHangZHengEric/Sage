@@ -95,7 +95,7 @@ async def test_cross_tenant_read_subscribe_and_delete_are_rejected(operation):
 
 
 @pytest.mark.asyncio
-async def test_authorized_delete_forgets_independent_derived_state():
+async def test_authorized_delete_forgets_all_independent_derived_state():
     class DerivedState:
         def __init__(self):
             self.forgotten = []
@@ -105,10 +105,12 @@ async def test_authorized_delete_forgets_independent_derived_state():
 
     store, _, handle = await setup_access()
     derived_state = DerivedState()
+    session_memory = DerivedState()
     access = AuthorizedSessionAccess(
         store,
         runtime=HarnessRuntime(store),
         derived_state=derived_state,
+        derived_state_cleaners=(session_memory,),
     )
     run = await store.get_run(handle.run_id)
     await store.commit_run(
@@ -124,6 +126,7 @@ async def test_authorized_delete_forgets_independent_derived_state():
     await access.delete_session(handle.session_id, OWNER)
 
     assert derived_state.forgotten == [handle.session_id]
+    assert session_memory.forgotten == [handle.session_id]
 
 
 @pytest.mark.asyncio

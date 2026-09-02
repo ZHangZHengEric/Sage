@@ -17,6 +17,7 @@ from app.desktop_v2.backend.catalog import (
 from app.desktop_v2.backend.package import desktop_v2_manifest
 from app.desktop_v2.backend.service import (
     _DesktopDriver,
+    _DesktopRecoveryAgent,
     _usage_percentile,
     AgentCreate,
     AgentRosterContextProvider,
@@ -334,6 +335,29 @@ async def test_desktop_driver_closes_root_sandbox_when_controller_close_fails(
         with pytest.raises(RuntimeError, match="controller close failed"):
             await driver.close_binding()
     controller.close.assert_awaited_once()
+    sandbox.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_desktop_recovery_composes_lazy_driver_before_barrier_recovery(
+    tmp_path: Path,
+):
+    loop = SimpleNamespace(
+        recover_interrupted=AsyncMock(return_value="recovered"),
+        delegated_run_controller=None,
+    )
+    sandbox = SimpleNamespace(close=AsyncMock(), scope_handles=[])
+    build = AsyncMock(return_value=(object(), loop, sandbox))
+    driver = _DesktopDriver(None, None, tmp_path, None, lazy_builder=build)
+    service = SimpleNamespace(driver_runtime=None, _drivers={})
+    recovery = _DesktopRecoveryAgent(service)
+    recovery._compose_driver = AsyncMock(return_value=(driver, object()))
+
+    result = await recovery._recover_interrupted_run("run_recovery", object())
+
+    assert result == "recovered"
+    build.assert_awaited_once()
+    loop.recover_interrupted.assert_awaited_once()
     sandbox.close.assert_awaited_once()
 
 

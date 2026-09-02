@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -69,6 +70,8 @@ _SCHEMA_TABLES = (
     "derived_state",
 )
 LOGGER = logging.getLogger(__name__)
+
+
 def _require_aiomysql():
     try:
         import aiomysql
@@ -103,7 +106,7 @@ def _datetime(value: str) -> str:
 def parse_mysql_dsn(dsn: str) -> dict[str, Any]:
     parsed = urlparse(dsn)
     database = unquote((parsed.path or "").lstrip("/").split("/", 1)[0])
-    if parsed.scheme not in {"mysql", "mysql+aiomysql", "mariadb"} or not database:
+    if parsed.scheme not in {"mysql", "mysql+aiomysql"} or not database:
         raise ValueError(
             "sage.session.mysql requires a mysql:// DSN that includes a database"
         )
@@ -147,6 +150,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
         self._pool = None
         self._lock_conn = None
         self._init_lock = asyncio.Lock()
+        self._writer_connection_lock = asyncio.Lock()
+        self._writer_lock_lost = False
         self._load_lock = asyncio.Lock()
         self._loaded_session_ids: set[str] = set()
         self._persisted_run_sequences: dict[str, int] = {}
@@ -168,7 +173,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     @property
     def lock_name(self) -> str:
-        digest = hashlib.sha256(self.table_prefix.encode("utf-8")).hexdigest()[:24]
+        scope = f"{self._connect_kwargs['db']}:{self.table_prefix}"
+        digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:24]
         return f"sage_sess_mysql_{digest}"
 
     def composition_identity(self) -> dict[str, str]:
@@ -188,10 +194,20 @@ class _MysqlSessionState(SessionStoreCoordinator):
         return f"{self.table_prefix}_{name}" if self.table_prefix else name
 
     async def _ensure_ready(self) -> None:
+        if self._writer_lock_lost:
+            raise self._writer_lock_lost_error()
         if self._pool is not None:
+            if self._lock_conn is None or self._lock_conn.closed:
+                self._writer_lock_lost = True
+                raise self._writer_lock_lost_error()
             return
         async with self._init_lock:
+            if self._writer_lock_lost:
+                raise self._writer_lock_lost_error()
             if self._pool is not None:
+                if self._lock_conn is None or self._lock_conn.closed:
+                    self._writer_lock_lost = True
+                    raise self._writer_lock_lost_error()
                 return
             if self._closed:
                 raise SageV2Error(
@@ -207,7 +223,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             try:
                 await self._acquire_writer_lock(lock_conn)
                 created = await self._bootstrap(lock_conn)
-                self._pool = await aiomysql.create_pool(
+                pool = await aiomysql.create_pool(
                     minsize=1,
                     maxsize=8,
                     **self._connect_kwargs,
@@ -221,6 +237,32 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 await self._close_lock_conn(lock_conn)
                 raise
             self._lock_conn = lock_conn
+            self._pool = pool
+
+    def _writer_lock_lost_error(self) -> SageV2Error:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="session_store.writer_lock_lost",
+                category=ErrorCategory.RESOURCE_LOST,
+                message="mysql SessionStore lost its single-writer lock connection",
+                safe_to_resume=True,
+            )
+        )
+
+    @asynccontextmanager
+    async def _writer_connection(self):
+        await self._ensure_ready()
+        async with self._writer_connection_lock:
+            connection = self._lock_conn
+            if connection is None or connection.closed:
+                self._writer_lock_lost = True
+                raise self._writer_lock_lost_error()
+            try:
+                yield connection
+            except BaseException:
+                if connection.closed:
+                    self._writer_lock_lost = True
+                raise
 
     async def _acquire_writer_lock(self, connection) -> None:
         async with connection.cursor() as cursor:
@@ -355,17 +397,18 @@ class _MysqlSessionState(SessionStoreCoordinator):
         if self._closed:
             return
         self._closed = True
-        pool = self._pool
-        lock_conn = self._lock_conn
-        self._pool = None
-        self._lock_conn = None
-        if pool is not None:
-            pool.close()
-            await pool.wait_closed()
-        await self._close_lock_conn(lock_conn)
+        async with self._writer_connection_lock:
+            pool = self._pool
+            lock_conn = self._lock_conn
+            self._pool = None
+            self._lock_conn = None
+            if pool is not None:
+                pool.close()
+                await pool.wait_closed()
+            await self._close_lock_conn(lock_conn)
 
     async def _close_lock_conn(self, connection) -> None:
-        if connection is None:
+        if connection is None or connection.closed:
             return
         try:
             async with connection.cursor() as cursor:
@@ -383,8 +426,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             for run_id, rows in state.get("run_events", {}).items()
         }
         next_run_sequences: dict[str, int] = {}
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             try:
                 async with connection.cursor() as cursor:
                     await cursor.execute(
@@ -418,7 +460,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     await self._replace_start_idempotency(cursor, session_id, compact)
                 await connection.commit()
             except Exception:
-                await connection.rollback()
+                try:
+                    await connection.rollback()
+                except Exception:
+                    self._writer_lock_lost = True
                 await self._reload_session_from_storage_locked(session_id)
                 raise
         self._remember_persisted_session(session_id, next_run_sequences)
@@ -522,8 +567,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
     ) -> None:
         await self._ensure_ready()
         ordered = tuple(sorted(deleted_session_ids))
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._writer_connection() as connection:
             try:
                 async with connection.cursor() as cursor:
                     if ordered:
@@ -537,7 +581,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
                         )
                 await connection.commit()
             except Exception:
-                await connection.rollback()
+                try:
+                    await connection.rollback()
+                except Exception:
+                    self._writer_lock_lost = True
                 raise
         for value in deleted_session_ids:
             self._forget_persisted_session(value)
@@ -568,19 +615,25 @@ class _MysqlSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         await super().put_derived_state(session_id, namespace, key, value)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
-                    f"""
-                    INSERT INTO {self._table("derived_state")}
-                        (session_id, namespace, `key`, value)
-                    VALUES (%s, %s, %s, CAST(%s AS JSON)) AS incoming
-                    ON DUPLICATE KEY UPDATE value = incoming.value
-                    """,
-                    (session_id, namespace, key, _json(value)),
-                )
-            await connection.commit()
+        async with self._writer_connection() as connection:
+            try:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(
+                        f"""
+                        INSERT INTO {self._table("derived_state")}
+                            (session_id, namespace, `key`, value)
+                        VALUES (%s, %s, %s, CAST(%s AS JSON)) AS incoming
+                        ON DUPLICATE KEY UPDATE value = incoming.value
+                        """,
+                        (session_id, namespace, key, _json(value)),
+                    )
+                await connection.commit()
+            except Exception:
+                try:
+                    await connection.rollback()
+                except Exception:
+                    self._writer_lock_lost = True
+                raise
 
     async def delete_derived_state(
         self, session_id: str, namespace: str, key: str
@@ -588,29 +641,41 @@ class _MysqlSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         await super().delete_derived_state(session_id, namespace, key)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
-                    f"""
-                    DELETE FROM {self._table("derived_state")}
-                    WHERE session_id = %s AND namespace = %s AND `key` = %s
-                    """,
-                    (session_id, namespace, key),
-                )
-            await connection.commit()
+        async with self._writer_connection() as connection:
+            try:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {self._table("derived_state")}
+                        WHERE session_id = %s AND namespace = %s AND `key` = %s
+                        """,
+                        (session_id, namespace, key),
+                    )
+                await connection.commit()
+            except Exception:
+                try:
+                    await connection.rollback()
+                except Exception:
+                    self._writer_lock_lost = True
+                raise
 
     async def forget_session(self, session_id: str) -> None:
         await super().forget_session(session_id)
         await self._ensure_ready()
-        assert self._pool is not None
-        async with self._pool.acquire() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
-                    f"DELETE FROM {self._table('derived_state')} WHERE session_id = %s",
-                    (session_id,),
-                )
-            await connection.commit()
+        async with self._writer_connection() as connection:
+            try:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(
+                        f"DELETE FROM {self._table('derived_state')} WHERE session_id = %s",
+                        (session_id,),
+                    )
+                await connection.commit()
+            except Exception:
+                try:
+                    await connection.rollback()
+                except Exception:
+                    self._writer_lock_lost = True
+                raise
 
     async def create_run(self, command, context):
         await self._ensure_ready()

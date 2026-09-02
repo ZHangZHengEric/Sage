@@ -8,11 +8,13 @@ from sagents.v2 import RunExecutionBinding, SAgentApplication, SAgentBuilder
 from sagents.v2.builder import _ExecutionBoundDriver
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.run_state import RunState
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.manifest.agents import AgentMemoryBehavior
 from sagents.v2.memory import NoopMemoryProvider
+from sagents.v2.session_memory import SessionMemoryCapabilities
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
@@ -87,6 +89,27 @@ class _RecordingDerivedStateStore:
         }
 
 
+class _RecordingSessionMemoryProvider:
+    def __init__(self) -> None:
+        self.forgotten = []
+
+    async def capabilities(self):
+        return SessionMemoryCapabilities(durable=False)
+
+    async def sync(self, records):
+        del records
+
+    async def recall(self, query):
+        del query
+        return ()
+
+    async def forget_session(self, session_id):
+        self.forgotten.append(session_id)
+
+    async def health(self):
+        return {"ok": True}
+
+
 @pytest.mark.asyncio
 async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
     package = BuiltinPackageFactory.create(
@@ -158,6 +181,58 @@ async def test_builder_does_not_require_injected_session_store_to_hold_derived_s
     derived_state = application.service("derived-state.store")
     assert isinstance(derived_state, InMemoryDerivedStateStore)
     assert application.service("context.summary-store").derived_state is derived_state
+    await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_wires_session_deletion_to_session_memory_cleanup(tmp_path: Path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-session-memory-cleanup",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    session_memory = _RecordingSessionMemoryProvider()
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "unused-session-store")
+        .with_session_memory_provider(session_memory)
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    store = application.entrypoint().runtime.session_store
+    context = RequestContext(
+        actor=ActorRef(
+            principal_id="owner",
+            principal_type=PrincipalType.USER,
+            tenant_id="tenant",
+        )
+    )
+    created = await store.create_run(
+        StartRun(
+            agent_id="agent",
+            input=(InputItem(role="user", content=(TextBlock(text="hello"),)),),
+            resolved_spec_hash="sha256:cleanup",
+            idempotency_key="cleanup-start",
+        ),
+        context,
+    )
+    run = await store.get_run(created.handle.run_id)
+    await store.commit_run(
+        run_id=run.run_id,
+        expected_revision=run.revision,
+        expected_states={run.state},
+        new_state=RunState.CANCELLED,
+        drafts=(),
+        context=context,
+        idempotency_key="cleanup-cancel",
+    )
+
+    await application.service("session.access").delete_session(
+        created.handle.session_id, context
+    )
+
+    assert session_memory.forgotten == [created.handle.session_id]
     await application.close()
 
 
@@ -920,6 +995,10 @@ async def test_materialize_agent_uses_next_manifest_without_a_second_dispatcher(
         assert _host_binding(ports.resolved_plan, "context.token-estimator").plugin_id == (
             "sage.context.token-estimator.unicode-heuristic"
         )
+        assert sum(
+            value.capability == "model.provider"
+            for value in ports.resolved_plan.providers
+        ) == 1
         assert "desktop-host" not in {
             value.source for value in ports.resolved_plan.providers
         }
@@ -956,4 +1035,107 @@ async def test_materialize_agent_reuses_agent_scoped_ports(tmp_path: Path):
     finally:
         for handle in reversed((*first.scope_handles, *second.scope_handles)):
             await handle.close()
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_materialized_plan_reports_only_ports_selected_for_this_call(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-plan-cache",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    window = _with_runtime_capabilities(
+        package, **{"context.reducer": "sage.context.reducer.window"}
+    )
+    persistent = _with_runtime_capabilities(
+        package, **{"context.reducer": "sage.context.reducer.persistent-summary"}
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    first = await application.materialize_agent(
+        window, agent_id="assistant", run_id="run_1"
+    )
+    second = await application.materialize_agent(
+        persistent, agent_id="assistant", run_id="run_2"
+    )
+    catalog = object()
+    executor = object()
+    third = await application.materialize_agent(
+        window,
+        agent_id="assistant",
+        run_id="run_3",
+        tool_catalog=catalog,
+        tool_executor=executor,
+    )
+    try:
+        assert isinstance(third.context_reducer, WindowContextReducer)
+        assert _host_binding(third.resolved_plan, "context.reducer").plugin_id == (
+            "sage.context.reducer.window"
+        )
+        assert sum(
+            value.capability == "context.reducer"
+            for value in third.resolved_plan.providers
+        ) == 1
+        assert third.tool_catalog is catalog
+        assert third.tool_executor is executor
+        assert _host_binding(third.resolved_plan, "tool.catalog").source == "host"
+        assert _host_binding(third.resolved_plan, "tool.executor").source == "host"
+        assert sum(
+            value.capability == "model.provider"
+            for value in third.resolved_plan.providers
+        ) == 1
+    finally:
+        for handle in reversed(
+            (*first.scope_handles, *second.scope_handles, *third.scope_handles)
+        ):
+            await handle.close()
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_materialize_agent_rolls_back_run_scopes_on_later_failure(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-rollback",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    composer = application._composer
+    original_port = composer._port
+    opened_run_handles = []
+
+    async def fail_after_continuation(*args, **kwargs):
+        value = await original_port(*args, **kwargs)
+        if kwargs["capability"] == "agent.continuation-policy":
+            opened_run_handles.extend(kwargs["run_handles"])
+        if kwargs["capability"] == "memory.recall-query":
+            raise RuntimeError("later component failed")
+        return value
+
+    composer._port = fail_after_continuation
+    try:
+        with pytest.raises(RuntimeError, match="later component failed"):
+            await application.materialize_agent(
+                package, agent_id="assistant", run_id="run_failure"
+            )
+        assert opened_run_handles
+        assert all(handle._closed for handle in opened_run_handles)
+    finally:
+        composer._port = original_port
         await application.close()
