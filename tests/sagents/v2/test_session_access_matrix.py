@@ -76,10 +76,11 @@ async def test_owner_and_admin_can_read_through_authorized_access():
     )
     events = await access.read_events(handle.run_id, OWNER)
     assert events[0].type == "run.accepted"
+    assert await access.list_session_commit_proposals(handle.session_id, OWNER) == ()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ("run", "events", "delete"))
+@pytest.mark.parametrize("operation", ("run", "events", "proposals", "delete"))
 async def test_cross_tenant_read_subscribe_and_delete_are_rejected(operation):
     _, access, handle = await setup_access()
 
@@ -88,6 +89,8 @@ async def test_cross_tenant_read_subscribe_and_delete_are_rejected(operation):
             await access.get_run(handle.run_id, OTHER)
         elif operation == "events":
             await access.read_events(handle.run_id, OTHER)
+        elif operation == "proposals":
+            await access.list_session_commit_proposals(handle.session_id, OTHER)
         else:
             await access.delete_session(handle.session_id, OTHER)
 
@@ -151,9 +154,7 @@ async def test_principal_type_is_part_of_owner_and_start_idempotency_scope():
     second = await runtime.start_run(
         StartRun(
             agent_id="agent",
-            input=(
-                InputItem(role="user", content=(TextBlock(text="service input"),)),
-            ),
+            input=(InputItem(role="user", content=(TextBlock(text="service input"),)),),
             resolved_spec_hash="sha256:access",
             idempotency_key="access-start",
         ),

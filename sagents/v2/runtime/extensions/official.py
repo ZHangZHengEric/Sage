@@ -88,6 +88,7 @@ from sagents.v2.workspace import (
 )
 from sagents.v2.memory.plugins.filesystem_bm25 import FilesystemBm25MemoryProvider
 from sagents.v2.memory.plugins.noop import NoopMemoryProvider
+from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.memory.plugins.recall_direct import DirectMemoryRecallQueryGenerator
 from sagents.v2.memory.plugins.recall_llm import LLMMemoryRecallQueryGenerator
 from sagents.v2.model.protocols import (
@@ -140,6 +141,16 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "default": 24,
                 "title": "Tool count limit",
                 "description": "Maximum number of full Tool schemas sent to the model.",
+            },
+            "model_timeout_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 120,
+                "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                "title": "Auxiliary model timeout",
+                "description": (
+                    "Maximum wait before model-assisted selection reports an error."
+                ),
             },
         },
         "additionalProperties": False,
@@ -221,6 +232,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             LLMContinuationJudge(
                 context.config["model"],
                 model_binding=str(context.config.get("model_binding", "fast")),
+                timeout_seconds=float(
+                    context.config.get(
+                        "timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                    )
+                ),
             ),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
@@ -233,6 +249,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             LLMContinuationJudge(
                 context.config["model"],
                 model_binding=str(context.config.get("model_binding", "fast")),
+                timeout_seconds=float(
+                    context.config.get(
+                        "timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                    )
+                ),
             ),
             repeat_threshold=int(context.config.get("repeat_threshold", 3)),
         ),
@@ -958,6 +979,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "model": {},
                         "language": {"type": "string"},
+                        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
                     },
                     "required": ["model"],
                     "additionalProperties": False,
@@ -968,6 +990,11 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             factory=lambda context, dependencies: LLMMemoryRecallQueryGenerator(
                 context.config["model"],
                 language=str(context.config.get("language") or "en"),
+                timeout_seconds=float(
+                    context.config.get(
+                        "timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                    )
+                ),
             ),
         )
     )

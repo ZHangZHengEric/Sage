@@ -11,6 +11,9 @@ from app.desktop_v2.backend import app as app_module
 from app.desktop_v2.backend.service import DesktopV2Service
 from sagents.v2.runtime.observability import NoopLogSink, StructuredLogger
 
+AUTH_TOKEN = "test-desktop-capability"
+AUTH_HEADERS = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+
 
 class _SessionStore:
     close = AsyncMock()
@@ -26,7 +29,7 @@ class _Service:
 @pytest.mark.asyncio
 async def test_v2_lifespan_initializes_and_closes_only_owned_components():
     service = _Service()
-    app = app_module.create_app(service=service)
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
 
     async with app.router.lifespan_context(app):
         pass
@@ -39,13 +42,16 @@ def test_api_validation_failures_include_details_in_structured_log(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path)
-    app = app_module.create_app(service=service)
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
 
     with TestClient(app) as client:
         response = client.post(
             "/api/v2/projects",
             json={},
-            headers={"X-Request-Id": "request_validation_test"},
+            headers={
+                **AUTH_HEADERS,
+                "X-Request-Id": "request_validation_test",
+            },
         )
 
     assert response.status_code == 422
@@ -66,16 +72,20 @@ def test_api_validation_failures_include_details_in_structured_log(
 
 def test_health_identifies_the_exact_sidecar_build():
     service = _Service()
-    app = app_module.create_app(service=service, build_id="source-test-build")
+    app = app_module.create_app(
+        service=service,
+        build_id="source-test-build",
+        auth_token=AUTH_TOKEN,
+    )
 
     with TestClient(app) as client:
-        response = client.get("/health")
+        response = client.get("/health", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["data"] == {
         "status": "ok",
         "protocol": "sage.runtime/v2",
-        "revision": 3,
+        "revision": 5,
         "build_id": "source-test-build",
     }
 
@@ -85,11 +95,44 @@ def test_delete_skill_route_forwards_the_authenticated_desktop_user():
     service.delete_skill = AsyncMock(
         return_value={"deleted_name": "review"},
     )
-    app = app_module.create_app(service=service)
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
 
     with TestClient(app) as client:
-        response = client.delete("/api/v2/skills/review")
+        response = client.delete("/api/v2/skills/review", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["data"] == {"deleted_name": "review"}
+    service.delete_skill.assert_awaited_once_with("review", "default_user")
+
+
+def test_sidecar_rejects_missing_or_incorrect_launch_capability():
+    service = _Service()
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+
+    with TestClient(app) as client:
+        missing = client.get("/health")
+        incorrect = client.get(
+            "/health",
+            headers={"Authorization": "Bearer incorrect"},
+        )
+
+    assert missing.status_code == 401
+    assert incorrect.status_code == 401
+
+
+def test_sidecar_ignores_caller_supplied_user_identity():
+    service = _Service()
+    service.delete_skill = AsyncMock(return_value={"deleted_name": "review"})
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+
+    with TestClient(app) as client:
+        response = client.delete(
+            "/api/v2/skills/review",
+            headers={
+                **AUTH_HEADERS,
+                "X-Sage-Internal-UserId": "spoofed-user",
+            },
+        )
+
+    assert response.status_code == 200
     service.delete_skill.assert_awaited_once_with("review", "default_user")

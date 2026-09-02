@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -13,6 +14,7 @@ from sagents.v2.context import DefaultContextAssembler, RunMetadataContextProvid
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.memory import (
     LLMMemoryRecallQueryGenerator,
@@ -236,7 +238,38 @@ async def test_automatic_recall_is_a_real_tool_pair_not_runtime_context():
 
 
 @pytest.mark.asyncio
-async def test_llm_memory_query_plugin_generates_keywords_and_falls_back_safely():
+async def test_automatic_recall_propagates_selected_query_plugin_failure():
+    class FailingRecallQuery:
+        async def generate(self, user_input: str, *, run_id: str) -> str:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="memory.recall_query.test_failure",
+                    category=ErrorCategory.PROVIDER_TRANSIENT,
+                    message="query provider unavailable",
+                    retryable=True,
+                    safe_to_resume=True,
+                )
+            )
+
+    runtime = ephemeral_runtime()
+    handle = await runtime.start_run(command(memory=True), CONTEXT)
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=ScriptedModelProvider(()),
+        tool_catalog=InMemoryToolCatalog(()),
+        tool_executor=InMemoryToolExecutor({}, {}),
+        automatic_memory_recall=True,
+        memory_recall_query_generator=FailingRecallQuery(),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await loop.execute(handle.run_id, CONTEXT)
+
+    assert caught.value.info.code == "memory.recall_query.test_failure"
+
+
+@pytest.mark.asyncio
+async def test_llm_memory_query_plugin_generates_keywords():
     model = ScriptedModelProvider(
         (
             ScriptedModelStep(
@@ -262,6 +295,31 @@ async def test_llm_memory_query_plugin_generates_keywords_and_falls_back_safely(
     assert query == "Sage runtime context v1"
     assert model.requests[0].model_binding == "fast"
     assert model.requests[0].metadata["purpose"] == "memory_recall_query"
+
+
+@pytest.mark.asyncio
+async def test_llm_memory_query_timeout_is_reported_by_selected_plugin():
+    class SlowModel:
+        def stream(self, request):
+            async def events():
+                await asyncio.sleep(60)
+                if False:
+                    yield None
+
+            return events()
+
+    generator = LLMMemoryRecallQueryGenerator(
+        SlowModel(), language="zh", timeout_seconds=0.01
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await generator.generate("你好啊", run_id="run_1")
+
+    assert caught.value.info.code == "memory.recall_query.model_timeout"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
+    assert caught.value.info.metadata["plugin_id"] == (
+        "sage.memory.recall-query.llm"
+    )
 
 
 @pytest.mark.asyncio

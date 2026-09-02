@@ -186,6 +186,8 @@ class UsageSummary(StrictModel):
     # default used when an endpoint omits usage altogether.  Runtime consumers
     # use the canonical counters below; diagnostics can inspect the original
     # provider payload without learning every compatible gateway dialect.
+    # ``input_tokens`` is canonical total prompt input, including cache reads;
+    # ``cached_input_tokens`` is the cached subset of that total.
     reported: bool = False
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)

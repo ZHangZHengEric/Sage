@@ -379,6 +379,7 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
                     "usage": {
                         "input_tokens": 20,
                         "cache_read_input_tokens": 4,
+                        "cache_creation_input_tokens": 2,
                     },
                 },
             },
@@ -462,13 +463,14 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     )
     assert completed.finish_reason == "tool_use"
     assert completed.tool_calls[0].arguments == {"q": "new"}
-    assert completed.usage.input_tokens == 20
+    assert completed.usage.input_tokens == 26
     assert completed.usage.output_tokens == 7
     assert completed.usage.cached_input_tokens == 4
     assert completed.usage.reported is True
     assert completed.usage.provider_usage == {
         "input_tokens": 20,
         "cache_read_input_tokens": 4,
+        "cache_creation_input_tokens": 2,
         "output_tokens": 7,
     }
     assert client.response.status_checked is True

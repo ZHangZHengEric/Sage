@@ -2,15 +2,75 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sage_desktop_v2/src/api/v2_api.dart';
 
 void main() {
+  test('workspace binary requests include the sidecar capability', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final directory = await Directory.systemTemp.createTemp(
+      'sage-v2-api-upload-test-',
+    );
+    final source = File('${directory.path}/note.txt');
+    await source.writeAsString('upload body');
+    addTearDown(() => server.close(force: true));
+    addTearDown(() => directory.delete(recursive: true));
+    final paths = <String>[];
+
+    server.listen((request) async {
+      paths.add(request.uri.path);
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer test-token',
+      );
+      if (request.uri.path == '/api/v2/workspaces/file') {
+        request.response.headers.contentType = ContentType.text;
+        request.response.write('file body');
+      } else {
+        await request.drain<void>();
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'code': 0,
+            'data': {
+              'name': 'note.txt',
+              'path': 'uploads/note.txt',
+              'virtual_path': '/workspace/uploads/note.txt',
+              'size': 11,
+            },
+          }),
+        );
+      }
+      await request.response.close();
+    });
+
+    final api = V2ApiClient(
+      baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
+    );
+    addTearDown(api.close);
+
+    final content = await api.workspaceFile(agentId: 'sage', path: 'note.txt');
+    final uploaded = await api.upload(
+      agentId: 'sage',
+      file: XFile(source.path),
+    );
+
+    expect(utf8.decode(content.bytes), 'file body');
+    expect(uploaded.path, 'uploads/note.txt');
+    expect(paths, ['/api/v2/workspaces/file', '/api/v2/workspaces/upload']);
+  });
+
   test('health rejects a sidecar from an older runtime revision', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
 
     server.listen((request) async {
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer test-token',
+      );
       request.response.headers.contentType = ContentType.json;
       request.response.write(
         jsonEncode({
@@ -23,6 +83,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     );
     addTearDown(api.close);
 
@@ -51,6 +112,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     )..expectedBuildId = 'new-build';
     addTearDown(api.close);
 
@@ -80,6 +142,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     );
     addTearDown(api.close);
 
@@ -111,6 +174,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     );
     addTearDown(api.close);
 
@@ -149,6 +213,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     )..toolCatalogLanguage = 'zh-CN';
     addTearDown(api.close);
 
@@ -192,6 +257,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     );
     addTearDown(api.close);
 
@@ -248,6 +314,7 @@ void main() {
 
     final api = V2ApiClient(
       baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
     );
     addTearDown(api.close);
 
@@ -307,6 +374,7 @@ void main() {
 
       final api = V2ApiClient(
         baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+        authToken: 'test-token',
       );
       addTearDown(api.close);
 

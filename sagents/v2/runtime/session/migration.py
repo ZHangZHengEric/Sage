@@ -18,6 +18,7 @@ from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
+    FILESYSTEM_SESSION_STORE_FORMAT_V2,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
     SESSION_AGGREGATE_SNAPSHOT_FORMAT,
     SessionAggregateSnapshotV2,
@@ -40,6 +41,88 @@ class MigrationReport:
     backup: Path | None = None
 
 
+@dataclass(frozen=True)
+class OwnerAdoptionReport:
+    runtime_root: Path
+    adopted_sessions: int
+    principal_id: str
+
+
+def adopt_unowned_sessions(
+    runtime_root: str | Path,
+    *,
+    principal_id: str,
+    principal_type: str = "user",
+    tenant_id: str | None = None,
+) -> OwnerAdoptionReport:
+    """Assign an explicit owner to legacy snapshots that never stored one.
+
+    This is intentionally opt-in and only fills missing owners. Existing
+    ownership facts are never changed. Desktop uses it during startup to bind
+    its pre-ownership, single-user history to the authenticated local user.
+    """
+
+    if not principal_id.strip():
+        raise ValueError("principal_id must not be empty")
+    source = Path(runtime_root).expanduser().resolve()
+    if not (source / "sessions").is_dir() or not (source / ".session-store").is_dir():
+        return OwnerAdoptionReport(
+            runtime_root=source,
+            adopted_sessions=0,
+            principal_id=principal_id,
+        )
+    lock = _lock_source(source)
+    adopted = 0
+    try:
+        for snapshot in sorted((source / "sessions").rglob("state.json")):
+            payload = _read_json(snapshot)
+            if payload.get("format") not in {
+                FILESYSTEM_SESSION_STORE_FORMAT_V3,
+                FILESYSTEM_SESSION_STORE_FORMAT,
+                FILESYSTEM_SESSION_STORE_FORMAT_V2,
+            }:
+                continue
+            _verify_checksum(payload, snapshot)
+            state = payload.get("state")
+            if not isinstance(state, dict):
+                continue
+            sessions = state.get("sessions")
+            if not isinstance(sessions, list) or len(sessions) != 1:
+                continue
+            session = sessions[0]
+            if not isinstance(session, dict) or session.get("owner") is not None:
+                continue
+
+            owner = {
+                "principal_id": principal_id,
+                "principal_type": principal_type,
+                "tenant_id": tenant_id,
+                "delegated_by": None,
+                "scopes": [],
+            }
+            session["owner"] = owner
+            for entry in state.get("start_idempotency", ()):
+                if isinstance(entry, dict) and entry.get("principal_type") is None:
+                    entry["tenant_id"] = tenant_id
+                    entry["principal_id"] = principal_id
+                    entry["principal_type"] = principal_type
+
+            unsigned = {
+                key: value for key, value in payload.items() if key != "checksum"
+            }
+            payload["checksum"] = FilesystemSessionStore._checksum(unsigned)
+            _atomic_json_replace(snapshot, payload)
+            _adopt_projected_session_owner(snapshot.parent / "session.json", owner)
+            adopted += 1
+    finally:
+        _unlock_source(lock)
+    return OwnerAdoptionReport(
+        runtime_root=source,
+        adopted_sessions=adopted,
+        principal_id=principal_id,
+    )
+
+
 def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> MigrationReport:
     """Validate v3, build and reopen v4, then atomically retain v3 as backup."""
 
@@ -60,6 +143,7 @@ def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> 
         for snapshot in sorted((source / "sessions").rglob("state.json")):
             state = _read_v3_aggregate(snapshot)
             state["session_format_version"] = SESSION_AGGREGATE_SNAPSHOT_FORMAT
+            FilesystemSessionStore._restore_legacy_principal_types(state)
             # Compare the semantic v4 aggregate, not incidental omissions in
             # old JSON. Typed normalization may add default empty collections
             # or optional null fields while preserving every durable fact.
@@ -382,6 +466,31 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"migration input must be a JSON object: {path}")
     return value
+
+
+def _adopt_projected_session_owner(path: Path, owner: dict[str, Any]) -> None:
+    if not path.is_file():
+        return
+    payload = _read_json(path)
+    session = payload.get("session")
+    if not isinstance(session, dict) or session.get("owner") is not None:
+        return
+    session["owner"] = dict(owner)
+    _atomic_json_replace(path, payload)
+
+
+def _atomic_json_replace(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.owner-{os.getpid()}.tmp")
+    try:
+        encoded = FilesystemSessionStore._canonical_json(payload)
+        with temporary.open("wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _fsync_directory(path: Path) -> None:

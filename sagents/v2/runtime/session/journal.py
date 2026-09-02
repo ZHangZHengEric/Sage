@@ -180,6 +180,18 @@ class SessionSnapshotEnvelopeV2(StrictModel):
     checksum: str
 
 
+class SessionSnapshotEnvelopeV3(StrictModel):
+    """Legacy v3 compact base state, retained for read compatibility."""
+
+    format: Literal["sage.filesystem-session-store/v3"] = (
+        FILESYSTEM_SESSION_STORE_FORMAT_V3
+    )
+    write_id: str
+    current_session_revision: int
+    state: dict[str, Any]
+    checksum: str
+
+
 class SessionStateDeltaMutation(StrictModel):
     kind: Literal["state_delta"] = "state_delta"
     upserts: dict[str, list[dict[str, Any]]] = {}
@@ -199,4 +211,17 @@ class SessionMutationEnvelope(StrictModel):
     previous_session_revision: int
     current_session_revision: int
     mutation: SessionStateDeltaMutation
+    checksum: str
+
+
+class SessionMutationEnvelopeV3(StrictModel):
+    """Legacy v3 untyped delta, retained for read compatibility."""
+
+    format: Literal["sage.filesystem-session-journal/v3"] = (
+        "sage.filesystem-session-journal/v3"
+    )
+    mutation_id: str
+    previous_session_revision: int
+    current_session_revision: int
+    delta: dict[str, Any]
     checksum: str

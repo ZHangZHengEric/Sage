@@ -114,7 +114,15 @@ class McpToolPlugin:
                         session.list_tools(), timeout=server.timeout_seconds
                     )
             except Exception as exc:
-                raise self._provider_error("mcp.discovery_failed", server, exc) from exc
+                # Discovery is read-only and happens before a tool call is
+                # dispatched, so its failure cannot leave an uncertain side
+                # effect behind and is safe to retry.
+                raise self._provider_error(
+                    "mcp.discovery_failed",
+                    server,
+                    exc,
+                    category=ErrorCategory.PROVIDER_TRANSIENT,
+                ) from exc
             for raw in _value(response, "tools", ()) or ():
                 remote_name = str(_value(raw, "name", "") or "").strip()
                 if not remote_name:
@@ -268,16 +276,16 @@ class McpToolPlugin:
 
     @staticmethod
     def _provider_error(
-        code: str, server: McpServerConfig, exc: Exception
+        code: str,
+        server: McpServerConfig,
+        exc: Exception,
+        *,
+        category: ErrorCategory = ErrorCategory.UNCERTAIN_SIDE_EFFECT,
     ) -> SageV2Error:
         return McpToolPlugin._error(
             code,
             f"MCP server {server.name!r} failed: {exc}",
-            # Once call_tool has been attempted, a timeout or transport failure
-            # cannot prove that the remote side effect did not happen.  The Agent
-            # Loop must persist an UNKNOWN barrier and require reconciliation or
-            # explicit user resolution instead of presenting a retryable failure.
-            ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+            category,
             metadata={"server": server.name, "protocol": server.protocol},
         )
 

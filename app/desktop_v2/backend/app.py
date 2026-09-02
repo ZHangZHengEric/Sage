@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 import json
+import secrets
 import time
 from typing import Any
 
@@ -19,23 +22,26 @@ from sagents.v2.contracts.session_commit import SessionMergeStrategy
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.common import new_id
 
-from app.desktop_v2.backend.service import (
+from app.desktop_v2.backend.schemas import (
     AgentCreate,
     AgentSettingsPatch,
     ComponentSelectionRequest,
     DesktopRunRequest,
-    DesktopV2Service,
     DesktopV2Settings,
     MCPConnectionRequest,
     ModelProviderCreate,
     ModelProviderPatch,
 )
+from app.desktop_v2.backend.service import DesktopV2Service
 from app.desktop_v2.backend.anytool import DesktopV2AnyToolApp
 from app.desktop_v2.backend.runtime_protocol import (
     SIDECAR_PROTOCOL,
     SIDECAR_REVISION,
 )
+from app.desktop_v2.backend.sidecar_lifecycle import SidecarClientLeases
 from app.desktop_v2.backend.terminal import TerminalSessionManager
+
+_MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
 
 def get_desktop_user_id(request: Request) -> str:
@@ -118,12 +124,26 @@ def create_app(
     service: DesktopV2Service | None = None,
     terminal_manager: TerminalSessionManager | None = None,
     build_id: str = "manual",
+    auth_token: str,
+    shutdown_requested: Callable[[], None] | None = None,
+    client_lease_ttl_seconds: float = 30.0,
 ) -> FastAPI:
+    if not auth_token.strip():
+        raise ValueError("Desktop sidecar auth token must not be empty")
     runtime_service = service or DesktopV2Service()
     terminals = terminal_manager or TerminalSessionManager()
+    client_leases = SidecarClientLeases(ttl_seconds=client_lease_ttl_seconds)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        lease_watcher = (
+            asyncio.create_task(
+                client_leases.watch(shutdown_requested),
+                name="desktop-sidecar-client-leases",
+            )
+            if shutdown_requested is not None
+            else None
+        )
         try:
             runtime_service.logger.info(
                 "application.started",
@@ -139,6 +159,9 @@ def create_app(
             )
             raise
         finally:
+            if lease_watcher is not None:
+                lease_watcher.cancel()
+                await asyncio.gather(lease_watcher, return_exceptions=True)
             await terminals.close()
             runtime_service.logger.info(
                 "application.stopped",
@@ -159,6 +182,7 @@ def create_app(
     )
     app.state.v2_service = runtime_service
     app.state.terminal_manager = terminals
+    app.state.client_leases = client_leases
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1", "http://localhost"],
@@ -177,9 +201,25 @@ def create_app(
         request_id = request.headers.get("X-Request-Id") or new_id("request")
         request.state.request_id = request_id
         started = time.monotonic()
-        user_id = str(request.headers.get("X-Sage-Internal-UserId") or "").strip()
+        supplied_token = request.headers.get("Authorization") or ""
+        expected_token = f"Bearer {auth_token}"
+        if not secrets.compare_digest(supplied_token, expected_token):
+            runtime_service.logger.warning(
+                "api.request.unauthenticated",
+                "Desktop API request did not present the launch capability",
+                request_id=request_id,
+                attributes={"method": request.method, "path": request.url.path},
+            )
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "invalid Desktop sidecar capability"},
+                headers={
+                    "WWW-Authenticate": "Bearer",
+                    "X-Request-Id": request_id,
+                },
+            )
         request.state.user_claims = {
-            "userid": user_id or "default_user",
+            "userid": "default_user",
             "role": "admin",
         }
         request_logger = runtime_service.logger.bind(request_id=request_id)
@@ -282,6 +322,40 @@ def create_app(
                 "protocol": SIDECAR_PROTOCOL,
                 "revision": SIDECAR_REVISION,
                 "build_id": build_id,
+            }
+        )
+
+    @app.put("/api/v2/runtime/clients/{client_id}")
+    async def attach_runtime_client(client_id: str):
+        result = await _safe(client_leases.attach(client_id))
+        return _success(
+            {
+                "active_clients": result.active_clients,
+                "lease_ttl_seconds": client_leases.ttl_seconds,
+            }
+        )
+
+    @app.delete("/api/v2/runtime/clients/{client_id}")
+    async def detach_runtime_client(client_id: str):
+        result = await _safe(client_leases.detach(client_id))
+        if result.shutdown_requested and shutdown_requested is not None:
+            asyncio.get_running_loop().call_soon(shutdown_requested)
+        return _success(
+            {
+                "active_clients": result.active_clients,
+                "shutdown_requested": result.shutdown_requested,
+            }
+        )
+
+    @app.post("/api/v2/runtime/shutdown-if-idle")
+    async def shutdown_runtime_if_idle():
+        result = await _safe(client_leases.request_shutdown_if_idle())
+        if result.shutdown_requested and shutdown_requested is not None:
+            asyncio.get_running_loop().call_soon(shutdown_requested)
+        return _success(
+            {
+                "active_clients": result.active_clients,
+                "shutdown_requested": result.shutdown_requested,
             }
         )
 
@@ -557,7 +631,9 @@ def create_app(
         agent_id: str = Form(...),
         workspace_id: str | None = Form(None),
     ):
-        content = await file.read()
+        content = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(content) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="upload exceeds 64 MiB limit")
         value = await _safe(
             runtime_service.upload(
                 workspace_id, agent_id, file.filename or "attachment", content
@@ -639,9 +715,7 @@ def create_app(
     @app.delete("/api/v2/terminals/{session_id}")
     async def close_terminal(session_id: str, request: Request):
         terminal_session(session_id, request)
-        await _safe(
-            terminals.close_session(session_id, get_desktop_user_id(request))
-        )
+        await _safe(terminals.close_session(session_id, get_desktop_user_id(request)))
         return _success({"session_id": session_id})
 
     @app.post("/api/v2/runs/stream")
@@ -664,8 +738,10 @@ def create_app(
         )
 
     @app.get("/api/v2/sessions")
-    async def list_sessions():
-        return _success(await _safe(runtime_service.list_sessions()))
+    async def list_sessions(request: Request):
+        return _success(
+            await _safe(runtime_service.list_sessions(get_desktop_user_id(request)))
+        )
 
     @app.get("/api/v2/usage/overview")
     async def usage_overview(
@@ -684,34 +760,56 @@ def create_app(
         )
 
     @app.get("/api/v2/sessions/{session_id}")
-    async def get_session(session_id: str):
-        return _success(await _safe(runtime_service.session_snapshot(session_id)))
+    async def get_session(session_id: str, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.session_snapshot(
+                    session_id, get_desktop_user_id(request)
+                )
+            )
+        )
 
     @app.delete("/api/v2/sessions/{session_id}")
-    async def delete_session(session_id: str):
-        await _safe(runtime_service.delete_session(session_id))
+    async def delete_session(session_id: str, request: Request):
+        await _safe(
+            runtime_service.delete_session(session_id, get_desktop_user_id(request))
+        )
         return _success()
 
     @app.get("/api/v2/sessions/{session_id}/runs")
-    async def list_session_runs(session_id: str):
-        return _success(await _safe(runtime_service.session_runs(session_id)))
+    async def list_session_runs(session_id: str, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.session_runs(session_id, get_desktop_user_id(request))
+            )
+        )
 
     @app.get("/api/v2/sessions/{session_id}/tree")
-    async def get_session_tree(session_id: str):
-        return _success(await _safe(runtime_service.session_tree(session_id)))
+    async def get_session_tree(session_id: str, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.session_tree(session_id, get_desktop_user_id(request))
+            )
+        )
 
     @app.get("/api/v2/sessions/{session_id}/tree/events")
-    async def subscribe_session_tree(session_id: str):
+    async def subscribe_session_tree(session_id: str, request: Request):
         return StreamingResponse(
-            runtime_service.subscribe_session_tree(session_id),
+            runtime_service.subscribe_session_tree(
+                session_id, get_desktop_user_id(request)
+            ),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/api/v2/sessions/{session_id}/commit-proposals")
-    async def list_session_commit_proposals(session_id: str):
+    async def list_session_commit_proposals(session_id: str, request: Request):
         return _success(
-            await _safe(runtime_service.session_commit_proposals(session_id))
+            await _safe(
+                runtime_service.session_commit_proposals(
+                    session_id, get_desktop_user_id(request)
+                )
+            )
         )
 
     @app.post("/api/v2/runs/{run_id}/commit-proposals")
@@ -754,6 +852,7 @@ def create_app(
     @app.get("/api/v2/sessions/{session_id}/events")
     async def list_session_events(
         session_id: str,
+        request: Request,
         after_sequence: int = 0,
         limit: int | None = None,
     ):
@@ -761,6 +860,7 @@ def create_app(
             await _safe(
                 runtime_service.session_events(
                     session_id,
+                    get_desktop_user_id(request),
                     after_sequence=after_sequence,
                     limit=limit,
                 )
@@ -768,25 +868,46 @@ def create_app(
         )
 
     @app.get("/api/v2/sessions/{session_id}/llm-requests")
-    async def list_llm_requests(session_id: str, run_id: str | None = None):
+    async def list_llm_requests(
+        session_id: str, request: Request, run_id: str | None = None
+    ):
         return _success(
-            await _safe(runtime_service.list_llm_requests(session_id, run_id=run_id))
+            await _safe(
+                runtime_service.list_llm_requests(
+                    session_id,
+                    get_desktop_user_id(request),
+                    run_id=run_id,
+                )
+            )
         )
 
     @app.get("/api/v2/sessions/{session_id}/runs/{run_id}/llm-requests/{request_id}")
-    async def get_llm_request(session_id: str, run_id: str, request_id: str):
+    async def get_llm_request(
+        session_id: str, run_id: str, request_id: str, request: Request
+    ):
         return _success(
-            await _safe(runtime_service.get_llm_request(session_id, run_id, request_id))
+            await _safe(
+                runtime_service.get_llm_request(
+                    session_id,
+                    run_id,
+                    request_id,
+                    get_desktop_user_id(request),
+                )
+            )
         )
 
     @app.get("/api/v2/runs/{run_id}")
-    async def get_run(run_id: str):
-        return _success(await _safe(runtime_service.snapshot(run_id)))
+    async def get_run(run_id: str, request: Request):
+        return _success(
+            await _safe(runtime_service.snapshot(run_id, get_desktop_user_id(request)))
+        )
 
     @app.get("/api/v2/runs/{run_id}/events")
-    async def subscribe_events(run_id: str, after_sequence: int = 0):
+    async def subscribe_events(run_id: str, request: Request, after_sequence: int = 0):
         return StreamingResponse(
-            runtime_service.subscribe_events(run_id, after_sequence),
+            runtime_service.subscribe_events(
+                run_id, after_sequence, get_desktop_user_id(request)
+            ),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )

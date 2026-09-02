@@ -30,6 +30,7 @@ from sagents.v2.model.wire import (
     provider_error,
     wire_json_value,
 )
+from sagents.v2.model.usage import canonical_token_usage
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -167,9 +168,6 @@ class AnthropicMessagesModelProvider:
         text = ""
         reasoning = ""
         finish_reason = "end_turn"
-        input_tokens = 0
-        output_tokens = 0
-        cached_tokens = 0
         provider_usage: dict[str, Any] = {}
         usage_reported = False
         tools: dict[int, dict[str, str]] = {}
@@ -191,8 +189,6 @@ class AnthropicMessagesModelProvider:
                             normalized_usage = wire_json_value(usage)
                             if isinstance(normalized_usage, dict):
                                 provider_usage.update(normalized_usage)
-                        input_tokens = int(usage.get("input_tokens") or 0)
-                        cached_tokens = int(usage.get("cache_read_input_tokens") or 0)
                     elif event_type == "content_block_start":
                         index = int(event.get("index") or 0)
                         block = event.get("content_block") or {}
@@ -268,12 +264,12 @@ class AnthropicMessagesModelProvider:
                             normalized_usage = wire_json_value(usage)
                             if isinstance(normalized_usage, dict):
                                 provider_usage.update(normalized_usage)
-                        output_tokens = int(usage.get("output_tokens") or output_tokens)
         except SageV2Error:
             raise
         except Exception as exc:
             raise provider_error(exc, response_started=response_started) from exc
 
+        usage = canonical_token_usage(provider_usage, input_mode="disjoint")
         calls = tuple(
             parse_tool_arguments(
                 value["arguments"], tool_call_id=value["id"], name=value["name"]
@@ -290,9 +286,10 @@ class AnthropicMessagesModelProvider:
                 finish_reason=finish_reason,
                 usage=UsageSummary(
                     reported=usage_reported,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cached_input_tokens=cached_tokens,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cached_input_tokens=usage.cached_input_tokens,
+                    reasoning_tokens=usage.reasoning_tokens,
                     models=(self.config.model,),
                     provider_usage=provider_usage,
                 ),

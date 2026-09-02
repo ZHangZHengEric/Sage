@@ -7,6 +7,7 @@ import hashlib
 
 import pytest
 
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.execution.sandbox import (
@@ -18,7 +19,12 @@ from sagents.v2.runtime.execution.sandbox import (
     ResolvedSandboxSpec,
     SandboxGrantIssuer,
 )
-from sagents.v2.tool import ToolCall, decorated_tool_definition, tool
+from sagents.v2.tool import (
+    ReconcileState,
+    ToolCall,
+    decorated_tool_definition,
+    tool,
+)
 from sagents.v2.tool.localization import localize_tool_definition
 from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.official import (
@@ -341,6 +347,91 @@ async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
         call("grep", {"pattern": "gamma", "path": "notes"}, index=4), CONTEXT
     )
     assert searched.content[0].value["matches"][0]["line"] == 2
+
+
+@pytest.mark.asyncio
+async def test_file_update_validation_failure_is_known_not_applied(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    (tmp_path / "notes.txt").write_text("alpha\nbeta\n")
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(
+            call(
+                "file_update",
+                {
+                    "file_path": "notes.txt",
+                    "operations": [
+                        {
+                            "update_mode": "search_replace",
+                            "search_pattern": "missing",
+                            "replacement": "gamma",
+                        }
+                    ],
+                },
+            ),
+            CONTEXT,
+        )
+
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+    assert (tmp_path / "notes.txt").read_text() == "alpha\nbeta\n"
+
+
+@pytest.mark.asyncio
+async def test_file_update_reconciles_from_workspace_after_result_loss(
+    tmp_path: Path,
+):
+    first = await plugin_for(tmp_path)
+    (tmp_path / "notes.txt").write_text("alpha\nbeta\n")
+    update = call(
+        "file_update",
+        {
+            "file_path": "notes.txt",
+            "operations": [
+                {
+                    "update_mode": "search_replace",
+                    "search_pattern": "beta",
+                    "replacement": "gamma",
+                }
+            ],
+        },
+    )
+    await first.executor.execute(update, CONTEXT)
+
+    # A fresh provider has no in-memory result cache, matching worker restart.
+    recovered = await plugin_for(tmp_path)
+    result = await recovered.executor.reconcile_call(update, CONTEXT)
+
+    assert result.state == ReconcileState.SUCCEEDED
+    assert result.result is not None
+    assert result.result.metadata["reconciled_from_workspace"] is True
+
+
+@pytest.mark.asyncio
+async def test_file_update_reconciliation_reports_known_failure_when_absent(
+    tmp_path: Path,
+):
+    plugin = await plugin_for(tmp_path)
+    (tmp_path / "notes.txt").write_text("alpha\nbeta\n")
+    update = call(
+        "file_update",
+        {
+            "file_path": "notes.txt",
+            "operations": [
+                {
+                    "update_mode": "search_replace",
+                    "search_pattern": "beta",
+                    "replacement": "gamma",
+                }
+            ],
+        },
+    )
+
+    result = await plugin.executor.reconcile_call(update, CONTEXT)
+
+    assert result.state == ReconcileState.FAILED
+    assert result.result is not None
+    assert result.result.error is not None
+    assert result.result.error.metadata["side_effect_state"] == "not_applied"
 
 
 @pytest.mark.asyncio

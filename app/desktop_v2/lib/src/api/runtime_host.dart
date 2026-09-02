@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'v2_api.dart';
 
@@ -24,10 +25,12 @@ class RuntimeHost {
     String? buildId,
     RuntimeProcessStarter startProcess = Process.start,
     RuntimePidKiller killPid = Process.killPid,
-    Duration terminationGracePeriod = const Duration(seconds: 2),
+    Duration terminationGracePeriod = const Duration(seconds: 10),
     int sidecarReadyAttempts = 20,
     Duration sidecarPollInterval = const Duration(milliseconds: 100),
-    RuntimePythonVersionReader readPythonVersion = _inspectPythonVersion,
+    this._leaseHeartbeatInterval = const Duration(seconds: 10),
+    String? clientId,
+    this.readPythonVersion = _inspectPythonVersion,
   }) : api = api ?? V2ApiClient(),
        _sidecarRegistryFileOverride = sidecarRegistryFile,
        _buildIdOverride = buildId,
@@ -36,27 +39,68 @@ class RuntimeHost {
        _shutdownGracePeriod = terminationGracePeriod,
        _registryReadyAttempts = sidecarReadyAttempts,
        _registryPollInterval = sidecarPollInterval,
-       _readPythonVersion = readPythonVersion;
+       _clientId = clientId ?? _newClientId();
 
   final V2ApiClient api;
   final File? _sidecarRegistryFileOverride;
   final String? _buildIdOverride;
   final RuntimeProcessStarter _processStarter;
   final RuntimePidKiller _pidKiller;
-  final RuntimePythonVersionReader _readPythonVersion;
+  final RuntimePythonVersionReader readPythonVersion;
   final Duration _shutdownGracePeriod;
   final int _registryReadyAttempts;
   final Duration _registryPollInterval;
+  final Duration _leaseHeartbeatInterval;
+  final String _clientId;
   Process? _process;
   int? _sidecarPid;
+  bool _ownsSidecar = false;
+  bool _leaseAttached = false;
+  Timer? _leaseHeartbeat;
+  Future<void>? _leaseRenewal;
+  Future<void>? _ensureReadyOperation;
+  bool _closed = false;
   final StringBuffer _sidecarStderr = StringBuffer();
 
-  Future<void> ensureReady() async {
+  Future<void> ensureReady() {
+    if (_closed) {
+      return Future<void>.error(
+        const SageApiException('Sage Desktop v2 runtime host is closed.'),
+      );
+    }
+    final active = _ensureReadyOperation;
+    if (active != null) return active;
+    late final Future<void> operation;
+    operation = _ensureReadyWithCleanup().whenComplete(() {
+      if (identical(_ensureReadyOperation, operation)) {
+        _ensureReadyOperation = null;
+      }
+    });
+    _ensureReadyOperation = operation;
+    return operation;
+  }
+
+  Future<void> _ensureReadyWithCleanup() async {
+    try {
+      await _ensureReadyOnce();
+    } on Object {
+      await _cleanupFailedOwnedStartup();
+      rethrow;
+    }
+  }
+
+  Future<void> _ensureReadyOnce() async {
     final root = _findRepositoryRoot();
     final buildId = _buildIdOverride ?? await _sourceBuildId(root);
     api.expectedBuildId = buildId;
-    if (await api.health()) return;
-    if (await _connectRegisteredSidecar(buildId)) return;
+    if (await api.health()) {
+      await _attachClientLease();
+      return;
+    }
+    if (await _connectRegisteredSidecar(buildId)) {
+      await _attachClientLease();
+      return;
+    }
     final executable = _pythonExecutable(root);
     await _requirePython312(executable);
     final dataRoot = _dataRootPath();
@@ -77,10 +121,12 @@ class RuntimeHost {
     );
     _process = process;
     _sidecarPid = process.pid;
+    _ownsSidecar = true;
     unawaited(
       process.exitCode.then((_) {
         if (identical(_process, process)) _process = null;
         if (_sidecarPid == process.pid) _sidecarPid = null;
+        _ownsSidecar = false;
       }),
     );
     unawaited(
@@ -96,7 +142,7 @@ class RuntimeHost {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .asBroadcastStream();
-    final readyPort = Completer<int>();
+    final readyEndpoint = Completer<(int, String)>();
     unawaited(
       stdoutLines
           .listen(
@@ -106,21 +152,28 @@ class RuntimeHost {
                 final port = value is Map
                     ? (value['port'] as num?)?.toInt()
                     : null;
-                if (port != null && port > 0 && !readyPort.isCompleted) {
-                  readyPort.complete(port);
+                final authToken = value is Map
+                    ? value['auth_token']?.toString()
+                    : null;
+                if (port != null &&
+                    port > 0 &&
+                    authToken != null &&
+                    authToken.isNotEmpty &&
+                    !readyEndpoint.isCompleted) {
+                  readyEndpoint.complete((port, authToken));
                 }
               } on FormatException {
                 // Existing Sage imports may log before the readiness envelope.
               }
             },
             onError: (Object error, StackTrace stackTrace) {
-              if (!readyPort.isCompleted) {
-                readyPort.completeError(error, stackTrace);
+              if (!readyEndpoint.isCompleted) {
+                readyEndpoint.completeError(error, stackTrace);
               }
             },
             onDone: () {
-              if (!readyPort.isCompleted) {
-                readyPort.completeError(
+              if (!readyEndpoint.isCompleted) {
+                readyEndpoint.completeError(
                   const SageApiException(
                     'Sage Desktop v2 sidecar exited before readiness.',
                   ),
@@ -130,22 +183,32 @@ class RuntimeHost {
           )
           .asFuture<void>(),
     );
-    late final int port;
+    late final (int, String) endpoint;
     try {
-      port = await readyPort.future.timeout(const Duration(seconds: 10));
+      endpoint = await readyEndpoint.future.timeout(
+        const Duration(seconds: 10),
+      );
     } on Object {
       await process.exitCode.timeout(
         const Duration(seconds: 1),
         onTimeout: () => -1,
       );
-      if (await _connectRegisteredSidecar(buildId)) return;
+      if (await _connectRegisteredSidecar(buildId)) {
+        await _attachClientLease();
+        return;
+      }
       throw _startupException(
         'Sage Desktop v2 sidecar exited before readiness.',
       );
     }
+    final (port, authToken) = endpoint;
     api.baseUri = Uri.parse('http://127.0.0.1:$port');
+    api.authToken = authToken;
     for (var attempt = 0; attempt < 120; attempt++) {
-      if (await api.health()) return;
+      if (await api.health()) {
+        await _attachClientLease();
+        return;
+      }
       if ((await process.exitCode.timeout(
             const Duration(milliseconds: 1),
             onTimeout: () => -1,
@@ -160,6 +223,28 @@ class RuntimeHost {
     throw const SageApiException(
       'Sage Desktop v2 sidecar did not become ready.',
     );
+  }
+
+  Future<void> _cleanupFailedOwnedStartup() async {
+    if (!_ownsSidecar || _leaseAttached) return;
+    final process = _process;
+    final pid = _sidecarPid;
+    _process = null;
+    _sidecarPid = null;
+    _ownsSidecar = false;
+    api.authToken = null;
+    if (process == null) return;
+    process.kill(ProcessSignal.sigterm);
+    await process.exitCode
+        .timeout(
+          _shutdownGracePeriod,
+          onTimeout: () {
+            process.kill(ProcessSignal.sigkill);
+            return -1;
+          },
+        )
+        .catchError((Object _) => -1);
+    await _deleteRegistryIfOwned(_sidecarRegistryFile(), pid ?? process.pid);
   }
 
   File _sidecarRegistryFile() {
@@ -189,14 +274,23 @@ class RuntimeHost {
       }
       final host = value['host']?.toString();
       final port = value['port'];
-      if (host == null || port is! num || port.toInt() <= 0) return false;
+      final authToken = value['auth_token']?.toString() ?? '';
+      if (host == null ||
+          !_isLoopbackHost(host) ||
+          port is! num ||
+          port.toInt() <= 0) {
+        return false;
+      }
       if (value['revision'] != sageSidecarRevision ||
-          value['build_id'] != buildId) {
+          value['build_id'] != buildId ||
+          authToken.isEmpty) {
         await _retireIncompatibleSidecar(value, registry, host, port.toInt());
         return false;
       }
       final previous = api.baseUri;
+      final previousAuthToken = api.authToken;
       api.baseUri = Uri.parse('http://$host:${port.toInt()}');
+      api.authToken = authToken;
       // Registry publication happens immediately before Uvicorn starts. A
       // concurrently launched desktop process must give that matching sidecar
       // a short readiness window instead of deleting valid discovery data.
@@ -204,11 +298,13 @@ class RuntimeHost {
         if (await api.health()) {
           final pid = value['pid'];
           _sidecarPid = pid is num && pid.toInt() > 0 ? pid.toInt() : null;
+          _ownsSidecar = false;
           return true;
         }
         await Future<void>.delayed(_registryPollInterval);
       }
       api.baseUri = previous;
+      api.authToken = previousAuthToken;
       await _retireRegisteredSidecar(value, registry);
     } on SageApiException {
       rethrow;
@@ -225,14 +321,44 @@ class RuntimeHost {
     String host,
     int port,
   ) async {
-    final previous = api.baseUri;
-    api.baseUri = Uri.parse('http://$host:$port');
-    try {
-      await _retireRegisteredSidecar(value, registry);
-    } finally {
-      api.baseUri = previous;
+    if (value['revision'] == sageSidecarRevision &&
+        _authTokenFrom(value).isNotEmpty &&
+        _isLoopbackHost(host)) {
+      final previous = api.baseUri;
+      final previousAuthToken = api.authToken;
+      api.baseUri = Uri.parse('http://$host:$port');
+      api.authToken = _authTokenFrom(value);
+      try {
+        final result = await api.shutdownRuntimeIfIdle();
+        if (result['shutdown_requested'] != true) {
+          throw SageApiException(
+            'A different Sage Desktop build is still serving '
+            '${result['active_clients'] ?? 'unknown'} active client(s).',
+          );
+        }
+        if (!await _waitForRegistryRemoval(registry, _shutdownGracePeriod)) {
+          throw const SageApiException(
+            'The previous Sage Desktop sidecar did not stop after an idle shutdown.',
+          );
+        }
+        return;
+      } on SageApiException {
+        rethrow;
+      } on Object {
+        // An unreachable endpoint is stale discovery and can be removed below.
+      } finally {
+        api.baseUri = previous;
+        api.authToken = previousAuthToken;
+      }
     }
+    await _retireRegisteredSidecar(value, registry);
   }
+
+  static String _authTokenFrom(Map<dynamic, dynamic> value) =>
+      value['auth_token']?.toString() ?? '';
+
+  static bool _isLoopbackHost(String host) =>
+      host == '127.0.0.1' || host == 'localhost';
 
   Future<void> _retireRegisteredSidecar(
     Map<dynamic, dynamic> value,
@@ -240,19 +366,10 @@ class RuntimeHost {
   ) async {
     final rawPid = value['pid'];
     final sidecarPid = rawPid is num ? rawPid.toInt() : 0;
-    if (sidecarPid > 0) {
-      final signaled = _pidKiller(sidecarPid, ProcessSignal.sigterm);
-      if (signaled &&
-          await _waitForRegistryRemoval(registry, _shutdownGracePeriod)) {
-        return;
-      }
-      if (signaled) {
-        _pidKiller(sidecarPid, ProcessSignal.sigkill);
-        // File locks are released by the OS when SIGKILL takes effect. Give the
-        // kernel a short scheduling window before provisioning a replacement.
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      }
-    }
+    // A registry can outlive its process and its PID can later be reused. Never
+    // signal a process that this RuntimeHost did not spawn and therefore cannot
+    // identify by its Process handle. The SessionStore writer lock remains the
+    // authoritative protection against accidentally provisioning two writers.
     await _deleteRegistryIfOwned(registry, sidecarPid);
   }
 
@@ -285,6 +402,41 @@ class RuntimeHost {
     return SageApiException(details.isEmpty ? summary : '$summary\n$details');
   }
 
+  Future<void> _attachClientLease() async {
+    if (_leaseAttached) return;
+    await api.attachRuntimeClient(_clientId);
+    _leaseAttached = true;
+    _leaseHeartbeat?.cancel();
+    _leaseHeartbeat = Timer.periodic(_leaseHeartbeatInterval, (_) {
+      _startLeaseRenewal();
+    });
+  }
+
+  void _startLeaseRenewal() {
+    if (_closed || !_leaseAttached || _leaseRenewal != null) return;
+    late final Future<void> renewal;
+    renewal = _renewClientLease().whenComplete(() {
+      if (identical(_leaseRenewal, renewal)) _leaseRenewal = null;
+    });
+    _leaseRenewal = renewal;
+  }
+
+  Future<void> _renewClientLease() async {
+    if (!_leaseAttached) return;
+    try {
+      await api.attachRuntimeClient(_clientId);
+    } on Object {
+      // A foreground API call will surface an unavailable sidecar. The lease
+      // expires server-side, so a crashed or disconnected client cannot pin it.
+    }
+  }
+
+  static String _newClientId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(24, (_) => random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
   Directory _findRepositoryRoot() {
     final candidates = <Directory>[
       Directory.current.absolute,
@@ -314,7 +466,7 @@ class RuntimeHost {
   }
 
   Future<void> _requirePython312(String executable) async {
-    final version = await _readPythonVersion(executable);
+    final version = await readPythonVersion(executable);
     if (version.$1 > 3 || (version.$1 == 3 && version.$2 >= 12)) {
       return;
     }
@@ -379,12 +531,51 @@ class RuntimeHost {
   }
 
   Future<void> stopOwnedSidecar() async {
-    api.close();
+    if (_closed) return;
+    _closed = true;
+    final startup = _ensureReadyOperation;
+    if (startup != null) {
+      try {
+        await startup;
+      } on Object {
+        // Startup already reports its own failure; shutdown still clears state.
+      }
+    }
+    _leaseHeartbeat?.cancel();
+    _leaseHeartbeat = null;
+    final renewal = _leaseRenewal;
+    if (renewal != null) await renewal;
+    Map<String, Object?>? release;
+    final hadLease = _leaseAttached;
+    if (hadLease) {
+      try {
+        release = await api.detachRuntimeClient(_clientId);
+      } on Object {
+        // The server-side TTL will release this lease if the sidecar is alive.
+      }
+    }
+    _leaseAttached = false;
     final process = _process;
     final sidecarPid = _sidecarPid;
+    final ownsSidecar = _ownsSidecar;
     _process = null;
     _sidecarPid = null;
+    _ownsSidecar = false;
+    api.close();
+    if (!ownsSidecar) return;
+    if (hadLease && release == null) return;
+    if (release != null && release['shutdown_requested'] != true) return;
     if (process != null) {
+      // The detach response means the sidecar has already scheduled its own
+      // Uvicorn shutdown. Let it drain requests and close durable stores before
+      // escalating to process signals.
+      final gracefulExit = await process.exitCode
+          .timeout(_shutdownGracePeriod, onTimeout: () => -1)
+          .catchError((Object _) => -1);
+      if (gracefulExit != -1) {
+        await _deleteRegistryIfOwned(_sidecarRegistryFile(), process.pid);
+        return;
+      }
       process.kill(ProcessSignal.sigterm);
       await process.exitCode
           .timeout(

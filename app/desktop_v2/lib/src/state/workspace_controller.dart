@@ -45,6 +45,8 @@ class WorkspaceController extends ChangeNotifier {
   static const _conversationsKey = 'sage.desktop_v2.conversations.v1';
   static const archivedConversationsKey =
       'sage.desktop_v2.archived_conversations.v1';
+  static const _largeStreamingDeltaThreshold = 24;
+  static const _streamingTextRevealInterval = Duration(milliseconds: 24);
 
   final V2ApiClient _api;
   final RuntimeHost? _runtimeHost;
@@ -59,8 +61,10 @@ class WorkspaceController extends ChangeNotifier {
   final Map<String, List<ComposerReference>> _composerReferences = {};
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _recoveringStreams = {};
+  final Set<ChatMessage> _pendingTextReveals = {};
   final Random _sessionIdRandom = Random.secure();
   Timer? _workspaceRefreshTimer;
+  Timer? _streamingTextRevealTimer;
   Future<void> _agentPatchTail = Future<void>.value();
   int _agentPatchRevision = 0;
   int _usageOverviewRevision = 0;
@@ -532,6 +536,28 @@ class WorkspaceController extends ChangeNotifier {
           text: selectedText,
         ),
       );
+    notifyListeners();
+  }
+
+  void referenceMessage(
+    ChatMessage message,
+    String selection, {
+    required String label,
+  }) {
+    final selectedText = selection.trim();
+    if (selectedText.isEmpty) return;
+    final references = _composerReferences.putIfAbsent(
+      selectedConversationId,
+      () => [],
+    );
+    references.add(
+      ComposerReference(
+        fileName: label,
+        path: 'conversation://${message.id}',
+        text: selectedText,
+        citationLabel: label,
+      ),
+    );
     notifyListeners();
   }
 
@@ -1965,21 +1991,83 @@ class WorkspaceController extends ChangeNotifier {
         .where((value) => value.id == id)
         .firstOrNull;
     if (existing == null) {
-      conversation.messages.add(
-        ChatMessage(
-          id: id,
-          role: 'assistant',
-          text: text,
-          streaming: true,
-          processOnly: true,
-          sequence: (event['run_sequence'] as num?)?.toInt() ?? 0,
-        ),
+      final message = ChatMessage(
+        id: id,
+        role: 'assistant',
+        text: text,
+        streaming: true,
+        processOnly: true,
+        sequence: (event['run_sequence'] as num?)?.toInt() ?? 0,
+      );
+      conversation.messages.add(message);
+      _queueTextReveal(
+        message,
+        revealPrefix: text.runes.length > _largeStreamingDeltaThreshold,
       );
     } else {
+      final deltaIsLarge = text.runes.length > _largeStreamingDeltaThreshold;
       existing.text += text;
+      if (!_pendingTextReveals.contains(existing) && !deltaIsLarge) {
+        existing.renderedText = existing.text;
+      }
+      // Keep even an already-rendered small delta in the queue for one frame.
+      // If more deltas arrive in the same frame, they will be drained smoothly
+      // instead of being coalesced into one visible jump.
+      _queueTextReveal(existing);
       existing.streaming = true;
       existing.processOnly = true;
     }
+  }
+
+  void _queueTextReveal(ChatMessage message, {bool revealPrefix = false}) {
+    if (revealPrefix) {
+      final runes = message.text.runes.toList(growable: false);
+      message.renderedText = String.fromCharCodes(
+        runes.take(min(2, runes.length)),
+      );
+    }
+    _pendingTextReveals.add(message);
+    _streamingTextRevealTimer ??= Timer.periodic(
+      _streamingTextRevealInterval,
+      (_) => _revealPendingText(),
+    );
+  }
+
+  void _revealPendingText() {
+    if (_disposed) return;
+    var changed = false;
+    for (final message in List<ChatMessage>.of(_pendingTextReveals)) {
+      if (message.renderedText == message.text) {
+        _pendingTextReveals.remove(message);
+        continue;
+      }
+      if (!message.text.startsWith(message.renderedText)) {
+        message.renderedText = message.text;
+        _pendingTextReveals.remove(message);
+        changed = true;
+        continue;
+      }
+      final targetRunes = message.text.runes.toList(growable: false);
+      final visibleCount = message.renderedText.runes.length;
+      final remaining = targetRunes.length - visibleCount;
+      final step = switch (remaining) {
+        > 240 => 8,
+        > 120 => 4,
+        > 48 => 2,
+        _ => 1,
+      };
+      final nextCount = min(targetRunes.length, visibleCount + step);
+      message.renderedText = String.fromCharCodes(targetRunes.take(nextCount));
+      if (nextCount == targetRunes.length) {
+        _pendingTextReveals.remove(message);
+      }
+      changed = true;
+    }
+    if (_pendingTextReveals.isEmpty) {
+      _streamingTextRevealTimer?.cancel();
+      _streamingTextRevealTimer = null;
+    }
+    if (changed && !_disposed) notifyListeners();
   }
 
   void _completeMessage(
@@ -2011,7 +2099,17 @@ class WorkspaceController extends ChangeNotifier {
         ),
       );
     } else {
-      existing.text = text.isEmpty ? existing.text : text;
+      if (text.isNotEmpty) {
+        existing.text = text;
+        if (_pendingTextReveals.contains(existing)) {
+          if (!text.startsWith(existing.renderedText)) {
+            existing.renderedText = text;
+            _pendingTextReveals.remove(existing);
+          }
+        } else {
+          existing.renderedText = text;
+        }
+      }
       existing.streaming = false;
       existing.processOnly = true;
     }
@@ -2461,20 +2559,78 @@ class WorkspaceController extends ChangeNotifier {
     final runId = run['run_id']?.toString() ?? child.runId;
     if (runId.isEmpty) return;
     final promptId = 'sub-task:${child.sessionId}:$runId';
-    if (prompt.isNotEmpty &&
-        !child.messages.any((message) => message.id == promptId)) {
-      child.messages.add(
-        ChatMessage(
-          id: promptId,
-          role: 'user',
-          text: prompt,
-          createdAt: DateTime.tryParse(run['created_at']?.toString() ?? ''),
-        ),
-      );
-    }
     final startedAt =
         DateTime.tryParse(run['created_at']?.toString() ?? '') ??
         child.createdAt;
+    if (prompt.isNotEmpty) {
+      final legacyPromptId = 'sub-task:${child.sessionId}';
+      final runPanelAnchors = {
+        for (final panel in child.processPanels)
+          if (panel.runId == runId) panel.anchorMessageId,
+      };
+      final candidateIndexes = <int>[];
+      for (var index = 0; index < child.messages.length; index++) {
+        final message = child.messages[index];
+        if (message.role != 'user') continue;
+        if (message.id == promptId ||
+            (message.id == legacyPromptId &&
+                (message.text.trim() == prompt ||
+                    runPanelAnchors.contains(message.id))) ||
+            (message.text.trim() == prompt &&
+                runPanelAnchors.contains(message.id))) {
+          candidateIndexes.add(index);
+        }
+      }
+
+      if (candidateIndexes.isEmpty) {
+        child.messages.add(
+          ChatMessage(
+            id: promptId,
+            role: 'user',
+            text: prompt,
+            createdAt: startedAt,
+          ),
+        );
+      } else {
+        final preferredIndex = candidateIndexes.firstWhere(
+          (index) => runPanelAnchors.contains(child.messages[index].id),
+          orElse: () => candidateIndexes.first,
+        );
+        final preferred = child.messages[preferredIndex];
+        final candidateIds = {
+          for (final index in candidateIndexes) child.messages[index].id,
+        };
+        child.messages[preferredIndex] = ChatMessage(
+          id: promptId,
+          role: 'user',
+          text: prompt,
+          streaming: preferred.streaming,
+          processOnly: preferred.processOnly,
+          sequence: preferred.sequence,
+          createdAt: startedAt,
+        );
+        for (final index in candidateIndexes.reversed) {
+          if (index != preferredIndex) child.messages.removeAt(index);
+        }
+        for (var index = 0; index < child.processPanels.length; index++) {
+          final panel = child.processPanels[index];
+          if (panel.runId != runId &&
+              !candidateIds.contains(panel.anchorMessageId)) {
+            continue;
+          }
+          if (panel.anchorMessageId == promptId) continue;
+          child.processPanels[index] = RuntimeProcessPanel(
+            id: panel.id,
+            anchorMessageId: promptId,
+            runId: panel.runId,
+            startedAt: panel.startedAt,
+            completedAt: panel.completedAt,
+            running: panel.running,
+            activities: panel.activities,
+          );
+        }
+      }
+    }
     final completedAt = DateTime.tryParse(run['updated_at']?.toString() ?? '');
     final terminal = _isTerminal(status);
     var panel = child.processPanels
@@ -2570,6 +2726,8 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _workspaceRefreshTimer?.cancel();
+    _streamingTextRevealTimer?.cancel();
+    _pendingTextReveals.clear();
     for (final subscription in _streams.values) {
       unawaited(subscription.cancel());
     }

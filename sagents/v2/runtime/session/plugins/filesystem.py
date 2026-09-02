@@ -30,11 +30,15 @@ from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
+    FILESYSTEM_SESSION_STORE_FORMAT_V2,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
     SessionMutationEnvelope,
+    SessionMutationEnvelopeV3,
     SessionAggregateSnapshotV2,
     SessionStateDeltaMutation,
     SessionSnapshotEnvelope,
+    SessionSnapshotEnvelopeV2,
+    SessionSnapshotEnvelopeV3,
 )
 
 try:
@@ -95,10 +99,13 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         self._storage_locks: dict[str, asyncio.Lock] = {}
         self._load_lock = asyncio.Lock()
         self._closed = False
+        self._opened_format = self.format_version
+        self._store_metadata: dict[str, Any] = {}
         self._prepare_root()
         self._writer_handle = (self.control_root / ".writer.lock").open("a+b")
         self._acquire_writer_lock()
         try:
+            self._upgrade_store_metadata()
             self._recover_transactions()
             self._normalize_existing_session_locations()
             super().__init__(**kwargs)
@@ -307,6 +314,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         return await super().get_session(session_id)
 
+    async def authorize_session_actor(self, session_id, context):
+        await self._ensure_session_loaded(session_id)
+        return await super().authorize_session_actor(session_id, context)
+
     async def delete_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
@@ -473,23 +484,38 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     f"store metadata cannot be read: {exc}",
                 ) from exc
             stored_format = metadata.get("format")
-            if stored_format != self.format_version:
-                if stored_format == FILESYSTEM_SESSION_STORE_FORMAT_V3:
-                    raise self._error(
-                        "session_store.migration_required",
-                        ErrorCategory.UNSUPPORTED_SCHEMA,
-                        "SessionStore v3 requires explicit migration: "
-                        f"sage v2 migrate --runtime-root {self.root}",
-                    )
+            if stored_format not in {
+                FILESYSTEM_SESSION_STORE_FORMAT_V2,
+                FILESYSTEM_SESSION_STORE_FORMAT_V3,
+                self.format_version,
+            }:
                 raise self._error(
                     "session_store.unsupported_format",
                     ErrorCategory.UNSUPPORTED_SCHEMA,
                     f"unsupported SessionStore format {stored_format!r}",
                 )
+            self._opened_format = str(stored_format)
+            self._store_metadata = metadata
             return
+        self._store_metadata = {
+            "format": self.format_version,
+            "store_id": new_id("store"),
+        }
+        self._atomic_json_write(metadata_path, self._store_metadata)
+
+    def _upgrade_store_metadata(self) -> None:
+        """Advertise the current writer while retaining legacy snapshot readers."""
+
+        if self._opened_format == self.format_version:
+            return
+        self._store_metadata = {
+            **self._store_metadata,
+            "format": self.format_version,
+            "read_compatible_from": FILESYSTEM_SESSION_STORE_FORMAT_V2,
+        }
         self._atomic_json_write(
-            metadata_path,
-            {"format": self.format_version, "store_id": new_id("store")},
+            self.control_root / "store.json",
+            self._store_metadata,
         )
 
     def _normalize_existing_session_locations(self) -> None:
@@ -1158,6 +1184,11 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         self._loaded_session_ids.add(session_id)
         self._persisted_states[session_id] = deepcopy(aggregate_state)
         self._journal_commits[session_id] = journal_count
+        if self._snapshot_format(snapshot) != self.format_version:
+            # A legacy aggregate is safe to read but must never receive a v4
+            # delta. Its first mutation atomically rewrites a v4 snapshot and
+            # resets the journal before normal incremental writes resume.
+            self._storage_recovery_required.add(session_id)
         for entry in aggregate_state.get("start_idempotency", ()):
             self._write_start_idempotency(entry, session_id)
         self._refresh_session_views(session_id, aggregate_state)
@@ -1186,14 +1217,18 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 "session_store.idempotency_corrupt",
                 f"idempotency lookup {path} cannot be read: {exc}",
             ) from exc
-        if value.get("format") != self.format_version:
+        if value.get("format") not in {
+            FILESYSTEM_SESSION_STORE_FORMAT_V2,
+            FILESYSTEM_SESSION_STORE_FORMAT_V3,
+            self.format_version,
+        }:
             raise self._corrupt(
                 "session_store.idempotency_format",
                 f"idempotency lookup {path} uses an unsupported format",
             )
         return value
 
-    def _read_snapshot(self, snapshot: Path) -> SessionSnapshotEnvelope:
+    def _read_snapshot_payload(self, snapshot: Path) -> dict[str, Any]:
         try:
             payload = json.loads(snapshot.read_bytes())
         except Exception as exc:
@@ -1213,22 +1248,46 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 "session_store.hash_mismatch",
                 f"snapshot {snapshot} checksum mismatch",
             )
+        return payload
+
+    def _snapshot_format(self, snapshot: Path) -> str | None:
         try:
-            envelope = SessionSnapshotEnvelope.model_validate(payload)
+            payload = json.loads(snapshot.read_bytes())
+        except Exception:
+            return None
+        return str(payload.get("format")) if isinstance(payload, dict) else None
+
+    def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
+        payload = self._read_snapshot_payload(snapshot)
+        snapshot_format = payload.get("format")
+        try:
+            if snapshot_format == self.format_version:
+                envelope = SessionSnapshotEnvelope.model_validate(payload)
+                state = envelope.state.model_dump(mode="json")
+            elif snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V3:
+                envelope = SessionSnapshotEnvelopeV3.model_validate(payload)
+                state = deepcopy(envelope.state)
+            elif snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V2:
+                envelope = SessionSnapshotEnvelopeV2.model_validate(payload)
+                state = deepcopy(envelope.state)
+            else:
+                raise ValueError(f"unsupported snapshot format {snapshot_format!r}")
         except Exception as exc:
             raise self._corrupt(
                 "session_store.corrupt_snapshot",
                 f"snapshot {snapshot} contains an invalid schema: {exc}",
             ) from exc
-        return envelope
-
-    def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
-        envelope = self._read_snapshot(snapshot)
-        state = envelope.state.model_dump(mode="json")
         revision = envelope.current_session_revision
         journal = snapshot.parent / "journal.jsonl"
+        if snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V2:
+            if journal.exists() and journal.read_bytes().strip():
+                raise self._corrupt(
+                    "session_store.journal_corrupt",
+                    f"v2 snapshot {snapshot} unexpectedly has a journal",
+                )
+            return self._normalize_snapshot_state(state, snapshot, revision), 0
         if not journal.exists():
-            return state, 0
+            return self._normalize_snapshot_state(state, snapshot, revision), 0
         try:
             encoded = journal.read_bytes()
         except OSError as exc:
@@ -1270,7 +1329,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     f"journal {journal} record {index + 1} checksum mismatch",
                 )
             try:
-                mutation = SessionMutationEnvelope.model_validate(payload)
+                if snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V3:
+                    mutation = SessionMutationEnvelopeV3.model_validate(payload)
+                    delta = mutation.delta
+                else:
+                    current = SessionMutationEnvelope.model_validate(payload)
+                    mutation = current
+                    delta = current.mutation.model_dump(
+                        mode="json", exclude={"kind"}
+                    )
             except Exception as exc:
                 raise self._corrupt(
                     "session_store.journal_corrupt",
@@ -1283,9 +1350,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     "session_store.revision_gap",
                     f"journal {journal} is not revision-contiguous at record {index + 1}",
                 )
-            self._apply_state_delta(
-                state, mutation.mutation.model_dump(mode="json", exclude={"kind"})
-            )
+            self._apply_state_delta(state, delta)
             applied_revision = int(state["sessions"][0]["revision"])
             if applied_revision != mutation.current_session_revision:
                 raise self._corrupt(
@@ -1293,7 +1358,87 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     f"journal {journal} record {index + 1} produced revision {applied_revision}",
                 )
             revision = mutation.current_session_revision
-        return state, complete_count
+        return self._normalize_snapshot_state(state, snapshot, revision), complete_count
+
+    def _normalize_snapshot_state(
+        self,
+        state: dict[str, Any],
+        snapshot: Path,
+        revision: int,
+    ) -> dict[str, Any]:
+        normalized = deepcopy(state)
+        if normalized.get("session_format_version") == "sage.session-aggregate/v1":
+            normalized["session_format_version"] = "sage.session-aggregate/v2"
+        self._restore_legacy_principal_types(normalized)
+        try:
+            typed = SessionAggregateSnapshotV2.model_validate(normalized)
+        except Exception as exc:
+            raise self._corrupt(
+                "session_store.corrupt_snapshot",
+                f"snapshot {snapshot} contains an invalid aggregate: {exc}",
+            ) from exc
+        value = typed.model_dump(mode="json")
+        rows = value.get("sessions", ())
+        if len(rows) != 1 or int(rows[0]["revision"]) != revision:
+            raise self._corrupt(
+                "session_store.revision_mismatch",
+                f"snapshot {snapshot} revision does not match its aggregate",
+            )
+        return value
+
+    @staticmethod
+    def _restore_legacy_principal_types(state: dict[str, Any]) -> None:
+        """Recover v2/v3 idempotency scope only from matching durable actors."""
+
+        run_rows = state.get("runs", ())
+        event_rows = state.get("run_events", {})
+        session_rows = state.get("sessions", ())
+        start_rows = state.get("start_idempotency", ())
+        if (
+            not isinstance(run_rows, (list, tuple))
+            or not isinstance(event_rows, dict)
+            or not isinstance(session_rows, (list, tuple))
+            or not isinstance(start_rows, (list, tuple))
+        ):
+            return
+        runs = {
+            str(value.get("run_id")): value
+            for value in run_rows
+            if isinstance(value, dict)
+        }
+        events = event_rows
+        session_owners = [
+            value.get("owner")
+            for value in session_rows
+            if isinstance(value, dict) and value.get("owner") is not None
+        ]
+        for entry in start_rows:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("principal_type") is not None:
+                continue
+            candidates: list[dict[str, Any]] = list(session_owners)
+            run_id = str(entry.get("run_id", ""))
+            run = runs.get(run_id)
+            if run is not None:
+                context = run.get("request_context")
+                if isinstance(context, dict) and isinstance(context.get("actor"), dict):
+                    candidates.append(context["actor"])
+            candidates.extend(
+                value.get("actor")
+                for value in events.get(run_id, ())
+                if isinstance(value.get("actor"), dict)
+            )
+            matching_types = {
+                str(actor["principal_type"])
+                for actor in candidates
+                if isinstance(actor, dict)
+                and actor.get("principal_type") is not None
+                and actor.get("tenant_id") == entry.get("tenant_id")
+                and actor.get("principal_id") == entry.get("principal_id")
+            }
+            if len(matching_types) == 1:
+                entry["principal_type"] = matching_types.pop()
 
     def _write_start_idempotency(self, entry: dict[str, Any], session_id: str) -> None:
         payload = {

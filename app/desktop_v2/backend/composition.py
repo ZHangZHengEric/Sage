@@ -88,5 +88,5 @@ async def build_desktop_application(
     if owns_bindings:
         # Application closes owned resources in reverse order. The dispatcher
         # must settle Run drivers before their Host binding provider closes.
-        application._owned_resources.insert(0, provider)
+        await application.adopt_resource(provider, close_after_existing=True)
     return application

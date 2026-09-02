@@ -26,15 +26,17 @@ def test_sidecar_registry_is_private_and_removed_only_by_its_owner(
         host="127.0.0.1",
         port=54321,
         build_id="test-build",
+        auth_token="test-capability",
     )
 
     assert json.loads(registry.read_text(encoding="utf-8")) == {
         "protocol": "sage.runtime/v2",
-        "revision": 3,
+        "revision": 5,
         "build_id": "test-build",
         "host": "127.0.0.1",
         "port": 54321,
         "pid": os.getpid(),
+        "auth_token": "test-capability",
     }
     assert registry.stat().st_mode & 0o777 == 0o600
 

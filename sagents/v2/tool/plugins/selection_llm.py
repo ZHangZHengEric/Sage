@@ -2,34 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from sagents.v2.contracts.common import new_id
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.i18n import tr
 from sagents.v2.model.contracts import ModelMessage, ModelRequest
+from sagents.v2.model.provider import auxiliary_model_timeout_error
 from sagents.v2.tool.selection import (
     BaseToolSelectionPolicy,
     ToolSelectionConfig,
     ToolSelectionPrepareContext,
     ToolSelectionRequest,
     ToolSelectionResult,
-    _bm25_ranked_names,
     _compact_history,
     _parse_llm_tool_names,
-    _recent_text,
     _recent_tool_names,
 )
 
 
 class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
-    """Use the host-provided fast model once per Run with bounded fallback."""
+    """Use the host-provided fast model once per Run."""
 
     plugin_id = "sage.tool-selection.llm"
     name = "LLM Tool selection"
     description = (
-        "Uses a fast model and recent context to select relevant Tools; "
-        "falls back locally on failure."
+        "Uses a fast model and recent context to select relevant Tools."
     )
 
     def __init__(self, config: ToolSelectionConfig | dict | None = None) -> None:
@@ -39,13 +39,20 @@ class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
 
     async def prepare(self, context: ToolSelectionPrepareContext) -> None:
         self._remember_catalog(context.run_id, context.tools)
-        fallback = _bm25_ranked_names(
-            context.tools, _recent_text(context.messages)
-        )
-        if context.model is None or not context.tools:
-            self._selected_by_run[context.run_id] = fallback
-            self._prepared_strategy_by_run[context.run_id] = "llm.fallback.bm25"
+        if not context.tools:
+            self._selected_by_run[context.run_id] = ()
+            self._prepared_strategy_by_run[context.run_id] = "llm"
             return
+        if context.model is None:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool_selection.model_missing",
+                    category=ErrorCategory.VALIDATION,
+                    message="LLM Tool selection requires a configured model",
+                    safe_to_resume=True,
+                    metadata={"plugin_id": self.plugin_id},
+                )
+            )
         request = ModelRequest(
             request_id=new_id("tool_selection"),
             run_id=context.run_id,
@@ -97,37 +104,58 @@ class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
             tool_choice="none",
             metadata={"purpose": "tool_selection"},
         )
+        response = None
         try:
-            response = None
-            stream = context.model.stream(request)
-            try:
-                async for event in stream:
-                    if event.response is not None:
-                        response = event.response
-            finally:
-                closer = getattr(stream, "aclose", None)
-                if closer is not None:
-                    await closer()
+            async with asyncio.timeout(self.config.model_timeout_seconds):
+                stream = context.model.stream(request)
+                try:
+                    async for event in stream:
+                        if event.response is not None:
+                            response = event.response
+                finally:
+                    closer = getattr(stream, "aclose", None)
+                    if closer is not None:
+                        await closer()
+        except TimeoutError as exc:
+            raise auxiliary_model_timeout_error(
+                code="tool_selection.model_timeout",
+                operation="LLM Tool selection",
+                timeout_seconds=self.config.model_timeout_seconds,
+                plugin_id=self.plugin_id,
+            ) from exc
+        try:
             names = _parse_llm_tool_names(
                 response.text if response else "", context.tools
             )
-            if not names:
-                raise ValueError("model returned no valid Tool names")
-            self._selected_by_run[context.run_id] = names
-            self._prepared_strategy_by_run[context.run_id] = "llm"
-        except Exception:
-            self._selected_by_run[context.run_id] = fallback
-            self._prepared_strategy_by_run[context.run_id] = "llm.fallback.bm25"
+        except (TypeError, ValueError):
+            names = ()
+        if not names:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool_selection.model_output_invalid",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="LLM Tool selection returned no valid Tool names",
+                    safe_to_resume=True,
+                    metadata={"plugin_id": self.plugin_id},
+                )
+            )
+        self._selected_by_run[context.run_id] = names
+        self._prepared_strategy_by_run[context.run_id] = "llm"
 
     def select(self, request: ToolSelectionRequest) -> ToolSelectionResult:
         self._remember_catalog(request.run_id, request.tools)
         prepared = self._selected_by_run.get(request.run_id)
         strategy = self._prepared_strategy_by_run.get(request.run_id)
         if prepared is None:
-            prepared = _bm25_ranked_names(
-                request.tools, _recent_text(request.messages)
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool_selection.not_prepared",
+                    category=ErrorCategory.INTERNAL,
+                    message="LLM Tool selection was used before prepare completed",
+                    safe_to_resume=True,
+                    metadata={"plugin_id": self.plugin_id},
+                )
             )
-            strategy = "llm.fallback.bm25"
         preferred = tuple(
             dict.fromkeys((*_recent_tool_names(request.messages), *prepared))
         )

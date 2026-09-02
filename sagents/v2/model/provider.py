@@ -10,6 +10,36 @@ from sagents.v2.model.contracts import (
     ModelRequest,
     ModelStreamEvent,
 )
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
+
+# Auxiliary classification/ranking calls should never inherit the main model's
+# long request timeout. The selected plugin still owns failure semantics.
+DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS = 6.0
+
+
+def auxiliary_model_timeout_error(
+    *,
+    code: str,
+    operation: str,
+    timeout_seconds: float,
+    plugin_id: str,
+) -> SageV2Error:
+    """Create the typed error emitted by strict auxiliary model plugins."""
+
+    return SageV2Error(
+        RuntimeErrorInfo(
+            code=code,
+            category=ErrorCategory.PROVIDER_TRANSIENT,
+            message=f"{operation} timed out after {timeout_seconds:g} seconds",
+            retryable=True,
+            safe_to_resume=True,
+            metadata={
+                "plugin_id": plugin_id,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+    )
 
 
 class ModelProvider(Protocol):

@@ -4,8 +4,10 @@ import argparse
 import ipaddress
 import json
 import os
+import secrets
 import socket
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -27,7 +29,7 @@ _ServiceT = TypeVar("_ServiceT")
 
 
 def _require_loopback_host(host: str) -> str:
-    """Keep the unauthenticated Desktop control plane local to this machine."""
+    """Keep the authenticated Desktop control plane local to this machine."""
 
     candidate = str(host).strip()
     if candidate.lower() == "localhost":
@@ -55,25 +57,36 @@ def _publish_sidecar(
     host: str,
     port: int,
     build_id: str,
+    auth_token: str,
 ) -> Path:
     path = _sidecar_registry_path(runtime_root)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(
-            {
-                "protocol": SIDECAR_PROTOCOL,
-                "revision": SIDECAR_REVISION,
-                "build_id": build_id,
-                "host": host,
-                "port": port,
-                "pid": os.getpid(),
-            },
-            separators=(",", ":"),
-        ),
-        encoding="utf-8",
+    payload = json.dumps(
+        {
+            "protocol": SIDECAR_PROTOCOL,
+            "revision": SIDECAR_REVISION,
+            "build_id": build_id,
+            "host": host,
+            "port": port,
+            "pid": os.getpid(),
+            "auth_token": auth_token,
+        },
+        separators=(",", ":"),
     )
-    temporary.chmod(0o600)
-    temporary.replace(path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        dir=runtime_root,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     return path
 
 
@@ -140,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     from app.desktop_v2.backend.app import create_app
     from app.desktop_v2.backend.service import DesktopV2Service
 
+    auth_token = secrets.token_urlsafe(32)
+
     # Build the application before advertising readiness. In particular, this
     # acquires the SessionStore writer lock, so a losing sidecar never publishes
     # an endpoint that will immediately disappear.
@@ -150,11 +165,21 @@ def main(argv: list[str] | None = None) -> int:
                 log_sink=log_sink,
                 log_plugin_id=log_plugin_id,
                 sidecar_port=actual_port,
+                sidecar_auth_token=auth_token,
             )
         )
+        server_holder: dict[str, uvicorn.Server] = {}
+
+        def request_shutdown() -> None:
+            server = server_holder.get("server")
+            if server is not None:
+                server.should_exit = True
+
         application = create_app(
             build_id=args.build_id,
             service=service,
+            auth_token=auth_token,
+            shutdown_requested=request_shutdown,
         )
     except Exception as exc:
         runtime_logger.exception(
@@ -168,8 +193,12 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         port=actual_port,
         build_id=args.build_id,
+        auth_token=auth_token,
     )
-    print(json.dumps({"host": args.host, "port": actual_port}), flush=True)
+    print(
+        json.dumps({"host": args.host, "port": actual_port, "auth_token": auth_token}),
+        flush=True,
+    )
     runtime_logger.info(
         "sidecar.ready",
         "Sage Desktop v2 sidecar is ready",
@@ -186,8 +215,10 @@ def main(argv: list[str] | None = None) -> int:
         log_level="info",
         timeout_keep_alive=65,
     )
+    server = uvicorn.Server(config)
+    server_holder["server"] = server
     try:
-        uvicorn.Server(config).run(sockets=[listener])
+        server.run(sockets=[listener])
     finally:
         runtime_logger.info(
             "sidecar.stopped",

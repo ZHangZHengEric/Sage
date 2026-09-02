@@ -1,6 +1,9 @@
+import asyncio
+
 import pytest
 
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
@@ -42,6 +45,16 @@ TOOLS = (
     definition("calendar_search", "search calendar events"),
     definition("tool_expand_tools", "activate more tools"),
 )
+
+
+class SlowModel:
+    def stream(self, request):
+        async def events():
+            await asyncio.sleep(60)
+            if False:
+                yield None
+
+        return events()
 
 
 def request(run_id="run_1", *, messages=()) -> ToolSelectionRequest:
@@ -127,20 +140,40 @@ async def test_llm_policy_prepares_once_and_uses_exact_valid_names():
 
 
 @pytest.mark.asyncio
-async def test_llm_policy_falls_back_to_bm25_when_output_is_invalid():
+async def test_llm_policy_reports_invalid_model_output():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed_json("not json"),)),)
     )
     policy = LLMToolSelectionPolicy({"max_visible_tools": 2})
     messages = user_message("send an email")
-    await policy.prepare(
-        ToolSelectionPrepareContext(
-            run_id="run_1", tools=TOOLS, messages=messages, model=model
+    with pytest.raises(SageV2Error) as caught:
+        await policy.prepare(
+            ToolSelectionPrepareContext(
+                run_id="run_1", tools=TOOLS, messages=messages, model=model
+            )
         )
+
+    assert caught.value.info.code == "tool_selection.model_output_invalid"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_PERMANENT
+
+
+@pytest.mark.asyncio
+async def test_llm_policy_reports_timeout_without_changing_strategy():
+    policy = LLMToolSelectionPolicy(
+        {"max_visible_tools": 2, "model_timeout_seconds": 0.01}
     )
-    result = policy.select(request(messages=messages))
-    assert result.strategy == "llm.fallback.bm25"
-    assert "send_email" in {tool.name for tool in result.tools}
+    messages = user_message("send an email")
+
+    with pytest.raises(SageV2Error) as caught:
+        await policy.prepare(
+            ToolSelectionPrepareContext(
+                run_id="run_1", tools=TOOLS, messages=messages, model=SlowModel()
+            )
+        )
+
+    assert caught.value.info.code == "tool_selection.model_timeout"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
+    assert caught.value.info.metadata["plugin_id"] == "sage.tool-selection.llm"
 
 
 def test_legacy_expert_parameters_are_removed_during_migration():
@@ -152,7 +185,10 @@ def test_legacy_expert_parameters_are_removed_during_migration():
             "max_tool_schema_tokens": 1234,
         }
     )
-    assert config.model_dump() == {"max_visible_tools": 7}
+    assert config.model_dump() == {
+        "max_visible_tools": 7,
+        "model_timeout_seconds": 6.0,
+    }
 
 
 def test_expansion_is_bounded_and_restorable():

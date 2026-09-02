@@ -31,7 +31,7 @@ flutter pub get
 flutter run -d macos
 ```
 
-Flutter 默认启动随应用托管的本机 Python sidecar，并与 Yiii 一样使用 `--port 0` 让操作系统分配临时端口。Python 通过 stdout readiness envelope 把实际地址交给 Flutter；端口只绑定 `127.0.0.1`，用户无需配置。也可从命令行直接启动开发服务：
+Flutter 默认启动随应用托管的本机 Python sidecar，并与 Yiii 一样使用 `--port 0` 让操作系统分配临时端口。Python 通过 stdout readiness envelope 把实际地址和每次启动随机生成的 capability token 交给 Flutter；注册文件通过权限为 `0600` 的随机临时文件原子发布，客户端对包括健康检查在内的每个请求发送 bearer token。端口同时只绑定 `127.0.0.1`，用户无需配置。多个 Desktop 实例复用同一 sidecar 时各自持有带心跳的客户端租约，最后一个实例退出或崩溃租约过期后 sidecar 才会优雅关闭；若宿主在首次挂接前崩溃，未认领的 sidecar 也会在租约窗口后自清理。构建升级只会请求空闲 sidecar 退出，不会中断仍有活跃客户端的旧构建。也可从命令行直接启动开发服务：
 
 ```bash
 .venv/bin/python -m app.desktop_v2.backend.main
@@ -82,7 +82,7 @@ Desktop v2 只创建自己的数据布局：`~/sage/runtime/sessions` 为每个 
 - 运行组件 inventory 来自 SAgents 的真实 ExtensionRegistration；只注册元数据但不能创建实例的组件不会展示。插件选择按组件声明立即生效、在下一次装配生效或在重启后生效。
 - 模型页可为每条 route 选择 `openai-chat-completions`、`openai-responses` 或 `anthropic-messages`，route 配置校验成功后保存；下一次 Run 根据这项配置创建对应 Provider。
 - 启用的 MCP 连接会在 Tool catalog 和每个 Run 的组合阶段真实发现工具，并以 `mcp_<server>_<tool>` 命名；发现失败会明确报错，不会显示为已启用却静默缺席。
-- Desktop catalog 以 `(user_id, id)` 作为 Agent/模型身份边界；不同用户复用 `sage` 或 `model_main` 不会互相覆盖。
+- Desktop 是固定本机单用户模型，HTTP adapter 始终使用 `default_user`，不接受客户端伪造身份；catalog 仍保留 `(user_id, id)` 键结构，以复用 sagents v2 的通用存储契约，但 Desktop 不对外提供多用户语义。
 - Desktop 的 persistent-summary 使用当前模型 route 生成结构化摘要，原始 Session Event 不被改写；摘要保存在所选 SessionStore 的 derived namespace，不存在第二个 summary 数据库。
 - 所有设置使用字段级自动保存；选择和开关即时提交，文本字段防抖提交，不提供全局保存按钮。模型密钥保存在权限收紧的 Desktop catalog 文件中，不进入 manifest 或组件 inventory。
 

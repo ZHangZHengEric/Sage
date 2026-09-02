@@ -27,6 +27,7 @@ from sagents.v2.model.wire import (
     wire_json_value,
     wire_value,
 )
+from sagents.v2.model.usage import canonical_token_usage
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -505,17 +506,14 @@ class OpenAIResponsesModelProvider:
         )
 
     def _usage(self, raw: Any) -> UsageSummary:
-        input_details = wire_value(raw, "input_tokens_details")
-        output_details = wire_value(raw, "output_tokens_details")
         normalized = wire_json_value(raw)
+        usage = canonical_token_usage(raw, input_mode="inclusive")
         return UsageSummary(
             reported=True,
-            input_tokens=int(wire_value(raw, "input_tokens", 0) or 0),
-            output_tokens=int(wire_value(raw, "output_tokens", 0) or 0),
-            cached_input_tokens=int(wire_value(input_details, "cached_tokens", 0) or 0),
-            reasoning_tokens=int(
-                wire_value(output_details, "reasoning_tokens", 0) or 0
-            ),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
             models=(self.config.model,),
             provider_usage=normalized if isinstance(normalized, dict) else {},
         )

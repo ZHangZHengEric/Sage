@@ -3,16 +3,19 @@ from pathlib import Path
 
 import pytest
 
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import CancelRun, InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.session import FilesystemSessionStore
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
+    FILESYSTEM_SESSION_STORE_FORMAT_V2,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
 )
 from sagents.v2.runtime.session.migration import (
     _make_writable,
+    adopt_unowned_sessions,
     migrate_manifest_v1,
     migrate_runtime_root,
 )
@@ -23,7 +26,7 @@ CONTEXT = RequestContext(
 )
 
 
-async def _v3_store(path: Path):
+async def _legacy_store(path: Path, legacy_format: str):
     store = FilesystemSessionStore(path)
     created = await store.create_run(
         StartRun(
@@ -37,12 +40,18 @@ async def _v3_store(path: Path):
     await store.close()
     metadata_path = path / ".session-store" / "store.json"
     metadata = json.loads(metadata_path.read_text())
-    metadata["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V3
+    metadata["format"] = legacy_format
     metadata_path.write_text(json.dumps(metadata))
     snapshot_path = next((path / "sessions").rglob("state.json"))
     snapshot = json.loads(snapshot_path.read_text())
-    snapshot["format"] = FILESYSTEM_SESSION_STORE_FORMAT_V3
+    snapshot["format"] = legacy_format
     snapshot["state"]["session_format_version"] = "sage.session-aggregate/v1"
+    for session in snapshot["state"]["sessions"]:
+        session.pop("owner", None)
+    for run in snapshot["state"]["runs"]:
+        run.pop("request_context", None)
+    for entry in snapshot["state"]["start_idempotency"]:
+        entry.pop("principal_type", None)
     snapshot["checksum"] = FilesystemSessionStore._checksum(
         {key: value for key, value in snapshot.items() if key != "checksum"}
     )
@@ -50,17 +59,88 @@ async def _v3_store(path: Path):
     return created
 
 
+async def _v3_store(path: Path):
+    return await _legacy_store(path, FILESYSTEM_SESSION_STORE_FORMAT_V3)
+
+
 @pytest.mark.asyncio
-async def test_v3_requires_explicit_dry_run_then_atomic_migration(tmp_path: Path):
+async def test_desktop_adopts_only_unowned_legacy_sessions(tmp_path: Path):
+    root = tmp_path / "sessions"
+    created = await _legacy_store(root, FILESYSTEM_SESSION_STORE_FORMAT_V2)
+
+    report = adopt_unowned_sessions(root, principal_id="default_user")
+
+    assert report.adopted_sessions == 1
+    snapshot_path = next((root / "sessions").rglob("state.json"))
+    payload = json.loads(snapshot_path.read_text())
+    assert payload["state"]["sessions"][0]["owner"] == {
+        "principal_id": "default_user",
+        "principal_type": "user",
+        "tenant_id": None,
+        "delegated_by": None,
+        "scopes": [],
+    }
+    assert payload["state"]["start_idempotency"][0]["principal_type"] == "user"
+
+    reopened = FilesystemSessionStore(root)
+    default_user = RequestContext(
+        actor=ActorRef(
+            principal_id="default_user",
+            principal_type=PrincipalType.USER,
+        )
+    )
+    await reopened.authorize_session_actor(created.handle.session_id, default_user)
+    await reopened.close()
+
+    second = adopt_unowned_sessions(root, principal_id="another_user")
+    assert second.adopted_sessions == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "legacy_format",
+    [FILESYSTEM_SESSION_STORE_FORMAT_V2, FILESYSTEM_SESSION_STORE_FORMAT_V3],
+)
+async def test_known_legacy_store_is_readable_and_upgrades_on_write(
+    tmp_path: Path,
+    legacy_format: str,
+):
+    root = tmp_path / "sessions"
+    created = await _legacy_store(root, legacy_format)
+    snapshot_path = next((root / "sessions").rglob("state.json"))
+
+    reopened = FilesystemSessionStore(root)
+    restored = await reopened.get_run(created.handle.run_id)
+
+    assert restored.run_id == created.handle.run_id
+    assert json.loads(snapshot_path.read_text())["format"] == legacy_format
+    metadata = json.loads((root / ".session-store" / "store.json").read_text())
+    assert metadata["format"] == FILESYSTEM_SESSION_STORE_FORMAT
+    assert metadata["read_compatible_from"] == FILESYSTEM_SESSION_STORE_FORMAT_V2
+
+    await HarnessRuntime(reopened).cancel_run(
+        CancelRun(
+            run_id=created.handle.run_id,
+            expected_revision=restored.revision,
+            idempotency_key="cancel-legacy-run",
+        ),
+        CONTEXT,
+    )
+    await reopened.close()
+
+    upgraded = json.loads(snapshot_path.read_text())
+    assert upgraded["format"] == FILESYSTEM_SESSION_STORE_FORMAT
+    assert upgraded["state"]["session_format_version"] == "sage.session-aggregate/v2"
+
+
+@pytest.mark.asyncio
+async def test_v3_supports_explicit_dry_run_then_atomic_migration(tmp_path: Path):
     root = tmp_path / "sessions"
     created = await _v3_store(root)
     (root / "settings.json").write_text('{"theme":"dark"}')
     (root / "memory").mkdir()
     (root / "memory" / "index.json").write_text("{}")
     (root / "desktop-v2-sidecar.json").write_text('{"pid":1}')
-
-    with pytest.raises(Exception, match="sage v2 migrate"):
-        FilesystemSessionStore(root)
 
     dry_run = migrate_runtime_root(root, dry_run=True)
     assert dry_run.sessions == 1
