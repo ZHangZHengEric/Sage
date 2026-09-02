@@ -17,6 +17,8 @@ class StdoutLogSink:
     """Write one redacted JSONL record per line to stdout or stderr."""
 
     plugin_id = "sage.logging.stdout"
+    name = "Stdout structured log sink"
+    description = "Writes one JSONL record per line to stdout or stderr."
     format_version = "sage.log/v1"
 
     def __init__(

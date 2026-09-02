@@ -21,6 +21,8 @@ class McpProtocolAdapter:
     """Maps only MCP-correlated progress/elicitation; MCP is not a Run protocol."""
 
     plugin_id = "sage.protocol.mcp"
+    name = "MCP protocol adapter"
+    description = "Projects Sage events into MCP progress and elicitation frames."
     protocol = "mcp"
     version = "2026-07-28"
 

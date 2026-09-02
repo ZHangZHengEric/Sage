@@ -12,6 +12,8 @@ class JsonHeuristicTokenEstimator:
     """Conservative provider-neutral estimate of the complete wire structure."""
 
     plugin_id = "sage.context.token-estimator.json-heuristic"
+    name = "JSON heuristic token estimator"
+    description = "Estimates tokens from JSON-serialized message size."
     estimator_id = "json-heuristic"
 
     def __init__(self, *, bytes_per_token: float = 4.0, message_overhead: int = 6):

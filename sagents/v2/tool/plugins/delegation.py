@@ -94,11 +94,13 @@ class MultiAgentToolPlugin:
     """Mode-scoped decorated Tools backed only by V2 coordination contracts."""
 
     plugin_id = "sage.tool.multi-agent"
+    name = "Multi-agent Tool provider"
+    description = "V2-native Fibre and Team delegation tools."
     descriptor = ExtensionDescriptor(
         plugin_id=plugin_id,
         version="2.0.0",
-        name="Multi-agent Tool provider",
-        description="V2-native Fibre and Team delegation tools.",
+        name=name,
+        description=description,
         provides=(
             CapabilityOffer(
                 capability="tool.catalog", api_version="2", name="multi-agent"

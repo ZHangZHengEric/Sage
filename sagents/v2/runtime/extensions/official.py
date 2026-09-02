@@ -74,6 +74,7 @@ from sagents.v2.runtime.extensions.contracts import (
     ExtensionDescriptor,
     ExtensionRegistration,
     ExtensionScope,
+    plugin_identity,
 )
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
@@ -92,6 +93,7 @@ from sagents.v2.memory.plugins.recall_llm import LLMMemoryRecallQueryGenerator
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
     model_protocol_descriptors,
+    model_protocol_implementation,
 )
 from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
@@ -142,39 +144,17 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         },
         "additionalProperties": False,
     }
-    for name, description, implementation, uses_model in (
-        (
-            "Show all Tools",
-            "Sends every policy-allowed Tool to the model. Best for small catalogs.",
-            DirectToolSelectionPolicy,
-            False,
-        ),
-        (
-            "LLM Tool selection",
-            "Uses a fast model and recent context to select relevant Tools; falls back locally on failure.",
-            LLMToolSelectionPolicy,
-            True,
-        ),
-        (
-            "BM25 Tool selection",
-            "Ranks Tool names, descriptions, and parameters locally like a search engine.",
-            LexicalToolSelectionPolicy,
-            False,
-        ),
-        (
-            "Recently used Tools first",
-            "Keeps recently called Tools first, then fills the remaining count deterministically.",
-            RecentToolSelectionPolicy,
-            False,
-        ),
+    for implementation, uses_model in (
+        (DirectToolSelectionPolicy, False),
+        (LLMToolSelectionPolicy, True),
+        (LexicalToolSelectionPolicy, False),
+        (RecentToolSelectionPolicy, False),
     ):
         registry.register(
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(
-                    plugin_id=implementation.plugin_id,
+                    **_identity(implementation),
                     version="2.0.0",
-                    name=name,
-                    description=description,
                     provides=(
                         CapabilityOffer(
                             capability="tool.selection-policy", api_version="2"
@@ -204,16 +184,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        NoopSessionMemoryProvider.plugin_id,
-        "No-op Session Memory provider",
+        NoopSessionMemoryProvider,
         "session-memory.provider",
         lambda context, dependencies: NoopSessionMemoryProvider(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        SqliteBm25SessionMemoryProvider.plugin_id,
-        "SQLite BM25 Session Memory provider",
+        SqliteBm25SessionMemoryProvider,
         "session-memory.provider",
         lambda context, dependencies: SqliteBm25SessionMemoryProvider(
             context.config["root"]
@@ -222,8 +200,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        CompositeContinuationPolicy.plugin_id,
-        "Deterministic continuation policy",
+        CompositeContinuationPolicy,
         "agent.continuation-policy",
         lambda context, dependencies: CompositeContinuationPolicy(
             rules=(
@@ -238,8 +215,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        LLMJudgeContinuationPolicy.plugin_id,
-        "No-tool-call LLM Judge completion policy",
+        LLMJudgeContinuationPolicy,
         "agent.continuation-policy",
         lambda context, dependencies: LLMJudgeContinuationPolicy(
             LLMContinuationJudge(
@@ -251,8 +227,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        HybridContinuationPolicy.plugin_id,
-        "Hybrid deterministic and LLM Judge policy",
+        HybridContinuationPolicy,
         "agent.continuation-policy",
         lambda context, dependencies: HybridContinuationPolicy(
             LLMContinuationJudge(
@@ -265,8 +240,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        ExplicitStatusContinuationPolicy.plugin_id,
-        "Explicit turn_status completion policy",
+        ExplicitStatusContinuationPolicy,
         "agent.continuation-policy",
         lambda context, dependencies: ExplicitStatusContinuationPolicy(
             repeat_threshold=int(context.config.get("repeat_threshold", 3))
@@ -276,24 +250,21 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        JsonHeuristicTokenEstimator.plugin_id,
-        "JSON heuristic token estimator",
+        JsonHeuristicTokenEstimator,
         "context.token-estimator",
         lambda context, dependencies: JsonHeuristicTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        UnicodeHeuristicTokenEstimator.plugin_id,
-        "Unicode heuristic token estimator",
+        UnicodeHeuristicTokenEstimator,
         "context.token-estimator",
         lambda context, dependencies: UnicodeHeuristicTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        TiktokenTokenEstimator.plugin_id,
-        "Tiktoken token estimator",
+        TiktokenTokenEstimator,
         "context.token-estimator",
         lambda context, dependencies: TiktokenTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
@@ -308,8 +279,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        ReferenceContextUnitCompactor.plugin_id,
-        "Durable-reference context unit compactor",
+        ReferenceContextUnitCompactor,
         "context.unit-compactor",
         lambda context, dependencies: ReferenceContextUnitCompactor(
             context.config.get("estimator")
@@ -318,8 +288,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        WindowContextReducer.plugin_id,
-        "Window context reducer",
+        WindowContextReducer,
         "context.reducer",
         lambda context, dependencies: WindowContextReducer(
             context.config.get("estimator")
@@ -328,8 +297,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        PersistentSummaryContextReducer.plugin_id,
-        "Persistent summary context reducer",
+        PersistentSummaryContextReducer,
         "context.reducer",
         lambda context, dependencies: PersistentSummaryContextReducer(
             context.config["store"],
@@ -348,16 +316,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        InMemoryConversationSummaryStore.plugin_id,
-        "Ephemeral conversation summary store",
+        InMemoryConversationSummaryStore,
         "context.summary-store",
         lambda context, dependencies: InMemoryConversationSummaryStore(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        SessionDerivedConversationSummaryStore.plugin_id,
-        "Session-derived conversation summary store",
+        SessionDerivedConversationSummaryStore,
         "context.summary-store",
         lambda context, dependencies: SessionDerivedConversationSummaryStore(
             context.config["session_store"]
@@ -366,16 +332,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        ExtractiveConversationSummarizer.plugin_id,
-        "Extractive conversation summarizer",
+        ExtractiveConversationSummarizer,
         "context.summarizer",
         lambda context, dependencies: ExtractiveConversationSummarizer(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        ModelConversationSummarizer.plugin_id,
-        "Model conversation summarizer",
+        ModelConversationSummarizer,
         "context.summarizer",
         lambda context, dependencies: ModelConversationSummarizer(
             context.config["model"],
@@ -387,8 +351,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        InMemoryScheduler.plugin_id,
-        "In-memory scheduler",
+        InMemoryScheduler,
         "execution.scheduler",
         lambda context, dependencies: InMemoryScheduler(
             max_pending_items=int(context.config.get("max_pending_items", 1024)),
@@ -410,8 +373,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        FilesystemScheduler.plugin_id,
-        "Filesystem durable scheduler",
+        FilesystemScheduler,
         "execution.scheduler",
         lambda context, dependencies: FilesystemScheduler(
             context.config["root"],
@@ -434,8 +396,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        InMemoryJobRuntime.plugin_id,
-        "In-memory Job runtime",
+        InMemoryJobRuntime,
         "execution.job-runtime",
         lambda context, dependencies: InMemoryJobRuntime(
             context.config.get("runners", {}),
@@ -476,8 +437,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        InMemorySandboxProvider.plugin_id,
-        "In-memory sandbox provider",
+        InMemorySandboxProvider,
         "execution.sandbox",
         lambda context, dependencies: InMemorySandboxProvider(
             _bytes(context.config["verification_key"]),
@@ -501,8 +461,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        LocalWorkspaceSandboxProvider.plugin_id,
-        "Local workspace sandbox provider",
+        LocalWorkspaceSandboxProvider,
         "execution.sandbox",
         lambda context, dependencies: LocalWorkspaceSandboxProvider(
             _bytes(context.config["verification_key"]),
@@ -525,8 +484,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        EnvironmentCredentialProvider.plugin_id,
-        "Environment credential provider",
+        EnvironmentCredentialProvider,
         "credentials.provider",
         lambda context, dependencies: EnvironmentCredentialProvider(
             context.config.get("declarations", {}),
@@ -536,8 +494,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        MappingCredentialProvider.plugin_id,
-        "Mapping credential provider",
+        MappingCredentialProvider,
         "credentials.provider",
         lambda context, dependencies: MappingCredentialProvider(
             context.config.get("values", {}),
@@ -547,16 +504,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        NoopDiagnosticSink.plugin_id,
-        "No-op diagnostic sink",
+        NoopDiagnosticSink,
         "observability.diagnostic-sink",
         lambda context, dependencies: NoopDiagnosticSink(),
         scopes={ExtensionScope.PROCESS},
     )
     _one(
         registry,
-        FilesystemDiagnosticSink.plugin_id,
-        "Filesystem diagnostic sink",
+        FilesystemDiagnosticSink,
         "observability.diagnostic-sink",
         lambda context, dependencies: FilesystemDiagnosticSink(
             context.config["root"],
@@ -566,16 +521,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        NoopLogSink.plugin_id,
-        "No-op structured log sink",
+        NoopLogSink,
         "observability.log-sink",
         lambda context, dependencies: NoopLogSink(),
         scopes={ExtensionScope.PROCESS},
     )
     _one(
         registry,
-        FilesystemLogSink.plugin_id,
-        "Rotating filesystem structured log sink",
+        FilesystemLogSink,
         "observability.log-sink",
         lambda context, dependencies: FilesystemLogSink(
             context.config["root"],
@@ -588,8 +541,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        StdoutLogSink.plugin_id,
-        "Stdout structured log sink",
+        StdoutLogSink,
         "observability.log-sink",
         lambda context, dependencies: StdoutLogSink(
             stream=str(context.config.get("stream", "stdout")),
@@ -615,16 +567,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        NoopTraceSink.plugin_id,
-        "No-op trace sink",
+        NoopTraceSink,
         "observability.trace-sink",
         lambda context, dependencies: NoopTraceSink(),
         scopes={ExtensionScope.PROCESS},
     )
     _one(
         registry,
-        OtlpTraceSink.plugin_id,
-        "OTLP / Jaeger trace sink",
+        OtlpTraceSink,
         "observability.trace-sink",
         lambda context, dependencies: OtlpTraceSink(
             endpoint=str(context.config.get("endpoint") or "http://127.0.0.1:4317"),
@@ -667,8 +617,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        ClawWorkspaceInitializer.plugin_id,
-        "Claw Mode workspace",
+        ClawWorkspaceInitializer,
         "workspace.initializer",
         lambda context, dependencies: ClawWorkspaceInitializer(
             language=str(context.config.get("language", "en"))
@@ -677,40 +626,36 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        BareWorkspaceInitializer.plugin_id,
-        "Bare workspace",
+        BareWorkspaceInitializer,
         "workspace.initializer",
         lambda context, dependencies: BareWorkspaceInitializer(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
     _one(
         registry,
-        InMemoryArtifactStore.plugin_id,
-        "In-memory ArtifactStore",
+        InMemoryArtifactStore,
         "artifact.store",
         lambda context, dependencies: InMemoryArtifactStore(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.RUN},
     )
     _one(
         registry,
-        InMemoryAgentPackageRegistry.plugin_id,
-        "In-memory AgentPackage registry",
+        InMemoryAgentPackageRegistry,
         "package.registry",
         lambda context, dependencies: InMemoryAgentPackageRegistry(),
         scopes={ExtensionScope.PROCESS},
     )
 
-    for name, adapter in (
-        ("Native protocol adapter", NativeProtocolAdapter),
-        ("AG-UI protocol adapter", AgUiProtocolAdapter),
-        ("ACP protocol adapter", AcpProtocolAdapter),
-        ("A2A protocol adapter", A2AProtocolAdapter),
-        ("MCP protocol adapter", McpProtocolAdapter),
+    for adapter in (
+        NativeProtocolAdapter,
+        AgUiProtocolAdapter,
+        AcpProtocolAdapter,
+        A2AProtocolAdapter,
+        McpProtocolAdapter,
     ):
         _one(
             registry,
-            adapter.plugin_id,
-            name,
+            adapter,
             "interface.protocol-adapter",
             lambda context, dependencies, adapter=adapter: adapter(**context.config),
             scopes={ExtensionScope.PROCESS, ExtensionScope.RUN},
@@ -721,9 +666,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=McpToolPlugin.plugin_id,
+                **_identity(McpToolPlugin),
                 version="2.0.0",
-                name="MCP Tool provider",
                 provides=(
                     CapabilityOffer(
                         capability="tool.catalog", api_version="2", name="mcp"
@@ -752,10 +696,18 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
 
 
+def _identity(implementation: type) -> dict[str, str]:
+    plugin_id, name, description = plugin_identity(implementation)
+    return {
+        "plugin_id": plugin_id,
+        "name": name,
+        "description": description,
+    }
+
+
 def _one(
     registry: ExtensionRegistry,
-    plugin_id: str,
-    name: str,
+    implementation: type,
     capability: str,
     factory,
     *,
@@ -771,9 +723,8 @@ def _one(
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=plugin_id,
+                **_identity(implementation),
                 version=version,
-                name=name,
                 provides=(
                     CapabilityOffer(
                         capability=capability,
@@ -842,10 +793,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=FilesystemSessionStore.plugin_id,
+                **_identity(FilesystemSessionStore),
                 version="2.1.0",
-                name="Filesystem SessionStore",
-                description="Compact authoritative checksummed state per Session.",
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
@@ -877,13 +826,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=PostgresSessionStore.plugin_id,
+                **_identity(PostgresSessionStore),
                 version="2.2.0",
-                name="PostgreSQL SessionStore",
-                description=(
-                    "Durable per-Session PostgreSQL store with appended Run events. "
-                    "Single-process writers; no global Session index."
-                ),
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
@@ -927,13 +871,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=MysqlSessionStore.plugin_id,
+                **_identity(MysqlSessionStore),
                 version="2.0.0",
-                name="MySQL SessionStore",
-                description=(
-                    "Durable per-Session MySQL store with appended Run events. "
-                    "Single-process writers; no global Session index."
-                ),
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
@@ -975,13 +914,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=DirectMemoryRecallQueryGenerator.plugin_id,
+                **_identity(DirectMemoryRecallQueryGenerator),
                 version="2.0.0",
-                name="Direct user input",
-                description=(
-                    "Uses the current user input as the search_memory query without "
-                    "an additional model request."
-                ),
                 provides=(
                     CapabilityOffer(
                         capability="memory.recall-query", api_version="2"
@@ -999,13 +933,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=LLMMemoryRecallQueryGenerator.plugin_id,
+                **_identity(LLMMemoryRecallQueryGenerator),
                 version="2.0.0",
-                name="LLM-generated keywords",
-                description=(
-                    "Uses a fast model to generate compact keywords before calling "
-                    "search_memory."
-                ),
                 provides=(
                     CapabilityOffer(
                         capability="memory.recall-query", api_version="2"
@@ -1035,10 +964,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=EphemeralSessionStore.plugin_id,
+                **_identity(EphemeralSessionStore),
                 version="2.0.0",
-                name="Ephemeral SessionStore",
-                description="Full lifecycle semantics without restart durability.",
                 provides=(
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
@@ -1052,10 +979,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=NoopMemoryProvider.plugin_id,
+                **_identity(NoopMemoryProvider),
                 version="2.0.0",
-                name="No-op Memory",
-                description="Disables long-term Memory without changing Agent logic.",
                 provides=(
                     CapabilityOffer(capability="memory.provider", api_version="2"),
                 ),
@@ -1075,10 +1000,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=FilesystemBm25MemoryProvider.plugin_id,
+                **_identity(FilesystemBm25MemoryProvider),
                 version="2.1.0",
-                name="Filesystem BM25 Memory",
-                description="Durable scoped Memory records with incremental SQLite FTS5 BM25 recall.",
                 provides=(
                     CapabilityOffer(capability="memory.provider", api_version="2"),
                 ),
@@ -1161,10 +1084,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=FilesystemSkillProvider.plugin_id,
+                **_identity(FilesystemSkillProvider),
                 version="2.0.0",
-                name="Filesystem Skill provider",
-                description="Lazy, bounded, symlink-safe Skill catalog and source.",
                 provides=(
                     CapabilityOffer(
                         capability="skill.catalog", api_version="2", name="filesystem"
@@ -1197,10 +1118,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
-                plugin_id=NativeAgentFlowNode.plugin_id,
+                **_identity(NativeAgentFlowNode),
                 version="2.0.0",
-                name="Agent Flow node",
-                description="Runs a child Agent through the shared AgentLoopEngine.",
                 provides=(
                     CapabilityOffer(
                         capability="flow.node", api_version="2", name="agent"
@@ -1216,14 +1135,12 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
 
 def _register_model_protocols(registry: ExtensionRegistry) -> None:
     for descriptor in model_protocol_descriptors():
-        plugin_id = descriptor.plugin_id
+        implementation = model_protocol_implementation(descriptor.protocol)
         registry.register(
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(
-                    plugin_id=plugin_id,
+                    **_identity(implementation),
                     version="2.0.0",
-                    name=descriptor.name,
-                    description=descriptor.value,
                     provides=(
                         CapabilityOffer(
                             capability="model.provider",

@@ -24,6 +24,8 @@ class ModelConversationSummarizer:
     """
 
     plugin_id = "sage.context.summarizer.model"
+    name = "Model conversation summarizer"
+    description = "Uses a model binding to write conversation summaries."
     _FIELDS = (
         "summary",
         "decisions",

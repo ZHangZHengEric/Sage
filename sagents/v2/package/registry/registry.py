@@ -32,6 +32,8 @@ class InMemoryAgentPackageRegistry:
     """
 
     plugin_id = "sage.package-registry.ephemeral"
+    name = "In-memory AgentPackage registry"
+    description = "Process-local AgentPackage inventory without restart durability."
 
     def __init__(self, *, resolver=None, clock=utc_now) -> None:
         self._resolver = resolver or CompositionResolver()

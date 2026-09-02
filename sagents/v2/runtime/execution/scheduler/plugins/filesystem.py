@@ -94,6 +94,8 @@ class FilesystemScheduler(InMemoryScheduler):
     """Persist state across restarts under one enforced writer lease."""
 
     plugin_id = "sage.scheduler.filesystem"
+    name = "Filesystem durable scheduler"
+    description = "Persists scheduler items on the local filesystem."
 
     def __init__(self, root: str | Path, **kwargs: Any) -> None:
         state_store = FilesystemSchedulerStateStore(root)

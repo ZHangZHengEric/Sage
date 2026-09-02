@@ -26,6 +26,11 @@ class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
     """Use the host-provided fast model once per Run with bounded fallback."""
 
     plugin_id = "sage.tool-selection.llm"
+    name = "LLM Tool selection"
+    description = (
+        "Uses a fast model and recent context to select relevant Tools; "
+        "falls back locally on failure."
+    )
 
     def __init__(self, config: ToolSelectionConfig | dict | None = None) -> None:
         super().__init__(config)

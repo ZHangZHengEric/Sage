@@ -17,6 +17,8 @@ class FilesystemLogSink:
     """Append redacted JSONL records with bounded local file rotation."""
 
     plugin_id = "sage.logging.filesystem"
+    name = "Rotating filesystem structured log sink"
+    description = "Writes rotating JSONL operational logs to disk."
     format_version = "sage.log/v1"
 
     def __init__(

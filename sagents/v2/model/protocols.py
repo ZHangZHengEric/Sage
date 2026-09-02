@@ -67,16 +67,16 @@ class ModelProtocolDescriptor(StrictModel):
 _DESCRIPTORS = (
     ModelProtocolDescriptor(
         protocol=BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS,
-        name="OpenAI Chat Completions",
-        value="Streams chat messages and function calls through /chat/completions.",
+        name=OpenAIChatCompletionsModelProvider.name,
+        value=OpenAIChatCompletionsModelProvider.description,
         default_base_url="https://api.openai.com/v1",
         aliases=("openai-compatible", "chat-completions", "completions"),
         capabilities=("streaming", "tools", "structured-output", "multimodal"),
     ),
     ModelProtocolDescriptor(
         protocol=BuiltinModelProtocol.OPENAI_RESPONSES,
-        name="OpenAI Responses",
-        value="Uses typed input/output items and Responses streaming events.",
+        name=OpenAIResponsesModelProvider.name,
+        value=OpenAIResponsesModelProvider.description,
         default_base_url="https://api.openai.com/v1",
         aliases=("responses",),
         capabilities=(
@@ -90,8 +90,8 @@ _DESCRIPTORS = (
     ),
     ModelProtocolDescriptor(
         protocol=BuiltinModelProtocol.ANTHROPIC_MESSAGES,
-        name="Anthropic Messages",
-        value="Uses Claude system, content-block, tool-use, and SSE semantics.",
+        name=AnthropicMessagesModelProvider.name,
+        value=AnthropicMessagesModelProvider.description,
         default_base_url="https://api.anthropic.com",
         aliases=("anthropic", "claude", "claude-messages"),
         capabilities=("streaming", "tools", "structured-output", "reasoning"),
@@ -101,6 +101,12 @@ _DESCRIPTORS = (
 
 def model_protocol_descriptors() -> tuple[ModelProtocolDescriptor, ...]:
     return _DESCRIPTORS
+
+
+def model_protocol_implementation(protocol: BuiltinModelProtocol):
+    """Return the implementation class registered for one built-in protocol."""
+
+    return _PROTOCOL_PROVIDERS[protocol]
 
 
 def resolve_model_protocol(provider_id: str) -> BuiltinModelProtocol:

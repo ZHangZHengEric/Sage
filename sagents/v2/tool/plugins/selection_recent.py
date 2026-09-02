@@ -14,6 +14,10 @@ class RecentToolSelectionPolicy(BaseToolSelectionPolicy):
     """Put recently called Tools first, then fill the remaining count."""
 
     plugin_id = "sage.tool-selection.recent"
+    name = "Recently used Tools first"
+    description = (
+        "Keeps recently called Tools first, then fills the remaining count deterministically."
+    )
 
     def select(self, request: ToolSelectionRequest) -> ToolSelectionResult:
         self._remember_catalog(request.run_id, request.tools)

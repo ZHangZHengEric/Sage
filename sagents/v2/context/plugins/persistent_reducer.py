@@ -40,6 +40,8 @@ class PersistentSummaryContextReducer:
     """
 
     plugin_id = "sage.context.reducer.persistent-summary"
+    name = "Persistent summary context reducer"
+    description = "Summarizes older units into a durable rolling conversation summary."
 
     def __init__(
         self,

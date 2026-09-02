@@ -9,6 +9,8 @@ class NoopDiagnosticSink:
     """Safe default used until a host explicitly selects a diagnostic sink."""
 
     plugin_id = "sage.observability.noop"
+    name = "No-op diagnostic sink"
+    description = "Discards model diagnostics."
 
     async def begin_model_request(self, **kwargs: Any) -> None:
         return None

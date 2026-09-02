@@ -15,6 +15,10 @@ class LexicalToolSelectionPolicy(BaseToolSelectionPolicy):
     """Local BM25-style ranking over Tool names, descriptions, and schemas."""
 
     plugin_id = "sage.tool-selection.lexical"
+    name = "BM25 Tool selection"
+    description = (
+        "Ranks Tool names, descriptions, and parameters locally like a search engine."
+    )
 
     def select(self, request: ToolSelectionRequest) -> ToolSelectionResult:
         self._remember_catalog(request.run_id, request.tools)

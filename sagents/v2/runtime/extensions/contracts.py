@@ -5,11 +5,42 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
+
+
+class PluginIdentity(Protocol):
+    """Stable host-visible identity declared by every selectable implementation."""
+
+    plugin_id: ClassVar[str]
+    name: ClassVar[str]
+    description: ClassVar[str]
+
+
+def plugin_identity(implementation: type[Any]) -> tuple[str, str, str]:
+    """Read required identity attributes from one implementation class."""
+
+    plugin_id = getattr(implementation, "plugin_id", None)
+    name = getattr(implementation, "name", None)
+    description = getattr(implementation, "description", None)
+    missing = [
+        field
+        for field, value in (
+            ("plugin_id", plugin_id),
+            ("name", name),
+            ("description", description),
+        )
+        if not isinstance(value, str) or not value.strip()
+    ]
+    if missing:
+        raise TypeError(
+            f"{implementation.__qualname__} must declare non-empty "
+            f"{', '.join(missing)}"
+        )
+    return plugin_id, name, description
 
 
 class ExtensionScope(str, Enum):

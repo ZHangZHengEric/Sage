@@ -18,6 +18,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionRegistry,
     ExtensionScope,
     ExtensionScopeContext,
+    plugin_identity,
 )
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
@@ -119,6 +120,30 @@ def test_builtin_inventory_contains_only_real_factories():
         assert inventory[plugin_id]["version"] == "3.0.0"
         assert inventory[plugin_id]["provides"][0]["capability"] == "execution.sandbox"
         assert inventory[plugin_id]["provides"][0]["api_version"] == "3"
+
+
+def test_official_plugins_declare_identity():
+    registry = builtin_extension_registry()
+    missing = [
+        value["plugin_id"]
+        for value in registry.inventory()
+        if not str(value.get("name") or "").strip()
+        or not str(value.get("description") or "").strip()
+    ]
+    assert missing == []
+    assert plugin_identity(CompositeContinuationPolicy) == (
+        "sage.agent.continuation.deterministic",
+        "Deterministic continuation policy",
+        "Applies ordered safety, budget, and completion rules without a model call.",
+    )
+
+
+def test_plugin_identity_rejects_incomplete_classes():
+    class Incomplete:
+        plugin_id = "acme.test"
+
+    with pytest.raises(TypeError, match="name, description"):
+        plugin_identity(Incomplete)
 
 
 def test_every_registered_plugin_has_a_pydantic_config_boundary():

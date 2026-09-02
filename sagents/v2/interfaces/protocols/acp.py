@@ -30,6 +30,8 @@ class AcpProtocolAdapter:
     """ACP projection with LossReports for unsupported Run/Flow semantics."""
 
     plugin_id = "sage.protocol.acp"
+    name = "ACP protocol adapter"
+    description = "Projects Sage events into ACP frames."
     protocol = "acp"
     version = "1"
 

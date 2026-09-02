@@ -17,6 +17,8 @@ class FilesystemSkillProvider:
     """Discover direct child folders containing `SKILL.md`, then fetch lazily."""
 
     plugin_id = "sage.skill.filesystem"
+    name = "Filesystem Skill provider"
+    description = "Lazy, bounded, symlink-safe Skill catalog and source."
 
     def __init__(
         self,

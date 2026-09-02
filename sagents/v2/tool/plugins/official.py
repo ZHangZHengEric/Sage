@@ -80,11 +80,13 @@ def official_tool_categories() -> dict[str, str]:
 
 class OfficialToolPlugin:
     plugin_id = "sage.tool.official"
+    name = "Official SAgents Tool provider"
+    description = "V2-native decorator-backed workspace and runtime tools."
     descriptor = ExtensionDescriptor(
         plugin_id=plugin_id,
         version="2.0.0",
-        name="Official SAgents Tool provider",
-        description="V2-native decorator-backed workspace and runtime tools.",
+        name=name,
+        description=description,
         provides=(
             CapabilityOffer(
                 capability="tool.catalog", api_version="2", name="official"

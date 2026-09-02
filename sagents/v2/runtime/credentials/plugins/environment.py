@@ -24,6 +24,8 @@ class EnvironmentCredentialProvider:
     """Env access never leaks into Kernel/AgentLoop."""
 
     plugin_id = "sage.credentials.environment"
+    name = "Environment credential provider"
+    description = "Resolves credentials from process environment variables."
 
     def __init__(
         self,

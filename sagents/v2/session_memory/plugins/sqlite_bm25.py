@@ -18,6 +18,8 @@ from sagents.v2.session_memory.contracts import (
 
 class SqliteBm25SessionMemoryProvider:
     plugin_id = "sage.session-memory.sqlite-bm25"
+    name = "SQLite BM25 Session Memory provider"
+    description = "Durable per-session BM25 index over canonical Session history."
     api_version = "2"
 
     def __init__(self, root: str | Path) -> None:

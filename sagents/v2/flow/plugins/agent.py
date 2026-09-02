@@ -22,6 +22,8 @@ class NativeAgentFlowNode:
     """First-party Flow node whose body is the standard message/model/tool loop."""
 
     plugin_id = "sage.flow.agent"
+    name = "Agent Flow node"
+    description = "Runs a child Agent through the shared AgentLoopEngine."
 
     def __init__(
         self,
