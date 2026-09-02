@@ -10,6 +10,7 @@ import hashlib
 import inspect
 import json
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -948,6 +949,7 @@ class SAgentBuilder:
             session_store,
             runtime=control_runtime,
             derived_state=(derived_state if derived_state is not session_store else None),
+            derived_state_cleaners=(session_memory_service,),
         )
         agent = SAgent(
             runtime=control_runtime,
@@ -1813,7 +1815,6 @@ class _ApplicationComposer:
         locked_configs: Mapping[str, Mapping[str, Any]] | None = None,
         cache_identities: Mapping[str, Any] | None = None,
     ) -> MaterializedAgentPorts:
-        del tool_catalog, tool_executor
         import asyncio
 
         if self._lock is None:
@@ -1836,7 +1837,8 @@ class _ApplicationComposer:
         identities = dict(cache_identities or {})
         effective_model = model if model is not None else self.process_model
         run_handles: list[Any] = []
-        async with self._lock:
+        selected_handles: list[Any] = []
+        async with self._lock, self._close_run_handles_on_error(run_handles):
             estimator = await self._port(
                 runtime,
                 declarations,
@@ -1846,6 +1848,7 @@ class _ApplicationComposer:
                 scope_id=f"materialize-estimator:{selected_agent}",
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             summarizer_lock = dict(locks.get("context.summarizer") or {})
             if effective_model is not None and "model" not in summarizer_lock:
@@ -1860,6 +1863,7 @@ class _ApplicationComposer:
                 locked_config=summarizer_lock,
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             unit_compactor = await self._port(
                 runtime,
@@ -1871,6 +1875,7 @@ class _ApplicationComposer:
                 locked_config={"estimator": estimator},
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             reducer_lock = {
                 "estimator": estimator,
@@ -1889,6 +1894,7 @@ class _ApplicationComposer:
                 locked_config=reducer_lock,
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             tool_selection = await self._port(
                 runtime,
@@ -1900,6 +1906,7 @@ class _ApplicationComposer:
                 locked_config=dict(locks.get("tool.selection-policy") or {}),
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             continuation_lock = {"repeat_threshold": 3}
             if effective_model is not None:
@@ -1920,6 +1927,7 @@ class _ApplicationComposer:
                 locked_config=continuation_lock,
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
                 agent_id=selected_agent,
                 run_id=run_id,
             )
@@ -1936,6 +1944,7 @@ class _ApplicationComposer:
                 locked_config=recall_lock,
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
             workspace_lock = dict(locks.get("workspace.initializer") or {})
             workspace_initializer = await self._port(
@@ -1948,12 +1957,15 @@ class _ApplicationComposer:
                 locked_config=workspace_lock,
                 identities=identities,
                 run_handles=run_handles,
+                selected_handles=selected_handles,
             )
         resolved_plan = self._materialized_plan(
             resolved,
             selected_agent,
-            run_handles,
+            selected_handles,
             model=model,
+            tool_catalog=tool_catalog,
+            tool_executor=tool_executor,
         )
         return MaterializedAgentPorts(
             token_estimator=estimator,
@@ -1961,11 +1973,35 @@ class _ApplicationComposer:
             context_reducer=context_reducer,
             continuation_policy=continuation,
             tool_selection_policy=tool_selection,
+            tool_catalog=tool_catalog,
+            tool_executor=tool_executor,
             memory_query_generator=memory_query,
             workspace_initializer=workspace_initializer,
             resolved_plan=resolved_plan,
             scope_handles=tuple(run_handles),
         )
+
+    @asynccontextmanager
+    async def _close_run_handles_on_error(self, handles):
+        try:
+            yield
+        except BaseException as exc:
+            failed_handles = []
+            for handle in reversed(handles):
+                try:
+                    await handle.close()
+                except BaseException as close_exc:
+                    failed_handles.append(handle)
+                    exc.add_note(f"materialization rollback also failed: {close_exc}")
+            if self.application is not None:
+                for handle in reversed(failed_handles):
+                    if all(
+                        handle is not existing
+                        for existing in self.application._scope_handles
+                    ):
+                        self.application._scope_handles.append(handle)
+            handles.clear()
+            raise
 
     async def _port(
         self,
@@ -1979,6 +2015,7 @@ class _ApplicationComposer:
         locked_config=None,
         identities,
         run_handles,
+        selected_handles,
         agent_id: str | None = None,
         run_id: str | None = None,
     ):
@@ -2014,7 +2051,9 @@ class _ApplicationComposer:
             _config_identity(identity if identity is not None else config),
         )
         if cacheable and cache_key in self._cache:
-            return self._cache[cache_key][1]
+            handle, value = self._cache[cache_key]
+            selected_handles.append(handle)
+            return value
         parent = self.process_root
         if scope == ExtensionScope.RUN:
             parent = await self._agent_parent(agent_id or "default")
@@ -2034,6 +2073,7 @@ class _ApplicationComposer:
                 self.application._scope_handles.append(handle)
         else:
             run_handles.append(handle)
+        selected_handles.append(handle)
         return value
 
     async def _agent_parent(self, agent_id: str):
@@ -2107,22 +2147,39 @@ class _ApplicationComposer:
         self,
         resolved,
         selected_agent: str,
-        run_handles,
+        selected_handles,
         *,
         model,
+        tool_catalog,
+        tool_executor,
     ) -> ResolvedApplicationPlan:
+        replaced_capabilities = {
+            "agent.continuation-policy",
+            "context.reducer",
+            "context.summarizer",
+            "context.token-estimator",
+            "context.unit-compactor",
+            "memory.recall-query",
+            "tool.selection-policy",
+            "workspace.initializer",
+        }
+        if model is not None:
+            replaced_capabilities.add("model.provider")
+        if tool_catalog is not None:
+            replaced_capabilities.add("tool.catalog")
+        if tool_executor is not None:
+            replaced_capabilities.add("tool.executor")
         bindings = {
             (value.capability, value.name, value.scope): value
             for value in self.process_plan.providers
+            if value.capability not in replaced_capabilities
         }
-        handles = []
-        if self.application is not None:
-            handles.extend(self.application._scope_handles)
-        handles.extend(run_handles)
+        dependencies = set(self.process_plan.dependencies)
 
         def visit(handle) -> None:
             for ancestor in getattr(handle, "_owned_ancestors", ()):
                 visit(ancestor)
+            dependencies.update(getattr(handle.graph, "dependencies", ()))
             for started in getattr(handle, "_started", ()):
                 descriptor = started.registration.descriptor
                 for offer in descriptor.provides:
@@ -2137,7 +2194,7 @@ class _ApplicationComposer:
                         )
                     )
 
-        for handle in handles:
+        for handle in selected_handles:
             visit(handle)
         if model is not None:
             bindings[("model.provider", "default", "agent")] = ResolvedProviderBinding(
@@ -2148,10 +2205,40 @@ class _ApplicationComposer:
                 scope="agent",
                 source="host",
             )
+        injected_scope = "run" if any(
+            handle.context.scope == ExtensionScope.RUN for handle in selected_handles
+        ) else "agent"
+        for capability, provider in (
+            ("tool.catalog", tool_catalog),
+            ("tool.executor", tool_executor),
+        ):
+            if provider is not None:
+                bindings[(capability, "default", injected_scope)] = (
+                    ResolvedProviderBinding(
+                        capability=capability,
+                        name="default",
+                        api_version="2",
+                        plugin_id=None,
+                        scope=injected_scope,
+                        source="host",
+                    )
+                )
         providers = tuple(sorted(bindings.values()))
         payload = {
             "process": self.process_plan.composition_hash,
             "manifest": resolved.manifest_hash,
+            "scope_compositions": sorted(
+                {handle.composition_hash for handle in selected_handles}
+            ),
+            "host_ports": {
+                capability: _service_composition_identity(provider)
+                for capability, provider in (
+                    ("model.provider", model),
+                    ("tool.catalog", tool_catalog),
+                    ("tool.executor", tool_executor),
+                )
+                if provider is not None
+            },
             "providers": [
                 (value.capability, value.plugin_id, value.scope, value.source)
                 for value in providers
@@ -2168,7 +2255,7 @@ class _ApplicationComposer:
             manifest_hash=resolved.manifest_hash,
             entrypoint_agent_id=selected_agent,
             providers=providers,
-            dependencies=self.process_plan.dependencies,
+            dependencies=tuple(sorted(dependencies)),
             composition_hash=composition_hash,
         )
 

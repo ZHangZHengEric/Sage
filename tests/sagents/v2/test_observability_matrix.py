@@ -8,6 +8,7 @@ from io import StringIO
 import pytest
 
 from sagents.v2.contracts.items import TextBlock, UsageSummary
+from sagents.v2.contracts.run_state import RunState
 from sagents.v2.model import ModelRequest, RecordingModelProvider
 from sagents.v2.model.contracts import (
     ModelEventKind,
@@ -32,6 +33,27 @@ from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
 )
+
+
+@pytest.mark.parametrize(
+    ("state", "status", "event", "level"),
+    (
+        (RunState.COMPLETED, "ok", "agent.run.completed", "info"),
+        (RunState.FAILED, "error", "agent.run.failed", "error"),
+        (RunState.CANCELLED, "unset", "agent.run.cancelled", "warning"),
+        (RunState.SUSPENDED, "unset", "agent.run.suspended", "info"),
+    ),
+)
+def test_run_outcomes_have_distinct_observability(state, status, event, level):
+    from sagents.v2.agent.observed import _run_outcome_observation
+
+    observed_status, observed_event, _message, observed_level = (
+        _run_outcome_observation(state)
+    )
+
+    assert observed_status.value == status
+    assert observed_event == event
+    assert observed_level == level
 
 
 @pytest.mark.asyncio

@@ -45,10 +45,7 @@ from app.desktop_v2.backend.package import (
     stable_component_id as _stable_component_id,
 )
 from app.desktop_v2.backend.session_index import JsonDesktopSessionIndex
-from sagents.v2 import (
-    SAgent,
-    SAgentApplication,
-)
+from sagents.v2 import SAgent
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
@@ -1097,6 +1094,7 @@ class _DesktopRecoveryAgent:
     async def _recover_interrupted_run(self, run_id, context):
         driver, _ = await self._compose_driver(run_id, context)
         try:
+            await driver._ensure_composed()
             return await driver.loop.recover_interrupted(run_id, context)
         finally:
             await driver.close()
@@ -1188,6 +1186,7 @@ class DesktopV2Service:
         self.memory_service = None
         self.session_memory_provider = None
         self.session_memory_service = None
+        self.execution_binding_provider = None
         self._start_lock = asyncio.Lock()
         self.session_index = JsonDesktopSessionIndex(
             self.runtime_root / "session-index.json"
@@ -1223,25 +1222,32 @@ class DesktopV2Service:
                 "en" if settings.language == "system" else settings.language
             )
             workspace = self._agent_workspace_path(settings.agent_workspace_path)
+            execution_binding_provider = DesktopExecutionBindingProvider(
+                workspace,
+                issuer=self._sandbox_grant_issuer,
+                private_workspace_root=self.runtime_root / "private-workspaces",
+            )
             application = await build_desktop_application(
                 session_root=self.runtime_root,
                 workspace=workspace,
                 log_sink=self.log_sink,
                 diagnostic_sink=self.diagnostics,
                 session_store=self.session_store,
+                derived_state_store=self.session_store,
                 component_selections=settings.component_selections,
                 component_configs=settings.component_configs,
                 language=language,
-                bindings=DesktopExecutionBindingProvider(
-                    workspace, issuer=self._sandbox_grant_issuer
-                ),
+                bindings=execution_binding_provider,
             )
             try:
+                self.execution_binding_provider = execution_binding_provider
                 self.application = application
                 self._bind_process_runtime()
             except BaseException:
+                self.execution_binding_provider = None
                 self.application = None
                 await application.close()
+                await execution_binding_provider.close()
                 raise
 
     def _bind_process_runtime(self) -> None:
@@ -1345,6 +1351,9 @@ class DesktopV2Service:
                 *(driver.close_binding() for driver in drivers),
                 return_exceptions=True,
             )
+        if self.execution_binding_provider is not None:
+            await self.execution_binding_provider.close()
+            self.execution_binding_provider = None
         await self.session_store.close()
         self._host_model_providers.clear()
         self._sandbox_providers.clear()
@@ -1698,11 +1707,14 @@ class DesktopV2Service:
                 "Authoritative Session state was already absent; continuing cleanup",
                 session_id=session_id,
             )
-        try:
-            for deleted_session_id in deleted_session_ids:
+        for deleted_session_id in deleted_session_ids:
+            try:
                 await self.session_memory_service.forget_session(deleted_session_id)
-        except Exception:
-            LOGGER.exception("Derived Session Memory cleanup failed for %s", session_id)
+            except Exception:
+                LOGGER.exception(
+                    "Derived Session Memory cleanup failed for %s",
+                    deleted_session_id,
+                )
         try:
             await self.session_index.remove_many(deleted_session_ids)
         except Exception:

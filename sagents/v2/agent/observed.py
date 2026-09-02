@@ -26,6 +26,20 @@ from sagents.v2.runtime.observability.traces import (
 )
 
 
+def _run_outcome_observation(
+    state: RunState,
+) -> tuple[TraceStatus, str, str, str]:
+    if state == RunState.COMPLETED:
+        return TraceStatus.OK, "agent.run.completed", "agent run completed", "info"
+    if state == RunState.FAILED:
+        return TraceStatus.ERROR, "agent.run.failed", "agent run failed", "error"
+    if state == RunState.CANCELLED:
+        return TraceStatus.UNSET, "agent.run.cancelled", "agent run cancelled", "warning"
+    if state == RunState.SUSPENDED:
+        return TraceStatus.UNSET, "agent.run.suspended", "agent run suspended", "info"
+    return TraceStatus.UNSET, "agent.run.stopped", "agent run stopped", "warning"
+
+
 class ObservedRunDriver(AgentLoopEngine):
     """Project Agent Run and logical Tool-call lifecycles to host-owned sinks."""
 
@@ -152,16 +166,15 @@ class ObservedRunDriver(AgentLoopEngine):
                     **correlation,
                 )
             raise
-        failed = snapshot.state == RunState.FAILED
+        status, event, message, log_method = _run_outcome_observation(snapshot.state)
         handle.end(
-            TraceStatus.ERROR if failed else TraceStatus.OK,
+            status,
             attributes={"run_state": snapshot.state.value},
         )
         if logger is not None:
-            write = logger.error if failed else logger.info
-            write(
-                "agent.run.failed" if failed else "agent.run.completed",
-                "agent run failed" if failed else "agent run completed",
+            getattr(logger, log_method)(
+                event,
+                message,
                 session_id=run.session_id,
                 run_id=run.run_id,
                 **correlation,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 
 import pytest
@@ -90,6 +91,25 @@ def test_postgres_store_requires_explicit_dsn():
         PostgresSessionStore()
     with pytest.raises(ValueError, match="plugin declaration"):
         PostgresSessionStore("   ")
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_fails_closed_after_writer_lock_connection_loss():
+    class ClosedConnection:
+        @staticmethod
+        def is_closed():
+            return True
+
+    state = _PostgresSessionState(
+        "postgresql://unused/unused", schema="sage_v2_demo"
+    )
+    state._pool = object()
+    state._lock_conn = ClosedConnection()
+
+    with pytest.raises(SageV2Error) as exc_info:
+        await state._ensure_ready()
+
+    assert exc_info.value.info.code == "session_store.writer_lock_lost"
 
 
 async def test_postgres_plugin_start_opens_schema_before_first_write():
@@ -189,7 +209,10 @@ async def test_builder_rejects_postgres_plugin_without_dsn():
 
 @pytest.fixture
 def postgres_dsn():
-    pytest.skip("live PostgreSQL tests require an explicit plugin dsn")
+    dsn = os.environ.get("SAGE_V2_TEST_POSTGRES_DSN", "").strip()
+    if not dsn:
+        pytest.skip("set SAGE_V2_TEST_POSTGRES_DSN to run live PostgreSQL tests")
+    return dsn
 
 
 @pytest.mark.asyncio

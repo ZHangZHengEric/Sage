@@ -10,7 +10,8 @@ performing deletion.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
+from typing import Protocol
 
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
@@ -18,6 +19,12 @@ from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class SessionStateCleaner(Protocol):
+    """Best-effort cleanup hook for state derived from a Session."""
+
+    async def forget_session(self, session_id: str) -> None: ...
 
 
 class AuthorizedSessionAccess:
@@ -29,10 +36,17 @@ class AuthorizedSessionAccess:
         *,
         runtime=None,
         derived_state: DerivedStateStore | None = None,
+        derived_state_cleaners: Iterable[SessionStateCleaner] = (),
     ) -> None:
         self._session_store = session_store
         self.runtime = runtime
-        self._derived_state = derived_state
+        cleaners = (() if derived_state is None else (derived_state,))
+        cleaners = (*cleaners, *derived_state_cleaners)
+        self._derived_state_cleaners = tuple(
+            cleaner
+            for index, cleaner in enumerate(cleaners)
+            if all(cleaner is not previous for previous in cleaners[:index])
+        )
 
     async def get_run(self, run_id: str, context: RequestContext):
         run = await self._session_store.get_run(run_id)
@@ -148,18 +162,18 @@ class AuthorizedSessionAccess:
         descendants = await self._session_store.list_descendant_sessions(session_id)
         deleted_session_ids = (session_id, *(value.session_id for value in descendants))
         await self._session_store.delete_session(session_id)
-        if self._derived_state is None:
-            return
         for deleted_session_id in deleted_session_ids:
-            try:
-                await self._derived_state.forget_session(deleted_session_id)
-            except Exception:
-                # Canonical deletion is already committed. Derived cleanup must
-                # never turn that acknowledged fact into a client-visible failure.
-                LOGGER.exception(
-                    "failed to forget derived state for deleted Session %s",
-                    deleted_session_id,
-                )
+            for cleaner in self._derived_state_cleaners:
+                try:
+                    await cleaner.forget_session(deleted_session_id)
+                except Exception:
+                    # Canonical deletion is already committed. Derived cleanup must
+                    # never turn that acknowledged fact into a client-visible failure.
+                    LOGGER.exception(
+                        "failed to clean %s for deleted Session %s",
+                        type(cleaner).__name__,
+                        deleted_session_id,
+                    )
 
     async def _authorize(self, session_id: str, context: RequestContext) -> None:
         authorize = getattr(self._session_store, "authorize_session_actor", None)

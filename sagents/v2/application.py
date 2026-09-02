@@ -60,6 +60,8 @@ class MaterializedAgentPorts:
     workspace_initializer: Any | None
     resolved_plan: ResolvedApplicationPlan
     scope_handles: tuple[Any, ...]
+    tool_catalog: Any | None = None
+    tool_executor: Any | None = None
 
 
 @dataclass
@@ -145,21 +147,22 @@ class SAgentApplication:
         Run-scoped ``scope_handles``.
         """
 
-        self._ensure_open()
-        if self._composer is None:
-            raise RuntimeError(
-                "SAgentApplication.materialize_agent requires a Builder-built application"
+        async with self._close_lock:
+            self._ensure_open()
+            if self._composer is None:
+                raise RuntimeError(
+                    "SAgentApplication.materialize_agent requires a Builder-built application"
+                )
+            return await self._composer.materialize_agent(
+                package,
+                agent_id=agent_id,
+                run_id=run_id,
+                model=model,
+                tool_catalog=tool_catalog,
+                tool_executor=tool_executor,
+                locked_configs=locked_configs,
+                cache_identities=cache_identities,
             )
-        return await self._composer.materialize_agent(
-            package,
-            agent_id=agent_id,
-            run_id=run_id,
-            model=model,
-            tool_catalog=tool_catalog,
-            tool_executor=tool_executor,
-            locked_configs=locked_configs,
-            cache_identities=cache_identities,
-        )
 
     def entrypoint(self) -> SAgent:
         self._ensure_open()
