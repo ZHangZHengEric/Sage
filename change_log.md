@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-02 14:21** 新增独立 server_v2：domain/repositories/db 分层，启动只读 .env（SAGE_SERVER_*），AG-UI 走 Redis 回放，Web 含登录/对话/模型与管理。
+
 - **2026-09-02 10:55** sagents/v2 与 Desktop v2 最低 Python 升为 3.12，导入与 sidecar 启动会拒绝更低版本。
 
 - **2026-09-02 10:30** 桌面恢复 sandbox 清理时直接用 SandboxRef.provider_id，去掉 sage.sandbox.memory 兼容映射。

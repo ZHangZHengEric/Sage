@@ -881,7 +881,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "type": "object",
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
-                        "table_prefix": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string"},
                     },
                     "required": ["dsn"],
                     "additionalProperties": False,
@@ -907,7 +907,11 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             ),
             factory=lambda context, dependencies: MysqlSessionStore(
                 str(context.config["dsn"]),
-                table_prefix=str(context.config.get("table_prefix") or "sagent"),
+                table_prefix=(
+                    None
+                    if "table_prefix" not in context.config
+                    else str(context.config.get("table_prefix") or "")
+                ),
             ),
         )
     )
