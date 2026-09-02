@@ -14,6 +14,7 @@ from app.desktop_v2.backend.catalog import (
     DesktopMcpRecord,
     DesktopModelCompatibilityProfile,
 )
+from app.desktop_v2.backend.package import desktop_v2_manifest
 from app.desktop_v2.backend.service import (
     _DesktopDriver,
     _usage_percentile,
@@ -75,11 +76,11 @@ from sagents.v2.memory import (
 )
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
 from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason, WorkItem
-from sagents.v2.runtime.extensions import ExtensionScope
 
 
 @asynccontextmanager
 async def desktop_execution_lease(service: DesktopV2Service, run_id: str):
+    await service.start()
     work_id = new_id("test_work")
     await service.scheduler.submit(
         WorkItem(
@@ -175,41 +176,41 @@ async def test_rebuilt_desktop_loop_checks_current_composition_not_stored_hash(
 @pytest.mark.asyncio
 async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path):
     service = DesktopV2Service(tmp_path)
-
-    class Agent:
-        async def close(self):
-            return None
-
-    application = service._run_application(
-        Agent(),
-        agent_id="agent_1",
-        composition_hash="sha256:desktop-plan",
-        component_snapshot={
-            "selections": {"context.reducer": "sage.context.reducer.window"}
-        },
+    await service.start()
+    ports = await service.application.materialize_agent(
+        desktop_v2_manifest(
+            session_root=service.runtime_root,
+            component_selections={
+                "context.reducer": "sage.context.reducer.window"
+            },
+        ),
+        agent_id="main",
+        run_id="run_plan",
     )
-    bindings = {
-        (value.capability, value.plugin_id, value.scope, value.source)
-        for value in application.resolved_plan.providers
-    }
-
-    assert application.resolved_plan.package_id == "desktop.agent_1"
-    assert application.resolved_plan.composition_hash == "sha256:desktop-plan"
-    assert (
-        "context.reducer",
-        "sage.context.reducer.window",
-        "tenant",
-        "plugin",
-    ) in bindings
-    assert (
-        "agent.continuation-policy",
-        "sage.agent.continuation.deterministic",
-        "run",
-        "plugin",
-    ) in bindings
-    assert ("model.provider", None, "agent", "desktop-host") in bindings
-    await application.close()
-    await service.close()
+    try:
+        bindings = {
+            (value.capability, value.plugin_id, value.source)
+            for value in ports.resolved_plan.providers
+        }
+        assert (
+            "context.reducer",
+            "sage.context.reducer.window",
+            "plugin",
+        ) in bindings
+        assert (
+            "agent.continuation-policy",
+            "sage.agent.continuation.deterministic",
+            "plugin",
+        ) in bindings
+        assert "desktop-host" not in {
+            value.source for value in ports.resolved_plan.providers
+        }
+        assert not hasattr(service, "_run_application")
+        assert not hasattr(service, "_scoped_component")
+    finally:
+        for handle in reversed(ports.scope_handles):
+            await handle.close()
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -222,14 +223,14 @@ async def test_workspace_initializer_reuses_agent_scope(tmp_path: Path):
         component_selections=settings.component_selections,
         language=settings.language,
     )
-    after_first = len(service._scope_handles)
+    after_first = len(service.application._scope_handles)
     await service._ensure_agent_workspace(
         settings.agent_workspace_path,
         component_selections=settings.component_selections,
         language=settings.language,
     )
 
-    assert len(service._scope_handles) == after_first
+    assert len(service.application._scope_handles) == after_first
     assert len(service._workspace_initializations) == 1
     await service.close()
 
@@ -237,28 +238,24 @@ async def test_workspace_initializer_reuses_agent_scope(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_long_lived_component_scope_is_reused_until_service_close(tmp_path: Path):
     service = DesktopV2Service(tmp_path / "sage")
-
-    first = await service._scoped_component(
-        "context.token-estimator",
-        "sage.context.token-estimator.json-heuristic",
-        scope=ExtensionScope.AGENT,
-        scope_id="desktop-estimator:user:agent",
-        agent_id="agent",
-        config={},
+    await service.start()
+    first = await service.application.materialize_agent(
+        desktop_v2_manifest(session_root=service.runtime_root),
+        agent_id="main",
+        run_id="run_a",
     )
-    after_first = len(service._scope_handles)
-    second = await service._scoped_component(
-        "context.token-estimator",
-        "sage.context.token-estimator.json-heuristic",
-        scope=ExtensionScope.AGENT,
-        scope_id="desktop-estimator:user:agent",
-        agent_id="agent",
-        config={},
+    second = await service.application.materialize_agent(
+        desktop_v2_manifest(session_root=service.runtime_root),
+        agent_id="main",
+        run_id="run_b",
     )
-
-    assert second is first
-    assert len(service._scope_handles) == after_first
-    await service.close()
+    try:
+        assert second.token_estimator is first.token_estimator
+        assert second.tool_selection_policy is first.tool_selection_policy
+    finally:
+        for handle in reversed((*first.scope_handles, *second.scope_handles)):
+            await handle.close()
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -283,7 +280,7 @@ async def test_repeated_loop_composition_does_not_accumulate_agent_scopes(
         run_id="run_scope_reuse_1",
     )
     await first_resources.close()
-    after_first = len(service._scope_handles)
+    after_first = len(service.application._scope_handles)
     _, _, second_resources = await service._build_loop(
         agent=agent,
         provider=provider,
@@ -294,7 +291,7 @@ async def test_repeated_loop_composition_does_not_accumulate_agent_scopes(
     )
     await second_resources.close()
 
-    assert len(service._scope_handles) == after_first
+    assert len(service.application._scope_handles) == after_first
     await service.close()
 
 

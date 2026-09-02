@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from pydantic import SecretStr
+
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.agent.policy import CompositeContinuationPolicy
 from sagents.v2.context import (
@@ -58,7 +60,12 @@ from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import PluginDeclaration
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.context.components import ContextComponentBundle
-from sagents.v2.memory import MemoryProvider, MemoryService, NoopMemoryProvider
+from sagents.v2.memory import (
+    DirectMemoryRecallQueryGenerator,
+    MemoryProvider,
+    MemoryService,
+    NoopMemoryProvider,
+)
 from sagents.v2.model.protocols import model_protocol_descriptor
 from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.root import SageManifest
@@ -90,6 +97,7 @@ from sagents.v2.session_memory import (
 )
 from sagents.v2.sagent import SAgent
 from sagents.v2.application import (
+    MaterializedAgentPorts,
     ResolvedApplicationPlan,
     ResolvedProviderBinding,
     SAgentApplication,
@@ -100,6 +108,8 @@ from sagents.v2.tool.plugins.ephemeral import (
 )
 from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.runtime.observability import (
+    DiagnosticSink,
+    LogSink,
     NoopDiagnosticSink,
     NoopLogSink,
     NoopTraceSink,
@@ -258,6 +268,8 @@ class SAgentBuilder:
         self._tool_runtime: OfficialToolRuntime | None = None
         self._tool_selection: ToolSelectionPolicy | None = None
         self._execution_binding_provider: ExecutionBindingProvider | None = None
+        self._log_sink: LogSink | None = None
+        self._diagnostic_sink: DiagnosticSink | None = None
         self._model_client: Any | None = None
 
     def with_defaults(self, *, session_root: str | Path) -> "SAgentBuilder":
@@ -323,6 +335,18 @@ class SAgentBuilder:
         """Inject the model-visible Tool projection policy."""
 
         self._tool_selection = value
+        return self
+
+    def with_log_sink(self, value: LogSink) -> "SAgentBuilder":
+        """Inject a process log sink the host already owns."""
+
+        self._log_sink = value
+        return self
+
+    def with_diagnostic_sink(self, value: DiagnosticSink) -> "SAgentBuilder":
+        """Inject a process diagnostic sink the host already owns."""
+
+        self._diagnostic_sink = value
         return self
 
     def inventory(self) -> tuple[dict, ...]:
@@ -1021,6 +1045,8 @@ class SAgentBuilder:
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
+                    ("observability.log-sink", self._log_sink),
+                    ("observability.diagnostic-sink", self._diagnostic_sink),
                 )
                 if injected is not None
             ),
@@ -1030,7 +1056,7 @@ class SAgentBuilder:
                 else ()
             ),
         )
-        return SAgentApplication(
+        application = SAgentApplication(
             agents={selected_agent: agent},
             entrypoint_agent_id=selected_agent,
             scope_handles=tuple(scope_handles),
@@ -1044,6 +1070,18 @@ class SAgentBuilder:
             resolved_plan=resolved_plan,
             owned_resources=(dispatcher,),
         )
+        application._attach_composer(
+            _ApplicationComposer(
+                host=extension_host,
+                process_root=process_root,
+                extensions=self.extensions,
+                process_plan=resolved_plan,
+                summary_store=summary_store,
+                derived_state=derived_state,
+                process_model=models_by_agent[selected_agent],
+            )
+        )
+        return application
 
     def _resolve_package(self, package):
         if isinstance(package, ResolvedSageManifest):
@@ -1431,23 +1469,31 @@ class SAgentBuilder:
                 capability="package.registry",
                 default_plugin=InMemoryAgentPackageRegistry.plugin_id,
             ),
-            "observability.diagnostic-sink": await self._create_capability(
-                host,
-                parent,
-                handles,
-                runtime,
-                declarations,
-                capability="observability.diagnostic-sink",
-                default_plugin=NoopDiagnosticSink.plugin_id,
+            "observability.diagnostic-sink": (
+                self._diagnostic_sink
+                if self._diagnostic_sink is not None
+                else await self._create_capability(
+                    host,
+                    parent,
+                    handles,
+                    runtime,
+                    declarations,
+                    capability="observability.diagnostic-sink",
+                    default_plugin=NoopDiagnosticSink.plugin_id,
+                )
             ),
-            "observability.log-sink": await self._create_capability(
-                host,
-                parent,
-                handles,
-                runtime,
-                declarations,
-                capability="observability.log-sink",
-                default_plugin=NoopLogSink.plugin_id,
+            "observability.log-sink": (
+                self._log_sink
+                if self._log_sink is not None
+                else await self._create_capability(
+                    host,
+                    parent,
+                    handles,
+                    runtime,
+                    declarations,
+                    capability="observability.log-sink",
+                    default_plugin=NoopLogSink.plugin_id,
+                )
             ),
             "observability.trace-sink": await self._create_capability(
                 host,
@@ -1728,6 +1774,439 @@ class SAgentBuilder:
             dependencies=tuple(sorted(dependencies)),
             composition_hash=composition_hash,
         )
+
+
+class _ApplicationComposer:
+    """Rematerialize Agent/Run ports on a live process Application."""
+
+    def __init__(
+        self,
+        *,
+        host,
+        process_root,
+        extensions,
+        process_plan: ResolvedApplicationPlan,
+        summary_store,
+        derived_state,
+        process_model=None,
+    ) -> None:
+        self.host = host
+        self.process_root = process_root
+        self.extensions = extensions
+        self.process_plan = process_plan
+        self.summary_store = summary_store
+        self.derived_state = derived_state
+        self.process_model = process_model
+        self.application: SAgentApplication | None = None
+        self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
+        self._lock = None
+
+    async def materialize_agent(
+        self,
+        package,
+        *,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        model: Any | None = None,
+        tool_catalog: Any | None = None,
+        tool_executor: Any | None = None,
+        locked_configs: Mapping[str, Mapping[str, Any]] | None = None,
+        cache_identities: Mapping[str, Any] | None = None,
+    ) -> MaterializedAgentPorts:
+        del tool_catalog, tool_executor
+        import asyncio
+
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        manifest, resolved = SAgentBuilder()._resolve_package(package)
+        declarations = (
+            manifest.plugins if manifest is not None else resolved.plugins
+        )
+        runtime = manifest.runtime if manifest is not None else resolved.runtime
+        for declaration in declarations:
+            if not self.extensions.contains(declaration.id):
+                self.extensions.register(load_installed_extension(declaration.id))
+        selected_agent = (
+            agent_id or resolved.entrypoint_agent or self.process_plan.entrypoint_agent_id
+        )
+        locks = {
+            capability: dict(config)
+            for capability, config in dict(locked_configs or {}).items()
+        }
+        identities = dict(cache_identities or {})
+        effective_model = model if model is not None else self.process_model
+        run_handles: list[Any] = []
+        async with self._lock:
+            estimator = await self._port(
+                runtime,
+                declarations,
+                capability="context.token-estimator",
+                default_plugin=JsonHeuristicTokenEstimator.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-estimator:{selected_agent}",
+                identities=identities,
+                run_handles=run_handles,
+            )
+            summarizer_lock = dict(locks.get("context.summarizer") or {})
+            if effective_model is not None and "model" not in summarizer_lock:
+                summarizer_lock["model"] = effective_model
+            summarizer = await self._port(
+                runtime,
+                declarations,
+                capability="context.summarizer",
+                default_plugin=ExtractiveConversationSummarizer.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-summarizer:{selected_agent}",
+                locked_config=summarizer_lock,
+                identities=identities,
+                run_handles=run_handles,
+            )
+            unit_compactor = await self._port(
+                runtime,
+                declarations,
+                capability="context.unit-compactor",
+                default_plugin=ReferenceContextUnitCompactor.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-unit-compactor:{selected_agent}",
+                locked_config={"estimator": estimator},
+                identities=identities,
+                run_handles=run_handles,
+            )
+            reducer_lock = {
+                "estimator": estimator,
+                "store": self.summary_store,
+                "summarizer": summarizer,
+                "unit_compactor": unit_compactor,
+                **dict(locks.get("context.reducer") or {}),
+            }
+            context_reducer = await self._port(
+                runtime,
+                declarations,
+                capability="context.reducer",
+                default_plugin=PersistentSummaryContextReducer.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-reducer:{selected_agent}",
+                locked_config=reducer_lock,
+                identities=identities,
+                run_handles=run_handles,
+            )
+            tool_selection = await self._port(
+                runtime,
+                declarations,
+                capability="tool.selection-policy",
+                default_plugin=LLMToolSelectionPolicy.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-tool-selection:{selected_agent}",
+                locked_config=dict(locks.get("tool.selection-policy") or {}),
+                identities=identities,
+                run_handles=run_handles,
+            )
+            continuation_lock = {"repeat_threshold": 3}
+            if effective_model is not None:
+                continuation_lock["model"] = effective_model
+            continuation_lock.update(dict(locks.get("agent.continuation-policy") or {}))
+            continuation_scope = (
+                ExtensionScope.RUN if run_id is not None else ExtensionScope.AGENT
+            )
+            continuation = await self._port(
+                runtime,
+                declarations,
+                capability="agent.continuation-policy",
+                default_plugin=CompositeContinuationPolicy.plugin_id,
+                default_scope=continuation_scope,
+                scope_id=(
+                    f"materialize-continuation:{selected_agent}:{run_id or 'agent'}"
+                ),
+                locked_config=continuation_lock,
+                identities=identities,
+                run_handles=run_handles,
+                agent_id=selected_agent,
+                run_id=run_id,
+            )
+            recall_lock = dict(locks.get("memory.recall-query") or {})
+            if effective_model is not None and "model" not in recall_lock:
+                recall_lock["model"] = effective_model
+            memory_query = await self._port(
+                runtime,
+                declarations,
+                capability="memory.recall-query",
+                default_plugin=DirectMemoryRecallQueryGenerator.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-recall-query:{selected_agent}",
+                locked_config=recall_lock,
+                identities=identities,
+                run_handles=run_handles,
+            )
+            workspace_lock = dict(locks.get("workspace.initializer") or {})
+            workspace_initializer = await self._port(
+                runtime,
+                declarations,
+                capability="workspace.initializer",
+                default_plugin=BareWorkspaceInitializer.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-workspace:{selected_agent}",
+                locked_config=workspace_lock,
+                identities=identities,
+                run_handles=run_handles,
+            )
+        resolved_plan = self._materialized_plan(
+            resolved,
+            selected_agent,
+            run_handles,
+            model=model,
+        )
+        return MaterializedAgentPorts(
+            token_estimator=estimator,
+            summarizer=summarizer,
+            context_reducer=context_reducer,
+            continuation_policy=continuation,
+            tool_selection_policy=tool_selection,
+            memory_query_generator=memory_query,
+            workspace_initializer=workspace_initializer,
+            resolved_plan=resolved_plan,
+            scope_handles=tuple(run_handles),
+        )
+
+    async def _port(
+        self,
+        runtime,
+        declarations,
+        *,
+        capability,
+        default_plugin,
+        default_scope=ExtensionScope.AGENT,
+        scope_id: str,
+        locked_config=None,
+        identities,
+        run_handles,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+    ):
+        selection = SAgentBuilder._selection(runtime, capability)
+        plugin_id = selection.plugin if selection is not None else default_plugin
+        if capability == "agent.continuation-policy" and plugin_id in {
+            "hybrid",
+            "sage.agent.continuation.hybrid",
+        }:
+            plugin_id = "sage.agent.continuation.llm-judge"
+        if capability == "tool.selection-policy" and plugin_id in {
+            "hybrid",
+            "sage.tool-selection.hybrid",
+        }:
+            plugin_id = LLMToolSelectionPolicy.plugin_id
+        config = {
+            **dict(selection.config if selection is not None else {}),
+        }
+        config = SAgentBuilder._merge_plugin_config(declarations, plugin_id, config)
+        config.update(dict(locked_config or {}))
+        scope = (
+            selection.scope
+            if selection is not None and selection.scope is not None
+            else default_scope
+        )
+        cacheable = scope != ExtensionScope.RUN
+        identity = identities.get(capability)
+        cache_key = (
+            capability,
+            plugin_id,
+            scope.value,
+            scope_id,
+            _config_identity(identity if identity is not None else config),
+        )
+        if cacheable and cache_key in self._cache:
+            return self._cache[cache_key][1]
+        parent = self.process_root
+        if scope == ExtensionScope.RUN:
+            parent = await self._agent_parent(agent_id or "default")
+        value, handle = await self._instantiate(
+            plugin_id,
+            config,
+            capability,
+            scope=scope,
+            scope_id=scope_id,
+            parent=parent,
+            agent_id=agent_id,
+            run_id=run_id,
+        )
+        if cacheable:
+            self._cache[cache_key] = (handle, value)
+            if self.application is not None:
+                self.application._scope_handles.append(handle)
+        else:
+            run_handles.append(handle)
+        return value
+
+    async def _agent_parent(self, agent_id: str):
+        cache_key = ("__agent_parent__", agent_id)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached[0]
+        handle = await self.host.open_scope(
+            ExtensionScopeContext(
+                scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-agent:{agent_id}",
+                agent_id=agent_id,
+            ),
+            self.host.plan(()),
+            parent=self.process_root,
+        )
+        self._cache[cache_key] = (handle, None)
+        if self.application is not None:
+            self.application._scope_handles.append(handle)
+        return handle
+
+    async def _instantiate(
+        self,
+        plugin_id: str,
+        config: dict[str, Any],
+        capability: str,
+        *,
+        scope: ExtensionScope,
+        scope_id: str,
+        parent,
+        agent_id: str | None,
+        run_id: str | None,
+    ):
+        registration = self.extensions.get(plugin_id)
+        if capability not in {
+            offer.capability for offer in registration.descriptor.provides
+        }:
+            raise ValueError(f"extension {plugin_id!r} does not provide {capability!r}")
+        name = next(
+            offer.name
+            for offer in registration.descriptor.provides
+            if offer.capability == capability
+        )
+        plan = self.host.plan(
+            (
+                CapabilityRequirement(
+                    capability=capability,
+                    api_version=(
+                        "3" if capability == "execution.sandbox" else ">=2,<3"
+                    ),
+                    name=name,
+                ),
+            ),
+            selections={capability: plugin_id},
+            configs={plugin_id: config},
+            scope_overrides={plugin_id: scope},
+        )
+        handle = await self.host.open_scope_hierarchy(
+            ExtensionScopeContext(
+                scope=scope,
+                scope_id=scope_id,
+                agent_id=agent_id,
+                run_id=run_id,
+            ),
+            plan,
+            parent=parent if scope != ExtensionScope.PROCESS else None,
+        )
+        return handle.providers.require(capability, name), handle
+
+    def _materialized_plan(
+        self,
+        resolved,
+        selected_agent: str,
+        run_handles,
+        *,
+        model,
+    ) -> ResolvedApplicationPlan:
+        bindings = {
+            (value.capability, value.name, value.scope): value
+            for value in self.process_plan.providers
+        }
+        handles = []
+        if self.application is not None:
+            handles.extend(self.application._scope_handles)
+        handles.extend(run_handles)
+
+        def visit(handle) -> None:
+            for ancestor in getattr(handle, "_owned_ancestors", ()):
+                visit(ancestor)
+            for started in getattr(handle, "_started", ()):
+                descriptor = started.registration.descriptor
+                for offer in descriptor.provides:
+                    bindings[(offer.capability, offer.name, handle.context.scope.value)] = (
+                        ResolvedProviderBinding(
+                            capability=offer.capability,
+                            name=offer.name,
+                            api_version=offer.api_version,
+                            plugin_id=descriptor.plugin_id,
+                            scope=handle.context.scope.value,
+                            source="plugin",
+                        )
+                    )
+
+        for handle in handles:
+            visit(handle)
+        if model is not None:
+            bindings[("model.provider", "default", "agent")] = ResolvedProviderBinding(
+                capability="model.provider",
+                name="default",
+                api_version="2",
+                plugin_id=None,
+                scope="agent",
+                source="host",
+            )
+        providers = tuple(sorted(bindings.values()))
+        payload = {
+            "process": self.process_plan.composition_hash,
+            "manifest": resolved.manifest_hash,
+            "providers": [
+                (value.capability, value.plugin_id, value.scope, value.source)
+                for value in providers
+            ],
+        }
+        composition_hash = (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps(payload, sort_keys=True).encode()
+            ).hexdigest()
+        )
+        return ResolvedApplicationPlan(
+            package_id=resolved.package_id,
+            manifest_hash=resolved.manifest_hash,
+            entrypoint_agent_id=selected_agent,
+            providers=providers,
+            dependencies=self.process_plan.dependencies,
+            composition_hash=composition_hash,
+        )
+
+
+def _config_identity(value: Any) -> str:
+    def normalize(candidate: Any, seen: set[int]) -> Any:
+        if candidate is None or isinstance(candidate, (str, int, float, bool)):
+            return candidate
+        if isinstance(candidate, SecretStr):
+            return {
+                "secret_sha256": hashlib.sha256(
+                    candidate.get_secret_value().encode()
+                ).hexdigest()
+            }
+        marker = id(candidate)
+        if marker in seen:
+            return {"cycle": True}
+        if isinstance(candidate, (bytes, bytearray)):
+            return {"bytes_sha256": hashlib.sha256(bytes(candidate)).hexdigest()}
+        if isinstance(candidate, Path):
+            return str(candidate)
+        if isinstance(candidate, Mapping):
+            seen.add(marker)
+            return {
+                str(key): normalize(item, seen)
+                for key, item in sorted(candidate.items(), key=lambda pair: str(pair[0]))
+            }
+        if isinstance(candidate, (list, tuple)):
+            seen.add(marker)
+            return [normalize(item, seen) for item in candidate]
+        return {
+            "type": f"{type(candidate).__module__}.{type(candidate).__qualname__}",
+            "id": marker,
+        }
+
+    return hashlib.sha256(
+        json.dumps(normalize(value, set()), sort_keys=True).encode()
+    ).hexdigest()
 
 
 def _service_composition_identity(provider: Any) -> dict[str, Any]:

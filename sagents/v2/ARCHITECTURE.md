@@ -144,13 +144,19 @@ The Builder consumes manifest selections for `agent.continuation-policy`,
 `context.token-estimator`, `context.summary-store`, `context.summarizer`, and
 `context.reducer`. Host-owned dependencies are locked inputs applied after
 manifest configuration, so configuration cannot replace the active Model,
-SessionStore, estimator, store, or summarizer. Generic and Desktop composition
-both use `AgentCompositionFactory.create_engine`; Desktop still owns its product
-policies and Context providers. `SAgentApplication.resolved_plan` is the single
-inspectable final composition: capability, provider/source, scope, API version,
-plugin dependency edges, and the final hash. It intentionally excludes raw
-configuration and credentials. The Builder may still open separate lifetime
-scopes internally; that is a lifecycle detail, not a second execution composer.
+SessionStore, estimator, store, or summarizer. Generic composition uses
+`AgentCompositionFactory.create_engine`. Desktop product state (catalog,
+session index, MCP records, settings) stays outside `resolved_plan`;
+host-owned sinks, models, tools, and sandbox bindings enter through `with_*`.
+Desktop should not open Extension scopes. Next-run rematerialization uses
+`SAgentApplication.materialize_agent` on the process Application; it reuses the
+process scope and Dispatcher and must not call `build()` again.
+`SAgentApplication.resolved_plan` is
+the single inspectable final composition: capability, provider/source, scope,
+API version, plugin dependency edges, and the final hash. It intentionally
+excludes raw configuration and credentials. The Builder may still open
+separate lifetime scopes internally; that is a lifecycle detail, not a second
+execution composer.
 
 ## Provider boundary
 
