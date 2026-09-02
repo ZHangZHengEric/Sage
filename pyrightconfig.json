@@ -1,5 +1,23 @@
 {
   "pythonVersion": "3.11",
+  "executionEnvironments": [
+    {
+      "root": "sagents/v2",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "app/desktop_v2",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "tests/sagents/v2",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "tests/app/desktop_v2",
+      "pythonVersion": "3.12"
+    }
+  ],
   "venvPath": ".",
   "venv": ".conda",
   "typeCheckingMode": "basic",

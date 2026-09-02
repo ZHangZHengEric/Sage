@@ -64,7 +64,7 @@
 
 ## 🚀 **快速开始**
 
-**环境要求（从源码跑 Web）：** Python 3.10+、Node.js 18+。
+**环境要求（从源码跑 Web）：** Python 3.10+、Node.js 18+。**SAgents v2 与 Desktop v2 需要 Python 3.12+。**
 
 ### Web（克隆后一键启动）
 

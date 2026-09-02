@@ -64,7 +64,7 @@
 
 ## 🚀 **Quick Start**
 
-**Prerequisites (web from source):** Python 3.10+, Node.js 18+.
+**Prerequisites (web from source):** Python 3.10+, Node.js 18+. **SAgents v2 and Desktop v2 require Python 3.12+.**
 
 ### Web (clone and run)
 

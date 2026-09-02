@@ -20,6 +20,9 @@ app/desktop_v2/
 
 ## 开发运行
 
+**环境要求：Python 3.12+。** Desktop v2 sidecar 与 `sagents.v2` 共用这一下限；
+旧 Desktop / Web 仍可使用 Python 3.10+。低于 3.12 时 Flutter 不会启动 sidecar。
+
 从仓库根目录启动：
 
 ```bash

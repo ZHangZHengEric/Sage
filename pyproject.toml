@@ -7,6 +7,7 @@ name = "sage"
 version = "1.1.0"
 description = "A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving."
 readme = "README.md"
+# Legacy Sage remains 3.10+. sagents.v2 and Desktop v2 require 3.12+.
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
