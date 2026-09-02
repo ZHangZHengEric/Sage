@@ -279,6 +279,11 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         path = self._derived_path(session_id, namespace, key)
         await asyncio.to_thread(path.unlink, missing_ok=True)
 
+    async def forget_session(self, session_id: str) -> None:
+        await super().forget_session(session_id)
+        path = self._session_dir(session_id) / "derived"
+        await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+
     async def close(self) -> None:
         """Release the process writer lock. Calling close twice is safe."""
 

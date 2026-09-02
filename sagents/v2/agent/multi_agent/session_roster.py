@@ -16,7 +16,7 @@ from sagents.v2.contracts.items import (
     ToolCallItemData,
     ToolResultItemData,
 )
-from sagents.v2.runtime.session.contracts import SessionStore
+from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
 
 
 @dataclass
@@ -37,8 +37,14 @@ class SessionDynamicAgentRoster:
     KEY = "dynamic_agent_roster_v1"
     SCHEMA_VERSION = 3
 
-    def __init__(self, session_store: SessionStore) -> None:
+    def __init__(
+        self, session_store: SessionStore, derived_state: DerivedStateStore
+    ) -> None:
+        # Two ports on purpose: the spawn Items read through ``session_store``
+        # are the durable fact, and ``derived_state`` is only the
+        # sequence-bound cache of the roster projected from them.
         self.session_store = session_store
+        self.derived_state = derived_state
         self._locks: dict[str, _RosterLockEntry] = {}
         self._locks_guard = asyncio.Lock()
 
@@ -87,7 +93,7 @@ class SessionDynamicAgentRoster:
                 "pending_spawn_call_ids": sorted(pending_calls),
             }
             payload["checksum"] = self._checksum(payload)
-            await self.session_store.put_derived_state(
+            await self.derived_state.put_derived_state(
                 session_id,
                 self.NAMESPACE,
                 self.KEY,
@@ -97,14 +103,14 @@ class SessionDynamicAgentRoster:
 
     async def _cached(self, session_id: str) -> dict[str, Any] | None:
         try:
-            value = await self.session_store.get_derived_state(
+            value = await self.derived_state.get_derived_state(
                 session_id, self.NAMESPACE, self.KEY
             )
         except Exception:
             # Derived state is explicitly rebuildable. A broken projection must
             # not make the canonical Session unusable.
             try:
-                await self.session_store.delete_derived_state(
+                await self.derived_state.delete_derived_state(
                     session_id, self.NAMESPACE, self.KEY
                 )
             except Exception:

@@ -102,7 +102,7 @@ async def test_final_request_budget_reserves_tool_schema_and_runtime_suffix():
     class ProjectionObserver:
         projection = None
 
-        async def observe_projection(self, run_id, projection):
+        async def observe_projection(self, run_id, projection, **kwargs):
             self.projection = projection
 
     observer = ProjectionObserver()

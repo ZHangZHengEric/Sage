@@ -6,14 +6,9 @@ import asyncio
 import hashlib
 import json
 from collections import OrderedDict
-from typing import Protocol
+from dataclasses import dataclass, field
 
 from sagents.v2.context import ContextProjection
-from sagents.v2.context.session_history import (
-    SessionHistoryLedgerBuilder,
-    SessionHistoryReader,
-)
-from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model import ModelMessage
 from sagents.v2.session_memory.contracts import (
@@ -23,29 +18,47 @@ from sagents.v2.session_memory.contracts import (
     SessionMemoryRecord,
 )
 
+_MAX_TRACKED_RUNS = 1_024
+_MAX_TRACKED_SESSIONS = 256
 
-class SessionMemoryReader(SessionHistoryReader, Protocol):
-    async def get_start_command(self, run_id: str) -> StartRun: ...
+
+@dataclass(frozen=True)
+class _RequestBoundary:
+    """What one observed projection allows the next recall to search."""
+
+    session_id: str | None
+    historical: frozenset[str]
+    source_count: int = 0
+    # tool_call_id -> record ids produced by that call, so a search_memory call
+    # cannot retrieve its own request.
+    calls: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 class SessionMemoryService:
-    """Index Session history and search only reducer-declared history."""
+    """Index Session history incrementally and search only declared history.
 
-    def __init__(
-        self,
-        provider: SessionMemoryProvider,
-        history_reader: SessionMemoryReader,
-        *,
-        history_builder: SessionHistoryLedgerBuilder | None = None,
-    ) -> None:
+    Indexing is driven by :meth:`observe_projection`, which the ContextAssembler
+    calls once per model request with the canonical Run ledger already in
+    memory. Only newly appended records are handed to the provider, so a recall
+    costs one provider query instead of a full history rebuild plus a full
+    re-sync.
+    """
+
+    def __init__(self, provider: SessionMemoryProvider) -> None:
         self.provider = provider
-        self.history = history_builder or SessionHistoryLedgerBuilder(history_reader)
-        self.reader = history_reader
-        self._historical_by_run: OrderedDict[str, frozenset[str]] = OrderedDict()
+        self._boundaries: OrderedDict[str, _RequestBoundary] = OrderedDict()
+        # session_id -> record_id -> content digest already accepted by the
+        # provider. Purely an optimisation: losing it re-syncs, never corrupts.
+        self._indexed: OrderedDict[str, dict[str, str]] = OrderedDict()
         self._lock = asyncio.Lock()
 
     async def observe_projection(
-        self, run_id: str, projection: ContextProjection
+        self,
+        run_id: str,
+        projection: ContextProjection,
+        *,
+        session_id: str | None = None,
+        source_messages: tuple[ModelMessage, ...] = (),
     ) -> None:
         historical = frozenset(
             self.record_id(message)
@@ -53,10 +66,53 @@ class SessionMemoryService:
             if message.role != "system"
         )
         async with self._lock:
-            self._historical_by_run[run_id] = historical
-            self._historical_by_run.move_to_end(run_id)
-            while len(self._historical_by_run) > 1_024:
-                self._historical_by_run.popitem(last=False)
+            previous = self._boundaries.get(run_id)
+            append_from = 0
+            calls: dict[str, list[str]] = {}
+            if (
+                previous is not None
+                and previous.session_id == session_id
+                and previous.source_count <= len(source_messages)
+            ):
+                append_from = previous.source_count
+                calls = {key: list(value) for key, value in previous.calls.items()}
+            appended = source_messages[append_from:]
+            records = (
+                self._records(
+                    session_id,
+                    appended,
+                    start_position=append_from,
+                )
+                if session_id is not None and appended
+                else ()
+            )
+            for record in records:
+                for tool_call_id in record.source.get("tool_call_ids", ()):
+                    calls.setdefault(tool_call_id, []).append(record.record_id)
+            pending = self._unindexed_locked(session_id, records)
+        if pending:
+            # Provider I/O stays outside the service lock so unrelated Runs can
+            # index concurrently. A failed write does not advance this Run.
+            await self.provider.sync(pending)
+        boundary = _RequestBoundary(
+            session_id=session_id,
+            historical=historical,
+            source_count=len(source_messages),
+            calls={key: tuple(value) for key, value in calls.items()},
+        )
+        async with self._lock:
+            self._remember_locked(session_id, pending)
+            current = self._boundaries.get(run_id)
+            if (
+                current is not None
+                and current.session_id == session_id
+                and current.source_count > boundary.source_count
+            ):
+                return
+            self._boundaries[run_id] = boundary
+            self._boundaries.move_to_end(run_id)
+            while len(self._boundaries) > _MAX_TRACKED_RUNS:
+                self._boundaries.popitem(last=False)
 
     async def recall(
         self,
@@ -67,33 +123,21 @@ class SessionMemoryService:
         limit: int,
         tool_call_id: str | None = None,
     ) -> tuple[SessionMemoryHit, ...]:
-        command = await self.reader.get_start_command(run_id)
-        ledger = await self.history.rebuild(command, run_id=run_id)
-        records = tuple(
-            self._record(session_id, message, position)
-            for position, message in enumerate(ledger)
-            if message.role != "system" and self._content(message)
-        )
-        await self.provider.sync(records)
         async with self._lock:
-            declared_history = self._historical_by_run.get(run_id)
-        if not declared_history:
-            # Missing projection and an explicit empty declaration both mean
-            # that the reducer exposed no searchable history for this request.
+            boundary = self._boundaries.get(run_id)
+        # Missing projection and an explicit empty declaration both mean that
+        # the reducer exposed no searchable history for this request. The
+        # reducer plugin owns this boundary: Session Memory deliberately does
+        # not infer history as "canonical ledger minus visible request".
+        if boundary is None or not boundary.historical:
             return ()
-        current_call_records = {
-            record.record_id
-            for record in records
+        current_call_records = (
+            frozenset(boundary.calls.get(tool_call_id, ()))
             if tool_call_id is not None
-            and tool_call_id in record.source.get("tool_call_ids", ())
-        }
-        # The reducer plugin owns this boundary. Session Memory deliberately
-        # does not infer history as "canonical ledger minus visible request".
+            else frozenset()
+        )
         historical_record_ids = tuple(
-            record.record_id
-            for record in records
-            if record.record_id in declared_history
-            and record.record_id not in current_call_records
+            sorted(boundary.historical - current_call_records)
         )
         if not historical_record_ids:
             return ()
@@ -104,12 +148,62 @@ class SessionMemoryService:
                 text=text,
                 limit=limit,
                 included_record_ids=historical_record_ids,
-                excluded_record_ids=tuple(current_call_records),
+                excluded_record_ids=tuple(sorted(current_call_records)),
             )
         )
 
     async def forget_session(self, session_id: str) -> None:
         await self.provider.forget_session(session_id)
+        async with self._lock:
+            self._indexed.pop(session_id, None)
+            for run_id, boundary in tuple(self._boundaries.items()):
+                if boundary.session_id == session_id:
+                    del self._boundaries[run_id]
+
+    def _unindexed_locked(
+        self, session_id: str | None, records: tuple[SessionMemoryRecord, ...]
+    ) -> tuple[SessionMemoryRecord, ...]:
+        if session_id is None or not records:
+            return ()
+        known = self._indexed.get(session_id, {})
+        return tuple(
+            record
+            for record in records
+            if known.get(record.record_id) != self._digest(record)
+        )
+
+    def _remember_locked(
+        self, session_id: str | None, records: tuple[SessionMemoryRecord, ...]
+    ) -> None:
+        if session_id is None:
+            return
+        known = self._indexed.setdefault(session_id, {})
+        for record in records:
+            known[record.record_id] = self._digest(record)
+        self._indexed.move_to_end(session_id)
+        while len(self._indexed) > _MAX_TRACKED_SESSIONS:
+            self._indexed.popitem(last=False)
+
+    @classmethod
+    def _records(
+        cls,
+        session_id: str,
+        messages: tuple[ModelMessage, ...],
+        *,
+        start_position: int = 0,
+    ) -> tuple[SessionMemoryRecord, ...]:
+        # ``messages`` is the newly appended suffix of the canonical Run ledger.
+        return tuple(
+            cls._record(session_id, message, start_position + offset)
+            for offset, message in enumerate(messages)
+            if message.role != "system" and cls._content(message)
+        )
+
+    @staticmethod
+    def _digest(record: SessionMemoryRecord) -> str:
+        return hashlib.sha256(
+            f"{record.position}\n{record.role}\n{record.content}".encode()
+        ).hexdigest()
 
     @classmethod
     def _record(

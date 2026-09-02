@@ -18,6 +18,8 @@ core/           基础设施
 
 生产启动强制 MySQL + Redis：`SAGE_SERVER_MYSQL_URL`、`SAGE_SERVER_REDIS_URL`。单测注入 Memory store / 内存回放，不写本地 JSON。
 
+配 MySQL 只让 Session 状态跨重启存活，**不等于可以横向扩容**：SessionStore 拒绝第二个 writer（`multi_process_writes: False`），订阅者留在进程内，Scheduler 与 JobRuntime 仍是内存实现。因此 Server 目前只支持单 worker；第二个进程会在 SessionStore 获取独占 writer 锁时直接启动失败。manifest 的 `required_guarantees` 会在装配阶段校验 SessionStore 的事务性、持久性与 actor 授权能力。
+
 ```bash
 cd app/server_v2/web && npm install && npm run build
 cd ../../..

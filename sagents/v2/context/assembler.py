@@ -237,12 +237,21 @@ class DefaultContextAssembler:
         if volatile:
             payload = self._inject_latest_user(payload, volatile)
         messages = (*system, *payload)
+        # Resolved once and shared: the reduction scope and the projection
+        # observer both need the owning Run, and neither should pay for a
+        # second store read.
+        run = None
+        if (
+            run_id is not None
+            and self.history is not None
+            and (self.budget is not None or self.projection_observer is not None)
+        ):
+            run = await self.history.reader.get_run(run_id)
         if self.budget is not None:
             # Reduction affects only this request projection. The checkpointed
             # ledger and canonical runtime events retain their original facts.
             scope = None
-            if run_id is not None and self.history is not None:
-                run = await self.history.reader.get_run(run_id)
+            if run is not None:
                 context_key = self._summary_context_key(run.session_id)
                 if run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED:
                     context_key = self._summary_context_key(
@@ -271,7 +280,12 @@ class DefaultContextAssembler:
                 source_message_count=len(messages),
             )
         if self.projection_observer is not None and run_id is not None:
-            await self.projection_observer.observe_projection(run_id, projection)
+            await self.projection_observer.observe_projection(
+                run_id,
+                projection,
+                session_id=run.session_id if run is not None else None,
+                source_messages=ledger,
+            )
         return projection
 
     @staticmethod

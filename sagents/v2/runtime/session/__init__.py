@@ -2,6 +2,7 @@
 
 from sagents.v2.runtime.session.contracts import (
     CommitResult,
+    DerivedStateStore,
     DispatchableRun,
     EventDraft,
     RunCreationResult,
@@ -25,30 +26,25 @@ from sagents.v2.runtime.session.migration import (
 )
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.coordinator import SessionStoreCoordinator
-from sagents.v2.runtime.session.repository import (
-    EphemeralSessionRepository,
-    FilesystemSessionRepository,
-    SessionRepository,
-)
+from sagents.v2.runtime.session.derived_state import InMemoryDerivedStateStore
 from sagents.v2.runtime.session.subscriptions import SubscriptionHub
 
 __all__ = [
     "CommitResult",
+    "DerivedStateStore",
     "DispatchableRun",
     "EventDraft",
     "EphemeralSessionStore",
     "FilesystemSessionStore",
+    "InMemoryDerivedStateStore",
     "MysqlSessionStore",
     "PostgresSessionStore",
     "LeaseFencedSessionStore",
     "AuthorizedSessionAccess",
     "MigrationReport",
     "SessionAggregate",
-    "SessionRepository",
     "SessionStoreCoordinator",
     "SubscriptionHub",
-    "EphemeralSessionRepository",
-    "FilesystemSessionRepository",
     "RunCreationResult",
     "SessionStoreCorruptionError",
     "SessionStore",

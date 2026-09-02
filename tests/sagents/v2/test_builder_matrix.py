@@ -32,6 +32,7 @@ from sagents.v2.context import (
 from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 from sagents.v2.runtime.session import EphemeralSessionStore
+from sagents.v2.runtime.session import InMemoryDerivedStateStore
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
@@ -46,6 +47,42 @@ from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelStep,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
+
+
+class _AuthoritativeOnlySessionStore:
+    """Expose the authoritative port while deliberately hiding derived storage."""
+
+    def __init__(self) -> None:
+        self.store = EphemeralSessionStore()
+
+    def __getattr__(self, name):
+        if name in {
+            "get_derived_state",
+            "put_derived_state",
+            "delete_derived_state",
+            "forget_session",
+        }:
+            raise AttributeError(name)
+        return getattr(self.store, name)
+
+
+class _RecordingDerivedStateStore:
+    def __init__(self) -> None:
+        self.values = {}
+
+    async def get_derived_state(self, session_id, namespace, key):
+        return self.values.get((session_id, namespace, key))
+
+    async def put_derived_state(self, session_id, namespace, key, value):
+        self.values[(session_id, namespace, key)] = value
+
+    async def delete_derived_state(self, session_id, namespace, key):
+        self.values.pop((session_id, namespace, key), None)
+
+    async def forget_session(self, session_id):
+        self.values = {
+            key: value for key, value in self.values.items() if key[0] != session_id
+        }
 
 
 @pytest.mark.asyncio
@@ -66,6 +103,59 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
     assert isinstance(application, SAgentApplication)
     agent = application.entrypoint()
     assert agent.runtime.session_store.capabilities["global_session_index"] is False
+    await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_injects_derived_state_independently_from_session_store(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-derived-state",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    session_store = _AuthoritativeOnlySessionStore()
+    derived_state = _RecordingDerivedStateStore()
+
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "unused-session-store")
+        .with_session_store(session_store)
+        .with_derived_state_store(derived_state)
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    summary_store = application.service("context.summary-store")
+    assert summary_store.derived_state is derived_state
+    assert application.service("derived-state.store") is derived_state
+    await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_does_not_require_injected_session_store_to_hold_derived_state(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-default-derived-state",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "unused-session-store")
+        .with_session_store(_AuthoritativeOnlySessionStore())
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    derived_state = application.service("derived-state.store")
+    assert isinstance(derived_state, InMemoryDerivedStateStore)
+    assert application.service("context.summary-store").derived_state is derived_state
     await application.close()
 
 
@@ -271,7 +361,7 @@ async def test_builder_composes_selected_context_and_continuation_plugins(
         ),
         "context.summary-store": CapabilitySelection(
             plugin="sage.context.summary-store.session-derived",
-            config={"session_store": "untrusted-manifest-value"},
+            config={"derived_state": "untrusted-manifest-value"},
         ),
         "context.summarizer": CapabilitySelection(
             plugin="sage.context.summarizer.model",
@@ -322,7 +412,7 @@ async def test_builder_composes_selected_context_and_continuation_plugins(
     assert isinstance(reducer.unit_compactor, ReferenceContextUnitCompactor)
     assert reducer.unit_compactor.estimator is loop.context_assembler.estimator
     assert isinstance(reducer.store, SessionDerivedConversationSummaryStore)
-    assert reducer.store.session_store is loop.runtime.session_store
+    assert reducer.store.derived_state is application.service("derived-state.store")
     assert isinstance(reducer.summarizer, ModelConversationSummarizer)
     assert reducer.summarizer.model is loop.model
     assert isinstance(continuation, ExplicitStatusContinuationPolicy)

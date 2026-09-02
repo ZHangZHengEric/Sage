@@ -31,7 +31,10 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
             version="0.1.0",
             name="Sage Server v2",
         ),
-        runtime=RuntimeConfig(capabilities=_runtime_capabilities(settings)),
+        runtime=RuntimeConfig(
+            capabilities=_runtime_capabilities(settings),
+            required_guarantees=_required_guarantees(settings),
+        ),
         agents={
             "main": AgentDefinition(
                 name="Main Assistant",
@@ -49,6 +52,28 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
             )
         },
     )
+
+
+def _required_guarantees(
+    settings: ServerV2Settings | None,
+) -> dict[str, dict[str, object]]:
+    """Assert what the Server actually depends on, so a swap fails at build.
+
+    These are requirements, not documentation: selecting a SessionStore that
+    cannot prove them aborts startup instead of degrading a multi-tenant
+    deployment at runtime. Process topology is not duplicated in application
+    configuration; stores and schedulers enforce their own writer and lease
+    contracts.
+    """
+
+    store: dict[str, object] = {
+        "transactional_run_events": True,
+        "transactional_suspension": True,
+        "supports_actor_authorization": True,
+    }
+    if settings is not None and settings.mysql_url:
+        store["durable_across_process_restart"] = True
+    return {"session.store": store}
 
 
 def _runtime_capabilities(

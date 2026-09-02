@@ -1683,6 +1683,16 @@ class SessionStoreCoordinator:
                 raise self._not_found("session.not_found", session_id)
             self._derived_state.pop((session_id, namespace, key), None)
 
+    async def forget_session(self, session_id: str) -> None:
+        """Forget projections without requiring authoritative Session presence."""
+
+        async with self._lock:
+            self._derived_state = {
+                key: value
+                for key, value in self._derived_state.items()
+                if key[0] != session_id
+            }
+
     async def get_checkpoint(self, checkpoint_id: str) -> Checkpoint:
         async with self._lock:
             checkpoint = self._checkpoints.get(checkpoint_id)

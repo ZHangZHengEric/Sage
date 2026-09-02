@@ -1374,10 +1374,12 @@ class DesktopV2Service:
             max_per_tenant=2,
         )
         self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self))
-        self.dynamic_agent_roster = SessionDynamicAgentRoster(self.session_store)
+        self.dynamic_agent_roster = SessionDynamicAgentRoster(
+            self.session_store, self.session_store
+        )
         self.summary_store_plugin_id, self.summary_store = self._process_component(
             "context.summary-store",
-            {"session_store": self.session_store},
+            {"derived_state": self.session_store},
             allow_user_selection=False,
         )
         self.activations = SessionDerivedSkillActivationRepository(
@@ -1411,7 +1413,7 @@ class DesktopV2Service:
             allow_user_selection=True,
         )
         self.session_memory_service = SessionMemoryService(
-            self.session_memory_provider, self.session_store
+            self.session_memory_provider
         )
         self.session_index = JsonDesktopSessionIndex(
             self.runtime_root / "session-index.json"

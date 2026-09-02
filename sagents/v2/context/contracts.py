@@ -92,10 +92,21 @@ class ContextProjection(StrictModel):
 
 
 class ContextProjectionObserver(Protocol):
-    """Observe the exact request view without changing canonical history."""
+    """Observe the exact request view without changing canonical history.
+
+    ``source_messages`` is the append-only canonical ledger the projection was
+    reduced from. Passing it here lets a derived index update incrementally at
+    the one point where the ledger is already in memory, instead of every
+    consumer rebuilding history from the SessionStore on each read.
+    """
 
     async def observe_projection(
-        self, run_id: str, projection: ContextProjection
+        self,
+        run_id: str,
+        projection: ContextProjection,
+        *,
+        session_id: str | None = None,
+        source_messages: tuple[ModelMessage, ...] = (),
     ) -> None: ...
 
 

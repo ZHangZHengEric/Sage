@@ -326,7 +326,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         SessionDerivedConversationSummaryStore,
         "context.summary-store",
         lambda context, dependencies: SessionDerivedConversationSummaryStore(
-            context.config["session_store"]
+            context.config["derived_state"]
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
     )
