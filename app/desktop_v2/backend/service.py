@@ -39,10 +39,13 @@ from app.desktop_v2.backend.shell_policy import (
 )
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.tool.localization import localize_tool_definition
+from app.desktop_v2.backend.package import (
+    DESKTOP_COMPONENT_DEFAULTS as _DESKTOP_COMPONENT_DEFAULTS,
+    DESKTOP_COMPONENTS as _DESKTOP_COMPONENTS,
+    stable_component_id as _stable_component_id,
+)
 from app.desktop_v2.backend.session_index import JsonDesktopSessionIndex
 from sagents.v2 import (
-    ResolvedApplicationPlan,
-    ResolvedProviderBinding,
     SAgent,
     SAgentApplication,
 )
@@ -92,9 +95,10 @@ from sagents.v2.contracts.session_commit import (
     SessionMergeStrategy,
 )
 from sagents.v2.runtime import HarnessRuntime
-from sagents.v2.runtime.execution import LocalWorkerDispatcher
-from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
-from sagents.v2.runtime.session import AuthorizedSessionAccess, LeaseFencedSessionStore
+from sagents.v2.runtime.session import (
+    FilesystemSessionStore,
+    LeaseFencedSessionStore,
+)
 from sagents.v2.agent import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.package.manifest.agents import (
@@ -141,15 +145,12 @@ from sagents.v2.model import (
     probe_model_connection,
     probe_model_json_object,
     probe_model_tool_calling,
-    resolve_model_protocol,
 )
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.model.plugins.openai_compatible import (
     default_chat_completion_token_field,
 )
 from sagents.v2.runtime.extensions import (
-    CapabilityRequirement,
-    ExtensionHost,
     ExtensionScope,
     ExtensionScopeContext,
 )
@@ -161,8 +162,10 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemMode,
     FileOperation,
     FileSystemPolicy,
+    InMemorySandboxProvider,
     IsolationLevel,
     LifecyclePolicy,
+    LocalWorkspaceSandboxProvider,
     NetworkPolicy,
     OperationIntent,
     ProcessPolicy,
@@ -187,6 +190,7 @@ from sagents.v2.skill import (
 from sagents.v2.tool import decorated_tool_definition
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.observability import (
+    FilesystemDiagnosticSink,
     LogError,
     LogLevel,
     LogRecord,
@@ -202,7 +206,10 @@ from sagents.v2.tool import (
     ToolDefinition,
     ToolSelectionConfig,
 )
+from app.desktop_v2.backend.bindings import DesktopExecutionBindingProvider
+from app.desktop_v2.backend.composition import build_desktop_application
 from app.desktop_v2.backend.observability import create_desktop_log_sink
+from app.desktop_v2.backend.package import desktop_v2_manifest
 
 
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -352,108 +359,11 @@ class ComponentSelectionRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-_DESKTOP_COMPONENTS = {
-    "agent.continuation-policy": {
-        "default": "sage.agent.continuation.deterministic",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "run",
-    },
-    "context.token-estimator": {
-        "default": "sage.context.token-estimator.json-heuristic",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "tenant",
-    },
-    "context.reducer": {
-        "default": "sage.context.reducer.persistent-summary",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "tenant",
-    },
-    "context.summarizer": {
-        "default": "sage.context.summarizer.model",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "agent",
-    },
-    "context.summary-store": {
-        "default": "sage.context.summary-store.session-derived",
-        "selection_mode": "host",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "memory.provider": {
-        "default": "sage.memory.filesystem-bm25",
-        "selection_mode": "user",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "memory.recall-query": {
-        "default": "sage.memory.recall-query.direct",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "agent",
-    },
-    "tool.selection-policy": {
-        "default": "sage.tool-selection.llm",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "agent",
-    },
-    "session-memory.provider": {
-        "default": "sage.session-memory.sqlite-bm25",
-        "selection_mode": "user",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "observability.diagnostic-sink": {
-        "default": "sage.observability.filesystem",
-        "selection_mode": "host",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "observability.log-sink": {
-        "default": "sage.logging.filesystem",
-        "selection_mode": "user",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "execution.sandbox": {
-        "default": "sage.sandbox.local-workspace",
-        "selection_mode": "host",
-        "apply_mode": "next_run",
-        "scope": "run",
-    },
-    "session.store": {
-        "default": "sage.session.filesystem",
-        "selection_mode": "host",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "workspace.initializer": {
-        "default": "sage.workspace.initializer.claw",
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "agent",
-    },
-}
-_DESKTOP_COMPONENT_DEFAULTS = {
-    capability: str(spec["default"]) for capability, spec in _DESKTOP_COMPONENTS.items()
-}
 _CONTINUATION_COMPONENT_CHOICES = (
     "sage.agent.continuation.explicit-status",
     "sage.agent.continuation.llm-judge",
     "sage.agent.continuation.deterministic",
 )
-
-
-def _desktop_component_scope(capability: str) -> str:
-    return str(_DESKTOP_COMPONENTS.get(capability, {}).get("scope", "process"))
-
-
-def _desktop_component_api_version(capability: str) -> str:
-    return "3" if capability == "execution.sandbox" else "2"
 
 
 def _continuation_component_config(plugin_id: str) -> dict[str, Any]:
@@ -614,112 +524,6 @@ def _sandbox_workspace_root(
     if host_workspace is None:
         raise ValueError("host workspace path mode requires the active workspace")
     return _virtual_workspace_root(host_workspace.expanduser().resolve().as_posix())
-
-
-def _stable_component_id(capability: str, plugin_id: str) -> str:
-    """Accept settings written before Desktop exposed stable extension IDs."""
-
-    if capability == "agent.continuation-policy" and plugin_id in {
-        "hybrid",
-        "sage.agent.continuation.hybrid",
-    }:
-        # Hybrid was an implementation composition, not a distinct completion
-        # signal. Keep its backend plugin for package compatibility while
-        # migrating the former Desktop choice to the Judge mode.
-        return "sage.agent.continuation.llm-judge"
-    if capability == "tool.selection-policy" and plugin_id in {
-        "hybrid",
-        "sage.tool-selection.hybrid",
-    }:
-        return "sage.tool-selection.llm"
-    if plugin_id.startswith("sage."):
-        return plugin_id
-    prefixes = {
-        "agent.continuation-policy": "sage.agent.continuation.",
-        "context.token-estimator": "sage.context.token-estimator.",
-        "context.reducer": "sage.context.reducer.",
-        "context.summarizer": "sage.context.summarizer.",
-        "context.summary-store": "sage.context.summary-store.",
-        "memory.provider": "sage.memory.",
-        "memory.recall-query": "sage.memory.recall-query.",
-        "session-memory.provider": "sage.session-memory.",
-        "observability.diagnostic-sink": "sage.observability.",
-        "observability.log-sink": "sage.logging.",
-        "execution.sandbox": "sage.sandbox.",
-        "session.store": "sage.session.",
-        "workspace.initializer": "sage.workspace.initializer.",
-        "tool.selection-policy": "sage.tool-selection.",
-    }
-    return prefixes[capability] + plugin_id
-
-
-def _component_cache_fingerprint(value: Any) -> str:
-    """Create a deterministic, secret-safe identity for long-lived components."""
-
-    def normalize(candidate: Any, seen: set[int]) -> Any:
-        if candidate is None or isinstance(candidate, (str, int, float, bool)):
-            return candidate
-        if isinstance(candidate, SecretStr):
-            secret = candidate.get_secret_value().encode()
-            return {"secret_sha256": hashlib.sha256(secret).hexdigest()}
-        if isinstance(candidate, bytes):
-            return {"bytes_sha256": hashlib.sha256(candidate).hexdigest()}
-        if isinstance(candidate, Path):
-            return str(candidate)
-        if isinstance(candidate, BaseModel):
-            return normalize(candidate.model_dump(mode="python"), seen)
-        if isinstance(candidate, dict):
-            return {
-                str(key): normalize(item, seen)
-                for key, item in sorted(
-                    candidate.items(), key=lambda pair: str(pair[0])
-                )
-            }
-        if isinstance(candidate, (list, tuple)):
-            return [normalize(item, seen) for item in candidate]
-        if isinstance(candidate, (set, frozenset)):
-            return sorted(
-                (normalize(item, seen) for item in candidate),
-                key=lambda item: json.dumps(item, sort_keys=True, default=str),
-            )
-        identity = id(candidate)
-        type_name = f"{type(candidate).__module__}.{type(candidate).__qualname__}"
-        if identity in seen:
-            return {"type": type_name}
-        seen.add(identity)
-        if isinstance(candidate, RecordingModelProvider):
-            return {
-                "type": type_name,
-                "provider": normalize(candidate.provider, seen),
-                "metadata": normalize(candidate.provider_metadata, seen),
-            }
-        try:
-            attributes = vars(candidate)
-        except TypeError:
-            return {"type": type_name}
-        state = {
-            key: normalize(item, seen)
-            for key, item in attributes.items()
-            if not callable(item)
-            and key
-            not in {
-                "client",
-                "_client",
-                "_lock",
-                "lock",
-                "_filesystem_lock",
-                "sink",
-            }
-        }
-        return {"type": type_name, "state": state}
-
-    encoded = json.dumps(
-        normalize(value, set()),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
-    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 class AgentSettingsPatch(BaseModel):
@@ -1322,21 +1126,12 @@ class DesktopV2Service:
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.runtime_root / "settings.json"
         self.extensions = builtin_extension_registry()
-        self.extension_host = ExtensionHost(self.extensions)
-        self._scope_handles = []
-        self._long_lived_components: dict[tuple[str, ...], tuple[Any, Any]] = {}
-        self._long_lived_component_lock = asyncio.Lock()
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
         self._sandbox_grant_issuer = SandboxGrantIssuer()
-        self._process_scope = self.extension_host.open_scope_sync(
-            ExtensionScopeContext(
-                scope=ExtensionScope.PROCESS,
-                scope_id="desktop-v2",
-            ),
-            self.extension_host.plan(()),
-        )
-        self._scope_handles.append(self._process_scope)
+        self._host_model_providers: dict[tuple[Any, ...], Any] = {}
+        self._sandbox_providers: dict[str, Any] = {}
+        self._last_run_plan = None
         if log_sink is None:
             self._owns_log_sink = True
             self.log_plugin_id, self.log_sink = create_desktop_log_sink(
@@ -1352,69 +1147,48 @@ class DesktopV2Service:
             "Desktop v2 service is initializing",
             attributes={"root": str(self.root), "log_plugin": self.log_plugin_id},
         )
-        self.session_plugin_id, self.session_store = self._process_component(
-            "session.store",
-            {"root": str(self.runtime_root)},
-            allow_user_selection=False,
-        )
+        settings = self._read_settings_sync()
+        self.session_plugin_id = _DESKTOP_COMPONENT_DEFAULTS["session.store"]
+        self.session_store = FilesystemSessionStore(self.runtime_root)
         self.runtime = HarnessRuntime(self.session_store)
-        self.scheduler = InMemoryScheduler()
-        self.driver_session_store = LeaseFencedSessionStore(
-            self.session_store, self.scheduler
+        self.diagnostic_plugin_id = _DESKTOP_COMPONENT_DEFAULTS[
+            "observability.diagnostic-sink"
+        ]
+        self.diagnostics = FilesystemDiagnosticSink(
+            self.runtime_root / "sessions",
+            legacy_root=self.runtime_root / "diagnostics",
         )
-        self.driver_runtime = HarnessRuntime(self.driver_session_store)
-        self.dispatcher = LocalWorkerDispatcher(
-            self.scheduler,
-            max_concurrent_runs=8,
-            max_concurrent_runs_per_tenant=2,
-            lease_scope_factory=self.driver_session_store.lease_scope,
-        )
-        self.delegation_limiter = DelegationConcurrencyLimiter(
-            max_concurrency=8,
-            max_per_tenant=2,
-        )
-        self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self))
-        self.dynamic_agent_roster = SessionDynamicAgentRoster(
-            self.session_store, self.session_store
-        )
-        self.summary_store_plugin_id, self.summary_store = self._process_component(
+        self.summary_store_plugin_id = _stable_component_id(
             "context.summary-store",
-            {"derived_state": self.session_store},
-            allow_user_selection=False,
+            _DESKTOP_COMPONENT_DEFAULTS["context.summary-store"],
         )
-        self.activations = SessionDerivedSkillActivationRepository(
-            self.session_store,
-            self._session_id_for_run,
-        )
-        self.diagnostic_plugin_id, self.diagnostics = self._process_component(
-            "observability.diagnostic-sink",
-            {
-                "root": str(self.runtime_root / "sessions"),
-                "legacy_root": str(self.runtime_root / "diagnostics"),
-            },
-            allow_user_selection=False,
-        )
-        self.memory_plugin_id, self.memory_provider = self._process_component(
+        self.memory_plugin_id = _stable_component_id(
             "memory.provider",
-            {"root": str(self.runtime_root / "memory")},
-            allow_user_selection=True,
+            settings.component_selections.get(
+                "memory.provider", _DESKTOP_COMPONENT_DEFAULTS["memory.provider"]
+            ),
         )
-        self.memory_service = MemoryService(
-            self.memory_provider,
-            scope_mode="agent",
-            on_error=self._log_memory_error,
-        )
-        (
-            self.session_memory_plugin_id,
-            self.session_memory_provider,
-        ) = self._process_component(
+        self.session_memory_plugin_id = _stable_component_id(
             "session-memory.provider",
-            {"root": str(self.runtime_root / "session-memory")},
-            allow_user_selection=True,
+            settings.component_selections.get(
+                "session-memory.provider",
+                _DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"],
+            ),
         )
-        self.session_memory_service = SessionMemoryService(
-            self.session_memory_provider
-        )
+        self.application = None
+        self.scheduler = None
+        self.dispatcher = None
+        self.driver_session_store = None
+        self.driver_runtime = None
+        self.delegation_limiter = None
+        self.dynamic_agent_roster = None
+        self.summary_store = None
+        self.activations = None
+        self.memory_provider = None
+        self.memory_service = None
+        self.session_memory_provider = None
+        self.session_memory_service = None
+        self._start_lock = asyncio.Lock()
         self.session_index = JsonDesktopSessionIndex(
             self.runtime_root / "session-index.json"
         )
@@ -1438,76 +1212,94 @@ class DesktopV2Service:
             },
         )
 
-    def _process_component(
-        self,
-        capability: str,
-        config: dict[str, Any],
-        *,
-        allow_user_selection: bool,
-    ):
-        default_plugin_id = _DESKTOP_COMPONENT_DEFAULTS[capability]
-        settings = self._read_settings_sync()
-        selected = (
-            settings.component_selections.get(capability, default_plugin_id)
-            if allow_user_selection
-            else default_plugin_id
-        )
-        selected = _stable_component_id(capability, selected)
-        try:
-            plan = self.extension_host.plan(
-                (
-                    CapabilityRequirement(
-                        capability=capability,
-                        api_version=_desktop_component_api_version(capability),
-                    ),
-                ),
-                selections={capability: selected},
-                configs={selected: config},
-                scope_overrides={selected: ExtensionScope.PROCESS},
+    async def start(self) -> None:
+        """Build the process Application once through SAgentBuilder."""
+
+        async with self._start_lock:
+            if self.application is not None:
+                return
+            settings = self._read_settings_sync()
+            language = (
+                "en" if settings.language == "system" else settings.language
             )
-            handle = self.extension_host.open_scope_sync(
-                ExtensionScopeContext(
-                    scope=ExtensionScope.PROCESS,
-                    scope_id="desktop-v2",
+            workspace = self._agent_workspace_path(settings.agent_workspace_path)
+            application = await build_desktop_application(
+                session_root=self.runtime_root,
+                workspace=workspace,
+                log_sink=self.log_sink,
+                diagnostic_sink=self.diagnostics,
+                session_store=self.session_store,
+                component_selections=settings.component_selections,
+                component_configs=settings.component_configs,
+                language=language,
+                bindings=DesktopExecutionBindingProvider(
+                    workspace, issuer=self._sandbox_grant_issuer
                 ),
-                plan,
-                parent=None,
             )
-            self._scope_handles.append(handle)
-            return selected, handle.providers.require_unique(capability)
-        except Exception as exc:
-            if selected == default_plugin_id:
+            try:
+                self.application = application
+                self._bind_process_runtime()
+            except BaseException:
+                self.application = None
+                await application.close()
                 raise
-            self.logger.warning(
-                "component.selection_fallback",
-                "Configured process component was unavailable; using default",
-                attributes={
-                    "capability": capability,
-                    "selected_plugin": selected,
-                    "default_plugin": default_plugin_id,
-                    "error": str(exc),
-                },
-            )
-            plan = self.extension_host.plan(
-                (
-                    CapabilityRequirement(
-                        capability=capability,
-                        api_version=_desktop_component_api_version(capability),
-                    ),
-                ),
-                selections={capability: default_plugin_id},
-                configs={default_plugin_id: config},
-                scope_overrides={default_plugin_id: ExtensionScope.PROCESS},
-            )
-            handle = self.extension_host.open_scope_sync(
-                ExtensionScopeContext(
-                    scope=ExtensionScope.PROCESS,
-                    scope_id="desktop-v2",
-                ),
-                plan,
-            )
-            self._scope_handles.append(handle)
-            return default_plugin_id, handle.providers.require_unique(capability)
+
+    def _bind_process_runtime(self) -> None:
+        application = self.application
+        self.scheduler = application.service("execution.scheduler")
+        self.dispatcher = application.service("execution.dispatcher")
+        self.dispatcher.attach_recovery_agent(
+            _DesktopRecoveryAgent(self), replace=True
+        )
+        self.driver_session_store = LeaseFencedSessionStore(
+            self.session_store, self.scheduler
+        )
+        self.driver_runtime = HarnessRuntime(self.driver_session_store)
+        self.delegation_limiter = DelegationConcurrencyLimiter(
+            max_concurrency=8,
+            max_per_tenant=2,
+        )
+        derived_state = application.service("derived-state.store")
+        self.dynamic_agent_roster = SessionDynamicAgentRoster(
+            self.session_store, derived_state
+        )
+        self.summary_store = application.service("context.summary-store")
+        self.activations = SessionDerivedSkillActivationRepository(
+            derived_state,
+            self._session_id_for_run,
+        )
+        self.memory_provider = application.service("memory.provider")
+        self.memory_service = MemoryService(
+            self.memory_provider,
+            scope_mode="agent",
+            on_error=self._log_memory_error,
+        )
+        self.session_memory_provider = application.service(
+            "session-memory.provider"
+        )
+        self.session_memory_service = SessionMemoryService(
+            self.session_memory_provider
+        )
+        self.summary_store_plugin_id = self._plan_plugin_id(
+            "context.summary-store", self.summary_store_plugin_id
+        )
+        self.memory_plugin_id = self._plan_plugin_id(
+            "memory.provider", self.memory_plugin_id
+        )
+        self.session_memory_plugin_id = self._plan_plugin_id(
+            "session-memory.provider", self.session_memory_plugin_id
+        )
+        self.diagnostic_plugin_id = self._plan_plugin_id(
+            "observability.diagnostic-sink", self.diagnostic_plugin_id
+        )
+
+    def _plan_plugin_id(self, capability: str, fallback: str) -> str:
+        if self.application is None:
+            return fallback
+        for provider in self.application.resolved_plan.providers:
+            if provider.capability == capability and provider.plugin_id:
+                return provider.plugin_id
+        return fallback
 
     async def _log_memory_error(self, error: Exception) -> None:
         self.logger.exception(
@@ -1517,13 +1309,13 @@ class DesktopV2Service:
         )
 
     async def initialize_agent_workspace(self) -> Path:
+        await self.start()
         settings = await self.get_settings()
         workspace = await self._ensure_agent_workspace(
             settings.agent_workspace_path,
             component_selections=settings.component_selections,
             language=settings.language,
         )
-        await self.dispatcher.start()
         await self._recover_pending_sandbox_cleanups()
         return workspace
 
@@ -1539,7 +1331,9 @@ class DesktopV2Service:
             task.cancel()
         if cleanup_tasks:
             await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        await self.dispatcher.close()
+        if self.application is not None:
+            await self.application.close()
+            self.application = None
         await asyncio.sleep(0)
         close_tasks = tuple(self._application_close_tasks)
         if close_tasks:
@@ -1551,12 +1345,9 @@ class DesktopV2Service:
                 *(driver.close_binding() for driver in drivers),
                 return_exceptions=True,
             )
-        await self.scheduler.close()
         await self.session_store.close()
-        for handle in reversed(self._scope_handles):
-            await handle.close()
-        self._scope_handles.clear()
-        self._long_lived_components.clear()
+        self._host_model_providers.clear()
+        self._sandbox_providers.clear()
         self._workspace_initializations.clear()
         self.logger.info("service.closed", "Desktop v2 service closed")
         if self._owns_log_sink:
@@ -1879,6 +1670,7 @@ class DesktopV2Service:
         }
 
     async def delete_session(self, session_id: str) -> None:
+        await self.start()
         deleted_session_ids = {session_id}
         try:
             indexed = await self.session_index.list()
@@ -3494,37 +3286,33 @@ class DesktopV2Service:
         async with self._workspace_initialization_lock:
             if initialization_key in self._workspace_initializations:
                 return workspace
-            plan = self.extension_host.plan(
-                (
-                    CapabilityRequirement(
-                        capability="workspace.initializer", api_version="2"
-                    ),
+            await self.start()
+            settings = await self.get_settings()
+            ports = await self.application.materialize_agent(
+                desktop_v2_manifest(
+                    session_root=self.runtime_root,
+                    component_selections=component_selections,
+                    component_configs=settings.component_configs,
+                    language=language,
                 ),
-                selections={"workspace.initializer": plugin_id},
-                configs={plugin_id: {"language": language}},
-                scope_overrides={plugin_id: ExtensionScope.AGENT},
+                locked_configs={"workspace.initializer": {"language": language}},
+                cache_identities={
+                    "workspace.initializer": {
+                        "plugin": plugin_id,
+                        "language": language,
+                    }
+                },
             )
-            handle = await self.extension_host.open_scope_hierarchy(
-                ExtensionScopeContext(
-                    scope=ExtensionScope.AGENT,
-                    scope_id=f"desktop-agent-workspace:{workspace}",
-                ),
-                plan,
-                parent=self._process_scope,
-            )
-            try:
-                initializer = handle.providers.require_unique("workspace.initializer")
-                initialize = initializer.initialize
-                if inspect.iscoroutinefunction(initialize):
-                    result = initialize(workspace)
-                else:
-                    result = await asyncio.to_thread(initialize, workspace)
-                if inspect.isawaitable(result):
-                    await result
-            except BaseException:
+            for handle in reversed(ports.scope_handles):
                 await handle.close()
-                raise
-            self._scope_handles.append(handle)
+            initializer = ports.workspace_initializer
+            initialize = initializer.initialize
+            if inspect.iscoroutinefunction(initialize):
+                result = initialize(workspace)
+            else:
+                result = await asyncio.to_thread(initialize, workspace)
+            if inspect.isawaitable(result):
+                await result
             self._workspace_initializations[initialization_key] = workspace
         return workspace
 
@@ -3595,6 +3383,7 @@ class DesktopV2Service:
     async def run_events(
         self, request: DesktopRunRequest, user_id: str
     ) -> AsyncIterator[str]:
+        await self.start()
         accepted_handle = None
         driver: _DesktopDriver | None = None
         run_logger = self.logger.bind(correlation_id=request.idempotency_key)
@@ -3677,19 +3466,9 @@ class DesktopV2Service:
                 },
             )
             facade.attach_dispatcher(self.dispatcher)
-            application = self._run_application(
-                facade,
-                agent_id=request.agent_id,
-                composition_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get("runtime_components"),
-            )
-            stream = await application.entrypoint().schedule_accepted_run(
-                accepted_handle, context
-            )
+            stream = await facade.schedule_accepted_run(accepted_handle, context)
             stream._execution.add_done_callback(
-                lambda _completed, app=application: self._schedule_application_close(
-                    app
-                )
+                lambda _completed, agent=facade: self._schedule_agent_close(agent)
             )
         except asyncio.CancelledError:
             if driver is not None:
@@ -4027,6 +3806,7 @@ class DesktopV2Service:
         return command
 
     async def _continue(self, run_id: str, user_id: str) -> None:
+        await self.start()
         self._ensure_run_observer(run_id)
         command = await self.session_store.get_start_command(run_id)
         agent = await self._agent(command.agent_id, user_id)
@@ -4074,13 +3854,7 @@ class DesktopV2Service:
             },
         )
         facade.attach_dispatcher(self.dispatcher)
-        application = self._run_application(
-            facade,
-            agent_id=command.agent_id,
-            composition_hash=command.resolved_spec_hash,
-            component_snapshot=command.config.metadata.get("runtime_components"),
-        )
-        task = await application.entrypoint().continue_run(
+        task = await facade.continue_run(
             run_id,
             self._context(
                 user_id,
@@ -4088,7 +3862,7 @@ class DesktopV2Service:
             ),
         )
         task.add_done_callback(
-            lambda _completed, app=application: self._schedule_application_close(app)
+            lambda _completed, agent=facade: self._schedule_agent_close(agent)
         )
         task.add_done_callback(
             lambda _completed, key=run_id, value=driver: asyncio.create_task(
@@ -4103,78 +3877,8 @@ class DesktopV2Service:
         if self._drivers.get(run_id) is driver:
             self._drivers.pop(run_id, None)
 
-    def _run_application(
-        self,
-        agent: SAgent,
-        *,
-        agent_id: str,
-        composition_hash: str,
-        component_snapshot: dict[str, Any] | None = None,
-    ) -> SAgentApplication:
-        """Expose every Desktop Run through the shared Application boundary."""
-
-        selections = {
-            **_DESKTOP_COMPONENT_DEFAULTS,
-            **dict((component_snapshot or {}).get("selections") or {}),
-        }
-        providers = {
-            ResolvedProviderBinding(
-                capability=capability,
-                name="default",
-                api_version="2",
-                plugin_id=str(plugin_id),
-                scope=_desktop_component_scope(capability),
-                source="plugin",
-            )
-            for capability, plugin_id in selections.items()
-        }
-        for capability, scope in (
-            ("session.store", "process"),
-            ("model.provider", "agent"),
-            ("tool.catalog", "run"),
-            ("tool.executor", "run"),
-            ("execution.dispatcher", "process"),
-            ("observability.diagnostic-sink", "process"),
-            ("observability.log-sink", "process"),
-        ):
-            if any(value.capability == capability for value in providers):
-                continue
-            providers.add(
-                ResolvedProviderBinding(
-                    capability=capability,
-                    name="default",
-                    api_version="2",
-                    plugin_id=None,
-                    scope=scope,
-                    source="desktop-host",
-                )
-            )
-        resolved_plan = ResolvedApplicationPlan(
-            package_id=f"desktop.{agent_id}",
-            manifest_hash=composition_hash,
-            entrypoint_agent_id=agent_id,
-            providers=tuple(sorted(providers)),
-            dependencies=(),
-            composition_hash=composition_hash,
-        )
-        return SAgentApplication(
-            agents={agent_id: agent},
-            entrypoint_agent_id=agent_id,
-            scope_handles=(),
-            services={
-                "session.access": AuthorizedSessionAccess(
-                    self.session_store, runtime=getattr(agent, "runtime", None)
-                ),
-                "observability.diagnostic-sink": self.diagnostics,
-                "observability.log-sink": self.log_sink,
-            },
-            adapters={},
-            composition_hash=composition_hash,
-            resolved_plan=resolved_plan,
-        )
-
-    def _schedule_application_close(self, application: SAgentApplication) -> None:
-        task = asyncio.create_task(application.close())
+    def _schedule_agent_close(self, agent: SAgent) -> None:
+        task = asyncio.create_task(agent.close())
         self._application_close_tasks.add(task)
 
         def completed(value: asyncio.Task) -> None:
@@ -4184,8 +3888,8 @@ class DesktopV2Service:
             error = value.exception()
             if error is not None:
                 self.logger.exception(
-                    "application.close_failed",
-                    "Per-Run application failed to close",
+                    "agent.close_failed",
+                    "Per-Run SAgent failed to close",
                     error,
                 )
 
@@ -4251,19 +3955,7 @@ class DesktopV2Service:
                         command.config.metadata.get("response_language") or "en"
                     ),
                 )
-                provider = await self._scoped_component(
-                    "execution.sandbox",
-                    record.sandbox_ref.provider_id,
-                    scope=ExtensionScope.PROCESS,
-                    scope_id="desktop-sandbox",
-                    agent_id=command.agent_id,
-                    config={
-                        "verification_key": self._sandbox_grant_issuer.verification_key
-                    },
-                    cache_identity={
-                        "verification_key": self._sandbox_grant_issuer.verification_key
-                    },
-                )
+                provider = self._sandbox_provider(record.sandbox_ref.provider_id)
                 lifecycle = ExecutionBindingLifecycleCoordinator(
                     sandbox_provider=provider,
                     session_store=self.driver_session_store,
@@ -4434,6 +4126,7 @@ class DesktopV2Service:
         component_snapshot: dict[str, Any] | None = None,
         force_leaf: bool = False,
     ):
+        await self.start()
         provisioned: list[Any] = []
         scope_handles: list[Any] = []
         token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(scope_handles)
@@ -4626,80 +4319,12 @@ class DesktopV2Service:
                 "model_type": "fast",
             },
         )
-        memory_query_generator = await self._scoped_component(
-            "memory.recall-query",
-            memory_query_plugin_id,
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-memory-query:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config=(
-                {"model": memory_query_model, "language": settings.language}
-                if memory_query_plugin_id == "sage.memory.recall-query.llm"
-                else {}
-            ),
-            cache_identity={
-                "plugin": memory_query_plugin_id,
-                "language": settings.language,
-                "provider": judge_provider.id,
-                "model": judge_provider.model,
-                "base_url": judge_provider.base_url,
-                "credential": SecretStr(judge_provider.api_key or ""),
-            },
-        )
         summarizer_plugin_id = _stable_component_id(
             "context.summarizer",
             settings.component_selections.get(
                 "context.summarizer",
                 _DESKTOP_COMPONENT_DEFAULTS["context.summarizer"],
             ),
-        )
-        summarizer = await self._scoped_component(
-            "context.summarizer",
-            summarizer_plugin_id,
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-summarizer:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config={"model": recording_model, "model_binding": "summary"},
-            cache_identity={
-                "plugin": summarizer_plugin_id,
-                "provider": provider.id,
-                "model": provider.model,
-                "base_url": provider.base_url,
-                "credential": SecretStr(provider.api_key or ""),
-                "model_binding": "summary",
-            },
-        )
-        token_estimator = await self._scoped_component(
-            "context.token-estimator",
-            estimator_id,
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-estimator:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config={},
-        )
-        reducer_config = {"estimator": token_estimator}
-        if reducer_id == "sage.context.reducer.persistent-summary":
-            reducer_config.update(
-                {
-                    "store": self.summary_store,
-                    "summarizer": summarizer,
-                }
-            )
-        context_reducer = await self._scoped_component(
-            "context.reducer",
-            reducer_id,
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-reducer:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config=reducer_config,
-            cache_identity={
-                "plugin": reducer_id,
-                "estimator": estimator_id,
-                "summarizer": summarizer_plugin_id,
-                "summary_store": self.summary_store_plugin_id,
-                "provider": provider.id,
-                "model": provider.model,
-            },
         )
         continuation_plugin_id = _stable_component_id(
             "agent.continuation-policy",
@@ -4717,6 +4342,113 @@ class DesktopV2Service:
             and not self._auxiliary_json_compatible(judge_provider)
         ):
             continuation_plugin_id = "sage.agent.continuation.deterministic"
+        raw_tool_selection = agent.config.get("toolSelection")
+        legacy_tool_selection_config = (
+            dict(raw_tool_selection) if isinstance(raw_tool_selection, dict) else {}
+        )
+        legacy_plugin_id = str(
+            legacy_tool_selection_config.pop(
+                "plugin", _DESKTOP_COMPONENT_DEFAULTS["tool.selection-policy"]
+            )
+        )
+        tool_selection_plugin_id = _stable_component_id(
+            "tool.selection-policy",
+            settings.component_selections.get(
+                "tool.selection-policy", legacy_plugin_id
+            ),
+        )
+        if (
+            tool_selection_plugin_id == "sage.tool-selection.llm"
+            and not self._auxiliary_json_compatible(judge_provider)
+        ):
+            tool_selection_plugin_id = "sage.tool-selection.lexical"
+        configured_tool_selection = settings.component_configs.get(
+            "tool.selection-policy"
+        )
+        tool_selection_config = _tool_selection_component_config(
+            tool_selection_plugin_id,
+            configured_tool_selection
+            if configured_tool_selection is not None
+            else legacy_tool_selection_config,
+        )
+        run_manifest = desktop_v2_manifest(
+            session_root=self.runtime_root,
+            component_selections={
+                **settings.component_selections,
+                "context.token-estimator": estimator_id,
+                "context.reducer": reducer_id,
+                "context.summarizer": summarizer_plugin_id,
+                "agent.continuation-policy": continuation_plugin_id,
+                "tool.selection-policy": tool_selection_plugin_id,
+                "memory.recall-query": memory_query_plugin_id,
+            },
+            component_configs=settings.component_configs,
+            language=settings.language,
+        )
+        run_cache_identities = {
+            "context.summarizer": {
+                "plugin": summarizer_plugin_id,
+                "provider": provider.id,
+                "model": provider.model,
+                "base_url": provider.base_url,
+                "credential": SecretStr(provider.api_key or ""),
+                "model_binding": "summary",
+            },
+            "memory.recall-query": {
+                "plugin": memory_query_plugin_id,
+                "language": settings.language,
+                "provider": judge_provider.id,
+                "model": judge_provider.model,
+                "base_url": judge_provider.base_url,
+                "credential": SecretStr(judge_provider.api_key or ""),
+            },
+            "context.reducer": {
+                "plugin": reducer_id,
+                "estimator": estimator_id,
+                "summarizer": summarizer_plugin_id,
+                "summary_store": self.summary_store_plugin_id,
+                "provider": provider.id,
+                "model": provider.model,
+            },
+            "tool.selection-policy": {
+                "plugin": tool_selection_plugin_id,
+                **tool_selection_config,
+            },
+        }
+        ports = await self.application.materialize_agent(
+            run_manifest,
+            agent_id=agent.agent_id,
+            run_id=run_id,
+            model=recording_model,
+            locked_configs={
+                "context.summarizer": {
+                    "model": recording_model,
+                    "model_binding": "summary",
+                },
+                "memory.recall-query": (
+                    {"model": memory_query_model, "language": settings.language}
+                    if memory_query_plugin_id == "sage.memory.recall-query.llm"
+                    else {}
+                ),
+                "tool.selection-policy": tool_selection_config,
+                "agent.continuation-policy": {
+                    "repeat_threshold": 3,
+                    "model": judge_recording_model,
+                    "model_binding": "fast",
+                },
+                "workspace.initializer": {"language": settings.language},
+            },
+            cache_identities=run_cache_identities,
+        )
+        self._last_run_plan = ports.resolved_plan
+        owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+        if owner_handles is not None:
+            owner_handles.extend(ports.scope_handles)
+        memory_query_generator = ports.memory_query_generator
+        summarizer = ports.summarizer
+        token_estimator = ports.token_estimator
+        context_reducer = ports.context_reducer
+        tool_selection_policy = ports.tool_selection_policy
         factory = AgentCompositionFactory(
             self.driver_runtime,
             context_components=ContextComponentBundle(
@@ -4733,15 +4465,7 @@ class DesktopV2Service:
         sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(settings)
         workspace_root = _sandbox_workspace_root(sandbox_config, workspace)
         issuer = self._sandbox_grant_issuer
-        sandbox_provider = await self._scoped_component(
-            "execution.sandbox",
-            sandbox_plugin_id,
-            scope=ExtensionScope.PROCESS,
-            scope_id="desktop-sandbox",
-            agent_id=agent.agent_id,
-            config={"verification_key": issuer.verification_key},
-            cache_identity={"verification_key": issuer.verification_key},
-        )
+        sandbox_provider = self._sandbox_provider(sandbox_plugin_id)
         capabilities = await sandbox_provider.capabilities()
         architecture = str(
             sandbox_config.get("architecture") or capabilities.architectures[0]
@@ -4874,43 +4598,6 @@ class DesktopV2Service:
             workspace_root=workspace_root,
         )
         goal_state_service = GoalStateService(self.driver_session_store)
-        raw_tool_selection = agent.config.get("toolSelection")
-        legacy_tool_selection_config = (
-            dict(raw_tool_selection) if isinstance(raw_tool_selection, dict) else {}
-        )
-        legacy_plugin_id = str(
-            legacy_tool_selection_config.pop(
-                "plugin", _DESKTOP_COMPONENT_DEFAULTS["tool.selection-policy"]
-            )
-        )
-        tool_selection_plugin_id = _stable_component_id(
-            "tool.selection-policy",
-            settings.component_selections.get(
-                "tool.selection-policy", legacy_plugin_id
-            ),
-        )
-        if (
-            tool_selection_plugin_id == "sage.tool-selection.llm"
-            and not self._auxiliary_json_compatible(judge_provider)
-        ):
-            tool_selection_plugin_id = "sage.tool-selection.lexical"
-        configured_tool_selection = settings.component_configs.get(
-            "tool.selection-policy"
-        )
-        tool_selection_config = _tool_selection_component_config(
-            tool_selection_plugin_id,
-            configured_tool_selection
-            if configured_tool_selection is not None
-            else legacy_tool_selection_config,
-        )
-        tool_selection_policy = await self._scoped_component(
-            "tool.selection-policy",
-            tool_selection_plugin_id,
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-tool-selection:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config=tool_selection_config,
-        )
         official_runtime = OfficialToolRuntime(
             sandbox_handle,
             issuer,
@@ -5116,21 +4803,31 @@ class DesktopV2Service:
                 ActiveSkillsContextProvider(loader),
                 PreferredSkillsContextProvider(),
             )
-            base_continuation_policy = await self._scoped_component(
-                "agent.continuation-policy",
-                continuation_plugin_id,
-                scope=ExtensionScope.RUN,
-                scope_id=f"desktop-continuation:{descriptor.agent_id}:{run_id}",
-                agent_id=descriptor.agent_id,
-                run_id=run_id,
-                config={
-                    "repeat_threshold": 3,
-                    "model": judge_models_by_agent.get(
+            if descriptor.agent_id == agent.agent_id:
+                base_continuation_policy = ports.continuation_policy
+            else:
+                member_ports = await self.application.materialize_agent(
+                    run_manifest,
+                    agent_id=descriptor.agent_id,
+                    run_id=run_id,
+                    model=judge_models_by_agent.get(
                         descriptor.agent_id, judge_recording_model
                     ),
-                    "model_binding": "fast",
-                },
-            )
+                    locked_configs={
+                        "agent.continuation-policy": {
+                            "repeat_threshold": 3,
+                            "model": judge_models_by_agent.get(
+                                descriptor.agent_id, judge_recording_model
+                            ),
+                            "model_binding": "fast",
+                        }
+                    },
+                    cache_identities=run_cache_identities,
+                )
+                owner = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
+                if owner is not None:
+                    owner.extend(member_ports.scope_handles)
+                base_continuation_policy = member_ports.continuation_policy
             continuation_policy = base_continuation_policy
             owns_invocation = descriptor.agent_id == agent.agent_id
             if invocation_mode == "plan" and owns_invocation:
@@ -5252,101 +4949,19 @@ class DesktopV2Service:
             official_runtime.job_runtime,
         )
 
-    async def _scoped_component(
-        self,
-        capability: str,
-        plugin_id: str,
-        *,
-        scope: ExtensionScope,
-        scope_id: str,
-        config: dict[str, Any],
-        agent_id: str | None = None,
-        run_id: str | None = None,
-        cache_identity: Any | None = None,
-    ):
-        cache_key: tuple[str, ...] | None = None
-        if scope in {
-            ExtensionScope.PROCESS,
-            ExtensionScope.TENANT,
-            ExtensionScope.AGENT,
-        }:
-            cache_key = (
-                scope.value,
-                scope_id,
-                capability,
-                plugin_id,
-                _component_cache_fingerprint(
-                    config if cache_identity is None else cache_identity
-                ),
-            )
-            cached = self._long_lived_components.get(cache_key)
-            if cached is not None:
-                return cached[1]
-
-        lock_acquired = False
-        if cache_key is not None:
-            await self._long_lived_component_lock.acquire()
-            lock_acquired = True
-            cached = self._long_lived_components.get(cache_key)
-            if cached is not None:
-                self._long_lived_component_lock.release()
-                return cached[1]
-        handle = None
-        try:
-            plan = self.extension_host.plan(
-                (
-                    CapabilityRequirement(
-                        capability=capability,
-                        api_version=_desktop_component_api_version(capability),
-                    ),
-                ),
-                selections={capability: plugin_id},
-                configs={plugin_id: config},
-                scope_overrides={plugin_id: scope},
-            )
-            parents = [self._process_scope]
-            if scope == ExtensionScope.RUN:
-                agent_parent = await self.extension_host.open_scope(
-                    ExtensionScopeContext(
-                        scope=ExtensionScope.AGENT,
-                        scope_id=f"desktop-agent-scope:{agent_id or 'default'}",
-                        agent_id=agent_id,
-                    ),
-                    self.extension_host.plan(()),
-                    parent=self._process_scope,
-                )
-                owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
-                (
-                    owner_handles if owner_handles is not None else self._scope_handles
-                ).append(agent_parent)
-                parents.append(agent_parent)
-            handle = await self.extension_host.open_scope_hierarchy(
-                ExtensionScopeContext(
-                    scope=scope,
-                    scope_id=scope_id,
-                    agent_id=agent_id,
-                    run_id=run_id,
-                ),
-                plan,
-                parent=parents[-1] if scope != ExtensionScope.PROCESS else None,
-            )
-            provider = handle.providers.require_unique(capability)
-            if cache_key is not None:
-                self._scope_handles.append(handle)
-                self._long_lived_components[cache_key] = (handle, provider)
-            else:
-                owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
-                (
-                    owner_handles if owner_handles is not None else self._scope_handles
-                ).append(handle)
-            return provider
-        except BaseException:
-            if handle is not None:
-                await handle.close()
-            raise
-        finally:
-            if lock_acquired:
-                self._long_lived_component_lock.release()
+    def _sandbox_provider(self, plugin_id: str):
+        cached = self._sandbox_providers.get(plugin_id)
+        if cached is not None:
+            return cached
+        verification_key = self._sandbox_grant_issuer.verification_key
+        if plugin_id == LocalWorkspaceSandboxProvider.plugin_id:
+            provider = LocalWorkspaceSandboxProvider(verification_key)
+        elif plugin_id == InMemorySandboxProvider.plugin_id:
+            provider = InMemorySandboxProvider(verification_key)
+        else:
+            raise ValueError(f"unsupported sandbox plugin {plugin_id!r}")
+        self._sandbox_providers[plugin_id] = provider
+        return provider
 
     async def _session_id_for_run(self, run_id: str) -> str:
         return (await self.session_store.get_run(run_id)).session_id
@@ -5564,23 +5179,27 @@ class DesktopV2Service:
                 parallel_tool_calls=provider.supports_tool_calling,
             ),
         )
-        protocol = resolve_model_protocol(route.provider)
-        return await self._scoped_component(
-            "model.provider",
-            f"sage.model.{protocol.value}",
-            scope=ExtensionScope.AGENT,
-            scope_id=f"desktop-agent:{agent.user_id}:{agent.agent_id}",
-            agent_id=agent.agent_id,
-            config={
-                "route": route.model_dump(mode="json"),
-                "credential": CredentialMaterial(
-                    credential_id=f"llm-provider:{provider.id}",
-                    secret=SecretStr(provider.api_key or ""),
-                    source="desktop-catalog",
-                ),
-                "provider_instance_id": provider.id,
-            },
+        cache_key = (
+            provider.id,
+            agent.agent_id,
+            bool(deep_thinking),
+            json.dumps(route.model_dump(mode="json"), sort_keys=True),
+            hashlib.sha256((provider.api_key or "").encode()).hexdigest(),
         )
+        cached = self._host_model_providers.get(cache_key)
+        if cached is not None:
+            return cached
+        model = create_registered_model_provider(
+            route,
+            CredentialMaterial(
+                credential_id=f"llm-provider:{provider.id}",
+                secret=SecretStr(provider.api_key or ""),
+                source="desktop-catalog",
+            ),
+            provider_instance_id=provider.id,
+        )
+        self._host_model_providers[cache_key] = model
+        return model
 
     @classmethod
     def _verified_model_compatibility_profile(

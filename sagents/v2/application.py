@@ -47,6 +47,21 @@ class ResolvedApplicationPlan:
     composition_hash: str
 
 
+@dataclass(frozen=True)
+class MaterializedAgentPorts:
+    """Agent/Run ports rematerialized on a live process Application."""
+
+    token_estimator: Any
+    summarizer: Any
+    context_reducer: Any
+    continuation_policy: Any
+    tool_selection_policy: Any
+    memory_query_generator: Any | None
+    workspace_initializer: Any | None
+    resolved_plan: ResolvedApplicationPlan
+    scope_handles: tuple[Any, ...]
+
+
 @dataclass
 class InterfaceRunStream:
     """Protocol-projected view of a Native run stream."""
@@ -103,9 +118,48 @@ class SAgentApplication:
         )
         self._owned_resources = list(owned_resources)
         self._pending_agents = list(self._agents.values())
+        self._composer: Any | None = None
         self._close_lock = asyncio.Lock()
         self._closed = False
         self._closing = False
+
+    def _attach_composer(self, composer: Any) -> None:
+        self._composer = composer
+        composer.application = self
+
+    async def materialize_agent(
+        self,
+        package: Any,
+        *,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        model: Any | None = None,
+        tool_catalog: Any | None = None,
+        tool_executor: Any | None = None,
+        locked_configs: Mapping[str, Mapping[str, Any]] | None = None,
+        cache_identities: Mapping[str, Any] | None = None,
+    ) -> MaterializedAgentPorts:
+        """Open Agent/Run ports from a new manifest without rebuilding the process root.
+
+        Reuses the Builder process scope and Dispatcher. Caller owns returned
+        Run-scoped ``scope_handles``.
+        """
+
+        self._ensure_open()
+        if self._composer is None:
+            raise RuntimeError(
+                "SAgentApplication.materialize_agent requires a Builder-built application"
+            )
+        return await self._composer.materialize_agent(
+            package,
+            agent_id=agent_id,
+            run_id=run_id,
+            model=model,
+            tool_catalog=tool_catalog,
+            tool_executor=tool_executor,
+            locked_configs=locked_configs,
+            cache_identities=cache_identities,
+        )
 
     def entrypoint(self) -> SAgent:
         self._ensure_open()

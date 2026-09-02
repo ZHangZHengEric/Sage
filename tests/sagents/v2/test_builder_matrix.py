@@ -28,9 +28,11 @@ from sagents.v2.context import (
     ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
     UnicodeHeuristicTokenEstimator,
+    WindowContextReducer,
 )
 from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.runtime.observability import NoopDiagnosticSink, NoopLogSink
 from sagents.v2.runtime.session import EphemeralSessionStore
 from sagents.v2.runtime.session import InMemoryDerivedStateStore
 from sagents.v2.runtime.execution.sandbox import (
@@ -790,3 +792,168 @@ async def test_execution_binding_invokes_failing_close_only_once():
         with pytest.raises(RuntimeError, match="close failed"):
             await binding.close()
     assert sandbox.calls == 1
+
+
+def _host_binding(plan, capability: str):
+    return next(
+        provider
+        for provider in plan.providers
+        if provider.capability == capability
+    )
+
+
+@pytest.mark.asyncio
+async def test_builder_injects_host_log_and_diagnostic_sinks(tmp_path: Path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-host-sinks",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    log_sink = NoopLogSink()
+    diagnostic_sink = NoopDiagnosticSink()
+
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_log_sink(log_sink)
+        .with_diagnostic_sink(diagnostic_sink)
+        .build(package)
+    )
+
+    assert application.service("observability.log-sink") is log_sink
+    assert application.service("observability.diagnostic-sink") is diagnostic_sink
+    assert _host_binding(application.resolved_plan, "observability.log-sink").source == (
+        "host"
+    )
+    assert _host_binding(
+        application.resolved_plan, "observability.diagnostic-sink"
+    ).source == "host"
+    await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_keeps_plugin_sinks_when_host_does_not_inject(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-default-sinks",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+
+    assert isinstance(application.service("observability.log-sink"), NoopLogSink)
+    assert isinstance(
+        application.service("observability.diagnostic-sink"), NoopDiagnosticSink
+    )
+    assert _host_binding(application.resolved_plan, "observability.log-sink").source == (
+        "plugin"
+    )
+    assert _host_binding(
+        application.resolved_plan, "observability.diagnostic-sink"
+    ).source == "plugin"
+    await application.close()
+
+
+def _with_runtime_capabilities(package, **capabilities):
+    current = dict(package.runtime.capabilities)
+    current.update(
+        {
+            capability: CapabilitySelection(plugin=plugin_id)
+            for capability, plugin_id in capabilities.items()
+        }
+    )
+    return package.model_copy(
+        update={"runtime": package.runtime.model_copy(update={"capabilities": current})}
+    )
+
+
+@pytest.mark.asyncio
+async def test_materialize_agent_uses_next_manifest_without_a_second_dispatcher(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-agent",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    dispatcher = application.service("execution.dispatcher")
+    next_manifest = _with_runtime_capabilities(
+        package,
+        **{
+            "context.reducer": "sage.context.reducer.window",
+            "context.token-estimator": (
+                "sage.context.token-estimator.unicode-heuristic"
+            ),
+        },
+    )
+
+    ports = await application.materialize_agent(
+        next_manifest,
+        agent_id="assistant",
+        run_id="run_next",
+        model=ScriptedModelProvider(()),
+    )
+    try:
+        assert isinstance(ports.token_estimator, UnicodeHeuristicTokenEstimator)
+        assert isinstance(ports.context_reducer, WindowContextReducer)
+        assert application.service("execution.dispatcher") is dispatcher
+        assert _host_binding(ports.resolved_plan, "context.reducer").plugin_id == (
+            "sage.context.reducer.window"
+        )
+        assert _host_binding(ports.resolved_plan, "context.token-estimator").plugin_id == (
+            "sage.context.token-estimator.unicode-heuristic"
+        )
+        assert "desktop-host" not in {
+            value.source for value in ports.resolved_plan.providers
+        }
+    finally:
+        for handle in reversed(ports.scope_handles):
+            await handle.close()
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_materialize_agent_reuses_agent_scoped_ports(tmp_path: Path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-reuse",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    first = await application.materialize_agent(
+        package, agent_id="assistant", run_id="run_1"
+    )
+    second = await application.materialize_agent(
+        package, agent_id="assistant", run_id="run_2"
+    )
+    try:
+        assert first.token_estimator is second.token_estimator
+        assert first.tool_selection_policy is second.tool_selection_policy
+        assert first.continuation_policy is not second.continuation_policy
+    finally:
+        for handle in reversed((*first.scope_handles, *second.scope_handles)):
+            await handle.close()
+        await application.close()

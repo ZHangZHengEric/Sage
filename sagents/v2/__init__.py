@@ -28,6 +28,7 @@ from sagents.v2.contracts import (
 from sagents.v2.sagent import SAgent, SAgentRunStream
 from sagents.v2.application import (
     InterfaceRunStream,
+    MaterializedAgentPorts,
     ResolvedApplicationPlan,
     ResolvedProviderBinding,
     SAgentApplication,
@@ -61,4 +62,5 @@ __all__ = [
     "SAgentBuilder",
     "SAgentRunStream",
     "InterfaceRunStream",
+    "MaterializedAgentPorts",
 ]

@@ -2,6 +2,12 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-02 19:40** Desktop Run 改走 Application.materialize_agent：删除 open_scope 与假 resolved_plan，next_run 选择可见。
+
+- **2026-09-02 19:00** Desktop 进程根改走 SAgentBuilder：删除 `_process_component`，store/sink 注入后由 Application 提供 dispatcher 与 memory。
+
+- **2026-09-02 18:15** Builder 新增 with_log_sink / with_diagnostic_sink；Desktop 抽出 manifest 与沙箱绑定，可经 Builder 得到真实 resolved_plan。
+
 - **2026-09-02 15:45** `AgentLoopEngine` 恢复为纯 RunDriver，移除 `log_sink` / `trace_sink` 与观测方法；Builder 改用外层 `ObservedRunDriver` 投影 Run/Tool 日志和 Trace，并删除仅作反向转发的 Agent Coordinator。
 
 - **2026-09-02 15:22** 对话时按 session 绑定用户目录，不再只靠 ContextVar；已配置模型不会再被误判为未配置。

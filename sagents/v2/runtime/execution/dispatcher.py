@@ -71,10 +71,14 @@ class LocalWorkerDispatcher:
         self._recovery_agent = None
         self._closed = False
 
-    def attach_recovery_agent(self, agent) -> None:
+    def attach_recovery_agent(self, agent, *, replace: bool = False) -> None:
         """Bind the Application Agent used for durable orphan WorkItems."""
 
-        if self._recovery_agent is not None and self._recovery_agent is not agent:
+        if (
+            self._recovery_agent is not None
+            and self._recovery_agent is not agent
+            and not replace
+        ):
             raise RuntimeError("dispatcher recovery Agent is already attached")
         self._recovery_agent = agent
 
