@@ -19,6 +19,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
     ModelToolCall,
 )
+from sagents.v2.model.usage import canonical_token_usage
 from sagents.v2.contracts.common import StrictModel, new_id
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -615,52 +616,17 @@ class OpenAICompatibleModelProvider:
     def _usage(self, raw: Any) -> UsageSummary:
         """Normalize common Chat Completions and Responses-style usage keys."""
 
-        prompt_details = wire_value(raw, "prompt_tokens_details")
-        completion_details = wire_value(raw, "completion_tokens_details")
-        input_details = wire_value(raw, "input_tokens_details")
-        output_details = wire_value(raw, "output_tokens_details")
         normalized = wire_json_value(raw)
+        usage = canonical_token_usage(raw, input_mode="auto")
         return UsageSummary(
             reported=True,
-            input_tokens=self._first_usage_int(raw, "prompt_tokens", "input_tokens"),
-            output_tokens=self._first_usage_int(
-                raw, "completion_tokens", "output_tokens"
-            ),
-            cached_input_tokens=self._first_usage_int(
-                prompt_details,
-                "cached_tokens",
-                fallback_values=(
-                    wire_value(input_details, "cached_tokens"),
-                    wire_value(raw, "cached_input_tokens"),
-                    wire_value(raw, "cache_read_input_tokens"),
-                ),
-            ),
-            reasoning_tokens=self._first_usage_int(
-                completion_details,
-                "reasoning_tokens",
-                fallback_values=(
-                    wire_value(output_details, "reasoning_tokens"),
-                    wire_value(raw, "reasoning_tokens"),
-                ),
-            ),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
             models=(self.config.model,),
             provider_usage=normalized if isinstance(normalized, dict) else {},
         )
-
-    @staticmethod
-    def _first_usage_int(
-        raw: Any,
-        *names: str,
-        fallback_values: tuple[Any, ...] = (),
-    ) -> int:
-        for name in names:
-            value = wire_value(raw, name)
-            if value is not None:
-                return int(value)
-        for value in fallback_values:
-            if value is not None:
-                return int(value)
-        return 0
 
     @staticmethod
     def _merge_stream_text(accumulated: str, incoming: str) -> tuple[str, str]:

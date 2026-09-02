@@ -10,7 +10,8 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 3;
+const sageSidecarRevision = 5;
+const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {
   const SageApiException(
@@ -32,19 +33,21 @@ class SageApiException implements Exception {
 }
 
 class V2ApiClient {
-  V2ApiClient({Uri? baseUri, HttpClient? httpClient})
+  V2ApiClient({Uri? baseUri, HttpClient? httpClient, this.authToken})
     : baseUri = baseUri ?? Uri.parse('http://127.0.0.1:0'),
       _http = httpClient ?? HttpClient();
 
   Uri baseUri;
   final HttpClient _http;
   String? expectedBuildId;
+  String? authToken;
 
   Future<bool> health() async {
     try {
-      final request = await _http
-          .getUrl(baseUri.resolve('/health'))
-          .timeout(const Duration(seconds: 1));
+      final request = await _request(
+        'GET',
+        baseUri.resolve('/health'),
+      ).timeout(const Duration(seconds: 1));
       final response = await request.close().timeout(
         const Duration(seconds: 1),
       );
@@ -60,6 +63,21 @@ class V2ApiClient {
     } on Object {
       return false;
     }
+  }
+
+  Future<Map<String, Object?>> attachRuntimeClient(String clientId) async {
+    final value = await _json('PUT', '/api/v2/runtime/clients/$clientId');
+    return (value as Map).cast<String, Object?>();
+  }
+
+  Future<Map<String, Object?>> detachRuntimeClient(String clientId) async {
+    final value = await _json('DELETE', '/api/v2/runtime/clients/$clientId');
+    return (value as Map).cast<String, Object?>();
+  }
+
+  Future<Map<String, Object?>> shutdownRuntimeIfIdle() async {
+    final value = await _json('POST', '/api/v2/runtime/shutdown-if-idle');
+    return (value as Map).cast<String, Object?>();
   }
 
   Future<List<AgentSummary>> listAgents() async {
@@ -368,7 +386,8 @@ class V2ApiClient {
     required String path,
     String workspaceId = '',
   }) async {
-    final request = await _http.getUrl(
+    final request = await _request(
+      'GET',
       _uri('/api/v2/workspaces/file', {
         'agent_id': agentId,
         'path': path,
@@ -392,10 +411,15 @@ class V2ApiClient {
     required XFile file,
     String workspaceId = '',
   }) async {
+    final size = await file.length();
+    if (size > _maxUploadBytes) {
+      throw const SageApiException('Upload exceeds the 64 MiB limit.');
+    }
     final boundary =
         '----sage-v2-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
     final bytes = await file.readAsBytes();
-    final request = await _http.postUrl(
+    final request = await _request(
+      'POST',
       baseUri.resolve('/api/v2/workspaces/upload'),
     );
     request.headers.set(
@@ -599,7 +623,14 @@ class V2ApiClient {
     Uri uri, {
     Map<String, Object?>? body,
   }) async {
+    final token = authToken;
+    if (token == null || token.isEmpty) {
+      throw const SageApiException(
+        'Desktop sidecar launch capability is unavailable.',
+      );
+    }
     final request = await _http.openUrl(method, uri);
+    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     if (body != null) {
       final bytes = utf8.encode(jsonEncode(body));
@@ -682,5 +713,8 @@ class V2ApiClient {
 
   String _safeHeader(String value) => value.replaceAll(RegExp(r'[\r\n"]'), '_');
 
-  void close() => _http.close(force: true);
+  void close() {
+    authToken = null;
+    _http.close(force: true);
+  }
 }

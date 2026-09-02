@@ -355,6 +355,8 @@ async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier
     suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
     interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     assert interaction.payload["reason"] == "tool_outcome_unknown"
+    assert interaction.payload["arguments"] == {"key": "answer"}
+    assert interaction.payload["side_effect_level"] == "read"
     assert "reconcile" not in interaction.allowed_decisions
 
 

@@ -102,6 +102,8 @@ async def test_mcp_bridge_exposes_discovery_failure_instead_of_hiding_server():
     with pytest.raises(Exception, match="offline") as caught:
         await bridge.list_tools(run_id="run_1")
     assert caught.value.info.code == "mcp.discovery_failed"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
+    assert caught.value.info.retryable is True
 
 
 @pytest.mark.asyncio

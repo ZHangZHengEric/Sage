@@ -250,7 +250,7 @@ async def test_stream_normalizes_responses_style_usage_from_chat_gateway():
     response = events[-1].response
     assert response is not None
     assert response.usage.reported is True
-    assert response.usage.input_tokens == 10
+    assert response.usage.input_tokens == 13
     assert response.usage.output_tokens == 5
     assert response.usage.cached_input_tokens == 2
     assert response.usage.provider_usage == raw_usage

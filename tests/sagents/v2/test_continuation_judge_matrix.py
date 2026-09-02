@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -17,7 +18,7 @@ from sagents.v2.agent.policy.legacy_v1_judge_prompt import (
     LEGACY_V1_TASK_COMPLETE_TEMPLATE,
 )
 from sagents.v2.contracts.items import JsonBlock, TextBlock, UsageSummary
-from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model import (
     ModelEventKind,
     ModelMessage,
@@ -83,6 +84,16 @@ def _judge_step(
     )
 
 
+class SlowModel:
+    def stream(self, request):
+        async def events():
+            await asyncio.sleep(60)
+            if False:
+                yield None
+
+        return events()
+
+
 def test_v2_vendors_the_v1_judge_prompts_without_modification():
     assert LEGACY_V1_TASK_COMPLETE_TEMPLATE == task_complete_template
 
@@ -124,6 +135,22 @@ async def test_llm_judge_uses_v1_prompt_contract_and_reports_usage():
     assert decision.usage.input_tokens == 17
     assert decision.usage.output_tokens == 5
     assert decision.metadata == {"policy": "llm_judge", "implementation": "v1"}
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_timeout_is_reported_by_selected_plugin():
+    policy = LLMJudgeContinuationPolicy(
+        LLMContinuationJudge(SlowModel(), timeout_seconds=0.01)
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await policy.decide(_context())
+
+    assert caught.value.info.code == "agent.continuation.judge_timeout"
+    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
+    assert caught.value.info.metadata["plugin_id"] == (
+        "sage.agent.continuation.llm-judge"
+    )
 
 
 @pytest.mark.asyncio
@@ -226,7 +253,7 @@ async def test_llm_judge_empty_output_has_a_stable_non_parser_reason():
 
 
 @pytest.mark.asyncio
-async def test_llm_judge_permanent_provider_rejection_uses_deterministic_fallback():
+async def test_llm_judge_propagates_permanent_provider_rejection():
     rejected = ScriptedModelStep(
         events=(),
         error=RuntimeErrorInfo(
@@ -240,18 +267,11 @@ async def test_llm_judge_permanent_provider_rejection_uses_deterministic_fallbac
     model = ScriptedModelProvider((rejected,))
     policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
 
-    decision = await policy.decide(_context())
+    with pytest.raises(SageV2Error) as caught:
+        await policy.decide(_context())
 
-    assert decision.action == ContinuationAction.COMPLETE_RUN
-    assert decision.reason_code == "judge.fallback_provider_permanent"
-    assert decision.metadata == {
-        "policy": "llm_judge",
-        "implementation": "v1",
-        "fallback": "judge_provider_permanent",
-        "judge_error_code": "model.provider_permanent",
-        "judge_error_category": "provider_permanent",
-        "judge_provider_code": "422",
-    }
+    assert caught.value.info.code == "model.provider_permanent"
+    assert caught.value.info.provider_code == "422"
     assert len(model.requests) == 1
 
 

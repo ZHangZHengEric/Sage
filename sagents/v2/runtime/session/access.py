@@ -40,7 +40,7 @@ class AuthorizedSessionAccess:
     ) -> None:
         self._session_store = session_store
         self.runtime = runtime
-        cleaners = (() if derived_state is None else (derived_state,))
+        cleaners = () if derived_state is None else (derived_state,)
         cleaners = (*cleaners, *derived_state_cleaners)
         self._derived_state_cleaners = tuple(
             cleaner
@@ -92,15 +92,26 @@ class AuthorizedSessionAccess:
             interaction.interaction_id
         )
 
-    async def list_descendant_sessions(
-        self, session_id: str, context: RequestContext
-    ):
+    async def list_descendant_sessions(self, session_id: str, context: RequestContext):
         await self._authorize(session_id, context)
         return await self._session_store.list_descendant_sessions(session_id)
 
     async def list_session_runs(self, session_id: str, context: RequestContext):
         await self._authorize(session_id, context)
         return await self._session_store.list_session_runs(session_id)
+
+    async def list_session_commit_proposals(
+        self, session_id: str, context: RequestContext
+    ):
+        await self._authorize(session_id, context)
+        return await self._session_store.list_session_commit_proposals(session_id)
+
+    async def get_session_commit_proposal(
+        self, proposal_id: str, context: RequestContext
+    ):
+        proposal = await self._session_store.get_session_commit_proposal(proposal_id)
+        await self._authorize(proposal.session_id, context)
+        return proposal
 
     async def read_events(
         self,
@@ -155,9 +166,7 @@ class AuthorizedSessionAccess:
         ):
             yield event
 
-    async def delete_session(
-        self, session_id: str, context: RequestContext
-    ) -> None:
+    async def delete_session(self, session_id: str, context: RequestContext) -> None:
         await self._authorize(session_id, context)
         descendants = await self._session_store.list_descendant_sessions(session_id)
         deleted_session_ids = (session_id, *(value.session_id for value in descendants))

@@ -727,20 +727,24 @@ class ComposerReference {
     required this.path,
     required this.text,
     this.isDirectory = false,
+    this.citationLabel,
   });
 
   final String fileName;
   final String path;
   final String text;
   final bool isDirectory;
+  final String? citationLabel;
+
+  String get displayPath => citationLabel ?? path;
 
   String get promptText {
-    if (text.isEmpty) return '@$path';
+    if (text.isEmpty) return '@$displayPath';
     final quoted = text
         .split('\n')
         .map((line) => line.isEmpty ? '>' : '> $line')
         .join('\n');
-    return '@$path\n$quoted';
+    return '@$displayPath\n$quoted';
   }
 }
 
@@ -753,11 +757,16 @@ class ChatMessage {
     this.processOnly = false,
     this.sequence = 0,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+  }) : renderedText = text,
+       createdAt = createdAt ?? DateTime.now();
 
   final String id;
   final String role;
   String text;
+
+  /// The presentation copy can trail [text] briefly while a large streamed
+  /// delta is revealed. It is deliberately excluded from persistence.
+  String renderedText;
   bool streaming;
   bool processOnly;
   final int sequence;

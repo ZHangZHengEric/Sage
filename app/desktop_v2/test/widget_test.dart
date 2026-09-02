@@ -949,6 +949,19 @@ class _ControlledProcessApi extends _FakeApi {
       });
   }
 
+  void emitLargeProcessDelta(String delta) {
+    _events.add({
+      'protocol_version': 'sage.runtime/v2',
+      'type': 'message.delta',
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'turn_id': 'turn_controlled',
+      'item_id': 'item_process_controlled',
+      'run_sequence': 3,
+      'data': {'kind': 'item', 'operation': 'delta', 'delta': delta},
+    });
+  }
+
   void emitSuspended() {
     _runState = 'suspended';
     _runSequence = 3;
@@ -1469,6 +1482,32 @@ class _SessionTreeApi extends _ControlledProcessApi {
   });
 }
 
+class _LegacySubSessionHydrationApi extends _FakeApi {
+  @override
+  Future<List<Map<String, Object?>>> getSessionTree(String sessionId) async =>
+      const [
+        {
+          'session': {
+            'session_id': 'session_child',
+            'parent_session_id': 'session_root',
+            'created_at': '2026-08-30T15:00:00Z',
+          },
+          'run': {
+            'run_id': 'run_child',
+            'state': 'completed',
+            'last_run_sequence': 8,
+            'created_at': '2026-08-30T15:00:02Z',
+            'updated_at': '2026-08-30T15:00:44Z',
+          },
+          'agent_id': 'agent_review',
+          'parent_run_id': 'run_root',
+          'task_name': '检查快速排序',
+          'task': '实现并验证快速排序',
+          'original_task': '委派快速排序',
+        },
+      ];
+}
+
 class _ReconnectingSessionTreeApi extends _SessionTreeApi {
   int treeSubscriptionCount = 0;
 
@@ -1739,6 +1778,39 @@ class _FileWriteSuspendedRunApi extends _SuspendedRunApi {
   };
 }
 
+class _FileUpdateSuspendedRunApi extends _SuspendedRunApi {
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_suspended',
+      'active_turn_id': 'turn_suspended',
+      'state': 'suspended',
+      'last_run_sequence': 4,
+    },
+    'interaction': {
+      'interaction_id': 'interaction_file_update',
+      'interaction_type': 'approval',
+      'status': 'pending',
+      'allowed_decisions': ['approve_once', 'deny', 'cancel'],
+      'payload': {
+        'tool_name': 'file_update',
+        'arguments': {
+          'file_path': '/workspace/quicksort.html',
+          'operations': [
+            {
+              'update_mode': 'search_replace',
+              'search_pattern': 'const pivot = arr[0]',
+              'replacement': 'const pivot = arr[Math.floor(arr.length / 2)]',
+            },
+          ],
+        },
+        'side_effect_level': 'write',
+      },
+    },
+  };
+}
+
 class _PlanSuspendedRunApi extends _SuspendedRunApi {
   @override
   Future<Map<String, Object?>> getRun(String runId) async => {
@@ -1992,6 +2064,90 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  test('legacy child prompt cache is migrated without duplication', () async {
+    const prompt = '实现并验证快速排序';
+    final root = Conversation(
+      id: 'root',
+      title: 'root',
+      agentId: 'agent_main',
+      sessionId: 'session_root',
+      runId: 'run_root',
+      status: RunStatus.completed,
+      subSessions: [
+        Conversation(
+          id: 'sub-session:session_child',
+          title: '检查快速排序',
+          agentId: 'agent_review',
+          sessionId: 'session_child',
+          parentSessionId: 'session_root',
+          parentRunId: 'run_root',
+          runId: 'run_child',
+          status: RunStatus.completed,
+          messages: [
+            ChatMessage(
+              id: 'sub-task:session_child',
+              role: 'user',
+              text: prompt,
+              createdAt: DateTime.parse('2026-08-30T15:00:44Z'),
+            ),
+            ChatMessage(
+              id: 'assistant-final',
+              role: 'assistant',
+              text: '已完成',
+              createdAt: DateTime.parse('2026-08-30T15:00:43Z'),
+            ),
+            ChatMessage(
+              id: 'sub-task:session_child:run_child',
+              role: 'user',
+              text: prompt,
+              createdAt: DateTime.parse('2026-08-30T15:00:02Z'),
+            ),
+          ],
+          processPanels: [
+            RuntimeProcessPanel(
+              id: 'legacy-panel',
+              anchorMessageId: 'sub-task:session_child',
+              runId: 'run_child',
+              startedAt: DateTime.parse('2026-08-30T15:00:02Z'),
+              completedAt: DateTime.parse('2026-08-30T15:00:44Z'),
+              running: false,
+            ),
+          ],
+        ),
+      ],
+    );
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [root.toJson()],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _LegacySubSessionHydrationApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+
+    final child =
+        controller.agentWorkspaceConversations.single.subSessions.single;
+    final userMessages = child.messages
+        .where((message) => message.role == 'user')
+        .toList();
+    expect(userMessages, hasLength(1));
+    expect(userMessages.single.id, 'sub-task:session_child:run_child');
+    expect(userMessages.single.text, prompt);
+    expect(child.messages.first.id, 'sub-task:session_child:run_child');
+    expect(
+      userMessages.single.createdAt,
+      DateTime.parse('2026-08-30T15:00:02Z'),
+    );
+    expect(
+      child.processPanels.single.anchorMessageId,
+      'sub-task:session_child:run_child',
+    );
+  });
+
   test(
     'all supported frontend locales contain the complete translation set',
     () {
@@ -2637,6 +2793,59 @@ void main() {
     final sentText =
         ((api.lastRunBody?['messages'] as List).single as Map)['text'];
     expect(sentText, '@mini_site\n\n删除');
+    final folderChip = find.byKey(
+      const ValueKey('message-reference-chip:mini_site'),
+    );
+    expect(folderChip, findsOneWidget);
+    expect(
+      find.descendant(
+        of: folderChip,
+        matching: find.byIcon(CupertinoIcons.folder),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a file reference is rendered as an inline chip in its message', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final persisted = _persistedBranchableConversation();
+    persisted['messages'] = const [
+      {
+        'id': 'user-file-reference',
+        'role': 'user',
+        'text': '@quicksort.html\n\n我发现这个网页里的排序不正确。',
+      },
+    ];
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [persisted],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _FakeApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    final fileChip = find.byKey(
+      const ValueKey('message-reference-chip:quicksort.html'),
+    );
+    expect(fileChip, findsOneWidget);
+    expect(find.text('@quicksort.html'), findsNothing);
+    expect(find.text('quicksort.html'), findsOneWidget);
+    expect(
+      find.descendant(of: fileChip, matching: find.byIcon(CupertinoIcons.doc)),
+      findsOneWidget,
+    );
+    expect(find.textContaining('排序不正确'), findsOneWidget);
   });
 
   test('workspace references use the real path in host path mode', () async {
@@ -3047,6 +3256,47 @@ void main() {
       },
     );
   }
+
+  testWidgets('file update approval identifies the file and renders a diff', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [
+          _persistedSuspendedConversation(),
+        ],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _FileUpdateSuspendedRunApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('更新 quicksort.html'), findsOneWidget);
+    expect(find.text('文件写入'), findsOneWidget);
+    expect(find.text('/workspace/quicksort.html'), findsOneWidget);
+    expect(find.text('1 处变更'), findsOneWidget);
+    expect(find.textContaining('- const pivot = arr[0]'), findsOneWidget);
+    expect(
+      find.textContaining('+ const pivot = arr[Math.floor(arr.length / 2)]'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('interaction-preview-toggle')),
+      findsOneWidget,
+    );
+    expect(find.text('查看完整变更'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('agent tool assignments save and update immediately', (
     tester,
@@ -3636,6 +3886,47 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
     await tester.pump();
     expect(find.text('正在检查实现。'), findsOneWidget);
+  });
+
+  testWidgets('large stream deltas are revealed progressively', (tester) async {
+    tester.platformDispatcher.localeTestValue = const Locale('zh');
+    tester.platformDispatcher.localesTestValue = const [Locale('zh')];
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _ControlledProcessApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-composer')),
+      '检查大块流式输出',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pump();
+    api.emitRunningProcess();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    const largeDelta = '这里是一段一次返回的较长内容，用来确认桌面端不会把整段文字突然全部显示出来，而是平滑地逐步展示。';
+    api.emitLargeProcessDelta(largeDelta);
+    await tester.pump();
+
+    final message = controller.selectedConversation!.messages.last;
+    expect(message.text, '正在检查实现。$largeDelta');
+    expect(message.renderedText, '正在检查实现。');
+
+    await tester.pump(const Duration(milliseconds: 48));
+    expect(message.renderedText.length, greaterThan('正在检查实现。'.length));
+    expect(message.renderedText, isNot(message.text));
+
+    await tester.pump(const Duration(seconds: 3));
+    expect(message.renderedText, message.text);
+    expect(find.text('正在检查实现。$largeDelta'), findsOneWidget);
   });
 
   testWidgets('paused process time freezes and resumes from the frozen value', (
@@ -4272,6 +4563,186 @@ void main() {
   }
 
   testWidgets(
+    'thread user jump rail matches yiii navigation and jumps between prompts',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+
+      final persisted = _persistedBranchableConversation();
+      persisted['messages'] = [
+        for (var index = 0; index < 3; index++) ...[
+          {
+            'id': 'jump-user-$index',
+            'role': 'user',
+            'text': 'User prompt number $index with enough text',
+          },
+          {
+            'id': 'jump-assistant-$index',
+            'role': 'assistant',
+            'text': [
+              'Assistant reply $index',
+              ...List.filled(24, 'Long reply block $index'),
+            ].join('\n\n'),
+          },
+        ],
+      ];
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [persisted],
+        }),
+      });
+      final controller = WorkspaceController(
+        api: _BranchingApi(),
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('thread-user-jump-rail')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('thread-user-jump-marker-0')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('thread-user-jump-line-0')))
+            .width,
+        8,
+      );
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(
+          find.byKey(const ValueKey('thread-user-jump-marker-0')),
+        ),
+      );
+      await tester.pumpAndSettle(const Duration(milliseconds: 180));
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('thread-user-jump-line-0')))
+            .width,
+        24,
+      );
+      expect(find.textContaining('User prompt number 0'), findsOneWidget);
+      expect(find.textContaining('Assistant reply 0'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('thread-user-jump-marker-0')));
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      final firstPrompt = find.byKey(const ValueKey('jump-user-0'));
+      expect(firstPrompt, findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const ValueKey('thread-message-list')),
+      );
+      final promptRect = tester.getRect(firstPrompt);
+      expect(promptRect.bottom, greaterThan(viewport.top));
+      expect(promptRect.top, lessThan(viewport.bottom));
+    },
+  );
+
+  testWidgets(
+    'chat messages select across Markdown blocks and expose copy and reference',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final persisted = _persistedBranchableConversation();
+      persisted['messages'] = const [
+        {'id': 'user-branch-1', 'role': 'user', 'text': '请给一个例子'},
+        {
+          'id': 'assistant-branch-1',
+          'role': 'assistant',
+          'text':
+              '第一段内容\n\n- 第二段内容\n\n```dart\nvoid main() {\n  print("hi");\n}\n```',
+        },
+      ];
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [persisted],
+        }),
+      });
+      final controller = WorkspaceController(
+        api: _BranchingApi(),
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+
+      final message = find.byKey(
+        const ValueKey('message-selection:assistant-branch-1'),
+      );
+      final markdown = tester.widget<MarkdownBody>(
+        find.descendant(of: message, matching: find.byType(MarkdownBody)),
+      );
+      expect(markdown.selectable, isFalse);
+      expect(markdown.fitContent, isFalse);
+      expect(find.byKey(const ValueKey('message-code-block')), findsOneWidget);
+      expect(find.text('dart'), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('message-code-block'))).width,
+        greaterThan(360),
+      );
+      expect(
+        find.byKey(const ValueKey('message-copy:assistant-branch-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('message-reference:assistant-branch-1')),
+        findsOneWidget,
+      );
+
+      final selectionAreaFinder = find.descendant(
+        of: message,
+        matching: find.byType(SelectionArea),
+      );
+      final selectionArea = tester.state<SelectionAreaState>(
+        selectionAreaFinder,
+      );
+      selectionArea.selectableRegion.selectAll();
+      await tester.pump();
+      await tester.tapAt(
+        tester.getCenter(
+          find.textContaining('第一段内容', findRichText: true).first,
+        ),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('局部引用'), findsOneWidget);
+      await tester.tap(find.text('局部引用'));
+      await tester.pumpAndSettle();
+      expect(controller.composerReferences, hasLength(1));
+      expect(controller.composerReferences.single.text, contains('第一段内容'));
+      expect(controller.composerReferences.single.text, contains('第二段内容'));
+      expect(controller.composerReferences.single.text, contains('void main'));
+      expect(
+        controller.composerReferences.single.promptText,
+        startsWith('@引用\n> 第一段内容'),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('message-reference:assistant-branch-1')),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.composerReferences, hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'approval card shows the concrete risk and has distinct actions',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 800);
@@ -4307,7 +4778,7 @@ void main() {
         find.byKey(const ValueKey('interaction-submit-approve_and_remember')),
         findsOneWidget,
       );
-      expect(find.text('批准并记住'), findsOneWidget);
+      expect(find.text('后续自动允许该命令'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('interaction-submit-deny')),
         findsOneWidget,
@@ -4415,18 +4886,14 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
 
-        expect(find.text('写入文件'), findsOneWidget);
+        expect(find.text('写入 quicksort.py'), findsOneWidget);
+        expect(find.text('文件写入'), findsOneWidget);
         expect(find.text('/workspace/quicksort.py'), findsOneWidget);
         expect(find.text('内容预览'), findsOneWidget);
-        expect(find.text('写入操作'), findsOneWidget);
         expect(find.text('49 个字符'), findsOneWidget);
         expect(find.text('3 行'), findsOneWidget);
         expect(find.textContaining('def quicksort(values):'), findsOneWidget);
         expect(find.textContaining('internal-marker'), findsNothing);
-        expect(
-          tester.getCenter(find.text('/workspace/quicksort.py')).dy,
-          closeTo(tester.getCenter(find.text('49 个字符')).dy, 2),
-        );
         expect(
           find.byKey(const ValueKey('interaction-technical-toggle')),
           findsNothing,

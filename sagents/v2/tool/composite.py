@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping
 
 from sagents.v2.tool.contracts import (
     ReconcileResult,
+    ReconcileState,
     ToolCall,
     ToolDefinition,
     ToolExecutionResult,
@@ -217,8 +218,6 @@ class RoutedToolExecutor:
     ) -> ReconcileResult:
         # Reconciliation intentionally queries every route because operation IDs
         # are globally stable while tool definitions may change after restore.
-        from sagents.v2.tool.contracts import ReconcileState
-
         pending = None
         for executor in dict.fromkeys(self._routes.values()):
             result = await executor.reconcile(operation_id, context)
@@ -229,6 +228,19 @@ class RoutedToolExecutor:
         return pending or ReconcileResult(
             operation_id=operation_id, state=ReconcileState.UNKNOWN
         )
+
+    async def reconcile_call(
+        self, call: ToolCall, context: RequestContext
+    ) -> ReconcileResult:
+        executor = self._routes.get(call.tool_name)
+        if executor is None:
+            return ReconcileResult(
+                operation_id=call.operation_id, state=ReconcileState.UNKNOWN
+            )
+        reconcile_call = getattr(executor, "reconcile_call", None)
+        if callable(reconcile_call):
+            return await reconcile_call(call, context)
+        return await executor.reconcile(call.operation_id, context)
 
 
 class CompositeToolExecutor:
@@ -276,8 +288,6 @@ class CompositeToolExecutor:
         return await cancel(operation_id, context)
 
     async def reconcile(self, operation_id: str, context: RequestContext):
-        from sagents.v2.tool.contracts import ReconcileState
-
         pending = None
         for executor in self._executors:
             result = await executor.reconcile(operation_id, context)
@@ -287,4 +297,23 @@ class CompositeToolExecutor:
                 pending = result
         return pending or ReconcileResult(
             operation_id=operation_id, state=ReconcileState.UNKNOWN
+        )
+
+    async def reconcile_call(self, call: ToolCall, context: RequestContext):
+        from sagents.v2.tool.contracts import ReconcileState
+
+        pending = None
+        for executor in self._executors:
+            call_aware = getattr(executor, "reconcile_call", None)
+            result = (
+                await call_aware(call, context)
+                if callable(call_aware)
+                else await executor.reconcile(call.operation_id, context)
+            )
+            if result.state in {ReconcileState.SUCCEEDED, ReconcileState.FAILED}:
+                return result
+            if result.state == ReconcileState.PENDING:
+                pending = result
+        return pending or ReconcileResult(
+            operation_id=call.operation_id, state=ReconcileState.UNKNOWN
         )

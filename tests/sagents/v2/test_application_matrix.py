@@ -53,7 +53,9 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path: Pat
     ) in bindings
     assert ("model.provider", None, "host") in bindings
     assert ("execution.dispatcher", None, "composition-root") in bindings
-    assert all("credential" not in value.name for value in application.resolved_plan.providers)
+    assert all(
+        "credential" not in value.name for value in application.resolved_plan.providers
+    )
 
     await application.close()
     await application.close()
@@ -84,8 +86,10 @@ async def test_build_failure_rolls_back_started_extensions(tmp_path: Path):
     )
 
     with pytest.raises(Exception):
-        await SAgentBuilder().with_model_provider(ScriptedModelProvider(())).build(
-            package
+        await (
+            SAgentBuilder()
+            .with_model_provider(ScriptedModelProvider(()))
+            .build(package)
         )
 
 
@@ -113,6 +117,35 @@ async def test_application_stops_execution_resources_before_closing_agents():
     )
     await application.close()
     assert order == ["dispatcher", "agent"]
+
+
+@pytest.mark.asyncio
+async def test_application_can_adopt_a_host_resource_with_explicit_close_order():
+    order: list[str] = []
+
+    class Resource:
+        def __init__(self, name: str):
+            self.name = name
+
+        async def close(self):
+            order.append(self.name)
+
+    provider = Resource("provider")
+    application = SAgentApplication(
+        agents={"main": Resource("agent")},
+        entrypoint_agent_id="main",
+        scope_handles=(),
+        services={},
+        adapters={},
+        composition_hash="sha256:test",
+        owned_resources=(Resource("dispatcher"),),
+    )
+
+    await application.adopt_resource(provider, close_after_existing=True)
+    await application.adopt_resource(provider, close_after_existing=True)
+    await application.close()
+
+    assert order == ["dispatcher", "provider", "agent"]
 
 
 @pytest.mark.asyncio

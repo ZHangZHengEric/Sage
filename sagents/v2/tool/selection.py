@@ -18,6 +18,7 @@ from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.tool.contracts import ToolDefinition
 
 
@@ -47,6 +48,11 @@ class ToolSelectionConfig(StrictModel):
     """Shared configuration used by the bounded official plugins."""
 
     max_visible_tools: int = Field(default=24, ge=1, le=10_000)
+    model_timeout_seconds: float = Field(
+        default=DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+        gt=0,
+        le=120,
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -56,7 +62,13 @@ class ToolSelectionConfig(StrictModel):
         if isinstance(value, cls):
             return value
         if isinstance(value, dict):
-            return {"max_visible_tools": value.get("max_visible_tools", 24)}
+            return {
+                "max_visible_tools": value.get("max_visible_tools", 24),
+                "model_timeout_seconds": value.get(
+                    "model_timeout_seconds",
+                    DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                ),
+            }
         return value
 
 

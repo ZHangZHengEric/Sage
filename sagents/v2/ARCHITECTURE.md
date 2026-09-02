@@ -183,7 +183,12 @@ from Session history, and replayed only by the matching adapter.
 Each newly captured namespace uses `schema_version=1` and an 8 MiB encoded
 limit. Legacy v0 Session rows remain readable; a matching adapter rejects an
 unknown envelope version, while a different protocol ignores state outside its
-namespace. Explicit cross-protocol conversion is not implemented. Live provider
+namespace. Provider-native state is never guessed or converted across protocols.
+A host must freeze the selected model route and Agent runtime definition for the
+lifetime of a Run (including recovery), or fail closed when it cannot recreate
+that composition; provider and Agent configuration changes apply only to new
+Runs. Credentials and explicit monotonic authorization updates may be resolved
+from current host state and must never be embedded in the snapshot. Live provider
 and crash/recovery tests remain required in addition to payload golden tests.
 
 ## Context boundary

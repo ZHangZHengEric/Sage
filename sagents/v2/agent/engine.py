@@ -288,12 +288,9 @@ class AgentLoopEngine:
         ).strip()
         if not user_input:
             return run, state
-        try:
-            query = await self.memory_recall_query_generator.generate(
-                user_input, run_id=run.run_id
-            )
-        except Exception:
-            query = user_input
+        query = await self.memory_recall_query_generator.generate(
+            user_input, run_id=run.run_id
+        )
         if not query.strip():
             return run, state
         try:
@@ -618,6 +615,7 @@ class AgentLoopEngine:
             uncertainty,
             context,
             started.step_id,
+            definition,
             supports_reconciliation=(
                 definition is not None and definition.supports_reconciliation
             ),
@@ -1093,6 +1091,7 @@ class AgentLoopEngine:
                         *state.response_fingerprints,
                         self._response_fingerprint(response),
                     ),
+                    "retry_model_step": False,
                     "force_tool_choice_required_next": False,
                     "pending_continuation_reason": None,
                 }
@@ -2175,8 +2174,11 @@ class AgentLoopEngine:
                 ),
             )
             try:
-                reconciled = await self.tool_executor.reconcile(
-                    call.operation_id, context
+                reconcile_call = getattr(self.tool_executor, "reconcile_call", None)
+                reconciled = (
+                    await reconcile_call(call, context)
+                    if callable(reconcile_call)
+                    else await self.tool_executor.reconcile(call.operation_id, context)
                 )
             except Exception as exc:
                 reconciled = ReconcileResult(
@@ -2446,6 +2448,12 @@ class AgentLoopEngine:
                 ),
                 "reason": "tool_outcome_unknown",
                 "tool_name": call.tool_name,
+                "arguments": call.arguments,
+                "side_effect_level": (
+                    definition.side_effect_level.value
+                    if definition is not None
+                    else None
+                ),
                 "operation_id": call.operation_id,
                 "idempotency_key": call.idempotency_key,
                 "supports_reconciliation": can_reconcile,

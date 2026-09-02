@@ -724,13 +724,24 @@ class ApprovalToolPresentation {
     required this.summary,
     this.preview,
     this.previewLabel,
+    this.previewLines = const [],
     this.facts = const [],
   });
 
   final String summary;
   final String? preview;
   final String? previewLabel;
+  final List<ApprovalPreviewLine> previewLines;
   final List<String> facts;
+}
+
+enum ApprovalPreviewLineKind { context, added, removed }
+
+class ApprovalPreviewLine {
+  const ApprovalPreviewLine(this.text, this.kind);
+
+  final String text;
+  final ApprovalPreviewLineKind kind;
 }
 
 ApprovalToolPresentation approvalToolPresentation(
@@ -745,12 +756,17 @@ ApprovalToolPresentation approvalToolPresentation(
   String summary = toolArgumentPreview(rawName, arguments, language);
   String? preview;
   String? previewLabel;
+  var previewLines = const <ApprovalPreviewLine>[];
 
-  if (name == 'file_write') {
+  if (name == 'file_write' || name == 'write_file') {
     final content = arguments['content']?.toString() ?? '';
     summary = path.isEmpty ? _approvalText('unnamedFile', language) : path;
     preview = _boundedPreview(content);
     previewLabel = _approvalText('contentPreview', language);
+    previewLines = _previewLines(
+      content,
+      defaultKind: ApprovalPreviewLineKind.added,
+    );
     final lineCount = content.isEmpty ? 0 : '\n'.allMatches(content).length + 1;
     facts.add(_approvalText('characters', language, content.length));
     facts.add(_approvalText('lines', language, lineCount));
@@ -773,13 +789,14 @@ ApprovalToolPresentation approvalToolPresentation(
     final lineCount = content.isEmpty ? 0 : '\n'.allMatches(content).length + 1;
     facts.add(_approvalText('characters', language, content.length));
     facts.add(_approvalText('lines', language, lineCount));
-  } else if (name == 'file_update') {
+  } else if (name == 'file_update' || name == 'update_file') {
     summary = path.isEmpty ? _approvalText('unnamedFile', language) : path;
     final operations = arguments['operations'];
     if (operations is List) {
       facts.add(_approvalText('changes', language, operations.length));
       preview = _formatUpdateOperations(operations, language);
       previewLabel = _approvalText('changePreview', language);
+      previewLines = _updatePreviewLines(operations, language);
     }
   } else if (name == 'apply_patch') {
     final patch = arguments['patch']?.toString() ?? '';
@@ -787,6 +804,7 @@ ApprovalToolPresentation approvalToolPresentation(
     if (summary.isEmpty) summary = _approvalText('workspacePatch', language);
     preview = _boundedPreview(patch);
     previewLabel = _approvalText('changePreview', language);
+    previewLines = _patchPreviewLines(patch);
   } else if (name == 'execute_shell_command') {
     summary = command;
     final workdir = _firstText(arguments, const ['workdir', 'cwd']);
@@ -804,9 +822,82 @@ ApprovalToolPresentation approvalToolPresentation(
     summary: _ellipsize(summary.trim(), 260),
     preview: preview?.trim().isEmpty ?? true ? null : preview,
     previewLabel: previewLabel,
+    previewLines: previewLines,
     facts: facts,
   );
 }
+
+List<ApprovalPreviewLine> _previewLines(
+  String value, {
+  required ApprovalPreviewLineKind defaultKind,
+  int maxLines = 18,
+}) => [
+  for (final line in value.split('\n').take(maxLines))
+    ApprovalPreviewLine(line, defaultKind),
+];
+
+List<ApprovalPreviewLine> _updatePreviewLines(
+  List<Object?> operations,
+  String language,
+) {
+  final lines = <ApprovalPreviewLine>[];
+  for (var index = 0; index < operations.length && index < 4; index++) {
+    final operation = operations[index];
+    if (operation is! Map) continue;
+    final values = operation.cast<Object?, Object?>();
+    final mode = values['update_mode']?.toString();
+    if (mode == 'search_replace') {
+      final search = values['search_pattern']?.toString() ?? '';
+      final replacement = values['replacement']?.toString() ?? '';
+      lines.addAll(
+        _previewLines(
+          search,
+          defaultKind: ApprovalPreviewLineKind.removed,
+          maxLines: 7,
+        ),
+      );
+      lines.addAll(
+        _previewLines(
+          replacement,
+          defaultKind: ApprovalPreviewLineKind.added,
+          maxLines: 9,
+        ),
+      );
+    } else {
+      final start = values['start_line'];
+      final end = values['end_line'];
+      lines.add(
+        ApprovalPreviewLine(
+          '${_approvalText('linesRange', language)} $start–$end',
+          ApprovalPreviewLineKind.context,
+        ),
+      );
+      lines.addAll(
+        _previewLines(
+          values['replacement']?.toString() ?? '',
+          defaultKind: ApprovalPreviewLineKind.added,
+          maxLines: 12,
+        ),
+      );
+    }
+  }
+  if (operations.length > 4) {
+    lines.add(const ApprovalPreviewLine('…', ApprovalPreviewLineKind.context));
+  }
+  return lines;
+}
+
+List<ApprovalPreviewLine> _patchPreviewLines(String patch) => [
+  for (final line in patch.split('\n').take(24))
+    ApprovalPreviewLine(
+      line,
+      line.startsWith('+') && !line.startsWith('+++')
+          ? ApprovalPreviewLineKind.added
+          : line.startsWith('-') && !line.startsWith('---')
+          ? ApprovalPreviewLineKind.removed
+          : ApprovalPreviewLineKind.context,
+    ),
+];
 
 String _firstText(Map<String, Object?> values, List<String> keys) {
   for (final key in keys) {

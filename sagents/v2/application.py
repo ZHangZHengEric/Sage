@@ -129,6 +129,28 @@ class SAgentApplication:
         self._composer = composer
         composer.application = self
 
+    async def adopt_resource(
+        self,
+        resource: ApplicationResource,
+        *,
+        close_after_existing: bool = True,
+    ) -> None:
+        """Transfer one host-created resource to the Application close boundary.
+
+        Composition helpers use this for resources they construct on behalf of
+        the caller. Resources adopted with ``close_after_existing`` settle only
+        after the resources already owned by the Application.
+        """
+
+        async with self._close_lock:
+            self._ensure_open()
+            if any(value is resource for value in self._owned_resources):
+                return
+            if close_after_existing:
+                self._owned_resources.insert(0, resource)
+            else:
+                self._owned_resources.append(resource)
+
     async def materialize_agent(
         self,
         package: Any,
@@ -180,7 +202,9 @@ class SAgentApplication:
         try:
             return self._services[capability]
         except KeyError as exc:
-            raise KeyError(f"application service {capability!r} is unavailable") from exc
+            raise KeyError(
+                f"application service {capability!r} is unavailable"
+            ) from exc
 
     @property
     def services(self) -> Mapping[str, Any]:
@@ -234,9 +258,7 @@ class SAgentApplication:
                     await resource.close()
                 except Exception as exc:
                     errors.append(exc)
-                    self._owned_resources = list(
-                        reversed(pending_resources[index:])
-                    )
+                    self._owned_resources = list(reversed(pending_resources[index:]))
                     break
             else:
                 self._owned_resources = []
@@ -257,16 +279,12 @@ class SAgentApplication:
                         await handle.close(StopReason.HOST_SHUTDOWN)
                     except Exception as exc:
                         errors.append(exc)
-                        self._scope_handles = list(
-                            reversed(pending_handles[index:])
-                        )
+                        self._scope_handles = list(reversed(pending_handles[index:]))
                         break
                 else:
                     self._scope_handles = []
             self._closed = not (
-                self._owned_resources
-                or self._pending_agents
-                or self._scope_handles
+                self._owned_resources or self._pending_agents or self._scope_handles
             )
             if errors:
                 raise RuntimeError(

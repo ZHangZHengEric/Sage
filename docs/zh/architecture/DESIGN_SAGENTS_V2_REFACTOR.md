@@ -315,7 +315,7 @@ Run 目录下；它不能成为恢复输入。
 
 - 已完成首版 opaque `provider_state` 传输、Session 重建和三类 adapter 回放；
 - 已增加 schema version、大小上限、有限 JSON 校验和 legacy-v0 读取；
-- 补齐 model route/provider 跨协议转换策略；
+- 已明确禁止猜测式跨协议转换；Run 冻结创建时的 model route 与 Agent runtime definition，恢复时只复用当前凭据和显式追加授权，其他配置变更仅影响新 Run；
 - 保留 cumulative snapshot 归一化，增加乱序/重复/残缺 chunk 反例；
 - 在 golden tests 之外增加真实 provider、进程重启和 resume 测试。
 
