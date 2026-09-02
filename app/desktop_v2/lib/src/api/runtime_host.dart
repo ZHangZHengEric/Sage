@@ -14,6 +14,9 @@ typedef RuntimeProcessStarter =
 
 typedef RuntimePidKiller = bool Function(int pid, ProcessSignal signal);
 
+typedef RuntimePythonVersionReader =
+    Future<(int, int)> Function(String executable);
+
 class RuntimeHost {
   RuntimeHost({
     V2ApiClient? api,
@@ -24,6 +27,7 @@ class RuntimeHost {
     Duration terminationGracePeriod = const Duration(seconds: 2),
     int sidecarReadyAttempts = 20,
     Duration sidecarPollInterval = const Duration(milliseconds: 100),
+    RuntimePythonVersionReader readPythonVersion = _inspectPythonVersion,
   }) : api = api ?? V2ApiClient(),
        _sidecarRegistryFileOverride = sidecarRegistryFile,
        _buildIdOverride = buildId,
@@ -31,13 +35,15 @@ class RuntimeHost {
        _pidKiller = killPid,
        _shutdownGracePeriod = terminationGracePeriod,
        _registryReadyAttempts = sidecarReadyAttempts,
-       _registryPollInterval = sidecarPollInterval;
+       _registryPollInterval = sidecarPollInterval,
+       _readPythonVersion = readPythonVersion;
 
   final V2ApiClient api;
   final File? _sidecarRegistryFileOverride;
   final String? _buildIdOverride;
   final RuntimeProcessStarter _processStarter;
   final RuntimePidKiller _pidKiller;
+  final RuntimePythonVersionReader _readPythonVersion;
   final Duration _shutdownGracePeriod;
   final int _registryReadyAttempts;
   final Duration _registryPollInterval;
@@ -52,6 +58,7 @@ class RuntimeHost {
     if (await api.health()) return;
     if (await _connectRegisteredSidecar(buildId)) return;
     final executable = _pythonExecutable(root);
+    await _requirePython312(executable);
     final dataRoot = _dataRootPath();
     final process = await _processStarter(
       executable,
@@ -304,6 +311,39 @@ class RuntimeHost {
     final candidate = File('${root.path}/.venv/bin/python');
     if (candidate.existsSync()) return candidate.path;
     return Platform.isWindows ? 'python' : 'python3';
+  }
+
+  Future<void> _requirePython312(String executable) async {
+    final version = await _readPythonVersion(executable);
+    if (version.$1 > 3 || (version.$1 == 3 && version.$2 >= 12)) {
+      return;
+    }
+    throw SageApiException(
+      'Sage Desktop v2 requires Python 3.12 or newer; '
+      '$executable reports ${version.$1}.${version.$2}.',
+    );
+  }
+
+  static Future<(int, int)> _inspectPythonVersion(String executable) async {
+    final result = await Process.run(executable, const [
+      '-c',
+      'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")',
+    ]);
+    final text = '${result.stdout}'.trim();
+    final parts = text.split('.');
+    if (result.exitCode != 0 || parts.length < 2) {
+      throw SageApiException(
+        'Sage Desktop v2 requires Python 3.12+; failed to inspect $executable.',
+      );
+    }
+    final major = int.tryParse(parts[0]);
+    final minor = int.tryParse(parts[1]);
+    if (major == null || minor == null) {
+      throw SageApiException(
+        'Sage Desktop v2 requires Python 3.12+; failed to inspect $executable.',
+      );
+    }
+    return (major, minor);
   }
 
   Future<String> _sourceBuildId(Directory root) async {

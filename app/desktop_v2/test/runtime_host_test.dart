@@ -104,6 +104,7 @@ void main() {
         startProcess:
             (executable, arguments, {workingDirectory, environment}) async =>
                 process,
+        readPythonVersion: (executable) async => (3, 12),
         killPid: (pid, signal) {
           killed.add((pid, signal));
           if (signal == ProcessSignal.sigterm) registry.deleteSync();
@@ -140,6 +141,7 @@ void main() {
         startProcess:
             (executable, arguments, {workingDirectory, environment}) async =>
                 process,
+        readPythonVersion: (executable) async => (3, 12),
         terminationGracePeriod: Duration.zero,
         sidecarReadyAttempts: 1,
         sidecarPollInterval: Duration.zero,
@@ -154,4 +156,37 @@ void main() {
       ]);
     },
   );
+
+  test('RuntimeHost rejects Python older than 3.12 before spawn', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'sage-runtime-host-python-test-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    var spawned = false;
+    final host = RuntimeHost(
+      api: _RegistryApi(healthyPorts: const {}),
+      sidecarRegistryFile: File('${directory.path}/desktop-v2-sidecar.json'),
+      buildId: 'test-build',
+      startProcess:
+          (executable, arguments, {workingDirectory, environment}) async {
+            spawned = true;
+            return _FakeProcess(pid: 456, readyPort: 54322);
+          },
+      readPythonVersion: (executable) async => (3, 11),
+      sidecarReadyAttempts: 1,
+      sidecarPollInterval: Duration.zero,
+    );
+
+    await expectLater(
+      host.ensureReady(),
+      throwsA(
+        isA<SageApiException>().having(
+          (error) => error.message,
+          'message',
+          contains('Python 3.12'),
+        ),
+      ),
+    );
+    expect(spawned, isFalse);
+  });
 }

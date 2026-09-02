@@ -9,6 +9,9 @@ the global list of conversations.
 V2 is independent from the legacy SAgents runtime. Importing `sagents.v2` does
 not initialize global managers or application services.
 
+**Requires Python 3.12 or newer.** The legacy Sage runtime stays on Python
+3.10+. Importing `sagents.v2` on an older interpreter raises immediately.
+
 ## Start with this mental model
 
 | Concept | Meaning |
