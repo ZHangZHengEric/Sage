@@ -2,6 +2,20 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-02 15:45** `AgentLoopEngine` 恢复为纯 RunDriver，移除 `log_sink` / `trace_sink` 与观测方法；Builder 改用外层 `ObservedRunDriver` 投影 Run/Tool 日志和 Trace，并删除仅作反向转发的 Agent Coordinator。
+
+- **2026-09-02 15:22** 对话时按 session 绑定用户目录，不再只靠 ContextVar；已配置模型不会再被误判为未配置。
+
+- **2026-09-02 15:25** 对话不再回显用户消息；未配置模型时提示去「模型」页，而不是笼统的校验失败。
+
+- **2026-09-02 15:32** server_v2 与 sagents/v2 默认输出 JSON stdout；HTTP correlation 贯穿 AG-UI、Agent、模型与工具日志，补 Agent 生命周期、正确失败级别并移除 INFO 中的工具参数/结果正文。日志级别与格式由 `SAGE_SERVER_LOG_LEVEL` / `SAGE_SERVER_LOG_FORMAT` 控制，不新增审计存储。
+
+- **2026-09-02 15:05** Postgres Session 也在 start() 建表；模型/工具调用写入 sage.logging.stdout。
+
+- **2026-09-02 14:45** MySQL Session 建表改到 sagents 启动时完成；对话走 stdout 打 AG-UI 起止日志，upsert 不再用已弃用的 VALUES()。
+
+- **2026-09-02 14:35** server_v2 固定注册 sage.logging.stdout，启动时把 sagents 插件清单打到 stdout。
+
 - **2026-09-02 14:21** 新增独立 server_v2：domain/repositories/db 分层，启动只读 .env（SAGE_SERVER_*），AG-UI 走 Redis 回放，Web 含登录/对话/模型与管理。
 
 - **2026-09-02 10:55** sagents/v2 与 Desktop v2 最低 Python 升为 3.12，导入与 sidecar 启动会拒绝更低版本。

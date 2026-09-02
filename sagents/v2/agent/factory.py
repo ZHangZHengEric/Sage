@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sagents.v2.agent.engine import AgentLoopEngine
+from sagents.v2.agent.observed import ObservedRunDriver
 from sagents.v2.agent.step_request import AgentStepRequestBuilder
 from sagents.v2.agent.policy.continuation import (
     CompositeContinuationPolicy,
@@ -123,10 +124,16 @@ class AgentCompositionFactory:
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         expected_resolved_spec_hash: str | None = None,
         trace_sink=None,
+        log_sink=None,
     ) -> AgentLoopEngine:
-        """Wire already-selected ports into the single canonical Loop engine."""
+        """Build the pure Loop, adding the host observability adapter when selected."""
 
-        return AgentLoopEngine(
+        engine_type = (
+            ObservedRunDriver
+            if trace_sink is not None or log_sink is not None
+            else AgentLoopEngine
+        )
+        return engine_type(
             runtime=self.runtime,
             model=model,
             tool_catalog=tool_catalog,
@@ -142,7 +149,11 @@ class AgentCompositionFactory:
             memory_recall_query_generator=memory_recall_query_generator,
             context_assembler=context_assembler,
             expected_resolved_spec_hash=expected_resolved_spec_hash,
-            trace_sink=trace_sink,
+            **(
+                {"trace_sink": trace_sink, "log_sink": log_sink}
+                if engine_type is ObservedRunDriver
+                else {}
+            ),
         )
 
     def create_loop(
@@ -167,6 +178,7 @@ class AgentCompositionFactory:
         additional_runtime_tools: tuple[str, ...] = (),
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
         trace_sink=None,
+        log_sink=None,
     ) -> AgentLoopEngine:
         """Create the standard single-Agent Loop from resolved capabilities."""
 
@@ -268,6 +280,7 @@ class AgentCompositionFactory:
             ),
             expected_resolved_spec_hash=resolved.manifest_hash,
             trace_sink=trace_sink,
+            log_sink=log_sink,
         )
 
 

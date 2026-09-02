@@ -64,12 +64,16 @@ def make_test_service(
     *,
     redis=None,
     model_provider=None,
+    fallback=True,
     **overrides,
 ) -> ServerV2Service:
     settings = make_settings(tmp_path, **overrides)
+    provider = model_provider
+    if provider is None and fallback:
+        provider = scripted_hello()
     return ServerV2Service(
         settings,
-        model_provider=model_provider or scripted_hello(),
+        model_provider=provider,
         redis=redis,
         users=MemoryUserStore(),
         catalog=MemoryCatalogStore(),

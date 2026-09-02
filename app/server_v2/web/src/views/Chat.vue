@@ -12,6 +12,7 @@ const text = ref('')
 const messages = ref([])
 const pending = ref(false)
 const error = ref('')
+const hasModel = ref(true)
 const scroller = ref(null)
 const input = ref(null)
 const agent = shallowRef(null)
@@ -46,6 +47,11 @@ function resizeInput() {
 
 async function loadThreads() {
   threads.value = await api.listThreads()
+}
+
+async function loadModels() {
+  const items = await api.listModels()
+  hasModel.value = items.length > 0
 }
 
 async function openThread(id) {
@@ -97,7 +103,7 @@ async function send() {
 onMounted(async () => {
   bindAgent()
   try {
-    await loadThreads()
+    await Promise.all([loadThreads(), loadModels()])
     if (threads.value[0]) await openThread(threads.value[0].thread_id)
     else startNew()
   } catch (exc) {
@@ -128,6 +134,11 @@ onUnmounted(() => {
           :pending="pending"
         />
       </div>
+      <p v-if="!hasModel" class="notice thread-error">
+        还没有可用模型，请先到
+        <router-link to="/models">模型</router-link>
+        页配置后再发送。
+      </p>
       <p v-if="error" class="error thread-error" role="alert">{{ error }}</p>
       <footer class="thread-footer">
         <form class="composer" @submit.prevent="send">

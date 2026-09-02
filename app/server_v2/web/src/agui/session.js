@@ -2,6 +2,14 @@ import { HttpAgent } from '@ag-ui/client'
 import { getToken } from '../auth.js'
 import { createResumableFetch } from './resume.js'
 
+export function messageForAguiError(event, fallback) {
+  const code = event?.code || fallback?.code
+  if (code === 'server.model_not_configured') {
+    return '请先在「模型」页配置模型后再发送'
+  }
+  return event?.message || fallback?.message || fallback || 'run failed'
+}
+
 export function createAguiAgent({ onMessages, onError } = {}) {
   const agent = new HttpAgent({
     url: '/api/agent',
@@ -13,10 +21,10 @@ export function createAguiAgent({ onMessages, onError } = {}) {
       onMessages?.([...messages])
     },
     onRunErrorEvent({ event }) {
-      onError?.(event.message || 'run failed')
+      onError?.(messageForAguiError(event))
     },
     onRunFailed({ error }) {
-      onError?.(error?.message || 'run failed')
+      onError?.(messageForAguiError(error, error))
     },
   })
   return agent

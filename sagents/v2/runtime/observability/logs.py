@@ -8,10 +8,12 @@ import os
 import re
 import traceback
 from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from pydantic import BaseModel
 
@@ -31,6 +33,23 @@ _LEVEL_ORDER = {
     LogLevel.ERROR: 40,
     LogLevel.CRITICAL: 50,
 }
+
+_LOG_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "sage_v2_structured_log_context",
+    default=None,
+)
+
+
+@contextmanager
+def structured_log_context(**context: Any) -> Iterator[None]:
+    """Bind correlation fields across async Runtime and Agent boundaries."""
+
+    current = _LOG_CONTEXT.get() or {}
+    token = _LOG_CONTEXT.set({**current, **context})
+    try:
+        yield
+    finally:
+        _LOG_CONTEXT.reset(token)
 
 
 def record_reaches_min_level(level: LogLevel, min_level: LogLevel) -> bool:
@@ -75,10 +94,8 @@ def redact_log_value(value: Any) -> Any:
     return redact_log_value(str(value))
 
 
-def encode_log_record(record: LogRecord) -> str:
-    """Return one redacted JSONL line for a structured record."""
-
-    safe = record.model_copy(
+def _redacted_record(record: LogRecord) -> LogRecord:
+    return record.model_copy(
         update={
             "message": redact_log_value(record.message),
             "attributes": redact_log_value(record.attributes),
@@ -94,6 +111,12 @@ def encode_log_record(record: LogRecord) -> str:
             ),
         }
     )
+
+
+def encode_log_record(record: LogRecord) -> str:
+    """Return one redacted JSONL line for a structured record."""
+
+    safe = _redacted_record(record)
     return (
         json.dumps(
             safe.model_dump(mode="json", exclude_none=True),
@@ -101,6 +124,49 @@ def encode_log_record(record: LogRecord) -> str:
             separators=(",", ":"),
         )
         + "\n"
+    )
+
+
+def format_log_record(record: LogRecord) -> str:
+    """Return one redacted console line for a structured record."""
+
+    safe = _redacted_record(record)
+    stamp = safe.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+    def console_value(value: Any) -> str:
+        return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+    fields: list[str] = []
+    for key in (
+        "session_id",
+        "run_id",
+        "turn_id",
+        "step_id",
+        "tool_call_id",
+        "request_id",
+        "correlation_id",
+    ):
+        value = getattr(safe, key)
+        if value:
+            fields.append(f"{key}={value}")
+    for key, value in (safe.attributes or {}).items():
+        if value is None or value == "":
+            continue
+        if isinstance(value, (dict, list, tuple)):
+            fields.append(
+                f"{key}={json.dumps(value, ensure_ascii=False, separators=(',', ':'))}"
+            )
+            continue
+        fields.append(f"{key}={console_value(value)}")
+    if safe.error is not None:
+        detail = safe.error.code or safe.error.type
+        fields.append(f"error={detail}:{console_value(safe.error.message)}")
+        if safe.error.stack_trace:
+            fields.append(f"stack_trace={console_value(safe.error.stack_trace)}")
+    suffix = f" | {' '.join(fields)}" if fields else ""
+    return (
+        f"{stamp} | {safe.level.value.upper():<8} | {safe.component} | "
+        f"{safe.event} | {console_value(safe.message)}{suffix}\n"
     )
 
 
@@ -135,7 +201,7 @@ class StructuredLogger:
         attributes: Mapping[str, Any] | None = None,
         **context: Any,
     ) -> None:
-        values = {**self.context, **context}
+        values = {**(_LOG_CONTEXT.get() or {}), **self.context, **context}
         known = {
             key: values.pop(key, None)
             for key in (

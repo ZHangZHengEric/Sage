@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.server_v2.app import create_app
 from app.server_v2.core.settings import DEFAULT_JWT_SECRET, ServerV2Settings
-from app.server_v2.main import ENV_FILE, load_env_file
+from app.server_v2.main import ENV_FILE, load_env_file, main
 from app.server_v2.repositories import DatabaseUserStore
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
@@ -30,15 +30,54 @@ def test_settings_read_mysql_redis_jaeger_from_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
     monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.setenv("SAGE_SERVER_JAEGER_URL", "http://sage-jaeger:4317")
-    monkeypatch.setenv(
-        "SAGE_SERVER_JAEGER_PUBLIC_URL", "http://127.0.0.1:16686/jaeger"
-    )
+    monkeypatch.setenv("SAGE_SERVER_JAEGER_PUBLIC_URL", "http://127.0.0.1:16686/jaeger")
+    monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
+    monkeypatch.setenv("SAGE_SERVER_LOG_FORMAT", "json")
     settings = ServerV2Settings.from_env(data_root=tmp_path)
     assert settings.mysql_url == "mysql://sage@127.0.0.1/sage"
     assert settings.database_url() == "mysql+aiomysql://sage@127.0.0.1/sage"
     assert settings.redis_url == "redis://127.0.0.1:6379/0"
     assert settings.jaeger_url == "http://sage-jaeger:4317"
     assert settings.jaeger_public_url == "http://127.0.0.1:16686/jaeger"
+    assert settings.log_level == "warning"
+    assert settings.log_format == "json"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("SAGE_SERVER_LOG_LEVEL", "verbose"),
+        ("SAGE_SERVER_LOG_FORMAT", "yaml"),
+    ],
+)
+def test_settings_reject_invalid_logging_choices(
+    tmp_path: Path, monkeypatch, name, value
+):
+    monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
+    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=name):
+        ServerV2Settings.from_env(data_root=tmp_path)
+
+
+def test_main_preserves_server_logging_configuration(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
+    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
+    monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
+    captured = {}
+    monkeypatch.setattr("app.server_v2.main.load_env_file", lambda: None)
+    monkeypatch.setattr("app.server_v2.main._pick_port", lambda host, port: port)
+    monkeypatch.setattr("app.server_v2.app.create_app", lambda settings: object())
+
+    def fake_run(application, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("app.server_v2.main.uvicorn.run", fake_run)
+
+    assert main(["--data-root", str(tmp_path)]) == 0
+    assert captured["log_level"] == "warning"
+    assert captured["log_config"] is None
 
 
 def test_main_loads_dotenv_from_package_root(tmp_path: Path, monkeypatch):
@@ -75,6 +114,7 @@ def test_health(client: TestClient):
         "host_store": "memory",
         "session_store": "filesystem",
         "agui_replay": "memory",
+        "log": "stdout",
     }
     assert response.json()["request_id"]
     assert response.headers["x-request-id"] == response.json()["request_id"]
@@ -155,9 +195,7 @@ def test_jaeger_routes_absent_without_url(client: TestClient):
 
 
 def test_jaeger_auth_requires_admin(tmp_path: Path):
-    service = make_test_service(
-        tmp_path, jaeger_url="http://127.0.0.1:4317"
-    )
+    service = make_test_service(tmp_path, jaeger_url="http://127.0.0.1:4317")
     with TestClient(create_app(service=service)) as client:
         assert client.get("/api/observability/jaeger/auth").status_code == 401
         token = register_and_login(client)
@@ -172,18 +210,14 @@ def test_jaeger_auth_requires_admin(tmp_path: Path):
         )
         allowed = client.get(
             "/api/observability/jaeger/auth",
-            headers={
-                "Authorization": f"Bearer {admin.json()['data']['access_token']}"
-            },
+            headers={"Authorization": f"Bearer {admin.json()['data']['access_token']}"},
         )
         assert allowed.status_code == 204
         cookie_only = client.get("/api/observability/jaeger/auth")
         assert cookie_only.status_code == 204
         redirect = client.get("/api/observability/jaeger", follow_redirects=False)
         assert redirect.status_code == 307
-        assert redirect.headers["location"].startswith(
-            "http://127.0.0.1:16686/jaeger"
-        )
+        assert redirect.headers["location"].startswith("http://127.0.0.1:16686/jaeger")
 
 
 def test_protected_routes_require_auth(client: TestClient):

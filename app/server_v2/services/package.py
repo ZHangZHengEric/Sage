@@ -19,8 +19,9 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
     """In-process package: no yaml, no env credentials, no model routes.
 
     The live model is injected by ``SAgentBuilder.with_model_provider``.
-    Host backends (MySQL session, Jaeger OTLP) are selected here and passed as
-    plugin config; plugins themselves do not read environment variables.
+    Host backends (stdout logs, MySQL session, Jaeger OTLP) are selected here
+    and passed as plugin config; plugins themselves do not read environment
+    variables.
     """
 
     return SageManifest(
@@ -53,7 +54,18 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
 def _runtime_capabilities(
     settings: ServerV2Settings | None,
 ) -> dict[str, CapabilitySelection]:
-    capabilities: dict[str, CapabilitySelection] = {}
+    log_level = settings.log_level if settings is not None else "info"
+    log_format = settings.log_format if settings is not None else "json"
+    capabilities: dict[str, CapabilitySelection] = {
+        "observability.log-sink": CapabilitySelection(
+            plugin="sage.logging.stdout",
+            config={
+                "stream": "stdout",
+                "min_level": log_level,
+                "format": log_format,
+            },
+        )
+    }
     if settings is not None and settings.mysql_url:
         capabilities["session.store"] = CapabilitySelection(
             plugin="sage.session.mysql",

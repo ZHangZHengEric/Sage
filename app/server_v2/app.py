@@ -24,14 +24,24 @@ from app.server_v2.services.runtime import ServerV2Service
 WEB_DIST = Path(__file__).resolve().parent / "web" / "dist"
 SERVICE_NAME = "sage-server"
 _LOGGING_READY = False
+_LOGGING_SIGNATURE: tuple[str, str, str | None] | None = None
 
 
-def _ensure_logging() -> None:
-    global _LOGGING_READY
-    if _LOGGING_READY:
+def _ensure_logging(settings: ServerV2Settings) -> None:
+    global _LOGGING_READY, _LOGGING_SIGNATURE
+    signature = (settings.log_level, settings.log_format, settings.log_directory)
+    if _LOGGING_READY and _LOGGING_SIGNATURE == signature:
         return
-    init_logging(LoggingSettings(), service_name=SERVICE_NAME)
+    init_logging(
+        LoggingSettings(
+            level=settings.log_level,
+            format=settings.log_format,
+            directory=settings.log_directory,
+        ),
+        service_name=SERVICE_NAME,
+    )
     _LOGGING_READY = True
+    _LOGGING_SIGNATURE = signature
 
 
 def required_resources(settings: ServerV2Settings):
@@ -52,15 +62,16 @@ def create_app(
     service: ServerV2Service | None = None,
     settings: ServerV2Settings | None = None,
 ) -> FastAPI:
-    _ensure_logging()
     if service is not None:
         runtime = service
+        settings = service.settings
         database = service.database
         redis = service._redis
     else:
         settings = settings or ServerV2Settings.from_env()
         database, redis = required_resources(settings)
         runtime = ServerV2Service(settings, database=database, redis=redis)
+    _ensure_logging(settings)
     resources = tuple(item for item in (database, redis) if item is not None)
     registry = ResourceRegistry(
         resources,

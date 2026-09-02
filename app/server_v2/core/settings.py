@@ -23,6 +23,16 @@ def _optional_env(name: str) -> str | None:
     return value.strip()
 
 
+def _choice_env(name: str, default: str, choices: frozenset[str]) -> str:
+    value = _env(name, default).lower()
+    if value == "warn" and "warning" in choices:
+        value = "warning"
+    if value not in choices:
+        expected = ", ".join(sorted(choices))
+        raise ValueError(f"{name} must be one of: {expected}")
+    return value
+
+
 def _jwt_secret() -> str:
     secret = _env("SAGE_SERVER_JWT_SECRET", DEFAULT_JWT_SECRET)
     if secret == DEFAULT_JWT_SECRET:
@@ -44,6 +54,9 @@ class ServerV2Settings:
     language: str
     admin_username: str
     admin_password: str
+    log_level: str = "info"
+    log_format: str = "json"
+    log_directory: str | None = None
     mysql_url: str | None = None
     redis_url: str | None = None
     jaeger_url: str | None = None
@@ -76,6 +89,17 @@ class ServerV2Settings:
             language=_env("SAGE_SERVER_LANGUAGE", "zh"),
             admin_username=_env("SAGE_SERVER_ADMIN_USERNAME", "admin"),
             admin_password=_env("SAGE_SERVER_ADMIN_PASSWORD", "admin12345"),
+            log_level=_choice_env(
+                "SAGE_SERVER_LOG_LEVEL",
+                "info",
+                frozenset({"debug", "info", "warning", "error", "critical"}),
+            ),
+            log_format=_choice_env(
+                "SAGE_SERVER_LOG_FORMAT",
+                "json",
+                frozenset({"json", "text"}),
+            ),
+            log_directory=_optional_env("SAGE_SERVER_LOG_DIRECTORY"),
             mysql_url=mysql_url,
             redis_url=redis_url,
             jaeger_url=_optional_env("SAGE_SERVER_JAEGER_URL"),

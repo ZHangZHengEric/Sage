@@ -4,7 +4,11 @@ import pytest
 from ag_ui.core import RunAgentInput
 
 from app.server_v2.agui.mapping import to_start_run
-from app.server_v2.agui.sse import RunStartedGate, frame_to_agui_event
+from app.server_v2.agui.sse import (
+    ClientOwnedUserTextFilter,
+    RunStartedGate,
+    frame_to_agui_event,
+)
 from app.server_v2.core.errors import ServerV2Error
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
 
@@ -87,3 +91,13 @@ def test_run_error_can_open_the_stream_without_run_started():
     assert gate.release({"type": "RUN_ERROR", "message": "no model"}) == [
         {"type": "RUN_ERROR", "message": "no model"}
     ]
+
+
+def test_skips_client_owned_user_text_but_keeps_assistant():
+    filt = ClientOwnedUserTextFilter()
+    assert filt.allow({"type": "TEXT_MESSAGE_START", "messageId": "u1", "role": "user"}) is False
+    assert filt.allow({"type": "TEXT_MESSAGE_CONTENT", "messageId": "u1", "delta": "hi"}) is False
+    assert filt.allow({"type": "TEXT_MESSAGE_END", "messageId": "u1"}) is False
+    assert filt.allow({"type": "TEXT_MESSAGE_START", "messageId": "a1", "role": "assistant"}) is True
+    assert filt.allow({"type": "TEXT_MESSAGE_CONTENT", "messageId": "a1", "delta": "hello"}) is True
+    assert filt.allow({"type": "RUN_ERROR", "message": "no model"}) is True

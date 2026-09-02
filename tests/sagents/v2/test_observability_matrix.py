@@ -25,6 +25,7 @@ from sagents.v2.runtime.observability import (
     OtlpTraceSink,
     StdoutLogSink,
     StructuredLogger,
+    structured_log_context,
 )
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.testing.plugins.scripted_model import (
@@ -138,10 +139,7 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     }
     assert await sink.list_model_requests(session_id="session_1") == (record,)
     request_paths = list(
-        (
-            tmp_path
-            / "diagnostics/session_1/runs/run_1/llm_requests"
-        ).glob("*.json")
+        (tmp_path / "diagnostics/session_1/runs/run_1/llm_requests").glob("*.json")
     )
     assert len(request_paths) == 1
     assert request_paths[0].name.startswith("00000000_agent_")
@@ -199,10 +197,7 @@ async def test_request_filenames_sort_by_start_order_and_include_kind(tmp_path):
 
 @pytest.mark.asyncio
 async def test_colocated_sink_migrates_legacy_diagnostics_into_the_run(tmp_path):
-    legacy_directory = (
-        tmp_path
-        / "legacy/sessions/session_1/runs/run_1/requests"
-    )
+    legacy_directory = tmp_path / "legacy/sessions/session_1/runs/run_1/requests"
     legacy_directory.mkdir(parents=True)
     legacy_record = {
         "format_version": "sage.model-diagnostics/v1",
@@ -228,13 +223,9 @@ async def test_colocated_sink_migrates_legacy_diagnostics_into_the_run(tmp_path)
             request_id="legacy_request",
         )
     ) == legacy_record
-    assert await sink.list_model_requests(session_id="session_1") == (
-        legacy_record,
-    )
+    assert await sink.list_model_requests(session_id="session_1") == (legacy_record,)
     migrated = list(
-        (
-            tmp_path / "sessions/session_1/runs/run_1/llm_requests"
-        ).glob("*.json")
+        (tmp_path / "sessions/session_1/runs/run_1/llm_requests").glob("*.json")
     )
     assert len(migrated) == 1
     assert migrated[0].name.startswith("00000000_agent_")
@@ -328,9 +319,7 @@ def test_structured_stdout_logs_share_schema_redact_and_respect_min_level():
             tool_call_id="call_1",
         )
 
-    rows = [
-        json.loads(line) for line in output.getvalue().splitlines() if line
-    ]
+    rows = [json.loads(line) for line in output.getvalue().splitlines() if line]
     assert [value["event"] for value in rows] == [
         "agent.run.started",
         "tool.call.failed",
@@ -343,9 +332,52 @@ def test_structured_stdout_logs_share_schema_redact_and_respect_min_level():
     assert rows[1]["error"]["type"] == "ValueError"
 
 
+def test_structured_log_context_adds_correlation_to_every_record():
+    output = StringIO()
+    sink = StdoutLogSink(output=output)
+    logger = StructuredLogger(sink, "test.agent")
+
+    with structured_log_context(correlation_id="http-request-1"):
+        logger.info("agent.run.started", "Agent run started", run_id="run_1")
+
+    row = json.loads(output.getvalue())
+    assert row["correlation_id"] == "http-request-1"
+    assert row["run_id"] == "run_1"
+
+
 def test_stdout_log_sink_rejects_unknown_stream():
     with pytest.raises(ValueError, match="stdout"):
         StdoutLogSink(stream="file")
+
+
+def test_stdout_log_sink_writes_text_console_lines():
+    output = StringIO()
+    sink = StdoutLogSink(
+        stream="stdout", min_level=LogLevel.INFO, format="text", output=output
+    )
+    logger = StructuredLogger(sink, "test.agent").bind(
+        run_id="run_1", correlation_id="request-1"
+    )
+    try:
+        raise ValueError("failed\non next line")
+    except ValueError as exc:
+        logger.exception(
+            "agui.run.failed",
+            "AG-UI run failed",
+            exc,
+            attributes={"api_key": "sk-secret-value", "agent_id": "main"},
+        )
+    line = output.getvalue()
+    assert '"format_version"' not in line
+    assert " | ERROR    | test.agent | agui.run.failed | AG-UI run failed |" in line
+    assert "run_id=run_1" in line
+    assert "correlation_id=request-1" in line
+    assert "agent_id=main" in line
+    assert "stack_trace=" in line
+    assert "\n" not in line.rstrip("\n")
+    assert "sk-secret-value" not in line
+    with pytest.raises(ValueError, match="format"):
+        StdoutLogSink(format="yaml")
 
 
 @pytest.mark.parametrize(
@@ -411,6 +443,19 @@ class _CapturingTraceSink:
 
     def end_span(self, span):
         self.ended.append(span)
+
+    def close(self) -> None:
+        return None
+
+
+class _CapturingLogSink:
+    format_version = "sage.log/v1"
+
+    def __init__(self) -> None:
+        self.records = []
+
+    def write(self, record):
+        self.records.append(record)
 
     def close(self) -> None:
         return None
@@ -502,7 +547,11 @@ def test_nested_span_keeps_active_trace_when_child_session_differs():
 
 
 def test_structured_tracer_records_redacted_span_timing():
-    from sagents.v2.runtime.observability import StructuredTracer, TraceKind, TraceStatus
+    from sagents.v2.runtime.observability import (
+        StructuredTracer,
+        TraceKind,
+        TraceStatus,
+    )
 
     sink = _CapturingTraceSink()
     tracer = StructuredTracer(sink, "test.agent").bind(session_id="session_1")
@@ -567,9 +616,7 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
         request_id="request_1",
         run_id="run_1",
         model_binding="primary",
-        messages=(
-            ModelMessage(role="user", content=(TextBlock(text="hello"),)),
-        ),
+        messages=(ModelMessage(role="user", content=(TextBlock(text="hello"),)),),
     )
     [event async for event in recording.stream(request)]
 
@@ -582,6 +629,57 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
     assert ended.status is TraceStatus.OK
     assert ended.attributes["ttfb_ms"] >= 0
     assert ended.attributes["duration_ms"] >= ended.attributes["ttfb_ms"]
+
+
+@pytest.mark.asyncio
+async def test_recording_provider_emits_model_request_logs(tmp_path):
+    from sagents.v2.runtime.observability import FilesystemDiagnosticSink
+
+    sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
+    logs = _CapturingLogSink()
+    response = ModelResponse(
+        response_id="response_1", text="done", finish_reason="stop"
+    )
+    provider = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="done"),
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=response,
+                    ),
+                )
+            ),
+        )
+    )
+
+    async def resolve_session(run_id: str) -> str:
+        return "session_1"
+
+    recording = RecordingModelProvider(
+        provider,
+        sink=sink,
+        log_sink=logs,
+        session_id_resolver=resolve_session,
+        provider_metadata={"agent_id": "main", "purpose": "agent"},
+    )
+    request = ModelRequest(
+        request_id="request_1",
+        run_id="run_1",
+        model_binding="primary",
+        messages=(ModelMessage(role="user", content=(TextBlock(text="hello"),)),),
+    )
+    [event async for event in recording.stream(request)]
+    events = [record.event for record in logs.records]
+    assert events == ["model.request.started", "model.request.completed"]
+    completed = logs.records[1]
+    assert completed.session_id == "session_1"
+    assert completed.run_id == "run_1"
+    assert completed.request_id == "request_1"
+    assert completed.attributes["model_binding"] == "primary"
+    assert completed.attributes["agent_id"] == "main"
+    assert completed.attributes["duration_ms"] >= 0
 
 
 @pytest.mark.asyncio
@@ -599,7 +697,11 @@ async def test_trace_noop_plugin_is_the_default_official_sink():
     otlp = registry.get("sage.trace.otlp").descriptor
     host = ExtensionHost(registry)
     plan = host.plan(
-        (CapabilityRequirement(capability="observability.trace-sink", api_version="2"),),
+        (
+            CapabilityRequirement(
+                capability="observability.trace-sink", api_version="2"
+            ),
+        ),
         selections={"observability.trace-sink": "sage.trace.noop"},
         scope_overrides={"sage.trace.noop": ExtensionScope.PROCESS},
     )
@@ -698,7 +800,9 @@ async def test_loop_emits_session_scoped_run_model_and_tool_spans():
     assert names.count("agent.run") == 1
     assert names.count("model.request") == 2
     assert names.count("tool.call") == 1
-    by_name = {span.name: span for span in traces.started if span.name != "model.request"}
+    by_name = {
+        span.name: span for span in traces.started if span.name != "model.request"
+    }
     model_spans = [span for span in traces.started if span.name == "model.request"]
     run_span = by_name["agent.run"]
     tool_span = by_name["tool.call"]
@@ -714,8 +818,120 @@ async def test_loop_emits_session_scoped_run_model_and_tool_spans():
 
 
 @pytest.mark.asyncio
+async def test_loop_emits_model_and_tool_logs():
+    from sagents.v2.runtime.observability import NoopDiagnosticSink
+
+    from tests.sagents.v2.test_agent_loop_matrix import (
+        CONTEXT,
+        completed,
+        setup_loop,
+        tool_call,
+    )
+
+    logs = _CapturingLogSink()
+    runtime_holder = {}
+
+    async def resolve_session(run_id: str) -> str:
+        return (await runtime_holder["runtime"].get_run(run_id)).session_id
+
+    inner = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+            ScriptedModelStep(events=(completed("the answer is 42"),)),
+        )
+    )
+    model = RecordingModelProvider(
+        inner,
+        sink=NoopDiagnosticSink(),
+        log_sink=logs,
+        session_id_resolver=resolve_session,
+    )
+    runtime, handle, loop, executor = await setup_loop(model, log_sink=logs)
+    runtime_holder["runtime"] = runtime
+    result = await loop.execute(handle.run_id, CONTEXT)
+
+    assert result.state.value == "completed"
+    assert len(executor.calls) == 1
+    events = [record.event for record in logs.records]
+    assert events.count("agent.run.started") == 1
+    assert events.count("agent.run.completed") == 1
+    assert events.count("model.request.started") == 2
+    assert events.count("model.request.completed") == 2
+    assert events.count("tool.call.started") == 1
+    assert events.count("tool.call.completed") == 1
+    tool_started = next(
+        record for record in logs.records if record.event == "tool.call.started"
+    )
+    assert tool_started.session_id == handle.session_id
+    assert tool_started.run_id == handle.run_id
+    assert tool_started.attributes["tool_name"] == "read_value"
+    assert "arguments" not in tool_started.attributes
+    tool_completed = next(
+        record for record in logs.records if record.event == "tool.call.completed"
+    )
+    assert "result" not in tool_completed.attributes
+
+
+@pytest.mark.asyncio
+async def test_tool_result_failure_is_logged_as_error_without_result_payload():
+    from sagents.v2.runtime.observability import NoopDiagnosticSink
+    from sagents.v2.tool.contracts import ToolExecutionResult
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+
+    from tests.sagents.v2.test_agent_loop_matrix import (
+        CONTEXT,
+        completed,
+        setup_loop,
+        tool_call,
+    )
+
+    logs = _CapturingLogSink()
+    runtime_holder = {}
+
+    async def resolve_session(run_id: str) -> str:
+        return (await runtime_holder["runtime"].get_run(run_id)).session_id
+
+    async def failed_tool(call, _context):
+        return ToolExecutionResult(
+            tool_call_id=call.tool_call_id,
+            operation_id=call.operation_id,
+            error=RuntimeErrorInfo(
+                code="tool.failed",
+                category=ErrorCategory.PROVIDER_PERMANENT,
+                message="private result body",
+            ),
+        )
+
+    model = RecordingModelProvider(
+        ScriptedModelProvider(
+            (
+                ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+                ScriptedModelStep(events=(completed("handled"),)),
+            )
+        ),
+        sink=NoopDiagnosticSink(),
+        log_sink=logs,
+        session_id_resolver=resolve_session,
+    )
+    runtime, handle, loop, _executor = await setup_loop(
+        model,
+        handlers={"read_value": failed_tool, "write_value": failed_tool},
+        log_sink=logs,
+    )
+    runtime_holder["runtime"] = runtime
+
+    await loop.execute(handle.run_id, CONTEXT)
+
+    failed = next(
+        record for record in logs.records if record.event == "tool.call.failed"
+    )
+    assert failed.level == LogLevel.ERROR
+    assert failed.attributes == {"tool_name": "read_value", "error_code": "tool.failed"}
+    assert "private result body" not in json.dumps(failed.model_dump(mode="json"))
+
+
+@pytest.mark.asyncio
 async def test_forked_child_run_joins_parent_session_trace():
-    from sagents.v2.agent import AgentLoopEngine
     from sagents.v2.agent.multi_agent import (
         AgentDescriptor,
         DelegationTask,
@@ -769,18 +985,24 @@ async def test_forked_child_run_joins_parent_session_trace():
     def child_loop(descriptor, run_id):
         del run_id
         inner = ScriptedModelProvider(
-            (ScriptedModelStep(events=(
-                ModelStreamEvent(
-                    kind=ModelEventKind.COMPLETED,
-                    response=ModelResponse(
-                        response_id="child_done",
-                        text="child done",
-                        finish_reason="stop",
-                    ),
+            (
+                ScriptedModelStep(
+                    events=(
+                        ModelStreamEvent(
+                            kind=ModelEventKind.COMPLETED,
+                            response=ModelResponse(
+                                response_id="child_done",
+                                text="child done",
+                                finish_reason="stop",
+                            ),
+                        ),
+                    )
                 ),
-            )),)
+            )
         )
-        return AgentLoopEngine(
+        from sagents.v2.agent.observed import ObservedRunDriver
+
+        return ObservedRunDriver(
             runtime=runtime,
             model=RecordingModelProvider(
                 inner,
@@ -801,7 +1023,9 @@ async def test_forked_child_run_joins_parent_session_trace():
         loop_factory=child_loop,
         resolved_spec_hash="sha256:children",
     )
-    parent_loop = AgentLoopEngine(
+    from sagents.v2.agent.observed import ObservedRunDriver
+
+    parent_loop = ObservedRunDriver(
         runtime=runtime,
         model=ScriptedModelProvider(()),
         tool_catalog=InMemoryToolCatalog(()),
@@ -812,7 +1036,9 @@ async def test_forked_child_run_joins_parent_session_trace():
     async def parent_body(run_id, request_context):
         run = await runtime.get_run(run_id)
 
-        async def tool_body(run, call, request_context, turn_id, step_id=None, state=None):
+        async def tool_body(
+            run, call, request_context, turn_id, step_id=None, state=None
+        ):
             del call, turn_id, step_id, state
             result = await executor.run_child(
                 AgentDescriptor(
@@ -839,7 +1065,7 @@ async def test_forked_child_run_joins_parent_session_trace():
                 content=(TextBlock(text=text),),
             )
 
-        run, _ = await parent_loop.trace_tool_call(
+        run, _ = await parent_loop._observe_tool_call(
             run,
             ToolCall(
                 tool_call_id="call_delegate",
@@ -855,12 +1081,10 @@ async def test_forked_child_run_joins_parent_session_trace():
         )
         return run
 
-    snapshot = await parent_loop.trace_run(
+    snapshot = await parent_loop._observe_run(
         parent.run_id, context, resumed=False, body=parent_body
     )
-    child_runs = [
-        span for span in traces.started if span.name == "agent.run"
-    ]
+    child_runs = [span for span in traces.started if span.name == "agent.run"]
     assert snapshot.session_id == parent.session_id
     assert len(child_runs) == 2
     parent_run, child_run = child_runs

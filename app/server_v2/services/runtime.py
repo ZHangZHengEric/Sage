@@ -2,22 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
 from sagents.v2 import SAgentApplication, SAgentBuilder
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+from sagents.v2.contracts.principals import (
+    ActorRef,
+    PrincipalType,
+    RequestContext,
+    TraceContext,
+)
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
 
 from app.server_v2.agui.mapping import to_start_run
 from app.server_v2.agui.redis_store import RedisAguiReplayStore
 from app.server_v2.agui.replay import AguiRun
 from app.server_v2.agui.sse import (
+    ClientOwnedUserTextFilter,
     RunStartedGate,
     frame_to_agui_event,
     run_error_event,
 )
 from app.server_v2.core.errors import ServerV2Error, map_sage_error
+from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.services.models import (
     HostModelProvider,
@@ -54,6 +61,7 @@ class ServerV2Service:
             self.users, self.catalog, self.threads = _mysql_repositories(database)
         self.replay = replay if replay is not None else _redis_replay(redis)
         self._fallback_model = model_provider
+        self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -73,13 +81,18 @@ class ServerV2Service:
         await self.users.ensure_admin(
             self.settings.admin_username, self.settings.admin_password
         )
-        provider = HostModelProvider(self.catalog, fallback=self._fallback_model)
+        self._host_models = HostModelProvider(
+            self.catalog,
+            fallback=self._fallback_model,
+            session_for_run=self._session_id_for_run,
+        )
         self._application = await (
             SAgentBuilder()
             .with_defaults(session_root=self.paths.sessions_root)
-            .with_model_provider(provider)
+            .with_model_provider(self._host_models)
             .build(server_v2_manifest(self.settings))
         )
+        self._log_sagents_registration()
 
     async def close(self) -> None:
         for task in tuple(self._tasks):
@@ -96,18 +109,22 @@ class ServerV2Service:
             "host_store": "mysql" if self.database is not None else "memory",
             "session_store": "mysql" if self.settings.mysql_url else "filesystem",
             "agui_replay": "redis" if self._redis is not None else "memory",
+            "log": "stdout",
         }
         if self.settings.jaeger_url:
             report["trace"] = "otlp"
         return report
 
-    def request_context(self, user_id: str) -> RequestContext:
+    def request_context(
+        self, user_id: str, *, correlation_id: str | None = None
+    ) -> RequestContext:
         return RequestContext(
             actor=ActorRef(
                 principal_id=user_id,
                 principal_type=PrincipalType.USER,
                 tenant_id=user_id,
             ),
+            trace=TraceContext(correlation_id=correlation_id),
             language=self.settings.language,
         )
 
@@ -115,7 +132,9 @@ class ServerV2Service:
         user = await self.users.get_by_id(user_id)
         return user.username if user is not None else user_id
 
-    async def delete_thread(self, thread_id: str, user_id: str, *, admin: bool = False) -> None:
+    async def delete_thread(
+        self, thread_id: str, user_id: str, *, admin: bool = False
+    ) -> None:
         record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
             raise ServerV2Error("not_found", "thread not found")
@@ -135,9 +154,9 @@ class ServerV2Service:
         if record is None or (not admin and record.user_id != user_id):
             raise ServerV2Error("not_found", "thread not found")
         try:
-            events = await self.application.service("session.access").read_session_events(
-                thread_id, self.request_context(record.user_id)
-            )
+            events = await self.application.service(
+                "session.access"
+            ).read_session_events(thread_id, self.request_context(record.user_id))
         except SageV2Error as exc:
             if exc.info.code.endswith("not_found"):
                 return []
@@ -148,9 +167,7 @@ class ServerV2Service:
             result = adapter.translate(event)
             for frame in result.frames:
                 frames.append(
-                    frame_to_agui_event(
-                        frame, thread_id=thread_id, run_id=event.run_id
-                    )
+                    frame_to_agui_event(frame, thread_id=thread_id, run_id=event.run_id)
                 )
         return frames
 
@@ -184,6 +201,7 @@ class ServerV2Service:
                         command,
                         user_id=user_id,
                         agent_id=agent_id,
+                        correlation_id=get_request_id(),
                     ),
                     name=f"server-v2-agui-{run_id}",
                 )
@@ -197,22 +215,67 @@ class ServerV2Service:
         *,
         user_id: str,
         agent_id: str,
+        correlation_id: str,
+    ) -> None:
+        with structured_log_context(correlation_id=correlation_id):
+            await self._drive_correlated_agui_run(
+                run,
+                command,
+                user_id=user_id,
+                agent_id=agent_id,
+                correlation_id=correlation_id,
+            )
+
+    async def _drive_correlated_agui_run(
+        self,
+        run: AguiRun,
+        command,
+        *,
+        user_id: str,
+        agent_id: str,
+        correlation_id: str,
     ) -> None:
         token = bind_model_user(user_id)
-        context = self.request_context(user_id)
+        if self._host_models is not None:
+            self._host_models.bind_session_user(run.thread_id, user_id)
+        context = self.request_context(user_id, correlation_id=correlation_id)
         stream = None
         gate = RunStartedGate()
+        owned_user_text = ClientOwnedUserTextFilter()
+        logger = self._sagents_logger().bind(
+            thread_id=run.thread_id,
+            run_id=run.run_id,
+        )
+        logger.info(
+            "agui.run.started",
+            "AG-UI run started",
+            attributes={"agent_id": agent_id, "user_id": user_id},
+        )
         try:
+            if not await self._has_configured_model(user_id):
+                await self._fail_agui_run(
+                    run,
+                    gate,
+                    self._model_missing_message(),
+                    code="server.model_not_configured",
+                )
+                logger.warning(
+                    "agui.run.failed",
+                    "AG-UI run failed",
+                    attributes={"code": "server.model_not_configured"},
+                )
+                return
             stream = await self.application.run_interface(
                 "ag_ui", command, context, agent_id=agent_id
             )
             async for result in stream.results:
                 for frame in result.frames:
-                    for payload in gate.release(
-                        frame_to_agui_event(
-                            frame, thread_id=run.thread_id, run_id=run.run_id
-                        )
-                    ):
+                    event = frame_to_agui_event(
+                        frame, thread_id=run.thread_id, run_id=run.run_id
+                    )
+                    if not owned_user_text.allow(event):
+                        continue
+                    for payload in gate.release(event):
                         await self.replay.publish(run, payload)
             title = ""
             if command.input:
@@ -220,25 +283,94 @@ class ServerV2Service:
                 title = getattr(first, "text", "")[:80]
             await self.threads.upsert(run.thread_id, user_id, title=title)
             await self.replay.finish(run, "completed")
+            logger.info("agui.run.completed", "AG-UI run completed")
         except SageV2Error as exc:
-            LOGGER.exception("AG-UI run failed")
+            logger.warning(
+                "agui.run.failed",
+                "AG-UI run failed",
+                attributes={"code": exc.info.code, "category": exc.info.category.value},
+            )
             mapped = map_sage_error(exc)
             for payload in gate.release(
                 run_error_event(mapped.message, code=exc.info.code)
             ):
                 await self.replay.publish(run, payload)
             await self.replay.finish(run, "failed")
-        except Exception:
-            LOGGER.exception("AG-UI run crashed")
+        except Exception as exc:
+            logger.exception("agui.run.crashed", "AG-UI run crashed", exc)
             for payload in gate.release(
                 run_error_event("internal server error", code="INTERNAL")
             ):
                 await self.replay.publish(run, payload)
             await self.replay.finish(run, "failed")
         finally:
+            if self._host_models is not None:
+                self._host_models.unbind_session_user(run.thread_id)
             reset_model_user(token)
             if stream is not None:
                 await stream.detach()
+
+    async def _session_id_for_run(self, run_id: str) -> str | None:
+        if self._application is None:
+            return None
+        try:
+            run = await self._application.entrypoint().runtime.session_store.get_run(
+                run_id
+            )
+        except SageV2Error:
+            return None
+        return run.session_id
+
+    async def _has_configured_model(self, user_id: str) -> bool:
+        if self._fallback_model is not None:
+            return True
+        return await self.catalog.default_model(user_id) is not None
+
+    def _model_missing_message(self) -> str:
+        if str(self.settings.language).lower().startswith("zh"):
+            return "请先在「模型」页配置模型后再发送"
+        return "Configure a model on the Models page before sending"
+
+    async def _fail_agui_run(
+        self,
+        run: AguiRun,
+        gate: RunStartedGate,
+        message: str,
+        *,
+        code: str,
+    ) -> None:
+        for payload in gate.release(run_error_event(message, code=code)):
+            await self.replay.publish(run, payload)
+        await self.replay.finish(run, "failed")
+
+    def _sagents_logger(self) -> StructuredLogger:
+        return StructuredLogger(
+            self.application.service("observability.log-sink"),
+            "server_v2.sagents",
+        )
+
+    def _log_sagents_registration(self) -> None:
+        plan = self.application.resolved_plan
+        plugins = sorted(
+            {
+                (binding.capability, binding.plugin_id)
+                for binding in plan.providers
+                if binding.plugin_id
+            }
+        )
+        self._sagents_logger().info(
+            "sagents.registered",
+            "sagents plugins registered",
+            attributes={
+                "package_id": plan.package_id,
+                "entrypoint": plan.entrypoint_agent_id,
+                "composition_hash": plan.composition_hash,
+                "plugins": [
+                    {"capability": capability, "plugin": plugin_id}
+                    for capability, plugin_id in plugins
+                ],
+            },
+        )
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
