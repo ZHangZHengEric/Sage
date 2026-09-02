@@ -14,6 +14,10 @@ class LLMMemoryRecallQueryGenerator:
     """Use a model to turn the current request into compact search keywords."""
 
     plugin_id = "sage.memory.recall-query.llm"
+    name = "LLM-generated keywords"
+    description = (
+        "Uses a fast model to generate compact keywords before calling search_memory."
+    )
 
     def __init__(self, model: ModelProvider, *, language: str = "en") -> None:
         self.model = model

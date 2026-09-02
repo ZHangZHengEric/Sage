@@ -11,6 +11,8 @@ class InMemoryConversationSummaryStore:
     """Concurrency-safe reference store for embedded and test deployments."""
 
     plugin_id = "sage.context.summary-store.ephemeral"
+    name = "Ephemeral conversation summary store"
+    description = "In-memory conversation summaries without restart durability."
 
     def __init__(self) -> None:
         self._values: dict[str, ConversationSummary] = {}

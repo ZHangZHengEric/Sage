@@ -17,6 +17,8 @@ class SessionDerivedConversationSummaryStore:
     """
 
     plugin_id = "sage.context.summary-store.session-derived"
+    name = "Session-derived conversation summary store"
+    description = "Persists conversation summaries through the selected SessionStore."
     namespace = "context-summary"
 
     def __init__(self, session_store: Any) -> None:

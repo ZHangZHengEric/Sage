@@ -65,6 +65,8 @@ class AnthropicMessagesModelProvider:
     """
 
     plugin_id = "sage.model.anthropic-messages"
+    name = "Anthropic Messages"
+    description = "Uses Claude system, content-block, tool-use, and SSE semantics."
 
     def __init__(
         self,

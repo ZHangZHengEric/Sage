@@ -16,11 +16,13 @@ class SkillToolPlugin:
     """Load Skill Tool methods without duplicating their schemas or behavior."""
 
     plugin_id = "sage.tool.skill"
+    name = "Skill Tool provider"
+    description = "Decorator-backed Tool operations owned by the Skill module."
     descriptor = ExtensionDescriptor(
         plugin_id=plugin_id,
         version="2.0.0",
-        name="Skill Tool provider",
-        description="Decorator-backed Tool operations owned by the Skill module.",
+        name=name,
+        description=description,
         provides=(
             CapabilityOffer(capability="tool.catalog", api_version="2", name="skill"),
             CapabilityOffer(capability="tool.executor", api_version="2", name="skill"),

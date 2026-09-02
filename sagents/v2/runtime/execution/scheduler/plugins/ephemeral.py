@@ -36,6 +36,8 @@ class InMemoryScheduler:
     """
 
     plugin_id = "sage.scheduler.ephemeral"
+    name = "In-memory scheduler"
+    description = "Process-local scheduler without restart durability."
     api_version = "2"
 
     def __init__(

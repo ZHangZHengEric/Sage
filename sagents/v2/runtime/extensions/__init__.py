@@ -10,8 +10,10 @@ from sagents.v2.runtime.extensions.contracts import (
     ExtensionRegistration,
     ExtensionScope,
     ExtensionScopeContext,
+    PluginIdentity,
     ProviderSet,
     StopReason,
+    plugin_identity,
 )
 from sagents.v2.runtime.extensions.host import (
     ExtensionCompositionPlan,
@@ -47,8 +49,10 @@ __all__ = [
     "ExtensionScope",
     "ExtensionScopeContext",
     "ExtensionScopeHandle",
+    "PluginIdentity",
     "ResolvedExtensionGraph",
     "ProviderSet",
+    "plugin_identity",
     "StopReason",
     "TypedExtensionRegistry",
     "load_installed_extension",

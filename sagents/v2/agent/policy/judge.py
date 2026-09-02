@@ -480,6 +480,8 @@ class LLMJudgeContinuationPolicy:
     """V1 Judge behavior with only V2 runtime safety boundaries retained."""
 
     plugin_id = "sage.agent.continuation.llm-judge"
+    name = "No-tool-call LLM Judge completion policy"
+    description = "Uses a judge model to decide completion when no tool call is pending."
 
     def __init__(self, judge: LLMContinuationJudge) -> None:
         self.judge = judge
@@ -573,6 +575,8 @@ class HybridContinuationPolicy:
     """Use typed deterministic rules first and the V1 Judge for final text."""
 
     plugin_id = "sage.agent.continuation.hybrid"
+    name = "Hybrid deterministic and LLM Judge policy"
+    description = "Combines deterministic safety rules with an LLM judge for completion."
 
     def __init__(
         self,

@@ -12,6 +12,8 @@ from sagents.v2.runtime.artifact.contracts import ArtifactRef
 
 class InMemoryArtifactStore:
     plugin_id = "sage.artifact.ephemeral"
+    name = "In-memory ArtifactStore"
+    description = "Process-local artifact bytes without restart durability."
 
     def __init__(self) -> None:
         self._values: dict[str, tuple[ArtifactRef, bytes]] = {}

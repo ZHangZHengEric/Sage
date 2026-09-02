@@ -16,6 +16,8 @@ class NoopMemoryProvider:
     """Safe default used until a host explicitly selects a Memory backend."""
 
     plugin_id = "sage.memory.noop"
+    name = "No-op Memory"
+    description = "Disables long-term Memory without changing Agent logic."
 
     async def capabilities(self) -> MemoryCapabilities:
         return MemoryCapabilities(durable=False, supports_delete=False)

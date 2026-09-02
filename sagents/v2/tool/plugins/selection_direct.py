@@ -13,6 +13,8 @@ class DirectToolSelectionPolicy(BaseToolSelectionPolicy):
     """Expose every policy-allowed Tool; the count limit is not applicable."""
 
     plugin_id = "sage.tool-selection.direct"
+    name = "Show all Tools"
+    description = "Sends every policy-allowed Tool to the model. Best for small catalogs."
 
     def __init__(self, config: dict | None = None) -> None:
         super().__init__({})

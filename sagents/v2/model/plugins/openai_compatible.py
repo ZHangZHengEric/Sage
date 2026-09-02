@@ -828,3 +828,5 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
     """Named Chat Completions adapter; behavior is implemented by its base."""
 
     plugin_id = "sage.model.openai-chat-completions"
+    name = "OpenAI Chat Completions"
+    description = "Streams chat messages and function calls through /chat/completions."

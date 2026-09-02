@@ -19,6 +19,8 @@ class WindowContextReducer:
     """Drops oldest complete conversation units while preserving tool pairs."""
 
     plugin_id = "sage.context.reducer.window"
+    name = "Window context reducer"
+    description = "Drops oldest units to keep the prompt inside a token window."
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
         self.estimator = estimator or JsonHeuristicTokenEstimator()

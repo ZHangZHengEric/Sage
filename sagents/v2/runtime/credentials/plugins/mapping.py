@@ -19,6 +19,8 @@ from sagents.v2.runtime.credentials.contracts import (
 
 class MappingCredentialProvider:
     plugin_id = "sage.credentials.mapping"
+    name = "Mapping credential provider"
+    description = "Resolves credentials from an in-memory host-supplied mapping."
 
     def __init__(self, values: Mapping[str, str], *, source: str = "host") -> None:
         self._values = dict(values)

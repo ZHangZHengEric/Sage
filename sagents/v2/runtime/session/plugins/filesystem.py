@@ -1591,6 +1591,8 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
     """
 
     plugin_id = "sage.session.filesystem"
+    name = "Filesystem SessionStore"
+    description = "Compact authoritative checksummed state per Session."
 
     def __init__(self, *args, **kwargs) -> None:
         object.__setattr__(

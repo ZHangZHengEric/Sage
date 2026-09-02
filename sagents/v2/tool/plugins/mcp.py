@@ -87,6 +87,8 @@ class McpToolPlugin:
     """
 
     plugin_id = "sage.tool.mcp"
+    name = "MCP Tool provider"
+    description = "Bridges configured MCP servers into the Sage Tool catalog and executor."
 
     def __init__(
         self,

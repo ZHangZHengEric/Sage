@@ -13,6 +13,8 @@ class ExtractiveConversationSummarizer:
     """Deterministic zero-network fallback that preserves exact recent facts."""
 
     plugin_id = "sage.context.summarizer.extractive"
+    name = "Extractive conversation summarizer"
+    description = "Builds summaries by extracting salient sentences from recent units."
 
     async def summarize(self, request: SummarizationRequest) -> str:
         labels = {

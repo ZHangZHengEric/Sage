@@ -23,6 +23,8 @@ class A2AProtocolAdapter:
     """Task-oriented projection that explicitly loses Step/Tool/Flow detail."""
 
     plugin_id = "sage.protocol.a2a"
+    name = "A2A protocol adapter"
+    description = "Projects Sage events into A2A frames."
     protocol = "a2a"
     # Latest published stable line; the development specification is newer and
     # must not be advertised as a supported wire version until conformance lands.

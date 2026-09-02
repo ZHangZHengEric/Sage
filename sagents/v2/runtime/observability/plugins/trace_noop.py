@@ -9,6 +9,8 @@ class NoopTraceSink:
     """Safe default used until a host explicitly selects a trace sink."""
 
     plugin_id = "sage.trace.noop"
+    name = "No-op trace sink"
+    description = "Discards trace spans."
     format_version = "sage.trace/v1"
 
     def start_span(self, span: TraceSpan) -> None:

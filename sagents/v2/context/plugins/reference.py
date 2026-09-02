@@ -14,6 +14,8 @@ class ReferenceContextUnitCompactor:
     """Use a Tool-provided durable reference; never truncate arbitrary text."""
 
     plugin_id = "sage.context.unit-compactor.reference"
+    name = "Durable-reference context unit compactor"
+    description = "Compacts oversized units into durable references instead of dropping them."
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
         self.estimator = estimator or JsonHeuristicTokenEstimator()

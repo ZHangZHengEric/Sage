@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-01 20:25** 插件约定 PluginIdentity：类上声明 id/名称/描述，official 注册从类属性读取。
+
 - **2026-09-01 20:12** Builder 默认插件全部改为类 plugin_id；缺 id 的默认实现已补上。
 
 - **2026-09-01 20:10** 剩余官方实现补上 plugin_id；official.py / Builder 登记改引用类属性。

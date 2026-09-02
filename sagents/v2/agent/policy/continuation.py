@@ -378,6 +378,10 @@ class CompositeContinuationPolicy:
     """
 
     plugin_id = "sage.agent.continuation.deterministic"
+    name = "Deterministic continuation policy"
+    description = (
+        "Applies ordered safety, budget, and completion rules without a model call."
+    )
 
     def __init__(self, rules: tuple[ContinuationRule, ...] | None = None) -> None:
         self.rules = rules or (
@@ -413,6 +417,8 @@ class ExplicitStatusContinuationPolicy(CompositeContinuationPolicy):
     """Require turn_status for completion while preserving safety boundaries."""
 
     plugin_id = "sage.agent.continuation.explicit-status"
+    name = "Explicit turn_status completion policy"
+    description = "Completes only when the model emits an explicit turn_status."
 
     def __init__(self, *, repeat_threshold: int = 3) -> None:
         super().__init__(

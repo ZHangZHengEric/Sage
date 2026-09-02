@@ -14,6 +14,8 @@ class EphemeralSessionStore:
     """Process-local composed facade over the transactional coordinator."""
 
     plugin_id = "sage.session.ephemeral"
+    name = "Ephemeral SessionStore"
+    description = "Full lifecycle semantics without restart durability."
 
     def __init__(self, *args, **kwargs) -> None:
         kwargs.setdefault("persistence_can_fail", False)

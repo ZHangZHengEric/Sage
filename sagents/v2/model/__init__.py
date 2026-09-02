@@ -39,6 +39,7 @@ from sagents.v2.model.protocols import (
     ModelProtocolDescriptor,
     model_protocol_descriptor,
     model_protocol_descriptors,
+    model_protocol_implementation,
     resolve_model_protocol,
 )
 from sagents.v2.model.registry import ModelProviderRegistry
@@ -68,6 +69,7 @@ __all__ = [
     "ModelProtocolDescriptor",
     "model_protocol_descriptor",
     "model_protocol_descriptors",
+    "model_protocol_implementation",
     "resolve_model_protocol",
     "OpenAIChatCompletionsConfig",
     "OpenAIChatCompletionsModelProvider",

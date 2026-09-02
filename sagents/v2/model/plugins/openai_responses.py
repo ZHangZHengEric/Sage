@@ -63,6 +63,8 @@ class OpenAIResponsesModelProvider:
     """
 
     plugin_id = "sage.model.openai-responses"
+    name = "OpenAI Responses"
+    description = "Uses typed input/output items and Responses streaming events."
 
     def __init__(
         self,

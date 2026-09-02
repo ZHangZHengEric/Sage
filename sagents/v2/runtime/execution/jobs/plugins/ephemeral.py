@@ -52,6 +52,8 @@ class InMemoryJobRuntime:
     """Model concurrent Job lifecycle/cursors without cross-process durability."""
 
     plugin_id = "sage.job.ephemeral"
+    name = "In-memory Job runtime"
+    description = "Process-local background Job runtime without restart durability."
     api_version = "2"
 
     def __init__(

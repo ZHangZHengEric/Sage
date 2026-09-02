@@ -13,6 +13,8 @@ class UnicodeHeuristicTokenEstimator:
     """Text-oriented estimate that treats CJK and symbol-heavy text conservatively."""
 
     plugin_id = "sage.context.token-estimator.unicode-heuristic"
+    name = "Unicode heuristic token estimator"
+    description = "Estimates tokens from Unicode code-point length."
     estimator_id = "unicode-heuristic"
 
     def __init__(

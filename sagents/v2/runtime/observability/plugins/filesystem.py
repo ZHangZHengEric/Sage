@@ -22,6 +22,8 @@ class FilesystemDiagnosticSink:
     """Store redacted model requests beside their owning Session and Run."""
 
     plugin_id = "sage.observability.filesystem"
+    name = "Filesystem diagnostic sink"
+    description = "Writes model diagnostics under a filesystem root."
     format_version = "sage.model-diagnostics/v2"
     _kind_aliases = {
         "continuation_judge": "completion_judge",

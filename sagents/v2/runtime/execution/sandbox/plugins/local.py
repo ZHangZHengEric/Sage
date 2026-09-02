@@ -398,6 +398,8 @@ class LocalWorkspaceSandboxProvider:
     """Grant-enforcing host filesystem/process provider without OS isolation."""
 
     plugin_id = "sage.sandbox.local-workspace"
+    name = "Local workspace sandbox provider"
+    description = "Runs sandbox work against the local workspace directory."
     provider_id = "sage.sandbox.local-workspace"
     provider_version = "3.0.0"
 

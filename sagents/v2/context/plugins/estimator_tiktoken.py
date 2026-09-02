@@ -12,6 +12,8 @@ class TiktokenTokenEstimator:
     """Optional OpenAI tokenizer plugin with lazy dependency loading."""
 
     plugin_id = "sage.context.token-estimator.tiktoken"
+    name = "Tiktoken token estimator"
+    description = "Uses tiktoken encodings when the optional package is installed."
     estimator_id = "tiktoken"
 
     def __init__(

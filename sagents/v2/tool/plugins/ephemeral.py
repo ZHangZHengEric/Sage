@@ -37,11 +37,13 @@ class EphemeralToolPlugin:
     """Paired in-memory catalog/executor without restart durability."""
 
     plugin_id = "sage.tool.ephemeral"
+    name = "Ephemeral Tool provider"
+    description = "In-memory Tool catalog and executor without restart durability."
     descriptor = ExtensionDescriptor(
         plugin_id=plugin_id,
         version="2.0.0",
-        name="Ephemeral Tool provider",
-        description="In-memory Tool catalog and executor without restart durability.",
+        name=name,
+        description=description,
         provides=(
             CapabilityOffer(
                 capability="tool.catalog", api_version="2", name="ephemeral"

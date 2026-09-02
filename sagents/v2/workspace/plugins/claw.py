@@ -89,6 +89,8 @@ def _is_replaceable_v2_seed(path: Path, filename: str, replacement: str) -> bool
 
 class ClawWorkspaceInitializer:
     plugin_id = "sage.workspace.initializer.claw"
+    name = "Claw Mode workspace"
+    description = "Seeds a Claw-style workspace layout and starter files."
     _directories = (
         "data",
         "logs",

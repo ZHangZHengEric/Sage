@@ -46,6 +46,8 @@ class OtlpTraceSink:
     """Export redacted spans to an OTLP collector. Never participates in recovery."""
 
     plugin_id = "sage.trace.otlp"
+    name = "OTLP / Jaeger trace sink"
+    description = "Exports traces over OTLP to Jaeger or a compatible collector."
     format_version = "sage.trace/v1"
 
     def __init__(
