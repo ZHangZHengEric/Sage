@@ -339,6 +339,15 @@ class LocalSandboxProvider(ISandboxHandle):
         # workspace-local installation for Desktop and CLI compatibility.
         if is_server_process():
             return
+        # 预装 uv 只是便利，不是沙箱正确性的一部分：CI / 离线环境可显式跳过，
+        # 避免在访问不到镜像源的机器上把 venv 准备拖到分钟级。
+        if os.environ.get("SAGE_SANDBOX_SKIP_UV_INSTALL", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            logger.info("[LocalSandboxProvider] SAGE_SANDBOX_SKIP_UV_INSTALL 已设置，跳过 uv 预装")
+            return
 
         venv_python = self._get_venv_python()
         if not venv_python:

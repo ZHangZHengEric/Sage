@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPOSITORY_ROOT = Path(__file__).parents[3]
 V2_ROOT = REPOSITORY_ROOT / "sagents" / "v2"
@@ -388,8 +390,13 @@ def test_v2_contains_no_symlink_to_repository_owned_code():
     assert offenders == []
 
 
+@pytest.mark.timeout(30)
 def test_v2_imports_when_it_is_the_only_sagents_implementation(tmp_path: Path):
-    """Physically isolate V2 so an accidental old-module import cannot succeed."""
+    """Physically isolate V2 so an accidental old-module import cannot succeed.
+
+    This copies the whole V2 tree and imports every module in a fresh interpreter;
+    that is well beyond the 2s default budget on CI runners, so it gets its own limit.
+    """
 
     package_root = tmp_path / "isolated"
     isolated_sagents = package_root / "sagents"
