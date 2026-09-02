@@ -126,8 +126,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
             raise ValueError(
                 "sage.session.mysql requires dsn in the plugin declaration"
             )
-        prefix = table_prefix or "sagent"
-        if not _PREFIX.fullmatch(prefix):
+        if table_prefix is None:
+            prefix = "sagent"
+        else:
+            prefix = table_prefix.strip()
+        if prefix and not _PREFIX.fullmatch(prefix):
             raise ValueError("mysql SessionStore table_prefix is invalid")
         self.dsn = resolved
         self.table_prefix = prefix
@@ -167,7 +170,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
         }
 
     def _table(self, name: str) -> str:
-        return f"`{self.table_prefix}_{name}`"
+        qualified = f"{self.table_prefix}_{name}" if self.table_prefix else name
+        return f"`{qualified}`"
+
+    def _constraint(self, name: str) -> str:
+        return f"{self.table_prefix}_{name}" if self.table_prefix else name
 
     async def _ensure_ready(self) -> None:
         if self._pool is not None:
@@ -239,7 +246,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 event JSON NOT NULL,
                 PRIMARY KEY (run_id, run_sequence),
                 KEY run_events_session_seq (session_id, session_sequence),
-                CONSTRAINT {self.table_prefix}_run_events_session
+                CONSTRAINT {self._constraint("run_events_session")}
                     FOREIGN KEY (session_id)
                     REFERENCES {self._table("sessions")} (session_id)
                     ON DELETE CASCADE
@@ -251,7 +258,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 identity VARCHAR(128) NOT NULL,
                 session_id VARCHAR(128) NOT NULL,
                 PRIMARY KEY (kind, identity),
-                CONSTRAINT {self.table_prefix}_locations_session
+                CONSTRAINT {self._constraint("locations_session")}
                     FOREIGN KEY (session_id)
                     REFERENCES {self._table("sessions")} (session_id)
                     ON DELETE CASCADE
@@ -266,7 +273,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 run_id VARCHAR(128) NOT NULL,
                 request_digest VARCHAR(128) NOT NULL,
                 PRIMARY KEY (tenant_id, principal_id, idempotency_key),
-                CONSTRAINT {self.table_prefix}_start_idempotency_session
+                CONSTRAINT {self._constraint("start_idempotency_session")}
                     FOREIGN KEY (session_id)
                     REFERENCES {self._table("sessions")} (session_id)
                     ON DELETE CASCADE
@@ -279,7 +286,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 `key` VARCHAR(128) NOT NULL,
                 value JSON NOT NULL,
                 PRIMARY KEY (session_id, namespace, `key`),
-                CONSTRAINT {self.table_prefix}_derived_state_session
+                CONSTRAINT {self._constraint("derived_state_session")}
                     FOREIGN KEY (session_id)
                     REFERENCES {self._table("sessions")} (session_id)
                     ON DELETE CASCADE

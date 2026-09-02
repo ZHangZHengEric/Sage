@@ -64,6 +64,10 @@ def test_mysql_plugin_requires_dsn_in_declaration():
     store = MysqlSessionStore("mysql://root@127.0.0.1/sage")
     assert store.table_prefix == "sagent"
     assert store._table("sessions") == "`sagent_sessions`"
+    bare = MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="")
+    assert bare.table_prefix == ""
+    assert bare._table("sessions") == "`sessions`"
+    assert bare._constraint("run_events_session") == "run_events_session"
 
 
 def test_mysql_store_requires_explicit_dsn():

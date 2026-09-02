@@ -61,11 +61,18 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29.0"]
-mysql = ["aiomysql>=0.2.0"]
+mysql = ["aiomysql>=0.2.0", "SQLAlchemy[asyncio]>=2.0,<2.2"]
+redis = ["redis>=5.0.0"]
 otel = [
   "opentelemetry-api>=1.20.0",
   "opentelemetry-sdk>=1.20.0",
   "opentelemetry-exporter-otlp>=1.20.0",
+]
+server-v2 = [
+  "aiomysql>=0.2.0",
+  "SQLAlchemy[asyncio]>=2.0,<2.2",
+  "redis>=5.0.0",
+  "prometheus-client>=0.20.0",
 ]
 
 [project.urls]

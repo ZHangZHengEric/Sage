@@ -1,0 +1,21 @@
+{
+  "name": "sage-server-v2-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ag-ui/client": "^0.0.59",
+    "marked": "^18.0.11",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.0"
+  }
+}

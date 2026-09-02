@@ -1,0 +1,276 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from sagents.v2 import SAgentApplication, SAgentBuilder
+from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
+from sagents.v2.model.provider import ModelProvider
+
+from app.server_v2.agui.mapping import to_start_run
+from app.server_v2.agui.redis_store import RedisAguiReplayStore
+from app.server_v2.agui.replay import AguiRun
+from app.server_v2.agui.sse import (
+    RunStartedGate,
+    frame_to_agui_event,
+    run_error_event,
+)
+from app.server_v2.core.errors import ServerV2Error, map_sage_error
+from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.services.models import (
+    HostModelProvider,
+    bind_model_user,
+    reset_model_user,
+)
+from app.server_v2.services.package import server_v2_manifest
+from app.server_v2.storage import prepare_server_v2_storage
+
+LOGGER = logging.getLogger(__name__)
+
+
+class ServerV2Service:
+    def __init__(
+        self,
+        settings: ServerV2Settings,
+        *,
+        model_provider: ModelProvider | None = None,
+        database=None,
+        redis=None,
+        users=None,
+        catalog=None,
+        threads=None,
+        replay=None,
+    ) -> None:
+        self.settings = settings
+        self.paths = prepare_server_v2_storage(settings.data_root)
+        self.database = database
+        self._redis = redis
+        injected = users is not None and catalog is not None and threads is not None
+        if injected:
+            self.users, self.catalog, self.threads = users, catalog, threads
+        else:
+            self.users, self.catalog, self.threads = _mysql_repositories(database)
+        self.replay = replay if replay is not None else _redis_replay(redis)
+        self._fallback_model = model_provider
+        self._application: SAgentApplication | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def application(self) -> SAgentApplication:
+        if self._application is None:
+            raise RuntimeError("Server v2 runtime is not started")
+        return self._application
+
+    async def start(self) -> None:
+        if self._application is not None:
+            return
+        if self.database is not None:
+            from app.server_v2.db.models import create_host_schema
+
+            await create_host_schema(self.database)
+        await self.users.ensure_admin(
+            self.settings.admin_username, self.settings.admin_password
+        )
+        provider = HostModelProvider(self.catalog, fallback=self._fallback_model)
+        self._application = await (
+            SAgentBuilder()
+            .with_defaults(session_root=self.paths.sessions_root)
+            .with_model_provider(provider)
+            .build(server_v2_manifest(self.settings))
+        )
+
+    async def close(self) -> None:
+        for task in tuple(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
+        if self._application is not None:
+            await self._application.close()
+            self._application = None
+
+    def backends(self) -> dict[str, str]:
+        report = {
+            "host_store": "mysql" if self.database is not None else "memory",
+            "session_store": "mysql" if self.settings.mysql_url else "filesystem",
+            "agui_replay": "redis" if self._redis is not None else "memory",
+        }
+        if self.settings.jaeger_url:
+            report["trace"] = "otlp"
+        return report
+
+    def request_context(self, user_id: str) -> RequestContext:
+        return RequestContext(
+            actor=ActorRef(
+                principal_id=user_id,
+                principal_type=PrincipalType.USER,
+                tenant_id=user_id,
+            ),
+            language=self.settings.language,
+        )
+
+    async def username_for(self, user_id: str) -> str:
+        user = await self.users.get_by_id(user_id)
+        return user.username if user is not None else user_id
+
+    async def delete_thread(self, thread_id: str, user_id: str, *, admin: bool = False) -> None:
+        record = await self.threads.find(thread_id)
+        if record is None or (not admin and record.user_id != user_id):
+            raise ServerV2Error("not_found", "thread not found")
+        try:
+            await self.application.service("session.access").delete_session(
+                thread_id, self.request_context(record.user_id)
+            )
+        except SageV2Error as exc:
+            if not exc.info.code.endswith("not_found"):
+                raise map_sage_error(exc) from exc
+        await self.threads.remove(thread_id, record.user_id)
+
+    async def thread_events(
+        self, thread_id: str, user_id: str, *, admin: bool = False
+    ) -> list[dict]:
+        record = await self.threads.find(thread_id)
+        if record is None or (not admin and record.user_id != user_id):
+            raise ServerV2Error("not_found", "thread not found")
+        try:
+            events = await self.application.service("session.access").read_session_events(
+                thread_id, self.request_context(record.user_id)
+            )
+        except SageV2Error as exc:
+            if exc.info.code.endswith("not_found"):
+                return []
+            raise map_sage_error(exc) from exc
+        adapter = AgUiProtocolAdapter(enable_sage_extensions=True)
+        frames: list[dict] = []
+        for event in events:
+            result = adapter.translate(event)
+            for frame in result.frames:
+                frames.append(
+                    frame_to_agui_event(
+                        frame, thread_id=thread_id, run_id=event.run_id
+                    )
+                )
+        return frames
+
+    async def start_agui_run(
+        self,
+        request,
+        *,
+        user_id: str,
+        last_event_id: str | None,
+    ):
+        thread_id, run_id, agent_id, command = to_start_run(
+            request,
+            composition_hash=self.application.composition_hash,
+            default_agent_id=self.application.resolved_plan.entrypoint_agent_id,
+        )
+        try:
+            self.application.agent(agent_id)
+        except KeyError as exc:
+            raise ServerV2Error("validation", f"unknown agent {agent_id}") from exc
+        existing = await self.threads.find(thread_id)
+        if existing is not None and existing.user_id != user_id:
+            raise ServerV2Error("not_found", "thread not found")
+        claim = await self.replay.claim(
+            user_id=user_id, thread_id=thread_id, run_id=run_id
+        )
+        if claim.created:
+            self._track(
+                asyncio.create_task(
+                    self._drive_agui_run(
+                        claim.run,
+                        command,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                    ),
+                    name=f"server-v2-agui-{run_id}",
+                )
+            )
+        return self.replay.subscribe(claim.run, last_event_id=last_event_id)
+
+    async def _drive_agui_run(
+        self,
+        run: AguiRun,
+        command,
+        *,
+        user_id: str,
+        agent_id: str,
+    ) -> None:
+        token = bind_model_user(user_id)
+        context = self.request_context(user_id)
+        stream = None
+        gate = RunStartedGate()
+        try:
+            stream = await self.application.run_interface(
+                "ag_ui", command, context, agent_id=agent_id
+            )
+            async for result in stream.results:
+                for frame in result.frames:
+                    for payload in gate.release(
+                        frame_to_agui_event(
+                            frame, thread_id=run.thread_id, run_id=run.run_id
+                        )
+                    ):
+                        await self.replay.publish(run, payload)
+            title = ""
+            if command.input:
+                first = command.input[0].content[0]
+                title = getattr(first, "text", "")[:80]
+            await self.threads.upsert(run.thread_id, user_id, title=title)
+            await self.replay.finish(run, "completed")
+        except SageV2Error as exc:
+            LOGGER.exception("AG-UI run failed")
+            mapped = map_sage_error(exc)
+            for payload in gate.release(
+                run_error_event(mapped.message, code=exc.info.code)
+            ):
+                await self.replay.publish(run, payload)
+            await self.replay.finish(run, "failed")
+        except Exception:
+            LOGGER.exception("AG-UI run crashed")
+            for payload in gate.release(
+                run_error_event("internal server error", code="INTERNAL")
+            ):
+                await self.replay.publish(run, payload)
+            await self.replay.finish(run, "failed")
+        finally:
+            reset_model_user(token)
+            if stream is not None:
+                await stream.detach()
+
+    def _track(self, task: asyncio.Task[None]) -> None:
+        self._tasks.add(task)
+
+        def _done(completed: asyncio.Task[None]) -> None:
+            self._tasks.discard(completed)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                LOGGER.error("background AG-UI task failed", exc_info=error)
+
+        task.add_done_callback(_done)
+
+
+def _mysql_repositories(database):
+    if database is None:
+        raise RuntimeError("MySQL is required")
+    from app.server_v2.repositories import (
+        DatabaseCatalogStore,
+        DatabaseThreadIndex,
+        DatabaseUserStore,
+    )
+
+    return (
+        DatabaseUserStore(database),
+        DatabaseCatalogStore(database),
+        DatabaseThreadIndex(database),
+    )
+
+
+def _redis_replay(redis):
+    if redis is None:
+        raise RuntimeError("Redis is required")
+    return RedisAguiReplayStore(redis)
