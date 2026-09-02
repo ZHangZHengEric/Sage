@@ -39,4 +39,4 @@ python -m app.server_v2 --data-root /tmp/sage-server-v2
 | AG-UI 回放 | Redis Stream | 进程内存 |
 | 工作区 | `{data_root}/tenants/{user_id}/workspace/` | 同左 |
 
-`/health` 的 `backends` 按实际装配报告（`mysql` / `memory` / `redis` / `filesystem`）。
+`/health` 的 `backends` 按实际装配报告（`mysql` / `memory` / `redis` / `filesystem` / `stdout`）。sagents 结构化日志由 host 固定接到 `sage.logging.stdout`，默认输出 `sage.log/v1` JSONL；`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 可显式切到本地阅读用的 `text`。stdout 的持久化由容器日志驱动或 Alloy/Loki 负责，不写审计业务表。

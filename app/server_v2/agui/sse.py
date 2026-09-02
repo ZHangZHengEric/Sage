@@ -6,6 +6,11 @@ from typing import Any
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
 
 _RUN_ID_EVENTS = {"RUN_STARTED", "RUN_FINISHED"}
+_TEXT_MESSAGE_EVENTS = {
+    "TEXT_MESSAGE_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TEXT_MESSAGE_END",
+}
 
 
 def frame_to_agui_event(
@@ -31,6 +36,24 @@ def run_error_event(message: str, *, code: str | None = None) -> dict[str, Any]:
     if code:
         event["code"] = code
     return event
+
+
+class ClientOwnedUserTextFilter:
+    """Drop inbound user TEXT_MESSAGE frames; the AG-UI client already has them."""
+
+    def __init__(self) -> None:
+        self._skip_ids: set[str] = set()
+
+    def allow(self, event: dict[str, Any]) -> bool:
+        kind = event.get("type")
+        message_id = str(event.get("messageId") or "")
+        if kind == "TEXT_MESSAGE_START" and event.get("role") == "user":
+            if message_id:
+                self._skip_ids.add(message_id)
+            return False
+        if kind in _TEXT_MESSAGE_EVENTS and message_id in self._skip_ids:
+            return False
+        return True
 
 
 class RunStartedGate:

@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 
 from sagents.v2.agent import AgentLoopEngine
+from sagents.v2.agent.observed import ObservedRunDriver
 from sagents.v2.context import DefaultContextAssembler
 from sagents.v2.model import ModelProvider
 from sagents.v2.tool import (
@@ -54,6 +55,7 @@ class ModeAwareAgentLoopFactory:
         fallback_invocation_mode: str | None = None,
         child_loop_factory=None,
         trace_sink=None,
+        log_sink=None,
     ) -> None:
         self.runtime = runtime
         self.model_factory = model_factory
@@ -67,6 +69,7 @@ class ModeAwareAgentLoopFactory:
         self.workspace_policy = workspace_policy
         self.fallback_invocation_mode = fallback_invocation_mode
         self.trace_sink = trace_sink
+        self.log_sink = log_sink
         self._coordinators: dict[tuple[str, AgentMode], MultiAgentCoordinator] = {}
 
         async def build_child(descriptor, run_id, context):
@@ -129,10 +132,13 @@ class ModeAwareAgentLoopFactory:
                 raise RuntimeError("async loop composers require create_loop_async()")
             loop.delegated_run_controller = self.child_executor
             loop.expected_resolved_spec_hash = self.resolved_spec_hash
-            if getattr(loop, "trace_sink", None) is None:
-                loop.trace_sink = self.trace_sink
             return loop
-        return AgentLoopEngine(
+        engine_type = (
+            ObservedRunDriver
+            if self.trace_sink is not None or self.log_sink is not None
+            else AgentLoopEngine
+        )
+        return engine_type(
             runtime=self.runtime,
             model=self.model_factory(descriptor, run_id),
             tool_catalog=catalog,
@@ -143,7 +149,11 @@ class ModeAwareAgentLoopFactory:
             ),
             delegated_run_controller=self.child_executor,
             expected_resolved_spec_hash=self.resolved_spec_hash,
-            trace_sink=self.trace_sink,
+            **(
+                {"trace_sink": self.trace_sink, "log_sink": self.log_sink}
+                if engine_type is ObservedRunDriver
+                else {}
+            ),
         )
 
     async def create_loop_async(
@@ -187,7 +197,5 @@ class ModeAwareAgentLoopFactory:
                 loop = await loop
             loop.delegated_run_controller = self.child_executor
             loop.expected_resolved_spec_hash = self.resolved_spec_hash
-            if getattr(loop, "trace_sink", None) is None:
-                loop.trace_sink = self.trace_sink
             return loop
         return self.create_loop(descriptor, run_id)

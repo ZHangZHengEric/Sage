@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from copy import deepcopy
 from typing import Any
@@ -60,6 +61,14 @@ _LOCATION_KINDS = (
     ("interactions", "interaction_id"),
     ("session_commit_proposals", "proposal_id"),
 )
+_SCHEMA_TABLES = (
+    "sessions",
+    "run_events",
+    "locations",
+    "start_idempotency",
+    "derived_state",
+)
+LOGGER = logging.getLogger(__name__)
 def _require_aiomysql():
     try:
         import aiomysql
@@ -169,9 +178,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
             "format": self.format_version,
         }
 
+    def _physical_table(self, name: str) -> str:
+        return f"{self.table_prefix}_{name}" if self.table_prefix else name
+
     def _table(self, name: str) -> str:
-        qualified = f"{self.table_prefix}_{name}" if self.table_prefix else name
-        return f"`{qualified}`"
+        return f"`{self._physical_table(name)}`"
 
     def _constraint(self, name: str) -> str:
         return f"{self.table_prefix}_{name}" if self.table_prefix else name
@@ -195,11 +206,16 @@ class _MysqlSessionState(SessionStoreCoordinator):
             lock_conn = await aiomysql.connect(**self._connect_kwargs)
             try:
                 await self._acquire_writer_lock(lock_conn)
-                await self._bootstrap(lock_conn)
+                created = await self._bootstrap(lock_conn)
                 self._pool = await aiomysql.create_pool(
                     minsize=1,
                     maxsize=8,
                     **self._connect_kwargs,
+                )
+                LOGGER.info(
+                    "mysql session store ready prefix=%s created=%s",
+                    self.table_prefix,
+                    created,
                 )
             except Exception:
                 await self._close_lock_conn(lock_conn)
@@ -223,10 +239,28 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 )
             )
 
-    async def _bootstrap(self, connection) -> None:
+    async def _existing_tables(self, connection) -> set[str]:
+        names = tuple(self._physical_table(name) for name in _SCHEMA_TABLES)
+        placeholders = ", ".join(["%s"] * len(names))
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                SELECT TABLE_NAME FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})
+                """,
+                names,
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]) for row in rows}
+
+    async def _bootstrap(self, connection) -> tuple[str, ...]:
+        existing = await self._existing_tables(connection)
         statements = (
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table("sessions")} (
+            (
+                "sessions",
+                f"""
+            CREATE TABLE {self._table("sessions")} (
                 session_id VARCHAR(128) NOT NULL,
                 parent_session_id VARCHAR(128) NULL,
                 revision BIGINT NOT NULL,
@@ -237,8 +271,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 PRIMARY KEY (session_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table("run_events")} (
+            ),
+            (
+                "run_events",
+                f"""
+            CREATE TABLE {self._table("run_events")} (
                 session_id VARCHAR(128) NOT NULL,
                 run_id VARCHAR(128) NOT NULL,
                 run_sequence BIGINT NOT NULL,
@@ -252,8 +289,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table("locations")} (
+            ),
+            (
+                "locations",
+                f"""
+            CREATE TABLE {self._table("locations")} (
                 kind VARCHAR(64) NOT NULL,
                 identity VARCHAR(128) NOT NULL,
                 session_id VARCHAR(128) NOT NULL,
@@ -264,8 +304,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table("start_idempotency")} (
+            ),
+            (
+                "start_idempotency",
+                f"""
+            CREATE TABLE {self._table("start_idempotency")} (
                 tenant_id VARCHAR(128) NOT NULL DEFAULT '',
                 principal_id VARCHAR(128) NOT NULL,
                 idempotency_key VARCHAR(128) NOT NULL,
@@ -279,8 +322,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table("derived_state")} (
+            ),
+            (
+                "derived_state",
+                f"""
+            CREATE TABLE {self._table("derived_state")} (
                 session_id VARCHAR(128) NOT NULL,
                 namespace VARCHAR(128) NOT NULL,
                 `key` VARCHAR(128) NOT NULL,
@@ -292,11 +338,18 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
+            ),
         )
+        created: list[str] = []
         async with connection.cursor() as cursor:
-            for statement in statements:
+            for name, statement in statements:
+                physical = self._physical_table(name)
+                if physical in existing:
+                    continue
                 await cursor.execute(statement)
+                created.append(physical)
         await connection.commit()
+        return tuple(created)
 
     async def close(self) -> None:
         if self._closed:
@@ -340,13 +393,13 @@ class _MysqlSessionState(SessionStoreCoordinator):
                             session_id, parent_session_id, revision,
                             last_sequence, created_at, updated_at, compact_state
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, CAST(%s AS JSON))
+                        VALUES (%s, %s, %s, %s, %s, %s, CAST(%s AS JSON)) AS incoming
                         ON DUPLICATE KEY UPDATE
-                            parent_session_id = VALUES(parent_session_id),
-                            revision = VALUES(revision),
-                            last_sequence = VALUES(last_sequence),
-                            updated_at = VALUES(updated_at),
-                            compact_state = VALUES(compact_state)
+                            parent_session_id = incoming.parent_session_id,
+                            revision = incoming.revision,
+                            last_sequence = incoming.last_sequence,
+                            updated_at = incoming.updated_at,
+                            compact_state = incoming.compact_state
                         """,
                         (
                             session_row["session_id"],
@@ -522,8 +575,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     f"""
                     INSERT INTO {self._table("derived_state")}
                         (session_id, namespace, `key`, value)
-                    VALUES (%s, %s, %s, CAST(%s AS JSON))
-                    ON DUPLICATE KEY UPDATE value = VALUES(value)
+                    VALUES (%s, %s, %s, CAST(%s AS JSON)) AS incoming
+                    ON DUPLICATE KEY UPDATE value = incoming.value
                     """,
                     (session_id, namespace, key, _json(value)),
                 )
@@ -1029,6 +1082,11 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
 
     def __init__(self, *args, **kwargs) -> None:
         object.__setattr__(self, "_coordinator", _MysqlSessionState(*args, **kwargs))
+
+    async def start(self, context, dependencies):
+        del context, dependencies
+        await self._coordinator._ensure_ready()
+        return {"session.store": self}
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

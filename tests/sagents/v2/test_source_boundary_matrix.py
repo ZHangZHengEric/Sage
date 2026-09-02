@@ -94,8 +94,8 @@ def test_every_v2_domain_imports_only_v2_first_party_code():
         "package",
         "plan",
         "runtime",
-            "session_memory",
-            "skill",
+        "session_memory",
+        "skill",
         "testing",
         "tool",
         "workspace",
@@ -267,17 +267,30 @@ def test_observability_sinks_do_not_import_each_other():
         assert offenders == [], f"{path.name} imports {offenders}"
 
 
-def test_agent_does_not_import_observability_sink_plugins():
-    """The Loop emits spans through ports; Builder selects the sink."""
+def test_agent_loop_engine_does_not_depend_on_observability():
+    """The RunDriver executes the loop; an outer adapter observes it."""
 
     engine = V2_ROOT / "agent" / "engine.py"
     offenders = [
         f"{engine.relative_to(V2_ROOT)}:{line}: {module}"
         for line, module in _import_targets(engine)
-        if module.startswith("sagents.v2.runtime.observability.plugins")
-        or module == "sagents.v2.runtime.observability"
+        if module.startswith("sagents.v2.runtime.observability")
     ]
     assert offenders == []
+
+    tree = ast.parse(engine.read_text(encoding="utf-8"), filename=str(engine))
+    constructor = next(
+        member
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "AgentLoopEngine"
+        for member in node.body
+        if isinstance(member, ast.FunctionDef) and member.name == "__init__"
+    )
+    parameters = {
+        argument.arg
+        for argument in (*constructor.args.args, *constructor.args.kwonlyargs)
+    }
+    assert parameters.isdisjoint({"trace_sink", "log_sink", "observability"})
 
 
 def test_execution_ports_do_not_depend_on_backend_plugins():

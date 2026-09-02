@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from sagents.v2.agent.engine import AgentLoopEngine
+from sagents.v2.agent.observed import ObservedRunDriver
 from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.model.contracts import (
@@ -215,6 +216,7 @@ async def setup_loop(
     memory_recall_query_generator=None,
     context_assembler=None,
     trace_sink=None,
+    log_sink=None,
 ):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(
@@ -269,9 +271,14 @@ async def setup_loop(
         loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
     if context_assembler is not None:
         loop_kwargs["context_assembler"] = context_assembler
-    if trace_sink is not None:
-        loop_kwargs["trace_sink"] = trace_sink
-    loop = AgentLoopEngine(**loop_kwargs)
+    if trace_sink is not None or log_sink is not None:
+        loop = ObservedRunDriver(
+            **loop_kwargs,
+            trace_sink=trace_sink,
+            log_sink=log_sink,
+        )
+    else:
+        loop = AgentLoopEngine(**loop_kwargs)
     return runtime, handle, loop, executor
 
 
@@ -346,9 +353,7 @@ async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier
     assert recovered.state == RunState.SUSPENDED
     assert unexpected_dispatches == 0
     suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
-    interaction = await runtime.session_store.get_interaction(
-        suspension.interaction_id
-    )
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     assert interaction.payload["reason"] == "tool_outcome_unknown"
     assert "reconcile" not in interaction.allowed_decisions
 
@@ -398,9 +403,7 @@ async def test_worker_restart_suspends_when_started_tool_lost_its_proposal():
     assert recovered is not None
     assert recovered.state == RunState.SUSPENDED
     suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
-    interaction = await runtime.session_store.get_interaction(
-        suspension.interaction_id
-    )
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
     assert interaction.payload["error_code"] == "tool.recovery_ledger_incomplete"
     assert interaction.allowed_decisions == (
         "confirm_succeeded",
@@ -1486,12 +1489,8 @@ async def test_pre_stream_context_overflow_reduces_once_with_adaptive_reserve():
             ScriptedModelStep(events=(completed("done"),)),
         )
     )
-    assembler = DefaultContextAssembler(
-        budget=ContextBudget(max_input_tokens=2_000)
-    )
-    runtime, handle, loop, _ = await setup_loop(
-        model, context_assembler=assembler
-    )
+    assembler = DefaultContextAssembler(budget=ContextBudget(max_input_tokens=2_000))
+    runtime, handle, loop, _ = await setup_loop(model, context_assembler=assembler)
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
@@ -1590,9 +1589,7 @@ async def test_cooperative_tool_is_cancelled_and_checkpointed_for_pause():
         side_effect_level=SideEffectLevel.READ,
         cancel_semantics=CancelSemantics.COOPERATIVE,
     )
-    call = ModelToolCall(
-        tool_call_id="call_cooperative", name=tool.name, arguments={}
-    )
+    call = ModelToolCall(tool_call_id="call_cooperative", name=tool.name, arguments={})
 
     async def handler(tool_call, _context):
         started.set()
@@ -2219,11 +2216,7 @@ async def test_generic_write_failure_after_dispatch_is_unknown_not_failed():
 
     executor = ResponseLostExecutor()
     model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                events=(completed("", calls=(tool_call("write_value"),)),)
-            ),
-        )
+        (ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),)
     )
     runtime, handle, loop, _ = await setup_loop(model, tools=(WRITE_TOOL,))
     loop.tool_executor = executor

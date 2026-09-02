@@ -51,7 +51,13 @@ def main(argv: list[str] | None = None) -> int:
     if port != requested:
         print(f"port {requested} is busy, switching to {port}", flush=True)
     application = create_app(settings=replace(settings, host=host, port=port))
-    uvicorn.run(application, host=host, port=port, log_level="info")
+    uvicorn.run(
+        application,
+        host=host,
+        port=port,
+        log_level=settings.log_level,
+        log_config=None,
+    )
     return 0
 
 

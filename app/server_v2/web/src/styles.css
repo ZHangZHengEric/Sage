@@ -126,6 +126,8 @@ nav a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-v
 .page-head p, p { margin: 0 0 var(--space-3); }
 .muted { color: var(--muted-foreground); }
 .error { color: var(--danger); }
+.notice { color: var(--muted-foreground); }
+.notice a { text-decoration: underline; }
 .empty { color: var(--muted-foreground); padding: var(--space-4) 0; }
 .eyebrow { letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); font-size: 0.75rem; }
 .tag {

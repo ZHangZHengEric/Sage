@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -22,6 +23,8 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _principal_lookup_key(principal_type: str, principal_id: str) -> str:
@@ -180,6 +183,11 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 await self._bootstrap(lock_conn)
                 self._pool = await asyncpg.create_pool(
                     self.dsn, min_size=1, max_size=8
+                )
+                LOGGER.info(
+                    "postgres session store ready schema=%s prefix=%s",
+                    self.schema_name,
+                    self.table_prefix,
                 )
             except Exception:
                 await lock_conn.close()
@@ -1097,6 +1105,11 @@ class PostgresSessionStore(metaclass=_PostgresSessionStoreMeta):
         object.__setattr__(
             self, "_coordinator", _PostgresSessionState(*args, **kwargs)
         )
+
+    async def start(self, context, dependencies):
+        del context, dependencies
+        await self._coordinator._ensure_ready()
+        return {"session.store": self}
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

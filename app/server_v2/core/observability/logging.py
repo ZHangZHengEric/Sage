@@ -41,7 +41,9 @@ class _SuccessfulHealthProbeFilter(logging.Filter):
             return True
 
         path = raw_path.partition("?")[0]
-        is_successful_health_probe = method == "GET" and path in _HEALTH_PROBE_PATHS and 200 <= status_code < 400
+        is_successful_health_probe = (
+            method == "GET" and path in _HEALTH_PROBE_PATHS and 200 <= status_code < 400
+        )
         return not is_successful_health_probe
 
 
@@ -60,7 +62,9 @@ def init_logging(settings: LoggingSettings, *, service_name: str) -> None:
         logger.add(
             sys.stdout,
             level=level,
-            format=("<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> [{extra[request_id]}] | {level} | {message}"),
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> [{extra[request_id]}] | {level} | {message}"
+            ),
         )
     if settings.directory and settings.directory.strip():
         directory = Path(settings.directory)

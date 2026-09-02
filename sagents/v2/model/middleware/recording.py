@@ -16,10 +16,12 @@ from sagents.v2.model.contracts import (
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.observability.contracts import (
     DiagnosticSink,
+    LogSink,
     TraceKind,
     TraceSink,
     TraceStatus,
 )
+from sagents.v2.runtime.observability.logs import StructuredLogger
 from sagents.v2.runtime.observability.timing import elapsed_ms
 from sagents.v2.runtime.observability.traces import (
     SpanHandle,
@@ -40,6 +42,7 @@ class RecordingModelProvider:
         session_id_resolver: Callable[[str], Awaitable[str]],
         provider_metadata: Mapping[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
+        log_sink: LogSink | None = None,
     ) -> None:
         self.provider = provider
         self.sink = sink
@@ -47,6 +50,31 @@ class RecordingModelProvider:
         self.provider_metadata = dict(provider_metadata or {})
         self.trace_sink = trace_sink
         self.tracer = StructuredTracer(self.trace_sink, "model")
+        self.logger = (
+            StructuredLogger(log_sink, "sagents.model") if log_sink is not None else None
+        )
+
+    def _log(
+        self,
+        event: str,
+        message: str,
+        *,
+        session_id: str,
+        request: ModelRequest,
+        error: BaseException | None = None,
+        attributes: Mapping[str, Any] | None = None,
+    ) -> None:
+        if self.logger is None:
+            return
+        bound = self.logger.bind(
+            session_id=session_id,
+            run_id=request.run_id,
+            request_id=request.request_id,
+        )
+        if error is not None:
+            bound.exception(event, message, error, attributes=attributes)
+            return
+        bound.info(event, message, attributes=attributes)
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return await self.provider.capabilities(model_binding)
@@ -57,6 +85,22 @@ class RecordingModelProvider:
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         session_id = await self.session_id_resolver(request.run_id)
         started_at = utc_now()
+        purpose = (
+            request.metadata.get("purpose")
+            or self.provider_metadata.get("purpose")
+            or "agent"
+        )
+        self._log(
+            "model.request.started",
+            "model request started",
+            session_id=session_id,
+            request=request,
+            attributes={
+                "model_binding": request.model_binding,
+                "purpose": purpose,
+                "agent_id": self.provider_metadata.get("agent_id"),
+            },
+        )
         active = current_trace_context()
         span = self.tracer.start_span(
             "model.request",
@@ -67,11 +111,7 @@ class RecordingModelProvider:
             trace_id=active[0] if active else session_trace_id(session_id),
             attributes={
                 "model_binding": request.model_binding,
-                "purpose": (
-                    request.metadata.get("purpose")
-                    or self.provider_metadata.get("purpose")
-                    or "agent"
-                ),
+                "purpose": purpose,
             },
         )
         diagnostic_request = getattr(self.provider, "diagnostic_request", None)
@@ -91,6 +131,14 @@ class RecordingModelProvider:
                 error=exc,
             )
             _end_model_span(span, started_at, None, error=exc)
+            self._log(
+                "model.request.failed",
+                "model request failed",
+                session_id=session_id,
+                request=request,
+                error=exc,
+                attributes={"model_binding": request.model_binding, "purpose": purpose},
+            )
             raise
         await self.sink.begin_model_request(
             session_id=session_id,
@@ -136,6 +184,21 @@ class RecordingModelProvider:
                         response=event.response,
                     )
                     _end_model_span(span, started_at, first_token_at)
+                    finished = utc_now()
+                    self._log(
+                        "model.request.completed",
+                        "model request completed",
+                        session_id=session_id,
+                        request=request,
+                        attributes={
+                            "model_binding": request.model_binding,
+                            "purpose": purpose,
+                            "agent_id": self.provider_metadata.get("agent_id"),
+                            "finish_reason": event.response.finish_reason,
+                            "duration_ms": elapsed_ms(started_at, finished),
+                            "ttfb_ms": elapsed_ms(started_at, first_token_at),
+                        },
+                    )
                     finalized = True
                 yield event
         except Exception as exc:
@@ -146,6 +209,14 @@ class RecordingModelProvider:
                 error=exc,
             )
             _end_model_span(span, started_at, first_token_at, error=exc)
+            self._log(
+                "model.request.failed",
+                "model request failed",
+                session_id=session_id,
+                request=request,
+                error=exc,
+                attributes={"model_binding": request.model_binding, "purpose": purpose},
+            )
             finalized = True
             raise
         finally:
@@ -156,11 +227,23 @@ class RecordingModelProvider:
                     request=request,
                     error=RuntimeError("model stream closed before completion"),
                 )
+                closed = RuntimeError("model stream closed before completion")
                 _end_model_span(
                     span,
                     started_at,
                     first_token_at,
-                    error=RuntimeError("model stream closed before completion"),
+                    error=closed,
+                )
+                self._log(
+                    "model.request.failed",
+                    "model request failed",
+                    session_id=session_id,
+                    request=request,
+                    error=closed,
+                    attributes={
+                        "model_binding": request.model_binding,
+                        "purpose": purpose,
+                    },
                 )
 
 

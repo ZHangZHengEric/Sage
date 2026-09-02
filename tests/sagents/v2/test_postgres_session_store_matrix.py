@@ -92,6 +92,19 @@ def test_postgres_store_requires_explicit_dsn():
         PostgresSessionStore("   ")
 
 
+async def test_postgres_plugin_start_opens_schema_before_first_write():
+    store = PostgresSessionStore("postgresql://unused/unused", schema="sage_v2_demo")
+    called: list[str] = []
+
+    async def fake_ready():
+        called.append("ready")
+
+    store._coordinator._ensure_ready = fake_ready
+    produced = await store.start(None, None)
+    assert called == ["ready"]
+    assert produced["session.store"] is store
+
+
 def test_postgres_capabilities_claim_single_process_without_connecting():
     store = PostgresSessionStore("postgresql://unused/unused", schema="sage_v2_demo")
     assert store.capabilities["durable_across_process_restart"] is True

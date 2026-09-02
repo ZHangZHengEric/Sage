@@ -476,6 +476,7 @@ class SAgentBuilder:
             return (await session_store.get_run(run_id)).session_id
 
         diagnostic_sink = services["observability.diagnostic-sink"]
+        log_sink = services["observability.log-sink"]
         trace_sink = services["observability.trace-sink"]
         models_by_agent = {
             member_id: (
@@ -485,6 +486,7 @@ class SAgentBuilder:
                     provider,
                     sink=diagnostic_sink,
                     trace_sink=trace_sink,
+                    log_sink=log_sink,
                     session_id_resolver=resolve_session_id,
                     provider_metadata={"agent_id": member_id},
                 )
@@ -749,6 +751,7 @@ class SAgentBuilder:
                         ),
                     ),
                     trace_sink=services["observability.trace-sink"],
+                    log_sink=services["observability.log-sink"],
                 )
 
             def compose(descriptor, child_run_id, catalog, executor):
@@ -848,6 +851,7 @@ class SAgentBuilder:
                 loop_composer=compose,
                 child_loop_factory=child_factory,
                 trace_sink=services["observability.trace-sink"],
+                log_sink=services["observability.log-sink"],
             )
             return mode_factory.create_loop(root_descriptor, run_id)
 

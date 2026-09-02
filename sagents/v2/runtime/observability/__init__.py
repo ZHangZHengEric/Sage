@@ -16,8 +16,10 @@ from sagents.v2.runtime.observability.logs import (
     StructuredLogger,
     StructuredLoggingHandler,
     encode_log_record,
+    format_log_record,
     install_standard_logging,
     redact_log_value,
+    structured_log_context,
 )
 from sagents.v2.runtime.observability.plugins import (
     FilesystemDiagnosticSink,
@@ -65,7 +67,9 @@ __all__ = [
     "TraceSpan",
     "TraceStatus",
     "encode_log_record",
+    "format_log_record",
     "install_standard_logging",
     "otel_available",
     "redact_log_value",
+    "structured_log_context",
 ]

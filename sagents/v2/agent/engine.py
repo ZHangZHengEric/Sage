@@ -150,7 +150,6 @@ class AgentLoopEngine:
         tool_selection_model: ModelProvider | None = None,
         delegated_run_controller=None,
         expected_resolved_spec_hash: str | None = None,
-        trace_sink=None,
         clock: Callable = utc_now,
     ) -> None:
         self.runtime = runtime
@@ -187,157 +186,13 @@ class AgentLoopEngine:
         )
         self.delegated_run_controller = delegated_run_controller
         self.expected_resolved_spec_hash = expected_resolved_spec_hash
-        self.trace_sink = trace_sink
         self.clock = clock
         from sagents.v2.runtime.lifecycle import DurableRunLifecycle
 
         self.lifecycle = DurableRunLifecycle(runtime)
-        from sagents.v2.agent.coordinators import (
-            AgentRunCoordinator,
-            ModelStepExecutor,
-            RunControlCoordinator,
-            ToolCallCoordinator,
-        )
-
-        self.run_coordinator = AgentRunCoordinator(self)
-        self.model_step_executor = ModelStepExecutor(self)
-        self.tool_call_coordinator = ToolCallCoordinator(self)
-        self.run_control_coordinator = RunControlCoordinator(self)
-
-    def _trace_sink(self):
-        return self.trace_sink
-
-    async def _root_session_id(self, session_id: str) -> str:
-        from sagents.v2.runtime.observability.traces import resolve_root_session_id
-
-        return await resolve_root_session_id(
-            self.runtime.session_store.get_session, session_id
-        )
-
-    async def _session_tracer(self, run, **context):
-        from sagents.v2.runtime.observability.traces import StructuredTracer, session_trace_id
-
-        root_session_id = await self._root_session_id(run.session_id)
-        return StructuredTracer(
-            self._trace_sink(),
-            "agent",
-            context={
-                "session_id": run.session_id,
-                "run_id": run.run_id,
-                **context,
-            },
-            trace_id=session_trace_id(root_session_id),
-        ), root_session_id
-
-    def _user_input_preview(self, command) -> str:
-        latest = next(
-            (
-                item
-                for item in reversed(getattr(command, "input", ()) or ())
-                if getattr(item, "role", None) == "user"
-            ),
-            None,
-        )
-        if latest is None:
-            return ""
-        return "\n".join(
-            block.text
-            for block in latest.content
-            if isinstance(block, TextBlock)
-        ).strip()
-
-    def _tool_result_preview(self, result) -> str:
-        if result is None:
-            return ""
-        texts = [
-            block.text
-            for block in getattr(result, "content", ()) or ()
-            if isinstance(block, TextBlock)
-        ]
-        return "\n".join(texts).strip()
-
-    async def trace_run(self, run_id: str, context: RequestContext, *, resumed, body):
-        from sagents.v2.runtime.observability.contracts import TraceKind, TraceStatus
-        from sagents.v2.runtime.observability.traces import preview_trace_value
-
-        try:
-            run = await self.runtime.get_run(run_id)
-            command = await self.runtime.session_store.get_start_command(run_id)
-        except Exception:
-            return await body(run_id, context)
-        try:
-            session = await self.runtime.session_store.get_session(run.session_id)
-        except Exception:
-            session = None
-        tracer, root_session_id = await self._session_tracer(run)
-        attributes = {
-            "agent_id": getattr(command, "agent_id", None),
-            "invocation_mode": getattr(command, "invocation_mode", None) or "normal",
-            "resumed": resumed,
-            "user_input": preview_trace_value(self._user_input_preview(command)),
-            "root_session_id": root_session_id,
-        }
-        parent_session_id = getattr(session, "parent_session_id", None)
-        if parent_session_id:
-            attributes["parent_session_id"] = parent_session_id
-        handle = tracer.start_span(
-            "agent.run",
-            kind=TraceKind.INTERNAL,
-            session_id=run.session_id,
-            run_id=run.run_id,
-            attributes=attributes,
-        )
-        try:
-            snapshot = await body(run_id, context)
-        except BaseException as exc:
-            handle.end(TraceStatus.ERROR, error=exc)
-            raise
-        handle.end(
-            TraceStatus.ERROR if snapshot.state == RunState.FAILED else TraceStatus.OK,
-            attributes={"run_state": snapshot.state.value},
-        )
-        return snapshot
-
-    async def trace_tool_call(
-        self, run, call, context, turn_id, step_id=None, state=None, *, body
-    ):
-        from sagents.v2.runtime.observability.contracts import TraceKind, TraceStatus
-        from sagents.v2.runtime.observability.traces import (
-            StructuredTracer,
-            preview_trace_value,
-        )
-
-        handle = StructuredTracer(self._trace_sink(), "tool").start_span(
-            "tool.call",
-            kind=TraceKind.CLIENT,
-            session_id=run.session_id,
-            run_id=run.run_id,
-            turn_id=turn_id,
-            step_id=step_id,
-            tool_call_id=call.tool_call_id,
-            attributes={
-                "tool_name": call.tool_name,
-                "arguments": preview_trace_value(call.arguments),
-            },
-        )
-        try:
-            run, result = await body(
-                run, call, context, turn_id, step_id=step_id, state=state
-            )
-        except BaseException as exc:
-            handle.end(TraceStatus.ERROR, error=exc)
-            raise
-        attributes = {
-            "result": preview_trace_value(self._tool_result_preview(result)),
-        }
-        handle.end(
-            TraceStatus.ERROR if getattr(result, "error", None) is not None else TraceStatus.OK,
-            attributes=attributes,
-        )
-        return run, result
 
     async def execute(self, run_id: str, context: RequestContext) -> RunSnapshot:
-        return await self.run_coordinator.execute(run_id, context)
+        return await self.execute_coordinated(run_id, context)
 
     async def execute_coordinated(
         self, run_id: str, context: RequestContext
@@ -575,7 +430,7 @@ class AgentLoopEngine:
         return run, state
 
     async def resume(self, run_id: str, context: RequestContext) -> RunSnapshot:
-        return await self.run_coordinator.resume(run_id, context)
+        return await self.resume_coordinated(run_id, context)
 
     async def recover_interrupted(
         self, run_id: str, context: RequestContext
@@ -716,9 +571,7 @@ class AgentLoopEngine:
                 started.step_id,
             )
         try:
-            definition = await self.tool_catalog.get_tool(
-                call.tool_name, run_id=run_id
-            )
+            definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run_id)
         except Exception:
             definition = None
         if definition is not None and definition.supports_reconciliation:
@@ -753,9 +606,7 @@ class AgentLoopEngine:
                         type="step.completed",
                         turn_id=state.turn_id,
                         step_id=started.step_id,
-                        data=StepEventData(
-                            state="completed", attempt=step_number
-                        ),
+                        data=StepEventData(state="completed", attempt=step_number),
                     ),
                 ),
             )
@@ -1536,9 +1387,7 @@ class AgentLoopEngine:
         )
 
     async def _stream_model(self, run, request, context, state, step_id):
-        return await self.model_step_executor.execute(
-            run, request, context, state, step_id
-        )
+        return await self.stream_model_step(run, request, context, state, step_id)
 
     async def _control_aware_model_events(self, stream, run, command):
         """Poll durable control/deadline state without cancelling socket reads."""
@@ -1876,16 +1725,14 @@ class AgentLoopEngine:
     async def _dispatch_tool(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
-        return await self.tool_call_coordinator.dispatch(
+        return await self.dispatch_tool_call(
             run, call, context, turn_id, step_id=step_id, state=state
         )
 
     async def _execute_tool_with_control(self, run, call, context):
         """Interrupt only when both Tool metadata and Executor permit it."""
 
-        definition = await self.tool_catalog.get_tool(
-            call.tool_name, run_id=run.run_id
-        )
+        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         execution = asyncio.create_task(self.tool_executor.execute(call, context))
         command = await self.runtime.session_store.get_start_command(run.run_id)
         cancellable = definition.cancel_semantics in {
@@ -1909,10 +1756,14 @@ class AgentLoopEngine:
                 )
                 if current.state == RunState.RUNNING and not deadline_expired:
                     continue
-                if current.state not in {
-                    RunState.SUSPEND_REQUESTED,
-                    *TERMINAL_RUN_STATES,
-                } and not deadline_expired:
+                if (
+                    current.state
+                    not in {
+                        RunState.SUSPEND_REQUESTED,
+                        *TERMINAL_RUN_STATES,
+                    }
+                    and not deadline_expired
+                ):
                     continue
                 cancellation = await cancel(call.operation_id, context)
                 if cancellation.state == ToolCancellationState.CANCELLED:
@@ -2003,9 +1854,7 @@ class AgentLoopEngine:
             ),
         )
         try:
-            run, result = await self._execute_tool_with_control(
-                run, call, context
-            )
+            run, result = await self._execute_tool_with_control(run, call, context)
             if result is None:
                 return run, None
         except SageV2Error as exc:
@@ -2126,9 +1975,7 @@ class AgentLoopEngine:
             return True
         if error.metadata.get("side_effect_state") == "not_applied":
             return False
-        definition = await self.tool_catalog.get_tool(
-            call.tool_name, run_id=run.run_id
-        )
+        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         return definition.side_effect_level in {
             SideEffectLevel.WRITE,
             SideEffectLevel.REVERSIBLE,
@@ -2732,9 +2579,7 @@ class AgentLoopEngine:
         )
 
     async def _suspend_at_safe_point(self, run, state, context):
-        return await self.run_control_coordinator.suspend_at_safe_point(
-            run, state, context
-        )
+        return await self.commit_safe_point_suspension(run, state, context)
 
     async def commit_safe_point_suspension(self, run, state, context):
         """Commit a manual-pause checkpoint between externally visible actions."""

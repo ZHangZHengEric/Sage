@@ -546,6 +546,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: StdoutLogSink(
             stream=str(context.config.get("stream", "stdout")),
             min_level=str(context.config.get("min_level", "info")),
+            format=str(context.config.get("format", "json")),
         ),
         scopes={ExtensionScope.PROCESS},
         config_schema={
@@ -560,6 +561,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     "type": "string",
                     "enum": ["debug", "info", "warning", "error", "critical"],
                     "default": "info",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["json", "text"],
+                    "default": "json",
                 },
             },
             "additionalProperties": False,

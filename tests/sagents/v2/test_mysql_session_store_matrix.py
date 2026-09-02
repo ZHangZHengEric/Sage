@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -18,9 +19,11 @@ from sagents.v2.contracts.run_state import RunState
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
+from sagents.v2.runtime.session.plugins import mysql as mysql_plugin
 from sagents.v2.runtime.session.plugins.mysql import (
     MysqlSessionStore,
     StoreInUseError,
+    _MysqlSessionState,
     parse_mysql_dsn,
 )
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
@@ -88,6 +91,92 @@ def test_parse_mysql_dsn_requires_database():
     assert parsed["user"] == "user"
     assert parsed["password"] == "p@ss"
     assert parsed["db"] == "sage_app"
+
+
+class _FakeCursor:
+    def __init__(self, existing: set[str]) -> None:
+        self.existing = existing
+        self.statements: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def execute(self, statement, params=None):
+        del params
+        self.statements.append(statement)
+
+    async def fetchall(self):
+        return [(name,) for name in sorted(self.existing)]
+
+
+class _FakeConnection:
+    def __init__(self, existing: set[str]) -> None:
+        self.cursor_obj = _FakeCursor(existing)
+        self.committed = False
+
+    def cursor(self):
+        return self.cursor_obj
+
+    async def commit(self):
+        self.committed = True
+
+
+async def test_mysql_plugin_start_opens_schema_before_first_write():
+    store = MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="")
+    called: list[str] = []
+
+    async def fake_ready():
+        called.append("ready")
+
+    store._coordinator._ensure_ready = fake_ready
+    produced = await store.start(None, None)
+    assert called == ["ready"]
+    assert produced["session.store"] is store
+
+
+async def test_bootstrap_skips_existing_tables():
+    state = _MysqlSessionState("mysql://root@127.0.0.1/sage", table_prefix="")
+    connection = _FakeConnection(
+        {"sessions", "run_events", "locations", "start_idempotency", "derived_state"}
+    )
+    created = await state._bootstrap(connection)
+    assert created == ()
+    assert connection.committed is True
+    creates = [
+        statement
+        for statement in connection.cursor_obj.statements
+        if "CREATE TABLE" in statement
+    ]
+    assert creates == []
+
+
+async def test_bootstrap_creates_missing_tables_only():
+    state = _MysqlSessionState("mysql://root@127.0.0.1/sage", table_prefix="")
+    connection = _FakeConnection({"sessions"})
+    created = await state._bootstrap(connection)
+    assert created == (
+        "run_events",
+        "locations",
+        "start_idempotency",
+        "derived_state",
+    )
+    creates = [
+        statement
+        for statement in connection.cursor_obj.statements
+        if "CREATE TABLE" in statement
+    ]
+    assert len(creates) == 4
+    assert all("IF NOT EXISTS" not in statement for statement in creates)
+
+
+def test_mysql_upsert_uses_row_alias_instead_of_values_function():
+    source = Path(mysql_plugin.__file__).read_text(encoding="utf-8")
+    assert "AS incoming" in source
+    assert "VALUES(parent_session_id)" not in source
+    assert "VALUES(value)" not in source
 
 
 def test_mysql_capabilities_claim_single_process_without_connecting():
