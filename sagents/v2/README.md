@@ -204,7 +204,9 @@ behavior is configured per Agent; provider selection is configured by the
 runtime.
 
 Session Memory is also separate: it retrieves relevant history omitted from
-the current model request. Neither memory system is required for normal Session
+the current model request. Its index consumes only the appended suffix of each
+observed Run ledger; recall does not rebuild Session history or resynchronize
+the indexed prefix. Neither memory system is required for normal Session
 continuity.
 
 ### Execution modes

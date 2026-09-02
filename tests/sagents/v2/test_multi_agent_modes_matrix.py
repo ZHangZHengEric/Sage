@@ -614,7 +614,7 @@ async def test_fibre_dynamic_agent_roster_survives_a_fresh_projection():
     result = await factory.create_loop(leader, parent.run_id).execute(
         parent.run_id, CONTEXT
     )
-    restored = await SessionDynamicAgentRoster(runtime.session_store).load(
+    restored = await SessionDynamicAgentRoster(runtime.session_store, runtime.session_store).load(
         parent.session_id
     )
 
@@ -640,7 +640,7 @@ async def test_fibre_roster_rebuilds_when_cache_sequence_is_ahead():
     )
     session = await runtime.session_store.get_session(parent.session_id)
     fabricated = MEMBER.model_copy(update={"agent_id": "fabricated", "dynamic": True})
-    roster = SessionDynamicAgentRoster(runtime.session_store)
+    roster = SessionDynamicAgentRoster(runtime.session_store, runtime.session_store)
     payload = {
         "schema_version": roster.SCHEMA_VERSION,
         "through_sequence": session.last_sequence + 10,

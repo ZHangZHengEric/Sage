@@ -85,12 +85,14 @@ def create_app(
         app.state.service = runtime
         app.state.resources = registry
         await registry.start()
-        await runtime.start()
         try:
+            await runtime.start()
             yield
         finally:
-            await runtime.close()
-            await registry.stop()
+            try:
+                await runtime.close()
+            finally:
+                await registry.stop()
 
     app = FastAPI(
         title="Sage Server v2",

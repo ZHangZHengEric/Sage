@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from sagents.v2.context.summary import ConversationSummary
+from sagents.v2.runtime.session.contracts import DerivedStateStore
 
 
 class SessionDerivedConversationSummaryStore:
-    """Persist summaries inside the selected SessionStore derived namespace.
+    """Persist summaries inside the selected derived-state namespace.
 
     This adapter removes the former second summary database. Summary state is
     still non-authoritative: deleting it only forces context compression to be
-    recomputed from canonical Session events.
+    recomputed from canonical Session events. It therefore depends on
+    :class:`DerivedStateStore` rather than the authoritative SessionStore.
     """
 
     plugin_id = "sage.context.summary-store.session-derived"
@@ -21,15 +22,15 @@ class SessionDerivedConversationSummaryStore:
     description = "Persists conversation summaries through the selected SessionStore."
     namespace = "context-summary"
 
-    def __init__(self, session_store: Any) -> None:
-        self.session_store = session_store
+    def __init__(self, derived_state: DerivedStateStore) -> None:
+        self.derived_state = derived_state
         self._lock = asyncio.Lock()
 
     async def get(
         self, context_key: str, *, session_id: str | None = None
     ) -> ConversationSummary | None:
         resolved_session_id = session_id or self._legacy_session_id(context_key)
-        value = await self.session_store.get_derived_state(
+        value = await self.derived_state.get_derived_state(
             resolved_session_id, self.namespace, context_key
         )
         if isinstance(value, dict) and "session_id" not in value:
@@ -51,7 +52,7 @@ class SessionDerivedConversationSummaryStore:
                 raise ValueError(
                     "conversation summary revision changed during compaction"
                 )
-            await self.session_store.put_derived_state(
+            await self.derived_state.put_derived_state(
                 summary.session_id,
                 self.namespace,
                 summary.context_key,
@@ -74,7 +75,7 @@ class SessionDerivedConversationSummaryStore:
                 raise ValueError(
                     "conversation summary revision changed before deletion"
                 )
-            await self.session_store.delete_derived_state(
+            await self.derived_state.delete_derived_state(
                 current.session_id, self.namespace, context_key
             )
 

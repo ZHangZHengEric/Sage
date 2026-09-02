@@ -600,6 +600,18 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 )
             await connection.commit()
 
+    async def forget_session(self, session_id: str) -> None:
+        await super().forget_session(session_id)
+        await self._ensure_ready()
+        assert self._pool is not None
+        async with self._pool.acquire() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    f"DELETE FROM {self._table('derived_state')} WHERE session_id = %s",
+                    (session_id,),
+                )
+            await connection.commit()
+
     async def create_run(self, command, context):
         await self._ensure_ready()
         if command.session_id is not None:

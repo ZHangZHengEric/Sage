@@ -309,6 +309,18 @@ Desktop index            -> product-owned list/search metadata
 Deleting derived data or diagnostics cannot change Session recovery. Memory
 failure cannot roll back an acknowledged Session commit.
 
+Derived per-Session values are reached through `DerivedStateStore`, a port
+separate from `SessionStore`. Conversation summaries, Skill activation, and the
+dynamic Agent roster depend on that narrow port, so a new authoritative
+Run/Event/Checkpoint backend does not have to ship a key-value cache to be a
+valid `SessionStore`, and a caller's type states whether its reads are
+authoritative. The shipped stores still satisfy both ports with one object and
+report `derived_state_authoritative: False`. When a host injects only a custom
+`SessionStore`, the Builder supplies a separate in-memory derived store; hosts
+that need durable projections inject `with_derived_state_store(...)`
+explicitly. Authorized deletion forgets independent derived values only after
+the canonical Session tree has been deleted successfully.
+
 ## Architecture acceptance gates
 
 A new module or plugin is complete only when:

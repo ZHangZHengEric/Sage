@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import pytest
 from sagents.v2.runtime.observability import StdoutLogSink
 
+from app.server_v2.app import create_app
 from app.server_v2.services.package import server_v2_manifest
 from tests.app.server_v2.conftest import make_settings, make_test_service
 
@@ -68,6 +70,43 @@ def test_package_skips_jaeger_when_endpoint_missing(tmp_path: Path):
     assert "observability.trace-sink" not in manifest.runtime.capabilities
     assert manifest.runtime.capabilities["session.store"].plugin == "sage.session.mysql"
     assert _stdout_log_sink(manifest).plugin == "sage.logging.stdout"
+
+
+def test_package_requires_the_store_guarantees_the_server_depends_on(tmp_path: Path):
+    guarantees = server_v2_manifest().runtime.required_guarantees["session.store"]
+    assert guarantees == {
+        "transactional_run_events": True,
+        "transactional_suspension": True,
+        "supports_actor_authorization": True,
+    }
+    durable = server_v2_manifest(
+        make_settings(tmp_path, mysql_url="mysql://sage:sage@127.0.0.1:3306/sage")
+    ).runtime.required_guarantees["session.store"]
+    assert durable["durable_across_process_restart"] is True
+
+
+async def test_lifespan_closes_runtime_when_runtime_start_fails(
+    tmp_path: Path, monkeypatch
+):
+    service = make_test_service(tmp_path)
+    closed = False
+
+    async def fail_start():
+        raise RuntimeError("runtime start failed")
+
+    async def close():
+        nonlocal closed
+        closed = True
+
+    monkeypatch.setattr(service, "start", fail_start)
+    monkeypatch.setattr(service, "close", close)
+    application = create_app(service=service)
+
+    with pytest.raises(RuntimeError, match="runtime start failed"):
+        async with application.router.lifespan_context(application):
+            pass
+
+    assert closed is True
 
 
 async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsys):

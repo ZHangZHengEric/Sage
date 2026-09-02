@@ -10,7 +10,7 @@ from sagents.v2.contracts.principals import (
     PrincipalType,
     RequestContext,
 )
-from sagents.v2.contracts.run_state import EventCursor
+from sagents.v2.contracts.run_state import EventCursor, RunState
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.session import AuthorizedSessionAccess, EphemeralSessionStore
 
@@ -92,6 +92,38 @@ async def test_cross_tenant_read_subscribe_and_delete_are_rejected(operation):
             await access.delete_session(handle.session_id, OTHER)
 
     assert denied.value.info.code == "session.actor_not_authorized"
+
+
+@pytest.mark.asyncio
+async def test_authorized_delete_forgets_independent_derived_state():
+    class DerivedState:
+        def __init__(self):
+            self.forgotten = []
+
+        async def forget_session(self, session_id):
+            self.forgotten.append(session_id)
+
+    store, _, handle = await setup_access()
+    derived_state = DerivedState()
+    access = AuthorizedSessionAccess(
+        store,
+        runtime=HarnessRuntime(store),
+        derived_state=derived_state,
+    )
+    run = await store.get_run(handle.run_id)
+    await store.commit_run(
+        run_id=handle.run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.CANCELLED,
+        drafts=(),
+        context=OWNER,
+        idempotency_key="finish-before-delete",
+    )
+
+    await access.delete_session(handle.session_id, OWNER)
+
+    assert derived_state.forgotten == [handle.session_id]
 
 
 @pytest.mark.asyncio

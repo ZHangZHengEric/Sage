@@ -76,7 +76,9 @@ from sagents.v2.runtime.extensions import (
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session import (
     AuthorizedSessionAccess,
+    DerivedStateStore,
     FilesystemSessionStore,
+    InMemoryDerivedStateStore,
     LeaseFencedSessionStore,
     SessionStore,
 )
@@ -247,6 +249,7 @@ class SAgentBuilder:
         self.extensions = builtin_extension_registry()
         self._session_root: Path | None = None
         self._session_store: SessionStore | None = None
+        self._derived_state_store: DerivedStateStore | None = None
         self._memory_provider: MemoryProvider | None = None
         self._session_memory_provider: SessionMemoryProvider | None = None
         self._model_provider: ModelProvider | None = None
@@ -267,6 +270,14 @@ class SAgentBuilder:
 
     def with_session_store(self, value: SessionStore) -> "SAgentBuilder":
         self._session_store = value
+        return self
+
+    def with_derived_state_store(
+        self, value: DerivedStateStore
+    ) -> "SAgentBuilder":
+        """Inject rebuildable state independently from authoritative Sessions."""
+
+        self._derived_state_store = value
         return self
 
     def with_memory_provider(self, value: MemoryProvider) -> "SAgentBuilder":
@@ -385,6 +396,7 @@ class SAgentBuilder:
                 "or the compatibility with_tool_runtime(runtime)"
             )
         session_store = self._session_store
+        session_store_was_injected = session_store is not None
         if session_store is None:
             session_store = await self._create_session_store(
                 extension_host,
@@ -392,6 +404,15 @@ class SAgentBuilder:
                 scope_handles,
                 runtime_config,
                 plugin_declarations,
+            )
+        derived_state = self._derived_state_store
+        if derived_state is None:
+            # Built-in Session stores explicitly provide colocated derived data.
+            # A host-injected authoritative store is not assumed to do so.
+            derived_state = (
+                InMemoryDerivedStateStore()
+                if session_store_was_injected
+                else session_store
             )
         credential_provider = await self._create_capability(
             extension_host,
@@ -438,9 +459,7 @@ class SAgentBuilder:
                 runtime_config,
                 plugin_declarations,
             )
-        session_memory_service = SessionMemoryService(
-            session_memory_provider, session_store
-        )
+        session_memory_service = SessionMemoryService(session_memory_provider)
         model = self._model_provider
         if model is None:
             model = await self._create_model(
@@ -573,7 +592,7 @@ class SAgentBuilder:
             capability="context.summary-store",
             default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
             default_scope=ExtensionScope.AGENT,
-            locked_config={"session_store": driver_session_store},
+            locked_config={"derived_state": derived_state},
         )
         summarizer = await self._create_capability(
             extension_host,
@@ -902,7 +921,9 @@ class SAgentBuilder:
             )
 
         session_access = AuthorizedSessionAccess(
-            session_store, runtime=control_runtime
+            session_store,
+            runtime=control_runtime,
+            derived_state=(derived_state if derived_state is not session_store else None),
         )
         agent = SAgent(
             runtime=control_runtime,
@@ -922,6 +943,7 @@ class SAgentBuilder:
         services = {
             **services,
             "session.store": session_store,
+            "derived-state.store": derived_state,
             "session.access": session_access,
             "credentials.provider": credential_provider,
             "memory.provider": memory_provider,
@@ -992,6 +1014,7 @@ class SAgentBuilder:
                 capability
                 for capability, injected in (
                     ("session.store", self._session_store),
+                    ("derived-state.store", self._derived_state_store),
                     ("memory.provider", self._memory_provider),
                     ("session-memory.provider", self._session_memory_provider),
                     ("model.provider", self._model_provider),

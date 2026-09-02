@@ -113,6 +113,39 @@ class SessionStoreCapabilities(Protocol):
     supports_bounded_subscription: bool
 
 
+class DerivedStateStore(Protocol):
+    """Non-authoritative per-Session cache, deliberately outside SessionStore.
+
+    Values here are projections such as conversation summaries, Skill
+    activation, and the dynamic Agent roster. They may be rebuilt from canonical
+    Session facts plus configured package/workspace sources; losing or corrupting
+    them never deletes a canonical fact. Keeping them off
+    :class:`SessionStore` means a new authoritative backend does not have to
+    implement a key-value cache to be a valid Run/Event/Checkpoint store, and
+    that callers can see from the type which reads are authoritative.
+
+    Storage may still be colocated: the shipped stores satisfy both ports with
+    one object, and each reports ``derived_state_authoritative: False``.
+    """
+
+    async def get_derived_state(
+        self, session_id: str, namespace: str, key: str
+    ) -> Any | None: ...
+
+    async def put_derived_state(
+        self, session_id: str, namespace: str, key: str, value: Any
+    ) -> None: ...
+
+    async def delete_derived_state(
+        self, session_id: str, namespace: str, key: str
+    ) -> None: ...
+
+    async def forget_session(self, session_id: str) -> None:
+        """Remove every derived value owned by a deleted Session."""
+
+        ...
+
+
 class SessionStore(Protocol):
     """Minimum versioned storage port consumed by the v2 Kernel.
 
@@ -208,18 +241,6 @@ class SessionStore(Protocol):
     ) -> tuple[RuntimeEvent, ...]: ...
 
     async def read_fork_base_events(self, run_id: str) -> tuple[RuntimeEvent, ...]: ...
-
-    async def get_derived_state(
-        self, session_id: str, namespace: str, key: str
-    ) -> Any | None: ...
-
-    async def put_derived_state(
-        self, session_id: str, namespace: str, key: str, value: Any
-    ) -> None: ...
-
-    async def delete_derived_state(
-        self, session_id: str, namespace: str, key: str
-    ) -> None: ...
 
     def subscribe_events(self, cursor: EventCursor) -> AsyncIterator[RuntimeEvent]: ...
 

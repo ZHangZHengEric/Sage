@@ -9,19 +9,30 @@ performing deletion.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
-from sagents.v2.runtime.session.contracts import SessionStore
+from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AuthorizedSessionAccess:
     """Context-bearing read/delete facade over an internal SessionStore."""
 
-    def __init__(self, session_store: SessionStore, *, runtime=None) -> None:
+    def __init__(
+        self,
+        session_store: SessionStore,
+        *,
+        runtime=None,
+        derived_state: DerivedStateStore | None = None,
+    ) -> None:
         self._session_store = session_store
         self.runtime = runtime
+        self._derived_state = derived_state
 
     async def get_run(self, run_id: str, context: RequestContext):
         run = await self._session_store.get_run(run_id)
@@ -134,7 +145,21 @@ class AuthorizedSessionAccess:
         self, session_id: str, context: RequestContext
     ) -> None:
         await self._authorize(session_id, context)
+        descendants = await self._session_store.list_descendant_sessions(session_id)
+        deleted_session_ids = (session_id, *(value.session_id for value in descendants))
         await self._session_store.delete_session(session_id)
+        if self._derived_state is None:
+            return
+        for deleted_session_id in deleted_session_ids:
+            try:
+                await self._derived_state.forget_session(deleted_session_id)
+            except Exception:
+                # Canonical deletion is already committed. Derived cleanup must
+                # never turn that acknowledged fact into a client-visible failure.
+                LOGGER.exception(
+                    "failed to forget derived state for deleted Session %s",
+                    deleted_session_id,
+                )
 
     async def _authorize(self, session_id: str, context: RequestContext) -> None:
         authorize = getattr(self._session_store, "authorize_session_actor", None)

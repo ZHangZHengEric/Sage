@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
@@ -77,29 +76,13 @@ async def test_sqlite_session_memory_is_incremental_scoped_and_excludable(tmp_pa
     )
 
 
-@dataclass
-class _Reader:
-    command: StartRun
-
-    async def get_start_command(self, run_id: str) -> StartRun:
-        del run_id
-        return self.command
-
-
-@dataclass
-class _History:
-    messages: tuple[ModelMessage, ...]
-
-    async def rebuild(self, command, *, run_id, through_run_sequence=None):
-        del command, run_id, through_run_sequence
-        return self.messages
-
-
 class _RecordingProvider:
     def __init__(self):
         self.recall_queries = []
+        self.sync_batches = []
 
     async def sync(self, records):
+        self.sync_batches.append(records)
         self.records = records
 
     async def recall(self, query):
@@ -136,18 +119,9 @@ async def test_session_memory_service_returns_only_messages_absent_from_request(
         ),
         metadata={"source_item_id": "item_search", "source_run_id": "run_1"},
     )
-    command = StartRun(
-        agent_id="agent_1",
-        input=(InputItem(role="user", content=current.content),),
-        resolved_spec_hash="sha256:test",
-        idempotency_key="start",
-    )
+    ledger = (old, current, current_search_call)
     service = SessionMemoryService(
         SqliteBm25SessionMemoryProvider(tmp_path / "session-memory"),
-        _Reader(command),  # type: ignore[arg-type]
-        history_builder=_History(
-            (old, current, current_search_call)
-        ),  # type: ignore[arg-type]
     )
     await service.observe_projection(
         "run_1",
@@ -157,6 +131,8 @@ async def test_session_memory_service_returns_only_messages_absent_from_request(
             estimated_tokens=10,
             source_message_count=2,
         ),
+        session_id="session_1",
+        source_messages=ledger,
     )
 
     hits = await service.recall(
@@ -173,6 +149,8 @@ async def test_session_memory_service_returns_only_messages_absent_from_request(
         ContextProjection(
             messages=(old, current), estimated_tokens=20, source_message_count=2
         ),
+        session_id="session_1",
+        source_messages=ledger,
     )
     assert (
         await service.recall(
@@ -198,18 +176,8 @@ async def test_session_memory_never_infers_history_when_reducer_declares_none():
         content=(TextBlock(text="Current question"),),
         metadata={"source_item_id": "item_current"},
     )
-    command = StartRun(
-        agent_id="agent_1",
-        input=(InputItem(role="user", content=current.content),),
-        resolved_spec_hash="sha256:test",
-        idempotency_key="start-visible",
-    )
     provider = _RecordingProvider()
-    service = SessionMemoryService(
-        provider,  # type: ignore[arg-type]
-        _Reader(command),  # type: ignore[arg-type]
-        history_builder=_History((old, current)),  # type: ignore[arg-type]
-    )
+    service = SessionMemoryService(provider)  # type: ignore[arg-type]
 
     assert (
         await service.recall(
@@ -229,6 +197,8 @@ async def test_session_memory_never_infers_history_when_reducer_declares_none():
             # not declare it as history. Session Memory must not guess.
             messages=(current,), estimated_tokens=20, source_message_count=2
         ),
+        session_id="session_1",
+        source_messages=(old, current),
     )
 
     assert (
@@ -301,3 +271,176 @@ def test_session_memory_plugin_id_matches_official_registry(implementation):
     assert "session-memory.provider" in {
         offer.capability for offer in registration.descriptor.provides
     }
+
+
+@pytest.mark.asyncio
+async def test_session_memory_indexes_only_new_records_as_history_grows():
+    """A growing Session must not re-sync its whole history on every request."""
+
+    provider = _RecordingProvider()
+    service = SessionMemoryService(provider)  # type: ignore[arg-type]
+
+    def message(index: int) -> ModelMessage:
+        return ModelMessage(
+            role="user",
+            content=(TextBlock(text=f"turn {index}"),),
+            metadata={"source_item_id": f"item_{index}"},
+        )
+
+    ledger = (message(0), message(1))
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(
+            messages=ledger, estimated_tokens=10, source_message_count=2
+        ),
+        session_id="session_1",
+        source_messages=ledger,
+    )
+    assert [
+        tuple(record.record_id for record in batch) for batch in provider.sync_batches
+    ] == [("item_0", "item_1")]
+
+    # Same ledger observed again: nothing changed, so nothing is handed over.
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(
+            messages=ledger, estimated_tokens=10, source_message_count=2
+        ),
+        session_id="session_1",
+        source_messages=ledger,
+    )
+    assert len(provider.sync_batches) == 1
+
+    grown = (*ledger, message(2), message(3))
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(
+            messages=grown, estimated_tokens=20, source_message_count=4
+        ),
+        session_id="session_1",
+        source_messages=grown,
+    )
+    assert tuple(
+        record.record_id for record in provider.sync_batches[1]
+    ) == ("item_2", "item_3")
+
+
+@pytest.mark.asyncio
+async def test_session_memory_does_not_revisit_an_observed_run_prefix():
+    class CountingSessionMemoryService(SessionMemoryService):
+        def __init__(self, provider):
+            super().__init__(provider)
+            self.recorded_batches = []
+
+        def _records(self, session_id, messages, *, start_position=0):
+            self.recorded_batches.append(
+                (start_position, tuple(message.metadata["source_item_id"] for message in messages))
+            )
+            return super()._records(
+                session_id,
+                messages,
+                start_position=start_position,
+            )
+
+    provider = _RecordingProvider()
+    service = CountingSessionMemoryService(provider)
+
+    def message(index: int) -> ModelMessage:
+        return ModelMessage(
+            role="user",
+            content=(TextBlock(text=f"turn {index}"),),
+            metadata={"source_item_id": f"item_{index}"},
+        )
+
+    first = (message(0), message(1))
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(messages=first, estimated_tokens=2, source_message_count=2),
+        session_id="session_1",
+        source_messages=first,
+    )
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(messages=first, estimated_tokens=2, source_message_count=2),
+        session_id="session_1",
+        source_messages=first,
+    )
+    grown = (*first, message(2))
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(messages=grown, estimated_tokens=3, source_message_count=3),
+        session_id="session_1",
+        source_messages=grown,
+    )
+
+    assert service.recorded_batches == [
+        (0, ("item_0", "item_1")),
+        (2, ("item_2",)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_session_memory_indexes_through_the_context_assembler(tmp_path):
+    """The assembler is the only production indexing trigger; prove it feeds it."""
+
+    from sagents.v2.context import ContextBudget, DefaultContextAssembler
+
+    old = ModelMessage(
+        role="user",
+        content=(TextBlock(text="The old release codename was Saturn."),),
+        metadata={"source_item_id": "item_old"},
+    )
+    current = ModelMessage(
+        role="user",
+        content=(TextBlock(text="Remind me of the codename."),),
+        metadata={"source_item_id": "item_current"},
+    )
+
+    class _DroppingReducer:
+        """Stand in for a reducer that evicts the oldest turn from the request."""
+
+        async def reduce(self, messages, budget, *, scope=None):
+            del budget, scope
+            kept = tuple(m for m in messages if m.metadata.get("source_item_id") != "item_old")
+            return ContextProjection(
+                messages=kept,
+                historical_messages=(old,),
+                estimated_tokens=1,
+                source_message_count=len(messages),
+            )
+
+    class _Reader:
+        async def get_run(self, run_id):
+            del run_id
+            return SimpleNamespace(
+                run_id="run_1",
+                session_id="session_1",
+                concurrency_mode=None,
+                base_session_sequence=0,
+            )
+
+    service = SessionMemoryService(
+        SqliteBm25SessionMemoryProvider(tmp_path / "session-memory")
+    )
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=1_000),
+        reducer=_DroppingReducer(),  # type: ignore[arg-type]
+        history_reader=_Reader(),  # type: ignore[arg-type]
+        projection_observer=service,
+    )
+    command = StartRun(
+        agent_id="agent_1",
+        input=(InputItem(role="user", content=current.content),),
+        resolved_spec_hash="sha256:test",
+        idempotency_key="start-assembler",
+    )
+
+    await assembler.prepare_projection(command, (old, current), run_id="run_1")
+
+    hits = await service.recall(
+        run_id="run_1",
+        session_id="session_1",
+        text="release codename Saturn",
+        limit=5,
+    )
+    assert [hit.record.record_id for hit in hits] == ["item_old"]

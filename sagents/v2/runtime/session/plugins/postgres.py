@@ -603,6 +603,16 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 key,
             )
 
+    async def forget_session(self, session_id: str) -> None:
+        await super().forget_session(session_id)
+        await self._ensure_ready()
+        assert self._pool is not None
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                f"DELETE FROM {self._table('derived_state')} WHERE session_id = $1",
+                session_id,
+            )
+
     async def create_run(self, command, context):
         await self._ensure_ready()
         session_id = command.session_id
