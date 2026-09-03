@@ -11,6 +11,7 @@ from sagents.v2.agent.policy import (
     ContinuationContext,
     ExplicitStatusContinuationPolicy,
     HybridContinuationPolicy,
+    InteractionDraft,
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
 )
@@ -178,7 +179,7 @@ async def test_llm_judge_never_skips_an_unsettled_tool_result():
         ("continue", ContinuationAction.CONTINUE_STEP, "judge.continue"),
         (
             "need_user_input",
-            ContinuationAction.REQUEST_INTERACTION,
+            ContinuationAction.COMPLETE_RUN,
             "judge.need_user_input",
         ),
         ("blocked", ContinuationAction.REQUEST_INTERACTION, "judge.blocked"),
@@ -197,6 +198,113 @@ async def test_llm_judge_preserves_all_v1_decisions(
     assert decision.reason_code == expected_code
     assert decision.reason == "v1 reason"
     assert "confidence" not in decision.metadata
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_need_user_input_completes_without_interaction():
+    model = ScriptedModelProvider(
+        (_judge_step("need_user_input", reason="Choose the deployment target."),)
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+
+    decision = await policy.decide(
+        _context(response=_response("Which deployment target should I use?"))
+    )
+
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "judge.need_user_input"
+    assert decision.interaction is None
+    assert decision.metadata["completion_status"] == "need_user_input"
+    assert decision.metadata["needs_user_input"] is True
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_preserves_explicit_questionnaire_interaction():
+    model = ScriptedModelProvider(())
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    questionnaire = InteractionDraft(
+        interaction_type="questionnaire",
+        allowed_decisions=("submit", "cancel"),
+        payload={
+            "title": "Choose a target",
+            "questions": [
+                {
+                    "id": "target",
+                    "type": "single",
+                    "title": "Where should I deploy?",
+                    "options": ["staging", "production"],
+                }
+            ],
+            "source": "questionnaire_async",
+        },
+    )
+
+    decision = await policy.decide(
+        _context(
+            explicit_status="need_user_input",
+            explicit_status_note="Choose a target",
+            requested_interaction=questionnaire,
+        )
+    )
+
+    assert decision.action == ContinuationAction.REQUEST_INTERACTION
+    assert decision.reason_code == "interaction.requested"
+    assert decision.interaction == questionnaire
+    assert decision.metadata["source"] == "explicit_interaction"
+    assert model.requests == []
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_does_not_turn_repeated_plain_text_into_a_questionnaire():
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="Find the questionnaire."),)),
+        ModelMessage(role="assistant", content=(TextBlock(text="I checked here."),)),
+        ModelMessage(role="assistant", content=(TextBlock(text="I checked there."),)),
+        ModelMessage(
+            role="assistant",
+            content=(TextBlock(text="Which questionnaire do you mean?"),),
+        ),
+    )
+    model = ScriptedModelProvider(
+        (_judge_step("need_user_input", reason="The questionnaire is ambiguous."),)
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+
+    decision = await policy.decide(
+        _context(
+            response=_response("Which questionnaire do you mean?"),
+            ledger=ledger,
+        )
+    )
+
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "judge.need_user_input"
+    assert decision.interaction is None
+    assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_does_not_treat_inline_markup_as_an_interaction():
+    text = "<questionnaire>Which target should I use?</questionnaire>"
+    model = ScriptedModelProvider(
+        (_judge_step("need_user_input", reason="A target is required."),)
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+
+    decision = await policy.decide(
+        _context(
+            response=_response(text),
+            ledger=(
+                ModelMessage(role="user", content=(TextBlock(text="Deploy it."),)),
+                ModelMessage(role="assistant", content=(TextBlock(text=text),)),
+            ),
+        )
+    )
+
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "judge.need_user_input"
+    assert decision.interaction is None
+    assert len(model.requests) == 1
 
 
 @pytest.mark.asyncio

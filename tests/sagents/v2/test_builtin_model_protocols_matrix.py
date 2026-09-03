@@ -29,6 +29,7 @@ from sagents.v2.model import (
 )
 from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.credentials import CredentialMaterial
@@ -377,6 +378,63 @@ async def test_openai_responses_retries_rejected_reasoning_control_once():
     assert "reasoning" not in provider.diagnostic_request(request())
 
 
+@pytest.mark.asyncio
+async def test_openai_responses_rejects_stream_without_terminal_event():
+    stream = FakeAsyncStream(
+        ({"type": "response.output_text.delta", "delta": "partial"},)
+    )
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=SimpleNamespace(responses=FakeResponses(stream)),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.stream_incomplete"
+    assert caught.value.info.retryable is False
+    assert caught.value.info.metadata["response_started"] is True
+    assert stream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_reads_tool_call_from_terminal_response_snapshot():
+    stream = FakeAsyncStream(
+        (
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "response_1",
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": "item_1",
+                            "call_id": "call_1",
+                            "name": "lookup",
+                            "arguments": '{"q":"final"}',
+                        }
+                    ],
+                },
+            },
+        )
+    )
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=SimpleNamespace(responses=FakeResponses(stream)),
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    completed = events[-1].response
+    assert completed is not None
+    assert completed.tool_calls == (
+        ModelToolCall(
+            tool_call_id="call_1", name="lookup", arguments={"q": "final"}
+        ),
+    )
+
+
 class FakeHTTPResponse:
     def __init__(self, events):
         self.events = events
@@ -562,6 +620,44 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
         "thinking": "think",
         "signature": "signed",
     }
+
+
+@pytest.mark.asyncio
+async def test_anthropic_messages_rejects_stream_without_message_stop():
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(model="claude-test", capabilities=CAPABILITIES),
+        client=FakeHTTPClient(
+            (
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "partial"},
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.stream_incomplete"
+    assert caught.value.info.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_anthropic_messages_surfaces_sse_error_event():
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(model="claude-test", capabilities=CAPABILITIES),
+        client=FakeHTTPClient(
+            ({"type": "error", "error": {"message": "overloaded"}},)
+        ),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.provider_permanent"
+    assert "overloaded" in caught.value.info.message
 
 
 def test_anthropic_thinking_uses_native_adaptive_effort_parameters():

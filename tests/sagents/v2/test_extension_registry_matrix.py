@@ -105,6 +105,18 @@ def test_builtin_inventory_contains_only_real_factories():
         is True
     )
     assert (
+        inventory["sage.artifact.ephemeral"]["capabilities"][
+            "durable_across_process_restart"
+        ]
+        is False
+    )
+    assert (
+        inventory["sage.package-registry.ephemeral"]["capabilities"][
+            "supports_package_signatures"
+        ]
+        is False
+    )
+    assert (
         inventory["sage.scheduler.filesystem"]["capabilities"]["multi_process_writes"]
         is False
     )

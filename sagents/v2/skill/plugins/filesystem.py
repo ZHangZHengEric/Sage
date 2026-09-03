@@ -53,10 +53,16 @@ class FilesystemSkillProvider:
                 ):
                     continue
                 description = self._description(skill_file)
-                values[candidate.name] = SkillDescriptor(
-                    name=candidate.name,
-                    description=description,
-                    source_id=self.source_id,
+                # Roots are an ordered precedence list. Keep discovery and
+                # `_skill_root()` aligned so metadata and fetched bytes always
+                # come from the same first matching bundle.
+                values.setdefault(
+                    candidate.name,
+                    SkillDescriptor(
+                        name=candidate.name,
+                        description=description,
+                        source_id=self.source_id,
+                    ),
                 )
         return values
 

@@ -297,6 +297,22 @@ def test_declared_plugin_version_must_match_loaded_registration(monkeypatch):
     assert mismatch.value.info.code == "extension.version_mismatch"
 
 
+def test_empty_plugin_version_requirement_is_rejected(monkeypatch):
+    registration = _model_registration(ScriptedModelProvider(()))
+    monkeypatch.setattr(
+        discovery.metadata,
+        "entry_points",
+        lambda **kwargs: (_FakeEntryPoint("acme.model.private-gateway", registration),),
+    )
+
+    with pytest.raises(SageV2Error) as invalid:
+        discovery.load_installed_extension(
+            "acme.model.private-gateway", version_requirement="  "
+        )
+
+    assert invalid.value.info.code == "extension.version_requirement_invalid"
+
+
 @pytest.mark.asyncio
 async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path):
     provider = ScriptedModelProvider(())

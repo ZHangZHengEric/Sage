@@ -16,6 +16,7 @@ class ExtensionRegistry:
 
     def __init__(self) -> None:
         self._registrations: dict[str, ExtensionRegistration] = {}
+        self._trusted_builtin_ids: set[str] = set()
 
     def register(self, registration: ExtensionRegistration) -> None:
         plugin_id = registration.descriptor.plugin_id
@@ -90,6 +91,25 @@ class ExtensionRegistry:
     def contains(self, plugin_id: str) -> bool:
         return plugin_id in self._registrations
 
+    def trust_builtins(self, plugin_ids) -> None:
+        """Record Host-owned built-ins independently from plugin self-reporting."""
+
+        resolved = set(plugin_ids)
+        invalid = sorted(
+            plugin_id
+            for plugin_id in resolved
+            if plugin_id not in self._registrations
+            or not self._registrations[plugin_id].descriptor.built_in
+        )
+        if invalid:
+            raise ValueError(
+                f"trusted built-ins must be registered and declared built-in: {invalid}"
+            )
+        self._trusted_builtin_ids.update(resolved)
+
+    def is_trusted_builtin(self, plugin_id: str) -> bool:
+        return plugin_id in self._trusted_builtin_ids
+
     def registrations(self) -> tuple[ExtensionRegistration, ...]:
         return tuple(self._registrations[key] for key in sorted(self._registrations))
 
@@ -97,7 +117,12 @@ class ExtensionRegistry:
         """Return truthful inventory derived from executable registrations."""
 
         return tuple(
-            registration.descriptor.model_dump(mode="json")
+            {
+                **registration.descriptor.model_dump(mode="json"),
+                "built_in": self.is_trusted_builtin(
+                    registration.descriptor.plugin_id
+                ),
+            }
             for registration in self.registrations()
         )
 

@@ -119,6 +119,73 @@ from sagents.v2.runtime.observability import (
 )
 
 
+_DISTRIBUTED_PROFILE_GUARANTEES: dict[str, dict[str, Any]] = {
+    "session.store": {
+        "durable_across_process_restart": True,
+        "multi_process_writes": True,
+        "cross_process_subscribe": True,
+        "transactional_outbox": True,
+        "atomic_session_cas": True,
+    },
+    "execution.scheduler": {
+        "durable_across_process_restart": True,
+        "supports_distributed_claims": True,
+        "supports_fencing": True,
+        "supports_atomic_fenced_mutations": True,
+        "supports_atomic_tenant_quota": True,
+    },
+    "execution.job-runtime": {
+        "durable_across_process_restart": True,
+        "supports_reconnect": True,
+        "supports_adoption": True,
+    },
+    "tool.executor": {
+        "durable_operation_ledger": True,
+        "supports_restart_reconciliation": True,
+    },
+    "artifact.store": {
+        "durable_across_process_restart": True,
+        "shared_across_processes": True,
+    },
+    "package.registry": {
+        "durable_across_process_restart": True,
+        "shared_across_processes": True,
+        "supports_package_signatures": True,
+    },
+}
+
+
+def _validate_declared_plugin_trust(
+    extensions: ExtensionRegistry,
+    declarations: tuple[PluginDeclaration, ...],
+    *,
+    built_in_only: bool,
+) -> None:
+    if not built_in_only:
+        return
+    for declaration in declarations:
+        if (
+            extensions.contains(declaration.id)
+            and extensions.is_trusted_builtin(declaration.id)
+        ):
+            continue
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="extension.plugin_trust_policy_violation",
+                category=ErrorCategory.VALIDATION,
+                message=(
+                    "built_in_only policy rejected declared extension "
+                    f"{declaration.id!r} before loading its entry point"
+                ),
+                safe_to_resume=False,
+                metadata={
+                    "plugin_id": declaration.id,
+                    "plugin_trust_policy": "built_in_only",
+                },
+            )
+        )
+
+
 class _ExecutionBoundDriver:
     """Lazily compose a loop after the Runtime has allocated its Run ID."""
 
@@ -392,8 +459,14 @@ class SAgentBuilder:
             manifest.plugins if manifest is not None else resolved.plugins
         )
         runtime_config = manifest.runtime if manifest is not None else resolved.runtime
-        self._load_declared_plugins(plugin_declarations)
-        extension_host = ExtensionHost(self.extensions)
+        self._load_declared_plugins(
+            plugin_declarations,
+            trust_policy=runtime_config.plugin_trust_policy,
+        )
+        extension_host = ExtensionHost(
+            self.extensions,
+            built_in_only=runtime_config.plugin_trust_policy == "built_in_only",
+        )
         process_root = await extension_host.open_scope(
             ExtensionScopeContext(
                 scope=ExtensionScope.PROCESS,
@@ -1107,6 +1180,7 @@ class SAgentBuilder:
                 derived_state=derived_state,
                 process_model=models_by_agent[selected_agent],
                 default_tenant_id=tenant_id,
+                deployment_profile=runtime_config.deployment_profile,
             )
         )
         return application
@@ -1123,8 +1197,16 @@ class SAgentBuilder:
         return package, CompositionResolver().resolve(package)
 
     def _load_declared_plugins(
-        self, declarations: tuple[PluginDeclaration, ...]
+        self,
+        declarations: tuple[PluginDeclaration, ...],
+        *,
+        trust_policy: str,
     ) -> None:
+        _validate_declared_plugin_trust(
+            self.extensions,
+            declarations,
+            built_in_only=trust_policy == "built_in_only",
+        )
         for declaration in declarations:
             if not self.extensions.contains(declaration.id):
                 self.extensions.register(
@@ -1635,7 +1717,8 @@ class SAgentBuilder:
     ) -> None:
         """Verify manifest guarantees against live providers or descriptors."""
 
-        if not runtime.required_guarantees:
+        required_guarantees = self._effective_required_guarantees(runtime)
+        if not required_guarantees:
             return
 
         descriptor_facts: dict[str, list[dict[str, Any]]] = {}
@@ -1657,7 +1740,7 @@ class SAgentBuilder:
         for handle in handles:
             visit(handle)
 
-        for capability, required in runtime.required_guarantees.items():
+        for capability, required in required_guarantees.items():
             observed: dict[str, Any] | None = None
             provider = services.get(capability)
             capability_reader = getattr(provider, "capabilities", None)
@@ -1709,6 +1792,7 @@ class SAgentBuilder:
                                 "required": dict(required),
                                 "declared": conflicts,
                                 "observed": live,
+                                "deployment_profile": runtime.deployment_profile,
                             },
                         )
                     )
@@ -1751,9 +1835,48 @@ class SAgentBuilder:
                         "required": dict(required),
                         "declared": declared,
                         "observed": observed if provider is not None else reported,
+                        "deployment_profile": runtime.deployment_profile,
                     },
                 )
             )
+
+    @staticmethod
+    def _effective_required_guarantees(
+        runtime: RuntimeConfig,
+    ) -> dict[str, dict[str, Any]]:
+        effective = {
+            capability: dict(required)
+            for capability, required in runtime.required_guarantees.items()
+        }
+        if runtime.deployment_profile != "distributed":
+            return effective
+        for capability, mandated in _DISTRIBUTED_PROFILE_GUARANTEES.items():
+            configured = effective.setdefault(capability, {})
+            conflicts = {
+                name: configured[name]
+                for name, expected in mandated.items()
+                if name in configured and configured[name] != expected
+            }
+            if conflicts:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="runtime.deployment_profile_conflict",
+                        category=ErrorCategory.VALIDATION,
+                        message=(
+                            "distributed deployment profile conflicts with explicit "
+                            f"guarantees for {capability!r}"
+                        ),
+                        safe_to_resume=False,
+                        metadata={
+                            "capability": capability,
+                            "configured": conflicts,
+                            "mandated": dict(mandated),
+                            "deployment_profile": runtime.deployment_profile,
+                        },
+                    )
+                )
+            configured.update(mandated)
+        return effective
 
     @staticmethod
     def _composition_hash(manifest_hash, handles, services) -> str:
@@ -1873,6 +1996,7 @@ class _ApplicationComposer:
         derived_state,
         process_model=None,
         default_tenant_id: str | None = None,
+        deployment_profile: str = "controlled_host",
     ) -> None:
         self.host = host
         self.process_root = process_root
@@ -1882,6 +2006,7 @@ class _ApplicationComposer:
         self.derived_state = derived_state
         self.process_model = process_model
         self.default_tenant_id = default_tenant_id
+        self.deployment_profile = deployment_profile
         self.application: SAgentApplication | None = None
         self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
         self._lock = None
@@ -1907,6 +2032,30 @@ class _ApplicationComposer:
         manifest, resolved = SAgentBuilder()._resolve_package(package)
         declarations = manifest.plugins if manifest is not None else resolved.plugins
         runtime = manifest.runtime if manifest is not None else resolved.runtime
+        if runtime.deployment_profile != self.deployment_profile:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="runtime.deployment_profile_mismatch",
+                    category=ErrorCategory.VALIDATION,
+                    message=(
+                        "materialized Agent deployment profile must match its owning "
+                        "Application"
+                    ),
+                    safe_to_resume=False,
+                    metadata={
+                        "application_profile": self.deployment_profile,
+                        "agent_profile": runtime.deployment_profile,
+                    },
+                )
+            )
+        built_in_only = (
+            self.host.built_in_only or runtime.plugin_trust_policy == "built_in_only"
+        )
+        _validate_declared_plugin_trust(
+            self.extensions,
+            declarations,
+            built_in_only=built_in_only,
+        )
         for declaration in declarations:
             if not self.extensions.contains(declaration.id):
                 self.extensions.register(
@@ -2140,6 +2289,21 @@ class _ApplicationComposer:
             "sage.tool-selection.hybrid",
         }:
             plugin_id = LLMToolSelectionPolicy.plugin_id
+        if (
+            self.host.built_in_only or runtime.plugin_trust_policy == "built_in_only"
+        ) and not self.extensions.is_trusted_builtin(plugin_id):
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="extension.plugin_trust_policy_violation",
+                    category=ErrorCategory.VALIDATION,
+                    message=f"built_in_only policy rejected extension {plugin_id!r}",
+                    safe_to_resume=False,
+                    metadata={
+                        "plugin_id": plugin_id,
+                        "plugin_trust_policy": "built_in_only",
+                    },
+                )
+            )
         config = {
             **dict(selection.config if selection is not None else {}),
         }

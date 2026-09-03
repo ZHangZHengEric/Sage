@@ -35,6 +35,14 @@ def report(*, passed, failed):
     )
 
 
+def test_in_memory_registry_reports_non_durable_trust_capabilities():
+    assert InMemoryAgentPackageRegistry().capabilities == {
+        "durable_across_process_restart": False,
+        "supports_package_signatures": False,
+        "shared_across_processes": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_package_lifecycle_requires_validation_tests_and_gate_before_publish():
     registry = InMemoryAgentPackageRegistry()
@@ -96,6 +104,27 @@ async def test_failed_eval_gate_blocks_publish_and_published_version_is_immutabl
     with pytest.raises(SageV2Error) as immutable:
         await registry.save_draft(package(), expected_revision=3)
     assert immutable.value.info.code == "package.version_immutable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("required_rate", [-0.1, 1.1, "invalid", float("nan"), True])
+async def test_invalid_package_test_gate_is_rejected(required_rate):
+    registry = InMemoryAgentPackageRegistry()
+    draft = await registry.save_draft(package(required_rate=required_rate))
+    await registry.validate(draft.package_id, draft.version, expected_revision=0)
+    tested = await registry.test(
+        draft.package_id,
+        draft.version,
+        lambda manifest: asyncio.sleep(0, result=report(passed=1, failed=0)),
+        expected_revision=1,
+    )
+
+    with pytest.raises(SageV2Error) as invalid:
+        await registry.publish(
+            tested.package_id, tested.version, expected_revision=tested.revision
+        )
+
+    assert invalid.value.info.code == "package.test_gate_invalid"
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolExecutor,
 )
 from sagents.v2.tool import FilteredToolCatalog, InvocationGrantToolCatalog
+from sagents.v2.tool.composite import CompositeToolExecutor, RoutedToolExecutor
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -345,6 +346,40 @@ async def test_tool_executor_releases_terminal_run_idempotency_state():
 
     assert reconciled.state == ReconcileState.UNKNOWN
     assert dispatches == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("executor_kind", ["routed", "composite"])
+async def test_composite_release_continues_after_one_plugin_cleanup_fails(
+    executor_kind,
+):
+    class Releaser:
+        def __init__(self, *, fail=False):
+            self.fail = fail
+            self.released = []
+
+        async def release_run(self, run_id):
+            self.released.append(run_id)
+            if self.fail:
+                raise OSError("cleanup unavailable")
+
+    failing = Releaser(fail=True)
+    healthy = Releaser()
+    executor = (
+        RoutedToolExecutor({"first": failing, "second": healthy})
+        if executor_kind == "routed"
+        else CompositeToolExecutor((failing, healthy))
+    )
+    executor._operation_routes["operation_1"] = failing
+    executor._operation_run_ids["operation_1"] = "run_1"
+
+    with pytest.raises(OSError, match="cleanup unavailable"):
+        await executor.release_run("run_1")
+
+    assert failing.released == ["run_1"]
+    assert healthy.released == ["run_1"]
+    assert executor._operation_routes == {}
+    assert executor._operation_run_ids == {}
 
 
 @pytest.mark.asyncio

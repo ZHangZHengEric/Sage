@@ -302,3 +302,23 @@ async def test_filesystem_skill_rejects_symlinked_bundle_files(tmp_path):
         await provider.fetch("unsafe", run_id="run_1")
 
     assert caught.value.info.code == "skill.symlink_denied"
+
+
+@pytest.mark.asyncio
+async def test_filesystem_skill_duplicate_roots_use_one_consistent_precedence(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for root, title in ((first, "First"), (second, "Second")):
+        skill_root = root / "duplicate"
+        skill_root.mkdir(parents=True)
+        (skill_root / "SKILL.md").write_text(
+            f"---\ndescription: {title}\n---\n# {title}", encoding="utf-8"
+        )
+    provider = FilesystemSkillProvider((first, second))
+
+    descriptor = await provider.get_skill("duplicate", run_id="run_1")
+    bundle = await provider.fetch("duplicate", run_id="run_1")
+
+    assert descriptor.description == "First"
+    assert bundle.descriptor == descriptor
+    assert b"# First" in bundle.files["SKILL.md"]

@@ -11,7 +11,9 @@ from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.package.presets import BuiltinPackageFactory
+from sagents.v2.package.manifest.root import PluginDeclaration
 from sagents.v2.package.manifest.runtime import CapabilitySelection
+from sagents.v2.package.manifest.runtime import RuntimeConfig
 from sagents.v2.package.manifest.agents import AgentMemoryBehavior
 from sagents.v2.memory import NoopMemoryProvider
 from sagents.v2.session_memory import SessionMemoryCapabilities
@@ -273,6 +275,144 @@ async def test_builder_fails_when_selected_provider_cannot_meet_required_guarant
         == "runtime.capability_guarantee_unsatisfied"
     )
     assert unsatisfied.value.info.metadata["capability"] == "execution.scheduler"
+
+
+@pytest.mark.asyncio
+async def test_distributed_profile_automatically_rejects_single_host_plugins(
+    tmp_path: Path,
+):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-distributed-profile",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    package = package.model_copy(
+        update={
+            "runtime": package.runtime.model_copy(
+                update={"deployment_profile": "distributed"}
+            )
+        }
+    )
+
+    with pytest.raises(SageV2Error) as unsatisfied:
+        await (
+            SAgentBuilder()
+            .with_defaults(session_root=tmp_path / "session-store")
+            .with_model_provider(ScriptedModelProvider(()))
+            .build(package)
+        )
+
+    assert unsatisfied.value.info.code == "runtime.capability_guarantee_unsatisfied"
+    assert unsatisfied.value.info.metadata["capability"] == "session.store"
+    assert unsatisfied.value.info.metadata["deployment_profile"] == "distributed"
+    assert unsatisfied.value.info.metadata["required"]["multi_process_writes"] is True
+
+
+def test_distributed_profile_rejects_weaker_explicit_guarantee():
+    runtime = RuntimeConfig(
+        deployment_profile="distributed",
+        required_guarantees={
+            "session.store": {"multi_process_writes": False},
+        },
+    )
+
+    with pytest.raises(SageV2Error) as conflict:
+        SAgentBuilder._effective_required_guarantees(runtime)
+
+    assert conflict.value.info.code == "runtime.deployment_profile_conflict"
+    assert conflict.value.info.metadata["capability"] == "session.store"
+
+    effective = SAgentBuilder._effective_required_guarantees(
+        RuntimeConfig(deployment_profile="distributed")
+    )
+    assert effective["artifact.store"]["shared_across_processes"] is True
+    assert effective["package.registry"]["supports_package_signatures"] is True
+    assert effective["execution.job-runtime"]["supports_adoption"] is True
+    assert effective["tool.executor"]["durable_operation_ledger"] is True
+    assert effective["tool.executor"]["supports_restart_reconciliation"] is True
+    # Workload isolation is a separate Host policy. It must not prevent a
+    # server from using SAgents as an async conversation engine with its own
+    # execution implementation (or no process tools at all).
+    assert "execution.sandbox" not in effective
+
+
+@pytest.mark.asyncio
+async def test_builtin_only_policy_rejects_external_declaration_before_import():
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-builtin-only",
+        model="test-model",
+    )
+    package = package.model_copy(
+        update={
+            "plugins": (PluginDeclaration(id="acme.untrusted"),),
+            "runtime": package.runtime.model_copy(
+                update={"plugin_trust_policy": "built_in_only"}
+            ),
+        }
+    )
+
+    with pytest.raises(SageV2Error) as rejected:
+        await SAgentBuilder().build(package)
+
+    assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
+    assert rejected.value.info.metadata == {
+        "plugin_id": "acme.untrusted",
+        "plugin_trust_policy": "built_in_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_materialization_cannot_weaken_application_trust_or_change_profile(
+    tmp_path: Path,
+):
+    root = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-materialize-policy-root",
+        model="test-model",
+    )
+    root = root.model_copy(
+        update={
+            "runtime": root.runtime.model_copy(
+                update={"plugin_trust_policy": "built_in_only"}
+            )
+        }
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "sessions")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(root)
+    )
+    external = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-materialize-policy-external",
+        model="test-model",
+    ).model_copy(update={"plugins": (PluginDeclaration(id="acme.untrusted"),)})
+    distributed = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-materialize-policy-distributed",
+        model="test-model",
+    )
+    distributed = distributed.model_copy(
+        update={
+            "runtime": distributed.runtime.model_copy(
+                update={"deployment_profile": "distributed"}
+            )
+        }
+    )
+
+    try:
+        with pytest.raises(SageV2Error) as trust:
+            await application.materialize_agent(external)
+        with pytest.raises(SageV2Error) as profile:
+            await application.materialize_agent(distributed)
+    finally:
+        await application.close()
+
+    assert trust.value.info.code == "extension.plugin_trust_policy_violation"
+    assert profile.value.info.code == "runtime.deployment_profile_mismatch"
 
 
 @pytest.mark.asyncio

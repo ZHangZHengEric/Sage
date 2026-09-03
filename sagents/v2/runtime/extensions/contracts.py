@@ -44,6 +44,13 @@ def plugin_identity(implementation: type[Any]) -> tuple[str, str, str]:
 
 
 class ExtensionScope(str, Enum):
+    """Provider lifetime boundary, never an implicit serialization boundary.
+
+    Process-, tenant-, and agent-scoped instances may receive overlapping async
+    calls from many Runs. Implementations must protect only their shared mutable
+    state, keep upstream I/O outside locks, or use Run scope when sharing is unsafe.
+    """
+
     PROCESS = "process"
     TENANT = "tenant"
     AGENT = "agent"

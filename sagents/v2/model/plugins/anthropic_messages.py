@@ -28,6 +28,8 @@ from sagents.v2.model.wire import (
     compact_json,
     parse_tool_arguments,
     provider_error,
+    stream_incomplete_error,
+    validate_extra_body,
     wire_json_value,
 )
 from sagents.v2.model.usage import canonical_token_usage
@@ -38,6 +40,22 @@ from sagents.v2.model.contracts import (
     ModelRequest,
     ModelResponse,
     ModelStreamEvent,
+)
+
+
+_HOST_OWNED_REQUEST_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "max_tokens",
+        "stream",
+        "system",
+        "tools",
+        "tool_choice",
+        "temperature",
+        "top_p",
+        "output_config",
+    }
 )
 
 
@@ -255,6 +273,11 @@ class AnthropicMessagesModelProvider:
             }
         if output_config:
             payload["output_config"] = output_config
+        validate_extra_body(
+            self.config.extra_body,
+            reserved_fields=_HOST_OWNED_REQUEST_FIELDS,
+            provider=self.config.provider_id,
+        )
         payload.update(self.config.extra_body)
         return payload
 
@@ -269,6 +292,7 @@ class AnthropicMessagesModelProvider:
         tools: dict[int, dict[str, str]] = {}
         thinking_blocks: dict[int, dict[str, Any]] = {}
         response_started = False
+        terminal_event_received = False
         try:
             async with self._open_stream(payload) as response:
                 raise_for_status = getattr(response, "raise_for_status", None)
@@ -360,10 +384,26 @@ class AnthropicMessagesModelProvider:
                             normalized_usage = wire_json_value(usage)
                             if isinstance(normalized_usage, dict):
                                 provider_usage.update(normalized_usage)
+                    elif event_type == "message_stop":
+                        terminal_event_received = True
+                    elif event_type == "error":
+                        error = event.get("error") or {}
+                        message = (
+                            error.get("message")
+                            if isinstance(error, dict)
+                            else str(error)
+                        )
+                        raise RuntimeError(message or "Anthropic Messages API failed")
         except SageV2Error:
             raise
         except Exception as exc:
             raise provider_error(exc, response_started=response_started) from exc
+
+        if not terminal_event_received:
+            raise stream_incomplete_error(
+                provider=self.config.provider_id,
+                response_started=response_started,
+            )
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")
         calls = tuple(

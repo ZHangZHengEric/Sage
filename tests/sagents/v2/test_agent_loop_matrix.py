@@ -969,6 +969,40 @@ async def test_judge_usage_and_metadata_are_committed_to_run_events():
 
 
 @pytest.mark.asyncio
+async def test_judge_need_user_input_completes_without_suspension():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("Which target should I use?"),)),)
+    )
+    judge = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        '{"decision":"need_user_input",'
+                        '"reason":"A deployment target is required."}'
+                    ),
+                )
+            ),
+        )
+    )
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        continuation_policy=policy,
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decision = next(event for event in events if event.type == "continuation.decided")
+
+    assert result.state == RunState.COMPLETED
+    assert decision.data.action == "complete_run"
+    assert decision.data.reason_code == "judge.need_user_input"
+    assert decision.data.details["completion_status"] == "need_user_input"
+    assert not any(event.type == "run.suspended" for event in events)
+
+
+@pytest.mark.asyncio
 async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
     def assert_first_request(request):
         assert request.tool_choice == "auto"

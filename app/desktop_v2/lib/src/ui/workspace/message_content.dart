@@ -795,6 +795,513 @@ String _messageTime(DateTime value) {
   return '$hour:$minute';
 }
 
+bool _isInlineQuestionnaire(PendingInteraction interaction) {
+  final explicitQuestionnaire =
+      interaction.type == 'questionnaire' ||
+      (interaction.type == 'user_input' &&
+          interaction.payload['source'] == 'questionnaire_async');
+  if (!explicitQuestionnaire) {
+    return false;
+  }
+  final questions = interaction.payload['questions'];
+  return questions is List && questions.any((value) => value is Map);
+}
+
+class _InlineQuestionnaireOtherAnswer {
+  const _InlineQuestionnaireOtherAnswer();
+}
+
+class _InlineQuestionnaireCard extends StatefulWidget {
+  const _InlineQuestionnaireCard({
+    super.key,
+    required this.interaction,
+    required this.onReply,
+  });
+
+  final PendingInteraction interaction;
+  final Future<void> Function(
+    String decision, {
+    String text,
+    Map<String, Object?> payload,
+  })
+  onReply;
+
+  @override
+  State<_InlineQuestionnaireCard> createState() =>
+      _InlineQuestionnaireCardState();
+}
+
+class _InlineQuestionnaireCardState extends State<_InlineQuestionnaireCard> {
+  final Map<String, TextEditingController> _controllers = {};
+  final Map<String, Object?> _answers = {};
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resetAnswers();
+  }
+
+  List<Map<String, Object?>> get _questions {
+    final raw = widget.interaction.payload['questions'];
+    if (raw is! List) return const [];
+    return [
+      for (final value in raw)
+        if (value is Map) value.cast<String, Object?>(),
+    ];
+  }
+
+  String _questionId(Map<String, Object?> question, int index) =>
+      question['id']?.toString() ?? 'q${index + 1}';
+
+  String _questionText(Map<String, Object?> question, int index) =>
+      question['title']?.toString() ??
+      question['question']?.toString() ??
+      question['text']?.toString() ??
+      _questionId(question, index);
+
+  String _optionValue(Object? option) => option is Map
+      ? option['value']?.toString() ?? option['label']?.toString() ?? ''
+      : option?.toString() ?? '';
+
+  String _optionLabel(Object? option) => option is Map
+      ? option['label']?.toString() ?? option['value']?.toString() ?? ''
+      : option?.toString() ?? '';
+
+  @override
+  void didUpdateWidget(covariant _InlineQuestionnaireCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.interaction.id == widget.interaction.id) return;
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    _controllers.clear();
+    _resetAnswers();
+    _submitting = false;
+  }
+
+  void _resetAnswers() {
+    _answers.clear();
+    for (final entry in _questions.indexed) {
+      final question = entry.$2;
+      final id = _questionId(question, entry.$1);
+      final type = question['type']?.toString().trim().toLowerCase() ?? 'text';
+      final defaultValue = question['default'];
+      if ((type == 'multiple' ||
+              type == 'multiple_choice' ||
+              type == 'multi_choice') &&
+          defaultValue is List) {
+        _answers[id] = [for (final value in defaultValue) value.toString()];
+      } else if ((type == 'single' || type == 'single_choice') &&
+          defaultValue != null &&
+          defaultValue.toString().isNotEmpty) {
+        _answers[id] = defaultValue.toString();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    final answers = <String, Object?>{};
+    for (final entry in _questions.indexed) {
+      final question = entry.$2;
+      final id = _questionId(question, entry.$1);
+      final type = question['type']?.toString().trim().toLowerCase() ?? 'text';
+      final answer = _answers[id];
+      if (type == 'text' || type == 'free_text') {
+        answers[id] = _controllers[id]?.text.trim() ?? '';
+      } else if (answer is _InlineQuestionnaireOtherAnswer) {
+        answers[id] = _controllers[id]?.text.trim() ?? '';
+      } else if (answer != null) {
+        answers[id] = answer;
+      }
+    }
+    final decisions = widget.interaction.allowedDecisions;
+    final decision = decisions.contains('submit')
+        ? 'submit'
+        : decisions.firstWhere(
+            (value) => value != 'cancel',
+            orElse: () => 'submit',
+          );
+    setState(() => _submitting = true);
+    try {
+      await widget.onReply(
+        decision,
+        text: jsonEncode({'answers': answers}),
+        payload: {'answers': answers},
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Widget _question(
+    BuildContext context,
+    Map<String, Object?> question,
+    int index,
+  ) {
+    final id = _questionId(question, index);
+    final text = _questionText(question, index);
+    final type = question['type']?.toString().trim().toLowerCase() ?? 'text';
+    final rawOptions = question['options'];
+    final options = rawOptions is List ? rawOptions : const <Object?>[];
+    final isMultiple =
+        type == 'multiple' ||
+        type == 'multiple_choice' ||
+        type == 'multi_choice';
+    final isSingle = type == 'single' || type == 'single_choice';
+    final allowOther = question['allow_other'] == true;
+    final otherSelected = _answers[id] is _InlineQuestionnaireOtherAnswer;
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurface,
+      fontSize: 13,
+      height: 1.35,
+    );
+
+    return KeyedSubtree(
+      key: ValueKey('questionnaire-question-$id'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (text.isNotEmpty) ...[
+            Text(text, style: style?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+          ],
+          if (isSingle || isMultiple)
+            _InlineQuestionnaireOptionWrap(
+              children: [
+                for (final option in options)
+                  _InlineQuestionnaireOptionPill(
+                    key: ValueKey(
+                      'interaction-question-$id-option-${_optionValue(option)}',
+                    ),
+                    label: _optionLabel(option),
+                    selected: isMultiple
+                        ? ((_answers[id] as List?) ?? const <Object?>[])
+                              .map((value) => value.toString())
+                              .contains(_optionValue(option))
+                        : !otherSelected &&
+                              _answers[id]?.toString() == _optionValue(option),
+                    onTap: () {
+                      if (isMultiple) {
+                        final selected = <String>{
+                          ...((_answers[id] as List?)?.map(
+                                (value) => value.toString(),
+                              ) ??
+                              const <String>[]),
+                        };
+                        final value = _optionValue(option);
+                        selected.contains(value)
+                            ? selected.remove(value)
+                            : selected.add(value);
+                        setState(
+                          () => _answers[id] = selected.toList(growable: false),
+                        );
+                      } else {
+                        setState(() => _answers[id] = _optionValue(option));
+                      }
+                    },
+                  ),
+                if (isSingle && allowOther)
+                  _InlineQuestionnaireOptionPill(
+                    key: ValueKey('interaction-question-$id-option-other'),
+                    label: context.l10n.text('questionnaire.other'),
+                    selected: otherSelected,
+                    onTap: () => setState(
+                      () => _answers[id] =
+                          const _InlineQuestionnaireOtherAnswer(),
+                    ),
+                  ),
+              ],
+            )
+          else
+            _InlineQuestionnaireTextField(
+              key: ValueKey('interaction-question-$id-field'),
+              controller: _controllers.putIfAbsent(
+                id,
+                () => TextEditingController(
+                  text: question['default']?.toString() ?? '',
+                ),
+              ),
+              fieldKey: ValueKey('interaction-question-$id'),
+            ),
+          if (isSingle && allowOther && otherSelected) ...[
+            const SizedBox(height: 8),
+            _InlineQuestionnaireTextField(
+              key: ValueKey('interaction-question-$id-other-field'),
+              controller: _controllers.putIfAbsent(
+                id,
+                TextEditingController.new,
+              ),
+              fieldKey: ValueKey('interaction-question-$id-other'),
+              autofocus: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final payload = widget.interaction.payload;
+    final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final title = payload['title']?.toString().trim() ?? '';
+    final prompt = payload['prompt']?.toString().trim() ?? '';
+    final heading = title.isNotEmpty ? title : prompt;
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: colors.onSurface,
+      fontSize: 13,
+      height: 1.35,
+    );
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: SizedBox(
+          width: double.infinity,
+          child: DecoratedBox(
+            key: const ValueKey('questionnaire-border'),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: colors.outlineVariant.withValues(
+                  alpha: dark ? 0.58 : 0.92,
+                ),
+                width: dark ? 1 : 1.15,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: dark ? 0.24 : 0.16),
+                  blurRadius: dark ? 18 : 22,
+                  spreadRadius: dark ? 0 : 0.5,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: dark
+                      ? colors.onSurface.withValues(alpha: 0.08)
+                      : const Color(0xFF667085).withValues(alpha: 0.12),
+                  blurRadius: 5,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: GlassCard(
+              key: const ValueKey('questionnaire-block'),
+              padding: const EdgeInsets.all(12),
+              shape: const LiquidRoundedSuperellipse(borderRadius: 12),
+              useOwnLayer: true,
+              settings: _composerGlassSettings(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (heading.isNotEmpty) ...[
+                    Text(
+                      heading,
+                      style: style?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  for (final entry in _questions.indexed) ...[
+                    _question(context, entry.$2, entry.$1),
+                    if (entry.$1 != _questions.length - 1)
+                      const SizedBox(height: 12),
+                  ],
+                  const SizedBox(height: 14),
+                  _InlineQuestionnaireSubmitButton(
+                    submitting: _submitting,
+                    onTap: _submit,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineQuestionnaireOptionWrap extends StatelessWidget {
+  const _InlineQuestionnaireOptionWrap({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 8, runSpacing: 8, children: children);
+  }
+}
+
+class _InlineQuestionnaireOptionPill extends StatelessWidget {
+  const _InlineQuestionnaireOptionPill({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        constraints: const BoxConstraints(maxWidth: 320, minHeight: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? colors.onSurface.withValues(alpha: dark ? 0.16 : 0.12)
+              : colors.surfaceContainerHighest.withValues(
+                  alpha: dark ? 0.28 : 0.36,
+                ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? colors.onSurface.withValues(alpha: 0.56)
+                : colors.outlineVariant.withValues(alpha: dark ? 0.42 : 0.62),
+          ),
+        ),
+        child: Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: colors.onSurface,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            height: 1.1,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineQuestionnaireTextField extends StatelessWidget {
+  const _InlineQuestionnaireTextField({
+    super.key,
+    required this.controller,
+    required this.fieldKey,
+    this.autofocus = false,
+  });
+
+  final TextEditingController controller;
+  final Key fieldKey;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: TextField(
+        key: fieldKey,
+        controller: controller,
+        autofocus: autofocus,
+        minLines: 1,
+        maxLines: 4,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: colors.onSurface,
+          fontSize: 13,
+          height: 1.35,
+        ),
+        cursorColor: colors.onSurface,
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: colors.surfaceContainerHighest.withValues(
+            alpha: dark ? 0.34 : 0.48,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 9,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: colors.outlineVariant.withValues(alpha: 0.7),
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: colors.outlineVariant.withValues(alpha: 0.7),
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: colors.onSurface.withValues(alpha: 0.54),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineQuestionnaireSubmitButton extends StatelessWidget {
+  const _InlineQuestionnaireSubmitButton({
+    required this.submitting,
+    required this.onTap,
+  });
+
+  final bool submitting;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: InkWell(
+        key: const ValueKey('interaction-submit-submit'),
+        borderRadius: BorderRadius.circular(999),
+        onTap: submitting ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: colors.onSurface,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              context.l10n.text('decision.submit'),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: colors.surface,
+                fontWeight: FontWeight.w800,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _InteractionCard extends StatefulWidget {
   const _InteractionCard({required this.interaction, required this.onReply});
 

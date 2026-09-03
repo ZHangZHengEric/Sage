@@ -24,6 +24,8 @@ from sagents.v2.model.wire import (
     compact_json,
     parse_tool_arguments,
     provider_error,
+    stream_incomplete_error,
+    validate_extra_body,
     wire_json_value,
     wire_value,
 )
@@ -35,6 +37,24 @@ from sagents.v2.model.contracts import (
     ModelRequest,
     ModelResponse,
     ModelStreamEvent,
+)
+
+
+_HOST_OWNED_REQUEST_FIELDS = frozenset(
+    {
+        "model",
+        "input",
+        "stream",
+        "store",
+        "tools",
+        "tool_choice",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "reasoning",
+        "include",
+        "text",
+    }
 )
 
 
@@ -254,6 +274,11 @@ class OpenAIResponsesModelProvider:
                     "schema": request.response_schema,
                 }
             }
+        validate_extra_body(
+            self.config.extra_body,
+            reserved_fields=_HOST_OWNED_REQUEST_FIELDS,
+            provider=self.config.provider_id,
+        )
         if self.config.extra_body:
             payload["extra_body"] = dict(self.config.extra_body)
         return payload
@@ -269,6 +294,7 @@ class OpenAIResponsesModelProvider:
         tool_fragments: dict[str, dict[str, str]] = {}
         reasoning_items: dict[str, dict[str, Any]] = {}
         response_started = False
+        terminal_event_received = False
         compatibility_fallback: dict[str, Any] | None = None
         try:
             try:
@@ -330,6 +356,7 @@ class OpenAIResponsesModelProvider:
                     )
                     continue
                 if event_type in {"response.completed", "response.incomplete"}:
+                    terminal_event_received = True
                     response = wire_value(event, "response")
                     response_id = str(
                         wire_value(response, "id", response_id) or response_id
@@ -348,6 +375,7 @@ class OpenAIResponsesModelProvider:
                     usage = self._usage(raw_usage)
                     for item in wire_value(response, "output", ()) or ():
                         self._record_reasoning_item(reasoning_items, item)
+                        self._record_tool_item(tool_fragments, item, replace=True)
                     continue
                 if event_type in {"response.failed", "error"}:
                     error = wire_value(event, "error") or wire_value(
@@ -365,6 +393,12 @@ class OpenAIResponsesModelProvider:
         finally:
             if upstream is not None:
                 await self._close_stream(upstream)
+
+        if not terminal_event_received:
+            raise stream_incomplete_error(
+                provider=self.config.provider_id,
+                response_started=response_started,
+            )
 
         calls = tuple(
             parse_tool_arguments(

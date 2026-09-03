@@ -486,15 +486,13 @@ class SAgent:
         return result
 
     async def _close_driver(self, run_id, driver) -> None:
-        try:
-            closer = getattr(driver, "close", None)
-            if closer is not None:
-                closed = closer()
-                if inspect.isawaitable(closed):
-                    await closed
-        finally:
-            if self._drivers.get(run_id) is driver:
-                self._drivers.pop(run_id, None)
+        closer = getattr(driver, "close", None)
+        if closer is not None:
+            closed = closer()
+            if inspect.isawaitable(closed):
+                await closed
+        if self._drivers.get(run_id) is driver:
+            self._drivers.pop(run_id, None)
 
     async def _fail_driver_crash(self, run_id, exc, context):
         """Record a driver crash without overwriting a concurrent pause/cancel."""

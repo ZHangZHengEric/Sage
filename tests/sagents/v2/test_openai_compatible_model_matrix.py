@@ -259,6 +259,54 @@ async def test_stream_normalizes_reasoning_text_tool_fragments_usage_and_closes(
 
 
 @pytest.mark.asyncio
+async def test_stream_normalizes_cumulative_tool_call_snapshots():
+    stream = FakeStream(
+        (
+            chunk(
+                tool_calls=(
+                    tool_delta(0, call_id="call_", name="look", arguments='{"q":'),
+                )
+            ),
+            chunk(
+                tool_calls=(
+                    tool_delta(
+                        0,
+                        call_id="call_1",
+                        name="lookup",
+                        arguments='{"q":"x"}',
+                    ),
+                ),
+                finish="tool_calls",
+            ),
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    events = [event async for event in provider.stream(request())]
+
+    response = events[-1].response
+    assert response is not None
+    assert response.tool_calls == (
+        ModelToolCall(tool_call_id="call_1", name="lookup", arguments={"q": "x"}),
+    )
+
+
+def test_extra_body_cannot_override_host_owned_request_fields():
+    provider = OpenAICompatibleModelProvider(
+        config(extra_body={"model": "shadow-model"}),
+        client=FakeClient(FakeCompletions()),
+    )
+
+    with pytest.raises(SageV2Error) as conflict:
+        provider.diagnostic_request(request())
+
+    assert conflict.value.info.code == "model.extra_body_conflict"
+    assert conflict.value.info.metadata["fields"] == ["model"]
+
+
+@pytest.mark.asyncio
 async def test_stream_normalizes_responses_style_usage_from_chat_gateway():
     raw_usage = {
         "input_tokens": 10,
@@ -663,6 +711,21 @@ async def test_provider_error_matrix(status, category, retryable):
     assert caught.value.info.category == category
     assert caught.value.info.retryable is retryable
     assert len(completions.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_compatible_rejects_stream_without_finish_reason():
+    stream = FakeStream((chunk(content="partial"),))
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+
+    assert caught.value.info.code == "model.stream_incomplete"
+    assert caught.value.info.retryable is False
+    assert stream.closed is True
 
 
 @pytest.mark.asyncio

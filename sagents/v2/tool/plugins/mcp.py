@@ -101,6 +101,14 @@ class McpToolPlugin:
         "Bridges configured MCP servers into the Sage Tool catalog and executor."
     )
 
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return {
+            "durable_operation_ledger": False,
+            "supports_restart_reconciliation": False,
+            "protocol_exactly_once": False,
+        }
+
     def __init__(
         self,
         servers: tuple[McpServerConfig, ...],
@@ -332,56 +340,25 @@ class McpToolPlugin:
                     future.exception()
             raise error from exc
         else:
-            response_bytes = len(
-                json.dumps(
-                    _dump(response),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    default=str,
-                ).encode("utf-8")
-            )
-            result_truncated = response_bytes > server.max_result_bytes
-            content = (
-                (
-                    TextBlock(
-                        text=(
-                            "MCP result omitted because it exceeded the configured "
-                            f"{server.max_result_bytes}-byte limit."
-                        )
-                    ),
+            try:
+                result = self._project_result(call, server, remote_name, response)
+            except Exception as exc:
+                error = self._provider_error(
+                    "mcp.result_invalid",
+                    server,
+                    exc,
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    metadata={
+                        "mcp_result_received": True,
+                        "tool_result_received": True,
+                    },
                 )
-                if result_truncated
-                else self._content(response)
-            )
-            result = ToolExecutionResult(
-                tool_call_id=call.tool_call_id,
-                operation_id=call.operation_id,
-                content=content,
-                error=(
-                    RuntimeErrorInfo(
-                        code="mcp.tool_error",
-                        category=ErrorCategory.PROVIDER_PERMANENT,
-                        message=self._error_text(response)[:4096],
-                        safe_to_resume=True,
-                        metadata={
-                            "server": server.name,
-                            "tool": remote_name,
-                            "mcp_result_received": True,
-                            "tool_result_received": True,
-                        },
-                    )
-                    if bool(_value(response, "isError", False))
-                    else None
-                ),
-                metadata={
-                    "mcp_server": server.name,
-                    "mcp_tool": remote_name,
-                    "mcp_result_received": True,
-                    "tool_result_received": True,
-                    "mcp_result_truncated": result_truncated,
-                    "mcp_result_size_bytes": response_bytes,
-                },
-            )
+                async with self._lock:
+                    self._failures[call.idempotency_key] = error.info
+                    if not future.done():
+                        future.set_exception(error)
+                        future.exception()
+                raise error from exc
             async with self._lock:
                 self._results[call.idempotency_key] = result
                 if not future.done():
@@ -391,6 +368,64 @@ class McpToolPlugin:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._operation_keys.pop(call.operation_id, None)
+
+    def _project_result(
+        self,
+        call: ToolCall,
+        server: McpServerConfig,
+        remote_name: str,
+        response: Any,
+    ) -> ToolExecutionResult:
+        response_bytes = len(
+            json.dumps(
+                _dump(response),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+        result_truncated = response_bytes > server.max_result_bytes
+        content = (
+            (
+                TextBlock(
+                    text=(
+                        "MCP result omitted because it exceeded the configured "
+                        f"{server.max_result_bytes}-byte limit."
+                    )
+                ),
+            )
+            if result_truncated
+            else self._content(response)
+        )
+        return ToolExecutionResult(
+            tool_call_id=call.tool_call_id,
+            operation_id=call.operation_id,
+            content=content,
+            error=(
+                RuntimeErrorInfo(
+                    code="mcp.tool_error",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message=self._error_text(response)[:4096],
+                    safe_to_resume=True,
+                    metadata={
+                        "server": server.name,
+                        "tool": remote_name,
+                        "mcp_result_received": True,
+                        "tool_result_received": True,
+                    },
+                )
+                if bool(_value(response, "isError", False))
+                else None
+            ),
+            metadata={
+                "mcp_server": server.name,
+                "mcp_tool": remote_name,
+                "mcp_result_received": True,
+                "tool_result_received": True,
+                "mcp_result_truncated": result_truncated,
+                "mcp_result_size_bytes": response_bytes,
+            },
+        )
 
     async def release_run(self, run_id: str) -> None:
         """Release terminal Run state without disturbing in-flight calls."""

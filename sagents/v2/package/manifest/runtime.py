@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -24,6 +24,10 @@ CapabilityBinding = CapabilitySelection | tuple[CapabilitySelection, ...]
 
 class RuntimeConfig(StrictModel):
     preset: Identifier = "standard"
+    deployment_profile: Literal["controlled_host", "distributed"] = "controlled_host"
+    plugin_trust_policy: Literal["trusted_declared", "built_in_only"] = (
+        "trusted_declared"
+    )
     capabilities: dict[Identifier, CapabilityBinding] = Field(default_factory=dict)
     # Operational guarantees are requirements, not documentation.  The
     # builder fails closed when the selected provider cannot prove each value.

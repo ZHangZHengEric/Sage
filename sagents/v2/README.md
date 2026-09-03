@@ -234,6 +234,39 @@ policy and is not inferred from the Agent mode.
 
 ## Persistence and hosting
 
+`runtime.deployment_profile` defaults to `controlled_host`. Selecting
+`distributed` is an executable admission policy, not a label: Builder requires
+multi-process Session writes and subscriptions, a transactional outbox,
+distributed Scheduler claims with atomic fencing, a restart-durable JobRuntime,
+a Tool executor with a durable operation ledger and restart reconciliation, and
+durable Artifact and Package stores. The built-in local providers do not satisfy
+that profile; distributed Artifact/Package stores must also be shared across
+processes, and the Package registry must verify signatures. A distributed manifest
+therefore fails during composition until the host supplies server-grade plugins.
+
+`controlled_host` does not mean single-conversation. One long-lived
+`SAgentApplication` runs many Sessions and Runs asynchronously through a bounded
+worker pool; `execution.scheduler.config.max_concurrent_runs` and
+`max_concurrent_runs_per_tenant` provide process-wide and tenant quotas. Sandbox
+isolation is an independent Host concern and is not required merely to serve
+concurrent conversations. Reuse the Application instead of building one per
+request.
+
+Extension scope controls lifetime and ownership, not serialization. Process-,
+tenant-, and agent-scoped providers can receive overlapping calls from many Runs;
+plugins must keep shared state concurrency-safe and avoid holding locks across
+model, network, subprocess, or other upstream I/O. A provider that cannot do so
+must use Run scope.
+
+`runtime.plugin_trust_policy` defaults to `trusted_declared`, which means the
+host accepts responsibility for every explicitly declared Python plugin.
+`built_in_only` rejects non-built-in extensions before an installed entry point
+is imported and also rejects pre-registered external providers during planning.
+Built-in trust comes from the Host's official registry provenance; an extension
+cannot become trusted by setting `descriptor.built_in` itself. This is a code
+admission boundary, not a configuration sandbox: hosts must still treat plugin
+configuration such as MCP stdio commands and remote endpoints as privileged.
+
 The default `FilesystemSessionStore` v4 keeps each Session under the configured
 runtime root. Its typed, checksummed aggregate plus discriminated mutation
 journal are authoritative; readable event, run, checkpoint, and derived files

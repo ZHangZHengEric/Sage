@@ -209,6 +209,42 @@ def test_every_builtin_protocol_advertises_the_probe_contract_version():
     }
 
 
+@pytest.mark.parametrize(
+    "provider",
+    [
+        OpenAIResponsesModelProvider(
+            OpenAIResponsesConfig(
+                model="gpt-test",
+                capabilities=CAPABILITIES,
+                extra_body={"input": "shadow-input"},
+            ),
+            client=object(),
+        ),
+        AnthropicMessagesModelProvider(
+            AnthropicMessagesConfig(
+                model="claude-test",
+                capabilities=CAPABILITIES,
+                extra_body={"messages": []},
+            ),
+            client=object(),
+        ),
+    ],
+)
+def test_provider_extra_body_cannot_override_host_owned_fields(provider):
+    request = ModelRequest(
+        request_id="request_1",
+        run_id="run_1",
+        model_binding="primary",
+        messages=(ModelMessage(role="user", content=(TextBlock(text="hello"),)),),
+    )
+
+    with pytest.raises(SageV2Error) as conflict:
+        provider.diagnostic_request(request)
+
+    assert conflict.value.info.code == "model.extra_body_conflict"
+    assert conflict.value.info.metadata["side_effect_state"] == "not_applied"
+
+
 def test_chat_plugin_reuses_its_recorded_image_and_token_dialect():
     profile = ModelCapabilityProfile(
         plugin_id="sage.model.openai-chat-completions",

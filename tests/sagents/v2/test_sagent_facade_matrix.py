@@ -75,6 +75,76 @@ async def test_run_stream_returns_handle_and_individual_canonical_events_to_term
 
 
 @pytest.mark.asyncio
+async def test_one_application_runs_one_hundred_conversations_asynchronously():
+    runtime = ephemeral_runtime()
+    scheduler = InMemoryScheduler()
+    dispatcher = LocalWorkerDispatcher(
+        scheduler,
+        max_concurrent_runs=8,
+        max_concurrent_runs_per_tenant=8,
+    )
+    release = asyncio.Event()
+    capacity_reached = asyncio.Event()
+    active = 0
+    peak = 0
+
+    class Driver:
+        async def execute(self, run_id, context):
+            nonlocal active, peak
+            run = await runtime.get_run(run_id)
+            run = await runtime.start_execution(
+                run_id=run_id,
+                expected_revision=run.revision,
+                context=context,
+                idempotency_key=f"parallel-start:{run_id}",
+            )
+            active += 1
+            peak = max(peak, active)
+            if active == 8:
+                capacity_reached.set()
+            try:
+                await release.wait()
+                return await runtime.complete_run(
+                    run_id=run_id,
+                    expected_revision=run.revision,
+                    context=context,
+                    idempotency_key=f"parallel-complete:{run_id}",
+                )
+            finally:
+                active -= 1
+
+        async def resume(self, run_id, context):
+            raise AssertionError("not used")
+
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=lambda run_id: Driver(),
+        dispatcher=dispatcher,
+    )
+    streams = await asyncio.gather(
+        *(
+            agent.run_stream(
+                command(f"parallel-{index}").model_copy(
+                    update={"session_id": f"parallel-session-{index}"}
+                ),
+                CONTEXT,
+            )
+            for index in range(100)
+        )
+    )
+    await asyncio.wait_for(capacity_reached.wait(), timeout=2)
+    assert peak == 8
+    release.set()
+    snapshots = await asyncio.wait_for(
+        asyncio.gather(*(stream.wait() for stream in streams)), timeout=5
+    )
+    assert len(snapshots) == 100
+    assert all(snapshot.state == RunState.COMPLETED for snapshot in snapshots)
+    assert len({snapshot.session_id for snapshot in snapshots}) == 100
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
 async def test_detach_does_not_cancel_or_suspend_the_run():
     runtime = ephemeral_runtime()
     release = asyncio.Event()
@@ -258,6 +328,9 @@ async def test_terminal_driver_cleanup_failure_does_not_replace_completed_result
     runtime = ephemeral_runtime()
 
     class CleanupFailureDriver:
+        def __init__(self):
+            self.close_calls = 0
+
         async def execute(self, run_id, context):
             run = await runtime.get_run(run_id)
             run = await runtime.start_execution(
@@ -277,11 +350,14 @@ async def test_terminal_driver_cleanup_failure_does_not_replace_completed_result
             raise AssertionError("not used")
 
         async def close(self):
-            raise OSError("cleanup unavailable")
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise OSError("cleanup unavailable")
 
+    driver = CleanupFailureDriver()
     agent = SAgent(
         runtime=runtime,
-        driver_factory=lambda run_id: CleanupFailureDriver(),
+        driver_factory=lambda run_id: driver,
     )
     stream = await agent.run_stream(command("cleanup-failure"), CONTEXT)
 
@@ -289,7 +365,10 @@ async def test_terminal_driver_cleanup_failure_does_not_replace_completed_result
 
     assert result.state == RunState.COMPLETED
     assert (await runtime.get_run(result.run_id)).state == RunState.COMPLETED
+    assert agent._drivers == {result.run_id: driver}
+    await agent.close()
     assert agent._drivers == {}
+    assert driver.close_calls == 2
 
 
 @pytest.mark.asyncio
