@@ -18,6 +18,7 @@ from sagents.v2.runtime.extensions.contracts import (
     StopReason,
 )
 from sagents.v2.runtime.extensions.host import ExtensionHost
+from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.extensions.scope import ExtensionStopError
 
 
@@ -176,6 +177,94 @@ def test_missing_required_fails_but_missing_optional_is_ignored():
     assert missing.value.info.code == "extension.capability_missing"
     graph = host.resolve((requirement("telemetry", optional=True),))
     assert graph.plugin_ids == ()
+
+
+def test_optional_requirement_cannot_mask_same_required_requirement():
+    host = ExtensionHost()
+
+    with pytest.raises(SageV2Error) as missing:
+        host.resolve(
+            (
+                requirement("telemetry", optional=True),
+                requirement("telemetry"),
+            )
+        )
+
+    assert missing.value.info.code == "extension.capability_missing"
+
+
+def test_incompatible_requirements_cannot_resolve_two_non_multi_provider_keys():
+    host = ExtensionHost()
+    first = plugin("model_v1", "model", api="1")
+    second = plugin("model_v2", "model", api="2")
+    host.register(first.registration)
+    host.register(second.registration)
+
+    with pytest.raises(SageV2Error) as conflict:
+        host.resolve((requirement("model", "1"), requirement("model", "2")))
+
+    assert conflict.value.info.code == "extension.provider_key_conflict"
+    assert first.starts == 0
+    assert second.starts == 0
+
+
+def test_invalid_capability_version_is_a_typed_resolution_error():
+    host = ExtensionHost()
+    host.register(plugin("provider", "model").registration)
+
+    with pytest.raises(SageV2Error) as invalid:
+        host.resolve((requirement("model", "  "),))
+
+    assert invalid.value.info.code == "extension.capability_version_invalid"
+
+
+def test_builtin_only_host_rejects_external_provider_before_start():
+    external = plugin("external", "model")
+    host = ExtensionHost(built_in_only=True)
+    host.register(external.registration)
+
+    with pytest.raises(SageV2Error) as rejected:
+        host.plan((requirement("model"),))
+
+    assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
+    assert external.starts == 0
+
+
+def test_builtin_only_uses_host_provenance_not_plugin_self_report():
+    spoofed = plugin("external", "model")
+    spoofed.descriptor = spoofed.descriptor.model_copy(update={"built_in": True})
+    host = ExtensionHost(built_in_only=True)
+    host.register(spoofed.registration)
+
+    with pytest.raises(SageV2Error) as rejected:
+        host.plan((requirement("model"),))
+
+    assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
+    assert spoofed.starts == 0
+    assert host.registry.inventory()[0]["built_in"] is False
+
+
+def test_builtin_only_accepts_host_registered_official_plugin():
+    host = ExtensionHost(builtin_extension_registry(), built_in_only=True)
+
+    plan = host.plan((requirement("artifact.store"),))
+
+    assert plan.graph.plugin_ids == ("sage.artifact.ephemeral",)
+
+
+@pytest.mark.asyncio
+async def test_builtin_only_host_rejects_plan_created_by_less_restrictive_host():
+    external = plugin("external", "model")
+    unrestricted = ExtensionHost()
+    unrestricted.register(external.registration)
+    plan = unrestricted.plan((requirement("model"),))
+    restricted = ExtensionHost(unrestricted.registry, built_in_only=True)
+
+    with pytest.raises(SageV2Error) as rejected:
+        await restricted.open_scope(context(), plan)
+
+    assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
+    assert external.starts == 0
 
 
 def test_ambiguous_single_provider_requires_explicit_selection():
@@ -342,6 +431,160 @@ async def test_hierarchy_opens_async_cross_scope_dependencies_and_owns_them():
 
 
 @pytest.mark.asyncio
+async def test_hierarchy_reuses_matching_parent_instead_of_duplicating_process_scope():
+    process_store = plugin(
+        "process_store",
+        "event_store",
+        scopes=(ExtensionScope.PROCESS,),
+    )
+    run_loop = plugin(
+        "run_loop",
+        "agent_loop",
+        requires=(requirement("event_store"),),
+        scopes=(ExtensionScope.RUN,),
+    )
+    host = ExtensionHost()
+    host.register(process_store.registration)
+    host.register(run_loop.registration)
+    process_plan = host.plan(
+        (requirement("event_store"),),
+        scope_overrides={"process_store": ExtensionScope.PROCESS},
+    )
+    parent = await host.open_scope(context(ExtensionScope.PROCESS), process_plan)
+    agent_parent = await host.open_scope(
+        ExtensionScopeContext(
+            scope=ExtensionScope.AGENT,
+            scope_id="agent-parent",
+            tenant_id="tenant_1",
+            agent_id="agent_1",
+        ),
+        host.plan(()),
+        parent=parent,
+    )
+    run_plan = host.plan(
+        (requirement("agent_loop"),),
+        scope_overrides={
+            "process_store": ExtensionScope.PROCESS,
+            "run_loop": ExtensionScope.RUN,
+        },
+    )
+
+    handle = await host.open_scope_hierarchy(context(), run_plan, parent=agent_parent)
+
+    assert process_store.starts == 1
+    assert run_loop.dependencies_seen == {
+        CapabilityKey(capability="event_store"): process_store.value
+    }
+    await handle.close()
+    assert process_store.stops == []
+    await agent_parent.close()
+    await parent.close()
+    assert process_store.stops == [StopReason.SCOPE_CLOSED]
+
+
+@pytest.mark.asyncio
+async def test_hierarchy_returns_non_owning_leaf_when_parent_has_every_plugin():
+    process_store = plugin(
+        "process_store",
+        "event_store",
+        scopes=(ExtensionScope.PROCESS,),
+    )
+    host = ExtensionHost()
+    host.register(process_store.registration)
+    plan = host.plan(
+        (requirement("event_store"),),
+        scope_overrides={"process_store": ExtensionScope.PROCESS},
+    )
+    parent = await host.open_scope(context(ExtensionScope.PROCESS), plan)
+
+    handle = await host.open_scope_hierarchy(context(), plan, parent=parent)
+
+    assert handle.context.scope == ExtensionScope.RUN
+    assert handle.providers.require("event_store") is process_store.value
+    await handle.close()
+    assert process_store.stops == []
+    await parent.close()
+    assert process_store.stops == [StopReason.SCOPE_CLOSED]
+
+
+@pytest.mark.asyncio
+async def test_hierarchy_fails_closed_when_parent_lacks_longer_lived_dependency():
+    process_store = plugin(
+        "process_store",
+        "event_store",
+        scopes=(ExtensionScope.PROCESS,),
+    )
+    run_loop = plugin(
+        "run_loop",
+        "agent_loop",
+        requires=(requirement("event_store"),),
+        scopes=(ExtensionScope.RUN,),
+    )
+    host = ExtensionHost()
+    host.register(process_store.registration)
+    host.register(run_loop.registration)
+    parent = await host.open_scope(context(ExtensionScope.PROCESS), host.plan(()))
+    run_plan = host.plan(
+        (requirement("agent_loop"),),
+        scope_overrides={
+            "process_store": ExtensionScope.PROCESS,
+            "run_loop": ExtensionScope.RUN,
+        },
+    )
+
+    with pytest.raises(SageV2Error) as incomplete:
+        await host.open_scope_hierarchy(context(), run_plan, parent=parent)
+
+    assert incomplete.value.info.code == "extension.parent_scope_incomplete"
+    assert process_store.starts == 0
+    assert run_loop.starts == 0
+    await parent.close()
+
+
+@pytest.mark.asyncio
+async def test_hierarchy_checks_started_parent_instances_not_only_plan_ids():
+    process_store = plugin(
+        "process_store",
+        "event_store",
+        scopes=(ExtensionScope.PROCESS, ExtensionScope.RUN),
+    )
+    run_loop = plugin(
+        "run_loop",
+        "agent_loop",
+        requires=(requirement("event_store"),),
+        scopes=(ExtensionScope.RUN,),
+    )
+    host = ExtensionHost()
+    host.register(process_store.registration)
+    host.register(run_loop.registration)
+    misleading_parent_plan = host.plan(
+        (requirement("agent_loop"),),
+        scope_overrides={
+            "process_store": ExtensionScope.RUN,
+            "run_loop": ExtensionScope.RUN,
+        },
+    )
+    parent = await host.open_scope(
+        context(ExtensionScope.PROCESS), misleading_parent_plan
+    )
+    run_plan = host.plan(
+        (requirement("agent_loop"),),
+        scope_overrides={
+            "process_store": ExtensionScope.PROCESS,
+            "run_loop": ExtensionScope.RUN,
+        },
+    )
+
+    with pytest.raises(SageV2Error) as incomplete:
+        await host.open_scope_hierarchy(context(), run_plan, parent=parent)
+
+    assert incomplete.value.info.code == "extension.parent_scope_incomplete"
+    assert process_store.starts == 0
+    assert run_loop.starts == 0
+    await parent.close()
+
+
+@pytest.mark.asyncio
 async def test_scope_hierarchy_exposes_only_lifetime_appropriate_identities():
     process_store = plugin(
         "process_store",
@@ -433,6 +676,27 @@ async def test_start_failure_rolls_back_failing_and_started_plugins():
 
 
 @pytest.mark.asyncio
+async def test_async_start_failure_reports_rollback_failure_without_masking_cause():
+    failing = plugin("failing", "runtime", fail=True)
+
+    async def fail_stop(reason):
+        del reason
+        raise OSError("cleanup unavailable")
+
+    failing.stop = fail_stop
+    host = ExtensionHost()
+    host.register(failing.registration)
+
+    with pytest.raises(RuntimeError, match="failed:failing") as started:
+        await host.open_scope(context(), host.plan((requirement("runtime"),)))
+
+    assert any(
+        "rollback also failed" in note and "cleanup unavailable" in note
+        for note in started.value.__notes__
+    )
+
+
+@pytest.mark.asyncio
 async def test_start_cancellation_rolls_back_failing_and_started_plugins():
     dependency = plugin("dependency", "store")
     cancelling = plugin(
@@ -463,6 +727,34 @@ async def test_start_cancellation_rolls_back_failing_and_started_plugins():
         "stop:cancelling:start_failed",
         "stop:dependency:start_failed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_scope_close_cancellation_preserves_resource_for_retry():
+    resource = plugin("resource", "store")
+    attempts = 0
+
+    async def cancel_once(reason):
+        nonlocal attempts
+        del reason
+        attempts += 1
+        if attempts == 1:
+            raise asyncio.CancelledError
+
+    resource.stop = cancel_once
+    host = ExtensionHost()
+    host.register(resource.registration)
+    handle = await host.open_scope(context(), host.plan((requirement("store"),)))
+
+    with pytest.raises(asyncio.CancelledError):
+        await handle.close()
+
+    assert handle._closed is False
+    assert len(handle._started) == 1
+    await handle.close()
+    assert handle._closed is True
+    assert handle._started == []
+    assert attempts == 2
 
 
 @pytest.mark.asyncio

@@ -204,16 +204,15 @@ class RoutedToolExecutor:
         return await executor.execute(call, context)
 
     async def release_run(self, run_id: str) -> None:
-        for executor in dict.fromkeys(self._routes.values()):
-            release = getattr(executor, "release_run", None)
-            if callable(release):
-                result = release(run_id)
-                if inspect.isawaitable(result):
-                    await result
+        errors = await _release_run_from_providers(
+            tuple(dict.fromkeys(self._routes.values())), run_id
+        )
         for operation_id, owner_run_id in tuple(self._operation_run_ids.items()):
             if owner_run_id == run_id:
                 self._operation_run_ids.pop(operation_id, None)
                 self._operation_routes.pop(operation_id, None)
+        if errors:
+            raise errors[0]
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (
@@ -292,16 +291,15 @@ class CompositeToolExecutor:
         )
 
     async def release_run(self, run_id: str) -> None:
-        for executor in dict.fromkeys(self._executors):
-            release = getattr(executor, "release_run", None)
-            if callable(release):
-                result = release(run_id)
-                if inspect.isawaitable(result):
-                    await result
+        errors = await _release_run_from_providers(
+            tuple(dict.fromkeys(self._executors)), run_id
+        )
         for operation_id, owner_run_id in tuple(self._operation_run_ids.items()):
             if owner_run_id == run_id:
                 self._operation_run_ids.pop(operation_id, None)
                 self._operation_routes.pop(operation_id, None)
+        if errors:
+            raise errors[0]
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (
@@ -348,3 +346,22 @@ class CompositeToolExecutor:
         return pending or ReconcileResult(
             operation_id=call.operation_id, state=ReconcileState.UNKNOWN
         )
+
+
+async def _release_run_from_providers(
+    providers: tuple[ToolExecutor, ...], run_id: str
+) -> tuple[Exception, ...]:
+    """Attempt every ordinary cleanup while preserving cancellation semantics."""
+
+    errors: list[Exception] = []
+    for provider in providers:
+        release = getattr(provider, "release_run", None)
+        if not callable(release):
+            continue
+        try:
+            result = release(run_id)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            errors.append(exc)
+    return tuple(errors)

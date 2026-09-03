@@ -20,6 +20,56 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.model.contracts import ModelToolCall
 
 
+def validate_extra_body(
+    extra_body: Mapping[str, Any],
+    *,
+    reserved_fields: frozenset[str],
+    provider: str,
+) -> None:
+    """Prevent provider extensions from replacing host-owned request fields."""
+
+    conflicts = sorted(set(extra_body).intersection(reserved_fields))
+    if not conflicts:
+        return
+    raise SageV2Error(
+        RuntimeErrorInfo(
+            code="model.extra_body_conflict",
+            category=ErrorCategory.VALIDATION,
+            message=(
+                f"{provider} extra_body cannot override host-owned fields: "
+                + ", ".join(conflicts)
+            ),
+            safe_to_resume=True,
+            metadata={
+                "provider": provider,
+                "fields": conflicts,
+                "side_effect_state": "not_applied",
+            },
+        )
+    )
+
+
+def stream_incomplete_error(*, provider: str, response_started: bool) -> SageV2Error:
+    """Report a transport EOF that arrived before the provider terminal event."""
+
+    return SageV2Error(
+        RuntimeErrorInfo(
+            code="model.stream_incomplete",
+            category=ErrorCategory.PROVIDER_TRANSIENT,
+            message=(
+                f"{provider} stream ended before a terminal response event was "
+                "received"
+            ),
+            retryable=not response_started,
+            safe_to_resume=True,
+            metadata={
+                "provider": provider,
+                "response_started": response_started,
+            },
+        )
+    )
+
+
 def wire_value(value: Any, name: str, default: Any = None) -> Any:
     """Read one field from an SDK object or a decoded JSON mapping."""
 

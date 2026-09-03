@@ -123,10 +123,15 @@ def builtin_extension_registry() -> ExtensionRegistry:
 def register_official_plugins(registry: ExtensionRegistry) -> None:
     """Register every first-party host-selectable plugin."""
 
+    existing = {value.descriptor.plugin_id for value in registry.registrations()}
     _register_session_and_memory(registry)
     _register_tools_skills_and_flow(registry)
     _register_infrastructure(registry)
     _register_model_protocols(registry)
+    added = {
+        value.descriptor.plugin_id for value in registry.registrations()
+    }.difference(existing)
+    registry.trust_builtins(added)
 
 
 def _register_infrastructure(registry: ExtensionRegistry) -> None:
@@ -793,6 +798,10 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "artifact.store",
         lambda context, dependencies: InMemoryArtifactStore(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.RUN},
+        capabilities={
+            "durable_across_process_restart": False,
+            "shared_across_processes": False,
+        },
     )
     _one(
         registry,
@@ -800,6 +809,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "package.registry",
         lambda context, dependencies: InMemoryAgentPackageRegistry(),
         scopes={ExtensionScope.PROCESS},
+        capabilities={
+            "durable_across_process_restart": False,
+            "supports_package_signatures": False,
+            "shared_across_processes": False,
+        },
     )
 
     for adapter, config_schema in (
@@ -853,6 +867,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                         "session_factory": {},
                     },
                     "additionalProperties": False,
+                },
+                capabilities={
+                    "durable_operation_ledger": False,
+                    "supports_restart_reconciliation": False,
+                    "protocol_exactly_once": False,
                 },
                 built_in=True,
             ),

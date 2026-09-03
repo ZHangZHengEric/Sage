@@ -61,6 +61,7 @@ class ExtensionScopeHandle:
                     await result
             except BaseException as exc:
                 if not isinstance(exc, Exception):
+                    self._started.append(value)
                     raise
                 errors.append(exc)
                 failed_started.append(value)
@@ -73,6 +74,7 @@ class ExtensionScopeHandle:
                 await handle.close(reason)
             except BaseException as exc:
                 if not isinstance(exc, Exception):
+                    self._owned_ancestors = (*self._owned_ancestors, handle)
                     raise
                 if isinstance(exc, ExtensionStopError):
                     errors.extend(exc.errors)

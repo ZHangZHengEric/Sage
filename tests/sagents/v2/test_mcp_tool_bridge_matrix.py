@@ -64,6 +64,11 @@ async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates():
         ),
         session_factory=factory,
     )
+    assert bridge.capabilities == {
+        "durable_operation_ledger": False,
+        "supports_restart_reconciliation": False,
+        "protocol_exactly_once": False,
+    }
     tools = await bridge.list_tools(run_id="run_1")
 
     assert [value.name for value in tools] == ["mcp_drive_search_files"]
@@ -552,6 +557,68 @@ async def test_mcp_concurrent_failure_is_typed_and_dispatched_once():
     assert session.calls == [("search files", {"query": "report"})]
     assert all(isinstance(value, SageV2Error) for value in failures)
     assert {value.info.code for value in failures} == {"mcp.result_not_received"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_invalid_received_result_wakes_all_waiters_without_redispatch():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            self.calls.append((name, arguments))
+            started.set()
+            await release.wait()
+            return {"content": [{"type": "text", "text": "found"}]}
+
+    class InvalidProjectionBridge(McpToolPlugin):
+        @staticmethod
+        def _content(response):
+            del response
+            raise ValueError("invalid result projection")
+
+    session = BlockingSession()
+
+    @asynccontextmanager
+    async def factory(config):
+        del config
+        yield session
+
+    bridge = InvalidProjectionBridge(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    tool = (await bridge.list_tools(run_id="run_1"))[0]
+    call = ToolCall(
+        tool_call_id="call_1",
+        tool_name=tool.name,
+        arguments={"query": "report"},
+        operation_id="operation_1",
+        idempotency_key="invalid-result",
+        owner_run_id="run_1",
+    )
+
+    first = asyncio.create_task(bridge.execute(call, CONTEXT))
+    await started.wait()
+    second = asyncio.create_task(bridge.execute(call, CONTEXT))
+    await asyncio.sleep(0)
+    release.set()
+    failures = await asyncio.wait_for(
+        asyncio.gather(first, second, return_exceptions=True), timeout=1
+    )
+
+    assert session.calls == [("search files", {"query": "report"})]
+    assert all(isinstance(value, SageV2Error) for value in failures)
+    assert {value.info.code for value in failures} == {"mcp.result_invalid"}
+    assert all(
+        value.info.category == ErrorCategory.PROVIDER_PERMANENT
+        and value.info.metadata["mcp_result_received"] is True
+        for value in failures
+    )
+    with pytest.raises(SageV2Error) as replayed:
+        await bridge.execute(call, CONTEXT)
+    assert replayed.value.info.code == "mcp.result_invalid"
+    assert session.calls == [("search files", {"query": "report"})]
 
 
 @pytest.mark.asyncio

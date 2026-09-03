@@ -52,9 +52,15 @@ class ExtensionCompositionPlan:
 class ExtensionHost:
     """Resolve providers once and create deterministic nested scope instances."""
 
-    def __init__(self, registry: ExtensionRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: ExtensionRegistry | None = None,
+        *,
+        built_in_only: bool = False,
+    ) -> None:
         self.registry = registry or ExtensionRegistry()
         self.resolver = ExtensionResolver(self.registry)
+        self.built_in_only = built_in_only
 
     def register(self, registration: ExtensionRegistration) -> None:
         self.registry.register(registration)
@@ -71,6 +77,7 @@ class ExtensionHost:
         scope_overrides: Mapping[str, ExtensionScope] | None = None,
     ) -> ExtensionCompositionPlan:
         graph = self.resolver.resolve(requirements, selections=selections)
+        self._validate_graph_trust(graph)
         supplied_configs = dict(configs or {})
         supplied_scopes = dict(scope_overrides or {})
         unknown = (set(supplied_configs) | set(supplied_scopes)) - set(graph.plugin_ids)
@@ -148,6 +155,7 @@ class ExtensionHost:
         *,
         parent: ExtensionScopeHandle | None = None,
     ) -> ExtensionScopeHandle:
+        self._validate_graph_trust(plan.graph)
         context = _normalized_scope_context(context)
         if parent is None and any(
             _SCOPE_RANK[selected_scope] < _SCOPE_RANK[context.scope]
@@ -195,6 +203,7 @@ class ExtensionHost:
                         )
                     }
                 )
+                self._validate_dependencies_available(descriptor, dependencies)
                 instance = registration.factory(plugin_context, dependencies)
                 if inspect.isawaitable(instance):
                     instance = await instance
@@ -240,13 +249,19 @@ class ExtensionHost:
                         providers[key] = provider
                 started.append(starting)
                 starting = None
-        except BaseException:
+        except BaseException as exc:
             rollback = ([starting] if starting is not None else []) + list(
                 reversed(started)
             )
             for value in rollback:
                 if value is not None:
-                    await _stop_extension(value, StopReason.START_FAILED, suppress=True)
+                    try:
+                        await _stop_extension(value, StopReason.START_FAILED)
+                    except BaseException as stop_exc:
+                        exc.add_note(
+                            "extension rollback also failed for "
+                            f"{value.registration.descriptor.plugin_id!r}: {stop_exc}"
+                        )
             raise
         return ExtensionScopeHandle(
             graph=plan.graph,
@@ -277,11 +292,28 @@ class ExtensionHost:
         if not selected_scopes:
             return await self.open_scope(context, plan, parent=parent)
         current_parent = parent
-        if current_parent is not None and any(
-            _SCOPE_RANK[scope] <= _SCOPE_RANK[current_parent.context.scope]
-            for scope in selected_scopes
-        ):
-            current_parent = None
+        if current_parent is not None:
+            parent_plugin_ids: set[str] = set()
+            ancestor = current_parent
+            while ancestor is not None:
+                parent_plugin_ids.update(
+                    value.registration.descriptor.plugin_id
+                    for value in ancestor._started
+                )
+                ancestor = ancestor.parent
+            inherited_plugin_ids = {
+                plugin_id
+                for plugin_id, scope in plan.scopes.items()
+                if _SCOPE_RANK[scope] <= _SCOPE_RANK[current_parent.context.scope]
+            }
+            missing_in_parent = inherited_plugin_ids.difference(parent_plugin_ids)
+            if missing_in_parent:
+                raise _error(
+                    "extension.parent_scope_incomplete",
+                    ErrorCategory.VALIDATION,
+                    "the supplied parent scope does not own required longer-lived "
+                    f"extensions: {sorted(missing_in_parent)}",
+                )
         created: list[ExtensionScopeHandle] = []
         try:
             for scope in selected_scopes:
@@ -307,10 +339,23 @@ class ExtensionHost:
                 )
                 created.append(handle)
                 current_parent = handle
-        except BaseException:
+        except BaseException as exc:
             for handle in reversed(created):
-                await handle.close(StopReason.START_FAILED)
+                try:
+                    await handle.close(StopReason.START_FAILED)
+                except BaseException as close_exc:
+                    exc.add_note(f"scope rollback also failed: {close_exc}")
             raise
+        if not created:
+            if current_parent is None or (
+                _SCOPE_RANK[current_parent.context.scope] >= _SCOPE_RANK[context.scope]
+            ):
+                raise _error(
+                    "extension.scope_hierarchy_invalid",
+                    ErrorCategory.VALIDATION,
+                    "extension hierarchy has no shorter-lived leaf scope to open",
+                )
+            created.append(await self.open_scope(context, plan, parent=current_parent))
         leaf = created[-1]
         leaf._owned_ancestors = tuple(created[:-1])
         return leaf
@@ -330,6 +375,7 @@ class ExtensionHost:
         they cannot be accidentally bound to a temporary event loop.
         """
 
+        self._validate_graph_trust(plan.graph)
         context = _normalized_scope_context(context)
         if parent is None and any(
             _SCOPE_RANK[selected_scope] < _SCOPE_RANK[context.scope]
@@ -373,6 +419,7 @@ class ExtensionHost:
                         )
                     }
                 )
+                self._validate_dependencies_available(descriptor, dependencies)
                 instance = registration.factory(plugin_context, dependencies)
                 if inspect.isawaitable(instance):
                     close = getattr(instance, "close", None)
@@ -482,6 +529,42 @@ class ExtensionHost:
             composition_hash=plan.composition_hash,
         )
 
+    def _validate_graph_trust(self, graph: ResolvedExtensionGraph) -> None:
+        if not self.built_in_only:
+            return
+        external = sorted(
+            plugin_id
+            for plugin_id in graph.plugin_ids
+            if not self.registry.is_trusted_builtin(plugin_id)
+        )
+        if external:
+            raise _error(
+                "extension.plugin_trust_policy_violation",
+                ErrorCategory.VALIDATION,
+                "built_in_only policy rejected external extensions: "
+                + ", ".join(external),
+            )
+
+    @staticmethod
+    def _validate_dependencies_available(descriptor, dependencies: ProviderSet) -> None:
+        missing = sorted(
+            f"{dependency.capability}:{dependency.name or '*'}"
+            for dependency in descriptor.dependencies
+            if not dependency.optional
+            and not any(
+                key.capability == dependency.capability
+                and (dependency.name is None or key.name == dependency.name)
+                for key in dependencies
+            )
+        )
+        if missing:
+            raise _error(
+                "extension.dependency_unavailable",
+                ErrorCategory.RESOURCE_LOST,
+                f"extension {descriptor.plugin_id!r} is missing resolved providers: "
+                + ", ".join(missing),
+            )
+
 
 async def _start_extension(
     started: StartedExtension,
@@ -526,25 +609,19 @@ async def _start_extension(
 async def _stop_extension(
     started: StartedExtension,
     reason: StopReason,
-    *,
-    suppress: bool = False,
 ) -> None:
-    try:
-        registration = started.registration
-        if registration.stop is not None:
-            result = registration.stop(started.instance, reason)
+    registration = started.registration
+    if registration.stop is not None:
+        result = registration.stop(started.instance, reason)
+    else:
+        stop = getattr(started.instance, "stop", None)
+        if stop is not None:
+            result = stop(reason)
         else:
-            stop = getattr(started.instance, "stop", None)
-            if stop is not None:
-                result = stop(reason)
-            else:
-                close = getattr(started.instance, "close", None)
-                result = close() if close is not None else None
-        if inspect.isawaitable(result):
-            await result
-    except Exception:
-        if not suppress:
-            raise
+            close = getattr(started.instance, "close", None)
+            result = close() if close is not None else None
+    if inspect.isawaitable(result):
+        await result
 
 
 def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:

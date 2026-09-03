@@ -36,7 +36,30 @@ from sagents.v2.contracts.items import (
     UsageSummary,
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
-from sagents.v2.model.wire import provider_error, wire_json_value, wire_value
+from sagents.v2.model.wire import (
+    provider_error,
+    stream_incomplete_error,
+    validate_extra_body,
+    wire_json_value,
+    wire_value,
+)
+
+
+_HOST_OWNED_REQUEST_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "stream",
+        "stream_options",
+        "tools",
+        "tool_choice",
+        "max_tokens",
+        "max_completion_tokens",
+        "temperature",
+        "top_p",
+        "response_format",
+    }
+)
 
 
 def default_chat_completion_token_field(
@@ -194,6 +217,11 @@ class OpenAICompatibleModelProvider:
                     "schema": request.response_schema,
                 },
             }
+        validate_extra_body(
+            self.config.extra_body,
+            reserved_fields=_HOST_OWNED_REQUEST_FIELDS,
+            provider=self.config.provider_id,
+        )
         extra_body = dict(self.config.extra_body)
         if self.config.reasoning_effort is not None:
             extra_body.setdefault("reasoning_effort", self.config.reasoning_effort)
@@ -225,6 +253,7 @@ class OpenAICompatibleModelProvider:
         observed_delta_fields: set[str] = set()
         observed_delta_field_types: dict[str, set[str]] = {}
         response_started = False
+        terminal_event_received = False
         compatibility_fallback: dict[str, Any] | None = None
         try:
             (
@@ -242,6 +271,7 @@ class OpenAICompatibleModelProvider:
                     choice_finish_reason = wire_value(choice, "finish_reason")
                     if choice_finish_reason:
                         finish_reason = str(choice_finish_reason)
+                        terminal_event_received = True
                     delta = wire_value(choice, "delta")
                     if delta is None:
                         delta = {}
@@ -309,15 +339,21 @@ class OpenAICompatibleModelProvider:
                         )
                         tool_id = wire_value(tool_delta, "id")
                         if tool_id:
-                            accumulator["id"] += str(tool_id)
+                            accumulator["id"], _ = self._merge_stream_text(
+                                accumulator["id"], str(tool_id)
+                            )
                         function = wire_value(tool_delta, "function")
                         if function is not None:
                             name = wire_value(function, "name")
                             arguments = wire_value(function, "arguments")
                             if name:
-                                accumulator["name"] += str(name)
+                                accumulator["name"], _ = self._merge_stream_text(
+                                    accumulator["name"], str(name)
+                                )
                             if arguments:
-                                accumulator["arguments"] += str(arguments)
+                                accumulator["arguments"], _ = self._merge_stream_text(
+                                    accumulator["arguments"], str(arguments)
+                                )
         except SageV2Error:
             raise
         except Exception as exc:
@@ -331,6 +367,12 @@ class OpenAICompatibleModelProvider:
                     result = closer()
                     if hasattr(result, "__await__"):
                         await result
+
+        if not terminal_event_received:
+            raise stream_incomplete_error(
+                provider=self.config.provider_id,
+                response_started=response_started,
+            )
 
         tool_calls: list[ModelToolCall] = []
         for index in sorted(tool_fragments):

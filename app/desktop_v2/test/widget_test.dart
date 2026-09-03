@@ -1852,6 +1852,10 @@ class _PlanSuspendedRunApi extends _SuspendedRunApi {
 }
 
 class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
+  _QuestionnaireSuspendedRunApi({this.source = 'questionnaire_async'});
+
+  final String? source;
+
   @override
   Future<Map<String, Object?>> getRun(String runId) async => {
     'run': {
@@ -1867,6 +1871,7 @@ class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
       'status': 'pending',
       'allowed_decisions': ['submit', 'cancel'],
       'payload': {
+        if (source != null) 'source': source,
         'title': '需要你的引导',
         'prompt': '请选择部署目标并补充说明。',
         'guidance': '回答后 Agent 会从原位置继续。',
@@ -1875,9 +1880,20 @@ class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
             'id': 'target',
             'type': 'single',
             'title': '部署目标',
+            'default': 'production',
+            'allow_other': true,
             'options': [
               {'label': '预发布', 'value': 'staging'},
               {'label': '生产', 'value': 'production'},
+            ],
+          },
+          {
+            'id': 'preserve',
+            'type': 'multiple',
+            'title': '保留内容',
+            'options': [
+              {'label': '页面结构', 'value': 'structure'},
+              {'label': '交互逻辑', 'value': 'interaction'},
             ],
           },
           {'id': 'notes', 'type': 'text', 'title': '补充说明', 'placeholder': '可选'},
@@ -3779,6 +3795,47 @@ void main() {
     );
   }
 
+  testWidgets('generic user input is not rendered as an inline questionnaire', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final conversation = _persistedSuspendedConversation();
+    conversation['pending_interaction'] = {
+      'interaction_id': 'interaction_generic_input',
+      'interaction_type': 'user_input',
+      'allowed_decisions': ['submit', 'cancel'],
+      'payload': {
+        'reason_code': 'judge.plain_text_no_progress',
+        'questions': [
+          {'id': 'direction', 'type': 'text', 'title': '接下来应该怎么做？'},
+        ],
+      },
+    };
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [conversation],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _QuestionnaireSuspendedRunApi(source: null),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byKey(const ValueKey('questionnaire-block')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('interaction-submit-submit')),
+      findsOneWidget,
+    );
+  });
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'project conversations only collapse explicitly in ${brightness.name} mode',
@@ -5138,66 +5195,98 @@ void main() {
     },
   );
 
-  testWidgets(
-    'questionnaire card renders fields and submits structured answers',
-    (tester) async {
-      tester.view.physicalSize = const Size(1200, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final conversation = _persistedSuspendedConversation();
-      conversation['pending_interaction'] = {
-        'interaction_id': 'interaction_questionnaire',
-        'interaction_type': 'user_input',
-        'allowed_decisions': ['submit', 'cancel'],
-        'payload': const {},
-      };
-      SharedPreferences.setMockInitialValues({
-        'sage.desktop_v2.conversations.v1': jsonEncode({
-          WorkspaceController.agentWorkspaceId: [conversation],
-        }),
-      });
-      final api = _QuestionnaireSuspendedRunApi();
-      final controller = WorkspaceController(
-        api: api,
-        preferencesLoader: SharedPreferences.getInstance,
-      );
-      addTearDown(controller.dispose);
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'questionnaire renders inline with Yiii controls and submits answers '
+      'in ${brightness.name} appearance',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final conversation = _persistedSuspendedConversation();
+        conversation['pending_interaction'] = {
+          'interaction_id': 'interaction_questionnaire',
+          'interaction_type': 'questionnaire',
+          'allowed_decisions': ['submit', 'cancel'],
+          'payload': const {},
+        };
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [conversation],
+          }),
+        });
+        final api = _QuestionnaireSuspendedRunApi();
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
 
-      await tester.pumpWidget(SageDesktopV2App(controller: controller));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.text('请选择部署目标并补充说明。'), findsOneWidget);
-      expect(find.text('回答后 Agent 会从原位置继续。'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('interaction-question-target')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('interaction-question-notes')),
-        findsOneWidget,
-      );
+        expect(find.text('需要你的引导'), findsOneWidget);
+        expect(find.text('请选择部署目标并补充说明。'), findsNothing);
+        expect(find.text('回答后 Agent 会从原位置继续。'), findsNothing);
+        expect(find.text('可选'), findsNothing);
+        expect(find.text('其他'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('thread-message-list')),
+            matching: find.byKey(const ValueKey('questionnaire-block')),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('interaction-question-notes')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('interaction-submit-cancel')),
+          findsNothing,
+        );
+        expect(find.byType(DropdownButtonFormField<String>), findsNothing);
 
-      await tester.tap(
-        find.byKey(const ValueKey('interaction-question-target')),
-      );
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.text('预发布').last);
-      await tester.enterText(
-        find.byKey(const ValueKey('interaction-question-notes')),
-        '先进行冒烟验证',
-      );
-      await tester.tap(find.byKey(const ValueKey('interaction-submit-submit')));
-      await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(
+          find.byKey(
+            const ValueKey('interaction-question-target-option-staging'),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 140));
+        await tester.tap(
+          find.byKey(
+            const ValueKey('interaction-question-preserve-option-structure'),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 140));
+        await tester.tap(
+          find.byKey(
+            const ValueKey('interaction-question-preserve-option-interaction'),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 140));
+        await tester.enterText(
+          find.byKey(const ValueKey('interaction-question-notes')),
+          '先进行冒烟验证',
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('interaction-submit-submit')),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
 
-      expect(api.repliedDecision, 'submit');
-      expect(api.repliedPayload?['answers'], {
-        'target': 'staging',
-        'notes': '先进行冒烟验证',
-      });
-    },
-  );
+        expect(api.repliedDecision, 'submit');
+        expect(api.repliedPayload?['answers'], {
+          'target': 'staging',
+          'preserve': ['structure', 'interaction'],
+          'notes': '先进行冒烟验证',
+        });
+      },
+    );
+  }
 
   for (final brightness in Brightness.values) {
     testWidgets(

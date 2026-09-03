@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable
 
 from sagents.v2.contracts.common import utc_now
@@ -34,6 +35,14 @@ class InMemoryAgentPackageRegistry:
     plugin_id = "sage.package-registry.ephemeral"
     name = "In-memory AgentPackage registry"
     description = "Process-local AgentPackage inventory without restart durability."
+
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return {
+            "durable_across_process_restart": False,
+            "supports_package_signatures": False,
+            "shared_across_processes": False,
+        }
 
     def __init__(self, *, resolver=None, clock=utc_now) -> None:
         self._resolver = resolver or CompositionResolver()
@@ -164,9 +173,23 @@ class InMemoryAgentPackageRegistry:
                     "package.not_tested",
                     "package must have a test report before publish",
                 )
-            required_rate = float(
-                current.manifest.tests.gates.get("required_pass_rate", 1.0)
+            raw_required_rate = current.manifest.tests.gates.get(
+                "required_pass_rate", 1.0
             )
+            try:
+                if isinstance(raw_required_rate, bool):
+                    raise ValueError
+                required_rate = float(raw_required_rate)
+            except (TypeError, ValueError) as exc:
+                raise self._error(
+                    "package.test_gate_invalid",
+                    "required_pass_rate must be a finite number between 0 and 1",
+                ) from exc
+            if not math.isfinite(required_rate) or not 0 <= required_rate <= 1:
+                raise self._error(
+                    "package.test_gate_invalid",
+                    "required_pass_rate must be a finite number between 0 and 1",
+                )
             total = current.test_report.passed_count + current.test_report.failed_count
             pass_rate = current.test_report.passed_count / total if total else 0.0
             if not current.test_report.passed or pass_rate < required_rate:

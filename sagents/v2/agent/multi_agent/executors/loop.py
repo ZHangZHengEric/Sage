@@ -205,17 +205,27 @@ class LoopChildRunExecutor:
         return loop
 
     async def _release_run(self, run_id):
-        self._loops_by_run.pop(run_id, None)
-        resource = self._resources_by_run.pop(run_id, None)
+        loop = self._loops_by_run.get(run_id)
+        resource = self._resources_by_run.get(run_id)
         closer = getattr(resource, "close", None)
         if closer is not None:
             closed = closer()
             if inspect.isawaitable(closed):
                 await closed
+        if self._loops_by_run.get(run_id) is loop:
+            self._loops_by_run.pop(run_id, None)
+        if self._resources_by_run.get(run_id) is resource:
+            self._resources_by_run.pop(run_id, None)
 
     async def close(self) -> None:
+        errors: list[Exception] = []
         for run_id in tuple(self._resources_by_run):
-            await self._release_run(run_id)
+            try:
+                await self._release_run(run_id)
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
     async def _settle_crashed_child(self, run_id, context, message):
         """Ensure a created child Run never remains active after its driver exits."""

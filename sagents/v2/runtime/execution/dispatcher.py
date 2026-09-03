@@ -69,6 +69,8 @@ class LocalWorkerDispatcher:
             max_active_per_tenant=max_concurrent_runs_per_tenant
         )
         self._recovery_agent = None
+        self._lifecycle = asyncio.Condition()
+        self._submissions_inflight = 0
         self._closed = False
 
     def attach_recovery_agent(self, agent, *, replace: bool = False) -> None:
@@ -83,6 +85,10 @@ class LocalWorkerDispatcher:
         self._recovery_agent = agent
 
     async def start(self, *, recover: bool = True) -> None:
+        async with self._lifecycle:
+            await self._start_locked(recover=recover)
+
+    async def _start_locked(self, *, recover: bool) -> None:
         if self._closed:
             raise RuntimeError("local worker dispatcher is closed")
         self._workers = [worker for worker in self._workers if not worker.done()]
@@ -125,21 +131,21 @@ class LocalWorkerDispatcher:
         *,
         resume: bool = False,
     ) -> asyncio.Future[RunSnapshot]:
-        if self._closed:
-            raise RuntimeError("local worker dispatcher is closed")
-        await self.start(recover=False)
-        current = self._requests.get(handle.run_id)
-        if current is not None:
-            return current.result
-        loop = asyncio.get_running_loop()
-        result: asyncio.Future[RunSnapshot] = loop.create_future()
-        request = _DispatchRequest(
-            agent=agent,
-            context=context,
-            resume=resume,
-            result=result,
-        )
-        self._requests[handle.run_id] = request
+        async with self._lifecycle:
+            await self._start_locked(recover=False)
+            current = self._requests.get(handle.run_id)
+            if current is not None:
+                return current.result
+            loop = asyncio.get_running_loop()
+            result: asyncio.Future[RunSnapshot] = loop.create_future()
+            request = _DispatchRequest(
+                agent=agent,
+                context=context,
+                resume=resume,
+                result=result,
+            )
+            self._requests[handle.run_id] = request
+            self._submissions_inflight += 1
         try:
             revision = getattr(handle, "revision", None)
             if revision is None:
@@ -147,9 +153,14 @@ class LocalWorkerDispatcher:
             await self.scheduler.submit(
                 self._work_item(handle, context, resume=resume, revision=revision)
             )
-        except Exception:
-            self._requests.pop(handle.run_id, None)
+        except BaseException:
+            async with self._lifecycle:
+                self._discard_request(handle.run_id, request)
             raise
+        finally:
+            async with self._lifecycle:
+                self._submissions_inflight -= 1
+                self._lifecycle.notify_all()
         return result
 
     async def submit_cleanup(
@@ -163,18 +174,19 @@ class LocalWorkerDispatcher:
     ) -> asyncio.Future[Any]:
         """Run one resource cleanup under the same per-Run Scheduler fence."""
 
-        if self._closed:
-            raise RuntimeError("local worker dispatcher is closed")
-        await self.start(recover=False)
-        work_id = f"cleanup-{run_id}-{generation}-{attempt}"
-        current = self._cleanup_requests.get(work_id)
-        if current is not None:
-            return current.result
-        result = asyncio.get_running_loop().create_future()
-        self._cleanup_requests[work_id] = _CleanupRequest(
-            operation=operation,
-            result=result,
-        )
+        async with self._lifecycle:
+            await self._start_locked(recover=False)
+            work_id = f"cleanup-{run_id}-{generation}-{attempt}"
+            current = self._cleanup_requests.get(work_id)
+            if current is not None:
+                return current.result
+            result = asyncio.get_running_loop().create_future()
+            request = _CleanupRequest(
+                operation=operation,
+                result=result,
+            )
+            self._cleanup_requests[work_id] = request
+            self._submissions_inflight += 1
         try:
             await self.scheduler.submit(
                 WorkItem(
@@ -189,9 +201,15 @@ class LocalWorkerDispatcher:
                     payload={"kind": "sandbox_cleanup", "generation": generation},
                 )
             )
-        except Exception:
-            self._cleanup_requests.pop(work_id, None)
+        except BaseException:
+            async with self._lifecycle:
+                if self._cleanup_requests.get(work_id) is request:
+                    self._cleanup_requests.pop(work_id, None)
             raise
+        finally:
+            async with self._lifecycle:
+                self._submissions_inflight -= 1
+                self._lifecycle.notify_all()
         return result
 
     @staticmethod
@@ -216,10 +234,13 @@ class LocalWorkerDispatcher:
         )
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        workers, self._workers = self._workers, []
+        async with self._lifecycle:
+            if self._closed:
+                return
+            self._closed = True
+            while self._submissions_inflight:
+                await self._lifecycle.wait()
+            workers, self._workers = self._workers, []
         for worker in workers:
             worker.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
@@ -361,6 +382,7 @@ class LocalWorkerDispatcher:
                     reason,
                     requeue=snapshot.state == RunState.RESUMING,
                 )
+                self._discard_request(lease.work.run_id, request)
                 if not request.result.done():
                     request.result.set_result(snapshot)
             except asyncio.CancelledError:
@@ -385,8 +407,6 @@ class LocalWorkerDispatcher:
                         request.result.set_exception(exc)
                 raise
             except Exception as exc:
-                if not request.result.done():
-                    request.result.set_exception(exc)
                 try:
                     await self.scheduler.release(
                         lease, LeaseReleaseReason.FAILED, requeue=False
@@ -395,10 +415,13 @@ class LocalWorkerDispatcher:
                     # A release failure must not permanently shrink the pool.
                     # The Scheduler will reap an active lease if one remains.
                     pass
+                self._discard_request(lease.work.run_id, request)
+                if not request.result.done():
+                    request.result.set_exception(exc)
             finally:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
-                self._requests.pop(lease.work.run_id, None)
+                self._discard_request(lease.work.run_id, request)
 
     async def _execute_cleanup(
         self, lease: WorkerLease, request: _CleanupRequest
@@ -525,6 +548,12 @@ class LocalWorkerDispatcher:
             result=result,
             recovered=True,
         )
+
+    def _discard_request(self, run_id: str, request: _DispatchRequest) -> None:
+        """Remove only this generation of a Run's in-process dispatch request."""
+
+        if self._requests.get(run_id) is request:
+            self._requests.pop(run_id, None)
 
     async def _finish_shutdown_request(
         self,

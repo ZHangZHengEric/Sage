@@ -91,6 +91,38 @@ class FakeChildExecutor:
         )
 
 
+@pytest.mark.asyncio
+async def test_child_executor_retains_failed_resource_cleanup_for_retry():
+    class Resource:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise OSError("cleanup unavailable")
+
+    executor = LoopChildRunExecutor(
+        runtime=object(),
+        loop_factory=lambda descriptor, run_id: object(),
+        resolved_spec_hash="sha256:test",
+    )
+    resource = Resource()
+    loop = object()
+    executor._resources_by_run["run_1"] = resource
+    executor._loops_by_run["run_1"] = loop
+
+    with pytest.raises(OSError, match="cleanup unavailable"):
+        await executor._release_run("run_1")
+
+    assert executor._resources_by_run == {"run_1": resource}
+    assert executor._loops_by_run == {"run_1": loop}
+    await executor._release_run("run_1")
+    assert executor._resources_by_run == {}
+    assert executor._loops_by_run == {}
+    assert resource.close_calls == 2
+
+
 def task(index, *, agent_id="member", session_id=None):
     return DelegationTask(
         task_id=f"task_{index}",

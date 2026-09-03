@@ -69,16 +69,25 @@ class ExtensionResolver:
                 requirement.capability,
                 requirement.api_version,
                 requirement.name,
+                requirement.optional,
             )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
-            candidates = [
-                (descriptor, offer)
-                for descriptor, offer in offers.get(requirement.capability, ())
-                if (requirement.name is None or offer.name == requirement.name)
-                and version_satisfies(offer.api_version, requirement.api_version)
-            ]
+            try:
+                candidates = [
+                    (descriptor, offer)
+                    for descriptor, offer in offers.get(requirement.capability, ())
+                    if (requirement.name is None or offer.name == requirement.name)
+                    and version_satisfies(offer.api_version, requirement.api_version)
+                ]
+            except ValueError as exc:
+                raise _error(
+                    "extension.capability_version_invalid",
+                    ErrorCategory.VALIDATION,
+                    f"invalid API version constraint while resolving "
+                    f"{requirement.capability!r}: {exc}",
+                ) from exc
             named_selection_key = (
                 f"{requirement.capability}:{requirement.name}"
                 if requirement.name is not None
@@ -152,6 +161,27 @@ class ExtensionResolver:
                 + ", ".join(unused_selection_keys),
             )
 
+        providers_by_key: dict[tuple[str, str], list[ResolvedCapability]] = (
+            defaultdict(list)
+        )
+        for resolved in capabilities:
+            providers_by_key[(resolved.capability, resolved.name)].append(resolved)
+        conflicts = {
+            key: values
+            for key, values in providers_by_key.items()
+            if len({value.plugin_id for value in values}) > 1
+            and not all(value.multi_provider for value in values)
+        }
+        if conflicts:
+            key, values = sorted(conflicts.items())[0]
+            raise _error(
+                "extension.provider_key_conflict",
+                ErrorCategory.CONFLICT,
+                f"capability {key[0]!r} provider name {key[1]!r} resolves to "
+                f"multiple non-multi extensions: "
+                f"{sorted({value.plugin_id for value in values})}",
+            )
+
         order = _topological_order(set(selected), dependencies)
         resolved_capabilities = tuple(
             sorted(
@@ -208,7 +238,10 @@ def version_satisfies(version: str, requirement: str) -> bool:
     """Return whether a numeric semantic version satisfies simple constraints."""
 
     current = _version_tuple(version)
-    for clause in [value.strip() for value in requirement.split(",") if value.strip()]:
+    clauses = [value.strip() for value in requirement.split(",") if value.strip()]
+    if not clauses:
+        raise ValueError("version requirement must contain at least one clause")
+    for clause in clauses:
         operator = next(
             (
                 value

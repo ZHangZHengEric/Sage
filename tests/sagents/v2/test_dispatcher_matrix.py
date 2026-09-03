@@ -83,6 +83,39 @@ class CountingScheduler(InMemoryScheduler):
         await super().release(lease, reason, requeue=requeue)
 
 
+class PausingSubmitScheduler(InMemoryScheduler):
+    def __init__(self):
+        super().__init__()
+        self.submit_entered = asyncio.Event()
+        self.allow_submit = asyncio.Event()
+
+    async def submit(self, work):
+        self.submit_entered.set()
+        await self.allow_submit.wait()
+        return await super().submit(work)
+
+
+class ConcurrentSubmitScheduler(InMemoryScheduler):
+    def __init__(self, expected: int):
+        super().__init__()
+        self.expected = expected
+        self.active = 0
+        self.peak = 0
+        self.all_entered = asyncio.Event()
+        self.allow_submit = asyncio.Event()
+
+    async def submit(self, work):
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        if self.active == self.expected:
+            self.all_entered.set()
+        try:
+            await self.allow_submit.wait()
+            return await super().submit(work)
+        finally:
+            self.active -= 1
+
+
 class RecoveryAgent(FakeAgent):
     def __init__(self, runtime: HarnessRuntime) -> None:
         super().__init__()
@@ -192,6 +225,111 @@ async def test_tenant_quota_does_not_claim_and_requeue_in_a_spin_loop():
     assert scheduler.successful_claims == 4
     assert scheduler.quota_requeues == 0
     assert scheduler.claim_calls <= 8
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_runs_many_conversations_at_configured_parallelism():
+    scheduler = InMemoryScheduler()
+    dispatcher = LocalWorkerDispatcher(
+        scheduler,
+        max_concurrent_runs=8,
+        max_concurrent_runs_per_tenant=8,
+    )
+
+    class PeakAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.peak = 0
+            self.capacity_reached = asyncio.Event()
+            self.release = asyncio.Event()
+
+        def _ensure_execution(self, run_id, context, *, resume):
+            del run_id, context, resume
+
+            async def execute():
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                if self.active == 8:
+                    self.capacity_reached.set()
+                try:
+                    await self.release.wait()
+                    return SimpleNamespace(state=RunState.COMPLETED)
+                finally:
+                    self.active -= 1
+
+            return asyncio.create_task(execute())
+
+    agent = PeakAgent()
+    results = await asyncio.gather(
+        *(
+            dispatcher.submit(
+                agent,
+                SimpleNamespace(run_id=f"parallel-run-{index}", run_revision=0),
+                CONTEXT,
+            )
+            for index in range(100)
+        )
+    )
+    await asyncio.wait_for(agent.capacity_reached.wait(), timeout=1)
+    assert agent.peak == 8
+    agent.release.set()
+    snapshots = await asyncio.wait_for(asyncio.gather(*results), timeout=3)
+    assert len(snapshots) == 100
+    assert all(snapshot.state == RunState.COMPLETED for snapshot in snapshots)
+    await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_inflight_submission_without_stranding_result():
+    scheduler = PausingSubmitScheduler()
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    agent = FakeAgent(delay=60)
+    submitting = asyncio.create_task(
+        dispatcher.submit(
+            agent,
+            SimpleNamespace(run_id="run-submit-close-race", run_revision=0),
+            CONTEXT,
+        )
+    )
+    await asyncio.wait_for(scheduler.submit_entered.wait(), timeout=1)
+
+    closing = asyncio.create_task(dispatcher.close())
+    await asyncio.sleep(0)
+    assert not closing.done()
+    scheduler.allow_submit.set()
+
+    result = await asyncio.wait_for(submitting, timeout=1)
+    await asyncio.wait_for(closing, timeout=2)
+    assert (await asyncio.wait_for(result, timeout=1)).state == RunState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_scheduler_submissions_are_not_serialized_by_dispatcher_lifecycle():
+    scheduler = ConcurrentSubmitScheduler(expected=8)
+    dispatcher = LocalWorkerDispatcher(
+        scheduler,
+        max_concurrent_runs=8,
+        max_concurrent_runs_per_tenant=8,
+    )
+    agent = FakeAgent()
+    submissions = [
+        asyncio.create_task(
+            dispatcher.submit(
+                agent,
+                SimpleNamespace(run_id=f"concurrent-submit-{index}", run_revision=0),
+                CONTEXT,
+            )
+        )
+        for index in range(8)
+    ]
+
+    await asyncio.wait_for(scheduler.all_entered.wait(), timeout=1)
+    assert scheduler.peak == 8
+    scheduler.allow_submit.set()
+    results = await asyncio.gather(*submissions)
+    await asyncio.wait_for(asyncio.gather(*results), timeout=2)
     await dispatcher.close()
 
 

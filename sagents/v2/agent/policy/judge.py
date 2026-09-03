@@ -382,21 +382,35 @@ class LLMContinuationJudge:
                 usage=usage,
                 metadata=metadata,
             )
-        if decision == "completed":
+        if decision in {"completed", "need_user_input"}:
             if not context.response.text.strip():
                 return ContinuationDecision(
                     action=ContinuationAction.CONTINUE_STEP,
                     reason_code="judge.explanation_required",
-                    reason="Judge completion requires user-facing final text",
+                    reason=(
+                        "Judge completion requires user-facing final text"
+                        if decision == "completed"
+                        else "Judge need_user_input requires a user-facing question"
+                    ),
                     usage=usage,
                     metadata=metadata,
                 )
             return ContinuationDecision(
                 action=ContinuationAction.COMPLETE_RUN,
-                reason_code="judge.completed",
+                reason_code=f"judge.{decision}",
                 reason=reason,
                 usage=usage,
-                metadata=metadata,
+                metadata={
+                    **metadata,
+                    **(
+                        {
+                            "completion_status": "need_user_input",
+                            "needs_user_input": True,
+                        }
+                        if decision == "need_user_input"
+                        else {}
+                    ),
+                },
             )
         return ContinuationDecision(
             action=ContinuationAction.REQUEST_INTERACTION,
@@ -497,7 +511,9 @@ class LLMJudgeContinuationPolicy:
 
     plugin_id = "sage.agent.continuation.llm-judge"
     name = "No-tool-call LLM Judge completion policy"
-    description = "Uses a judge model to decide completion when no tool call is pending."
+    description = (
+        "Uses a judge model to decide completion when no tool call is pending."
+    )
 
     def __init__(self, judge: LLMContinuationJudge) -> None:
         self.judge = judge
@@ -516,28 +532,26 @@ class LLMJudgeContinuationPolicy:
         flow = await self._flow.evaluate(context)
         if flow is not None:
             return flow
+        if context.requested_interaction is not None:
+            return ContinuationDecision(
+                action=ContinuationAction.REQUEST_INTERACTION,
+                reason_code="interaction.requested",
+                reason=(
+                    context.explicit_status_note
+                    or str(context.requested_interaction.payload.get("title") or "")
+                    or str(context.requested_interaction.payload.get("prompt") or "")
+                    or "an explicit interaction requires user input"
+                ),
+                interaction=context.requested_interaction,
+                metadata={
+                    "policy": "llm_judge",
+                    "implementation": "v1",
+                    "source": "explicit_interaction",
+                },
+            )
         protocol = _v1_protocol_decision(context)
         if protocol is not None:
             return protocol
-        if _trailing_plain_assistant_responses(context.ledger) >= 3:
-            return ContinuationDecision(
-                action=ContinuationAction.REQUEST_INTERACTION,
-                reason_code="judge.plain_text_no_progress",
-                reason=tr("recovery.plain_text", context.language),
-                interaction=InteractionDraft(
-                    interaction_type="loop_recovery",
-                    allowed_decisions=("submit", "cancel"),
-                    payload={
-                        **recovery_payload(
-                            "recovery.plain_text",
-                            context.language,
-                            reason_code="judge.plain_text_no_progress",
-                        ),
-                        "stop_reason": "plain_text_no_progress",
-                    },
-                ),
-                metadata={"policy": "llm_judge", "implementation": "v1"},
-            )
         return await self.judge.decide(context)
 
 
@@ -546,7 +560,9 @@ class HybridContinuationPolicy:
 
     plugin_id = "sage.agent.continuation.hybrid"
     name = "Hybrid deterministic and LLM Judge policy"
-    description = "Combines deterministic safety rules with an LLM judge for completion."
+    description = (
+        "Combines deterministic safety rules with an LLM judge for completion."
+    )
 
     def __init__(
         self,
@@ -609,26 +625,6 @@ def _v1_protocol_decision(
     context: ContinuationContext,
 ) -> ContinuationDecision | None:
     text = context.response.text.strip()
-    if _has_inline_questionnaire(text):
-        return ContinuationDecision(
-            action=ContinuationAction.REQUEST_INTERACTION,
-            reason_code="judge.inline_questionnaire",
-            reason="inline questionnaire requires user input",
-            interaction=InteractionDraft(
-                interaction_type="judge_need_user_input",
-                allowed_decisions=("submit", "cancel"),
-                payload={
-                    **recovery_payload(
-                        "recovery.input_prompt",
-                        context.language,
-                        reason_code="judge.inline_questionnaire",
-                    ),
-                    "status": "need_user_input",
-                    "prompt": text,
-                },
-            ),
-            metadata={"policy": "llm_judge", "implementation": "v1"},
-        )
     if _has_ling_action(text):
         return ContinuationDecision(
             action=ContinuationAction.COMPLETE_RUN,
@@ -646,33 +642,6 @@ def _v1_protocol_decision(
     return None
 
 
-def _has_inline_questionnaire(text: str) -> bool:
-    decoded = unescape(text)
-    for fragment in decoded.split("<")[1:]:
-        raw_tag = fragment.split(">", 1)[0].strip()
-        if not raw_tag or raw_tag[0] in "/!?":
-            continue
-        name = raw_tag.split(None, 1)[0].rstrip("/").lower()
-        if name == "questionnaire" or (
-            name.endswith("-questionnaire") and name != "-questionnaire"
-        ):
-            return True
-    for line in decoded.splitlines():
-        stripped = line.strip()
-        if len(stripped) < 4 or stripped[0] not in {"`", "'"}:
-            continue
-        character = stripped[0]
-        fence_length = len(stripped) - len(stripped.lstrip(character))
-        if fence_length < 3:
-            continue
-        name = stripped[fence_length:].strip().lower()
-        if name == "questionnaire" or (
-            name.endswith("-questionnaire") and name != "-questionnaire"
-        ):
-            return True
-    return False
-
-
 def _has_ling_action(text: str) -> bool:
     for fragment in unescape(text).split("<")[1:]:
         raw_tag = fragment.split(">", 1)[0].strip()
@@ -681,21 +650,6 @@ def _has_ling_action(text: str) -> bool:
         if raw_tag.split(None, 1)[0].rstrip("/").lower() == "ling-action":
             return True
     return False
-
-
-def _trailing_plain_assistant_responses(
-    messages: tuple[ModelMessage, ...],
-) -> int:
-    count = 0
-    for message in reversed(messages):
-        if message.role in {"user", "tool"}:
-            break
-        if message.role == "assistant":
-            if message.tool_calls:
-                break
-            if LLMContinuationJudge._content_text(message).strip():
-                count += 1
-    return count
 
 
 def _redact_base64_data_urls(value: str) -> str:

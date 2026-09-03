@@ -35,7 +35,8 @@ class _ThreadPanel extends StatelessWidget {
             onToggleRail: onToggleRail,
             onToggleWorkspace: onToggleWorkspace,
           ),
-          if (conversation.messages.isEmpty)
+          if (conversation.messages.isEmpty &&
+              conversation.pendingInteraction == null)
             Expanded(
               child: Center(
                 child: ConstrainedBox(
@@ -75,7 +76,8 @@ class _ThreadPanel extends StatelessWidget {
                     controller.selectedConversation?.subSessions ?? const [],
               ),
             ),
-            if (conversation.pendingInteraction case final interaction?)
+            if (conversation.pendingInteraction case final interaction?
+                when !_isInlineQuestionnaire(interaction))
               _InteractionCard(
                 interaction: interaction,
                 onReply: readOnly
@@ -292,8 +294,12 @@ class _MessageListState extends State<_MessageList> {
               '${value.pendingInteraction?.id ?? ''}',
         )
         .join('|');
+    final interaction = conversation.pendingInteraction;
+    final interactionSignature = interaction == null
+        ? ''
+        : '${interaction.id}:${interaction.type}:${interaction.payload.hashCode}';
     return '$messageSignature:$processSignature:$subSessionSignature:'
-        '${conversation.thinking}';
+        '${conversation.thinking}:$interactionSignature';
   }
 
   void _handleScroll() {
@@ -554,6 +560,18 @@ class _MessageListState extends State<_MessageList> {
   Widget build(BuildContext context) {
     final children = <Widget>[];
     final attachedPanelIds = <String>{};
+    final pendingInteraction = conversation.pendingInteraction;
+    final inlineQuestionnaire =
+        pendingInteraction != null && _isInlineQuestionnaire(pendingInteraction)
+        ? pendingInteraction
+        : null;
+    var lastVisibleMessageIndex = -1;
+    for (var index = conversation.messages.length - 1; index >= 0; index--) {
+      if (!conversation.messages[index].processOnly) {
+        lastVisibleMessageIndex = index;
+        break;
+      }
+    }
     for (
       var messageIndex = 0;
       messageIndex < conversation.messages.length;
@@ -615,7 +633,19 @@ class _MessageListState extends State<_MessageList> {
           ),
         );
       }
-      children.add(SizedBox(height: attachedPanels.isEmpty ? 26 : 16));
+      final followedByQuestionnaire =
+          inlineQuestionnaire != null &&
+          messageIndex == lastVisibleMessageIndex &&
+          attachedPanels.isEmpty;
+      children.add(
+        SizedBox(
+          height: followedByQuestionnaire
+              ? 10
+              : attachedPanels.isEmpty
+              ? 26
+              : 16,
+        ),
+      );
     }
     for (final panel in conversation.processPanels.where(
       (value) =>
@@ -634,6 +664,18 @@ class _MessageListState extends State<_MessageList> {
     if (conversation.thinking) {
       children.add(const _RunningThinkingStatus());
       children.add(const SizedBox(height: 14));
+    }
+    if (inlineQuestionnaire != null) {
+      children.add(
+        _InlineQuestionnaireCard(
+          key: ValueKey('inline-questionnaire:${inlineQuestionnaire.id}'),
+          interaction: inlineQuestionnaire,
+          onReply: widget.controller.viewingSubSession
+              ? widget.controller.replyDisplayInteraction
+              : widget.controller.replyInteraction,
+        ),
+      );
+      children.add(const SizedBox(height: 26));
     }
     final jumpTargets = _jumpTargets();
     final activeJumpMessageIndex =
