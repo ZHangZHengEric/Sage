@@ -27,7 +27,7 @@ from sagents.v2.runtime.execution.sandbox import (
     InMemorySandboxProvider,
     SandboxGrantIssuer,
 )
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
@@ -52,6 +52,7 @@ def spec(
     max_total_bytes: int | None = 4096,
     process_enabled: bool = False,
     network_mode: NetworkMode = NetworkMode.NONE,
+    protected_paths: tuple[str, ...] = (),
 ) -> ResolvedSandboxSpec:
     return ResolvedSandboxSpec(
         spec_hash="sha256:spec",
@@ -68,6 +69,7 @@ def spec(
                     FileOperation.LIST,
                 }
             ),
+            protected_paths=protected_paths,
             max_file_bytes=max_file_bytes,
             max_total_bytes=max_total_bytes,
         ),
@@ -475,3 +477,147 @@ def test_release_receipt_rejects_unconfirmed_or_inconsistent_compute_state():
             compute_released=True,
             released_at=NOW,
         )
+
+
+# ---------- FileSystemPolicy.protected_paths ----------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["/workspace/.git/hooks", "../.git", "..", ".", "", "hooks/../../etc", "..\\x"],
+)
+def test_protected_paths_reject_absolute_or_escaping_entries(raw):
+    with pytest.raises(ValueError, match="relative path inside the workspace"):
+        FileSystemPolicy(
+            allowed_operations=frozenset(FileOperation), protected_paths=(raw,)
+        )
+
+
+def test_protected_paths_are_canonical_and_match_defensively():
+    policy = FileSystemPolicy(
+        allowed_operations=frozenset(FileOperation),
+        protected_paths=("./.git/hooks/", ".git\\config", ".git/hooks", ".git//info"),
+    )
+    reordered = FileSystemPolicy(
+        allowed_operations=frozenset(FileOperation),
+        protected_paths=(".git/info", ".git/hooks", ".git/config"),
+    )
+
+    # 去重、排序、统一分隔符 → policy_hash 与书写顺序/写法无关。
+    assert policy.protected_paths == (".git/config", ".git/hooks", ".git/info")
+    assert policy.model_dump(mode="json") == reordered.model_dump(mode="json")
+    assert policy.model_dump(mode="json")["protected_paths"] == [
+        ".git/config",
+        ".git/hooks",
+        ".git/info",
+    ]
+    # 子树、大小写、ADS、重复分隔符与 ".." 都命中；同前缀的兄弟路径不误伤。
+    assert policy.protected_path_for(".git/hooks") == ".git/hooks"
+    assert policy.protected_path_for(".git/hooks/pre-commit") == ".git/hooks"
+    assert policy.protected_path_for(".GIT/Hooks/pre-commit") == ".git/hooks"
+    assert policy.protected_path_for(".git/config:evil") == ".git/config"
+    assert policy.protected_path_for(".git//hooks/../hooks/x") == ".git/hooks"
+    assert policy.protected_path_for("/.git/hooks/x") == ".git/hooks"
+    assert policy.protected_path_for(".git/hooks-extra/x") is None
+    assert policy.protected_path_for(".git/config.bak") is None
+    assert policy.protected_path_for(".git/description") is None
+    assert policy.protected_path_for(".gitignore") is None
+    assert policy.protected_path_for("") is None
+    whole_git = FileSystemPolicy(
+        allowed_operations=frozenset(FileOperation), protected_paths=(".git",)
+    )
+    assert whole_git.protected_path_for(".gitignore") is None
+    assert whole_git.protected_path_for(".git/objects/ab/cd") == ".git"
+    # NFC/NFD 视作同一路径（macOS 文件系统对规范化不敏感）。
+    accented = FileSystemPolicy(
+        allowed_operations=frozenset(FileOperation), protected_paths=("données",)
+    )
+    assert accented.protected_path_for("données/x") == "données"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".git/hooks/pre-commit",
+        ".git/hooks",
+        "/workspace/.git/hooks/post-commit",
+        ".GIT/HOOKS/pre-commit",
+        "src/../.git/hooks/pre-commit",
+        ".git//hooks//pre-commit",
+        ".git\\hooks\\pre-commit",
+        ".git/config",
+        ".git/config:stream",
+    ],
+)
+async def test_protected_paths_reject_every_mutating_spelling(path):
+    issuer, provider = provider_pair()
+    handle = await provider.provision(
+        spec(protected_paths=(".git/hooks", ".git/config")), CONTEXT, run_id="run_1"
+    )
+    operation_intent = intent(handle.ref, FileOperation.CREATE, path)
+
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.write_bytes(
+            path,
+            b"x",
+            intent=operation_intent,
+            grant=grant(issuer, handle.ref, operation_intent, FileOperation.CREATE),
+        )
+
+    assert denied.value.info.code == "sandbox.protected_path"
+    assert denied.value.info.category == ErrorCategory.POLICY_DENIED
+    assert denied.value.info.safe_to_resume is True
+    # 拒绝发生在写入之前：工具执行器据此判定为干净失败，而不是结果未知。
+    assert denied.value.info.metadata["side_effect_state"] == "not_applied"
+    assert denied.value.info.metadata["protected_path"] in {".git/hooks", ".git/config"}
+    assert (await handle.status()).file_count == 0
+
+
+@pytest.mark.asyncio
+async def test_protected_paths_keep_reads_and_unprotected_writes_working():
+    issuer, provider = provider_pair()
+    handle = await provider.provision(
+        spec(protected_paths=(".git/hooks",)), CONTEXT, run_id="run_1"
+    )
+    # 模拟宿主仓库里预置的 hook：受保护内容只能来自策略之外。
+    provider._rows[handle.ref.sandbox_id].files["/workspace/.git/hooks/pre-commit"] = (
+        b"#!/bin/sh\n"
+    )
+
+    read_intent = intent(handle.ref, FileOperation.READ, ".git/hooks/pre-commit")
+    assert (
+        await handle.filesystem.read_bytes(
+            ".git/hooks/pre-commit",
+            intent=read_intent,
+            grant=grant(issuer, handle.ref, read_intent, FileOperation.READ),
+        )
+        == b"#!/bin/sh\n"
+    )
+    list_intent = intent(handle.ref, FileOperation.LIST, ".git")
+    listed = await handle.filesystem.list_paths(
+        ".git",
+        intent=list_intent,
+        grant=grant(issuer, handle.ref, list_intent, FileOperation.LIST),
+    )
+    assert [value.path for value in listed] == ["/workspace/.git/hooks/pre-commit"]
+
+    delete_intent = intent(handle.ref, FileOperation.DELETE, ".git/hooks/pre-commit")
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.delete(
+            ".git/hooks/pre-commit",
+            intent=delete_intent,
+            grant=grant(issuer, handle.ref, delete_intent, FileOperation.DELETE),
+        )
+    assert denied.value.info.code == "sandbox.protected_path"
+
+    for path in (".gitignore", ".git/description", "src/main.py"):
+        create_intent = intent(handle.ref, FileOperation.CREATE, path)
+        await handle.filesystem.write_bytes(
+            path,
+            b"ok",
+            intent=create_intent,
+            grant=grant(issuer, handle.ref, create_intent, FileOperation.CREATE),
+        )
+    status = await handle.status()
+    assert status.file_count == 4
