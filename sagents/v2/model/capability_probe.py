@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable
 from enum import Enum
 from typing import Any, Literal
@@ -548,6 +549,7 @@ async def _request(
             if event.kind == ModelEventKind.COMPLETED:
                 completed = event.response
     except SageV2Error as exc:
+        diagnostic = _compact_probe_error(exc.info.message, name=name)
         return None, ModelCapabilityProbeOutcome(
             name=name,
             status=ModelCapabilityProbeStatus.ERROR,
@@ -555,15 +557,20 @@ async def _request(
             error_code=exc.info.code,
             error_category=exc.info.category.value,
             provider_code=exc.info.provider_code,
+            metadata={"diagnostic_error": diagnostic},
         )
     except Exception as exc:
         status = getattr(exc, "status_code", None)
+        message = str(exc)
         return None, ModelCapabilityProbeOutcome(
             name=name,
             status=ModelCapabilityProbeStatus.ERROR,
-            error=str(exc),
+            error=message,
             error_code=type(exc).__name__,
             provider_code=str(status) if status is not None else None,
+            metadata={
+                "diagnostic_error": _compact_probe_error(message, name=name)
+            },
         )
     if completed is None:
         return None, ModelCapabilityProbeOutcome(
@@ -573,6 +580,30 @@ async def _request(
             error_code="model.probe_incomplete",
         )
     return completed, None
+
+
+def _compact_probe_error(message: str, *, name: ProbeName) -> str:
+    """Extract a useful cause without discarding the provider's raw error."""
+
+    if name == "multimodal" and "ResponseInputImageParam" in message:
+        match = re.search(
+            r"ResponseInputImageParam['\"],\s*['\"]([^'\"]+)['\"]\).*?"
+            r"['\"]msg['\"]:\s*['\"]([^'\"]+)['\"]",
+            message,
+            flags=re.DOTALL,
+        )
+        if match is not None:
+            field_error = (
+                f"ResponseInputImageParam.{match.group(1)}: {match.group(2)}"
+            )
+            return (
+                "Image payload lost a required Responses field during gateway "
+                f"validation ({field_error}). If this is a Chat Completions "
+                "route, its Chat-to-Responses image conversion is incompatible; "
+                "use the OpenAI Responses protocol for multimodal requests."
+            )
+    compact = " ".join(message.split())
+    return compact[:1_000]
 
 
 def _supported(

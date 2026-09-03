@@ -101,6 +101,24 @@ async def probe_model_provider_capabilities(
             "status": outcome.status.value,
         }
 
+    def diagnostic_outcome(outcome: dict[str, Any]) -> dict[str, str]:
+        metadata = outcome.get("metadata")
+        diagnostic = (
+            metadata.get("diagnostic_error") if isinstance(metadata, dict) else None
+        )
+        values = {
+            "status": outcome.get("status"),
+            "provider_code": outcome.get("provider_code"),
+            "error_code": outcome.get("error_code"),
+            "error_category": outcome.get("error_category"),
+            "diagnostic_error": diagnostic or outcome.get("error"),
+        }
+        return {
+            key: str(value)[:1_000]
+            for key, value in values.items()
+            if value is not None and str(value)
+        }
+
     candidates = (provider.max_tokens,) + tuple(
         value for value in output_token_fallbacks if value < provider.max_tokens
     )
@@ -352,6 +370,12 @@ async def probe_model_provider_capabilities(
             auxiliary_json_compatible=(selected_auxiliary_json_outcome.supported),
             successful_probes=tuple(successful_probes),
             failed_probes=tuple(failed_probes),
+            probe_diagnostics={
+                name: diagnostic_outcome(outcome)
+                for name, outcome in probes.items()
+                if outcome.get("supported") is not True
+                and outcome.get("status") != "supported"
+            },
         )
         return {
             "valid": True,
@@ -389,4 +413,3 @@ async def probe_model_provider_capabilities(
                 result = close()
                 if inspect.isawaitable(result):
                     await result
-

@@ -1200,6 +1200,12 @@ async def test_model_capability_probe_checks_connection_image_and_schema(
     ]
     assert result["failed_probes"] == ["tool_calling"]
     assert result["skipped_probes"] == []
+    assert result["compatibility_profile"]["probe_diagnostics"] == {
+        "tool_calling": {
+            "status": "unsupported",
+            "diagnostic_error": "provider did not return the required probe tool call",
+        }
+    }
     assert len(probe_provider.requests) == 19
     probe_provider.raw_client.aclose.assert_awaited_once()
     await service.session_store.close()

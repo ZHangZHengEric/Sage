@@ -421,7 +421,11 @@ class OpenAIResponsesModelProvider:
         if isinstance(block, TextBlock):
             return {"type": text_type, "text": block.text}
         if isinstance(block, ImageBlock):
-            return {"type": "input_image", "image_url": block.uri}
+            return {
+                "type": "input_image",
+                "image_url": block.uri,
+                "detail": block.detail,
+            }
         if isinstance(block, FileBlock):
             return {"type": "input_file", "file_id": block.uri}
         if isinstance(block, JsonBlock):

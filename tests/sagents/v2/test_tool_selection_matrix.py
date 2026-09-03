@@ -57,6 +57,16 @@ class SlowModel:
         return events()
 
 
+class SlowCompletionModel:
+    def stream(self, request):
+        async def events():
+            yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="{")
+            await asyncio.sleep(0.03)
+            yield completed_json('{"tools":["weather_lookup"]}')
+
+        return events()
+
+
 def request(run_id="run_1", *, messages=()) -> ToolSelectionRequest:
     return ToolSelectionRequest(run_id=run_id, tools=TOOLS, messages=messages)
 
@@ -158,6 +168,42 @@ async def test_llm_policy_reports_invalid_model_output():
 
 
 @pytest.mark.asyncio
+async def test_llm_policy_accepts_an_explicit_empty_tool_selection():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed_json('{"tools":[]}'),)),)
+    )
+    policy = LLMToolSelectionPolicy({"max_visible_tools": 2})
+    messages = user_message("answer without using a tool")
+
+    await policy.prepare(
+        ToolSelectionPrepareContext(
+            run_id="run_1", tools=TOOLS, messages=messages, model=model
+        )
+    )
+
+    result = policy.select(request(messages=messages))
+    assert result.strategy == "llm"
+    assert len(result.tools) == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed_json('{"tools":["missing"]}'),)),)
+    )
+    policy = LLMToolSelectionPolicy({"max_visible_tools": 2})
+
+    with pytest.raises(SageV2Error) as caught:
+        await policy.prepare(
+            ToolSelectionPrepareContext(
+                run_id="run_1", tools=TOOLS, model=model
+            )
+        )
+
+    assert caught.value.info.code == "tool_selection.model_output_invalid"
+
+
+@pytest.mark.asyncio
 async def test_llm_policy_reports_timeout_without_changing_strategy():
     policy = LLMToolSelectionPolicy(
         {"max_visible_tools": 2, "model_timeout_seconds": 0.01}
@@ -174,6 +220,26 @@ async def test_llm_policy_reports_timeout_without_changing_strategy():
     assert caught.value.info.code == "tool_selection.model_timeout"
     assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
     assert caught.value.info.metadata["plugin_id"] == "sage.tool-selection.llm"
+
+
+@pytest.mark.asyncio
+async def test_llm_policy_timeout_only_bounds_the_first_stream_event():
+    policy = LLMToolSelectionPolicy(
+        {"max_visible_tools": 2, "model_timeout_seconds": 0.01}
+    )
+    messages = user_message("look up the weather")
+
+    await policy.prepare(
+        ToolSelectionPrepareContext(
+            run_id="run_1",
+            tools=TOOLS,
+            messages=messages,
+            model=SlowCompletionModel(),
+        )
+    )
+
+    result = policy.select(request(messages=messages))
+    assert "weather_lookup" in {tool.name for tool in result.tools}
 
 
 def test_legacy_expert_parameters_are_removed_during_migration():

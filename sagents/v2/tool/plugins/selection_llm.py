@@ -105,31 +105,37 @@ class LLMToolSelectionPolicy(BaseToolSelectionPolicy):
             metadata={"purpose": "tool_selection"},
         )
         response = None
+        stream = context.model.stream(request)
         try:
-            async with asyncio.timeout(self.config.model_timeout_seconds):
-                stream = context.model.stream(request)
-                try:
-                    async for event in stream:
-                        if event.response is not None:
-                            response = event.response
-                finally:
-                    closer = getattr(stream, "aclose", None)
-                    if closer is not None:
-                        await closer()
+            iterator = stream.__aiter__()
+            try:
+                async with asyncio.timeout(self.config.model_timeout_seconds):
+                    first_event = await anext(iterator)
+            except StopAsyncIteration:
+                first_event = None
+            if first_event is not None and first_event.response is not None:
+                response = first_event.response
+            async for event in iterator:
+                if event.response is not None:
+                    response = event.response
         except TimeoutError as exc:
             raise auxiliary_model_timeout_error(
                 code="tool_selection.model_timeout",
-                operation="LLM Tool selection",
+                operation="LLM Tool selection first event",
                 timeout_seconds=self.config.model_timeout_seconds,
                 plugin_id=self.plugin_id,
             ) from exc
+        finally:
+            closer = getattr(stream, "aclose", None)
+            if closer is not None:
+                await closer()
         try:
             names = _parse_llm_tool_names(
                 response.text if response else "", context.tools
             )
         except (TypeError, ValueError):
-            names = ()
-        if not names:
+            names = None
+        if names is None:
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="tool_selection.model_output_invalid",

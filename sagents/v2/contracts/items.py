@@ -41,6 +41,7 @@ class ImageBlock(StrictModel):
     uri: str
     mime_type: str
     alt: str | None = None
+    detail: Literal["auto", "low", "high", "original"] = "auto"
 
 
 class AudioBlock(StrictModel):

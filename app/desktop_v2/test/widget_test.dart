@@ -27,6 +27,7 @@ class _FakeApi extends V2ApiClient {
   Map<String, Object?>? lastModelPatch;
   Map<String, Object?>? lastModelCreate;
   Map<String, Object?>? lastModelCapabilityDraft;
+  Map<String, Object?>? modelCapabilityResult;
   String? lastModelCapabilityProviderId;
   DesktopSettings? lastSettings;
   String? lastDeletedModelId;
@@ -309,7 +310,7 @@ Inspect the complete diff before reporting findings.
       model: value['model']?.toString() ?? 'gpt-5.4',
       baseUrl: value['base_url']?.toString() ?? 'https://api.openai.com/v1',
       apiKeyConfigured: (value['api_keys'] as List?)?.isNotEmpty == true,
-      supportsMultimodal: true,
+      supportsMultimodal: value['supports_multimodal'] as bool? ?? true,
       supportsStructuredOutput: true,
       supportsToolCalling: true,
       maxTokens: value['max_tokens'] as int?,
@@ -323,6 +324,7 @@ Inspect the complete diff before reporting findings.
     Map<String, Object?> patch,
   ) async {
     lastModelPatch = patch;
+    final compatibility = patch['compatibility_profile'];
     return ModelProviderSummary(
       id: providerId,
       name:
@@ -336,8 +338,11 @@ Inspect the complete diff before reporting findings.
               : 'test-model'),
       baseUrl: patch['base_url']?.toString() ?? 'https://example.test/v1',
       apiKeyConfigured: true,
-      supportsMultimodal: true,
+      supportsMultimodal: patch['supports_multimodal'] as bool? ?? true,
       isDefault: patch['is_default'] == true || providerId == 'model_main',
+      compatibilityProfile: compatibility is Map
+          ? compatibility.cast<String, Object?>()
+          : null,
     );
   }
 
@@ -348,34 +353,35 @@ Inspect the complete diff before reporting findings.
   }) async {
     lastModelCapabilityDraft = Map<String, Object?>.of(draft);
     lastModelCapabilityProviderId = providerId;
-    return const {
-      'connection': {'supported': true},
-      'supports_multimodal': true,
-      'supports_structured_output': true,
-      'supports_tool_calling': true,
-      'compatibility_profile': {
-        'schema_version': 2,
-        'route_fingerprint': 'sha256:verified-route',
-        'verified_at': '2026-09-01T00:00:00Z',
-        'max_output_tokens_field': 'max_completion_tokens',
-        'effective_max_output_tokens': 4096,
-        'reasoning_disable_strategy': 'omit',
-        'reasoning_behavior': 'controllable',
-        'reasoning_effort_strategy': 'reasoning_effort',
-        'supported_reasoning_efforts': ['low', 'high'],
-        'text_only_reasoning_efforts': ['xhigh'],
-        'unsupported_reasoning_efforts': ['minimal', 'medium', 'max'],
-        'supports_json_object': true,
-        'auxiliary_json_compatible': true,
-        'successful_probes': [
-          'connection',
-          'structured_output',
-          'json_object',
-          'tool_calling',
-        ],
-        'failed_probes': <String>[],
-      },
-    };
+    return modelCapabilityResult ??
+        const {
+          'connection': {'supported': true},
+          'supports_multimodal': true,
+          'supports_structured_output': true,
+          'supports_tool_calling': true,
+          'compatibility_profile': {
+            'schema_version': 2,
+            'route_fingerprint': 'sha256:verified-route',
+            'verified_at': '2026-09-01T00:00:00Z',
+            'max_output_tokens_field': 'max_completion_tokens',
+            'effective_max_output_tokens': 4096,
+            'reasoning_disable_strategy': 'omit',
+            'reasoning_behavior': 'controllable',
+            'reasoning_effort_strategy': 'reasoning_effort',
+            'supported_reasoning_efforts': ['low', 'high'],
+            'text_only_reasoning_efforts': ['xhigh'],
+            'unsupported_reasoning_efforts': ['minimal', 'medium', 'max'],
+            'supports_json_object': true,
+            'auxiliary_json_compatible': true,
+            'successful_probes': [
+              'connection',
+              'structured_output',
+              'json_object',
+              'tool_calling',
+            ],
+            'failed_probes': <String>[],
+          },
+        };
   }
 
   @override
@@ -6308,9 +6314,12 @@ void main() {
       find.byKey(const ValueKey('settings-model-capability-check')),
       findsOneWidget,
     );
-    await tester.tap(
-      find.byKey(const ValueKey('settings-model-capability-check')),
+    final capabilityCheck = find.byKey(
+      const ValueKey('settings-model-capability-check'),
     );
+    await tester.ensureVisible(capabilityCheck);
+    await tester.pumpAndSettle();
+    await tester.tap(capabilityCheck);
     await tester.pumpAndSettle();
 
     expect(api.lastModelPatch, isNull);
@@ -6344,6 +6353,105 @@ void main() {
     expect(find.text('工具调用'), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-model-id-field')), findsNothing);
     expect(find.byKey(const ValueKey('settings-save-button')), findsNothing);
+  });
+
+  testWidgets('model capability check shows the multimodal probe cause', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final api = _FakeApi()
+      ..modelCapabilityResult = {
+        'supports_multimodal': false,
+        'supports_structured_output': true,
+        'supports_tool_calling': true,
+        'multimodal': {
+          'supported': false,
+          'status': 'error',
+          'provider_code': '400',
+          'error_code': 'model.provider_permanent',
+          'error': 'large raw provider error',
+          'metadata': {
+            'diagnostic_error':
+                'ResponseInputImageParam.detail: Field required',
+          },
+        },
+        'probes': {
+          'multimodal': {
+            'supported': false,
+            'status': 'error',
+            'provider_code': '400',
+            'error_code': 'model.provider_permanent',
+            'error': 'large raw provider error',
+            'metadata': {
+              'diagnostic_error':
+                  'ResponseInputImageParam.detail: Field required',
+            },
+          },
+        },
+        'compatibility_profile': {
+          'schema_version': 2,
+          'route_fingerprint': 'sha256:verified-route',
+          'verified_at': '2026-09-03T00:00:00Z',
+          'successful_probes': ['connection'],
+          'failed_probes': ['multimodal'],
+          'probe_diagnostics': {
+            'multimodal': {
+              'status': 'error',
+              'provider_code': '400',
+              'error_code': 'model.provider_permanent',
+              'diagnostic_error':
+                  'ResponseInputImageParam.detail: Field required',
+            },
+          },
+        },
+      };
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-model-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-model-id-field')),
+      'changed-model',
+    );
+    final capabilityCheck = find.byKey(
+      const ValueKey('settings-model-capability-check'),
+    );
+    await tester.ensureVisible(capabilityCheck);
+    await tester.pumpAndSettle();
+    await tester.tap(capabilityCheck);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('HTTP 400'), findsOneWidget);
+    expect(
+      find.textContaining('ResponseInputImageParam.detail: Field required'),
+      findsOneWidget,
+    );
+
+    final save = find.byKey(const ValueKey('settings-model-save'));
+    await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('HTTP 400'), findsOneWidget);
+    expect(
+      find.textContaining('ResponseInputImageParam.detail: Field required'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
