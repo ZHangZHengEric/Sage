@@ -627,6 +627,8 @@ async def test_plan_invocation_keeps_the_agent_tool_catalog_visible():
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.COMPLETED
     assert [call.tool_name for call in executor.calls] == ["read_value"]
+    assert executor._results == {}
+    assert executor._call_fingerprints == {}
 
 
 @pytest.mark.asyncio
@@ -2234,6 +2236,53 @@ async def test_generic_write_failure_after_dispatch_is_unknown_not_failed():
     assert executor.remote_commits == 1
     assert "tool.call.unknown" in types
     assert "tool.call.failed" not in types
+
+
+@pytest.mark.asyncio
+async def test_authoritative_write_tool_error_is_failed_without_losing_content():
+    class RejectedWriteExecutor:
+        async def execute(self, call, context):
+            del context
+            return ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(TextBlock(text="remote rejected the write: quota exceeded"),),
+                error=RuntimeErrorInfo(
+                    code="remote.write_rejected",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="write rejected",
+                    safe_to_resume=True,
+                    metadata={"tool_result_received": True},
+                ),
+                metadata={"tool_result_received": True},
+            )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("write_value"),)),)
+            ),
+            ScriptedModelStep(events=(completed("handled"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model, tools=(WRITE_TOOL,))
+    loop.tool_executor = RejectedWriteExecutor()
+    loop.tool_policy = DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    types = [
+        event.type for event in await runtime.session_store.read_events(handle.run_id)
+    ]
+    tool_message = next(
+        message for message in model.requests[1].messages if message.role == "tool"
+    )
+
+    assert result.state == RunState.COMPLETED
+    assert "tool.call.failed" in types
+    assert "tool.call.unknown" not in types
+    assert tool_message.content[0].text == "remote rejected the write: quota exceeded"
 
 
 @pytest.mark.asyncio

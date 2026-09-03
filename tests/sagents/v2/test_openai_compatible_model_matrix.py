@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pydantic import SecretStr
 
 from sagents.v2.model import (
     ModelCapabilities,
@@ -17,6 +18,7 @@ from sagents.v2.model import (
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
+from sagents.v2.runtime.credentials import CredentialMaterial
 
 
 CAPABILITIES = ModelCapabilities(
@@ -76,6 +78,35 @@ class SequencedCompletions:
 class FakeClient:
     def __init__(self, completions):
         self.chat = SimpleNamespace(completions=completions)
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_closes_only_the_client_it_constructed(monkeypatch):
+    class ClosableClient(FakeClient):
+        def __init__(self):
+            super().__init__(FakeCompletions())
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    owned = ClosableClient()
+    monkeypatch.setattr(
+        "sagents.v2.model.plugins.openai_compatible.AsyncOpenAI",
+        lambda **kwargs: owned,
+    )
+    credential = CredentialMaterial(
+        credential_id="model", secret=SecretStr("secret"), source="test"
+    )
+    provider = OpenAICompatibleModelProvider(config(), credential)
+    await provider.close()
+
+    injected = ClosableClient()
+    injected_provider = OpenAICompatibleModelProvider(config(), client=injected)
+    await injected_provider.close()
+
+    assert owned.close_calls == 1
+    assert injected.close_calls == 0
 
 
 def config(**changes):

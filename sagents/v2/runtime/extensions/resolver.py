@@ -61,6 +61,7 @@ class ExtensionResolver:
             (None, requirement) for requirement in requirements
         ]
         visited = set()
+        used_selection_keys: set[str] = set()
         while queue:
             consumer_id, requirement = queue.pop(0)
             visit_key = (
@@ -76,14 +77,34 @@ class ExtensionResolver:
                 (descriptor, offer)
                 for descriptor, offer in offers.get(requirement.capability, ())
                 if (requirement.name is None or offer.name == requirement.name)
-                and _version_satisfies(offer.api_version, requirement.api_version)
+                and version_satisfies(offer.api_version, requirement.api_version)
             ]
-            selected_id = selections.get(requirement.capability)
+            named_selection_key = (
+                f"{requirement.capability}:{requirement.name}"
+                if requirement.name is not None
+                else None
+            )
+            selection_key = (
+                named_selection_key
+                if named_selection_key in selections
+                else requirement.capability
+                if requirement.capability in selections
+                else None
+            )
+            selected_id = selections.get(selection_key) if selection_key else None
             if selected_id is not None:
+                used_selection_keys.add(selection_key)
                 candidates = [
                     value for value in candidates if value[0].plugin_id == selected_id
                 ]
             if not candidates:
+                if selected_id is not None:
+                    raise _error(
+                        "extension.selection_incompatible",
+                        ErrorCategory.CONFLICT,
+                        f"selected extension {selected_id!r} does not satisfy "
+                        f"{requirement.capability!r} {requirement.api_version!r}",
+                    )
                 if requirement.optional:
                     continue
                 raise _error(
@@ -121,6 +142,15 @@ class ExtensionResolver:
                     dependencies[consumer_id].add(descriptor.plugin_id)
                 for dependency in descriptor.dependencies:
                     queue.append((descriptor.plugin_id, dependency.requirement()))
+
+        unused_selection_keys = sorted(set(selections) - used_selection_keys)
+        if unused_selection_keys:
+            raise _error(
+                "extension.selection_unused",
+                ErrorCategory.VALIDATION,
+                "extension selections do not match any resolved requirement: "
+                + ", ".join(unused_selection_keys),
+            )
 
         order = _topological_order(set(selected), dependencies)
         resolved_capabilities = tuple(
@@ -174,7 +204,9 @@ def _version_tuple(version: str) -> tuple[int, int, int]:
     return tuple(int(value or 0) for value in match.groups())  # type: ignore[return-value]
 
 
-def _version_satisfies(version: str, requirement: str) -> bool:
+def version_satisfies(version: str, requirement: str) -> bool:
+    """Return whether a numeric semantic version satisfies simple constraints."""
+
     current = _version_tuple(version)
     for clause in [value.strip() for value in requirement.split(",") if value.strip()]:
         operator = next(

@@ -82,6 +82,7 @@ def _package_with_declared_model_plugin():
             "plugins": (
                 PluginDeclaration(
                     id="acme.model.private-gateway",
+                    version=">=1,<2",
                     config={
                         "gateway_region": "cn-east",
                         "route": "must-be-overridden-by-the-model-route",
@@ -147,7 +148,9 @@ async def test_manually_registered_declared_plugin_does_not_require_entry_point(
 
 
 @pytest.mark.asyncio
-async def test_resolved_manifest_preserves_runtime_plugin_selection(tmp_path, monkeypatch):
+async def test_resolved_manifest_preserves_runtime_plugin_selection(
+    tmp_path, monkeypatch
+):
     observed_configs: list[dict[str, Any]] = []
 
     def factory(context, dependencies):
@@ -276,3 +279,44 @@ def test_duplicate_installed_entry_points_are_rejected(monkeypatch):
         discovery.load_installed_extension("acme.model.private-gateway")
 
     assert invalid.value.info.code == "extension.entry_point_ambiguous"
+
+
+def test_declared_plugin_version_must_match_loaded_registration(monkeypatch):
+    registration = _model_registration(ScriptedModelProvider(()))
+    monkeypatch.setattr(
+        discovery.metadata,
+        "entry_points",
+        lambda **kwargs: (_FakeEntryPoint("acme.model.private-gateway", registration),),
+    )
+
+    with pytest.raises(SageV2Error) as mismatch:
+        discovery.load_installed_extension(
+            "acme.model.private-gateway", version_requirement=">=2,<3"
+        )
+
+    assert mismatch.value.info.code == "extension.version_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path):
+    provider = ScriptedModelProvider(())
+    package = _package_with_declared_model_plugin().model_copy(
+        update={
+            "plugins": (
+                PluginDeclaration(
+                    id="acme.model.private-gateway",
+                    version=">=2,<3",
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(SageV2Error) as mismatch:
+        await (
+            SAgentBuilder()
+            .with_defaults(session_root=tmp_path / "session-store")
+            .register(_model_registration(provider))
+            .build(package)
+        )
+
+    assert mismatch.value.info.code == "extension.version_mismatch"

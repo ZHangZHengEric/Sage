@@ -302,10 +302,16 @@ class DesktopCatalogServiceMixin:
         await self._initialize_user(user_id)
         values = await self.catalog.list_mcp(user_id)
         return McpToolPlugin(
-            tuple(self._mcp_config(value) for value in values if not value.disabled)
+            tuple(
+                self._mcp_config(value, required=False)
+                for value in values
+                if not value.disabled
+            )
         )
 
-    def _mcp_config(self, value: DesktopMcpRecord) -> McpServerConfig:
+    def _mcp_config(
+        self, value: DesktopMcpRecord, *, required: bool = True
+    ) -> McpServerConfig:
         streamable_url = value.streamable_http_url
         api_key = value.api_key
         if value.kind == "anytool":
@@ -326,6 +332,7 @@ class DesktopCatalogServiceMixin:
             command=value.command,
             args=value.args,
             env=value.env,
+            required=required,
         )
 
     async def list_model_providers(self, user_id: str) -> list[dict[str, Any]]:

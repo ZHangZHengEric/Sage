@@ -451,6 +451,7 @@ class DesktopRunCompositionMixin:
         }
         ports = await self.application.materialize_agent(
             run_manifest,
+            tenant_id=agent.user_id,
             agent_id=agent.agent_id,
             run_id=run_id,
             model=recording_model,
@@ -847,6 +848,7 @@ class DesktopRunCompositionMixin:
             else:
                 member_ports = await self.application.materialize_agent(
                     run_manifest,
+                    tenant_id=agent.user_id,
                     agent_id=descriptor.agent_id,
                     run_id=run_id,
                     model=judge_models_by_agent.get(

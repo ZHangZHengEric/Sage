@@ -501,8 +501,9 @@ class PersistentSummaryContextReducer:
                 unit = [message]
                 index += 1
                 while index < len(messages) and messages[index].role == "tool":
-                    if messages[index].tool_call_id in expected:
-                        unit.append(messages[index])
+                    if messages[index].tool_call_id not in expected:
+                        break
+                    unit.append(messages[index])
                     index += 1
                 units.append(tuple(unit))
                 continue

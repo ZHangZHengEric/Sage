@@ -6,13 +6,16 @@ from importlib import metadata
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
+from sagents.v2.runtime.extensions.resolver import version_satisfies
 
 
 ENTRY_POINT_GROUP = "sage.extensions"
 SUPPORTED_EXTENSION_API_VERSION = "2"
 
 
-def load_installed_extension(plugin_id: str) -> ExtensionRegistration:
+def load_installed_extension(
+    plugin_id: str, *, version_requirement: str | None = None
+) -> ExtensionRegistration:
     """Load one installed extension whose entry-point name is ``plugin_id``.
 
     Discovery is deliberately targeted: a package manifest must declare the
@@ -70,7 +73,36 @@ def load_installed_extension(plugin_id: str) -> ExtensionRegistration:
             f"extension {plugin_id!r} requires API {descriptor.api_version!r}; "
             f"this runtime supports {SUPPORTED_EXTENSION_API_VERSION!r}",
         )
+    validate_extension_version(registration, version_requirement)
     return registration
+
+
+def validate_extension_version(
+    registration: ExtensionRegistration, version_requirement: str | None
+) -> None:
+    """Fail closed when a manifest pins an incompatible plugin implementation."""
+
+    if version_requirement is None:
+        return
+    try:
+        compatible = version_satisfies(
+            registration.descriptor.version, version_requirement
+        )
+    except ValueError as exc:
+        raise _error(
+            "extension.version_requirement_invalid",
+            ErrorCategory.VALIDATION,
+            f"invalid version requirement {version_requirement!r} for extension "
+            f"{registration.descriptor.plugin_id!r}",
+        ) from exc
+    if not compatible:
+        raise _error(
+            "extension.version_mismatch",
+            ErrorCategory.CONFLICT,
+            f"extension {registration.descriptor.plugin_id!r} version "
+            f"{registration.descriptor.version!r} does not satisfy "
+            f"{version_requirement!r}",
+        )
 
 
 def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:

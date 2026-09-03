@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Awaitable, Protocol
 
 from sagents.v2.tool.contracts import (
     ReconcileResult,
@@ -39,3 +39,9 @@ class CancellableToolExecutor(Protocol):
     async def cancel(
         self, operation_id: str, context: RequestContext
     ) -> ToolCancellationResult: ...
+
+
+class RunScopedToolState(Protocol):
+    """Optional bounded-state hook for providers shared by multiple Runs."""
+
+    def release_run(self, run_id: str) -> None | Awaitable[None]: ...
