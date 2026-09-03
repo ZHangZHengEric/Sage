@@ -12,11 +12,11 @@ impl SlashCommandDef {
             "/new" | "/clear" | "/sessions" | "/resume" | "/transcript" | "/welcome" | "/exit" => {
                 "Session"
             }
-            "/agent" | "/mode" | "/workspace" | "/sandbox" | "/model" | "/display" | "/goal" => {
-                "Runtime"
-            }
+            "/agent" | "/mode" | "/workspace" | "/sandbox" | "/model" | "/display" | "/goal"
+            | "/runtime" => "Runtime",
             "/skills" | "/skill" | "/config" | "/doctor" | "/providers" | "/provider" => "Setup",
-            "/interrupt" | "/retry" | "/approve" | "/deny" | "/status" | "/approvals" => "Control",
+            "/interrupt" | "/retry" | "/approve" | "/deny" | "/remember" | "/status"
+            | "/approvals" => "Control",
             _ => "Help",
         }
     }
@@ -55,6 +55,15 @@ impl SlashCommandDef {
                 "Shows recent sandbox approval requests and runtime decisions for this terminal session.",
                 "Use this to verify which command was approved, denied, or is still pending.",
             ],
+            "/runtime" => &[
+                "v1 drives the current `sage chat --json` backend; v2 drives `sage v2 chat --json` (SAgents v2, experimental).",
+                "Switching runtimes restarts the backend on the next task; v2 session ids come from the backend.",
+                "On v2, /approve, /remember and /deny answer tool approvals; questions are answered from the composer.",
+            ],
+            "/remember" => &[
+                "v2 only: approve the pending tool call and remember it for this session (same command / same file).",
+                "Later matching calls are auto-approved; the backend reports them in the transcript.",
+            ],
             "/help" => &[
                 "Open /help for the command list, or /help <command> for focused usage notes.",
             ],
@@ -74,7 +83,7 @@ impl SlashCommandDef {
     }
 }
 
-const COMMANDS: [SlashCommandDef; 27] = [
+const COMMANDS: [SlashCommandDef; 29] = [
     SlashCommandDef {
         command: "/help",
         description: "Show available commands",
@@ -206,6 +215,18 @@ const COMMANDS: [SlashCommandDef; 27] = [
         description: "Deny the pending sandbox command",
         usage: "/deny",
         example: "/deny",
+    },
+    SlashCommandDef {
+        command: "/remember",
+        description: "Approve the pending tool call and remember it (v2)",
+        usage: "/remember",
+        example: "/remember",
+    },
+    SlashCommandDef {
+        command: "/runtime",
+        description: "Show or switch the backend runtime (v1 / v2)",
+        usage: "/runtime [show|set <v1|v2>]",
+        example: "/runtime set v2",
     },
     SlashCommandDef {
         command: "/status",

@@ -90,7 +90,35 @@ pub struct ProviderMutation {
     pub is_default: Option<bool>,
 }
 
+/// 后端运行时：v1 = `sage chat --json`（现有），v2 = `sage v2 chat --json`（SAgents v2）。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BackendRuntime {
+    #[default]
+    V1,
+    V2,
+}
+
+impl BackendRuntime {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "v1" | "legacy" => Some(Self::V1),
+            "v2" => Some(Self::V2),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V1 => "v1",
+            Self::V2 => "v2",
+        }
+    }
+}
+
 pub struct BackendRequest {
+    pub runtime: BackendRuntime,
+    /// v2：仅当 session_id 是 v2 存储里已知的会话时才传 `--session-id`。
+    pub resume_session: bool,
     pub session_id: String,
     pub user_id: String,
     pub agent_id: Option<String>,
@@ -117,6 +145,15 @@ pub struct SandboxApprovalRequest {
     pub reason: Option<String>,
     pub approval_mode: Option<String>,
     pub hint: Option<String>,
+}
+
+/// v2 的非审批交互（用户输入 / 恢复问题）：由 composer 输入或 /approve /deny 作答。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct V2InputRequest {
+    pub interaction_id: String,
+    pub interaction_type: String,
+    pub prompt: String,
+    pub allowed_decisions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -170,6 +207,7 @@ pub enum BackendEvent {
     ToolFinished(String),
     SandboxApprovalRequested(SandboxApprovalRequest),
     SandboxApprovalResolved(SandboxApprovalResolution),
+    InputRequested(Box<V2InputRequest>),
     Stats(BackendStats),
     Error(String),
     Finished,
