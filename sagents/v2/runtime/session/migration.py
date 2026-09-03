@@ -82,7 +82,6 @@ def adopt_unowned_sessions(
                 FILESYSTEM_SESSION_STORE_FORMAT_V2,
             }:
                 continue
-            _verify_checksum(payload, snapshot)
             state = payload.get("state")
             if not isinstance(state, dict):
                 continue
@@ -92,6 +91,13 @@ def adopt_unowned_sessions(
             session = sessions[0]
             if not isinstance(session, dict) or session.get("owner") is not None:
                 continue
+
+            # Owner adoption is a one-time compatibility migration. An already
+            # owned aggregate is outside its scope, so leave integrity handling
+            # to the SessionStore's per-Session isolation instead of preventing
+            # every healthy Session (and the Desktop itself) from opening.
+            # Snapshots that still require mutation must remain fully trusted.
+            _verify_checksum(payload, snapshot)
 
             owner = {
                 "principal_id": principal_id,
@@ -374,7 +380,10 @@ def _session_id(state) -> str:
 
 def _verify_checksum(payload: dict[str, Any], source: Path) -> None:
     unsigned = {key: value for key, value in payload.items() if key != "checksum"}
-    if payload.get("checksum") != FilesystemSessionStore._checksum(unsigned):
+    if (
+        payload.get("checksum") != FilesystemSessionStore._checksum(unsigned)
+        and not FilesystemSessionStore._matches_legacy_unordered_checksum(payload)
+    ):
         raise ValueError(f"checksum mismatch: {source}")
 
 

@@ -73,9 +73,7 @@ class ExtensionHost:
         graph = self.resolver.resolve(requirements, selections=selections)
         supplied_configs = dict(configs or {})
         supplied_scopes = dict(scope_overrides or {})
-        unknown = (set(supplied_configs) | set(supplied_scopes)) - set(
-            graph.plugin_ids
-        )
+        unknown = (set(supplied_configs) | set(supplied_scopes)) - set(graph.plugin_ids)
         if unknown:
             raise _error(
                 "extension.unselected_configuration",
@@ -191,10 +189,7 @@ class ExtensionHost:
                         for key, value in providers.items()
                         if any(
                             dependency.capability == key.capability
-                            and (
-                                dependency.name is None
-                                or dependency.name == key.name
-                            )
+                            and (dependency.name is None or dependency.name == key.name)
                             for dependency in descriptor.dependencies
                         )
                     }
@@ -244,7 +239,7 @@ class ExtensionHost:
                         providers[key] = provider
                 started.append(starting)
                 starting = None
-        except Exception:
+        except BaseException:
             rollback = ([starting] if starting is not None else []) + list(
                 reversed(started)
             )
@@ -291,8 +286,7 @@ class ExtensionHost:
             for scope in selected_scopes:
                 if (
                     current_parent is not None
-                    and _SCOPE_RANK[scope]
-                    <= _SCOPE_RANK[current_parent.context.scope]
+                    and _SCOPE_RANK[scope] <= _SCOPE_RANK[current_parent.context.scope]
                 ):
                     continue
                 scope_context = context.model_copy(
@@ -371,10 +365,7 @@ class ExtensionHost:
                         for key, value in providers.items()
                         if any(
                             dependency.capability == key.capability
-                            and (
-                                dependency.name is None
-                                or dependency.name == key.name
-                            )
+                            and (dependency.name is None or dependency.name == key.name)
                             for dependency in descriptor.dependencies
                         )
                     }
@@ -450,9 +441,7 @@ class ExtensionHost:
             # objects accepted above are sync-only by contract, so close them
             # directly during rollback.
             for value in reversed(started):
-                stop = value.registration.stop or getattr(
-                    value.instance, "stop", None
-                )
+                stop = value.registration.stop or getattr(value.instance, "stop", None)
                 if stop is not None:
                     result = (
                         stop(value.instance, StopReason.START_FAILED)

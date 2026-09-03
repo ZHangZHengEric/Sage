@@ -451,7 +451,12 @@ class DesktopV2Service(
         if self._owns_log_sink:
             self.log_sink.close()
 
-    async def _authorized_indexed_sessions(self, user_id: str):
+    async def _authorized_indexed_sessions(
+        self,
+        user_id: str,
+        *,
+        skipped_unreadable_sessions: set[str] | None = None,
+    ):
         await self.start()
         context = self._context(user_id)
         visible = []
@@ -467,6 +472,19 @@ class DesktopV2Service(
                         "session_not_found",
                     }
                 ):
+                    continue
+                if exc.info.category == ErrorCategory.CORRUPT_STATE:
+                    if skipped_unreadable_sessions is not None:
+                        skipped_unreadable_sessions.add(value.session_id)
+                    self.logger.warning(
+                        "session.index_entry_skipped",
+                        "Skipped an unreadable indexed Session",
+                        attributes={
+                            "session_id": value.session_id,
+                            "error_code": exc.info.code,
+                            "error": exc.info.message,
+                        },
+                    )
                     continue
                 raise
             visible.append(value)

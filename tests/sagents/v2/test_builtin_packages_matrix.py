@@ -11,6 +11,7 @@ from sagents.v2.agent.presets.catalog import BUILTIN_AGENT_PRESETS
 from sagents.v2.package.manifest import CompositionResolver
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.tool import DecoratedToolProvider, ToolCall, ToolDefinition, tool
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 
 
@@ -145,3 +146,19 @@ async def test_decorated_provider_loads_and_executes_only_decorated_methods():
         ),
     )
     assert result.content[0].text == "hello"
+
+    with pytest.raises(SageV2Error) as conflict:
+        await provider.execute(
+            ToolCall(
+                tool_call_id="call_2",
+                tool_name="example_echo",
+                arguments={"text": "different"},
+                operation_id="operation_2",
+                idempotency_key="key_1",
+                owner_run_id="run_1",
+            ),
+            RequestContext(
+                actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
+            ),
+        )
+    assert conflict.value.info.code == "tool.idempotency_conflict"

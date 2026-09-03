@@ -108,7 +108,7 @@ async def test_probe_suite_keeps_independent_results_after_one_rejection():
 
 
 @pytest.mark.asyncio
-async def test_multimodal_probe_keeps_raw_error_and_extracts_image_field_cause():
+async def test_multimodal_probe_keeps_raw_error_without_inferring_another_protocol():
     class RejectedImageProvider(ProbeProvider):
         async def _stream(self, request):
             self.requests.append(request)
@@ -133,12 +133,10 @@ async def test_multimodal_probe_keeps_raw_error_and_extracts_image_field_cause()
 
     outcome = report.outcome("multimodal")
     assert "validation errors" in (outcome.error or "")
-    assert outcome.metadata["diagnostic_error"] == (
-        "Image payload lost a required Responses field during gateway validation "
-        "(ResponseInputImageParam.detail: Field required). If this is a Chat "
-        "Completions route, its Chat-to-Responses image conversion is "
-        "incompatible; use the OpenAI Responses protocol for multimodal requests."
-    )
+    assert "validation errors" in outcome.metadata["diagnostic_error"]
+    assert "use the OpenAI Responses protocol" not in outcome.metadata[
+        "diagnostic_error"
+    ]
 
 
 @pytest.mark.asyncio

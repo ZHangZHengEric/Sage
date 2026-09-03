@@ -62,6 +62,64 @@ void main() {
     expect(paths, ['/api/v2/workspaces/file', '/api/v2/workspaces/upload']);
   });
 
+  test(
+    'workspace upload preserves a Unicode filename in multipart data',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final directory = await Directory.systemTemp.createTemp(
+        'sage-v2-api-unicode-upload-test-',
+      );
+      const filename = '小凤筝 copy "最终".png';
+      final source = File('${directory.path}/$filename');
+      await source.writeAsBytes(const [0x89, 0x50, 0x4e, 0x47]);
+      addTearDown(() => server.close(force: true));
+      addTearDown(() => directory.delete(recursive: true));
+      final body = Completer<List<int>>();
+
+      server.listen((request) async {
+        body.complete(
+          await request.fold<List<int>>(
+            <int>[],
+            (bytes, chunk) => bytes..addAll(chunk),
+          ),
+        );
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'code': 0,
+            'data': {
+              'name': filename,
+              'path': 'uploads/$filename',
+              'virtual_path': '/workspace/uploads/$filename',
+              'size': 4,
+            },
+          }),
+        );
+        await request.response.close();
+      });
+
+      final api = V2ApiClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+        authToken: 'test-token',
+      );
+      addTearDown(api.close);
+
+      final uploaded = await api.upload(
+        agentId: 'sage',
+        file: XFile(source.path),
+      );
+      final multipartBytes = await body.future;
+      final multipart = utf8.decode(multipartBytes, allowMalformed: true);
+
+      expect(uploaded.name, filename);
+      expect(multipart, contains('filename="小凤筝 copy _最终_.png"'));
+      expect(
+        multipartBytes,
+        containsAllInOrder(const [0x89, 0x50, 0x4e, 0x47]),
+      );
+    },
+  );
+
   test('health rejects a sidecar from an older runtime revision', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));

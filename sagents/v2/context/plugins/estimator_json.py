@@ -27,14 +27,25 @@ class JsonHeuristicTokenEstimator:
     def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
         total = 0
         for message in messages:
+            payload = message.model_dump(mode="json")
+            media_tokens = 0
+            for block in payload.get("content", ()):
+                if not isinstance(block, dict) or block.get("kind") != "image":
+                    continue
+                media_tokens += 256 if block.get("detail") == "low" else 4_096
+                uri = str(block.get("uri") or "")
+                if uri.startswith("data:"):
+                    header = uri.partition(",")[0]
+                    block["uri"] = f"{header},<opaque-image-data>"
             encoded = json.dumps(
-                message.model_dump(mode="json"),
+                payload,
                 sort_keys=True,
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
-            total += self.message_overhead + math.ceil(
-                len(encoded) / self.bytes_per_token
+            total += (
+                self.message_overhead
+                + math.ceil(len(encoded) / self.bytes_per_token)
+                + media_tokens
             )
         return total
-

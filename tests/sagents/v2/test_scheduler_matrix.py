@@ -320,6 +320,28 @@ async def test_filesystem_scheduler_restores_pending_work(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_filesystem_scheduler_poisoned_after_persistence_failure(tmp_path):
+    clock = MutableClock()
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+
+    async def fail_save(state):
+        del state
+        raise OSError("disk unavailable")
+
+    scheduler._state_store.save = fail_save
+
+    with pytest.raises(SageV2Error) as failed:
+        await scheduler.submit(work("uncertain", clock))
+    assert failed.value.info.code == "scheduler.persistence_failed"
+    assert failed.value.info.safe_to_resume is False
+
+    with pytest.raises(SageV2Error) as poisoned:
+        await scheduler.submit(work("second", clock))
+    assert poisoned.value.info.code == "scheduler.closed"
+    await scheduler.close()
+
+
+@pytest.mark.asyncio
 async def test_filesystem_scheduler_enforces_one_writer_per_root(tmp_path):
     first = FilesystemScheduler(tmp_path)
     with pytest.raises(SchedulerInUseError) as caught:

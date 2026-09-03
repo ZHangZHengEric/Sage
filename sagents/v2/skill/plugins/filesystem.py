@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from sagents.v2.contracts.errors import (
@@ -28,6 +29,10 @@ class FilesystemSkillProvider:
         max_files: int = 2_000,
         max_total_bytes: int = 64 * 1024 * 1024,
     ) -> None:
+        if max_files <= 0:
+            raise ValueError("max_files must be positive")
+        if max_total_bytes <= 0:
+            raise ValueError("max_total_bytes must be positive")
         self.roots = tuple(Path(root).expanduser().resolve() for root in roots)
         self.source_id = source_id
         self.max_files = max_files
@@ -81,12 +86,23 @@ class FilesystemSkillProvider:
                 )
             if not candidate.is_file():
                 continue
-            content = candidate.read_bytes()
-            total += len(content)
-            if len(files) + 1 > self.max_files or total > self.max_total_bytes:
+            if len(files) >= self.max_files:
                 raise self._error(
                     "skill.bundle_too_large", "skill exceeds configured file limits"
                 )
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(root)
+            except (OSError, ValueError) as exc:
+                raise self._error(
+                    "skill.symlink_denied",
+                    f"skill file resolves outside its root: {candidate}",
+                ) from exc
+            content = self._read_bounded(
+                resolved,
+                remaining=self.max_total_bytes - total,
+            )
+            total += len(content)
             files[candidate.relative_to(root).as_posix()] = content
         digest = hashlib.sha256()
         for path, content in files.items():
@@ -110,8 +126,12 @@ class FilesystemSkillProvider:
     @staticmethod
     def _description(skill_file: Path) -> str:
         try:
-            text = skill_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            text = FilesystemSkillProvider._read_bounded(
+                skill_file,
+                remaining=64 * 1024,
+                truncate=True,
+            ).decode("utf-8")
+        except (OSError, UnicodeDecodeError, SageV2Error):
             return ""
 
         # A Skill's user-facing description belongs to its YAML front matter.
@@ -145,6 +165,29 @@ class FilesystemSkillProvider:
             if stripped and not stripped.startswith("---"):
                 return stripped[:500]
         return ""
+
+    @staticmethod
+    def _read_bounded(path: Path, *, remaining: int, truncate: bool = False) -> bytes:
+        if remaining < 0:
+            raise FilesystemSkillProvider._error(
+                "skill.bundle_too_large", "skill exceeds configured file limits"
+            )
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise FilesystemSkillProvider._error(
+                "skill.file_unreadable", f"skill file cannot be opened safely: {path}"
+            ) from exc
+        with os.fdopen(descriptor, "rb") as stream:
+            content = stream.read(remaining + 1)
+        if len(content) > remaining:
+            if truncate:
+                return content[:remaining]
+            raise FilesystemSkillProvider._error(
+                "skill.bundle_too_large", "skill exceeds configured file limits"
+            )
+        return content
 
     @staticmethod
     def _error(code: str, message: str) -> SageV2Error:

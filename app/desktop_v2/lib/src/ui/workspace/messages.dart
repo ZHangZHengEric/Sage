@@ -87,6 +87,7 @@ class _MessageBubble extends StatefulWidget {
     this.onEdit,
     this.onBranch,
     this.onReference,
+    this.onLoadReference,
     super.key,
   });
 
@@ -94,6 +95,7 @@ class _MessageBubble extends StatefulWidget {
   final Future<void> Function(String value)? onEdit;
   final Future<bool> Function()? onBranch;
   final ValueChanged<String>? onReference;
+  final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
 
   @override
   State<_MessageBubble> createState() => _MessageBubbleState();
@@ -224,7 +226,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                           ? _UserMessageContent(
                               key: ValueKey('message-selection:${message.id}'),
                               data: _messageDisplayText(context, message),
+                              content: message.content,
                               onReferenceSelection: widget.onReference,
+                              onLoadReference: widget.onLoadReference,
                             )
                           : _ConversationMarkdown(
                               key: ValueKey('message-selection:${message.id}'),

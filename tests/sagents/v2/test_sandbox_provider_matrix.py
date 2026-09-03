@@ -128,6 +128,31 @@ async def test_capabilities_are_explicit_and_do_not_claim_security_or_processes(
     assert capabilities.isolation_level == IsolationLevel.NONE
     assert capabilities.process.available is False
     assert capabilities.supports_background_jobs is False
+
+
+@pytest.mark.asyncio
+async def test_signed_grant_and_capability_sets_have_canonical_json_order():
+    issuer, provider = provider_pair()
+    handle = await provider.provision(spec(), CONTEXT, run_id="run_1")
+    operation_intent = intent(handle.ref, FileOperation.READ, "/workspace/a.txt")
+    signed = issuer.issue(
+        ref=handle.ref,
+        intent=operation_intent,
+        allowed_operations=frozenset({"process.run", "read", "network.request"}),
+    )
+    capabilities = await provider.capabilities()
+
+    assert signed.model_dump(mode="json")["allowed_operations"] == [
+        "network.request",
+        "process.run",
+        "read",
+    ]
+    dumped = capabilities.model_dump(mode="json")
+    assert dumped["filesystem_modes"] == sorted(dumped["filesystem_modes"])
+    assert dumped["network_modes"] == sorted(dumped["network_modes"])
+    assert dumped["supported_release_dispositions"] == sorted(
+        dumped["supported_release_dispositions"]
+    )
     assert capabilities.supports_snapshot is True
     assert capabilities.supports_terminal_purge is True
     assert capabilities.network_modes == frozenset({NetworkMode.NONE})
@@ -407,9 +432,7 @@ async def test_v3_release_is_idempotent_and_snapshot_fences_old_compute():
     issuer, provider = provider_pair()
     handle = await provider.provision(spec(), CONTEXT, run_id="run_1")
     operation_intent = intent(handle.ref, FileOperation.CREATE, "state.txt")
-    old_grant = grant(
-        issuer, handle.ref, operation_intent, FileOperation.CREATE
-    )
+    old_grant = grant(issuer, handle.ref, operation_intent, FileOperation.CREATE)
     snapshot = await provider.inspect(handle.ref)
     request = SandboxReleaseRequest(
         ref=handle.ref,
@@ -438,6 +461,7 @@ async def test_v3_release_is_idempotent_and_snapshot_fences_old_compute():
 
 def test_release_receipt_rejects_unconfirmed_or_inconsistent_compute_state():
     _issuer, provider = provider_pair()
+
     # Obtain a well-formed ref without reaching into provider internals.
     async def build_ref():
         return (await provider.provision(spec(), CONTEXT, run_id="run_1")).ref

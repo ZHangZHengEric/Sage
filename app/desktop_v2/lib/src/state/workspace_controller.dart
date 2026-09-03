@@ -641,6 +641,68 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<WorkspaceFileContent> loadAttachmentPreview(
+    UploadedAttachment attachment,
+  ) => _api.workspaceFile(
+    agentId: selectedAgentId,
+    workspaceId: selectedGroup.workspaceId,
+    path: attachment.path,
+  );
+
+  Future<WorkspaceFileContent> loadMessageReference(String source) async {
+    final path = _workspaceRelativePath(source);
+    final node = _findFile(files, path);
+    if (node?.isDirectory == true) {
+      final listing = node!.children
+          .map((child) => '${child.name}${child.isDirectory ? '/' : ''}')
+          .join('\n');
+      return WorkspaceFileContent(
+        bytes: Uint8List.fromList(utf8.encode(listing)),
+        mediaType: 'text/plain',
+      );
+    }
+    return _api.workspaceFile(
+      agentId: selectedAgentId,
+      workspaceId: selectedGroup.workspaceId,
+      path: path,
+    );
+  }
+
+  String _workspaceRelativePath(String source) {
+    final normalized = source
+        .replaceAll('\\', '/')
+        .replaceFirst(RegExp(r'/+$'), '');
+    final roots = <String>{'/workspace'};
+    void addRoot(Object? value) {
+      final root = value
+          ?.toString()
+          .replaceAll('\\', '/')
+          .replaceFirst(RegExp(r'/+$'), '');
+      if (root != null && root.startsWith('/') && root.length > 1) {
+        roots.add(root);
+      }
+    }
+
+    addRoot(settings.agentWorkspacePath);
+    addRoot(selectedGroup.project?.path);
+    final configuredSandbox = settings.componentConfigs['execution.sandbox'];
+    addRoot(configuredSandbox?['workspace_root']);
+    for (final component in components) {
+      if (component.id != 'execution.sandbox') continue;
+      addRoot(component.activeConfig['workspace_root']);
+      break;
+    }
+    final sortedRoots = roots.toList()
+      ..sort((left, right) => right.length.compareTo(left.length));
+    for (final root in sortedRoots) {
+      if (normalized == root) return '';
+      if (normalized.startsWith('$root/')) {
+        return normalized.substring(root.length + 1);
+      }
+    }
+    return normalized.replaceFirst(RegExp(r'^/+'), '');
+  }
+
   void removeAttachment(UploadedAttachment value) {
     attachments.remove(value);
     composerReferences.removeWhere(
@@ -1469,21 +1531,29 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> send(String text) async {
+  Future<void> send(
+    String text, {
+    List<ChatMessageContent> content = const [],
+  }) async {
     final conversation = selectedConversation;
     final prompt = text.trim();
+    final structuredContent = content.isEmpty && prompt.isNotEmpty
+        ? [ChatMessageContent.text(prompt)]
+        : List<ChatMessageContent>.of(content);
     if (conversation == null ||
         viewingSubSession ||
-        prompt.isEmpty ||
+        (prompt.isEmpty &&
+            !structuredContent.any((part) => part.isReference)) ||
         selectedAgentId.isEmpty) {
       return;
     }
+    final selectedAttachments = List<UploadedAttachment>.of(attachments);
     if (conversation.status == RunStatus.running ||
         conversation.status == RunStatus.starting ||
         conversation.status == RunStatus.suspending) {
       _attachments[conversation.id] = [];
       notifyListeners();
-      await steer(prompt);
+      await steer(prompt, content: structuredContent);
       return;
     }
     final pendingFork =
@@ -1500,6 +1570,7 @@ class WorkspaceController extends ChangeNotifier {
       id: _id('message'),
       role: 'user',
       text: prompt,
+      content: structuredContent,
     );
     conversation.messages.add(userMessage);
     conversation.processPanels.add(
@@ -1510,14 +1581,20 @@ class WorkspaceController extends ChangeNotifier {
       ),
     );
     if (conversation.title == '新会话') {
-      conversation.title = prompt.length > 28
-          ? '${prompt.substring(0, 28)}…'
-          : prompt;
+      final titleSource = prompt.isNotEmpty
+          ? prompt
+          : structuredContent
+                    .where((part) => part.isReference)
+                    .map((part) => part.fileName)
+                    .firstOrNull ??
+                '';
+      conversation.title = titleSource.length > 28
+          ? '${titleSource.substring(0, 28)}…'
+          : titleSource;
     }
     conversation.status = RunStatus.starting;
     conversation.thinking = false;
     conversation.pendingInteraction = null;
-    final selectedAttachments = List<UploadedAttachment>.of(attachments);
     _attachments[conversation.id] = [];
     notifyListeners();
     _persist();
@@ -1527,7 +1604,11 @@ class WorkspaceController extends ChangeNotifier {
           ? PlatformDispatcher.instance.locale.languageCode
           : settings.language,
       'messages': [
-        {'role': 'user', 'text': prompt},
+        {
+          'role': 'user',
+          'text': prompt,
+          'content': [for (final part in structuredContent) part.toJson()],
+        },
       ],
       if (pendingFork)
         'session_id': conversation.parentSessionId
@@ -1540,9 +1621,11 @@ class WorkspaceController extends ChangeNotifier {
       if (selectedGroup.workspaceId.isNotEmpty)
         'workspace_id': selectedGroup.workspaceId,
       'preferred_skills': preferredSkills.toList()..sort(),
-      'attachment_paths': [
-        for (final value in selectedAttachments) value.virtualPath,
-      ],
+      if (!structuredContent.any((part) => part.isReference) &&
+          selectedAttachments.isNotEmpty)
+        'attachment_paths': [
+          for (final value in selectedAttachments) value.virtualPath,
+        ],
       'approval_mode': conversation.approvalMode.wireValue,
       'invocation_mode': conversation.invocationMode.wireValue,
       'idempotency_key': _id('desktop'),
@@ -1627,21 +1710,38 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> steer(String text) async {
+  Future<void> steer(
+    String text, {
+    List<ChatMessageContent> content = const [],
+  }) async {
     final value = selectedConversation;
     final prompt = text.trim();
+    final structuredContent = content.isEmpty && prompt.isNotEmpty
+        ? [ChatMessageContent.text(prompt)]
+        : List<ChatMessageContent>.of(content);
     if (value == null ||
         value.runId.isEmpty ||
         value.turnId.isEmpty ||
-        prompt.isEmpty) {
+        (prompt.isEmpty &&
+            !structuredContent.any((part) => part.isReference))) {
       return;
     }
     value.messages.add(
-      ChatMessage(id: _id('steer'), role: 'user', text: prompt),
+      ChatMessage(
+        id: _id('steer'),
+        role: 'user',
+        text: prompt,
+        content: structuredContent,
+      ),
     );
     notifyListeners();
     try {
-      await _api.steer(value.runId, value.turnId, prompt);
+      await _api.steer(
+        value.runId,
+        value.turnId,
+        prompt,
+        content: structuredContent,
+      );
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();

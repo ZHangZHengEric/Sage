@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -381,3 +382,52 @@ async def test_model_summarizer_propagates_chinese_response_language():
 
     assert model.requests[0].metadata["response_language"] == "zh"
     assert "使用中文" in model.requests[0].messages[0].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_model_summarizer_bounds_the_entire_auxiliary_stream():
+    class SlowSummaryModel:
+        async def capabilities(self, model_binding):
+            del model_binding
+            return await ScriptedModelProvider(()).capabilities("summary")
+
+        def stream(self, request):
+            del request
+
+            async def events():
+                yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="{")
+                await asyncio.sleep(0.03)
+                yield _summary_completion("{}")
+
+            return events()
+
+    summarizer = ModelConversationSummarizer(SlowSummaryModel(), timeout_seconds=0.01)
+
+    with pytest.raises(SageV2Error) as caught:
+        await summarizer.summarize(
+            SummarizationRequest(
+                scope=scope(),
+                messages=ledger()[1:4],
+                target_tokens=512,
+            )
+        )
+
+    assert caught.value.info.code == "context.summarizer.model_timeout"
+
+
+@pytest.mark.asyncio
+async def test_model_summarizer_enforces_its_own_source_limit():
+    model = ScriptedModelProvider(())
+    summarizer = ModelConversationSummarizer(model, max_source_tokens=1)
+
+    with pytest.raises(SageV2Error) as caught:
+        await summarizer.summarize(
+            SummarizationRequest(
+                scope=scope(),
+                messages=ledger()[1:4],
+                target_tokens=512,
+            )
+        )
+
+    assert caught.value.info.code == "context.summarizer.source_too_large"
+    assert model.requests == []

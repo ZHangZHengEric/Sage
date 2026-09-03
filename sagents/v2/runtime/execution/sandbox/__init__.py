@@ -1,4 +1,6 @@
-"""SAgents V2 module for runtime/execution/sandbox/__init__.py."""
+"""Sandbox contracts and lazily loaded implementations."""
+
+from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.runtime.execution.sandbox.contracts import (
     FileOperation,
@@ -26,11 +28,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxSnapshot,
     SandboxState,
 )
-from sagents.v2.runtime.execution.sandbox.plugins import (
-    InMemorySandboxProvider,
-    LocalWorkspaceSandboxProvider,
-    SandboxGrantIssuer,
-)
 from sagents.v2.runtime.execution.sandbox.provider import (
     SandboxFileSystem,
     SandboxHandle,
@@ -38,6 +35,21 @@ from sagents.v2.runtime.execution.sandbox.provider import (
     SandboxProcessRuntime,
     SandboxProvider,
 )
+
+_LAZY_EXPORTS = {
+    "InMemorySandboxProvider": (
+        "sagents.v2.runtime.execution.sandbox.plugins.ephemeral",
+        "InMemorySandboxProvider",
+    ),
+    "LocalWorkspaceSandboxProvider": (
+        "sagents.v2.runtime.execution.sandbox.plugins.local",
+        "LocalWorkspaceSandboxProvider",
+    ),
+    "SandboxGrantIssuer": (
+        "sagents.v2.runtime.execution.sandbox.plugins.ephemeral",
+        "SandboxGrantIssuer",
+    ),
+}
 
 __all__ = [
     "FileOperation",
@@ -73,3 +85,11 @@ __all__ = [
     "SandboxSnapshot",
     "SandboxState",
 ]
+
+
+def __getattr__(name: str):
+    return resolve_export(name, _LAZY_EXPORTS, globals())
+
+
+def __dir__() -> list[str]:
+    return exported_names(_LAZY_EXPORTS, globals())

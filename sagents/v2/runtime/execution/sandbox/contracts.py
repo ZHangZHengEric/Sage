@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_serializer, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 
@@ -112,6 +112,17 @@ class SandboxCapabilities(StrictModel):
     max_retained_terminal_items: int | None = Field(default=None, ge=0)
     max_lifetime_seconds: int | None = Field(default=None, gt=0)
 
+    @field_serializer(
+        "filesystem_modes",
+        "network_modes",
+        "supported_release_dispositions",
+        when_used="json",
+    )
+    def serialize_capability_sets(self, value: frozenset[Enum]) -> list[str]:
+        """Keep capability negotiation stable on every process/hash seed."""
+
+        return sorted(item.value for item in value)
+
 
 class MountSpec(StrictModel):
     source_ref: Identifier
@@ -127,6 +138,14 @@ class FileSystemPolicy(StrictModel):
     max_file_bytes: int | None = Field(default=None, gt=0)
     max_total_bytes: int | None = Field(default=None, gt=0)
     allow_symlinks: bool = False
+
+    @field_serializer("allowed_operations", when_used="json")
+    def serialize_allowed_operations(
+        self, value: frozenset[FileOperation]
+    ) -> list[str]:
+        """Keep persisted policy JSON and hashes stable across processes."""
+
+        return sorted(operation.value for operation in value)
 
 
 class ProcessPolicy(StrictModel):
@@ -175,9 +194,7 @@ class LifecyclePolicy(StrictModel):
     safe_pause_behavior: SandboxReleaseDisposition = (
         SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE
     )
-    unsafe_pause_behavior: SandboxReleaseDisposition = (
-        SandboxReleaseDisposition.DETACH
-    )
+    unsafe_pause_behavior: SandboxReleaseDisposition = SandboxReleaseDisposition.DETACH
 
     @model_validator(mode="before")
     @classmethod
@@ -324,6 +341,12 @@ class SandboxGrant(StrictModel):
     nonce: Identifier
     single_use: bool = True
     signature: str
+
+    @field_serializer("allowed_operations", when_used="json")
+    def serialize_allowed_operations(self, value: frozenset[str]) -> list[str]:
+        """Canonicalize the signed grant payload for cross-process verification."""
+
+        return sorted(value)
 
 
 class FileStat(StrictModel):

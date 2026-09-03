@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import pytest
@@ -302,6 +303,39 @@ async def test_start_failure_rolls_back_failing_and_started_plugins():
 
 
 @pytest.mark.asyncio
+async def test_start_cancellation_rolls_back_failing_and_started_plugins():
+    dependency = plugin("dependency", "store")
+    cancelling = plugin(
+        "cancelling",
+        "runtime",
+        requires=(requirement("store"),),
+    )
+
+    async def cancel_start(context, dependencies):
+        del context, dependencies
+        EVENTS.append("start:cancelling")
+        raise asyncio.CancelledError
+
+    cancelling.start = cancel_start
+    host = ExtensionHost()
+    host.register(dependency.registration)
+    host.register(cancelling.registration)
+    plan = host.plan((requirement("runtime"),))
+
+    with pytest.raises(asyncio.CancelledError):
+        await host.open_scope(context(), plan)
+
+    assert cancelling.stops == [StopReason.START_FAILED]
+    assert dependency.stops == [StopReason.START_FAILED]
+    assert EVENTS == [
+        "start:dependency",
+        "start:cancelling",
+        "stop:cancelling:start_failed",
+        "stop:dependency:start_failed",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_scope_is_validated_before_plugin_start():
     process_only = plugin(
         "process_catalog",
@@ -344,10 +378,9 @@ async def test_two_hosts_have_no_shared_registry_or_lifecycle_state():
     )
     assert first_handle.providers.get_provider("model") is first_plugin.value
     assert second_handle.providers.get_provider("model") is second_plugin.value
-    assert (
-        first_handle.providers.get_provider("model")
-        is not second_handle.providers.get_provider("model")
-    )
+    assert first_handle.providers.get_provider(
+        "model"
+    ) is not second_handle.providers.get_provider("model")
     await first_handle.close()
     assert first_plugin.stops == [StopReason.SCOPE_CLOSED]
     assert second_plugin.stops == []

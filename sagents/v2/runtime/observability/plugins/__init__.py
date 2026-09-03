@@ -1,20 +1,46 @@
-"""Official observability sink implementations."""
+"""Observability plugins exposed without eager sibling imports."""
 
-from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
-from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
-from sagents.v2.runtime.observability.plugins.logging_filesystem import FilesystemLogSink
-from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
-from sagents.v2.runtime.observability.plugins.logging_stdout import StdoutLogSink
-from sagents.v2.runtime.observability.plugins.otlp import OtlpTraceSink, otel_available
-from sagents.v2.runtime.observability.plugins.trace_noop import NoopTraceSink
+from sagents.v2._lazy import exported_names, resolve_export
 
-__all__ = [
-    "FilesystemDiagnosticSink",
-    "FilesystemLogSink",
-    "NoopDiagnosticSink",
-    "NoopLogSink",
-    "NoopTraceSink",
-    "OtlpTraceSink",
-    "StdoutLogSink",
-    "otel_available",
-]
+
+_EXPORTS = {
+    "FilesystemDiagnosticSink": (
+        "sagents.v2.runtime.observability.plugins.filesystem",
+        "FilesystemDiagnosticSink",
+    ),
+    "FilesystemLogSink": (
+        "sagents.v2.runtime.observability.plugins.logging_filesystem",
+        "FilesystemLogSink",
+    ),
+    "NoopDiagnosticSink": (
+        "sagents.v2.runtime.observability.plugins.diagnostic_noop",
+        "NoopDiagnosticSink",
+    ),
+    "NoopLogSink": (
+        "sagents.v2.runtime.observability.plugins.logging_noop",
+        "NoopLogSink",
+    ),
+    "NoopTraceSink": (
+        "sagents.v2.runtime.observability.plugins.trace_noop",
+        "NoopTraceSink",
+    ),
+    "OtlpTraceSink": ("sagents.v2.runtime.observability.plugins.otlp", "OtlpTraceSink"),
+    "StdoutLogSink": (
+        "sagents.v2.runtime.observability.plugins.logging_stdout",
+        "StdoutLogSink",
+    ),
+    "otel_available": (
+        "sagents.v2.runtime.observability.plugins.otlp",
+        "otel_available",
+    ),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    return resolve_export(name, _EXPORTS, globals())
+
+
+def __dir__() -> list[str]:
+    return exported_names(_EXPORTS, globals())

@@ -593,6 +593,7 @@ class _MessageListState extends State<_MessageList> {
               value,
               label: context.l10n.text('workspace.reference'),
             ),
+            onLoadReference: widget.controller.loadMessageReference,
           ),
         ),
       );

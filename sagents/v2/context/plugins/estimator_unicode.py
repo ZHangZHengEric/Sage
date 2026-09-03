@@ -26,6 +26,8 @@ class UnicodeHeuristicTokenEstimator:
     ) -> None:
         if ascii_chars_per_token <= 0 or non_ascii_chars_per_token <= 0:
             raise ValueError("characters-per-token values must be positive")
+        if message_overhead < 0:
+            raise ValueError("message_overhead cannot be negative")
         self.ascii_chars_per_token = ascii_chars_per_token
         self.non_ascii_chars_per_token = non_ascii_chars_per_token
         self.message_overhead = message_overhead
@@ -33,8 +35,18 @@ class UnicodeHeuristicTokenEstimator:
     def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
         total = 0
         for message in messages:
+            payload = message.model_dump(mode="json")
+            media_tokens = 0
+            for block in payload.get("content", ()):
+                if not isinstance(block, dict) or block.get("kind") != "image":
+                    continue
+                media_tokens += 256 if block.get("detail") == "low" else 4_096
+                uri = str(block.get("uri") or "")
+                if uri.startswith("data:"):
+                    header = uri.partition(",")[0]
+                    block["uri"] = f"{header},<opaque-image-data>"
             value = json.dumps(
-                message.model_dump(mode="json"),
+                payload,
                 sort_keys=True,
                 separators=(",", ":"),
                 ensure_ascii=False,
@@ -50,4 +62,5 @@ class UnicodeHeuristicTokenEstimator:
             total += self.message_overhead
             total += math.ceil(ascii_count / self.ascii_chars_per_token)
             total += math.ceil(non_ascii_weight / self.non_ascii_chars_per_token)
+            total += media_tokens
         return total

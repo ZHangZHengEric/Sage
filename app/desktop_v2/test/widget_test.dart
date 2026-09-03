@@ -38,6 +38,10 @@ class _FakeApi extends V2ApiClient {
   Map<String, Object?>? lastRunBody;
   int workspaceTreeCalls = 0;
   int workspaceFileCalls = 0;
+  String? lastWorkspaceFileAgentId;
+  String? lastWorkspaceFileId;
+  String? lastWorkspaceFilePath;
+  Object? workspaceFileError;
   int? lastUsageDays;
   UsageDataQuality usageDataQuality = const UsageDataQuality();
   String? lastWorkspaceTreeId;
@@ -790,6 +794,11 @@ Inspect the complete diff before reporting findings.
     String workspaceId = '',
   }) async {
     workspaceFileCalls += 1;
+    lastWorkspaceFileAgentId = agentId;
+    lastWorkspaceFileId = workspaceId;
+    lastWorkspaceFilePath = path;
+    final failure = workspaceFileError;
+    if (failure != null) throw failure;
     return workspaceFileContent;
   }
 
@@ -2619,10 +2628,38 @@ void main() {
     );
     expect(controller.composerReferences.single.fileName, 'notes.md');
     expect(controller.composerReferences.single.path, 'docs/notes.md');
-    expect(
-      controller.composerReferences.single.promptText,
-      '@docs/notes.md\n> 第一行\n> 第二行',
+    final content = controller.composerReferences.single.toMessageContent();
+    expect(content.type, 'reference');
+    expect(content.path, 'docs/notes.md');
+    expect(content.quote, '第一行\n第二行');
+  });
+
+  test('chat messages persist interleaved text and reference content', () {
+    final original = ChatMessage(
+      id: 'message-structured-content',
+      role: 'user',
+      text: '请看然后继续',
+      content: const [
+        ChatMessageContent.text('请看'),
+        ChatMessageContent.reference(
+          fileName: 'image copy.png',
+          path: 'uploads/image copy.png',
+        ),
+        ChatMessageContent.text('然后继续'),
+      ],
     );
+
+    final restored = ChatMessage.fromJson(original.toJson());
+
+    expect(restored.text, '请看然后继续');
+    expect(restored.content.map((part) => part.type), [
+      'text',
+      'reference',
+      'text',
+    ]);
+    expect(restored.content[0].text, '请看');
+    expect(restored.content[1].path, 'uploads/image copy.png');
+    expect(restored.content[2].text, '然后继续');
   });
 
   testWidgets(
@@ -2696,15 +2733,120 @@ void main() {
 
       final sentText =
           ((api.lastRunBody?['messages'] as List).single as Map)['text'];
+      expect(sentText, '请解释这一段');
+      final sentContent =
+          ((api.lastRunBody?['messages'] as List).single as Map)['content']
+              as List;
+      expect(sentContent.map((part) => (part as Map)['type']), [
+        'text',
+        'reference',
+        'text',
+      ]);
+      expect((sentContent[0] as Map)['text'], '请解释');
+      expect((sentContent[1] as Map)['path'], 'docs/notes.md');
+      expect((sentContent[1] as Map)['quote'], fullReference);
+      expect((sentContent[2] as Map)['text'], '这一段');
+      final storedContent = controller.selectedConversation!.messages
+          .lastWhere((message) => message.role == 'user')
+          .content;
+      expect(storedContent.map((part) => part.type), [
+        'text',
+        'reference',
+        'text',
+      ]);
       expect(
-        sentText,
-        '请解释\n\n'
-        '@docs/notes.md\n'
-        '> 这是完整引用的第一行，内容足够长以便在输入消息里只展示简短摘要。\n'
-        '> 这是完整引用的第二行。\n\n'
-        '这一段',
+        find.byKey(const ValueKey('message-reference-chip:docs/notes.md')),
+        findsOneWidget,
       );
       expect(controller.composerReferences, isEmpty);
+    },
+  );
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'composer loads image attachment bytes from the workspace API in ${brightness.name} mode',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final api = _FakeApi();
+        api
+          ..desktopSettings = api.desktopSettings.copyWith(
+            themeMode: brightness.name,
+          )
+          ..workspaceFileContent = WorkspaceFileContent(
+            bytes: base64Decode(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            ),
+            mediaType: 'image/png',
+          );
+        final controller = await _controller(api: api);
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        controller.referenceWorkspaceNode(
+          const WorkspaceFileNode(
+            name: 'image.png',
+            path: 'uploads/image.png',
+            isDirectory: false,
+            size: 68,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(api.workspaceFileCalls, 1);
+        expect(api.lastWorkspaceFileAgentId, 'agent_main');
+        expect(api.lastWorkspaceFileId, isEmpty);
+        expect(api.lastWorkspaceFilePath, 'uploads/image.png');
+        final preview = tester.widget<Image>(
+          find.byKey(
+            const ValueKey(
+              'composer-attachment-preview-image:uploads/image.png',
+            ),
+          ),
+        );
+        expect(preview.image, isA<MemoryImage>());
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'composer uses a themed fallback when image preview loading fails',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi()
+        ..workspaceFileError = StateError('preview unavailable');
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      controller.referenceWorkspaceNode(
+        const WorkspaceFileNode(
+          name: 'image.png',
+          path: 'uploads/image.png',
+          isDirectory: false,
+          size: 68,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(api.workspaceFileCalls, 1);
+      expect(
+        find.byKey(
+          const ValueKey(
+            'composer-attachment-preview-fallback:uploads/image.png',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
     },
   );
 
@@ -2775,7 +2917,10 @@ void main() {
 
     expect(controller.attachments, hasLength(1));
     expect(controller.composerReferences, hasLength(1));
-    expect(controller.composerReferences.single.promptText, '@mini_site');
+    expect(
+      controller.composerReferences.single.toMessageContent().path,
+      'mini_site',
+    );
     expect(find.byKey(const ValueKey('composer-asset-shelf')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('composer-inline-reference')),
@@ -2798,7 +2943,14 @@ void main() {
 
     final sentText =
         ((api.lastRunBody?['messages'] as List).single as Map)['text'];
-    expect(sentText, '@mini_site\n\n删除');
+    expect(sentText, '删除');
+    final sentContent =
+        ((api.lastRunBody?['messages'] as List).single as Map)['content']
+            as List;
+    expect(sentContent.map((part) => (part as Map)['type']), [
+      'reference',
+      'text',
+    ]);
     final folderChip = find.byKey(
       const ValueKey('message-reference-chip:mini_site'),
     );
@@ -2854,6 +3006,182 @@ void main() {
     expect(find.textContaining('排序不正确'), findsOneWidget);
   });
 
+  testWidgets('a file reference with spaces is rendered as an inline chip', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const source =
+        '/Users/zhangzheng/sage/agent_workspace/uploads/小凤筝 copy.jpeg';
+    final persisted = _persistedBranchableConversation();
+    persisted['messages'] = const [
+      {
+        'id': 'user-file-reference-with-spaces',
+        'role': 'user',
+        'text': '这个图片里有什么呢？\n\n@$source',
+      },
+    ];
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [persisted],
+      }),
+    });
+    final controller = WorkspaceController(
+      api: _FakeApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    final fileChip = find.byKey(
+      const ValueKey('message-reference-chip:$source'),
+    );
+    expect(fileChip, findsOneWidget);
+    expect(find.text('@$source'), findsNothing);
+    expect(find.text('小凤筝 copy.jpeg'), findsOneWidget);
+    expect(find.text('这个图片里有什么呢？'), findsOneWidget);
+    expect(
+      find.descendant(of: fileChip, matching: find.byIcon(CupertinoIcons.doc)),
+      findsOneWidget,
+    );
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'hovering an image reference shows workspace content in ${brightness.name} mode',
+      (tester) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final persisted = _persistedBranchableConversation();
+        persisted['messages'] = const [
+          {
+            'id': 'user-image-reference',
+            'role': 'user',
+            'text': '@/workspace/uploads/image.png\n\n这个图片里面有什么？',
+          },
+        ];
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [persisted],
+          }),
+        });
+        final api = _FakeApi()
+          ..workspaceFileContent = WorkspaceFileContent(
+            bytes: base64Decode(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            ),
+            mediaType: 'image/png',
+          );
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        final chip = find.byKey(
+          const ValueKey('message-reference-chip:/workspace/uploads/image.png'),
+        );
+        expect(chip, findsOneWidget);
+        expect(api.workspaceFileCalls, 0);
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse.removePointer);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(chip));
+        await tester.pumpAndSettle();
+
+        expect(api.workspaceFileCalls, 1);
+        expect(api.lastWorkspaceFilePath, 'uploads/image.png');
+        final previewCard = find.byKey(
+          const ValueKey(
+            'message-reference-preview:/workspace/uploads/image.png',
+          ),
+        );
+        expect(previewCard, findsOneWidget);
+        final previewRect = tester.getRect(previewCard);
+        expect(previewRect.left, greaterThanOrEqualTo(0));
+        expect(previewRect.top, greaterThanOrEqualTo(0));
+        expect(previewRect.right, lessThanOrEqualTo(1200));
+        expect(previewRect.bottom, lessThanOrEqualTo(800));
+        expect(
+          find.byKey(
+            const ValueKey(
+              'message-reference-preview-image:/workspace/uploads/image.png',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+
+        await mouse.moveTo(Offset.zero);
+        await tester.pumpAndSettle();
+        expect(previewCard, findsNothing);
+      },
+    );
+  }
+
+  testWidgets('hovering a quote reference shows the quoted content', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final persisted = _persistedBranchableConversation();
+    persisted['messages'] = const [
+      {
+        'id': 'user-quote-reference',
+        'role': 'user',
+        'text': '@引用\n> 第一行引用\n> 第二行引用\n\n继续处理',
+      },
+    ];
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [persisted],
+      }),
+    });
+    final api = _FakeApi();
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    final chip = find.byKey(const ValueKey('message-reference-chip:引用'));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(chip));
+    await tester.pumpAndSettle();
+
+    expect(api.workspaceFileCalls, 0);
+    expect(
+      find.byKey(const ValueKey('message-reference-preview-text:引用')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('message-reference-preview-text:引用')),
+          )
+          .data,
+      '第一行引用\n第二行引用',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   test('workspace references use the real path in host path mode', () async {
     final api = _FakeApi();
     final controller = await _controller(api: api);
@@ -2884,6 +3212,10 @@ void main() {
       controller.attachments.single.virtualPath,
       '/tmp/sage/agent_workspace/docs/notes.md',
     );
+    await controller.loadMessageReference(
+      '/tmp/sage/agent_workspace/docs/notes.md',
+    );
+    expect(api.lastWorkspaceFilePath, 'docs/notes.md');
 
     controller.selectedGroupId = 'project_demo';
     controller.referenceWorkspaceNode(
@@ -2899,6 +3231,9 @@ void main() {
       controller.attachments.last.virtualPath,
       '/tmp/demo-project/docs/project.md',
     );
+    await controller.loadMessageReference('/tmp/demo-project/docs/project.md');
+    expect(api.lastWorkspaceFileId, 'project_demo');
+    expect(api.lastWorkspaceFilePath, 'docs/project.md');
   });
 
   test(
@@ -4734,10 +5069,9 @@ void main() {
       expect(controller.composerReferences.single.text, contains('第一段内容'));
       expect(controller.composerReferences.single.text, contains('第二段内容'));
       expect(controller.composerReferences.single.text, contains('void main'));
-      expect(
-        controller.composerReferences.single.promptText,
-        startsWith('@引用\n> 第一段内容'),
-      );
+      final reference = controller.composerReferences.single.toMessageContent();
+      expect(reference.citationLabel, '引用');
+      expect(reference.quote, startsWith('第一段内容'));
 
       await tester.tap(
         find.byKey(const ValueKey('message-reference:assistant-branch-1')),

@@ -77,6 +77,7 @@ from sagents.v2.runtime.extensions import (
     CapabilityRequirement,
     ExtensionHost,
     ExtensionRegistration,
+    ExtensionRegistry,
     ExtensionScope,
     ExtensionScopeContext,
     load_installed_extension,
@@ -285,9 +286,7 @@ class SAgentBuilder:
         self._session_store = value
         return self
 
-    def with_derived_state_store(
-        self, value: DerivedStateStore
-    ) -> "SAgentBuilder":
+    def with_derived_state_store(self, value: DerivedStateStore) -> "SAgentBuilder":
         """Inject rebuildable state independently from authoritative Sessions."""
 
         self._derived_state_store = value
@@ -888,9 +887,7 @@ class SAgentBuilder:
                 base_catalog=selected_catalog,
                 base_executor=selected_executor,
                 registry=registry,
-                resolved_spec_hash=(
-                    runtime_composition_hash or resolved.manifest_hash
-                ),
+                resolved_spec_hash=(runtime_composition_hash or resolved.manifest_hash),
                 delegation_concurrency_limiter=delegation_limiter,
                 loop_composer=compose,
                 child_loop_factory=child_factory,
@@ -948,7 +945,9 @@ class SAgentBuilder:
         session_access = AuthorizedSessionAccess(
             session_store,
             runtime=control_runtime,
-            derived_state=(derived_state if derived_state is not session_store else None),
+            derived_state=(
+                derived_state if derived_state is not session_store else None
+            ),
             derived_state_cleaners=(session_memory_service,),
         )
         agent = SAgent(
@@ -995,9 +994,7 @@ class SAgentBuilder:
             scheduler_config.config if scheduler_config is not None else {}
         )
         scheduler_capabilities = await scheduler.capabilities()
-        tenant_limit = int(
-            dispatcher_values.get("max_concurrent_runs_per_tenant", 2)
-        )
+        tenant_limit = int(dispatcher_values.get("max_concurrent_runs_per_tenant", 2))
         if not scheduler_capabilities.supports_atomic_tenant_quota:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -1295,7 +1292,9 @@ class SAgentBuilder:
     ) -> ToolSelectionPolicy:
         selection = self._selection(runtime, "tool.selection-policy")
         plugin_id = (
-            selection.plugin if selection is not None else LLMToolSelectionPolicy.plugin_id
+            selection.plugin
+            if selection is not None
+            else LLMToolSelectionPolicy.plugin_id
         )
         if plugin_id in {"hybrid", "sage.tool-selection.hybrid"}:
             plugin_id = LLMToolSelectionPolicy.plugin_id
@@ -1341,7 +1340,11 @@ class SAgentBuilder:
         # Host-owned runtime identities are dependencies, not user/plugin
         # configuration. Apply them last so a manifest cannot replace a model,
         # SessionStore, estimator, or another trusted composition input.
-        config.update(dict(locked_config or {}))
+        config.update(
+            self._supported_locked_config(
+                self.extensions, plugin_id, dict(locked_config or {})
+            )
+        )
         return await self._instantiate(
             host,
             parent,
@@ -1405,6 +1408,20 @@ class SAgentBuilder:
             for offer in registration.descriptor.provides
             if offer.capability == capability
         )
+
+    @staticmethod
+    def _supported_locked_config(
+        extensions: ExtensionRegistry,
+        plugin_id: str,
+        locked_config: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Inject host-owned values only when the selected plugin declares them."""
+
+        schema = extensions.get(plugin_id).descriptor.config_schema or {}
+        if schema.get("additionalProperties", True) is not False:
+            return dict(locked_config)
+        properties = set((schema.get("properties") or {}).keys())
+        return {key: value for key, value in locked_config.items() if key in properties}
 
     @staticmethod
     def _selection(
@@ -1606,9 +1623,7 @@ class SAgentBuilder:
                     facts
                     for facts in declared
                     if any(
-                        name in facts
-                        and name in live
-                        and facts[name] != live[name]
+                        name in facts and name in live and facts[name] != live[name]
                         for name in required
                     )
                 ]
@@ -1631,8 +1646,7 @@ class SAgentBuilder:
                         )
                     )
                 satisfied = all(
-                    live.get(name) == expected
-                    for name, expected in required.items()
+                    live.get(name) == expected for name, expected in required.items()
                 )
                 candidates = [live]
             else:
@@ -1820,15 +1834,15 @@ class _ApplicationComposer:
         if self._lock is None:
             self._lock = asyncio.Lock()
         manifest, resolved = SAgentBuilder()._resolve_package(package)
-        declarations = (
-            manifest.plugins if manifest is not None else resolved.plugins
-        )
+        declarations = manifest.plugins if manifest is not None else resolved.plugins
         runtime = manifest.runtime if manifest is not None else resolved.runtime
         for declaration in declarations:
             if not self.extensions.contains(declaration.id):
                 self.extensions.register(load_installed_extension(declaration.id))
         selected_agent = (
-            agent_id or resolved.entrypoint_agent or self.process_plan.entrypoint_agent_id
+            agent_id
+            or resolved.entrypoint_agent
+            or self.process_plan.entrypoint_agent_id
         )
         locks = {
             capability: dict(config)
@@ -2035,7 +2049,11 @@ class _ApplicationComposer:
             **dict(selection.config if selection is not None else {}),
         }
         config = SAgentBuilder._merge_plugin_config(declarations, plugin_id, config)
-        config.update(dict(locked_config or {}))
+        config.update(
+            SAgentBuilder._supported_locked_config(
+                self.extensions, plugin_id, dict(locked_config or {})
+            )
+        )
         scope = (
             selection.scope
             if selection is not None and selection.scope is not None
@@ -2183,15 +2201,15 @@ class _ApplicationComposer:
             for started in getattr(handle, "_started", ()):
                 descriptor = started.registration.descriptor
                 for offer in descriptor.provides:
-                    bindings[(offer.capability, offer.name, handle.context.scope.value)] = (
-                        ResolvedProviderBinding(
-                            capability=offer.capability,
-                            name=offer.name,
-                            api_version=offer.api_version,
-                            plugin_id=descriptor.plugin_id,
-                            scope=handle.context.scope.value,
-                            source="plugin",
-                        )
+                    bindings[
+                        (offer.capability, offer.name, handle.context.scope.value)
+                    ] = ResolvedProviderBinding(
+                        capability=offer.capability,
+                        name=offer.name,
+                        api_version=offer.api_version,
+                        plugin_id=descriptor.plugin_id,
+                        scope=handle.context.scope.value,
+                        source="plugin",
                     )
 
         for handle in selected_handles:
@@ -2205,9 +2223,14 @@ class _ApplicationComposer:
                 scope="agent",
                 source="host",
             )
-        injected_scope = "run" if any(
-            handle.context.scope == ExtensionScope.RUN for handle in selected_handles
-        ) else "agent"
+        injected_scope = (
+            "run"
+            if any(
+                handle.context.scope == ExtensionScope.RUN
+                for handle in selected_handles
+            )
+            else "agent"
+        )
         for capability, provider in (
             ("tool.catalog", tool_catalog),
             ("tool.executor", tool_executor),
@@ -2246,9 +2269,7 @@ class _ApplicationComposer:
         }
         composition_hash = (
             "sha256:"
-            + hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode()
-            ).hexdigest()
+            + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         )
         return ResolvedApplicationPlan(
             package_id=resolved.package_id,
@@ -2281,7 +2302,9 @@ def _config_identity(value: Any) -> str:
             seen.add(marker)
             return {
                 str(key): normalize(item, seen)
-                for key, item in sorted(candidate.items(), key=lambda pair: str(pair[0]))
+                for key, item in sorted(
+                    candidate.items(), key=lambda pair: str(pair[0])
+                )
             }
         if isinstance(candidate, (list, tuple)):
             seen.add(marker)

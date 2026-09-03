@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from typing import Any
 
 from pydantic import SecretStr
@@ -11,6 +12,7 @@ from app.desktop_v2.backend.catalog import (
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model import (
+    ModelCapabilityProbeRequest,
     probe_model_capabilities,
     probe_model_connection,
     probe_model_json_object,
@@ -26,6 +28,28 @@ from sagents.v2.package.manifest.models import (
     ModelRoute,
 )
 from sagents.v2.runtime.credentials import CredentialMaterial
+
+
+_IMAGE_VALIDATION_FIELD_RE = re.compile(
+    r"ResponseInputImageParam['\"],\s*['\"]([^'\"]+)['\"]\).*?"
+    r"['\"]msg['\"]:\s*['\"]([^'\"]+)['\"]",
+    flags=re.DOTALL,
+)
+
+
+def _probe_diagnostic(
+    *, protocol: str, name: str, raw_error: str, fallback: str
+) -> str:
+    """Describe a failure only in terms of the configured wire protocol."""
+
+    if protocol == "openai-chat-completions" and name == "multimodal":
+        match = _IMAGE_VALIDATION_FIELD_RE.search(raw_error)
+        if match is not None:
+            return (
+                "openai-chat-completions image_url probe rejected during provider "
+                f"validation (image_url.{match.group(1)}: {match.group(2)})"
+            )
+    return fallback
 
 
 async def probe_model_provider_capabilities(
@@ -90,7 +114,7 @@ async def probe_model_provider_capabilities(
         return model_provider
 
     def serialize_outcome(outcome) -> dict[str, Any]:
-        return {
+        value = {
             "supported": outcome.supported,
             **outcome.model_dump(
                 mode="json",
@@ -100,6 +124,19 @@ async def probe_model_provider_capabilities(
             ),
             "status": outcome.status.value,
         }
+
+        if not outcome.supported and outcome.error:
+            metadata = dict(value.get("metadata") or {})
+            fallback = str(metadata.get("diagnostic_error") or outcome.error)[:1_000]
+            metadata["diagnostic_error"] = _probe_diagnostic(
+                protocol=provider.protocol,
+                name=outcome.name,
+                raw_error=outcome.error,
+                fallback=fallback,
+            )
+            metadata["protocol"] = provider.protocol
+            value["metadata"] = metadata
+        return value
 
     def diagnostic_outcome(outcome: dict[str, Any]) -> dict[str, str]:
         metadata = outcome.get("metadata")
@@ -128,6 +165,111 @@ async def probe_model_provider_capabilities(
     connection_outcome = None
     effective_max_output_tokens = provider.max_tokens
     try:
+        plugin_probe = getattr(negotiation_provider, "probe_capabilities", None)
+        if callable(plugin_probe):
+            route_fingerprint = compatibility_fingerprint(provider)
+            plugin_profile = await plugin_probe(
+                ModelCapabilityProbeRequest(
+                    model_binding=provider.id,
+                    route_fingerprint=route_fingerprint,
+                    max_output_tokens=provider.max_tokens,
+                    output_token_fallbacks=output_token_fallbacks,
+                    reasoning_efforts=reasoning_efforts,
+                )
+            )
+            probes = {
+                outcome.name: serialize_outcome(outcome)
+                for outcome in plugin_profile.outcomes
+            }
+            reasoning_outcome = plugin_profile.outcome("reasoning_control")
+            reasoning_control = probes["reasoning_control"]
+            reasoning_control.update(reasoning_outcome.metadata)
+            reasoning_control["probed"] = True
+            probes["reasoning_control"] = reasoning_control
+            successful_probes = [
+                outcome.name
+                for outcome in plugin_profile.outcomes
+                if outcome.supported
+            ]
+            failed_probes = [
+                outcome.name
+                for outcome in plugin_profile.outcomes
+                if outcome.status.value in {"error", "unsupported"}
+            ]
+            skipped_probes = [
+                outcome.name
+                for outcome in plugin_profile.outcomes
+                if outcome.status.value == "skipped"
+            ]
+            strategy = plugin_profile.invocation_strategy
+            compatibility_profile = DesktopModelCompatibilityProfile(
+                route_fingerprint=route_fingerprint,
+                max_output_tokens_field=strategy.get("max_output_tokens_field"),
+                effective_max_output_tokens=(
+                    plugin_profile.effective_max_output_tokens
+                ),
+                reasoning_disable_strategy=strategy.get(
+                    "reasoning_disable_strategy", "omit"
+                ),
+                reasoning_behavior=strategy.get("reasoning_behavior", "none"),
+                reasoning_effort_strategy=strategy.get(
+                    "reasoning_effort_strategy", "reasoning_effort"
+                ),
+                supported_reasoning_efforts=tuple(
+                    strategy.get("supported_reasoning_efforts", ())
+                ),
+                text_only_reasoning_efforts=tuple(
+                    strategy.get("text_only_reasoning_efforts", ())
+                ),
+                unsupported_reasoning_efforts=tuple(
+                    strategy.get("unsupported_reasoning_efforts", ())
+                ),
+                supports_json_object=bool(
+                    strategy.get("supports_json_object", False)
+                ),
+                auxiliary_json_compatible=bool(
+                    strategy.get("auxiliary_json_compatible", False)
+                ),
+                successful_probes=tuple(successful_probes),
+                failed_probes=tuple(failed_probes),
+                probe_diagnostics={
+                    name: diagnostic_outcome(outcome)
+                    for name, outcome in probes.items()
+                    if outcome.get("supported") is not True
+                    and outcome.get("status") != "supported"
+                },
+                plugin_profile=plugin_profile,
+            )
+            return {
+                "valid": plugin_profile.supports("connection"),
+                "successful_probes": successful_probes,
+                "failed_probes": failed_probes,
+                "skipped_probes": skipped_probes,
+                "connection": probes["connection"],
+                "requested_max_output_tokens": provider.max_tokens,
+                "effective_max_output_tokens": (
+                    plugin_profile.effective_max_output_tokens
+                ),
+                "supports_multimodal": plugin_profile.supports("multimodal"),
+                "supports_structured_output": plugin_profile.supports(
+                    "structured_output"
+                ),
+                "supports_json_object": plugin_profile.supports("json_object"),
+                "supports_tool_calling": plugin_profile.supports("tool_calling"),
+                "multimodal": probes["multimodal"],
+                "structured_output": probes["structured_output"],
+                "json_object": probes["json_object"],
+                "tool_calling": probes["tool_calling"],
+                "reasoning_control": reasoning_control,
+                "compatibility_profile": compatibility_profile.model_dump(
+                    mode="json"
+                ),
+                "probes": probes,
+                "protocol": provider.protocol,
+                "model": provider.model,
+                "base_url": provider.base_url,
+            }
+
         for candidate in candidates:
             connection_outcome = await probe_model_connection(
                 negotiation_provider,
@@ -396,6 +538,7 @@ async def probe_model_provider_capabilities(
             "reasoning_control": reasoning_control,
             "compatibility_profile": compatibility_profile.model_dump(mode="json"),
             "probes": probes,
+            "protocol": provider.protocol,
             "model": provider.model,
             "base_url": provider.base_url,
         }

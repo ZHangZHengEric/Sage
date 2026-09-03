@@ -306,14 +306,17 @@ class DesktopWorkspaceServiceMixin:
             raise ValueError("invalid filename")
         uploads = root / "uploads"
         uploads.mkdir(parents=True, exist_ok=True)
-        target = self._resolve_child(uploads, safe_name)
-        if target.exists():
-            raise ValueError(f"upload already exists: {safe_name}")
-        await asyncio.to_thread(target.write_bytes, content)
+        stored_name = await asyncio.to_thread(
+            self._store_upload,
+            uploads,
+            safe_name,
+            content,
+        )
         return {
-            "name": safe_name,
-            "path": f"uploads/{safe_name}",
-            "virtual_path": workspace_root.rstrip("/") + f"/uploads/{safe_name}",
+            "name": stored_name,
+            "path": f"uploads/{stored_name}",
+            "virtual_path": workspace_root.rstrip("/")
+            + f"/uploads/{stored_name}",
             "size": len(content),
         }
 
@@ -410,6 +413,35 @@ class DesktopWorkspaceServiceMixin:
         if root != candidate and root not in candidate.parents:
             raise PermissionError("path is outside the active workspace")
         return candidate
+
+    @classmethod
+    def _store_upload(
+        cls,
+        uploads: Path,
+        safe_name: str,
+        content: bytes,
+    ) -> str:
+        source = Path(safe_name)
+        index = 0
+        while True:
+            candidate_name = (
+                safe_name
+                if index == 0
+                else f"{source.stem}_{index}{source.suffix}"
+            )
+            target = cls._resolve_child(uploads, candidate_name)
+            if target.exists():
+                if target.is_file() and target.read_bytes() == content:
+                    return candidate_name
+                index += 1
+                continue
+            try:
+                with target.open("xb") as output:
+                    output.write(content)
+                return candidate_name
+            except FileExistsError:
+                # Another upload claimed this name after the existence check.
+                continue
 
     @classmethod
     def _project_runtime_entries(

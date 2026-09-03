@@ -17,6 +17,7 @@ from typing import Any, Literal, Protocol
 from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel, utc_now
+from sagents.v2.model.capability_contracts import ModelCapabilityProfile
 
 
 def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, Any]:
@@ -101,6 +102,7 @@ class DesktopModelCompatibilityProfile(StrictModel):
     successful_probes: tuple[str, ...] = ()
     failed_probes: tuple[str, ...] = ()
     probe_diagnostics: dict[str, dict[str, str]] = Field(default_factory=dict)
+    plugin_profile: ModelCapabilityProfile | None = None
 
 
 class DesktopModelProviderRecord(StrictModel):

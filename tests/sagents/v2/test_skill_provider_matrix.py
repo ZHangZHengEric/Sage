@@ -17,6 +17,7 @@ from sagents.v2.skill import (
     SkillDescriptor,
     SkillLoader,
 )
+from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.errors import SageV2Error
@@ -194,8 +195,7 @@ async def test_durable_run_skill_grant_blocks_unselected_skill_materialization()
     )
 
     assert [
-        value.name
-        for value in await loader.catalog.list_skills(run_id="run_1")
+        value.name for value in await loader.catalog.list_skills(run_id="run_1")
     ] == ["alpha"]
     with pytest.raises(SageV2Error) as denied:
         await loader.load("beta", run_id="run_1")
@@ -269,3 +269,36 @@ def test_skill_name_preserves_legacy_spaces_but_rejects_path_separators():
             description="unsafe",
             source_id="legacy",
         )
+
+
+@pytest.mark.asyncio
+async def test_filesystem_skill_rejects_oversized_file_before_reading_past_limit(
+    tmp_path,
+):
+    skill_root = tmp_path / "skills" / "large"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_bytes(b"x" * 33)
+    provider = FilesystemSkillProvider(
+        (tmp_path / "skills",), max_files=2, max_total_bytes=32
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await provider.fetch("large", run_id="run_1")
+
+    assert caught.value.info.code == "skill.bundle_too_large"
+
+
+@pytest.mark.asyncio
+async def test_filesystem_skill_rejects_symlinked_bundle_files(tmp_path):
+    skill_root = tmp_path / "skills" / "unsafe"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Unsafe", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+    (skill_root / "secret.txt").symlink_to(secret)
+    provider = FilesystemSkillProvider((tmp_path / "skills",))
+
+    with pytest.raises(SageV2Error) as caught:
+        await provider.fetch("unsafe", run_id="run_1")
+
+    assert caught.value.info.code == "skill.symlink_denied"

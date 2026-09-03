@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
+from sagents.v2.model.capability_contracts import ModelCapabilityProfile
 
 
 class ModelRequestDefaults(StrictModel):
@@ -42,6 +43,7 @@ class ModelRoute(StrictModel):
     capabilities: ModelCapabilityDeclaration = Field(
         default_factory=ModelCapabilityDeclaration
     )
+    capability_profile: ModelCapabilityProfile | None = None
 
     @field_validator("base_url")
     @classmethod

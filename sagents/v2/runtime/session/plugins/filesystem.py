@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -51,6 +52,10 @@ LOGGER = logging.getLogger(__name__)
 SESSION_LAYOUT_FORMAT = "sage.filesystem-session-layout/v1"
 JOURNAL_COMPACT_COMMITS = 256
 JOURNAL_COMPACT_BYTES = 8 * 1024 * 1024
+_FILE_OPERATION_VALUES = frozenset(
+    {"read", "write", "create", "delete", "rename", "list"}
+)
+_LEGACY_CHECKSUM_PERMUTATION_LIMIT = 10_000
 
 
 class StoreInUseError(SageV2Error):
@@ -649,11 +654,114 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             "current_session_revision": current_revision,
             "state": typed_state.model_dump(mode="json"),
         }
-        envelope = SessionSnapshotEnvelope(
+        # Validate once, then checksum the exact JSON representation that will
+        # be written. Nested models may canonicalize unordered collections;
+        # hashing their pre-validation representation can produce a snapshot
+        # whose checksum never matched its own on-disk payload.
+        normalized = SessionSnapshotEnvelope(
             **unsigned,
-            checksum=self._checksum(unsigned),
-        )
-        self._atomic_json_write(path, envelope.model_dump(mode="json"))
+            checksum="pending",
+        ).model_dump(mode="json", exclude={"checksum"})
+        payload = {
+            **normalized,
+            "checksum": self._checksum(normalized),
+        }
+        self._atomic_json_write(path, payload)
+
+    @classmethod
+    def _matches_legacy_unordered_checksum(cls, payload: dict[str, Any]) -> bool:
+        """Recognize the v4 checksum bug caused only by FileOperation ordering.
+
+        Older v4 writers hashed one Pydantic serialization and persisted a
+        second. ``frozenset[FileOperation]`` could use a different order in the
+        two serializations. Enumerating this six-value set lets us prove the
+        stored digest matches the same payload under another legal ordering;
+        arbitrary checksum mismatches remain corruption.
+        """
+
+        if payload.get("format") != cls.format_version:
+            return False
+        stored_checksum = payload.get("checksum")
+        if not isinstance(stored_checksum, str):
+            return False
+        unsigned = {key: value for key, value in payload.items() if key != "checksum"}
+        state = unsigned.get("state")
+        if not isinstance(state, dict):
+            return False
+
+        grouped_paths: dict[tuple[str, ...], list[tuple[object, ...]]] = {}
+
+        def register_path(path: tuple[object, ...]) -> None:
+            current: Any = unsigned
+            try:
+                for part in path:
+                    current = current[part]
+            except (KeyError, IndexError, TypeError):
+                return
+            if (
+                not isinstance(current, list)
+                or not current
+                or len(current) > len(_FILE_OPERATION_VALUES)
+                or any(not isinstance(value, str) for value in current)
+                or len(set(current)) != len(current)
+                or any(value not in _FILE_OPERATION_VALUES for value in current)
+            ):
+                return
+            grouped_paths.setdefault(tuple(sorted(current)), []).append(path)
+
+        for index, _record in enumerate(state.get("execution_resources", ())):
+            register_path(
+                (
+                    "state",
+                    "execution_resources",
+                    index,
+                    "sandbox_spec",
+                    "filesystem",
+                    "allowed_operations",
+                )
+            )
+        for index, _result in enumerate(
+            state.get("execution_resource_command_results", ())
+        ):
+            register_path(
+                (
+                    "state",
+                    "execution_resource_command_results",
+                    index,
+                    "record",
+                    "sandbox_spec",
+                    "filesystem",
+                    "allowed_operations",
+                )
+            )
+        if not grouped_paths:
+            return False
+
+        groups = tuple(grouped_paths.items())
+        permutation_count = 1
+        permutations: list[tuple[tuple[str, ...], ...]] = []
+        for values, _paths in groups:
+            candidates = tuple(itertools.permutations(values))
+            permutation_count *= len(candidates)
+            if permutation_count > _LEGACY_CHECKSUM_PERMUTATION_LIMIT:
+                return False
+            permutations.append(candidates)
+
+        candidate = deepcopy(unsigned)
+
+        def replace(path: tuple[object, ...], value: tuple[str, ...]) -> None:
+            current: Any = candidate
+            for part in path[:-1]:
+                current = current[part]
+            current[path[-1]] = list(value)
+
+        for combination in itertools.product(*permutations):
+            for (_values, paths), ordered in zip(groups, combination, strict=True):
+                for path in paths:
+                    replace(path, ordered)
+            if cls._checksum(candidate) == stored_checksum:
+                return True
+        return False
 
     def _refresh_session_views(self, session_id: str, state: dict[str, Any]) -> None:
         """Best-effort human-readable projection of the SessionStore contract.
@@ -853,11 +961,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     "current_session_revision": current_revision,
                     "mutation": mutation.model_dump(mode="json"),
                 }
-                envelope = SessionMutationEnvelope(
+                normalized = SessionMutationEnvelope(
                     **unsigned,
-                    checksum=self._checksum(unsigned),
-                )
-                self._append_journal_line(journal, envelope.model_dump(mode="json"))
+                    checksum="pending",
+                ).model_dump(mode="json", exclude={"checksum"})
+                envelope = {
+                    **normalized,
+                    "checksum": self._checksum(normalized),
+                }
+                self._append_journal_line(journal, envelope)
                 count = self._journal_commits.get(session_id, 0) + 1
                 self._journal_commits[session_id] = count
                 if (
@@ -1244,9 +1356,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         stored_checksum = payload.get("checksum")
         unsigned = {key: value for key, value in payload.items() if key != "checksum"}
         if stored_checksum != self._checksum(unsigned):
-            raise self._corrupt(
-                "session_store.hash_mismatch",
-                f"snapshot {snapshot} checksum mismatch",
+            if not self._matches_legacy_unordered_checksum(payload):
+                raise self._corrupt(
+                    "session_store.hash_mismatch",
+                    f"snapshot {snapshot} checksum mismatch",
+                )
+            payload["checksum"] = self._checksum(unsigned)
+            self._atomic_json_write(snapshot, payload)
+            LOGGER.warning(
+                "repaired legacy unordered-collection checksum: %s", snapshot
             )
         return payload
 
@@ -1335,9 +1453,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 else:
                     current = SessionMutationEnvelope.model_validate(payload)
                     mutation = current
-                    delta = current.mutation.model_dump(
-                        mode="json", exclude={"kind"}
-                    )
+                    delta = current.mutation.model_dump(mode="json", exclude={"kind"})
             except Exception as exc:
                 raise self._corrupt(
                     "session_store.journal_corrupt",
@@ -1631,9 +1747,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         parts = [str(payload.get("tenant_id") or "")]
         if "principal_type" in payload:
             parts.append(str(payload.get("principal_type") or ""))
-        parts.extend(
-            (str(payload["principal_id"]), str(payload["idempotency_key"]))
-        )
+        parts.extend((str(payload["principal_id"]), str(payload["idempotency_key"])))
         identity = "\0".join(parts)
         return (
             self.idempotency_root

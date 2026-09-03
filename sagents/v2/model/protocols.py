@@ -29,6 +29,7 @@ from sagents.v2.model.plugins.openai_responses import (
     OpenAIResponsesModelProvider,
 )
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.capability_contracts import ModelCapabilityProfile
 
 
 class BuiltinModelProtocol(str, Enum):
@@ -94,7 +95,13 @@ _DESCRIPTORS = (
         value=AnthropicMessagesModelProvider.description,
         default_base_url="https://api.anthropic.com",
         aliases=("anthropic", "claude", "claude-messages"),
-        capabilities=("streaming", "tools", "structured-output", "reasoning"),
+        capabilities=(
+            "streaming",
+            "tools",
+            "structured-output",
+            "reasoning",
+            "multimodal",
+        ),
     ),
 )
 
@@ -128,11 +135,21 @@ def create_registered_model_provider(
     *,
     client: Any | None = None,
     provider_instance_id: str | None = None,
+    capability_profile: ModelCapabilityProfile | None = None,
 ) -> ModelProvider:
     """Construct the implementation selected by a real plugin registration."""
 
     protocol = resolve_model_protocol(route.provider)
     descriptor = model_protocol_descriptor(route.provider)
+    implementation = _PROTOCOL_PROVIDERS[protocol]
+    capability_profile = capability_profile or route.capability_profile
+    if capability_profile is not None:
+        if capability_profile.protocol != protocol.value:
+            raise ValueError("model capability profile protocol does not match route")
+        if capability_profile.plugin_id != implementation.plugin_id:
+            raise ValueError("model capability profile owner does not match route")
+        if capability_profile.plugin_version != implementation.plugin_version:
+            raise ValueError("model capability profile version is stale")
     declaration = route.capabilities
     capabilities = ModelCapabilities(
         supports_streaming=True,
@@ -175,6 +192,10 @@ def create_registered_model_provider(
             ),
             extra_body=extra,
         )
+        if capability_profile is not None:
+            config = implementation.apply_capability_profile(
+                config, capability_profile
+            )
         return OpenAIChatCompletionsModelProvider(config, credential, client=client)
     if protocol == BuiltinModelProtocol.OPENAI_RESPONSES:
         config = OpenAIResponsesConfig(
@@ -186,6 +207,10 @@ def create_registered_model_provider(
             ),
             extra_body=extra,
         )
+        if capability_profile is not None:
+            config = implementation.apply_capability_profile(
+                config, capability_profile
+            )
         return OpenAIResponsesModelProvider(config, credential, client=client)
     config = AnthropicMessagesConfig(
         **common,
@@ -194,4 +219,6 @@ def create_registered_model_provider(
         extra_headers=dict(extra.pop("extra_headers", {})),
         extra_body=extra,
     )
+    if capability_profile is not None:
+        config = implementation.apply_capability_profile(config, capability_profile)
     return AnthropicMessagesModelProvider(config, credential, client=client)

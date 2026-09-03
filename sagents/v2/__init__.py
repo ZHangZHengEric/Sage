@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """Sage Agents v2 public API.
 
 The v2 package is intentionally independent from the legacy runtime.  Importing
@@ -10,58 +9,53 @@ Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 """
 
 from sagents.v2.compat import require_python
+from sagents.v2._lazy import exported_names, resolve_export
 
 require_python()
 
-from sagents.v2.contracts import (
-    ActorRef,
-    EventCursor,
-    RequestContext,
-    RunHandle,
-    RuntimeEvent,
-    ProposeSessionCommit,
-    PublishSessionCommit,
-    RejectSessionCommit,
-    SessionCommitProposal,
-    SessionMergeStrategy,
-    StartRun,
-)
-from sagents.v2.sagent import SAgent, SAgentRunStream
-from sagents.v2.application import (
-    InterfaceRunStream,
-    MaterializedAgentPorts,
-    ResolvedApplicationPlan,
-    ResolvedProviderBinding,
-    SAgentApplication,
-)
-from sagents.v2.builder import SAgentBuilder
-from sagents.v2.runtime.execution import (
-    ExecutionBindingProvider,
-    ExecutionBindingRequest,
-    RunExecutionBinding,
-)
+_EXPORTS = {
+    "ActorRef": ("sagents.v2.contracts", "ActorRef"),
+    "EventCursor": ("sagents.v2.contracts", "EventCursor"),
+    "ExecutionBindingProvider": (
+        "sagents.v2.runtime.execution",
+        "ExecutionBindingProvider",
+    ),
+    "ExecutionBindingRequest": (
+        "sagents.v2.runtime.execution",
+        "ExecutionBindingRequest",
+    ),
+    "InterfaceRunStream": ("sagents.v2.application", "InterfaceRunStream"),
+    "MaterializedAgentPorts": ("sagents.v2.application", "MaterializedAgentPorts"),
+    "ProposeSessionCommit": ("sagents.v2.contracts", "ProposeSessionCommit"),
+    "PublishSessionCommit": ("sagents.v2.contracts", "PublishSessionCommit"),
+    "RejectSessionCommit": ("sagents.v2.contracts", "RejectSessionCommit"),
+    "RequestContext": ("sagents.v2.contracts", "RequestContext"),
+    "ResolvedApplicationPlan": (
+        "sagents.v2.application",
+        "ResolvedApplicationPlan",
+    ),
+    "ResolvedProviderBinding": (
+        "sagents.v2.application",
+        "ResolvedProviderBinding",
+    ),
+    "RunExecutionBinding": ("sagents.v2.runtime.execution", "RunExecutionBinding"),
+    "RunHandle": ("sagents.v2.contracts", "RunHandle"),
+    "RuntimeEvent": ("sagents.v2.contracts", "RuntimeEvent"),
+    "SAgent": ("sagents.v2.sagent", "SAgent"),
+    "SAgentApplication": ("sagents.v2.application", "SAgentApplication"),
+    "SAgentBuilder": ("sagents.v2.builder", "SAgentBuilder"),
+    "SAgentRunStream": ("sagents.v2.sagent", "SAgentRunStream"),
+    "SessionCommitProposal": ("sagents.v2.contracts", "SessionCommitProposal"),
+    "SessionMergeStrategy": ("sagents.v2.contracts", "SessionMergeStrategy"),
+    "StartRun": ("sagents.v2.contracts", "StartRun"),
+}
 
-__all__ = [
-    "ActorRef",
-    "EventCursor",
-    "ExecutionBindingProvider",
-    "ExecutionBindingRequest",
-    "RequestContext",
-    "ResolvedApplicationPlan",
-    "ResolvedProviderBinding",
-    "RunHandle",
-    "RunExecutionBinding",
-    "RuntimeEvent",
-    "ProposeSessionCommit",
-    "PublishSessionCommit",
-    "RejectSessionCommit",
-    "SessionCommitProposal",
-    "SessionMergeStrategy",
-    "StartRun",
-    "SAgent",
-    "SAgentApplication",
-    "SAgentBuilder",
-    "SAgentRunStream",
-    "InterfaceRunStream",
-    "MaterializedAgentPorts",
-]
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    return resolve_export(name, _EXPORTS, globals())
+
+
+def __dir__() -> list[str]:
+    return exported_names(_EXPORTS, globals())

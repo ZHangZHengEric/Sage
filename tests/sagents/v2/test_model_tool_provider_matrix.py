@@ -252,7 +252,9 @@ async def test_invocation_grant_catalog_enforces_goal_controls_for_list_and_look
         ("sum", "goal_submit", "goal_complete"),
         command_reader,
     )
-    assert {value.name for value in await catalog.list_tools(run_id="run_1")} == expected
+    assert {
+        value.name for value in await catalog.list_tools(run_id="run_1")
+    } == expected
     for control in {"goal_submit", "goal_complete"} - expected:
         with pytest.raises(SageV2Error) as denied:
             await catalog.get_tool(control, run_id="run_1")
@@ -321,6 +323,20 @@ async def test_tool_idempotency_coalesces_concurrent_calls_and_replays_result():
     assert dispatches == 1
     assert len(executor.calls) == 1
     assert all(result == results[0] for result in (*results, replay))
+
+
+@pytest.mark.asyncio
+async def test_tool_idempotency_rejects_key_reuse_for_a_different_call():
+    executor = InMemoryToolExecutor({"sum": TOOL}, {"sum": sum_handler})
+
+    await executor.execute(call(), CONTEXT)
+    with pytest.raises(SageV2Error) as conflict:
+        await executor.execute(
+            call(arguments={"a": 2, "b": 3}, operation="operation_2"), CONTEXT
+        )
+
+    assert conflict.value.info.code == "tool.idempotency_conflict"
+    assert len(executor.calls) == 1
 
 
 @pytest.mark.asyncio

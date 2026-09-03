@@ -45,11 +45,11 @@ class OpenAIResponsesConfig(StrictModel):
     base_url: str = "https://api.openai.com/v1"
     model: str
     capabilities: ModelCapabilities
-    default_max_output_tokens: int | None = None
+    default_max_output_tokens: int | None = Field(default=None, gt=0)
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
-    timeout_seconds: float = 120
+    timeout_seconds: float = Field(default=120, gt=0)
     store: bool = False
     extra_body: dict[str, Any] = Field(default_factory=dict)
     reasoning_parameter_fallback: bool = False
@@ -64,8 +64,31 @@ class OpenAIResponsesModelProvider:
     """
 
     plugin_id = "sage.model.openai-responses"
+    plugin_version = "3.0.0"
     name = "OpenAI Responses"
     description = "Uses typed input/output items and Responses streaming events."
+
+    @classmethod
+    def apply_capability_profile(cls, config, profile):
+        """Apply only a Responses-owned persisted invocation strategy."""
+
+        strategy = profile.invocation_strategy
+        reasoning_effort = config.reasoning_effort
+        if (
+            reasoning_effort is None
+            and strategy.get("reasoning_disable_strategy") == "reasoning_effort_none"
+        ):
+            reasoning_effort = "none"
+        return config.model_copy(
+            update={
+                "default_max_output_tokens": min(
+                    config.default_max_output_tokens
+                    or profile.effective_max_output_tokens,
+                    profile.effective_max_output_tokens,
+                ),
+                "reasoning_effort": reasoning_effort,
+            }
+        )
 
     def __init__(
         self,
@@ -97,6 +120,80 @@ class OpenAIResponsesModelProvider:
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
+
+    async def probe_capabilities(self, request):
+        """Probe only the Responses wire contract owned by this plugin."""
+
+        from sagents.v2.model.capability_probe import (
+            model_capability_profile,
+            negotiate_model_output_limit,
+            probe_model_capabilities,
+            probe_model_reasoning_controls,
+        )
+
+        effective, _ = await negotiate_model_output_limit(self, request)
+
+        def clone(
+            *,
+            reasoning_effort: str | None = None,
+            extra_body: dict[str, Any] | None = None,
+        ):
+            config = self.config.model_copy(
+                update={
+                    "default_max_output_tokens": effective,
+                    "reasoning_effort": reasoning_effort,
+                    "extra_body": dict(extra_body or {}),
+                }
+            )
+            return self.__class__(config, client=self.raw_client)
+
+        model_provider = clone()
+        report = await probe_model_capabilities(
+            model_provider,
+            model_binding=request.model_binding,
+            max_output_tokens=effective,
+            timeout_seconds=request.timeout_seconds,
+        )
+
+        def reasoning_provider(strategy: str, effort: str | None):
+            if effort is not None:
+                return clone(reasoning_effort=effort)
+            if strategy == "reasoning_effort_none":
+                return clone(reasoning_effort="none")
+            return clone()
+
+        reasoning, reasoning_metadata = await probe_model_reasoning_controls(
+            base_provider=model_provider,
+            provider_factory=reasoning_provider,
+            report=report,
+            request=request,
+            max_output_tokens=effective,
+            disable_strategies=("omit", "reasoning_effort_none"),
+            effort_strategies=("reasoning_effort",),
+        )
+        return model_capability_profile(
+            plugin_id=self.plugin_id,
+            plugin_version=self.plugin_version,
+            protocol="openai-responses",
+            request=request,
+            effective_max_output_tokens=effective,
+            report=report,
+            reasoning=reasoning,
+            invocation_strategy={
+                "reasoning_disable_strategy": reasoning_metadata["disable_strategy"],
+                "reasoning_behavior": reasoning_metadata["behavior"],
+                "reasoning_effort_strategy": reasoning_metadata["effort_strategy"],
+                "supported_reasoning_efforts": reasoning_metadata["supported_efforts"],
+                "text_only_reasoning_efforts": reasoning_metadata["text_only_efforts"],
+                "unsupported_reasoning_efforts": reasoning_metadata[
+                    "unsupported_efforts"
+                ],
+                "supports_json_object": report.supports_json_object,
+                "auxiliary_json_compatible": bool(
+                    reasoning_metadata["auxiliary_json"].get("status") == "supported"
+                ),
+            },
+        )
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         """Return the exact non-secret keyword arguments passed to the SDK."""

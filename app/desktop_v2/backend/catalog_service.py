@@ -38,6 +38,7 @@ from sagents.v2.package.manifest.models import (
 )
 from sagents.v2.model import (
     model_protocol_descriptor,
+    model_protocol_implementation,
 )
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.runtime.extensions import (
@@ -552,8 +553,12 @@ class DesktopCatalogServiceMixin:
     def _model_compatibility_fingerprint(
         provider: DesktopModelProviderRecord,
     ) -> str:
+        descriptor = model_protocol_descriptor(provider.protocol)
+        implementation = model_protocol_implementation(descriptor.protocol)
         payload = {
             "protocol": provider.protocol,
+            "plugin_id": implementation.plugin_id,
+            "plugin_version": implementation.plugin_version,
             "base_url": provider.base_url.rstrip("/"),
             "model": provider.model,
             "max_tokens": provider.max_tokens,
@@ -582,6 +587,20 @@ class DesktopCatalogServiceMixin:
             raise ValueError(
                 "model compatibility verification does not match the saved route"
             )
+        plugin_profile = profile.plugin_profile
+        if plugin_profile is not None:
+            descriptor = model_protocol_descriptor(provider.protocol)
+            implementation = model_protocol_implementation(descriptor.protocol)
+            if plugin_profile.route_fingerprint != expected:
+                raise ValueError(
+                    "plugin capability profile does not match the saved route"
+                )
+            if plugin_profile.protocol != provider.protocol:
+                raise ValueError("plugin capability profile protocol does not match")
+            if plugin_profile.plugin_id != implementation.plugin_id:
+                raise ValueError("plugin capability profile owner does not match")
+            if plugin_profile.plugin_version != implementation.plugin_version:
+                raise ValueError("plugin capability profile version does not match")
         if (
             provider.protocol == "openai-chat-completions"
             and profile.max_output_tokens_field is None

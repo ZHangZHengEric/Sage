@@ -6,7 +6,7 @@ from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
 from sagents.v2.context import ContextBudget, DefaultContextAssembler
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.tool import DirectToolSelectionPolicy, ToolDefinition
 from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog
@@ -221,3 +221,44 @@ async def test_final_request_budget_fails_before_provider_when_tools_cannot_fit(
         )
 
     assert getattr(error.value, "info", None).code == "context.invalid_budget"
+
+
+@pytest.mark.asyncio
+async def test_multimodal_data_uri_fits_by_image_tokens_not_base64_bytes():
+    budget = ContextBudget(
+        max_input_tokens=128_000,
+        reserve_output_tokens=8_196,
+    )
+    assembler = DefaultContextAssembler(budget=budget)
+    builder = DefaultAgentStepRequestBuilder(
+        context_assembler=assembler,
+        tool_catalog=InMemoryToolCatalog(()),
+        tool_selection_policy=DirectToolSelectionPolicy(),
+        token_estimator=assembler.estimator,
+        context_budget=budget,
+    )
+    image_uri = "data:image/png;base64," + ("A" * 2_000_000)
+
+    prepared = await builder.prepare(
+        command=_command(None),
+        run_id="run_multimodal",
+        turn_id="turn_multimodal",
+        step_id="step_multimodal",
+        messages=(
+            ModelMessage(
+                role="user",
+                content=(
+                    TextBlock(text="What is in this image?"),
+                    ImageBlock(uri=image_uri, mime_type="image/png"),
+                ),
+            ),
+        ),
+        pending_continuation_reason=None,
+        language="en",
+    )
+
+    estimated = prepared.request.metadata["request_budget"][
+        "estimated_input_tokens"
+    ]
+    assert 4_096 <= estimated < 10_000
+    assert prepared.request.messages[0].content[1].uri == image_uri

@@ -25,7 +25,6 @@ from sagents.v2.contracts.commands import (
 )
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
     RequestContext,
 )
@@ -51,6 +50,8 @@ from sagents.v2.runtime.observability import (
 )
 from app.desktop_v2.backend.schemas import (
     DesktopRunRequest,
+    RunMessage,
+    RunMessageContent,
 )
 from app.desktop_v2.backend.run_lifecycle import (
     DesktopDriver as _DesktopDriver,
@@ -200,10 +201,17 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 input=tuple(
                     InputItem(
                         role=value.role,
-                        content=(TextBlock(text=value.text),),
+                        content=content,
                     )
                     for value in request.messages
-                    if value.text.strip()
+                    if (
+                        content := self._run_message_content(
+                            value,
+                            provider=None,
+                            workspace=None,
+                            workspace_root="/workspace",
+                        )
+                    )
                 ),
                 config=RunConfig(metadata={"response_language": language}),
                 resolved_spec_hash="sha256:desktop-preflight-v1",
@@ -407,16 +415,31 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         await self._index_session(run.session_id)
         return result
 
-    async def steer(self, run_id: str, turn_id: str, text: str, user_id: str):
+    async def steer(
+        self,
+        run_id: str,
+        turn_id: str,
+        text: str,
+        user_id: str,
+        *,
+        content: list[RunMessageContent] | None = None,
+    ):
         await self.start()
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
+        message = RunMessage(role="user", text=text, content=content or [])
+        message_content = self._run_message_content(
+            message,
+            provider=None,
+            workspace=None,
+            workspace_root="/workspace",
+        )
         result = await self.runtime.steer_run(
             SteerRun(
                 run_id=run_id,
                 expected_revision=run.revision,
                 expected_turn_id=turn_id,
-                input=(InputItem(role="user", content=(TextBlock(text=text),)),),
+                input=(InputItem(role="user", content=message_content),),
                 idempotency_key=new_id("steer"),
             ),
             context,

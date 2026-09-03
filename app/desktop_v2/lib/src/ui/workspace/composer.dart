@@ -67,9 +67,13 @@ class _ComposerState extends State<_Composer> {
   }
 
   void _submit() {
-    final value = _text.promptText.trim();
-    if (value.isEmpty) return;
-    widget.controller.send(value);
+    final content = _text.messageContent;
+    if (!content.any(
+      (part) => part.isReference || part.text.trim().isNotEmpty,
+    )) {
+      return;
+    }
+    widget.controller.send(_text.plainText, content: content);
     _text.reset();
     widget.controller.clearComposerReferences(widget.conversation.id);
     _focus.requestFocus();
@@ -255,6 +259,9 @@ class _ComposerState extends State<_Composer> {
             _ComposerAssetShelf(
               assets: widget.controller.attachments,
               onRemoved: widget.controller.removeAttachment,
+              loadPreview: widget.controller.loadAttachmentPreview,
+              previewScope:
+                  '${widget.controller.selectedAgentId}:${widget.controller.selectedGroup.workspaceId}',
             ),
             _ComposerSkillShelf(
               skills: widget.controller.preferredSkills.toList()..sort(),
@@ -529,20 +536,28 @@ class _ComposerTextEditingController extends TextEditingController {
     return [for (final token in removed) token.reference];
   }
 
-  String get promptText {
+  List<ChatMessageContent> get messageContent {
     final ordered = [..._tokens]
       ..sort((left, right) => left.offset.compareTo(right.offset));
-    final buffer = StringBuffer();
+    final content = <ChatMessageContent>[];
     var cursor = 0;
     for (final token in ordered) {
       if (token.offset < cursor || token.offset >= text.length) continue;
-      buffer.write(text.substring(cursor, token.offset));
-      buffer.write('\n\n${token.reference.promptText}\n\n');
+      final before = text.substring(cursor, token.offset);
+      if (before.isNotEmpty) content.add(ChatMessageContent.text(before));
+      content.add(token.reference.toMessageContent());
       cursor = token.offset + 1;
     }
-    buffer.write(text.substring(cursor));
-    return buffer.toString();
+    final after = text.substring(cursor);
+    if (after.isNotEmpty) content.add(ChatMessageContent.text(after));
+    return content;
   }
+
+  String get plainText => messageContent
+      .where((part) => part.isText)
+      .map((part) => part.text)
+      .join()
+      .trim();
 
   void reset() {
     _tokens.clear();
@@ -650,10 +665,17 @@ class _ComposerInlineReferenceItem extends StatelessWidget {
 }
 
 class _ComposerAssetShelf extends StatelessWidget {
-  const _ComposerAssetShelf({required this.assets, required this.onRemoved});
+  const _ComposerAssetShelf({
+    required this.assets,
+    required this.onRemoved,
+    required this.loadPreview,
+    required this.previewScope,
+  });
 
   final List<UploadedAttachment> assets;
   final ValueChanged<UploadedAttachment> onRemoved;
+  final Future<WorkspaceFileContent> Function(UploadedAttachment) loadPreview;
+  final String previewScope;
 
   @override
   Widget build(BuildContext context) {
@@ -688,7 +710,13 @@ class _ComposerAssetShelf extends StatelessWidget {
                     ),
                   ),
                   child: isImage
-                      ? Image.file(File(asset.path), fit: BoxFit.cover)
+                      ? _ComposerAttachmentPreview(
+                          key: ValueKey(
+                            'composer-attachment-preview:$previewScope:${asset.path}',
+                          ),
+                          asset: asset,
+                          loadPreview: loadPreview,
+                        )
                       : Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -745,6 +773,90 @@ class _ComposerAssetShelf extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+class _ComposerAttachmentPreview extends StatefulWidget {
+  const _ComposerAttachmentPreview({
+    required this.asset,
+    required this.loadPreview,
+    super.key,
+  });
+
+  final UploadedAttachment asset;
+  final Future<WorkspaceFileContent> Function(UploadedAttachment) loadPreview;
+
+  @override
+  State<_ComposerAttachmentPreview> createState() =>
+      _ComposerAttachmentPreviewState();
+}
+
+class _ComposerAttachmentPreviewState
+    extends State<_ComposerAttachmentPreview> {
+  late Future<WorkspaceFileContent> _content;
+
+  @override
+  void initState() {
+    super.initState();
+    _content = widget.loadPreview(widget.asset);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ComposerAttachmentPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.asset.path != widget.asset.path) {
+      _content = widget.loadPreview(widget.asset);
+    }
+  }
+
+  Widget _placeholder(BuildContext context, {required bool loading}) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      image: true,
+      label: widget.asset.name,
+      child: Center(
+        child: loading
+            ? CupertinoActivityIndicator(
+                radius: 8,
+                color: colors.onSurfaceVariant,
+              )
+            : Icon(
+                CupertinoIcons.photo,
+                key: ValueKey(
+                  'composer-attachment-preview-fallback:${widget.asset.path}',
+                ),
+                size: 24,
+                color: colors.onSurfaceVariant,
+              ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<WorkspaceFileContent>(
+      future: _content,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _placeholder(context, loading: true);
+        }
+        final content = snapshot.data;
+        if (snapshot.hasError || content == null || !content.isImage) {
+          return _placeholder(context, loading: false);
+        }
+        return Image.memory(
+          content.bytes,
+          key: ValueKey(
+            'composer-attachment-preview-image:${widget.asset.path}',
+          ),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          semanticLabel: widget.asset.name,
+          errorBuilder: (context, _, _) =>
+              _placeholder(context, loading: false),
+        );
+      },
     );
   }
 }
