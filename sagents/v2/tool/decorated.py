@@ -63,6 +63,7 @@ class _DecoratedToolExecutor:
         self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
         self._operation_keys: dict[str, str] = {}
         self._call_fingerprints: dict[str, str] = {}
+        self._call_run_ids: dict[str, str] = {}
 
     async def execute(
         self, call: ToolCall, context: RequestContext
@@ -115,6 +116,7 @@ class _DecoratedToolExecutor:
                 self._inflight[call.idempotency_key] = future
                 self._operation_keys[call.operation_id] = call.idempotency_key
                 self._call_fingerprints[call.idempotency_key] = fingerprint
+                self._call_run_ids[call.idempotency_key] = call.owner_run_id
                 owner = True
             else:
                 owner = False
@@ -148,6 +150,18 @@ class _DecoratedToolExecutor:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._operation_keys.pop(call.operation_id, None)
+
+    async def release_run(self, run_id: str) -> None:
+        async with self._lock:
+            keys = {
+                key
+                for key, owner_run_id in self._call_run_ids.items()
+                if owner_run_id == run_id and key not in self._inflight
+            }
+            for key in keys:
+                self._results.pop(key, None)
+                self._call_fingerprints.pop(key, None)
+                self._call_run_ids.pop(key, None)
 
     async def reconcile(
         self, operation_id: str, context: RequestContext

@@ -43,9 +43,10 @@ class ExtensionScopeHandle:
     async def close(self, reason: StopReason = StopReason.SCOPE_CLOSED) -> None:
         if self._closed:
             return
-        errors = []
+        errors: list[Exception] = []
+        failed_started: list[StartedExtension] = []
         while self._started:
-            value = self._started[-1]
+            value = self._started.pop()
             try:
                 if value.registration.stop is not None:
                     result = value.registration.stop(value.instance, reason)
@@ -62,21 +63,23 @@ class ExtensionScopeHandle:
                 if not isinstance(exc, Exception):
                     raise
                 errors.append(exc)
-                break
-            else:
-                self._started.pop()
-        if not self._started:
-            while self._owned_ancestors:
-                handle = self._owned_ancestors[-1]
-                try:
-                    await handle.close(reason)
-                except BaseException as exc:
-                    if not isinstance(exc, Exception):
-                        raise
-                    errors.append(exc)
-                    break
+                failed_started.append(value)
+        self._started = list(reversed(failed_started))
+        failed_ancestors: list[ExtensionScopeHandle] = []
+        while self._owned_ancestors:
+            handle = self._owned_ancestors[-1]
+            self._owned_ancestors = self._owned_ancestors[:-1]
+            try:
+                await handle.close(reason)
+            except BaseException as exc:
+                if not isinstance(exc, Exception):
+                    raise
+                if isinstance(exc, ExtensionStopError):
+                    errors.extend(exc.errors)
                 else:
-                    self._owned_ancestors = self._owned_ancestors[:-1]
+                    errors.append(exc)
+                failed_ancestors.append(handle)
+        self._owned_ancestors = tuple(reversed(failed_ancestors))
         self._closed = not self._started and not self._owned_ancestors
         if errors:
             raise ExtensionStopError(tuple(errors)) from errors[0]

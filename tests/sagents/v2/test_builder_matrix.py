@@ -1039,6 +1039,68 @@ async def test_materialize_agent_reuses_agent_scoped_ports(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_materialize_agent_isolates_cached_ports_by_tenant_and_agent(tmp_path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-tenant-isolation",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package, tenant_id="tenant_a")
+    )
+
+    tenant_a_first = await application.materialize_agent(
+        package,
+        agent_id="assistant",
+        run_id="run_a1",
+    )
+    tenant_a_second = await application.materialize_agent(
+        package,
+        agent_id="assistant",
+        run_id="run_a2",
+    )
+    tenant_b = await application.materialize_agent(
+        package,
+        tenant_id="tenant_b",
+        agent_id="assistant",
+        run_id="run_b1",
+    )
+    try:
+        assert tenant_a_first.token_estimator is tenant_a_second.token_estimator
+        assert tenant_a_first.token_estimator is not tenant_b.token_estimator
+        tenant_a_contexts = [
+            handle.context
+            for handle in application._scope_handles
+            if handle.context.tenant_id == "tenant_a"
+            and handle.context.agent_id == "assistant"
+        ]
+        tenant_b_contexts = [
+            handle.context
+            for handle in application._scope_handles
+            if handle.context.tenant_id == "tenant_b"
+            and handle.context.agent_id == "assistant"
+        ]
+        assert tenant_a_contexts
+        assert tenant_b_contexts
+        assert all(context.run_id is None for context in tenant_a_contexts)
+        assert all(context.run_id is None for context in tenant_b_contexts)
+    finally:
+        for handle in reversed(
+            (
+                *tenant_a_first.scope_handles,
+                *tenant_a_second.scope_handles,
+                *tenant_b.scope_handles,
+            )
+        ):
+            await handle.close()
+        await application.close()
+
+
+@pytest.mark.asyncio
 async def test_materialized_plan_reports_only_ports_selected_for_this_call(
     tmp_path: Path,
 ):

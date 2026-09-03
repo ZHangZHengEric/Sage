@@ -326,6 +326,28 @@ async def test_tool_idempotency_coalesces_concurrent_calls_and_replays_result():
 
 
 @pytest.mark.asyncio
+async def test_tool_executor_releases_terminal_run_idempotency_state():
+    dispatches = 0
+
+    async def counting_handler(tool_call, context):
+        nonlocal dispatches
+        dispatches += 1
+        return await sum_handler(tool_call, context)
+
+    executor = InMemoryToolExecutor({"sum": TOOL}, {"sum": counting_handler})
+    await executor.execute(call(), CONTEXT)
+
+    await executor.release_run("run_1")
+    reconciled = await executor.reconcile("operation_1", CONTEXT)
+    await executor.execute(
+        call(arguments={"a": 2, "b": 3}, operation="operation_2"), CONTEXT
+    )
+
+    assert reconciled.state == ReconcileState.UNKNOWN
+    assert dispatches == 2
+
+
+@pytest.mark.asyncio
 async def test_tool_idempotency_rejects_key_reuse_for_a_different_call():
     executor = InMemoryToolExecutor({"sum": TOOL}, {"sum": sum_handler})
 

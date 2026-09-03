@@ -517,6 +517,10 @@ class AgentLoopEngine:
             messages=messages,
             pending_flow_boundary=command.config.flow_boundary,
         )
+        try:
+            definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run_id)
+        except Exception:
+            definition = None
         unknown_event = next(
             (
                 event
@@ -567,10 +571,6 @@ class AgentLoopEngine:
                 state.turn_id,
                 started.step_id,
             )
-        try:
-            definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run_id)
-        except Exception:
-            definition = None
         if definition is not None and definition.supports_reconciliation:
             run, result = await self._reconcile_or_suspend_tool(
                 run,
@@ -803,7 +803,7 @@ class AgentLoopEngine:
                         ),
                         context,
                     )
-                    self.tool_selection_policy.release_run(run.run_id)
+                    await self._release_run_resources(run.run_id)
                     return await self.runtime.get_run(run.run_id)
                 try:
                     input_items = self._interaction_input_items(
@@ -891,7 +891,7 @@ class AgentLoopEngine:
             if current.state == RunState.SUSPEND_REQUESTED:
                 return await self._suspend_at_safe_point(current, state, context)
             if current.state in TERMINAL_RUN_STATES:
-                self.tool_selection_policy.release_run(run.run_id)
+                await self._release_run_resources(run.run_id)
                 return current
             run = current
             claimed = await self.runtime.session_store.claim_steers(
@@ -1896,12 +1896,18 @@ class AgentLoopEngine:
                     state,
                     uncertainty,
                 )
-            result = result.model_copy(
-                update={
-                    "error": localized,
-                    "content": (TextBlock(text=localized.message),),
-                }
-            )
+            # A Tool may return a structured, model-actionable failure (MCP
+            # ``isError`` is one example). Preserve that authoritative content,
+            # while the persisted error remains localized for host/UI use.
+            if result.metadata.get("tool_result_received") is True:
+                result = result.model_copy(update={"error": localized})
+            else:
+                result = result.model_copy(
+                    update={
+                        "error": localized,
+                        "content": (TextBlock(text=localized.message),),
+                    }
+                )
         elif call.tool_name == "tool_expand_tools":
             requested_names = call.arguments.get("tool_names")
             if requested_names is None:
@@ -1970,6 +1976,11 @@ class AgentLoopEngine:
     async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
         """Classify post-dispatch failures without assuming a write was rolled back."""
 
+        # A protocol-level tool error is an authoritative response, not a lost
+        # response. The remote side confirmed that the operation failed, so a
+        # write must not be escalated to an unknown-side-effect suspension.
+        if error.metadata.get("tool_result_received") is True:
+            return False
         if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
             return True
         if error.metadata.get("side_effect_state") == "not_applied":
@@ -2836,14 +2847,14 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=f"loop-complete:{run.run_id}:{state.step_number}",
         )
-        self.tool_selection_policy.release_run(run.run_id)
+        await self._release_run_resources(run.run_id)
         return completed
 
     async def _fail(self, run, state, step_id, error, context):
         error = localize_error(error, context.language)
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
-            self.tool_selection_policy.release_run(run.run_id)
+            await self._release_run_resources(run.run_id)
             return current
         resumable = error.safe_to_resume or error.retryable
         if current.state == RunState.RUNNING and resumable:
@@ -2904,8 +2915,33 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=f"loop-fail:{run.run_id}:{state.step_number}:{error.code}",
         )
-        self.tool_selection_policy.release_run(run.run_id)
+        await self._release_run_resources(run.run_id)
         return failed
+
+    async def _release_run_resources(self, run_id: str) -> None:
+        """Best-effort cleanup after the durable Run reached a terminal state."""
+
+        providers = (
+            self.tool_selection_policy,
+            self.tool_catalog,
+            self.tool_executor,
+        )
+        seen: set[int] = set()
+        for provider in providers:
+            if id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            release = getattr(provider, "release_run", None)
+            if not callable(release):
+                continue
+            try:
+                result = release(run_id)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # Terminal state is already durable. Cleanup failure must not
+                # turn a completed/failed Run into a caller-visible failure.
+                continue
 
     async def _commit_running(
         self, run, context, drafts, *, expected_states=None

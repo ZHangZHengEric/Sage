@@ -148,6 +148,7 @@ class ExtensionHost:
         *,
         parent: ExtensionScopeHandle | None = None,
     ) -> ExtensionScopeHandle:
+        context = _normalized_scope_context(context)
         if parent is None and any(
             _SCOPE_RANK[selected_scope] < _SCOPE_RANK[context.scope]
             for selected_scope in plan.scopes.values()
@@ -329,6 +330,7 @@ class ExtensionHost:
         they cannot be accidentally bound to a temporary event loop.
         """
 
+        context = _normalized_scope_context(context)
         if parent is None and any(
             _SCOPE_RANK[selected_scope] < _SCOPE_RANK[context.scope]
             for selected_scope in plan.scopes.values()
@@ -350,6 +352,7 @@ class ExtensionHost:
 
         providers = parent.providers.as_dict() if parent is not None else {}
         started: list[StartedExtension] = []
+        starting: StartedExtension | None = None
         try:
             for plugin_id in plan.graph.start_order:
                 if plan.scopes[plugin_id] != context.scope:
@@ -372,12 +375,15 @@ class ExtensionHost:
                 )
                 instance = registration.factory(plugin_context, dependencies)
                 if inspect.isawaitable(instance):
+                    close = getattr(instance, "close", None)
+                    if close is not None:
+                        close()
                     raise _error(
                         "extension.async_plugin_requires_async_host",
                         ErrorCategory.VALIDATION,
                         f"extension {plugin_id!r} requires open_scope()",
                     )
-                value = StartedExtension(registration, instance)
+                starting = StartedExtension(registration, instance)
                 if registration.start is not None:
                     produced = registration.start(
                         instance, plugin_context, dependencies
@@ -395,6 +401,9 @@ class ExtensionHost:
                         }
                     )
                 if inspect.isawaitable(produced):
+                    close = getattr(produced, "close", None)
+                    if close is not None:
+                        close()
                     raise _error(
                         "extension.async_plugin_requires_async_host",
                         ErrorCategory.VALIDATION,
@@ -435,21 +444,34 @@ class ExtensionHost:
                         )
                     else:
                         providers[key] = provider
-                started.append(value)
-        except Exception:
+                started.append(starting)
+                starting = None
+        except Exception as exc:
             # Synchronous embeddings cannot await asynchronous stop hooks. All
             # objects accepted above are sync-only by contract, so close them
             # directly during rollback.
-            for value in reversed(started):
+            rollback = ([starting] if starting is not None else []) + list(
+                reversed(started)
+            )
+            for value in rollback:
                 stop = value.registration.stop or getattr(value.instance, "stop", None)
-                if stop is not None:
-                    result = (
-                        stop(value.instance, StopReason.START_FAILED)
-                        if value.registration.stop is not None
-                        else stop(StopReason.START_FAILED)
-                    )
-                    if inspect.isawaitable(result):
-                        result.close()
+                close = getattr(value.instance, "close", None)
+                if stop is not None or close is not None:
+                    try:
+                        result = (
+                            stop(value.instance, StopReason.START_FAILED)
+                            if value.registration.stop is not None
+                            else stop(StopReason.START_FAILED)
+                            if stop is not None
+                            else close()
+                        )
+                        if inspect.isawaitable(result):
+                            result.close()
+                    except Exception as stop_exc:
+                        exc.add_note(
+                            "extension rollback also failed for "
+                            f"{value.registration.descriptor.plugin_id!r}: {stop_exc}"
+                        )
             raise
         return ExtensionScopeHandle(
             graph=plan.graph,
@@ -534,6 +556,22 @@ def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
             safe_to_resume=True,
         )
     )
+
+
+def _normalized_scope_context(
+    context: ExtensionScopeContext,
+) -> ExtensionScopeContext:
+    """Expose only identities that belong to the current lifetime boundary."""
+
+    if context.scope == ExtensionScope.PROCESS:
+        updates = {"tenant_id": None, "agent_id": None, "run_id": None}
+    elif context.scope == ExtensionScope.TENANT:
+        updates = {"agent_id": None, "run_id": None}
+    elif context.scope == ExtensionScope.AGENT:
+        updates = {"run_id": None}
+    else:
+        updates = {}
+    return context.model_copy(update=updates) if updates else context
 
 
 def _composition_hash(

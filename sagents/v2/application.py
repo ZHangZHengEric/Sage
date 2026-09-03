@@ -155,6 +155,7 @@ class SAgentApplication:
         self,
         package: Any,
         *,
+        tenant_id: str | None = None,
         agent_id: str | None = None,
         run_id: str | None = None,
         model: Any | None = None,
@@ -177,6 +178,7 @@ class SAgentApplication:
                 )
             return await self._composer.materialize_agent(
                 package,
+                tenant_id=tenant_id,
                 agent_id=agent_id,
                 run_id=run_id,
                 model=model,

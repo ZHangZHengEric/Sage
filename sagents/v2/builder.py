@@ -81,6 +81,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
     ExtensionScopeContext,
     load_installed_extension,
+    validate_extension_version,
 )
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session import (
@@ -356,6 +357,7 @@ class SAgentBuilder:
         self,
         package: SageManifest | ResolvedSageManifest | str | Path,
         *,
+        tenant_id: str | None = None,
         agent_id: str | None = None,
     ) -> SAgentApplication:
         """Resolve one composition and open all provider scopes asynchronously."""
@@ -364,6 +366,7 @@ class SAgentBuilder:
         try:
             return await self._build_application(
                 package,
+                tenant_id=tenant_id,
                 agent_id=agent_id,
                 scope_handles=scope_handles,
             )
@@ -379,6 +382,7 @@ class SAgentBuilder:
         self,
         package: SageManifest | ResolvedSageManifest | str | Path,
         *,
+        tenant_id: str | None,
         agent_id: str | None,
         scope_handles: list,
     ) -> SAgentApplication:
@@ -494,6 +498,7 @@ class SAgentBuilder:
                 selected_agent,
                 plugin_declarations,
                 credential_provider,
+                tenant_id=tenant_id,
             )
         models_by_agent = {selected_agent: model}
         selected_definition = resolved.agents[selected_agent]
@@ -511,6 +516,7 @@ class SAgentBuilder:
                     member_id,
                     plugin_declarations,
                     credential_provider,
+                    tenant_id=tenant_id,
                 )
             )
             models_by_agent[member_id] = member_model
@@ -542,6 +548,8 @@ class SAgentBuilder:
             scope_handles,
             runtime_config,
             plugin_declarations,
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         if self._tool_catalog is not None and self._tool_executor is not None:
             tool_catalog, tool_executor = self._tool_catalog, self._tool_executor
@@ -561,6 +569,8 @@ class SAgentBuilder:
                 scope_handles,
                 runtime_config,
                 plugin_declarations,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
         else:
             tool_catalog = InMemoryToolCatalog(())
@@ -606,6 +616,8 @@ class SAgentBuilder:
             capability="context.token-estimator",
             default_plugin=JsonHeuristicTokenEstimator.plugin_id,
             default_scope=ExtensionScope.AGENT,
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         summary_store = await self._create_capability(
             extension_host,
@@ -617,6 +629,8 @@ class SAgentBuilder:
             default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"derived_state": derived_state},
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         summarizer = await self._create_capability(
             extension_host,
@@ -628,6 +642,8 @@ class SAgentBuilder:
             default_plugin=ExtractiveConversationSummarizer.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"model": models_by_agent[selected_agent]},
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         unit_compactor = await self._create_capability(
             extension_host,
@@ -639,6 +655,8 @@ class SAgentBuilder:
             default_plugin=ReferenceContextUnitCompactor.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"estimator": token_estimator},
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         context_reducer = await self._create_capability(
             extension_host,
@@ -655,6 +673,8 @@ class SAgentBuilder:
                 "estimator": token_estimator,
                 "unit_compactor": unit_compactor,
             },
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         continuation_policy = await self._create_capability(
             extension_host,
@@ -666,6 +686,8 @@ class SAgentBuilder:
             default_plugin=CompositeContinuationPolicy.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"model": models_by_agent[selected_agent]},
+            tenant_id=tenant_id,
+            agent_id=selected_agent,
         )
         components = ContextComponentBundle(
             token_estimator=token_estimator,
@@ -843,6 +865,9 @@ class SAgentBuilder:
                         runtime_override=child_runtime,
                         return_handle=True,
                         scope_override=ExtensionScope.RUN,
+                        tenant_id=tenant_id or child_context.actor.tenant_id,
+                        agent_id=descriptor.agent_id,
+                        run_id=child_run_id,
                     )
                     return (
                         compose_with_runtime(
@@ -923,6 +948,9 @@ class SAgentBuilder:
                     runtime_override=official_runtime,
                     return_handle=True,
                     scope_override=ExtensionScope.RUN,
+                    tenant_id=tenant_id,
+                    agent_id=selected_agent,
+                    run_id=run_id,
                 )
                 return (
                     make_loop(
@@ -1078,6 +1106,7 @@ class SAgentBuilder:
                 summary_store=summary_store,
                 derived_state=derived_state,
                 process_model=models_by_agent[selected_agent],
+                default_tenant_id=tenant_id,
             )
         )
         return application
@@ -1097,9 +1126,16 @@ class SAgentBuilder:
         self, declarations: tuple[PluginDeclaration, ...]
     ) -> None:
         for declaration in declarations:
-            if self.extensions.contains(declaration.id):
-                continue
-            self.extensions.register(load_installed_extension(declaration.id))
+            if not self.extensions.contains(declaration.id):
+                self.extensions.register(
+                    load_installed_extension(
+                        declaration.id,
+                        version_requirement=declaration.version,
+                    )
+                )
+            validate_extension_version(
+                self.extensions.get(declaration.id), declaration.version
+            )
 
     @staticmethod
     def _merge_plugin_config(
@@ -1189,6 +1225,8 @@ class SAgentBuilder:
         agent_id,
         declarations: tuple[PluginDeclaration, ...],
         credential_provider,
+        *,
+        tenant_id: str | None,
     ):
         agent = resolved.agents[agent_id]
         route_id = agent.model_bindings.get("primary")
@@ -1228,6 +1266,8 @@ class SAgentBuilder:
             "model.provider",
             scope=ExtensionScope.AGENT,
             scope_id=f"agent-{agent_id}",
+            tenant_id=tenant_id,
+            agent_id=agent_id,
         )
 
     async def _create_tools(
@@ -1241,6 +1281,9 @@ class SAgentBuilder:
         runtime_override: OfficialToolRuntime | None = None,
         return_handle: bool = False,
         scope_override: ExtensionScope | None = None,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
     ):
         selection = self._selection(runtime, "tool.catalog")
         if selection is None:
@@ -1266,6 +1309,9 @@ class SAgentBuilder:
             "tool.catalog",
             scope=scope_override or selection.scope or ExtensionScope.AGENT,
             scope_id="agent-tools",
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            run_id=run_id,
             return_handle=True,
         )
         executor = handle.providers.require(
@@ -1289,6 +1335,9 @@ class SAgentBuilder:
         handles,
         runtime: RuntimeConfig,
         declarations: tuple[PluginDeclaration, ...],
+        *,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
     ) -> ToolSelectionPolicy:
         selection = self._selection(runtime, "tool.selection-policy")
         plugin_id = (
@@ -1314,6 +1363,8 @@ class SAgentBuilder:
             if selection and selection.scope
             else ExtensionScope.AGENT,
             scope_id="agent-tool-selection",
+            tenant_id=tenant_id,
+            agent_id=agent_id,
         )
 
     async def _create_capability(
@@ -1329,6 +1380,9 @@ class SAgentBuilder:
         default_config=None,
         default_scope=ExtensionScope.PROCESS,
         locked_config=None,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
     ):
         selection = self._selection(runtime, capability)
         plugin_id = selection.plugin if selection else default_plugin
@@ -1354,6 +1408,9 @@ class SAgentBuilder:
             capability,
             scope=selection.scope if selection and selection.scope else default_scope,
             scope_id=f"application-{capability.replace('.', '-')}",
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            run_id=run_id,
         )
 
     async def _instantiate(
@@ -1367,6 +1424,9 @@ class SAgentBuilder:
         *,
         scope: ExtensionScope,
         scope_id: str,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
         return_handle: bool = False,
     ):
         registration = self.extensions.get(plugin_id)
@@ -1393,6 +1453,13 @@ class SAgentBuilder:
             ExtensionScopeContext(
                 scope=scope,
                 scope_id=scope_id,
+                tenant_id=tenant_id,
+                agent_id=(
+                    agent_id
+                    if scope in {ExtensionScope.AGENT, ExtensionScope.RUN}
+                    else None
+                ),
+                run_id=run_id if scope == ExtensionScope.RUN else None,
             ),
             plan,
             parent=parent if scope != ExtensionScope.PROCESS else None,
@@ -1805,6 +1872,7 @@ class _ApplicationComposer:
         summary_store,
         derived_state,
         process_model=None,
+        default_tenant_id: str | None = None,
     ) -> None:
         self.host = host
         self.process_root = process_root
@@ -1813,6 +1881,7 @@ class _ApplicationComposer:
         self.summary_store = summary_store
         self.derived_state = derived_state
         self.process_model = process_model
+        self.default_tenant_id = default_tenant_id
         self.application: SAgentApplication | None = None
         self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
         self._lock = None
@@ -1821,6 +1890,7 @@ class _ApplicationComposer:
         self,
         package,
         *,
+        tenant_id: str | None = None,
         agent_id: str | None = None,
         run_id: str | None = None,
         model: Any | None = None,
@@ -1833,12 +1903,21 @@ class _ApplicationComposer:
 
         if self._lock is None:
             self._lock = asyncio.Lock()
+        tenant_id = tenant_id or self.default_tenant_id
         manifest, resolved = SAgentBuilder()._resolve_package(package)
         declarations = manifest.plugins if manifest is not None else resolved.plugins
         runtime = manifest.runtime if manifest is not None else resolved.runtime
         for declaration in declarations:
             if not self.extensions.contains(declaration.id):
-                self.extensions.register(load_installed_extension(declaration.id))
+                self.extensions.register(
+                    load_installed_extension(
+                        declaration.id,
+                        version_requirement=declaration.version,
+                    )
+                )
+            validate_extension_version(
+                self.extensions.get(declaration.id), declaration.version
+            )
         selected_agent = (
             agent_id
             or resolved.entrypoint_agent
@@ -1863,6 +1942,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             summarizer_lock = dict(locks.get("context.summarizer") or {})
             if effective_model is not None and "model" not in summarizer_lock:
@@ -1878,6 +1959,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             unit_compactor = await self._port(
                 runtime,
@@ -1890,6 +1973,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             reducer_lock = {
                 "estimator": estimator,
@@ -1909,6 +1994,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             tool_selection = await self._port(
                 runtime,
@@ -1921,6 +2008,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             continuation_lock = {"repeat_threshold": 3}
             if effective_model is not None:
@@ -1942,6 +2031,7 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
                 agent_id=selected_agent,
                 run_id=run_id,
             )
@@ -1959,6 +2049,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
             workspace_lock = dict(locks.get("workspace.initializer") or {})
             workspace_initializer = await self._port(
@@ -1972,6 +2064,8 @@ class _ApplicationComposer:
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
             )
         resolved_plan = self._materialized_plan(
             resolved,
@@ -2030,6 +2124,7 @@ class _ApplicationComposer:
         identities,
         run_handles,
         selected_handles,
+        tenant_id: str | None = None,
         agent_id: str | None = None,
         run_id: str | None = None,
     ):
@@ -2061,11 +2156,19 @@ class _ApplicationComposer:
         )
         cacheable = scope != ExtensionScope.RUN
         identity = identities.get(capability)
+        cache_tenant_id = (
+            tenant_id
+            if scope in {ExtensionScope.TENANT, ExtensionScope.AGENT}
+            else None
+        )
+        cache_agent_id = agent_id if scope == ExtensionScope.AGENT else None
         cache_key = (
             capability,
             plugin_id,
             scope.value,
             scope_id,
+            cache_tenant_id or "",
+            cache_agent_id or "",
             _config_identity(identity if identity is not None else config),
         )
         if cacheable and cache_key in self._cache:
@@ -2074,7 +2177,7 @@ class _ApplicationComposer:
             return value
         parent = self.process_root
         if scope == ExtensionScope.RUN:
-            parent = await self._agent_parent(agent_id or "default")
+            parent = await self._agent_parent(tenant_id, agent_id or "default")
         value, handle = await self._instantiate(
             plugin_id,
             config,
@@ -2082,6 +2185,7 @@ class _ApplicationComposer:
             scope=scope,
             scope_id=scope_id,
             parent=parent,
+            tenant_id=tenant_id,
             agent_id=agent_id,
             run_id=run_id,
         )
@@ -2094,15 +2198,16 @@ class _ApplicationComposer:
         selected_handles.append(handle)
         return value
 
-    async def _agent_parent(self, agent_id: str):
-        cache_key = ("__agent_parent__", agent_id)
+    async def _agent_parent(self, tenant_id: str | None, agent_id: str):
+        cache_key = ("__agent_parent__", tenant_id or "", agent_id)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached[0]
         handle = await self.host.open_scope(
             ExtensionScopeContext(
                 scope=ExtensionScope.AGENT,
-                scope_id=f"materialize-agent:{agent_id}",
+                scope_id=f"materialize-agent:{tenant_id or 'default'}:{agent_id}",
+                tenant_id=tenant_id,
                 agent_id=agent_id,
             ),
             self.host.plan(()),
@@ -2122,6 +2227,7 @@ class _ApplicationComposer:
         scope: ExtensionScope,
         scope_id: str,
         parent,
+        tenant_id: str | None,
         agent_id: str | None,
         run_id: str | None,
     ):
@@ -2153,8 +2259,13 @@ class _ApplicationComposer:
             ExtensionScopeContext(
                 scope=scope,
                 scope_id=scope_id,
-                agent_id=agent_id,
-                run_id=run_id,
+                tenant_id=tenant_id,
+                agent_id=(
+                    agent_id
+                    if scope in {ExtensionScope.AGENT, ExtensionScope.RUN}
+                    else None
+                ),
+                run_id=run_id if scope == ExtensionScope.RUN else None,
             ),
             plan,
             parent=parent if scope != ExtensionScope.PROCESS else None,

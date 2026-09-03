@@ -23,7 +23,12 @@ from sagents.v2.tool.composite import (
     InvocationGrantToolCatalog,
     RoutedToolExecutor,
 )
-from sagents.v2.tool.provider import CancellableToolExecutor, ToolCatalog, ToolExecutor
+from sagents.v2.tool.provider import (
+    CancellableToolExecutor,
+    RunScopedToolState,
+    ToolCatalog,
+    ToolExecutor,
+)
 from sagents.v2.tool.decorators import decorated_tool_definition, tool
 from sagents.v2.tool.decorated import DecoratedToolProvider, ToolInvocation
 from sagents.v2.tool.localization import (
@@ -83,6 +88,7 @@ __all__ = [
     "ReconcileState",
     "ResumeStrategy",
     "RoutedToolExecutor",
+    "RunScopedToolState",
     "SideEffectLevel",
     "ToolCall",
     "ToolCancellationResult",

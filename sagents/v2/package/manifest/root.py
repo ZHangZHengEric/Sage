@@ -24,6 +24,7 @@ class ManifestMetadata(StrictModel):
 
 class PluginDeclaration(StrictModel):
     id: Identifier
+    version: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 

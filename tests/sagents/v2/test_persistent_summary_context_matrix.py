@@ -110,6 +110,23 @@ def ledger():
     )
 
 
+def test_summary_units_never_drop_an_unmatched_tool_message():
+    call = ModelToolCall(tool_call_id="call_expected", name="lookup", arguments={})
+    messages = (
+        ModelMessage(role="assistant", tool_calls=(call,)),
+        ModelMessage(
+            role="tool",
+            tool_call_id="call_unmatched",
+            content=(TextBlock(text="must survive"),),
+        ),
+        ModelMessage(role="user", content=(TextBlock(text="continue"),)),
+    )
+
+    units = PersistentSummaryContextReducer._units(messages)
+
+    assert units == [(messages[0],), (messages[1],), (messages[2],)]
+
+
 @pytest.mark.asyncio
 async def test_persistent_summary_replaces_old_units_without_splitting_tool_pairs():
     store = InMemoryConversationSummaryStore()

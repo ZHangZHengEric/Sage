@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from pydantic import SecretStr
 
 from sagents.v2.package.manifest.models import (
     ModelCapabilityDeclaration,
@@ -30,6 +31,7 @@ from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
+from sagents.v2.runtime.credentials import CredentialMaterial
 
 
 CAPABILITIES = ModelCapabilities(
@@ -128,6 +130,49 @@ class SequencedResponses:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_closes_only_the_client_it_constructed(monkeypatch):
+    class ClosableClient:
+        def __init__(self):
+            self.responses = FakeResponses(FakeAsyncStream(()))
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    owned = ClosableClient()
+    monkeypatch.setattr(
+        "sagents.v2.model.plugins.openai_responses.AsyncOpenAI",
+        lambda **kwargs: owned,
+    )
+    credential = CredentialMaterial(
+        credential_id="model", secret=SecretStr("secret"), source="test"
+    )
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(
+            base_url="https://api.invalid/v1",
+            model="gpt-test",
+            capabilities=CAPABILITIES,
+        ),
+        credential,
+    )
+    await provider.close()
+
+    injected = ClosableClient()
+    injected_provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(
+            base_url="https://api.invalid/v1",
+            model="gpt-test",
+            capabilities=CAPABILITIES,
+        ),
+        client=injected,
+    )
+    await injected_provider.close()
+
+    assert owned.close_calls == 1
+    assert injected.close_calls == 0
 
 
 @pytest.mark.asyncio

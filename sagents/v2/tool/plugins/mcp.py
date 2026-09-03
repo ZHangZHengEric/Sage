@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -52,6 +53,11 @@ class McpServerConfig(StrictModel):
     args: tuple[str, ...] = ()
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=30, gt=0)
+    required: bool = True
+    max_tools: int = Field(default=256, gt=0, le=10_000)
+    max_pages: int = Field(default=64, gt=0, le=1_024)
+    max_schema_bytes: int = Field(default=262_144, gt=0, le=16_777_216)
+    max_result_bytes: int = Field(default=4_194_304, gt=0, le=67_108_864)
 
     @model_validator(mode="after")
     def validate_transport(self) -> "McpServerConfig":
@@ -110,71 +116,101 @@ class McpToolPlugin:
         self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
         self._operation_keys: dict[str, str] = {}
         self._call_fingerprints: dict[str, str] = {}
+        self._call_run_ids: dict[str, str] = {}
+        self._discovery_errors: dict[str, RuntimeErrorInfo] = {}
         self._lock = asyncio.Lock()
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         del run_id
         discovered: dict[str, ToolDefinition] = {}
         routes: dict[str, tuple[McpServerConfig, str]] = {}
+        discovery_errors: dict[str, RuntimeErrorInfo] = {}
         for server in self.servers:
             try:
                 async with self.session_factory(server) as session:
-                    response = await asyncio.wait_for(
-                        session.list_tools(), timeout=server.timeout_seconds
-                    )
+                    raw_tools = await self._list_server_tools(server, session)
+            except SageV2Error as error:
+                if server.required:
+                    raise
+                discovery_errors[server.name] = error.info
+                continue
             except Exception as exc:
                 # Discovery is read-only and happens before a tool call is
                 # dispatched, so its failure cannot leave an uncertain side
                 # effect behind and is safe to retry.
-                raise self._provider_error(
+                error = self._provider_error(
                     "mcp.discovery_failed",
                     server,
                     exc,
                     category=ErrorCategory.PROVIDER_TRANSIENT,
-                ) from exc
-            for raw in _value(response, "tools", ()) or ():
-                remote_name = str(_value(raw, "name", "") or "").strip()
-                if not remote_name:
-                    continue
-                public_name = self._public_name(server.name, remote_name)
-                if public_name in discovered:
-                    raise self._error(
-                        "mcp.tool_name_collision",
-                        f"multiple MCP tools map to {public_name!r}",
-                        ErrorCategory.CONFLICT,
-                    )
-                schema = _value(raw, "inputSchema", None) or _value(
-                    raw, "input_schema", None
                 )
-                if not isinstance(schema, dict):
-                    schema = {"type": "object", "properties": {}}
-                try:
-                    Draft202012Validator.check_schema(schema)
-                except SchemaError as exc:
-                    raise self._error(
-                        "mcp.tool_schema_invalid",
-                        f"MCP tool {public_name!r} returned an invalid input schema: {exc.message}",
-                        ErrorCategory.PROVIDER_PERMANENT,
-                        metadata={"server": server.name, "tool": remote_name},
-                    ) from exc
-                discovered[public_name] = ToolDefinition(
-                    name=public_name,
-                    description=str(_value(raw, "description", "") or ""),
-                    input_schema=schema,
-                    # MCP does not declare a universal side-effect contract.
-                    # The conservative default forces policy approval and avoids
-                    # replay after an uncertain transport failure.
-                    side_effect_level=SideEffectLevel.WRITE,
-                    idempotency_strategy=IdempotencyStrategy.RECONCILE_ONLY,
-                    resume_strategy=ResumeStrategy.MANUAL_RESOLUTION,
-                    requires_approval=True,
-                    required_scopes=("tool.external_side_effect",),
+                if server.required:
+                    raise error from exc
+                discovery_errors[server.name] = error.info
+                continue
+            try:
+                server_definitions, server_routes = self._project_tools(
+                    server, raw_tools, existing_names=frozenset(discovered)
                 )
-                routes[public_name] = (server, remote_name)
+            except SageV2Error as exc:
+                if server.required:
+                    raise
+                discovery_errors[server.name] = exc.info
+                continue
+            discovered.update(server_definitions)
+            routes.update(server_routes)
         async with self._lock:
             self._definitions = discovered
             self._routes = routes
+            self._discovery_errors = discovery_errors
         return tuple(discovered[name] for name in sorted(discovered))
+
+    async def _list_server_tools(
+        self, server: McpServerConfig, session: Any
+    ) -> tuple[Any, ...]:
+        """Read every MCP catalog page with bounded, loop-safe pagination."""
+
+        tools: list[Any] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for _page in range(server.max_pages):
+            request = (
+                session.list_tools() if cursor is None else session.list_tools(cursor)
+            )
+            response = await asyncio.wait_for(
+                request,
+                timeout=server.timeout_seconds,
+            )
+            tools.extend(tuple(_value(response, "tools", ()) or ()))
+            if len(tools) > server.max_tools:
+                raise self._error(
+                    "mcp.tool_catalog_too_large",
+                    f"MCP server {server.name!r} returned more than the configured "
+                    f"{server.max_tools}-tool limit",
+                    ErrorCategory.PROVIDER_PERMANENT,
+                    metadata={"server": server.name, "limit": server.max_tools},
+                )
+            next_cursor = _value(response, "nextCursor", None) or _value(
+                response, "next_cursor", None
+            )
+            if next_cursor is None:
+                return tuple(tools)
+            cursor = str(next_cursor)
+            if not cursor or cursor in seen_cursors:
+                raise self._error(
+                    "mcp.pagination_invalid",
+                    f"MCP server {server.name!r} returned a repeated or empty cursor",
+                    ErrorCategory.PROVIDER_PERMANENT,
+                    metadata={"server": server.name},
+                )
+            seen_cursors.add(cursor)
+        raise self._error(
+            "mcp.pagination_limit_exceeded",
+            f"MCP server {server.name!r} exceeded the configured "
+            f"{server.max_pages}-page limit",
+            ErrorCategory.PROVIDER_PERMANENT,
+            metadata={"server": server.name, "limit": server.max_pages},
+        )
 
     async def get_tool(self, name: str, *, run_id: str) -> ToolDefinition:
         if name not in self._definitions:
@@ -227,6 +263,7 @@ class McpToolPlugin:
                 self._inflight[call.idempotency_key] = future
                 self._operation_keys[call.operation_id] = call.idempotency_key
                 self._call_fingerprints[call.idempotency_key] = fingerprint
+                self._call_run_ids[call.idempotency_key] = call.owner_run_id
                 owner = True
             else:
                 owner = False
@@ -240,15 +277,54 @@ class McpToolPlugin:
                     timeout=server.timeout_seconds,
                 )
         except asyncio.CancelledError as exc:
+            error = self._provider_error(
+                "mcp.result_cancelled",
+                server,
+                RuntimeError("tool call was cancelled before a result was received"),
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                metadata={
+                    "mcp_result_received": False,
+                    "transport_failure": "cancelled",
+                },
+            )
             async with self._lock:
+                self._failures[call.idempotency_key] = error.info
                 if not future.done():
                     future.set_exception(exc)
                     future.exception()
             raise
+        except TimeoutError as exc:
+            error = self._provider_error(
+                "mcp.result_timeout",
+                server,
+                RuntimeError(
+                    f"Tool did not return within {server.timeout_seconds:g} seconds"
+                ),
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                metadata={
+                    "mcp_result_received": False,
+                    "transport_failure": "timeout",
+                },
+            )
+            async with self._lock:
+                self._failures[call.idempotency_key] = error.info
+                if not future.done():
+                    future.set_exception(error)
+                    future.exception()
+            raise error from exc
         except Exception as exc:
-            # The request may have reached the remote server. Do not retry here;
-            # AgentLoop will persist an uncertain side-effect barrier.
-            error = self._provider_error("mcp.call_failed", server, exc)
+            # The request may have reached the remote server and completed even
+            # though its response was lost. Never replay a write from this state.
+            error = self._provider_error(
+                "mcp.result_not_received",
+                server,
+                exc,
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                metadata={
+                    "mcp_result_received": False,
+                    "transport_failure": "connection",
+                },
+            )
             async with self._lock:
                 self._failures[call.idempotency_key] = error.info
                 if not future.done():
@@ -256,22 +332,55 @@ class McpToolPlugin:
                     future.exception()
             raise error from exc
         else:
+            response_bytes = len(
+                json.dumps(
+                    _dump(response),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            )
+            result_truncated = response_bytes > server.max_result_bytes
+            content = (
+                (
+                    TextBlock(
+                        text=(
+                            "MCP result omitted because it exceeded the configured "
+                            f"{server.max_result_bytes}-byte limit."
+                        )
+                    ),
+                )
+                if result_truncated
+                else self._content(response)
+            )
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
                 operation_id=call.operation_id,
-                content=self._content(response),
+                content=content,
                 error=(
                     RuntimeErrorInfo(
                         code="mcp.tool_error",
                         category=ErrorCategory.PROVIDER_PERMANENT,
-                        message=self._error_text(response),
+                        message=self._error_text(response)[:4096],
                         safe_to_resume=True,
-                        metadata={"server": server.name, "tool": remote_name},
+                        metadata={
+                            "server": server.name,
+                            "tool": remote_name,
+                            "mcp_result_received": True,
+                            "tool_result_received": True,
+                        },
                     )
                     if bool(_value(response, "isError", False))
                     else None
                 ),
-                metadata={"mcp_server": server.name, "mcp_tool": remote_name},
+                metadata={
+                    "mcp_server": server.name,
+                    "mcp_tool": remote_name,
+                    "mcp_result_received": True,
+                    "tool_result_received": True,
+                    "mcp_result_truncated": result_truncated,
+                    "mcp_result_size_bytes": response_bytes,
+                },
             )
             async with self._lock:
                 self._results[call.idempotency_key] = result
@@ -282,6 +391,96 @@ class McpToolPlugin:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._operation_keys.pop(call.operation_id, None)
+
+    async def release_run(self, run_id: str) -> None:
+        """Release terminal Run state without disturbing in-flight calls."""
+
+        async with self._lock:
+            keys = {
+                key
+                for key, owner_run_id in self._call_run_ids.items()
+                if owner_run_id == run_id and key not in self._inflight
+            }
+            for key in keys:
+                self._results.pop(key, None)
+                self._failures.pop(key, None)
+                self._call_fingerprints.pop(key, None)
+                self._call_run_ids.pop(key, None)
+
+    @classmethod
+    def _project_tools(
+        cls,
+        server: McpServerConfig,
+        raw_tools: tuple[Any, ...],
+        *,
+        existing_names: frozenset[str],
+    ) -> tuple[
+        dict[str, ToolDefinition],
+        dict[str, tuple[McpServerConfig, str]],
+    ]:
+        definitions: dict[str, ToolDefinition] = {}
+        routes: dict[str, tuple[McpServerConfig, str]] = {}
+        for raw in raw_tools:
+            remote_name = str(_value(raw, "name", "") or "").strip()
+            if not remote_name:
+                continue
+            public_name = cls._public_name(server.name, remote_name)
+            if public_name in existing_names or public_name in definitions:
+                raise cls._error(
+                    "mcp.tool_name_collision",
+                    f"multiple MCP tools map to {public_name!r}",
+                    ErrorCategory.CONFLICT,
+                )
+            schema = _value(raw, "inputSchema", None) or _value(
+                raw, "input_schema", None
+            )
+            if not isinstance(schema, dict):
+                schema = {"type": "object", "properties": {}}
+            try:
+                schema_bytes = len(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+                Draft202012Validator.check_schema(schema)
+            except (SchemaError, TypeError, ValueError) as exc:
+                raise cls._error(
+                    "mcp.tool_schema_invalid",
+                    f"MCP tool {public_name!r} returned an invalid input schema: {exc}",
+                    ErrorCategory.PROVIDER_PERMANENT,
+                    metadata={"server": server.name, "tool": remote_name},
+                ) from exc
+            if schema_bytes > server.max_schema_bytes:
+                raise cls._error(
+                    "mcp.tool_schema_too_large",
+                    f"MCP tool {public_name!r} schema exceeds the configured "
+                    f"{server.max_schema_bytes}-byte limit",
+                    ErrorCategory.PROVIDER_PERMANENT,
+                    metadata={
+                        "server": server.name,
+                        "tool": remote_name,
+                        "size_bytes": schema_bytes,
+                        "limit_bytes": server.max_schema_bytes,
+                    },
+                )
+            definitions[public_name] = ToolDefinition(
+                name=public_name,
+                description=str(_value(raw, "description", "") or "")[:4096],
+                input_schema=schema,
+                # MCP annotations are untrusted hints and there is no
+                # protocol-wide exactly-once guarantee. A lost response may
+                # therefore hide a completed remote write.
+                side_effect_level=SideEffectLevel.WRITE,
+                idempotency_strategy=IdempotencyStrategy.RECONCILE_ONLY,
+                resume_strategy=ResumeStrategy.MANUAL_RESOLUTION,
+                requires_approval=True,
+                required_scopes=("tool.external_side_effect",),
+            )
+            routes[public_name] = (server, remote_name)
+        return definitions, routes
 
     async def reconcile(
         self, operation_id: str, context: RequestContext
@@ -301,8 +500,10 @@ class McpToolPlugin:
         return ReconcileResult(
             operation_id=operation_id,
             state=(
-                ReconcileState.SUCCEEDED
-                if result
+                ReconcileState.FAILED
+                if result is not None and result.error is not None
+                else ReconcileState.SUCCEEDED
+                if result is not None
                 else ReconcileState.PENDING
                 if pending
                 else ReconcileState.UNKNOWN
@@ -359,12 +560,17 @@ class McpToolPlugin:
         exc: Exception,
         *,
         category: ErrorCategory = ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+        metadata: dict[str, Any] | None = None,
     ) -> SageV2Error:
         return McpToolPlugin._error(
             code,
             f"MCP server {server.name!r} failed: {exc}",
             category,
-            metadata={"server": server.name, "protocol": server.protocol},
+            metadata={
+                "server": server.name,
+                "protocol": server.protocol,
+                **dict(metadata or {}),
+            },
         )
 
     @staticmethod

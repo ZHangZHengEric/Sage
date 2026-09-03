@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable, Mapping
 
 from sagents.v2.tool.contracts import (
@@ -78,7 +79,9 @@ class InvocationGrantToolCatalog:
         try:
             command = await self._command_reader(run_id)
             mode = str(getattr(command, "invocation_mode", None) or "normal")
-            configured = getattr(getattr(command, "config", None), "enabled_tools", None)
+            configured = getattr(
+                getattr(command, "config", None), "enabled_tools", None
+            )
         except SageV2Error as exc:
             if self._fallback_invocation_mode is None or not exc.info.code.endswith(
                 ".not_found"
@@ -182,6 +185,7 @@ class RoutedToolExecutor:
     def __init__(self, routes: Mapping[str, ToolExecutor]) -> None:
         self._routes = dict(routes)
         self._operation_routes: dict[str, ToolExecutor] = {}
+        self._operation_run_ids: dict[str, str] = {}
 
     async def execute(
         self, call: ToolCall, context: RequestContext
@@ -196,7 +200,20 @@ class RoutedToolExecutor:
                 )
             )
         self._operation_routes[call.operation_id] = executor
+        self._operation_run_ids[call.operation_id] = call.owner_run_id
         return await executor.execute(call, context)
+
+    async def release_run(self, run_id: str) -> None:
+        for executor in dict.fromkeys(self._routes.values()):
+            release = getattr(executor, "release_run", None)
+            if callable(release):
+                result = release(run_id)
+                if inspect.isawaitable(result):
+                    await result
+        for operation_id, owner_run_id in tuple(self._operation_run_ids.items()):
+            if owner_run_id == run_id:
+                self._operation_run_ids.pop(operation_id, None)
+                self._operation_routes.pop(operation_id, None)
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (
@@ -249,11 +266,13 @@ class CompositeToolExecutor:
     def __init__(self, executors: tuple[ToolExecutor, ...]) -> None:
         self._executors = executors
         self._operation_routes: dict[str, ToolExecutor] = {}
+        self._operation_run_ids: dict[str, str] = {}
 
     async def execute(self, call: ToolCall, context: RequestContext):
         last_missing = None
         for executor in self._executors:
             self._operation_routes[call.operation_id] = executor
+            self._operation_run_ids[call.operation_id] = call.owner_run_id
             try:
                 return await executor.execute(call, context)
             except SageV2Error as exc:
@@ -271,6 +290,18 @@ class CompositeToolExecutor:
                 message=f"tool {call.tool_name!r} has no execution provider",
             )
         )
+
+    async def release_run(self, run_id: str) -> None:
+        for executor in dict.fromkeys(self._executors):
+            release = getattr(executor, "release_run", None)
+            if callable(release):
+                result = release(run_id)
+                if inspect.isawaitable(result):
+                    await result
+        for operation_id, owner_run_id in tuple(self._operation_run_ids.items()):
+            if owner_run_id == run_id:
+                self._operation_run_ids.pop(operation_id, None)
+                self._operation_routes.pop(operation_id, None)
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (

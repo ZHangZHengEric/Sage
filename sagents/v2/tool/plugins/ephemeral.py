@@ -115,6 +115,7 @@ class InMemoryToolExecutor:
         self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
         self._call_fingerprints: dict[str, str] = {}
+        self._call_run_ids: dict[str, str] = {}
         self.calls: list[ToolCall] = []
 
     async def execute(
@@ -167,6 +168,7 @@ class InMemoryToolExecutor:
                 future = asyncio.get_running_loop().create_future()
                 self._inflight[call.idempotency_key] = future
                 self._call_fingerprints[call.idempotency_key] = fingerprint
+                self._call_run_ids[call.idempotency_key] = call.owner_run_id
                 owner = True
                 self.calls.append(call)
                 current_task = asyncio.current_task()
@@ -204,6 +206,20 @@ class InMemoryToolExecutor:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._execution_tasks.pop(call.operation_id, None)
+
+    async def release_run(self, run_id: str) -> None:
+        """Drop completed idempotency state once a Run is terminal."""
+
+        async with self._lock:
+            keys = {
+                key
+                for key, owner_run_id in self._call_run_ids.items()
+                if owner_run_id == run_id and key not in self._inflight
+            }
+            for key in keys:
+                self._results.pop(key, None)
+                self._call_fingerprints.pop(key, None)
+                self._call_run_ids.pop(key, None)
 
     async def cancel(
         self, operation_id: str, context: RequestContext

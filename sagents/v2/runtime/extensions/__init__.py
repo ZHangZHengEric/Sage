@@ -22,6 +22,7 @@ from sagents.v2.runtime.extensions.host import (
 from sagents.v2.runtime.extensions.discovery import (
     ENTRY_POINT_GROUP,
     load_installed_extension,
+    validate_extension_version,
 )
 from sagents.v2.runtime.extensions.registry import (
     ExtensionRegistry,
@@ -56,4 +57,5 @@ __all__ = [
     "StopReason",
     "TypedExtensionRegistry",
     "load_installed_extension",
+    "validate_extension_version",
 ]

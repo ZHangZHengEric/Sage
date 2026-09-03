@@ -100,6 +100,7 @@ class OpenAIResponsesModelProvider:
         if client is None and credential is None:
             raise ValueError("credential is required when client is not injected")
         self.config = config
+        self._owns_client = client is None
         if client is not None:
             self._client = client
         else:
@@ -114,6 +115,20 @@ class OpenAIResponsesModelProvider:
     @property
     def raw_client(self) -> Any:
         return self._client
+
+    async def close(self) -> None:
+        """Release only the SDK client created by this plugin instance."""
+
+        if not self._owns_client:
+            return
+        close = getattr(self._client, "close", None) or getattr(
+            self._client, "aclose", None
+        )
+        if close is None:
+            return
+        result = close()
+        if hasattr(result, "__await__"):
+            await result
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return self.config.capabilities
