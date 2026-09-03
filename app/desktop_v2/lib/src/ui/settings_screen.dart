@@ -4996,8 +4996,8 @@ class _ModelSettingsState extends State<_ModelSettings> {
     }
   }
 
-  void _markDraftChanged() {
-    if (_dirty && _detectionError == null && !_detected) return;
+  void _markDraftChanged({bool rebuild = false}) {
+    if (!rebuild && _dirty && _detectionError == null && !_detected) return;
     setState(() {
       _dirty = true;
       _detectionError = null;
@@ -5465,7 +5465,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
                         onChanged: (value) {
                           if (value == _protocol) return;
                           _protocol = value;
-                          _markDraftChanged();
+                          _markDraftChanged(rebuild: true);
                         },
                       )
                     : Text(_modelProtocolLabel(displayed.protocol)),

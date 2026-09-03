@@ -6815,6 +6815,17 @@ void main() {
           find.byKey(const ValueKey('settings-model-id-field')),
           findsOneWidget,
         );
+        await tester.tap(
+          find.byKey(const ValueKey('settings-model-protocol-picker')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Anthropic Messages').last);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('settings-model-id-field')),
+          findsOneWidget,
+        );
+        expect(find.text('Anthropic Messages'), findsOneWidget);
         await tester.enterText(
           find.byKey(const ValueKey('settings-model-id-field')),
           'created-model',
@@ -6827,7 +6838,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(api.lastModelCreate?['model'], 'created-model');
-        expect(api.lastModelCreate?['protocol'], 'openai-responses');
+        expect(api.lastModelCreate?['protocol'], 'anthropic-messages');
         expect(controller.modelProviders.last.id, 'model_created');
         controller.dispose();
         await tester.pumpWidget(const SizedBox.shrink());
