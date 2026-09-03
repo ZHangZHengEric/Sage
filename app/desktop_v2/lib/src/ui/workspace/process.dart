@@ -5,12 +5,14 @@ class _ProcessPanel extends StatefulWidget {
     required this.panel,
     required this.messages,
     this.subSessions = const [],
+    this.forceCollapsed = false,
     super.key,
   });
 
   final RuntimeProcessPanel panel;
   final List<ChatMessage> messages;
   final List<Conversation> subSessions;
+  final bool forceCollapsed;
 
   @override
   State<_ProcessPanel> createState() => _ProcessPanelState();
@@ -24,7 +26,7 @@ class _ProcessPanelState extends State<_ProcessPanel> {
   @override
   void initState() {
     super.initState();
-    _expanded = widget.panel.running;
+    _expanded = widget.panel.running && !widget.forceCollapsed;
     _wasRunning = widget.panel.running;
     _syncTimer();
   }
@@ -32,7 +34,9 @@ class _ProcessPanelState extends State<_ProcessPanel> {
   @override
   void didUpdateWidget(covariant _ProcessPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_wasRunning && !widget.panel.running) _expanded = false;
+    if (widget.forceCollapsed || (_wasRunning && !widget.panel.running)) {
+      _expanded = false;
+    }
     _wasRunning = widget.panel.running;
     _syncTimer();
   }

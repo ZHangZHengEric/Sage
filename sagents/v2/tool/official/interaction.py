@@ -6,7 +6,6 @@ from typing import Any
 
 from sagents.v2.tool import ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
-from sagents.v2.agent.policy import InteractionDraft
 from sagents.v2.i18n import normalize_language, tr
 
 
@@ -100,7 +99,7 @@ class InteractionTools:
         resolved_title = title.strip() or tr("recovery.title", language)
         result = {
             "success": True,
-            "status": "questionnaire_ready",
+            "status": "awaiting_user_input",
             "validation_passed": True,
             "title": resolved_title,
             "question_count": len(normalized),
@@ -108,27 +107,6 @@ class InteractionTools:
             "questionnaire_kind": questionnaire_kind,
             "should_end": True,
         }
-        run_id = invocation.call.owner_run_id if invocation is not None else "unknown"
-        self.runtime.set_turn_status(
-            run_id,
-            {
-                "status": "need_user_input",
-                "note": resolved_title,
-                "interaction": InteractionDraft(
-                    interaction_type="questionnaire",
-                    allowed_decisions=("submit", "cancel"),
-                    payload={
-                        "title": resolved_title,
-                        "prompt": tr("recovery.input_prompt", language),
-                        "guidance": tr("recovery.guidance", language),
-                        "questions": normalized,
-                        "questionnaire_kind": questionnaire_kind,
-                        "language": language,
-                        "source": "questionnaire_async",
-                    },
-                ).model_dump(mode="json"),
-            },
-        )
         return result
 
 

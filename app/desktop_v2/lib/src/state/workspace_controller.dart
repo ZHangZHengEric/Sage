@@ -2309,7 +2309,7 @@ class WorkspaceController extends ChangeNotifier {
         conversation.processPanels.where((value) => value.running).lastOrNull ??
         (promoteFinal ? conversation.processPanels.lastOrNull : null);
     if (panel == null) return;
-    if (promoteFinal) {
+    if (promoteFinal && !_hasValidatedQuestionnaireResult(panel)) {
       final anchorIndex = conversation.messages.indexWhere(
         (value) => value.id == panel.anchorMessageId,
       );
@@ -2325,6 +2325,30 @@ class WorkspaceController extends ChangeNotifier {
       activity.active = false;
       activity.completedAt = DateTime.now();
     }
+  }
+
+  bool _hasValidatedQuestionnaireResult(RuntimeProcessPanel panel) {
+    for (final activity in panel.activities) {
+      if (activity.label.trim().toLowerCase() != 'questionnaire_async' ||
+          activity.failed ||
+          activity.result.trim().isEmpty) {
+        continue;
+      }
+      Object? decoded;
+      try {
+        decoded = jsonDecode(activity.result);
+      } on FormatException {
+        continue;
+      }
+      if (decoded is Map &&
+          decoded['success'] == true &&
+          decoded['validation_passed'] == true &&
+          decoded['questions'] is List &&
+          (decoded['questions'] as List).isNotEmpty) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _pauseProcessPanel(Conversation conversation, {DateTime? pausedAt}) {

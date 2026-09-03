@@ -561,13 +561,47 @@ class _MessageListState extends State<_MessageList> {
     final children = <Widget>[];
     final attachedPanelIds = <String>{};
     final pendingInteraction = conversation.pendingInteraction;
-    final inlineQuestionnaire =
+    final pendingQuestionnaire =
         pendingInteraction != null && _isInlineQuestionnaire(pendingInteraction)
         ? pendingInteraction
         : null;
+    final completedQuestionnaire = pendingQuestionnaire == null
+        ? _latestValidatedToolQuestionnaire(conversation)
+        : null;
+    final inlineQuestionnaire = pendingQuestionnaire ?? completedQuestionnaire;
+    final questionnairePanelId =
+        completedQuestionnaire?.payload['_process_panel_id']?.toString() ?? '';
+    bool hiddenByQuestionnaire(ChatMessage message) =>
+        questionnairePanelId.isNotEmpty &&
+        message.role == 'assistant' &&
+        _panelForMessage(message)?.id == questionnairePanelId;
+    Widget questionnaireCard() => _InlineQuestionnaireCard(
+      key: ValueKey('inline-questionnaire:${inlineQuestionnaire!.id}'),
+      interaction: inlineQuestionnaire,
+      onReply: completedQuestionnaire != null
+          ? (decision, {text = '', payload = const {}}) async {
+              if (decision != 'submit') return;
+              final rawAnswers = payload['answers'];
+              final answers = rawAnswers is Map
+                  ? rawAnswers.cast<String, Object?>()
+                  : const <String, Object?>{};
+              await widget.controller.send(
+                _questionnaireResponseMessage(
+                  completedQuestionnaire,
+                  answers,
+                  context.l10n.text('questionnaire.response'),
+                ),
+              );
+            }
+          : widget.controller.viewingSubSession
+          ? widget.controller.replyDisplayInteraction
+          : widget.controller.replyInteraction,
+    );
+    var questionnaireInserted = false;
     var lastVisibleMessageIndex = -1;
     for (var index = conversation.messages.length - 1; index >= 0; index--) {
-      if (!conversation.messages[index].processOnly) {
+      if (!conversation.messages[index].processOnly &&
+          !hiddenByQuestionnaire(conversation.messages[index])) {
         lastVisibleMessageIndex = index;
         break;
       }
@@ -578,7 +612,7 @@ class _MessageListState extends State<_MessageList> {
       messageIndex++
     ) {
       final message = conversation.messages[messageIndex];
-      if (message.processOnly) continue;
+      if (message.processOnly || hiddenByQuestionnaire(message)) continue;
       final panel = message.role == 'assistant'
           ? _panelForMessage(message)
           : null;
@@ -630,8 +664,14 @@ class _MessageListState extends State<_MessageList> {
             panel: panel,
             messages: _processMessagesFor(panel),
             subSessions: _subSessionsFor(panel),
+            forceCollapsed: panel.id == questionnairePanelId,
           ),
         );
+        if (panel.id == questionnairePanelId && inlineQuestionnaire != null) {
+          children.add(const SizedBox(height: 14));
+          children.add(questionnaireCard());
+          questionnaireInserted = true;
+        }
       }
       final followedByQuestionnaire =
           inlineQuestionnaire != null &&
@@ -657,24 +697,22 @@ class _MessageListState extends State<_MessageList> {
           panel: panel,
           messages: _processMessagesFor(panel),
           subSessions: _subSessionsFor(panel),
+          forceCollapsed: panel.id == questionnairePanelId,
         ),
       );
+      if (panel.id == questionnairePanelId && inlineQuestionnaire != null) {
+        children.add(const SizedBox(height: 14));
+        children.add(questionnaireCard());
+        questionnaireInserted = true;
+      }
       children.add(const SizedBox(height: 26));
     }
     if (conversation.thinking) {
       children.add(const _RunningThinkingStatus());
       children.add(const SizedBox(height: 14));
     }
-    if (inlineQuestionnaire != null) {
-      children.add(
-        _InlineQuestionnaireCard(
-          key: ValueKey('inline-questionnaire:${inlineQuestionnaire.id}'),
-          interaction: inlineQuestionnaire,
-          onReply: widget.controller.viewingSubSession
-              ? widget.controller.replyDisplayInteraction
-              : widget.controller.replyInteraction,
-        ),
-      );
+    if (inlineQuestionnaire != null && !questionnaireInserted) {
+      children.add(questionnaireCard());
       children.add(const SizedBox(height: 26));
     }
     final jumpTargets = _jumpTargets();

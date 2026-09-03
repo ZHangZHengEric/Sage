@@ -211,7 +211,7 @@ def test_complex_builtin_schemas_describe_nested_contracts():
 
 
 @pytest.mark.asyncio
-async def test_questionnaire_async_requests_user_input_without_blocking(tmp_path: Path):
+async def test_questionnaire_async_returns_validated_terminal_payload(tmp_path: Path):
     plugin = await plugin_for(tmp_path)
 
     result = await plugin.executor.execute(
@@ -233,12 +233,12 @@ async def test_questionnaire_async_requests_user_input_without_blocking(tmp_path
     )
     signal = plugin.runtime.consume_continuation_signals("run_1")
 
+    assert result.content[0].value["status"] == "awaiting_user_input"
+    assert result.content[0].value["validation_passed"] is True
     assert result.content[0].value["should_end"] is True
-    assert signal.explicit_status == "need_user_input"
-    assert signal.interaction is not None
-    assert signal.interaction.interaction_type == "questionnaire"
-    assert signal.interaction.allowed_decisions == ("submit", "cancel")
-    assert signal.interaction.payload["questions"][0]["id"] == "target"
+    assert result.content[0].value["questions"][0]["id"] == "target"
+    assert signal.explicit_status is None
+    assert signal.interaction is None
 
 
 @pytest.mark.asyncio

@@ -1097,6 +1097,7 @@ class AgentLoopEngine:
                 }
             )
 
+            questionnaire_completed = False
             if response.tool_calls:
                 # Phase 4: proposal and policy decision are committed before any
                 # external ToolExecutor receives the call.
@@ -1212,6 +1213,10 @@ class AgentLoopEngine:
                     )
                     if result is None:
                         return run
+                    questionnaire_completed = (
+                        questionnaire_completed
+                        or self._validated_questionnaire_result(tool_call, result)
+                    )
                     state = state.model_copy(
                         update={
                             "messages": (
@@ -1228,39 +1233,51 @@ class AgentLoopEngine:
             signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF
             # or a provider finish_reason.
-            decision = await self.continuation_policy.decide(
-                ContinuationContext(
-                    run_id=run.run_id,
-                    step_number=state.step_number,
-                    max_steps=max_steps,
-                    response=response,
-                    ledger=state.messages,
-                    language=str(
-                        command.config.metadata.get("response_language")
-                        or context.language
-                        or "en"
-                    ),
-                    agent_system_requirements=self._system_requirements(
-                        request.messages
-                    ),
-                    available_tools=tuple(tool.name for tool in tools),
-                    pending_tool_calls=0,
-                    repeated_fingerprint_count=repeated,
-                    explicit_status=signals.explicit_status,
-                    explicit_status_note=signals.explicit_status_note,
-                    requested_interaction=signals.interaction,
-                    flow_boundary=signals.flow_boundary,
-                    elapsed_seconds=max(
-                        0.0, (self.clock() - run.created_at).total_seconds()
-                    ),
-                    deadline_seconds=command.config.deadline_seconds,
-                    total_tokens=state.total_input_tokens + state.total_output_tokens,
-                    max_total_tokens=(
-                        command.config.max_total_tokens
-                        or command.config.metadata.get("max_total_tokens")
-                    ),
-                )
+            continuation_context = ContinuationContext(
+                run_id=run.run_id,
+                step_number=state.step_number,
+                max_steps=max_steps,
+                response=response,
+                ledger=state.messages,
+                language=str(
+                    command.config.metadata.get("response_language")
+                    or context.language
+                    or "en"
+                ),
+                agent_system_requirements=self._system_requirements(request.messages),
+                available_tools=tuple(tool.name for tool in tools),
+                pending_tool_calls=0,
+                repeated_fingerprint_count=repeated,
+                explicit_status=signals.explicit_status,
+                explicit_status_note=signals.explicit_status_note,
+                requested_interaction=signals.interaction,
+                flow_boundary=signals.flow_boundary,
+                elapsed_seconds=max(
+                    0.0, (self.clock() - run.created_at).total_seconds()
+                ),
+                deadline_seconds=command.config.deadline_seconds,
+                total_tokens=state.total_input_tokens + state.total_output_tokens,
+                max_total_tokens=(
+                    command.config.max_total_tokens
+                    or command.config.metadata.get("max_total_tokens")
+                ),
             )
+            if questionnaire_completed:
+                # Match the established questionnaire_async contract: a
+                # successfully validated result is a terminal boundary for this
+                # Run, while the answer arrives as the next user turn. The
+                # durable Tool result remains the UI's questionnaire source.
+                decision = ContinuationDecision(
+                    action=ContinuationAction.COMPLETE_RUN,
+                    reason_code="tool.questionnaire_ready",
+                    reason="validated questionnaire is awaiting the next user turn",
+                    metadata={
+                        "source": "questionnaire_async",
+                        "awaiting_user_input": True,
+                    },
+                )
+            else:
+                decision = await self.continuation_policy.decide(continuation_context)
             if decision.usage.input_tokens or decision.usage.output_tokens:
                 state = state.model_copy(
                     update={
@@ -1383,6 +1400,37 @@ class AgentLoopEngine:
                 "interaction": external.interaction,
                 "flow_boundary": external.flow_boundary or signals.flow_boundary,
             }
+        )
+
+    @staticmethod
+    def _validated_questionnaire_result(
+        call: ToolCall, result: ToolExecutionResult
+    ) -> bool:
+        if call.tool_name != "questionnaire_async" or result.error is not None:
+            return False
+        payload = None
+        for block in result.content:
+            if isinstance(block, JsonBlock) and isinstance(block.value, dict):
+                payload = block.value
+                break
+            if not isinstance(block, TextBlock) or not block.text.strip():
+                continue
+            try:
+                value = json.loads(block.text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                payload = value
+                break
+        if not isinstance(payload, dict):
+            return False
+        questions = payload.get("questions")
+        return (
+            payload.get("success") is True
+            and payload.get("validation_passed") is True
+            and isinstance(questions, list)
+            and bool(questions)
+            and payload.get("should_end") is True
         )
 
     async def _stream_model(self, run, request, context, state, step_id):
