@@ -108,6 +108,40 @@ async def test_probe_suite_keeps_independent_results_after_one_rejection():
 
 
 @pytest.mark.asyncio
+async def test_multimodal_probe_keeps_raw_error_and_extracts_image_field_cause():
+    class RejectedImageProvider(ProbeProvider):
+        async def _stream(self, request):
+            self.requests.append(request)
+            if "multimodal" in request.request_id:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="model.provider_permanent",
+                        category=ErrorCategory.PROVIDER_PERMANENT,
+                        message=(
+                            "validation errors: ('ResponseInputImageParam', "
+                            "'detail'), 'msg': 'Field required'"
+                        ),
+                        provider_code="400",
+                    )
+                )
+            async for event in super()._stream(request):
+                yield event
+
+    report = await probe_model_capabilities(
+        RejectedImageProvider(), model_binding="primary"
+    )
+
+    outcome = report.outcome("multimodal")
+    assert "validation errors" in (outcome.error or "")
+    assert outcome.metadata["diagnostic_error"] == (
+        "Image payload lost a required Responses field during gateway validation "
+        "(ResponseInputImageParam.detail: Field required). If this is a Chat "
+        "Completions route, its Chat-to-Responses image conversion is "
+        "incompatible; use the OpenAI Responses protocol for multimodal requests."
+    )
+
+
+@pytest.mark.asyncio
 async def test_probe_suite_is_invalid_only_when_every_executable_probe_fails():
     provider = ProbeProvider(fail_all=True)
 

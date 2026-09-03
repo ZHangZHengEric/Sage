@@ -763,7 +763,10 @@ class OpenAICompatibleModelProvider:
         if isinstance(block, TextBlock):
             return {"type": "text", "text": block.text}
         if isinstance(block, ImageBlock):
-            return {"type": "image_url", "image_url": {"url": block.uri}}
+            return {
+                "type": "image_url",
+                "image_url": {"url": block.uri, "detail": block.detail},
+            }
         if isinstance(block, AudioBlock):
             return {"type": "input_audio", "input_audio": {"data": block.uri}}
         if isinstance(block, FileBlock):

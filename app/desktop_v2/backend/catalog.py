@@ -100,6 +100,7 @@ class DesktopModelCompatibilityProfile(StrictModel):
     auxiliary_json_compatible: bool = False
     successful_probes: tuple[str, ...] = ()
     failed_probes: tuple[str, ...] = ()
+    probe_diagnostics: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class DesktopModelProviderRecord(StrictModel):

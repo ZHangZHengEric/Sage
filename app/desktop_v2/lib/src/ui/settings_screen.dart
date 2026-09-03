@@ -4834,6 +4834,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
   bool _supportsStructuredOutput = false;
   bool _supportsToolCalling = true;
   Map<String, Object?>? _compatibilityProfile;
+  Map<String, Object?>? _capabilityReport;
   final _name = TextEditingController();
   final _baseUrl = TextEditingController();
   final _model = TextEditingController();
@@ -4888,6 +4889,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
     _supportsStructuredOutput = value.supportsStructuredOutput;
     _supportsToolCalling = value.supportsToolCalling;
     _compatibilityProfile = null;
+    _capabilityReport = null;
     _dirty = false;
   }
 
@@ -5001,6 +5003,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
+      _capabilityReport = null;
       _supportsMultimodal = false;
       _supportsStructuredOutput = false;
       _supportsToolCalling = false;
@@ -5028,6 +5031,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
+      _capabilityReport = null;
       _supportsMultimodal = false;
       _supportsStructuredOutput = false;
       _supportsToolCalling = false;
@@ -5091,6 +5095,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
+      _capabilityReport = null;
     });
     try {
       final result = await widget.controller.verifyModelProviderCapabilities(
@@ -5107,6 +5112,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
         _compatibilityProfile = compatibility is Map
             ? compatibility.cast<String, Object?>()
             : null;
+        _capabilityReport = Map<String, Object?>.of(result);
         _detected = true;
       });
     } on Object {
@@ -5181,6 +5187,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
+      _capabilityReport = null;
     });
   }
 
@@ -5426,6 +5433,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
             _detectionError = null;
             _detected = false;
             _compatibilityProfile = null;
+            _capabilityReport = null;
             _dirty = false;
           }),
           onRemove: _deleteProvider,
@@ -5506,6 +5514,8 @@ class _ModelSettingsState extends State<_ModelSettings> {
               ),
               _ModelCapabilityResult(
                 profile: activeCompatibilityProfile,
+                report: _editing ? _capabilityReport : null,
+                protocol: _editing ? _protocol : displayed.protocol,
                 supportsMultimodal: _editing
                     ? _supportsMultimodal
                     : displayed.supportsMultimodal,
@@ -5533,12 +5543,16 @@ String _modelProtocolLabel(String value) => switch (value) {
 class _ModelCapabilityResult extends StatelessWidget {
   const _ModelCapabilityResult({
     required this.profile,
+    required this.report,
+    required this.protocol,
     required this.supportsMultimodal,
     required this.supportsStructuredOutput,
     required this.supportsToolCalling,
   });
 
   final Map<String, Object?>? profile;
+  final Map<String, Object?>? report;
+  final String protocol;
   final bool supportsMultimodal;
   final bool supportsStructuredOutput;
   final bool supportsToolCalling;
@@ -5560,6 +5574,37 @@ class _ModelCapabilityResult extends StatelessWidget {
   bool? _profileCapability(String key) {
     if (profile == null || !profile!.containsKey(key)) return null;
     return profile![key] == true;
+  }
+
+  String? _probeFailure(String name) {
+    final probes = report?['probes'];
+    final persisted = profile?['probe_diagnostics'];
+    final raw = probes is Map
+        ? probes[name]
+        : report?[name] ?? (persisted is Map ? persisted[name] : null);
+    if (raw is! Map ||
+        raw['supported'] == true ||
+        raw['status'] == 'supported') {
+      return null;
+    }
+    final metadata = raw['metadata'];
+    final diagnostic =
+        raw['diagnostic_error']?.toString() ??
+        (metadata is Map ? metadata['diagnostic_error']?.toString() : null);
+    final values = <String>[
+      if (raw['provider_code'] case final value?
+          when value.toString().isNotEmpty)
+        'HTTP $value',
+      if (raw['error_code'] case final value? when value.toString().isNotEmpty)
+        value.toString(),
+      if (diagnostic != null && diagnostic.isNotEmpty)
+        diagnostic
+      else if (raw['error'] case final value? when value.toString().isNotEmpty)
+        value.toString().replaceAll(RegExp(r'\s+'), ' ').trim(),
+    ];
+    if (values.isEmpty) return null;
+    final message = values.join(' · ');
+    return message.length <= 480 ? message : '${message.substring(0, 477)}…';
   }
 
   String _reasoningBehavior(BuildContext context) =>
@@ -5603,6 +5648,7 @@ class _ModelCapabilityResult extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final l10n = context.l10n;
     final verified = profile != null;
+    final multimodalFailure = _probeFailure('multimodal');
     final capabilities = <Widget>[
       _CapabilityStatusTag(label: l10n.text('model.text'), supported: true),
       _CapabilityStatusTag(
@@ -5674,6 +5720,15 @@ class _ModelCapabilityResult extends StatelessWidget {
               technical: true,
               failed: _list('failed_probes').isNotEmpty,
             ),
+            if (multimodalFailure != null)
+              _CapabilityMetricData(
+                '${l10n.text('model.multimodal')} · '
+                '${_modelProtocolLabel(protocol)} · '
+                '${l10n.text('model.failedProbes')}',
+                multimodalFailure,
+                technical: true,
+                failed: true,
+              ),
           ]
         : const <_CapabilityMetricData>[];
 

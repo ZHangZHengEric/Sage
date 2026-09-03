@@ -149,7 +149,10 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
         {"type": "text", "text": "inspect this"},
         {
             "type": "image_url",
-            "image_url": {"url": "https://example.invalid/input.png"},
+            "image_url": {
+                "url": "https://example.invalid/input.png",
+                "detail": "auto",
+            },
         },
         {"type": "text", "text": "</user_request>"},
     ]
@@ -159,7 +162,11 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
         "content": [
             {"type": "input_text", "text": chat["messages"][-1]["content"][0]["text"]},
             {"type": "input_text", "text": "inspect this"},
-            {"type": "input_image", "image_url": "https://example.invalid/input.png"},
+            {
+                "type": "input_image",
+                "image_url": "https://example.invalid/input.png",
+                "detail": "auto",
+            },
             {"type": "input_text", "text": "</user_request>"},
         ],
     }

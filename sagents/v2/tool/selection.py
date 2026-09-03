@@ -374,7 +374,7 @@ def _bm25_ranked_names(
 
 def _parse_llm_tool_names(
     text: str, tools: tuple[ToolDefinition, ...]
-) -> tuple[str, ...]:
+) -> tuple[str, ...] | None:
     value = text.strip()
     if value.startswith("```"):
         lines = value.splitlines()
@@ -382,15 +382,19 @@ def _parse_llm_tool_names(
     parsed = json.loads(value)
     raw_names = parsed.get("tools") if isinstance(parsed, dict) else None
     if not isinstance(raw_names, list):
-        return ()
+        return None
     available = {tool.name for tool in tools}
-    return tuple(
+    names = tuple(
         dict.fromkeys(
             str(name).strip()
             for name in raw_names
             if str(name).strip() in available
         )
     )
+    # An explicit empty list is a valid decision: this run does not need any
+    # task-specific Tool. A non-empty list containing no known names is still
+    # invalid provider output and must not be confused with that decision.
+    return names if names or not raw_names else None
 
 
 def _schema_tokens(tool: ToolDefinition) -> int:
