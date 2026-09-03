@@ -84,11 +84,18 @@ def build_start_run(
     metadata: dict | None = None,
     invocation_mode: str | None = None,
     idempotency_key: str | None = None,
+    enabled_tools: tuple[str, ...] | None = None,
 ) -> StartRun:
     if config is None:
-        config = RunConfig(metadata=dict(metadata or {}))
-    elif metadata:
-        config = config.model_copy(update={"metadata": {**config.metadata, **metadata}})
+        config = RunConfig(metadata=dict(metadata or {}), enabled_tools=enabled_tools)
+    else:
+        updates: dict = {}
+        if metadata:
+            updates["metadata"] = {**config.metadata, **metadata}
+        if enabled_tools is not None:
+            updates["enabled_tools"] = enabled_tools
+        if updates:
+            config = config.model_copy(update=updates)
     return StartRun(
         session_id=session_id,
         agent_id=agent_id,
