@@ -106,6 +106,11 @@ class DefaultToolPolicy:
         ).encode()
         self.policy_hash = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
+    def composition_identity(self) -> str:
+        """宿主直接注入时，让组合身份（composition hash）纳入策略本身。"""
+
+        return self.policy_hash
+
     async def decide(self, context: ToolPolicyContext) -> ToolPolicyDecision:
         missing_scopes = sorted(
             set(context.definition.required_scopes) - set(context.actor.scopes)
