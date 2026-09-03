@@ -34,7 +34,9 @@ from sagents.v2.agent.policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
     ExplicitStatusContinuationPolicy,
+    SessionApprovalMemory,
 )
+from sagents.v2.contracts.commands import ReplyInteraction
 from sagents.v2.context import (
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
@@ -1576,3 +1578,139 @@ async def test_host_tool_policy_is_visible_in_the_plan_but_does_not_fence_runs(
     # 审批模式是宿主运行偏好：换一档不改变 composition hash，
     # 上个进程挂起的 Run 在新的审批模式下仍能续跑。
     assert hashes["default"] == hashes["auto"] == hashes["ask"]
+
+
+# ---------- 审批记忆接线 ----------
+
+
+def _write_steps(*calls: tuple[str, dict]) -> ScriptedModelProvider:
+    steps = [
+        ScriptedModelStep(
+            events=(
+                ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id=call_id,
+                        text="",
+                        tool_calls=(
+                            ModelToolCall(
+                                tool_call_id=call_id,
+                                name=_POLICY_WRITE_TOOL.name,
+                                arguments=arguments,
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                    ),
+                ),
+            )
+        )
+        for call_id, arguments in calls
+    ]
+    steps.append(
+        ScriptedModelStep(
+            events=(
+                ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="final", text="done", finish_reason="stop"
+                    ),
+                ),
+            )
+        )
+    )
+    return ScriptedModelProvider(tuple(steps))
+
+
+@pytest.mark.asyncio
+async def test_builder_wires_session_approval_memory_and_accepts_a_host_memory(
+    tmp_path: Path,
+):
+    package = _policy_package("test.approval-memory")
+    application = await _build_with_tool_policy(
+        tmp_path / "default", package, None, ScriptedModelProvider(())
+    )
+    try:
+        memory = application.services["agent.approval-memory"]
+        assert isinstance(memory, SessionApprovalMemory)
+        loop = application.entrypoint().driver_factory("run_memory")
+        assert loop.approval_memory is memory
+        assert (
+            _host_binding(application.resolved_plan, "agent.approval-memory").source
+            == "host"
+        )
+    finally:
+        await application.close()
+
+    host_memory = SessionApprovalMemory(InMemoryDerivedStateStore())
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "host")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_approval_memory(host_memory)
+        .build(package)
+    )
+    try:
+        assert application.services["agent.approval-memory"] is host_memory
+        loop = application.entrypoint().driver_factory("run_host")
+        assert loop.approval_memory is host_memory
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_remembers_approvals_in_the_session_derived_state(
+    tmp_path: Path,
+):
+    package = _policy_package("test.approval-memory-e2e")
+    arguments = {"key": "answer", "value": "1"}
+    application = await _build_with_tool_policy(
+        tmp_path / "session-store",
+        package,
+        DefaultToolPolicy(allow_persistent_approval=True),
+        _write_steps(("call_1", arguments), ("call_2", arguments)),
+    )
+    try:
+        agent = application.entrypoint()
+        store = agent.runtime.session_store
+        event_types, suspended = await _run_to_boundary(
+            application, package, key="remember-e2e"
+        )
+        assert suspended.state == RunState.SUSPENDED
+        assert event_types.count("tool.call.awaiting_approval") == 1
+        suspension = await store.get_suspension(suspended.suspension_id)
+        interaction = await store.get_interaction(suspension.interaction_id)
+        assert "approve_and_remember" in interaction.allowed_decisions
+
+        await agent.runtime.reply_interaction(
+            ReplyInteraction(
+                run_id=suspended.run_id,
+                suspension_id=suspension.suspension_id,
+                interaction_id=interaction.interaction_id,
+                expected_revision=suspended.revision,
+                expected_suspension_revision=suspension.expected_revision,
+                expected_interaction_revision=interaction.expected_revision,
+                decision="approve_and_remember",
+                idempotency_key="remember-e2e-reply",
+            ),
+            _POLICY_USER,
+        )
+        final = await (await agent.continue_run(suspended.run_id, _POLICY_USER))
+
+        assert final.state == RunState.COMPLETED
+        types = [event.type for event in await store.read_events(suspended.run_id)]
+        assert types.count("tool.call.awaiting_approval") == 1
+        assert types.count("tool.call.succeeded") == 2
+        assert types.count("policy.approval.remembered") == 1
+        memory = application.services["agent.approval-memory"]
+        remembered = await memory.list_remembered(session_id=final.session_id)
+        assert [value.matcher.tool_name for value in remembered] == ["write_value"]
+        # 记忆真的落在 Session 存储的派生状态里，重开进程后同一 Session 仍可复用。
+        raw = await store.get_derived_state(
+            final.session_id,
+            SessionApprovalMemory.NAMESPACE,
+            SessionApprovalMemory.KEY,
+        )
+        assert raw["version"] == 1
+        assert list(raw["entries"]) == [remembered[0].matcher.key]
+    finally:
+        await application.close()

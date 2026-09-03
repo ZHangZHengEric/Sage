@@ -40,6 +40,7 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationSignals,
     InteractionDraft,
 )
+from sagents.v2.agent.policy.approval_memory import SessionApprovalMemory
 from sagents.v2.agent.policy.tool_policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
@@ -217,6 +218,8 @@ async def setup_loop(
     context_assembler=None,
     trace_sink=None,
     log_sink=None,
+    tool_policy=None,
+    approval_memory=None,
 ):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(
@@ -271,6 +274,13 @@ async def setup_loop(
         loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
     if context_assembler is not None:
         loop_kwargs["context_assembler"] = context_assembler
+    if tool_policy is not None:
+        loop_kwargs["tool_policy"] = tool_policy
+    if approval_memory is not None:
+        # 传 callable 时用 runtime 现场构造（例如 SessionApprovalMemory(store)）。
+        loop_kwargs["approval_memory"] = (
+            approval_memory(runtime) if callable(approval_memory) else approval_memory
+        )
     if trace_sink is not None or log_sink is not None:
         loop = ObservedRunDriver(
             **loop_kwargs,
@@ -2436,3 +2446,271 @@ async def test_non_reconcilable_unknown_requires_explicit_manual_resolution():
     assert len(executor.calls) == 1
     assert executor.reconciliations == []
     assert types.count("tool.call.reconciled") == 1
+
+
+# ---------- 审批记忆：approve_and_remember ----------
+
+
+def _session_memory(runtime):
+    return SessionApprovalMemory(runtime.session_store)
+
+
+def _write_call(call_id: str, key: str = "a", value: str = "1") -> ModelToolCall:
+    return ModelToolCall(
+        tool_call_id=call_id, name="write_value", arguments={"key": key, "value": value}
+    )
+
+
+async def _pending_interaction(runtime, suspended):
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    return suspension, interaction
+
+
+def _approval_reply(run_id, suspended, suspension, interaction, decision, key, **payload):
+    return ReplyInteraction(
+        run_id=run_id,
+        suspension_id=suspension.suspension_id,
+        interaction_id=interaction.interaction_id,
+        expected_revision=suspended.revision,
+        expected_suspension_revision=suspension.expected_revision,
+        expected_interaction_revision=interaction.expected_revision,
+        decision=decision,
+        payload=payload,
+        idempotency_key=key,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_session():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_2"),)),)),
+            ScriptedModelStep(
+                events=(completed("", calls=(_write_call("call_3", key="b"),)),)
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    memory = loop.approval_memory
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    assert interaction.allowed_decisions == (
+        "approve_once",
+        "approve_and_remember",
+        "deny",
+        "cancel",
+    )
+    assert interaction.payload["persistent_approval_allowed"] is True
+    assert interaction.payload["approval_scopes"] == ["session"]
+    assert interaction.payload["approval_matcher"]["tool_name"] == "write_value"
+
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_1",
+        ),
+        CONTEXT,
+    )
+    again = await loop.resume(handle.run_id, CONTEXT)
+
+    # call_2 参数完全相同 → 直接放行；call_3 参数不同 → 再次挂起。
+    assert again.state == RunState.SUSPENDED
+    assert [call.tool_call_id for call in executor.calls] == ["call_1", "call_2"]
+    remembered = await memory.list_remembered(session_id=session_id)
+    assert len(remembered) == 1
+    assert remembered[0].scope == "session"
+    assert remembered[0].remembered_by == "user_1"
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    assert types.count("tool.call.awaiting_approval") == 2
+    assert types.count("policy.approval.remembered") == 1
+    assert types.index("policy.approval.remembered") < types.index(
+        "tool.call.dispatching"
+    )
+    audit = next(event for event in events if event.type == "policy.approval.remembered")
+    assert audit.data.remembered_by == "user_1"
+    assert audit.data.remembered_scope == "session"
+    assert audit.data.decision == "approve_and_remember"
+    auto_allowed = [
+        event
+        for event in events
+        if event.type == "policy.decision.recorded"
+        and event.data.remembered_by == "user_1"
+    ]
+    assert len(auto_allowed) == 1
+    assert auto_allowed[0].data.decision == "allow"
+    assert auto_allowed[0].data.remembered_scope == "session"
+
+    suspension, interaction = await _pending_interaction(runtime, again)
+    assert (
+        interaction.payload["approval_matcher"]["fingerprint"]
+        != remembered[0].matcher.fingerprint
+    )
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id, again, suspension, interaction, "approve_once", "approve_3"
+        ),
+        CONTEXT,
+    )
+    final = await loop.resume(handle.run_id, CONTEXT)
+
+    assert final.state == RunState.COMPLETED
+    assert len(executor.calls) == 3
+    # approve_once 不写记忆。
+    assert len(await memory.list_remembered(session_id=session_id)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_policy", "with_memory"),
+    [
+        pytest.param(None, True, id="default-policy-with-memory"),
+        pytest.param(
+            DefaultToolPolicy(allow_persistent_approval=True),
+            False,
+            id="persistent-policy-without-memory",
+        ),
+        pytest.param(
+            DefaultToolPolicy(
+                approval_strategy=ApprovalStrategy.ALWAYS_ASK,
+                allow_persistent_approval=True,
+            ),
+            True,
+            id="always-ask-with-memory",
+        ),
+    ],
+)
+async def test_remember_is_only_offered_when_policy_and_memory_both_allow(
+    tool_policy, with_memory
+):
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),)
+    )
+    runtime, handle, loop, _executor = await setup_loop(
+        model,
+        tool_policy=tool_policy,
+        approval_memory=_session_memory if with_memory else None,
+    )
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    _suspension, interaction = await _pending_interaction(runtime, suspended)
+
+    assert interaction.allowed_decisions == ("approve_once", "deny", "cancel")
+    assert "approval_scopes" not in interaction.payload
+
+
+@pytest.mark.asyncio
+async def test_remembered_approval_never_overrides_a_denial():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_2"),)),)),
+            ScriptedModelStep(events=(completed("denied anyway"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_1",
+        ),
+        CONTEXT,
+    )
+    assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    assert len(await loop.approval_memory.list_remembered(session_id=session_id)) == 1
+
+    # 同一 Session 里换一个没有 filesystem:write scope 的 actor：策略先 DENY，
+    # 记忆只能收敛 REQUIRE_INTERACTION，绝不把 DENY 变成 ALLOW。
+    unscoped = RequestContext(
+        actor=ActorRef(
+            principal_id="user_1",
+            principal_type=PrincipalType.USER,
+            tenant_id="tenant_1",
+        )
+    )
+    second = await runtime.start_run(
+        StartRun(
+            session_id=session_id,
+            agent_id="agent_test",
+            input=(InputItem(role="user", content=(TextBlock(text="again"),)),),
+            config=RunConfig(model_bindings={"primary": "test-model"}, max_steps=10),
+            resolved_spec_hash="sha256:agent",
+            idempotency_key="start_2",
+        ),
+        unscoped,
+    )
+    result = await loop.execute(second.run_id, unscoped)
+
+    assert result.state == RunState.COMPLETED
+    assert [call.tool_call_id for call in executor.calls] == ["call_1"]
+    events = await runtime.session_store.read_events(second.run_id)
+    decisions = [event for event in events if event.type == "policy.decision.recorded"]
+    assert [event.data.decision for event in decisions] == ["deny"]
+    assert decisions[0].data.remembered_by is None
+    assert "tool.call.dispatching" not in [event.type for event in events]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_scope_is_tightened_to_session():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, _executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_workspace",
+            scope="workspace",
+        ),
+        CONTEXT,
+    )
+    assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+
+    remembered = await loop.approval_memory.list_remembered(session_id=session_id)
+    assert [value.scope for value in remembered] == ["session"]
+    audit = next(
+        event
+        for event in await runtime.session_store.read_events(handle.run_id)
+        if event.type == "policy.approval.remembered"
+    )
+    assert audit.data.remembered_scope == "session"

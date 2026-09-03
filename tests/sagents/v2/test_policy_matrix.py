@@ -10,6 +10,8 @@ from sagents.v2.agent.policy.continuation import (
     ToolOrTextRule,
 )
 from sagents.v2.agent.policy.tool_policy import (
+    EXACT_ARGUMENTS_MATCHER_ID,
+    ApprovalMatcher,
     ApprovalStrategy,
     DefaultToolPolicy,
     ToolOperationAssessment,
@@ -273,7 +275,7 @@ def tool_definition(
     )
 
 
-def tool_context(definition, *, actor_scopes=()):
+def tool_context(definition, *, actor_scopes=(), arguments=None):
     return ToolPolicyContext(
         run_id="run_1",
         actor=ActorRef(
@@ -285,7 +287,7 @@ def tool_context(definition, *, actor_scopes=()):
         call=ToolCall(
             tool_call_id="call_1",
             tool_name="tool",
-            arguments={"path": "a.txt"},
+            arguments={"path": "a.txt"} if arguments is None else arguments,
             operation_id="operation_1",
             idempotency_key="key_1",
             owner_run_id="run_1",
@@ -500,3 +502,134 @@ async def test_tool_policy_decision_id_is_deterministic_per_call_and_policy():
     repeat = await policy.decide(tool_context(tool_definition()))
     assert first == repeat
     assert first.policy_version == "7"
+
+
+# ---------- 审批记忆：策略侧只回答"可否记住 + 按什么匹配器记" ----------
+
+
+@pytest.mark.asyncio
+async def test_default_policy_never_marks_a_decision_persistent():
+    decision = await DefaultToolPolicy().decide(
+        tool_context(tool_definition(SideEffectLevel.WRITE))
+    )
+
+    assert decision.action == ToolPolicyAction.REQUIRE_INTERACTION
+    assert decision.persistent_approval_allowed is False
+    assert decision.approval_matcher is None
+    assert "approve_and_remember" not in decision.allowed_decisions
+    assert "approval_matcher" not in decision.interaction_payload
+
+
+@pytest.mark.asyncio
+async def test_persistent_policy_exposes_exact_matcher_but_leaves_offering_to_loop():
+    policy = DefaultToolPolicy(allow_persistent_approval=True)
+    decision = await policy.decide(tool_context(tool_definition(SideEffectLevel.WRITE)))
+
+    assert decision.persistent_approval_allowed is True
+    matcher = decision.approval_matcher
+    assert matcher is not None
+    assert matcher.tool_name == "tool"
+    assert matcher.fingerprint.startswith("sha256:")
+    assert matcher.summary == 'tool {"path":"a.txt"}'
+    assert matcher.key == f"tool:{matcher.fingerprint}"
+    assert decision.interaction_payload["approval_matcher"] == matcher.model_dump(
+        mode="json"
+    )
+    # 能否真的"记住"取决于 Loop 是否持有记忆端口；策略本身不提供该选项。
+    assert decision.allowed_decisions == ("approve_once", "deny", "cancel")
+    assert policy.approval_matcher_id == EXACT_ARGUMENTS_MATCHER_ID
+
+
+@pytest.mark.asyncio
+async def test_exact_matcher_is_deterministic_and_argument_sensitive():
+    policy = DefaultToolPolicy(allow_persistent_approval=True)
+    definition = tool_definition(SideEffectLevel.WRITE)
+    first = await policy.decide(tool_context(definition))
+    repeat = await policy.decide(tool_context(definition))
+    reordered = await policy.decide(
+        tool_context(definition, arguments={"path": "a.txt"})
+    )
+    other = await policy.decide(tool_context(definition, arguments={"path": "b.txt"}))
+
+    assert first.approval_matcher == repeat.approval_matcher == reordered.approval_matcher
+    assert first.approval_matcher != other.approval_matcher
+
+
+@pytest.mark.asyncio
+async def test_always_ask_never_allows_persistent_approval():
+    policy = DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.ALWAYS_ASK, allow_persistent_approval=True
+    )
+    decision = await policy.decide(tool_context(tool_definition(SideEffectLevel.READ)))
+
+    assert decision.action == ToolPolicyAction.REQUIRE_INTERACTION
+    assert decision.persistent_approval_allowed is False
+    assert decision.approval_matcher is None
+
+
+@pytest.mark.asyncio
+async def test_assessor_decides_persistence_when_present():
+    def allow_remember(context):
+        del context
+        return ToolOperationAssessment(
+            action=ToolPolicyAction.REQUIRE_INTERACTION,
+            reason="risky",
+            persistent_approval_allowed=True,
+        )
+
+    def forbid_remember(context):
+        del context
+        return ToolOperationAssessment(
+            action=ToolPolicyAction.REQUIRE_INTERACTION, reason="too risky"
+        )
+
+    context = tool_context(tool_definition(SideEffectLevel.WRITE))
+    allowed = await DefaultToolPolicy(operation_assessor=allow_remember).decide(context)
+    forbidden = await DefaultToolPolicy(
+        operation_assessor=forbid_remember, allow_persistent_approval=True
+    ).decide(context)
+
+    # 既有行为保持：assessor 允许时策略直接给出 approve_and_remember（宿主自行落地）。
+    assert "approve_and_remember" in allowed.allowed_decisions
+    assert allowed.persistent_approval_allowed is True
+    assert allowed.approval_matcher is not None
+    # assessor 逐次判断优先：它说不能记，policy 级开关不能放宽。
+    assert forbidden.persistent_approval_allowed is False
+    assert forbidden.approval_matcher is None
+    assert "approve_and_remember" not in forbidden.allowed_decisions
+
+
+@pytest.mark.asyncio
+async def test_custom_matcher_can_opt_a_call_out_and_is_part_of_policy_hash():
+    def path_matcher(context):
+        path = str(context.call.arguments.get("path"))
+        if path == "secret.txt":
+            return None
+        return ApprovalMatcher(
+            tool_name=context.definition.name,
+            fingerprint=f"path:{path}",
+            summary=f"{context.definition.name} {path}",
+        )
+
+    policy = DefaultToolPolicy(
+        allow_persistent_approval=True,
+        approval_matcher=path_matcher,
+        approval_matcher_id="test.path-matcher/v1",
+    )
+    definition = tool_definition(SideEffectLevel.WRITE)
+    normal = await policy.decide(tool_context(definition))
+    secret = await policy.decide(
+        tool_context(definition, arguments={"path": "secret.txt"})
+    )
+
+    assert normal.approval_matcher is not None
+    assert normal.approval_matcher.fingerprint == "path:a.txt"
+    assert secret.persistent_approval_allowed is False
+    assert secret.approval_matcher is None
+    assert policy.approval_matcher_id == "test.path-matcher/v1"
+    hashes = {
+        DefaultToolPolicy().policy_hash,
+        DefaultToolPolicy(allow_persistent_approval=True).policy_hash,
+        policy.policy_hash,
+    }
+    assert len(hashes) == 3

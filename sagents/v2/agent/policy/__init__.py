@@ -6,7 +6,10 @@ from sagents.v2._lazy import exported_names, resolve_export
 _CONTINUATION = "sagents.v2.agent.policy.continuation"
 _JUDGE = "sagents.v2.agent.policy.judge"
 _TOOL = "sagents.v2.agent.policy.tool_policy"
+_APPROVAL_MEMORY = "sagents.v2.agent.policy.approval_memory"
 _EXPORTS = {
+    "ApprovalMatcher": (_TOOL, "ApprovalMatcher"),
+    "ApprovalMemory": (_APPROVAL_MEMORY, "ApprovalMemory"),
     "ApprovalStrategy": (_TOOL, "ApprovalStrategy"),
     "BudgetRule": (_CONTINUATION, "BudgetRule"),
     "CompositeContinuationPolicy": (_CONTINUATION, "CompositeContinuationPolicy"),
@@ -30,12 +33,15 @@ _EXPORTS = {
     "LLMContinuationJudge": (_JUDGE, "LLMContinuationJudge"),
     "LLMJudgeContinuationPolicy": (_JUDGE, "LLMJudgeContinuationPolicy"),
     "LoopRecoveryRule": (_CONTINUATION, "LoopRecoveryRule"),
+    "RememberedApproval": (_APPROVAL_MEMORY, "RememberedApproval"),
+    "SessionApprovalMemory": (_APPROVAL_MEMORY, "SessionApprovalMemory"),
     "ToolOperationAssessment": (_TOOL, "ToolOperationAssessment"),
     "ToolOrTextRule": (_CONTINUATION, "ToolOrTextRule"),
     "ToolOrTextRuleForPendingCalls": (_CONTINUATION, "ToolOrTextRuleForPendingCalls"),
     "ToolPolicyAction": (_TOOL, "ToolPolicyAction"),
     "ToolPolicyContext": (_TOOL, "ToolPolicyContext"),
     "ToolPolicyDecision": (_TOOL, "ToolPolicyDecision"),
+    "exact_arguments_matcher": (_TOOL, "exact_arguments_matcher"),
 }
 
 __all__ = list(_EXPORTS)

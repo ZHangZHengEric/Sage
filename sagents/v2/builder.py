@@ -17,7 +17,12 @@ from typing import Any
 from pydantic import SecretStr
 
 from sagents.v2.agent.factory import AgentCompositionFactory
-from sagents.v2.agent.policy import CompositeContinuationPolicy, DefaultToolPolicy
+from sagents.v2.agent.policy import (
+    ApprovalMemory,
+    CompositeContinuationPolicy,
+    DefaultToolPolicy,
+    SessionApprovalMemory,
+)
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     JsonHeuristicTokenEstimator,
@@ -338,6 +343,7 @@ class SAgentBuilder:
         self._tool_runtime: OfficialToolRuntime | None = None
         self._tool_selection: ToolSelectionPolicy | None = None
         self._tool_policy: DefaultToolPolicy | None = None
+        self._approval_memory: ApprovalMemory | None = None
         self._execution_binding_provider: ExecutionBindingProvider | None = None
         self._log_sink: LogSink | None = None
         self._diagnostic_sink: DiagnosticSink | None = None
@@ -417,6 +423,16 @@ class SAgentBuilder:
         """
 
         self._tool_policy = value
+        return self
+
+    def with_approval_memory(self, value: ApprovalMemory) -> "SAgentBuilder":
+        """Inject a host-owned approval memory (e.g. one that adds workspace scope).
+
+        未注入时使用 ``SessionApprovalMemory``：记在 Session 的派生状态里，
+        随 Session 删除而清理。宿主实现至少要支持 ``session`` 作用域。
+        """
+
+        self._approval_memory = value
         return self
 
     def with_log_sink(self, value: LogSink) -> "SAgentBuilder":
@@ -529,6 +545,10 @@ class SAgentBuilder:
                 if session_store_was_injected
                 else session_store
             )
+        # 审批记忆默认落在会话派生状态：非权威、可重建、随 Session 删除清理。
+        approval_memory = self._approval_memory or SessionApprovalMemory(
+            derived_state
+        )
         credential_provider = await self._create_capability(
             extension_host,
             process_root,
@@ -887,6 +907,7 @@ class SAgentBuilder:
                         session_memory_service if member_memory_enabled else None
                     ),
                     tool_policy=self._tool_policy,
+                    approval_memory=approval_memory,
                     continuation_policy=continuation_policy,
                     continuation_signal_provider=(
                         active_runtime.consume_continuation_signals
@@ -1099,6 +1120,7 @@ class SAgentBuilder:
             "context.unit-compactor": unit_compactor,
             "context.reducer": context_reducer,
             "agent.continuation-policy": continuation_policy,
+            "agent.approval-memory": approval_memory,
         }
         await self._validate_required_guarantees(
             runtime_config,
@@ -1160,6 +1182,7 @@ class SAgentBuilder:
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
+                    ("agent.approval-memory", self._approval_memory),
                     ("observability.log-sink", self._log_sink),
                     ("observability.diagnostic-sink", self._diagnostic_sink),
                 )
