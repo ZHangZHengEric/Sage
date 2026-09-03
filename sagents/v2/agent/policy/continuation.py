@@ -371,11 +371,7 @@ class ExplicitStatusRequiredRule:
 
 
 class CompositeContinuationPolicy:
-    """Evaluate ordered rules; earlier safety/budget rules have precedence.
-
-    Rules return data only. They may not execute tools, mutate the Session, or
-    commit events, which keeps replay and scenario tests deterministic.
-    """
+    """Deterministic continuation plugin composed from ordered rules."""
 
     plugin_id = "sage.agent.continuation.deterministic"
     name = "Deterministic continuation policy"
@@ -413,7 +409,7 @@ class ToolOrTextRuleForPendingCalls:
         return None
 
 
-class ExplicitStatusContinuationPolicy(CompositeContinuationPolicy):
+class ExplicitStatusContinuationPolicy:
     """Require turn_status for completion while preserving safety boundaries."""
 
     plugin_id = "sage.agent.continuation.explicit-status"
@@ -421,13 +417,18 @@ class ExplicitStatusContinuationPolicy(CompositeContinuationPolicy):
     description = "Completes only when the model emits an explicit turn_status."
 
     def __init__(self, *, repeat_threshold: int = 3) -> None:
-        super().__init__(
-            rules=(
-                BudgetRule(),
-                ExplicitStatusRule(),
-                LoopRecoveryRule(repeat_threshold),
-                FlowBoundaryRule(),
-                ToolOrTextRuleForPendingCalls(),
-                ExplicitStatusRequiredRule(),
-            )
+        self.rules = (
+            BudgetRule(),
+            ExplicitStatusRule(),
+            LoopRecoveryRule(repeat_threshold),
+            FlowBoundaryRule(),
+            ToolOrTextRuleForPendingCalls(),
+            ExplicitStatusRequiredRule(),
         )
+
+    async def decide(self, context: ContinuationContext) -> ContinuationDecision:
+        for rule in self.rules:
+            decision = await rule.evaluate(context)
+            if decision is not None:
+                return decision
+        raise RuntimeError("continuation policy has no terminal fallback rule")

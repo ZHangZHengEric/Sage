@@ -44,8 +44,8 @@ class ExtensionScopeHandle:
         if self._closed:
             return
         errors = []
-        pending_started = list(reversed(self._started))
-        for index, value in enumerate(pending_started):
+        while self._started:
+            value = self._started[-1]
             try:
                 if value.registration.stop is not None:
                     result = value.registration.stop(value.instance, reason)
@@ -58,28 +58,25 @@ class ExtensionScopeHandle:
                         result = close() if close is not None else None
                 if inspect.isawaitable(result):
                     await result
-            except Exception as exc:
+            except BaseException as exc:
+                if not isinstance(exc, Exception):
+                    raise
                 errors.append(exc)
-                # Do not tear down dependencies below a component whose stop
-                # failed. Keep the failure and all unattempted components for
-                # an ordered retry.
-                self._started = list(reversed(pending_started[index:]))
                 break
-        else:
-            self._started = []
+            else:
+                self._started.pop()
         if not self._started:
-            pending_ancestors = list(reversed(self._owned_ancestors))
-            for index, handle in enumerate(pending_ancestors):
+            while self._owned_ancestors:
+                handle = self._owned_ancestors[-1]
                 try:
                     await handle.close(reason)
-                except Exception as exc:
+                except BaseException as exc:
+                    if not isinstance(exc, Exception):
+                        raise
                     errors.append(exc)
-                    self._owned_ancestors = tuple(
-                        reversed(pending_ancestors[index:])
-                    )
                     break
-            else:
-                self._owned_ancestors = ()
+                else:
+                    self._owned_ancestors = self._owned_ancestors[:-1]
         self._closed = not self._started and not self._owned_ancestors
         if errors:
             raise ExtensionStopError(tuple(errors)) from errors[0]

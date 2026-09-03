@@ -55,20 +55,24 @@ class OpenAICompatibleConfig(StrictModel):
     base_url: str
     model: str
     capabilities: ModelCapabilities
-    default_max_output_tokens: int | None = None
+    default_max_output_tokens: int | None = Field(default=None, gt=0)
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
     max_output_tokens_field: Literal["auto", "max_tokens", "max_completion_tokens"] = (
         "auto"
     )
-    timeout_seconds: float = 120
+    timeout_seconds: float = Field(default=120, gt=0)
     extra_body: dict[str, Any] = Field(default_factory=dict)
     reasoning_parameter_fallback: bool = False
+    image_detail_mode: Literal["include", "omit"] = "include"
 
 
 class OpenAICompatibleModelProvider:
     """Chat Completions streaming adapter with normalized v2 model events."""
+
+    plugin_id = "sage.model.openai-chat-completions"
+    plugin_version = "3.0.0"
 
     def __init__(
         self,
@@ -121,6 +125,13 @@ class OpenAICompatibleModelProvider:
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
+
+    async def probe_capabilities(self, request):
+        """Use the Chat Completions plugin probe for the legacy class name."""
+
+        return await OpenAIChatCompletionsModelProvider.probe_capabilities(
+            self, request
+        )
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         """Return the exact non-secret payload passed to the OpenAI SDK."""
@@ -724,8 +735,7 @@ class OpenAICompatibleModelProvider:
             )
         )
 
-    @classmethod
-    def _message(cls, message: ModelMessage) -> dict[str, Any]:
+    def _message(self, message: ModelMessage) -> dict[str, Any]:
         value: dict[str, Any] = {"role": message.role}
         if message.role == "assistant":
             state = read_provider_state(message.provider_state, "openai_compatible")
@@ -751,21 +761,23 @@ class OpenAICompatibleModelProvider:
                 }
                 for call in message.tool_calls
             ]
-        parts = [cls._content_block(block) for block in message.content]
+        parts = [self._content_block(block) for block in message.content]
         if len(parts) == 1 and parts[0].get("type") == "text":
             value["content"] = parts[0]["text"]
         else:
             value["content"] = parts
         return value
 
-    @staticmethod
-    def _content_block(block) -> dict[str, Any]:
+    def _content_block(self, block) -> dict[str, Any]:
         if isinstance(block, TextBlock):
             return {"type": "text", "text": block.text}
         if isinstance(block, ImageBlock):
+            image_url = {"url": block.uri}
+            if self.config.image_detail_mode == "include":
+                image_url["detail"] = block.detail
             return {
                 "type": "image_url",
-                "image_url": {"url": block.uri, "detail": block.detail},
+                "image_url": image_url,
             }
         if isinstance(block, AudioBlock):
             return {"type": "input_audio", "input_audio": {"data": block.uri}}
@@ -797,5 +809,192 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
     """Named Chat Completions adapter; behavior is implemented by its base."""
 
     plugin_id = "sage.model.openai-chat-completions"
+    plugin_version = "3.0.0"
     name = "OpenAI Chat Completions"
     description = "Streams chat messages and function calls through /chat/completions."
+
+    @classmethod
+    def apply_capability_profile(cls, config, profile):
+        """Apply this plugin's opaque persisted invocation strategy."""
+
+        strategy = profile.invocation_strategy
+        extra_body = dict(config.extra_body)
+        reasoning_effort = config.reasoning_effort
+        if reasoning_effort is None:
+            disable = strategy.get("reasoning_disable_strategy", "omit")
+            disable_extras = {
+                "omit": {},
+                "reasoning_effort_none": {"reasoning_effort": "none"},
+                "thinking_type_disabled": {"thinking": {"type": "disabled"}},
+                "enable_thinking_false": {"enable_thinking": False},
+                "thinking_false": {"thinking": False},
+                "chat_template_enable_thinking_false": {
+                    "chat_template_kwargs": {"enable_thinking": False}
+                },
+            }
+            extra_body.update(disable_extras.get(disable, {}))
+        elif strategy.get("reasoning_effort_strategy") == (
+            "chat_template_reasoning_effort"
+        ):
+            extra_body["chat_template_kwargs"] = {
+                "thinking": True,
+                "reasoning_effort": reasoning_effort,
+            }
+            reasoning_effort = None
+        return config.model_copy(
+            update={
+                "default_max_output_tokens": min(
+                    config.default_max_output_tokens
+                    or profile.effective_max_output_tokens,
+                    profile.effective_max_output_tokens,
+                ),
+                "max_output_tokens_field": strategy.get(
+                    "max_output_tokens_field", config.max_output_tokens_field
+                ),
+                "image_detail_mode": strategy.get(
+                    "image_detail_mode", config.image_detail_mode
+                ),
+                "reasoning_effort": reasoning_effort,
+                "extra_body": extra_body,
+            }
+        )
+
+    async def probe_capabilities(self, request):
+        """Probe Chat Completions only and return its reusable wire strategy."""
+
+        from sagents.v2.model.capability_probe import (
+            ModelCapabilityProbeStatus,
+            model_capability_profile,
+            negotiate_model_output_limit,
+            probe_model_capabilities,
+            probe_model_multimodal,
+            probe_model_reasoning_controls,
+        )
+
+        effective, _ = await negotiate_model_output_limit(self, request)
+        maximum_field = (
+            self.resolved_max_output_tokens_field
+            or default_chat_completion_token_field(self.config.model)
+        )
+
+        def clone(
+            *,
+            reasoning_effort: str | None = None,
+            extra_body: dict[str, Any] | None = None,
+            image_detail_mode: Literal["include", "omit"] = "include",
+        ):
+            config = self.config.model_copy(
+                update={
+                    "default_max_output_tokens": effective,
+                    "max_output_tokens_field": maximum_field,
+                    "reasoning_effort": reasoning_effort,
+                    "extra_body": dict(extra_body or {}),
+                    "image_detail_mode": image_detail_mode,
+                }
+            )
+            return self.__class__(config, client=self.raw_client)
+
+        model_provider = clone()
+        report = await probe_model_capabilities(
+            model_provider,
+            model_binding=request.model_binding,
+            max_output_tokens=effective,
+            timeout_seconds=request.timeout_seconds,
+        )
+        image_detail_mode = "include"
+        current_multimodal = report.outcome("multimodal")
+        if not current_multimodal.supported:
+            alternate = await probe_model_multimodal(
+                clone(image_detail_mode="omit"),
+                model_binding=request.model_binding,
+                max_output_tokens=effective,
+                timeout_seconds=request.timeout_seconds,
+            )
+            if alternate.supported:
+                image_detail_mode = "omit"
+                outcomes = tuple(
+                    alternate if value.name == "multimodal" else value
+                    for value in report.outcomes
+                )
+                successful = tuple(value.name for value in outcomes if value.supported)
+                failed = tuple(
+                    value.name
+                    for value in outcomes
+                    if value.status
+                    in {
+                        ModelCapabilityProbeStatus.ERROR,
+                        ModelCapabilityProbeStatus.UNSUPPORTED,
+                    }
+                )
+                report = report.model_copy(
+                    update={
+                        "outcomes": outcomes,
+                        "successful_probes": successful,
+                        "failed_probes": failed,
+                        "supports_multimodal": True,
+                    }
+                )
+
+        disable_extras = {
+            "omit": {},
+            "reasoning_effort_none": {"reasoning_effort": "none"},
+            "thinking_type_disabled": {"thinking": {"type": "disabled"}},
+            "enable_thinking_false": {"enable_thinking": False},
+            "thinking_false": {"thinking": False},
+            "chat_template_enable_thinking_false": {
+                "chat_template_kwargs": {"enable_thinking": False}
+            },
+        }
+
+        def reasoning_provider(strategy: str, effort: str | None):
+            if effort is not None:
+                if strategy == "chat_template_reasoning_effort":
+                    return clone(
+                        extra_body={
+                            "chat_template_kwargs": {
+                                "thinking": True,
+                                "reasoning_effort": effort,
+                            }
+                        }
+                    )
+                return clone(reasoning_effort=effort)
+            return clone(extra_body=disable_extras[strategy])
+
+        reasoning, reasoning_metadata = await probe_model_reasoning_controls(
+            base_provider=model_provider,
+            provider_factory=reasoning_provider,
+            report=report,
+            request=request,
+            max_output_tokens=effective,
+            disable_strategies=tuple(disable_extras),
+            effort_strategies=(
+                "reasoning_effort",
+                "chat_template_reasoning_effort",
+            ),
+        )
+        return model_capability_profile(
+            plugin_id=self.plugin_id,
+            plugin_version=self.plugin_version,
+            protocol="openai-chat-completions",
+            request=request,
+            effective_max_output_tokens=effective,
+            report=report,
+            reasoning=reasoning,
+            invocation_strategy={
+                "max_output_tokens_field": maximum_field,
+                "image_transport": "data_uri",
+                "image_detail_mode": image_detail_mode,
+                "reasoning_disable_strategy": reasoning_metadata["disable_strategy"],
+                "reasoning_behavior": reasoning_metadata["behavior"],
+                "reasoning_effort_strategy": reasoning_metadata["effort_strategy"],
+                "supported_reasoning_efforts": reasoning_metadata["supported_efforts"],
+                "text_only_reasoning_efforts": reasoning_metadata["text_only_efforts"],
+                "unsupported_reasoning_efforts": reasoning_metadata[
+                    "unsupported_efforts"
+                ],
+                "supports_json_object": report.supports_json_object,
+                "auxiliary_json_compatible": bool(
+                    reasoning_metadata["auxiliary_json"].get("status") == "supported"
+                ),
+            },
+        )

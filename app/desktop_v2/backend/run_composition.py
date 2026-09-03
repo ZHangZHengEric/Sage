@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import SecretStr
+from PIL import Image
 
 from sagents.llm.model_capabilities import (
     build_llm_extra_body,
     is_openai_reasoning_model,
 )
+from sagents.utils.multimodal_image import compress_image_to_jpeg_bytes_for_llm
 from app.desktop_v2.backend.catalog import (
     DesktopAgentRecord,
     DesktopModelCompatibilityProfile,
@@ -39,7 +44,7 @@ from sagents.v2.contracts.commands import (
 )
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.agent import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.package.manifest.agents import (
@@ -78,6 +83,7 @@ from sagents.v2.runtime.credentials import CredentialMaterial
 from sagents.v2.model import (
     RecordingModelProvider,
 )
+from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
@@ -111,6 +117,9 @@ from sagents.v2.tool import (
 from app.desktop_v2.backend.package import desktop_v2_manifest
 from app.desktop_v2.backend.schemas import (
     DesktopRunRequest,
+    RunMessage,
+    RunMessageReferenceContent,
+    RunMessageTextContent,
 )
 from app.desktop_v2.backend.run_lifecycle import (
     ACTIVE_EXTENSION_SCOPE_HANDLES as _ACTIVE_EXTENSION_SCOPE_HANDLES,
@@ -135,6 +144,7 @@ from app.desktop_v2.backend.runtime_config import (
 from app.desktop_v2.backend.usage_analytics import (
     _usage_percentile as _usage_percentile,
 )
+
 
 class DesktopRunCompositionMixin:
     """Compose immutable Run manifests, providers, tools, and sandboxes."""
@@ -453,7 +463,7 @@ class DesktopRunCompositionMixin:
                     {
                         "model": memory_query_model,
                         "language": settings.language,
-                        "timeout_seconds": 6.0,
+                        "timeout_seconds": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
                     }
                     if memory_query_plugin_id == "sage.memory.recall-query.llm"
                     else {}
@@ -463,7 +473,7 @@ class DesktopRunCompositionMixin:
                     "repeat_threshold": 3,
                     "model": judge_recording_model,
                     "model_binding": "fast",
-                    "timeout_seconds": 6.0,
+                    "timeout_seconds": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
                 },
                 "workspace.initializer": {"language": settings.language},
             },
@@ -1001,6 +1011,12 @@ class DesktopRunCompositionMixin:
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 200))
         deep_thinking, thinking_level = self._thinking_config(agent)
         compatibility_profile = self._verified_model_compatibility_profile(provider)
+        plugin_profile = (
+            compatibility_profile.plugin_profile
+            if compatibility_profile is not None
+            else None
+        )
+        legacy_profile = compatibility_profile if plugin_profile is None else None
         effective_max_output_tokens = self._effective_model_output_tokens(
             provider, compatibility_profile
         )
@@ -1013,21 +1029,19 @@ class DesktopRunCompositionMixin:
         request_extra: dict[str, Any] = {}
         if (
             provider.protocol == "openai-chat-completions"
-            and compatibility_profile is not None
+            and legacy_profile is not None
         ):
             request_extra["max_output_tokens_field"] = (
-                compatibility_profile.max_output_tokens_field
+                legacy_profile.max_output_tokens_field
             )
-        if compatibility_profile is not None and not deep_thinking:
+        if legacy_profile is not None and not deep_thinking:
             request_extra.update(
-                self._reasoning_disable_extra(
-                    compatibility_profile.reasoning_disable_strategy
-                )
+                self._reasoning_disable_extra(legacy_profile.reasoning_disable_strategy)
             )
-        elif compatibility_profile is not None:
+        elif legacy_profile is not None:
             request_extra.update(
                 self._reasoning_effort_extra(
-                    compatibility_profile,
+                    legacy_profile,
                     enabled=deep_thinking,
                     requested=thinking_level,
                 )
@@ -1058,6 +1072,7 @@ class DesktopRunCompositionMixin:
                 reasoning=True,
                 parallel_tool_calls=provider.supports_tool_calling,
             ),
+            capability_profile=plugin_profile,
         )
         return SageManifest(
             kind="agent-package",
@@ -1103,6 +1118,12 @@ class DesktopRunCompositionMixin:
             deep_thinking = enable_thinking
         request_extra: dict[str, Any] = {}
         compatibility_profile = self._verified_model_compatibility_profile(provider)
+        plugin_profile = (
+            compatibility_profile.plugin_profile
+            if compatibility_profile is not None
+            else None
+        )
+        legacy_profile = compatibility_profile if plugin_profile is None else None
         effective_max_output_tokens = self._effective_model_output_tokens(
             provider, compatibility_profile
         )
@@ -1113,20 +1134,20 @@ class DesktopRunCompositionMixin:
             legacy=thinking_level if deep_thinking else None,
         )
         if provider.protocol == "openai-chat-completions":
-            if compatibility_profile is not None:
+            if legacy_profile is not None:
                 request_extra["max_output_tokens_field"] = (
-                    compatibility_profile.max_output_tokens_field
+                    legacy_profile.max_output_tokens_field
                 )
                 if not deep_thinking:
                     request_extra.update(
                         self._reasoning_disable_extra(
-                            compatibility_profile.reasoning_disable_strategy
+                            legacy_profile.reasoning_disable_strategy
                         )
                     )
                 else:
                     request_extra.update(
                         self._reasoning_effort_extra(
-                            compatibility_profile,
+                            legacy_profile,
                             enabled=True,
                             requested=thinking_level,
                         )
@@ -1152,32 +1173,30 @@ class DesktopRunCompositionMixin:
                         )
                     )
         elif provider.protocol == "openai-responses":
-            if compatibility_profile is not None and not deep_thinking:
+            if legacy_profile is not None and not deep_thinking:
                 request_extra.update(
                     self._reasoning_disable_extra(
-                        compatibility_profile.reasoning_disable_strategy
+                        legacy_profile.reasoning_disable_strategy
                     )
                 )
-            elif compatibility_profile is not None:
+            elif legacy_profile is not None:
                 request_extra.update(
                     self._reasoning_effort_extra(
-                        compatibility_profile,
+                        legacy_profile,
                         enabled=True,
                         requested=thinking_level,
                     )
                 )
             elif enable_thinking is not None:
                 request_extra["reasoning_parameter_fallback"] = enable_thinking is False
-        elif compatibility_profile is not None and not deep_thinking:
+        elif legacy_profile is not None and not deep_thinking:
             request_extra.update(
-                self._reasoning_disable_extra(
-                    compatibility_profile.reasoning_disable_strategy
-                )
+                self._reasoning_disable_extra(legacy_profile.reasoning_disable_strategy)
             )
-        elif compatibility_profile is not None:
+        elif legacy_profile is not None:
             request_extra.update(
                 self._reasoning_effort_extra(
-                    compatibility_profile,
+                    legacy_profile,
                     enabled=True,
                     requested=thinking_level,
                 )
@@ -1205,12 +1224,17 @@ class DesktopRunCompositionMixin:
                 reasoning=True,
                 parallel_tool_calls=provider.supports_tool_calling,
             ),
+            capability_profile=plugin_profile,
         )
         cache_key = (
             provider.id,
             agent.agent_id,
             bool(deep_thinking),
             json.dumps(route.model_dump(mode="json"), sort_keys=True),
+            json.dumps(
+                plugin_profile.model_dump(mode="json") if plugin_profile else None,
+                sort_keys=True,
+            ),
             hashlib.sha256((provider.api_key or "").encode()).hexdigest(),
         )
         cached = self._host_model_providers.get(cache_key)
@@ -1224,6 +1248,7 @@ class DesktopRunCompositionMixin:
                 source="desktop-catalog",
             ),
             provider_instance_id=provider.id,
+            capability_profile=plugin_profile,
         )
         self._host_model_providers[cache_key] = model
         return model
@@ -1333,6 +1358,140 @@ class DesktopRunCompositionMixin:
             level = "medium"
         return enabled, level
 
+    @staticmethod
+    def _attachment_host_path(
+        attachment_path: str,
+        *,
+        workspace: Path,
+        workspace_root: str,
+    ) -> Path | None:
+        """Resolve a sandbox-visible attachment without escaping its workspace."""
+
+        raw = str(attachment_path).strip()
+        if not raw:
+            return None
+        host_root = workspace.expanduser().resolve()
+        normalized = raw.replace("\\", "/")
+        virtual_root = workspace_root.replace("\\", "/").rstrip("/")
+        if normalized == virtual_root:
+            relative = ""
+        elif normalized.startswith(f"{virtual_root}/"):
+            relative = normalized[len(virtual_root) + 1 :]
+        else:
+            candidate = Path(raw).expanduser()
+            if candidate.is_absolute():
+                resolved = candidate.resolve()
+                if resolved != host_root and host_root not in resolved.parents:
+                    return None
+                return resolved
+            relative = normalized
+        resolved = (host_root / relative).resolve()
+        if resolved != host_root and host_root not in resolved.parents:
+            return None
+        return resolved
+
+    @classmethod
+    def _image_attachment_block(
+        cls,
+        attachment_path: str,
+        *,
+        workspace: Path,
+        workspace_root: str,
+    ) -> ImageBlock | None:
+        host_path = cls._attachment_host_path(
+            attachment_path,
+            workspace=workspace,
+            workspace_root=workspace_root,
+        )
+        if host_path is None or not host_path.is_file():
+            return None
+        mime_type = mimetypes.guess_type(host_path.name)[0]
+        if mime_type is None or not mime_type.startswith("image/"):
+            return None
+        try:
+            content = host_path.read_bytes()
+        except OSError:
+            return None
+        # Keep the durable upload untouched, but reuse v1's proven LLM image
+        # normalization at the outbound attachment boundary. This applies EXIF
+        # orientation, bounds the long edge, removes alpha safely, and uses a
+        # byte-budgeted JPEG representation for every decodable raster image.
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                content = compress_image_to_jpeg_bytes_for_llm(image)
+            mime_type = "image/jpeg"
+        except (OSError, ValueError, Image.DecompressionBombError):
+            # Preserve the previous pass-through behavior for malformed or
+            # unsupported formats; the selected model plugin will validate it.
+            pass
+        return ImageBlock(
+            uri=(
+                f"data:{mime_type};base64," + base64.b64encode(content).decode("ascii")
+            ),
+            mime_type=mime_type,
+            alt=attachment_path,
+        )
+
+    @staticmethod
+    def _attachment_markdown_reference(attachment_path: str) -> str:
+        """Keep every attachment address visible as a Markdown reference."""
+
+        normalized = str(attachment_path).replace("\\", "/")
+        label = Path(normalized).name or normalized
+        escaped_label = (
+            label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        )
+        escaped_destination = normalized.replace("<", "%3C").replace(">", "%3E")
+        prefix = (
+            "!" if (mimetypes.guess_type(label)[0] or "").startswith("image/") else ""
+        )
+        return f"{prefix}[{escaped_label}](<{escaped_destination}>)"
+
+    def _run_message_content(
+        self,
+        message: RunMessage,
+        *,
+        provider: DesktopModelProviderRecord | None,
+        workspace: Path | None,
+        workspace_root: str,
+    ) -> tuple[TextBlock | ImageBlock, ...]:
+        if not message.content:
+            return (TextBlock(text=message.text),) if message.text.strip() else ()
+
+        blocks: list[TextBlock | ImageBlock] = []
+        for part in message.content:
+            if isinstance(part, RunMessageTextContent):
+                if part.text:
+                    blocks.append(TextBlock(text=part.text))
+                continue
+
+            if not isinstance(part, RunMessageReferenceContent):
+                continue
+            label = part.citation_label or part.name or Path(part.path).name
+            if part.quote:
+                if part.path.startswith("conversation://"):
+                    reference = f"Referenced message excerpt ({label}):\n{part.quote}"
+                else:
+                    reference = (
+                        f"{self._attachment_markdown_reference(part.path)}\n"
+                        f"Referenced excerpt:\n{part.quote}"
+                    )
+                blocks.append(TextBlock(text=reference))
+                continue
+
+            blocks.append(
+                TextBlock(text=self._attachment_markdown_reference(part.path))
+            )
+            if provider is not None and provider.supports_multimodal and workspace:
+                image = self._image_attachment_block(
+                    part.path,
+                    workspace=workspace,
+                    workspace_root=workspace_root,
+                )
+                if image is not None:
+                    blocks.append(image)
+        return tuple(blocks)
+
     def _command(
         self,
         request: DesktopRunRequest,
@@ -1350,30 +1509,56 @@ class DesktopRunCompositionMixin:
         )
         current_time = datetime.now().astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")
         frozen_time = f"<current_time>{current_time}</current_time>"
-        items = tuple(
-            InputItem(
-                role=value.role,
-                content=(TextBlock(text=value.text),),
-                metadata=(
-                    {"frozen_current_time_context": frozen_time}
-                    if value.role == "user"
-                    else {}
-                ),
+        items_list: list[InputItem] = []
+        for value in request.messages:
+            content = self._run_message_content(
+                value,
+                provider=provider,
+                workspace=Path(workspace) if workspace is not None else None,
+                workspace_root=workspace_root,
             )
-            for value in request.messages
-            if value.text.strip()
-        )
+            if not content:
+                continue
+            items_list.append(
+                InputItem(
+                    role=value.role,
+                    content=content,
+                    metadata=(
+                        {"frozen_current_time_context": frozen_time}
+                        if value.role == "user"
+                        else {}
+                    ),
+                )
+            )
+        items = tuple(items_list)
         if request.attachment_paths:
+            attachment_content: list[TextBlock | ImageBlock] = [
+                TextBlock(
+                    text="Attached workspace references (files or directories):\n"
+                    + "\n".join(
+                        self._attachment_markdown_reference(attachment_path)
+                        for attachment_path in request.attachment_paths
+                    )
+                )
+            ]
+            if provider is not None and provider.supports_multimodal and workspace:
+                attachment_content.extend(
+                    block
+                    for attachment_path in request.attachment_paths
+                    if (
+                        block := self._image_attachment_block(
+                            attachment_path,
+                            workspace=Path(workspace),
+                            workspace_root=workspace_root,
+                        )
+                    )
+                    is not None
+                )
             items = (
                 *items,
                 InputItem(
                     role="user",
-                    content=(
-                        TextBlock(
-                            text="Attached workspace references (files or directories):\n"
-                            + "\n".join(request.attachment_paths)
-                        ),
-                    ),
+                    content=tuple(attachment_content),
                     metadata={"frozen_current_time_context": frozen_time},
                 ),
             )

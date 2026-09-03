@@ -36,6 +36,21 @@ def create_desktop_log_sink(runtime_root: Path) -> tuple[str, LogSink]:
 
     registry = builtin_extension_registry()
     try:
+        requested_config = {
+            "root": str(runtime_root / "logs"),
+            "filename": "sage.jsonl",
+            "max_bytes": 10 * 1024 * 1024,
+            "backup_count": 5,
+            "min_level": "info",
+        }
+        schema = registry.get(selected).descriptor.config_schema or {}
+        if schema.get("additionalProperties", True) is False:
+            supported = set((schema.get("properties") or {}).keys())
+            requested_config = {
+                key: value
+                for key, value in requested_config.items()
+                if key in supported
+            }
         host = ExtensionHost(registry)
         plan = host.plan(
             (
@@ -45,15 +60,7 @@ def create_desktop_log_sink(runtime_root: Path) -> tuple[str, LogSink]:
                 ),
             ),
             selections={LOG_CAPABILITY: selected},
-            configs={
-                selected: {
-                    "root": str(runtime_root / "logs"),
-                    "filename": "sage.jsonl",
-                    "max_bytes": 10 * 1024 * 1024,
-                    "backup_count": 5,
-                    "min_level": "info",
-                }
-            },
+            configs={selected: requested_config},
             scope_overrides={selected: ExtensionScope.PROCESS},
         )
         handle = host.open_scope_sync(

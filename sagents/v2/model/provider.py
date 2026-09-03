@@ -11,11 +11,14 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-
+from sagents.v2.model.capability_contracts import (
+    ModelCapabilityProbeRequest,
+    ModelCapabilityProfile,
+)
 
 # Auxiliary classification/ranking calls should never inherit the main model's
 # long request timeout. The selected plugin still owns failure semantics.
-DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS = 6.0
+DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS = 60.0
 
 
 def auxiliary_model_timeout_error(
@@ -50,4 +53,7 @@ class ModelProvider(Protocol):
     """
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities: ...
+    async def probe_capabilities(
+        self, request: ModelCapabilityProbeRequest
+    ) -> ModelCapabilityProfile: ...
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]: ...

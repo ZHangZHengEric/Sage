@@ -96,17 +96,20 @@ enum _MessageReferenceKind { file, directory, quote }
 class _MessageContentPart {
   const _MessageContentPart.markdown(this.value)
     : referenceKind = null,
-      referenceSource = null;
+      referenceSource = null,
+      referencePreview = null;
 
   const _MessageContentPart.reference(
     this.value,
     this.referenceKind,
     this.referenceSource,
+    this.referencePreview,
   );
 
   final String value;
   final _MessageReferenceKind? referenceKind;
   final String? referenceSource;
+  final String? referencePreview;
 
   bool get isReference => referenceKind != null;
 }
@@ -125,7 +128,7 @@ List<_MessageContentPart> _splitUserMessageContent(String data) {
   }
 
   for (var index = 0; index < lines.length; index++) {
-    final match = RegExp(r'^\s*@([^\s]+)\s*$').firstMatch(lines[index]);
+    final match = RegExp(r'^\s*@(.+?)\s*$').firstMatch(lines[index]);
     if (match == null) {
       markdownLines.add(lines[index]);
       continue;
@@ -146,7 +149,18 @@ List<_MessageContentPart> _splitUserMessageContent(String data) {
         : label.contains('.')
         ? _MessageReferenceKind.file
         : _MessageReferenceKind.directory;
-    parts.add(_MessageContentPart.reference(label, kind, source));
+    String? preview;
+    if (kind == _MessageReferenceKind.quote) {
+      final quoted = <String>[];
+      while (next < lines.length) {
+        final line = lines[next].trimLeft();
+        if (!line.startsWith('>')) break;
+        quoted.add(line.substring(1).trimLeft());
+        next++;
+      }
+      preview = quoted.join('\n').trim();
+    }
+    parts.add(_MessageContentPart.reference(label, kind, source, preview));
   }
   flushMarkdown();
   return parts;
@@ -155,15 +169,32 @@ List<_MessageContentPart> _splitUserMessageContent(String data) {
 class _UserMessageContent extends StatelessWidget {
   const _UserMessageContent({
     required this.data,
+    this.content = const [],
     this.onReferenceSelection,
+    this.onLoadReference,
     super.key,
   });
 
   final String data;
+  final List<ChatMessageContent> content;
   final ValueChanged<String>? onReferenceSelection;
+  final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
 
   @override
   Widget build(BuildContext context) {
+    if (content.any((part) => part.isReference)) {
+      return _ConversationMarkdown(
+        data: _structuredMessageMarkdown(content),
+        onReferenceSelection: onReferenceSelection,
+        inlineSyntaxes: [_MessageReferenceSyntax()],
+        builders: {
+          'sage-reference': _MessageReferenceBuilder(
+            content: content,
+            onLoadReference: onLoadReference,
+          ),
+        },
+      );
+    }
     final parts = _splitUserMessageContent(data);
     if (!parts.any((part) => part.isReference)) {
       return _ConversationMarkdown(
@@ -178,7 +209,10 @@ class _UserMessageContent extends StatelessWidget {
         for (var index = 0; index < parts.length; index++) ...[
           if (index > 0) const SizedBox(height: 7),
           if (parts[index].isReference)
-            _MessageReferenceChip(part: parts[index])
+            _MessageReferenceChip(
+              part: parts[index],
+              onLoadReference: onLoadReference,
+            )
           else
             _ConversationMarkdown(
               data: parts[index].value,
@@ -190,51 +224,354 @@ class _UserMessageContent extends StatelessWidget {
   }
 }
 
-class _MessageReferenceChip extends StatelessWidget {
-  const _MessageReferenceChip({required this.part});
+const _messageReferenceMarker = '\u{E000}sage-reference:';
+const _messageReferenceMarkerEnd = '\u{E001}';
+
+String _structuredMessageMarkdown(List<ChatMessageContent> content) {
+  final markdown = StringBuffer();
+  for (var index = 0; index < content.length; index++) {
+    final part = content[index];
+    if (part.isText) {
+      markdown.write(part.text);
+    } else if (part.isReference) {
+      markdown.write(
+        '$_messageReferenceMarker$index$_messageReferenceMarkerEnd',
+      );
+    }
+  }
+  return markdown.toString();
+}
+
+class _MessageReferenceSyntax extends md.InlineSyntax {
+  _MessageReferenceSyntax()
+    : super('$_messageReferenceMarker(\\d+)$_messageReferenceMarkerEnd');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(
+      md.Element.text('sage-reference', '')
+        ..attributes['index'] = match.group(1)!,
+    );
+    return true;
+  }
+}
+
+class _MessageReferenceBuilder extends MarkdownElementBuilder {
+  _MessageReferenceBuilder({required this.content, this.onLoadReference});
+
+  final List<ChatMessageContent> content;
+  final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final index = int.tryParse(element.attributes['index'] ?? '');
+    if (index == null || index < 0 || index >= content.length) return null;
+    final reference = content[index];
+    if (!reference.isReference) return null;
+    final label = reference.citationLabel ?? reference.fileName;
+    final kind = reference.quote.isNotEmpty
+        ? _MessageReferenceKind.quote
+        : reference.isDirectory
+        ? _MessageReferenceKind.directory
+        : _MessageReferenceKind.file;
+    final chip = _MessageReferenceChip(
+      part: _MessageContentPart.reference(
+        label,
+        kind,
+        reference.path,
+        reference.quote.isEmpty ? null : reference.quote,
+      ),
+      onLoadReference: onLoadReference,
+    );
+    return Text.rich(
+      TextSpan(
+        children: [
+          WidgetSpan(alignment: PlaceholderAlignment.middle, child: chip),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageReferenceChip extends StatefulWidget {
+  const _MessageReferenceChip({required this.part, this.onLoadReference});
 
   final _MessageContentPart part;
+  final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
+
+  @override
+  State<_MessageReferenceChip> createState() => _MessageReferenceChipState();
+}
+
+class _MessageReferenceChipState extends State<_MessageReferenceChip> {
+  final LayerLink _layerLink = LayerLink();
+  OverlayEntry? _previewOverlay;
+  Future<WorkspaceFileContent>? _content;
+  bool _hovered = false;
+  bool _focused = false;
+
+  _MessageContentPart get part => widget.part;
+
+  @override
+  void didUpdateWidget(covariant _MessageReferenceChip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.part.referenceSource != part.referenceSource ||
+        oldWidget.part.referencePreview != part.referencePreview) {
+      _content = null;
+      _previewOverlay?.markNeedsBuild();
+    }
+  }
+
+  @override
+  void dispose() {
+    _previewOverlay?.remove();
+    super.dispose();
+  }
+
+  void _updatePreviewVisibility() {
+    if (_hovered || _focused) {
+      _showPreview();
+    } else {
+      _previewOverlay?.remove();
+      _previewOverlay = null;
+    }
+  }
+
+  void _showPreview() {
+    if (_previewOverlay != null) return;
+    final source = part.referenceSource;
+    if (part.referenceKind != _MessageReferenceKind.quote &&
+        source != null &&
+        widget.onLoadReference != null) {
+      _content ??= widget.onLoadReference!(source);
+    }
+    _previewOverlay = OverlayEntry(builder: _buildPreviewOverlay);
+    Overlay.of(context, rootOverlay: true).insert(_previewOverlay!);
+  }
+
+  Widget _buildPreviewOverlay(BuildContext overlayContext) {
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) {
+      return const SizedBox.shrink();
+    }
+    final screen = MediaQuery.sizeOf(overlayContext);
+    final origin = renderObject.localToGlobal(Offset.zero);
+    final below = screen.height - origin.dy - renderObject.size.height - 16;
+    final above = origin.dy - 16;
+    final showAbove = below < 180 && above > below;
+    final alignRight =
+        origin.dx + renderObject.size.width / 2 > screen.width / 2;
+    final width = min(420.0, max(220.0, screen.width - 32));
+    final availableHeight = showAbove ? above : below;
+    final maxHeight = min(320.0, max(96.0, availableHeight - 8));
+    return Positioned(
+      left: 0,
+      top: 0,
+      width: width,
+      child: IgnorePointer(
+        child: CompositedTransformFollower(
+          link: _layerLink,
+          showWhenUnlinked: false,
+          targetAnchor: showAbove
+              ? (alignRight ? Alignment.topRight : Alignment.topLeft)
+              : (alignRight ? Alignment.bottomRight : Alignment.bottomLeft),
+          followerAnchor: showAbove
+              ? (alignRight ? Alignment.bottomRight : Alignment.bottomLeft)
+              : (alignRight ? Alignment.topRight : Alignment.topLeft),
+          offset: Offset(0, showAbove ? -8 : 8),
+          child: Material(
+            color: Colors.transparent,
+            child: GlassCard(
+              key: ValueKey(
+                'message-reference-preview:${part.referenceSource}',
+              ),
+              width: width,
+              padding: const EdgeInsets.all(12),
+              shape: const LiquidRoundedSuperellipse(borderRadius: 14),
+              useOwnLayer: true,
+              settings: _composerGlassSettings(overlayContext),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: _buildPreviewContent(overlayContext),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreviewContent(BuildContext context) {
+    final quoted = part.referencePreview;
+    if (part.referenceKind == _MessageReferenceKind.quote &&
+        quoted != null &&
+        quoted.isNotEmpty) {
+      return _MessageReferenceTextPreview(
+        text: quoted,
+        referenceSource: part.referenceSource,
+      );
+    }
+    final content = _content;
+    if (content == null) return _previewFallback(context, loading: false);
+    return FutureBuilder<WorkspaceFileContent>(
+      future: content,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _previewFallback(context, loading: true);
+        }
+        final value = snapshot.data;
+        if (snapshot.hasError || value == null) {
+          return _previewFallback(context, loading: false);
+        }
+        if (value.isImage) {
+          return Image.memory(
+            value.bytes,
+            key: ValueKey(
+              'message-reference-preview-image:${part.referenceSource}',
+            ),
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            semanticLabel: part.value,
+            errorBuilder: (context, _, _) =>
+                _previewFallback(context, loading: false),
+          );
+        }
+        if (value.isText) {
+          return _MessageReferenceTextPreview(
+            text: utf8.decode(value.bytes, allowMalformed: true),
+            referenceSource: part.referenceSource,
+          );
+        }
+        return _previewFallback(context, loading: false);
+      },
+    );
+  }
+
+  Widget _previewFallback(BuildContext context, {required bool loading}) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 72,
+      child: Center(
+        child: loading
+            ? CupertinoActivityIndicator(
+                radius: 8,
+                color: colors.onSurfaceVariant,
+              )
+            : Icon(
+                CupertinoIcons.doc,
+                size: 24,
+                color: colors.onSurfaceVariant,
+              ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final animationsDisabled =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final icon = switch (part.referenceKind!) {
       _MessageReferenceKind.file => CupertinoIcons.doc,
       _MessageReferenceKind.directory => CupertinoIcons.folder,
       _MessageReferenceKind.quote => CupertinoIcons.quote_bubble,
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-      child: Container(
-        key: ValueKey('message-reference-chip:${part.referenceSource}'),
-        height: 25,
-        constraints: BoxConstraints(
-          maxWidth: min(280, MediaQuery.sizeOf(context).width * 0.42),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: colors.primaryContainer.withValues(alpha: 0.42),
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: colors.primary.withValues(alpha: 0.24)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 11, color: colors.primary),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                part.value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontSize: 11,
-                  color: colors.onSurface,
-                  fontWeight: FontWeight.w600,
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: MouseRegion(
+        onEnter: (_) {
+          setState(() => _hovered = true);
+          _updatePreviewVisibility();
+        },
+        onExit: (_) {
+          setState(() => _hovered = false);
+          _updatePreviewVisibility();
+        },
+        child: Focus(
+          onFocusChange: (focused) {
+            setState(() => _focused = focused);
+            _updatePreviewVisibility();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+            child: AnimatedContainer(
+              key: ValueKey('message-reference-chip:${part.referenceSource}'),
+              duration: animationsDisabled
+                  ? Duration.zero
+                  : const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              height: 25,
+              constraints: BoxConstraints(
+                maxWidth: min(280, MediaQuery.sizeOf(context).width * 0.42),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: colors.primaryContainer.withValues(
+                  alpha: _hovered || _focused ? 0.56 : 0.42,
+                ),
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(
+                  color: colors.primary.withValues(
+                    alpha: _hovered || _focused ? 0.38 : 0.24,
+                  ),
                 ),
               ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 11, color: colors.primary),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      part.value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontSize: 11,
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageReferenceTextPreview extends StatelessWidget {
+  const _MessageReferenceTextPreview({
+    required this.text,
+    required this.referenceSource,
+  });
+
+  final String text;
+  final String? referenceSource;
+
+  @override
+  Widget build(BuildContext context) {
+    const maximumCharacters = 12000;
+    final preview = text.length > maximumCharacters
+        ? '${text.substring(0, maximumCharacters)}\n…'
+        : text;
+    return SingleChildScrollView(
+      child: Text(
+        preview,
+        key: ValueKey('message-reference-preview-text:$referenceSource'),
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontFamily: 'Menlo',
+          fontSize: 12.5,
+          height: 1.45,
         ),
       ),
     );
@@ -245,11 +582,15 @@ class _ConversationMarkdown extends StatelessWidget {
   const _ConversationMarkdown({
     required this.data,
     this.onReferenceSelection,
+    this.inlineSyntaxes = const [],
+    this.builders = const {},
     super.key,
   });
 
   final String data;
   final ValueChanged<String>? onReferenceSelection;
+  final List<md.InlineSyntax> inlineSyntaxes;
+  final Map<String, MarkdownElementBuilder> builders;
 
   @override
   Widget build(BuildContext context) {
@@ -258,7 +599,8 @@ class _ConversationMarkdown extends StatelessWidget {
       selectable: false,
       fitContent: false,
       styleSheet: _messageMarkdownStyle(context),
-      builders: {'pre': _MessageCodeBlockBuilder()},
+      inlineSyntaxes: inlineSyntaxes,
+      builders: {'pre': _MessageCodeBlockBuilder(), ...builders},
     );
     final callback = onReferenceSelection;
     if (callback == null) return SelectionArea(child: markdown);

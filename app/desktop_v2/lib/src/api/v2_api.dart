@@ -426,21 +426,22 @@ class V2ApiClient {
       HttpHeaders.contentTypeHeader,
       'multipart/form-data; boundary=$boundary',
     );
+    void writeUtf8(String value) => request.add(utf8.encode(value));
     void field(String name, String value) {
-      request.write('--$boundary\r\n');
-      request.write('Content-Disposition: form-data; name="$name"\r\n\r\n');
-      request.write('$value\r\n');
+      writeUtf8('--$boundary\r\n');
+      writeUtf8('Content-Disposition: form-data; name="$name"\r\n\r\n');
+      writeUtf8('$value\r\n');
     }
 
     field('agent_id', agentId);
     if (workspaceId.isNotEmpty) field('workspace_id', workspaceId);
-    request.write('--$boundary\r\n');
-    request.write(
+    writeUtf8('--$boundary\r\n');
+    writeUtf8(
       'Content-Disposition: form-data; name="file"; filename="${_safeHeader(file.name)}"\r\n',
     );
-    request.write('Content-Type: application/octet-stream\r\n\r\n');
+    writeUtf8('Content-Type: application/octet-stream\r\n\r\n');
     request.add(bytes);
-    request.write('\r\n--$boundary--\r\n');
+    writeUtf8('\r\n--$boundary--\r\n');
     final response = await request.close();
     final decoded = await _decodeResponse(response);
     final data = _unwrap(decoded, response.statusCode);
@@ -556,9 +557,19 @@ class V2ApiClient {
     }
   }
 
-  Future<void> steer(String runId, String turnId, String text) => _command(
+  Future<void> steer(
+    String runId,
+    String turnId,
+    String text, {
+    List<ChatMessageContent> content = const [],
+  }) => _command(
     '/api/v2/runs/${Uri.encodeComponent(runId)}/steer',
-    body: {'turn_id': turnId, 'text': text},
+    body: {
+      'turn_id': turnId,
+      'text': text,
+      if (content.isNotEmpty)
+        'content': [for (final part in content) part.toJson()],
+    },
   );
 
   Future<void> replyInteraction(

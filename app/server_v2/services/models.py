@@ -47,6 +47,9 @@ class HostModelProvider:
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return await (await self._resolve()).capabilities(model_binding)
 
+    async def probe_capabilities(self, request):
+        return await (await self._resolve()).probe_capabilities(request)
+
     async def stream(self, request: ModelRequest):
         provider = await self._resolve(run_id=request.run_id)
         async for event in provider.stream(request):

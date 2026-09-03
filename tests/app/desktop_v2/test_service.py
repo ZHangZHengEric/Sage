@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 import sqlite3
 from contextlib import asynccontextmanager
@@ -9,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from PIL import Image
 
 from app.desktop_v2.backend.catalog import (
     DesktopMcpRecord,
@@ -30,7 +33,11 @@ from app.desktop_v2.backend.service import (
     ModelProviderPatch,
     DesktopRunRequest,
 )
-from app.desktop_v2.backend.schemas import RunMessage
+from app.desktop_v2.backend.schemas import (
+    RunMessage,
+    RunMessageReferenceContent,
+    RunMessageTextContent,
+)
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.events import (
     EventDurability,
@@ -160,7 +167,8 @@ async def test_builtin_anytool_uses_ephemeral_sidecar_capability(tmp_path: Path)
     config = service._mcp_config(record)
 
     assert config.url == "http://127.0.0.1:54321/api/mcp/anytool/AnyTool"
-    assert config.api_key == "launch-capability"
+    assert config.api_key is not None
+    assert config.api_key.get_secret_value() == "launch-capability"
     assert record.api_key is None
     await service.close()
 
@@ -183,7 +191,8 @@ async def test_external_mcp_keeps_its_catalog_api_key(tmp_path: Path):
     config = service._mcp_config(record)
 
     assert config.url == "https://mcp.example.test/tools"
-    assert config.api_key == "remote-secret"
+    assert config.api_key is not None
+    assert config.api_key.get_secret_value() == "remote-secret"
     await service.close()
 
 
@@ -672,6 +681,67 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
     )
     assert payload["format_version"] == "sage.desktop-catalog/v2"
     assert "legacy" not in json.dumps(payload).lower()
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
+    service = DesktopV2Service(tmp_path / "sage")
+    service.start = AsyncMock()
+    corrupt = SimpleNamespace(session_id="session_corrupt")
+    healthy = SimpleNamespace(session_id="session_healthy")
+    service.session_index.list = AsyncMock(return_value=(corrupt, healthy))
+    service.session_access = SimpleNamespace(
+        get_session=AsyncMock(
+            side_effect=(
+                SageV2Error(
+                    RuntimeErrorInfo(
+                        code="session_store.hash_mismatch",
+                        category=ErrorCategory.CORRUPT_STATE,
+                        message="snapshot checksum mismatch",
+                    )
+                ),
+                SimpleNamespace(session_id="session_healthy"),
+            )
+        )
+    )
+    skipped: set[str] = set()
+
+    visible = await service._authorized_indexed_sessions(
+        "user_1",
+        skipped_unreadable_sessions=skipped,
+    )
+
+    assert visible == (healthy,)
+    assert skipped == {"session_corrupt"}
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_usage_overview_marks_corrupt_index_entry_as_partial(tmp_path: Path):
+    service = DesktopV2Service(tmp_path / "sage")
+    await service.list_agents("user_1")
+
+    async def authorized_sessions(
+        _user_id: str,
+        *,
+        skipped_unreadable_sessions: set[str] | None = None,
+    ):
+        assert skipped_unreadable_sessions is not None
+        skipped_unreadable_sessions.add("session_corrupt")
+        return ()
+
+    service._authorized_indexed_sessions = AsyncMock(side_effect=authorized_sessions)
+
+    value = await service.usage_overview("user_1", days=7)
+
+    assert value["totals"]["sessions"] == 0
+    assert value["data_quality"] == {
+        "partial": True,
+        "skipped_sessions": 1,
+        "skipped_event_sessions": 1,
+        "skipped_diagnostic_sessions": 1,
+    }
     await service.session_store.close()
 
 
@@ -1170,7 +1240,7 @@ async def test_model_capability_probe_checks_connection_image_and_schema(
 
     probe_provider = ProbeProvider()
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda *args, **kwargs: probe_provider,
     )
 
@@ -1284,9 +1354,16 @@ async def test_model_capability_probe_records_supported_reasoning_controls(
             )
 
     probe_provider = ProbeProvider()
+    constructed_routes = []
+
+    def provider_factory(route, *args, **kwargs):
+        del args, kwargs
+        constructed_routes.append(route)
+        return probe_provider
+
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
-        lambda *args, **kwargs: probe_provider,
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        provider_factory,
     )
 
     result = await service._probe_model_provider_capabilities(candidate)
@@ -1302,6 +1379,11 @@ async def test_model_capability_probe_records_supported_reasoning_controls(
         "max",
     ]
     assert result["valid"] is True
+    assert result["protocol"] == "openai-chat-completions"
+    assert constructed_routes
+    assert {route.provider for route in constructed_routes} == {
+        "openai-chat-completions"
+    }
     assert result["successful_probes"] == [
         "connection",
         "multimodal",
@@ -1409,7 +1491,7 @@ async def test_model_capability_probe_calibrates_luna_and_runtime_omits_rejected
             yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
 
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda route, *args, **kwargs: ProbeProvider(route),
     )
 
@@ -1518,7 +1600,7 @@ async def test_model_capability_probe_requires_reasoning_to_work_with_tools(
             yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
 
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda route, *args, **kwargs: ProbeProvider(route),
     )
 
@@ -1630,7 +1712,7 @@ async def test_model_capability_probe_persists_nested_reasoning_effort_dialect(
             yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
 
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda route, *args, **kwargs: ProbeProvider(route),
     )
 
@@ -1714,7 +1796,7 @@ async def test_model_capability_probe_persists_effective_reasoning_disable_contr
             yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
 
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda route, *args, **kwargs: ProbeProvider(route),
     )
 
@@ -1795,7 +1877,7 @@ async def test_model_capability_probe_returns_partial_results_after_probe_errors
 
     probe_provider = ProbeProvider()
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda *args, **kwargs: probe_provider,
     )
 
@@ -1846,7 +1928,7 @@ async def test_model_capability_probe_is_invalid_only_when_all_probes_fail(
 
     probe_provider = ProbeProvider()
     monkeypatch.setattr(
-            "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
+        "app.desktop_v2.backend.catalog_service.create_registered_model_provider",
         lambda *args, **kwargs: probe_provider,
     )
 
@@ -2049,7 +2131,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "plugin_id": "sage.tool-selection.llm",
         "selected_plugin_id": "sage.tool-selection.llm",
         "source": "default",
-        "config": {"max_visible_tools": 24, "model_timeout_seconds": 6.0},
+        "config": {"max_visible_tools": 24, "model_timeout_seconds": 60.0},
         "pending_restart": False,
     }
     tool_plugins = {
@@ -2386,7 +2468,7 @@ async def test_tool_selection_component_keeps_only_the_builtin_count_limit(
     assert selection["pending_restart"] is False
     assert selection["config"] == {
         "max_visible_tools": 20,
-        "model_timeout_seconds": 6.0,
+        "model_timeout_seconds": 60.0,
     }
     settings = await service.get_settings()
     assert settings.component_selections["tool.selection-policy"] == (
@@ -2556,10 +2638,10 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
         ],
         "uses_confidence": False,
         "uses_llm_judge": True,
-        "timeout_seconds": 6.0,
+        "timeout_seconds": 60.0,
         "judge_failure": "propagate_error",
     }
-    assert loop.continuation_policy.judge.timeout_seconds == 6.0
+    assert loop.continuation_policy.judge.timeout_seconds == 60.0
     assert "turn_status" not in {tool.name for tool in tools}
 
     await sandbox.close()
@@ -3175,6 +3257,41 @@ async def test_desktop_memory_recall_query_plugin_selects_llm_generator(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_workspace_upload_reuses_identical_content_and_indexes_changes(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+
+    first = await service.upload(None, "sage", "image.png", b"first image")
+    first_retry = await service.upload(None, "sage", "image.png", b"first image")
+    changed = await service.upload(None, "sage", "image.png", b"changed image")
+    changed_retry = await service.upload(
+        None,
+        "sage",
+        "image.png",
+        b"changed image",
+    )
+    changed_again = await service.upload(None, "sage", "image.png", b"third image")
+
+    assert first["name"] == first_retry["name"] == "image.png"
+    assert first["path"] == first_retry["path"] == "uploads/image.png"
+    assert changed["name"] == changed_retry["name"] == "image_1.png"
+    assert changed["path"] == changed_retry["path"] == "uploads/image_1.png"
+    assert changed["virtual_path"] == changed_retry["virtual_path"]
+    assert changed["virtual_path"].endswith("/uploads/image_1.png")
+    assert changed_again["name"] == "image_2.png"
+    assert changed_again["path"] == "uploads/image_2.png"
+    assert changed_again["virtual_path"].endswith("/uploads/image_2.png")
+
+    workspace = await service.workspace_root(None, "sage")
+    assert (workspace / "uploads" / "image.png").read_bytes() == b"first image"
+    assert (workspace / "uploads" / "image_1.png").read_bytes() == b"changed image"
+    assert (workspace / "uploads" / "image_2.png").read_bytes() == b"third image"
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_sandbox_workspace_root_is_generic_run_configuration(tmp_path: Path):
     service = DesktopV2Service(tmp_path)
     settings = await service.get_settings()
@@ -3305,9 +3422,7 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
         approval_mode="high_risk",
         invocation_mode="goal",
     )
-    loop.tool_selection_model = scripted_tool_selection(
-        "goal_submit", "goal_complete"
-    )
+    loop.tool_selection_model = scripted_tool_selection("goal_submit", "goal_complete")
 
     def assert_active_goal(request):
         system = "\n".join(
@@ -4146,6 +4261,235 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
         is not None
     )
     assert metadata["workspace_files"].startswith("Working directory: /workspace\n")
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_command_inlines_workspace_images_for_multimodal_models(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    settings = await service.get_settings()
+    await service.save_settings(
+        settings.model_copy(
+            update={
+                "component_configs": {
+                    **settings.component_configs,
+                    "execution.sandbox": {
+                        "workspace_root": "/workspace",
+                        "workspace_path_mode": "host",
+                        "workspace_mapping": "active_workspace",
+                        "filesystem_mode": "workspace",
+                    },
+                }
+            }
+        )
+    )
+    await service.list_agents("user_1")
+    agent = await service._agent("sage", "user_1")
+    provider = (await service.catalog.list_model_providers("user_1"))[0]
+    workspace = await service.workspace_root(None, "sage")
+    image_path = workspace / "uploads" / "image.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_bytes = b"\x89PNG\r\n\x1a\n"
+    image_path.write_bytes(image_bytes)
+    resolved = CompositionResolver().resolve(
+        service._manifest(agent, provider, ("file_read",), ())
+    )
+
+    command = service._command(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[
+                RunMessage(
+                    role="user",
+                    text="What is in this image?",
+                    content=[
+                        RunMessageTextContent(text="What is in "),
+                        RunMessageReferenceContent(
+                            name="image.png",
+                            path=image_path.as_posix(),
+                        ),
+                        RunMessageTextContent(text="this image?"),
+                    ],
+                )
+            ],
+        ),
+        resolved,
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    attachment = command.input[0]
+    assert isinstance(attachment.content[0], TextBlock)
+    assert attachment.content[0].text == "What is in"
+    assert f"![image.png](<{image_path.as_posix()}>)" in attachment.content[1].text
+    image = next(block for block in attachment.content if isinstance(block, ImageBlock))
+    assert image.uri == "data:image/png;base64,iVBORw0KGgo="
+    assert image.mime_type == "image/png"
+    assert image.alt == image_path.as_posix()
+    assert attachment.content[-1].text == "this image?"
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_command_preserves_interleaved_structured_references(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    agent = await service._agent("sage", "user_1")
+    provider = (await service.catalog.list_model_providers("user_1"))[0]
+    workspace = await service.workspace_root(None, "sage")
+    resolved = CompositionResolver().resolve(
+        service._manifest(agent, provider, ("file_read",), ())
+    )
+
+    command = service._command(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[
+                RunMessage(
+                    role="user",
+                    text="请检查前后内容",
+                    content=[
+                        RunMessageTextContent(text="请检查"),
+                        RunMessageReferenceContent(
+                            name="requirements copy.md",
+                            path="docs/requirements copy.md",
+                        ),
+                        RunMessageTextContent(text="前后内容"),
+                    ],
+                )
+            ],
+        ),
+        resolved,
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    blocks = command.input[0].content
+    assert [block.kind for block in blocks] == ["text", "text", "text"]
+    assert blocks[0].text == "请检查"
+    assert blocks[1].text == "[requirements copy.md](<docs/requirements copy.md>)"
+    assert blocks[2].text == "前后内容"
+    assert all("@" not in block.text for block in blocks)
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_command_compresses_large_images_without_mutating_upload(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    agent = await service._agent("sage", "user_1")
+    provider = (await service.catalog.list_model_providers("user_1"))[0]
+    workspace = await service.workspace_root(None, "sage")
+    image_path = workspace / "uploads" / "large.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    source = Image.effect_noise((2_048, 1_536), 100).convert("RGB")
+    source.save(image_path, format="PNG")
+    original = image_path.read_bytes()
+    resolved = CompositionResolver().resolve(
+        service._manifest(agent, provider, ("file_read",), ())
+    )
+
+    command = service._command(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[RunMessage(role="user", text="Inspect this image")],
+            attachment_paths=[image_path.as_posix()],
+        ),
+        resolved,
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    attachment = command.input[-1]
+    image = next(block for block in attachment.content if isinstance(block, ImageBlock))
+    encoded = image.uri.partition(",")[2]
+    outbound = base64.b64decode(encoded)
+    with Image.open(io.BytesIO(outbound)) as compressed:
+        assert compressed.format == "JPEG"
+        assert max(compressed.size) == 1_536
+    assert len(outbound) < len(original)
+    assert image.mime_type == "image/jpeg"
+    assert image.uri.startswith("data:image/jpeg;base64,")
+    assert image_path.read_bytes() == original
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_command_keeps_images_as_references_for_text_only_models(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    agent = await service._agent("sage", "user_1")
+    provider = (await service.catalog.list_model_providers("user_1"))[0].model_copy(
+        update={"supports_multimodal": False}
+    )
+    workspace = await service.workspace_root(None, "sage")
+    image_path = workspace / "uploads" / "image.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    resolved = CompositionResolver().resolve(
+        service._manifest(agent, provider, ("file_read",), ())
+    )
+
+    command = service._command(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[RunMessage(role="user", text="Inspect the attachment")],
+            attachment_paths=["/workspace/uploads/image.png"],
+        ),
+        resolved,
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    assert all(not isinstance(block, ImageBlock) for block in command.input[-1].content)
+    assert (
+        "![image.png](</workspace/uploads/image.png>)"
+        in command.input[-1].content[0].text
+    )
+    await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_command_keeps_non_image_files_as_markdown_references(
+    tmp_path: Path,
+):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+    agent = await service._agent("sage", "user_1")
+    provider = (await service.catalog.list_model_providers("user_1"))[0]
+    workspace = await service.workspace_root(None, "sage")
+    resolved = CompositionResolver().resolve(
+        service._manifest(agent, provider, ("file_read",), ())
+    )
+
+    command = service._command(
+        DesktopRunRequest(
+            agent_id="sage",
+            messages=[RunMessage(role="user", text="Inspect the attachment")],
+            attachment_paths=["/workspace/docs/requirements.md"],
+        ),
+        resolved,
+        agent=agent,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    assert (
+        "[requirements.md](</workspace/docs/requirements.md>)"
+        in command.input[-1].content[0].text
+    )
     await service.session_store.close()
 
 

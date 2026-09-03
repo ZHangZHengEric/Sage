@@ -738,14 +738,67 @@ class ComposerReference {
 
   String get displayPath => citationLabel ?? path;
 
-  String get promptText {
-    if (text.isEmpty) return '@$displayPath';
-    final quoted = text
-        .split('\n')
-        .map((line) => line.isEmpty ? '>' : '> $line')
-        .join('\n');
-    return '@$displayPath\n$quoted';
+  ChatMessageContent toMessageContent() => ChatMessageContent.reference(
+    fileName: fileName,
+    path: path,
+    quote: text,
+    isDirectory: isDirectory,
+    citationLabel: citationLabel,
+  );
+}
+
+class ChatMessageContent {
+  const ChatMessageContent.text(this.text)
+    : type = 'text',
+      fileName = '',
+      path = '',
+      quote = '',
+      isDirectory = false,
+      citationLabel = null;
+
+  const ChatMessageContent.reference({
+    required this.fileName,
+    required this.path,
+    this.quote = '',
+    this.isDirectory = false,
+    this.citationLabel,
+  }) : type = 'reference',
+       text = '';
+
+  final String type;
+  final String text;
+  final String fileName;
+  final String path;
+  final String quote;
+  final bool isDirectory;
+  final String? citationLabel;
+
+  bool get isText => type == 'text';
+  bool get isReference => type == 'reference';
+
+  factory ChatMessageContent.fromJson(Map<String, Object?> json) {
+    if (json['type']?.toString() == 'reference') {
+      return ChatMessageContent.reference(
+        fileName: json['name']?.toString() ?? '',
+        path: json['path']?.toString() ?? '',
+        quote: json['quote']?.toString() ?? '',
+        isDirectory: json['is_directory'] == true,
+        citationLabel: json['citation_label']?.toString(),
+      );
+    }
+    return ChatMessageContent.text(json['text']?.toString() ?? '');
   }
+
+  Map<String, Object?> toJson() => isReference
+      ? {
+          'type': 'reference',
+          'name': fileName,
+          'path': path,
+          if (quote.isNotEmpty) 'quote': quote,
+          if (isDirectory) 'is_directory': true,
+          if (citationLabel != null) 'citation_label': citationLabel,
+        }
+      : {'type': 'text', 'text': text};
 }
 
 class ChatMessage {
@@ -756,6 +809,7 @@ class ChatMessage {
     this.streaming = false,
     this.processOnly = false,
     this.sequence = 0,
+    this.content = const [],
     DateTime? createdAt,
   }) : renderedText = text,
        createdAt = createdAt ?? DateTime.now();
@@ -770,22 +824,35 @@ class ChatMessage {
   bool streaming;
   bool processOnly;
   final int sequence;
+  final List<ChatMessageContent> content;
   final DateTime createdAt;
 
-  factory ChatMessage.fromJson(Map<String, Object?> json) => ChatMessage(
-    id: json['id']?.toString() ?? '',
-    role: json['role']?.toString() ?? 'assistant',
-    text: json['text']?.toString() ?? '',
-    streaming: json['streaming'] == true,
-    processOnly: json['process_only'] == true,
-    sequence: (json['sequence'] as num?)?.toInt() ?? 0,
-    createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
-  );
+  factory ChatMessage.fromJson(Map<String, Object?> json) {
+    final rawContent = json['content'];
+    return ChatMessage(
+      id: json['id']?.toString() ?? '',
+      role: json['role']?.toString() ?? 'assistant',
+      text: json['text']?.toString() ?? '',
+      streaming: json['streaming'] == true,
+      processOnly: json['process_only'] == true,
+      sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+      content: rawContent is List
+          ? [
+              for (final value in rawContent)
+                if (value is Map)
+                  ChatMessageContent.fromJson(value.cast<String, Object?>()),
+            ]
+          : const [],
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+    );
+  }
 
   Map<String, Object?> toJson() => {
     'id': id,
     'role': role,
     'text': text,
+    if (content.isNotEmpty)
+      'content': [for (final value in content) value.toJson()],
     'streaming': false,
     'process_only': processOnly,
     'sequence': sequence,

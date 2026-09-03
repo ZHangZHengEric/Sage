@@ -115,6 +115,7 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
         client=_UnusedClient(),
     ).diagnostic_request(request)
 
+    assert "input" not in chat
     assert [value["role"] for value in chat["messages"]] == ["system", "user"]
     expected_system = (
         "<response_language>\n"

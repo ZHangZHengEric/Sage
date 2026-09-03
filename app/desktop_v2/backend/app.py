@@ -31,6 +31,7 @@ from app.desktop_v2.backend.schemas import (
     MCPConnectionRequest,
     ModelProviderCreate,
     ModelProviderPatch,
+    RunMessageContent,
 )
 from app.desktop_v2.backend.service import DesktopV2Service
 from app.desktop_v2.backend.anytool import DesktopV2AnyToolApp
@@ -59,7 +60,8 @@ class SkillFolderImportRequest(BaseModel):
 
 class SteerRequest(BaseModel):
     turn_id: str
-    text: str
+    text: str = ""
+    content: list[RunMessageContent] = Field(default_factory=list)
 
 
 class InteractionReplyRequest(BaseModel):
@@ -935,7 +937,11 @@ def create_app(
     async def steer_run(run_id: str, body: SteerRequest, request: Request):
         value = await _safe(
             runtime_service.steer(
-                run_id, body.turn_id, body.text, get_desktop_user_id(request)
+                run_id,
+                body.turn_id,
+                body.text,
+                get_desktop_user_id(request),
+                content=body.content,
             )
         )
         return _success(value.model_dump(mode="json"))

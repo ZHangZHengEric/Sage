@@ -16,7 +16,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+from pydantic import Field, SecretStr, model_validator
 
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.errors import (
@@ -36,6 +38,7 @@ from sagents.v2.tool.contracts import (
     ToolDefinition,
     ToolExecutionResult,
 )
+from sagents.v2.tool._idempotency import call_fingerprint
 
 
 class McpServerConfig(StrictModel):
@@ -44,7 +47,7 @@ class McpServerConfig(StrictModel):
     name: str = Field(min_length=1, max_length=255)
     protocol: Literal["stdio", "sse", "streamable_http"]
     url: str | None = None
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     command: str | None = None
     args: tuple[str, ...] = ()
     env: dict[str, str] = Field(default_factory=dict)
@@ -88,7 +91,9 @@ class McpToolPlugin:
 
     plugin_id = "sage.tool.mcp"
     name = "MCP Tool provider"
-    description = "Bridges configured MCP servers into the Sage Tool catalog and executor."
+    description = (
+        "Bridges configured MCP servers into the Sage Tool catalog and executor."
+    )
 
     def __init__(
         self,
@@ -101,6 +106,10 @@ class McpToolPlugin:
         self._routes: dict[str, tuple[McpServerConfig, str]] = {}
         self._definitions: dict[str, ToolDefinition] = {}
         self._results: dict[str, ToolExecutionResult] = {}
+        self._failures: dict[str, RuntimeErrorInfo] = {}
+        self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
+        self._operation_keys: dict[str, str] = {}
+        self._call_fingerprints: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
@@ -139,6 +148,15 @@ class McpToolPlugin:
                 )
                 if not isinstance(schema, dict):
                     schema = {"type": "object", "properties": {}}
+                try:
+                    Draft202012Validator.check_schema(schema)
+                except SchemaError as exc:
+                    raise self._error(
+                        "mcp.tool_schema_invalid",
+                        f"MCP tool {public_name!r} returned an invalid input schema: {exc.message}",
+                        ErrorCategory.PROVIDER_PERMANENT,
+                        metadata={"server": server.name, "tool": remote_name},
+                    ) from exc
                 discovered[public_name] = ToolDefinition(
                     name=public_name,
                     description=str(_value(raw, "description", "") or ""),
@@ -172,15 +190,48 @@ class McpToolPlugin:
         self, call: ToolCall, context: RequestContext
     ) -> ToolExecutionResult:
         del context
+        fingerprint = call_fingerprint(call)
         async with self._lock:
+            bound = self._call_fingerprints.get(call.idempotency_key)
+            if bound is not None and bound != fingerprint:
+                raise self._error(
+                    "tool.idempotency_conflict",
+                    "idempotency key was already bound to a different Tool call",
+                    ErrorCategory.CONFLICT,
+                    metadata={"side_effect_state": "not_applied"},
+                )
             previous = self._results.get(call.idempotency_key)
+            failure = self._failures.get(call.idempotency_key)
             route = self._routes.get(call.tool_name)
-        if previous is not None:
-            return previous
-        if route is None:
-            raise self._error(
-                "tool.not_found", f"MCP tool {call.tool_name!r} is not registered"
-            )
+            definition = self._definitions.get(call.tool_name)
+            if previous is not None:
+                return previous
+            if failure is not None:
+                raise SageV2Error(failure)
+            if route is None or definition is None:
+                raise self._error(
+                    "tool.not_found", f"MCP tool {call.tool_name!r} is not registered"
+                )
+            try:
+                Draft202012Validator(definition.input_schema).validate(call.arguments)
+            except ValidationError as exc:
+                raise self._error(
+                    "tool.arguments_invalid",
+                    exc.message,
+                    ErrorCategory.VALIDATION,
+                    metadata={"side_effect_state": "not_applied"},
+                ) from exc
+            future = self._inflight.get(call.idempotency_key)
+            if future is None:
+                future = asyncio.get_running_loop().create_future()
+                self._inflight[call.idempotency_key] = future
+                self._operation_keys[call.operation_id] = call.idempotency_key
+                self._call_fingerprints[call.idempotency_key] = fingerprint
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            return await asyncio.shield(future)
         server, remote_name = route
         try:
             async with self.session_factory(server) as session:
@@ -188,30 +239,49 @@ class McpToolPlugin:
                     session.call_tool(remote_name, call.arguments),
                     timeout=server.timeout_seconds,
                 )
+        except asyncio.CancelledError as exc:
+            async with self._lock:
+                if not future.done():
+                    future.set_exception(exc)
+                    future.exception()
+            raise
         except Exception as exc:
             # The request may have reached the remote server. Do not retry here;
             # AgentLoop will persist an uncertain side-effect barrier.
-            raise self._provider_error("mcp.call_failed", server, exc) from exc
-        result = ToolExecutionResult(
-            tool_call_id=call.tool_call_id,
-            operation_id=call.operation_id,
-            content=self._content(response),
-            error=(
-                RuntimeErrorInfo(
-                    code="mcp.tool_error",
-                    category=ErrorCategory.PROVIDER_PERMANENT,
-                    message=self._error_text(response),
-                    safe_to_resume=True,
-                    metadata={"server": server.name, "tool": remote_name},
-                )
-                if bool(_value(response, "isError", False))
-                else None
-            ),
-            metadata={"mcp_server": server.name, "mcp_tool": remote_name},
-        )
-        async with self._lock:
-            self._results[call.idempotency_key] = result
-        return result
+            error = self._provider_error("mcp.call_failed", server, exc)
+            async with self._lock:
+                self._failures[call.idempotency_key] = error.info
+                if not future.done():
+                    future.set_exception(error)
+                    future.exception()
+            raise error from exc
+        else:
+            result = ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=self._content(response),
+                error=(
+                    RuntimeErrorInfo(
+                        code="mcp.tool_error",
+                        category=ErrorCategory.PROVIDER_PERMANENT,
+                        message=self._error_text(response),
+                        safe_to_resume=True,
+                        metadata={"server": server.name, "tool": remote_name},
+                    )
+                    if bool(_value(response, "isError", False))
+                    else None
+                ),
+                metadata={"mcp_server": server.name, "mcp_tool": remote_name},
+            )
+            async with self._lock:
+                self._results[call.idempotency_key] = result
+                if not future.done():
+                    future.set_result(result)
+            return result
+        finally:
+            async with self._lock:
+                self._inflight.pop(call.idempotency_key, None)
+                self._operation_keys.pop(call.operation_id, None)
 
     async def reconcile(
         self, operation_id: str, context: RequestContext
@@ -226,9 +296,17 @@ class McpToolPlugin:
                 ),
                 None,
             )
+            key = self._operation_keys.get(operation_id)
+            pending = key in self._inflight if key is not None else False
         return ReconcileResult(
             operation_id=operation_id,
-            state=(ReconcileState.SUCCEEDED if result else ReconcileState.UNKNOWN),
+            state=(
+                ReconcileState.SUCCEEDED
+                if result
+                else ReconcileState.PENDING
+                if pending
+                else ReconcileState.UNKNOWN
+            ),
             result=result,
         )
 
@@ -303,7 +381,7 @@ class McpToolPlugin:
                 category=category,
                 message=message,
                 retryable=category == ErrorCategory.PROVIDER_TRANSIENT,
-                safe_to_resume=True,
+                safe_to_resume=category != ErrorCategory.UNCERTAIN_SIDE_EFFECT,
                 metadata=dict(metadata or {}),
             )
         )
@@ -321,7 +399,11 @@ async def _sdk_session(config: McpServerConfig) -> AsyncIterator[McpClientSessio
     except ImportError as exc:  # pragma: no cover - depends on host packaging
         raise RuntimeError("the optional 'mcp' package is not installed") from exc
 
-    headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else None
+    headers = (
+        {"Authorization": f"Bearer {config.api_key.get_secret_value()}"}
+        if config.api_key
+        else None
+    )
     async with AsyncExitStack() as stack:
         if config.protocol == "stdio":
             if not config.command:

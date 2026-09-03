@@ -8,7 +8,7 @@ import json
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock
-from sagents.v2.model import ModelMessage, ModelRequest
+from sagents.v2.model.contracts import ModelMessage, ModelRequest
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.model.provider import (
     DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
@@ -50,10 +50,10 @@ class LLMMemoryRecallQueryGenerator:
         )
         prompt = (
             "提取 3-10 个关键词。优先保留项目名、文件名、路径、函数名、产品名和核心需求；忽略客套、运行时信息和已完成的旧动作。"
-            "只返回 JSON：{\"query\":\"检索词\"}\n\n用户请求：\n"
+            '只返回 JSON：{"query":"检索词"}\n\n用户请求：\n'
             if chinese
             else "Extract 3-10 keywords. Prefer project names, filenames, paths, functions, products, and the core request; ignore chatter, runtime details, and completed old actions. "
-            "Return JSON only: {\"query\":\"search terms\"}\n\nUser request:\n"
+            'Return JSON only: {"query":"search terms"}\n\nUser request:\n'
         )
         request = ModelRequest(
             request_id=new_id("memory_query"),

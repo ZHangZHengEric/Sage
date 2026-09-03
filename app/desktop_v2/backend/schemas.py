@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -115,11 +115,38 @@ class ModelProviderCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class RunMessageTextContent(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class RunMessageReferenceContent(BaseModel):
+    type: Literal["reference"] = "reference"
+    name: str
+    path: str
+    quote: str = ""
+    is_directory: bool = False
+    citation_label: str | None = None
+
+
+RunMessageContent = Annotated[
+    RunMessageTextContent | RunMessageReferenceContent,
+    Field(discriminator="type"),
+]
+
+
 class RunMessage(BaseModel):
     # System/developer instructions are composed by trusted Context providers.
     # The Desktop request boundary accepts conversation facts only.
     role: Literal["user", "assistant"]
-    text: str
+    text: str = ""
+    content: list[RunMessageContent] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_content(self):
+        if not self.text.strip() and not self.content:
+            raise ValueError("message must include text or content")
+        return self
 
 
 class DesktopRunRequest(BaseModel):
@@ -158,4 +185,7 @@ __all__ = [
     "ModelProviderCreate",
     "ModelProviderPatch",
     "RunMessage",
+    "RunMessageContent",
+    "RunMessageReferenceContent",
+    "RunMessageTextContent",
 ]

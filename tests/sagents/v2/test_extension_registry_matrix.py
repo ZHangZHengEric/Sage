@@ -13,7 +13,9 @@ from sagents.v2.agent.policy import (
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
+    CapabilityRequirement,
     ExtensionDescriptor,
+    ExtensionHost,
     ExtensionRegistration,
     ExtensionRegistry,
     ExtensionScope,
@@ -97,13 +99,13 @@ def test_builtin_inventory_contains_only_real_factories():
         is False
     )
     assert (
-        inventory["sage.scheduler.filesystem"]["capabilities"]
-        ["durable_across_process_restart"]
+        inventory["sage.scheduler.filesystem"]["capabilities"][
+            "durable_across_process_restart"
+        ]
         is True
     )
     assert (
-        inventory["sage.scheduler.filesystem"]["capabilities"]
-        ["multi_process_writes"]
+        inventory["sage.scheduler.filesystem"]["capabilities"]["multi_process_writes"]
         is False
     )
     assert (
@@ -111,8 +113,7 @@ def test_builtin_inventory_contains_only_real_factories():
         is False
     )
     assert (
-        inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"]
-        is False
+        inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"] is False
     )
     assert inventory["sage.tool.ephemeral"]["capabilities"]["durable"] is False
     assert inventory["sage.tool.ephemeral"]["capabilities"]["testing"] is True
@@ -157,6 +158,45 @@ def test_every_registered_plugin_has_a_pydantic_config_boundary():
         registration.config_model.model_json_schema()["type"] == "object"
         for registration in registry.registrations()
     )
+    assert all(
+        registration.descriptor.config_schema.get("additionalProperties") is False
+        for registration in registry.registrations()
+    )
+
+
+@pytest.mark.parametrize(
+    ("capability", "plugin_id"),
+    [
+        ("session-memory.provider", "sage.session-memory.sqlite-bm25"),
+        ("agent.continuation-policy", "sage.agent.continuation.llm-judge"),
+        ("context.reducer", "sage.context.reducer.persistent-summary"),
+        ("context.summarizer", "sage.context.summarizer.model"),
+        ("observability.log-sink", "sage.logging.filesystem"),
+    ],
+)
+def test_official_plugin_required_config_fails_during_planning(capability, plugin_id):
+    host = ExtensionHost(builtin_extension_registry())
+
+    with pytest.raises(SageV2Error) as caught:
+        host.plan(
+            (CapabilityRequirement(capability=capability, api_version=">=2,<3"),),
+            selections={capability: plugin_id},
+        )
+
+    assert caught.value.info.code == "extension.config_invalid"
+
+
+def test_no_config_official_plugin_rejects_unknown_fields_during_planning():
+    host = ExtensionHost(builtin_extension_registry())
+
+    with pytest.raises(SageV2Error) as caught:
+        host.plan(
+            (CapabilityRequirement(capability="artifact.store", api_version=">=2,<3"),),
+            selections={"artifact.store": "sage.artifact.ephemeral"},
+            configs={"sage.artifact.ephemeral": {"typo": True}},
+        )
+
+    assert caught.value.info.code == "extension.config_invalid"
 
 
 def test_duplicate_registration_is_rejected():

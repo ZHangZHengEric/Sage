@@ -33,6 +33,7 @@ from sagents.v2.contracts.commands import (
     StartRun,
 )
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
     ActorRef,
@@ -46,6 +47,16 @@ from sagents.v2.contracts.session_commit import (
     SessionCommitProposalStatus,
 )
 from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.runtime.execution import (
+    ExecutionResourceRecord,
+    ExecutionResourceState,
+)
+from sagents.v2.runtime.execution.sandbox import (
+    FileOperation,
+    FileSystemPolicy,
+    ResolvedSandboxSpec,
+    SandboxRef,
+)
 from sagents.v2.flow import FlowNodeResult, FlowRuntime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
@@ -561,6 +572,148 @@ def test_snapshot_checksum_is_compatible_with_new_optional_fields(tmp_path):
     restored = asyncio.run(reopened.get_run(created.handle.run_id))
     assert restored.state == RunState.QUEUED
     asyncio.run(reopened.close())
+
+
+def test_snapshot_checksum_uses_stable_file_operation_order(tmp_path):
+    path = tmp_path / "session-store"
+
+    async def create():
+        store = FilesystemSessionStore(path)
+        created = await store.create_run(command(), CONTEXT)
+        spec = ResolvedSandboxSpec(
+            spec_hash="sha256:sandbox-spec",
+            architecture="native",
+            filesystem=FileSystemPolicy(
+                allowed_operations=frozenset(FileOperation),
+            ),
+            policy_hash="sha256:sandbox-policy",
+        )
+        resource = ExecutionResourceRecord(
+            run_id=created.handle.run_id,
+            generation=1,
+            sandbox_ref=SandboxRef(
+                sandbox_id="sandbox_1",
+                provider_id="sandbox.test",
+                provider_version="1",
+                tenant_id="tenant_1",
+                owner_run_id=created.handle.run_id,
+                spec_hash=spec.spec_hash,
+                policy_hash=spec.policy_hash,
+            ),
+            sandbox_spec=spec,
+            run_resolved_spec_hash="sha256:agent",
+            state=ExecutionResourceState.ACTIVE,
+            updated_at=utc_now(),
+        )
+        store._storage_recovery_required.add(created.handle.session_id)
+        await store.commit_execution_resource(
+            record=resource,
+            expected_run_revision=0,
+            expected_resource_revision=None,
+            event_type="sandbox.ready",
+            context=CONTEXT,
+            idempotency_key="sandbox-ready",
+        )
+        await store.close()
+        return created
+
+    created = asyncio.run(create())
+    snapshot = next((path / "sessions").glob("*/state.json"))
+    envelope = json.loads(snapshot.read_text(encoding="utf-8"))
+    unsigned = {key: value for key, value in envelope.items() if key != "checksum"}
+    expected_operations = sorted(operation.value for operation in FileOperation)
+
+    assert envelope["checksum"] == FilesystemSessionStore._checksum(unsigned)
+    assert (
+        envelope["state"]["execution_resources"][0]["sandbox_spec"]["filesystem"][
+            "allowed_operations"
+        ]
+        == expected_operations
+    )
+
+    reopened = FilesystemSessionStore(path)
+    asyncio.run(reopened.get_session(created.handle.session_id))
+    restored = asyncio.run(reopened.get_execution_resource(created.handle.run_id))
+    assert restored is not None
+    assert restored.sandbox_spec.filesystem.allowed_operations == frozenset(
+        FileOperation
+    )
+    asyncio.run(reopened.close())
+
+
+def test_snapshot_repairs_known_legacy_file_operation_order_checksum(tmp_path):
+    path = tmp_path / "session-store"
+
+    async def create():
+        store = FilesystemSessionStore(path)
+        created = await store.create_run(command(), CONTEXT)
+        spec = ResolvedSandboxSpec(
+            spec_hash="sha256:sandbox-spec",
+            architecture="native",
+            filesystem=FileSystemPolicy(
+                allowed_operations=frozenset(FileOperation),
+            ),
+            policy_hash="sha256:sandbox-policy",
+        )
+        store._storage_recovery_required.add(created.handle.session_id)
+        await store.commit_execution_resource(
+            record=ExecutionResourceRecord(
+                run_id=created.handle.run_id,
+                generation=1,
+                sandbox_ref=SandboxRef(
+                    sandbox_id="sandbox_1",
+                    provider_id="sandbox.test",
+                    provider_version="1",
+                    tenant_id="tenant_1",
+                    owner_run_id=created.handle.run_id,
+                    spec_hash=spec.spec_hash,
+                    policy_hash=spec.policy_hash,
+                ),
+                sandbox_spec=spec,
+                run_resolved_spec_hash="sha256:agent",
+                state=ExecutionResourceState.ACTIVE,
+                updated_at=utc_now(),
+            ),
+            expected_run_revision=0,
+            expected_resource_revision=None,
+            event_type="sandbox.ready",
+            context=CONTEXT,
+            idempotency_key="sandbox-ready",
+        )
+        await store.close()
+        return created
+
+    created = asyncio.run(create())
+    snapshot = next((path / "sessions").glob("*/state.json"))
+    envelope = json.loads(snapshot.read_text(encoding="utf-8"))
+    legacy_unsigned = {
+        key: value for key, value in envelope.items() if key != "checksum"
+    }
+    legacy_order = list(
+        reversed(sorted(operation.value for operation in FileOperation))
+    )
+    legacy_unsigned["state"]["execution_resources"][0]["sandbox_spec"]["filesystem"][
+        "allowed_operations"
+    ] = legacy_order
+    legacy_unsigned["state"]["execution_resource_command_results"][0]["record"][
+        "sandbox_spec"
+    ]["filesystem"]["allowed_operations"] = legacy_order
+    envelope["checksum"] = FilesystemSessionStore._checksum(legacy_unsigned)
+    snapshot.write_text(
+        json.dumps(envelope, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    reopened = FilesystemSessionStore(path)
+    restored = asyncio.run(reopened.get_session(created.handle.session_id))
+    asyncio.run(reopened.close())
+
+    assert restored.session_id == created.handle.session_id
+    repaired = json.loads(snapshot.read_text(encoding="utf-8"))
+    repaired_unsigned = {
+        key: value for key, value in repaired.items() if key != "checksum"
+    }
+    assert repaired["checksum"] == FilesystemSessionStore._checksum(repaired_unsigned)
 
 
 def test_interrupted_temporary_snapshot_is_ignored(tmp_path):

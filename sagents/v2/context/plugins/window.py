@@ -4,15 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 from sagents.v2.context.contracts import ContextProjection
-from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
 )
+from sagents.v2.model.contracts import ModelMessage
+
+
+class _JsonHeuristicTokenEstimator:
+    """Plugin-local fallback used when the host does not inject an estimator."""
+
+    estimator_id = "window-json-heuristic"
+
+    def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
+        total = 0
+        for message in messages:
+            payload = message.model_dump(mode="json")
+            encoded = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            total += 6 + math.ceil(len(encoded) / 4.0)
+        return total
 
 
 class WindowContextReducer:
@@ -23,7 +43,7 @@ class WindowContextReducer:
     description = "Drops oldest units to keep the prompt inside a token window."
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
-        self.estimator = estimator or JsonHeuristicTokenEstimator()
+        self.estimator = estimator or _JsonHeuristicTokenEstimator()
 
     async def reduce(self, messages, budget, *, scope=None):
         maximum = (

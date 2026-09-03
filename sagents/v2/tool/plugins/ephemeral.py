@@ -22,6 +22,7 @@ from sagents.v2.tool.contracts import (
     ToolDefinition,
     ToolExecutionResult,
 )
+from sagents.v2.tool._idempotency import call_fingerprint
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -113,6 +114,7 @@ class InMemoryToolExecutor:
         self._results: dict[str, ToolExecutionResult] = {}
         self._inflight: dict[str, asyncio.Future[ToolExecutionResult]] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
+        self._call_fingerprints: dict[str, str] = {}
         self.calls: list[ToolCall] = []
 
     async def execute(
@@ -142,7 +144,21 @@ class InMemoryToolExecutor:
                 )
             ) from exc
 
+        fingerprint = call_fingerprint(call)
         async with self._lock:
+            bound = self._call_fingerprints.get(call.idempotency_key)
+            if bound is not None and bound != fingerprint:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="tool.idempotency_conflict",
+                        category=ErrorCategory.CONFLICT,
+                        message=(
+                            "idempotency key was already bound to a different Tool call"
+                        ),
+                        safe_to_resume=True,
+                        metadata={"side_effect_state": "not_applied"},
+                    )
+                )
             existing = self._results.get(call.idempotency_key)
             if existing is not None:
                 return existing
@@ -150,6 +166,7 @@ class InMemoryToolExecutor:
             if future is None:
                 future = asyncio.get_running_loop().create_future()
                 self._inflight[call.idempotency_key] = future
+                self._call_fingerprints[call.idempotency_key] = fingerprint
                 owner = True
                 self.calls.append(call)
                 current_task = asyncio.current_task()

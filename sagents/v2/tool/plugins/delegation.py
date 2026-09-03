@@ -21,12 +21,9 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.contracts.items import JsonBlock
-from sagents.v2.tool import (
-    DecoratedToolProvider,
-    ToolExecutionResult,
-    ToolInvocation,
-    tool,
-)
+from sagents.v2.tool.contracts import ToolExecutionResult
+from sagents.v2.tool.decorated import DecoratedToolProvider, ToolInvocation
+from sagents.v2.tool.decorators import tool
 
 
 _DELEGATION_INPUT_SCHEMA: dict[str, Any] = {
@@ -114,6 +111,7 @@ class MultiAgentToolPlugin:
             "type": "object",
             "properties": {"coordinator": {}, "runtime": {}},
             "required": ["coordinator", "runtime"],
+            "additionalProperties": False,
         },
         capabilities={
             "decorated_tools": True,

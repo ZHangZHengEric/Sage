@@ -67,6 +67,11 @@ class SlowCompletionModel:
         return events()
 
 
+class UnexpectedModel:
+    def stream(self, request):
+        raise AssertionError(f"model should not be called: {request.request_id}")
+
+
 def request(run_id="run_1", *, messages=()) -> ToolSelectionRequest:
     return ToolSelectionRequest(run_id=run_id, tools=TOOLS, messages=messages)
 
@@ -109,9 +114,7 @@ def test_recent_policy_puts_recent_calls_first_then_fills_the_limit():
         ModelMessage(
             role="assistant",
             tool_calls=(
-                ModelToolCall(
-                    tool_call_id="call_1", name="send_email", arguments={}
-                ),
+                ModelToolCall(tool_call_id="call_1", name="send_email", arguments={}),
                 ModelToolCall(
                     tool_call_id="call_2", name="weather_lookup", arguments={}
                 ),
@@ -187,6 +190,23 @@ async def test_llm_policy_accepts_an_explicit_empty_tool_selection():
 
 
 @pytest.mark.asyncio
+async def test_llm_policy_skips_model_when_the_catalog_fits_the_visible_limit():
+    policy = LLMToolSelectionPolicy({"max_visible_tools": len(TOOLS)})
+    messages = user_message("inspect a file")
+
+    await policy.prepare(
+        ToolSelectionPrepareContext(
+            run_id="run_1", tools=TOOLS, messages=messages, model=UnexpectedModel()
+        )
+    )
+
+    result = policy.select(request(messages=messages))
+    assert {tool.name for tool in result.tools} == {tool.name for tool in TOOLS}
+    assert len(result.tools) == len(TOOLS)
+    assert result.strategy == "direct.catalog_within_limit"
+
+
+@pytest.mark.asyncio
 async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed_json('{"tools":["missing"]}'),)),)
@@ -195,16 +215,14 @@ async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
 
     with pytest.raises(SageV2Error) as caught:
         await policy.prepare(
-            ToolSelectionPrepareContext(
-                run_id="run_1", tools=TOOLS, model=model
-            )
+            ToolSelectionPrepareContext(run_id="run_1", tools=TOOLS, model=model)
         )
 
     assert caught.value.info.code == "tool_selection.model_output_invalid"
 
 
 @pytest.mark.asyncio
-async def test_llm_policy_reports_timeout_without_changing_strategy():
+async def test_llm_policy_reports_timeout_without_changing_selection_strategy():
     policy = LLMToolSelectionPolicy(
         {"max_visible_tools": 2, "model_timeout_seconds": 0.01}
     )
@@ -219,27 +237,31 @@ async def test_llm_policy_reports_timeout_without_changing_strategy():
 
     assert caught.value.info.code == "tool_selection.model_timeout"
     assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
-    assert caught.value.info.metadata["plugin_id"] == "sage.tool-selection.llm"
+    assert caught.value.info.retryable is True
+    assert caught.value.info.metadata == {
+        "plugin_id": "sage.tool-selection.llm",
+        "timeout_seconds": 0.01,
+    }
 
 
 @pytest.mark.asyncio
-async def test_llm_policy_timeout_only_bounds_the_first_stream_event():
+async def test_llm_policy_timeout_bounds_the_entire_stream():
     policy = LLMToolSelectionPolicy(
         {"max_visible_tools": 2, "model_timeout_seconds": 0.01}
     )
     messages = user_message("look up the weather")
 
-    await policy.prepare(
-        ToolSelectionPrepareContext(
-            run_id="run_1",
-            tools=TOOLS,
-            messages=messages,
-            model=SlowCompletionModel(),
+    with pytest.raises(SageV2Error) as caught:
+        await policy.prepare(
+            ToolSelectionPrepareContext(
+                run_id="run_1",
+                tools=TOOLS,
+                messages=messages,
+                model=SlowCompletionModel(),
+            )
         )
-    )
 
-    result = policy.select(request(messages=messages))
-    assert "weather_lookup" in {tool.name for tool in result.tools}
+    assert caught.value.info.code == "tool_selection.model_timeout"
 
 
 def test_legacy_expert_parameters_are_removed_during_migration():
@@ -253,7 +275,7 @@ def test_legacy_expert_parameters_are_removed_during_migration():
     )
     assert config.model_dump() == {
         "max_visible_tools": 7,
-        "model_timeout_seconds": 6.0,
+        "model_timeout_seconds": 60.0,
     }
 
 
@@ -271,3 +293,16 @@ def test_expansion_is_bounded_and_restorable():
     restored.restore_expanded_tools("run_1", policy.expanded_tools("run_1"))
     after_restore = restored.select(request())
     assert "send_email" in {tool.name for tool in after_restore.tools}
+
+
+def test_expansion_fails_closed_before_a_catalog_is_known():
+    policy = LexicalToolSelectionPolicy({"max_visible_tools": 3})
+
+    result = policy.expand_tools(run_id="run_unknown", names=("send_email",))
+
+    assert result == {
+        "status": "error",
+        "code": "tool_selection.unknown_tools",
+        "unknown_tools": ["send_email"],
+    }
+    assert policy.expanded_tools("run_unknown") == ()

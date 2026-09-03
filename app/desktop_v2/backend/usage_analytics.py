@@ -98,7 +98,15 @@ async def build_usage_overview(
 
     agent_records = await self.catalog.list_agents(user_id)
     agent_names = {value.agent_id: value.name for value in agent_records}
-    indexed_sessions = await self._authorized_indexed_sessions(user_id)
+    skipped_indexed_sessions: set[str] = set()
+    indexed_sessions = await self._authorized_indexed_sessions(
+        user_id,
+        skipped_unreadable_sessions=skipped_indexed_sessions,
+    )
+    # Authorization cannot be established from a corrupt authoritative
+    # snapshot, so neither its events nor its diagnostics may be aggregated.
+    skipped_event_sessions.update(skipped_indexed_sessions)
+    skipped_diagnostic_sessions.update(skipped_indexed_sessions)
 
     for session in indexed_sessions:
         session_id = session.session_id

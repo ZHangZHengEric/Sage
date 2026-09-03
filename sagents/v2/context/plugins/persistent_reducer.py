@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import math
+
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.context.contracts import (
     ContextBudget,
     ContextProjection,
     ContextReductionScope,
     ContextUnitCompactor,
-)
-from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
-from sagents.v2.context.plugins.summarizer_extractive import (
-    ExtractiveConversationSummarizer,
 )
 from sagents.v2.context.summary import (
     ConversationSummarizer,
@@ -26,9 +25,117 @@ from sagents.v2.context.summary import (
     create_summary,
     message_digest,
 )
-from sagents.v2.context.plugins.reference import ReferenceContextUnitCompactor
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model.contracts import ModelMessage
+
+
+class _JsonHeuristicTokenEstimator:
+    estimator_id = "persistent-summary-json-heuristic"
+
+    def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
+        total = 0
+        for message in messages:
+            encoded = json.dumps(
+                message.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            total += 6 + math.ceil(len(encoded) / 4.0)
+        return total
+
+
+class _ExtractiveConversationSummarizer:
+    async def summarize(self, request: SummarizationRequest) -> str:
+        labels = {
+            "en": (
+                "Previous summary:",
+                "New history:",
+                "Tool calls:",
+                "[...history condensed...]",
+            ),
+            "zh": ("之前的摘要：", "新增历史：", "工具调用：", "[……历史已压缩……]"),
+            "pt": (
+                "Resumo anterior:",
+                "Novo histórico:",
+                "Chamadas de ferramentas:",
+                "[...histórico condensado...]",
+            ),
+        }[request.response_language]
+        lines = []
+        if request.previous_summary:
+            lines.extend([labels[0], request.previous_summary.strip(), labels[1]])
+        for message in request.messages:
+            values = []
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    values.append(block.text)
+                elif isinstance(block, JsonBlock):
+                    values.append(
+                        json.dumps(block.value, ensure_ascii=False, sort_keys=True)
+                    )
+                else:
+                    values.append(
+                        json.dumps(block.model_dump(mode="json"), ensure_ascii=False)
+                    )
+            content = "\n".join(values)
+            if message.tool_calls:
+                calls = ", ".join(
+                    f"{call.name}({json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)})"
+                    for call in message.tool_calls
+                )
+                content = f"{content}\n{labels[2]} {calls}".strip()
+            lines.append(f"{message.role.upper()}: {content}".strip())
+        maximum = max(256, request.target_tokens * 4)
+        value = "\n".join(lines).strip()
+        if len(value) <= maximum:
+            return value
+        head = value[: maximum // 3]
+        tail = value[-(maximum - len(head) - 32) :]
+        return f"{head}\n{labels[3]}\n{tail}"
+
+
+class _ReferenceContextUnitCompactor:
+    def __init__(self, estimator: TokenEstimator) -> None:
+        self.estimator = estimator
+
+    async def compact(
+        self, unit: tuple[ModelMessage, ...]
+    ) -> tuple[ModelMessage, ...] | None:
+        result = []
+        changed = False
+        for message in unit:
+            reference = message.metadata.get("context_reference")
+            if message.role != "tool" or not isinstance(reference, (dict, str)):
+                result.append(message)
+                continue
+            encoded = json.dumps(
+                reference,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            replacement = message.model_copy(
+                update={
+                    "content": (
+                        TextBlock(
+                            text=f"<tool_result_reference>{encoded}</tool_result_reference>"
+                        ),
+                    ),
+                    "metadata": {
+                        **message.metadata,
+                        "context_compacted_to_reference": True,
+                    },
+                }
+            )
+            if self.estimator.estimate((replacement,)) < self.estimator.estimate(
+                (message,)
+            ):
+                result.append(replacement)
+                changed = True
+            else:
+                result.append(message)
+        return tuple(result) if changed else None
 
 
 class PersistentSummaryContextReducer:
@@ -58,13 +165,15 @@ class PersistentSummaryContextReducer:
             raise ValueError("summary_target_tokens must be positive")
         if protected_recent_units < 1:
             raise ValueError("protected_recent_units must be at least one")
+        if max_summary_source_tokens <= 0:
+            raise ValueError("max_summary_source_tokens must be positive")
         self.store = store
-        self.summarizer = summarizer or ExtractiveConversationSummarizer()
-        self.estimator = estimator or JsonHeuristicTokenEstimator()
+        self.summarizer = summarizer or _ExtractiveConversationSummarizer()
+        self.estimator = estimator or _JsonHeuristicTokenEstimator()
         self.summary_target_tokens = summary_target_tokens
         self.protected_recent_units = protected_recent_units
         self.max_summary_source_tokens = max_summary_source_tokens
-        self.unit_compactor = unit_compactor or ReferenceContextUnitCompactor(
+        self.unit_compactor = unit_compactor or _ReferenceContextUnitCompactor(
             self.estimator
         )
 

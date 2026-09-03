@@ -11,6 +11,7 @@ from app.desktop_v2.backend.package import (
 from app.desktop_v2.backend.run_context import _virtual_workspace_root
 from app.desktop_v2.backend.schemas import DesktopV2Settings
 from sagents.v2.runtime.execution.sandbox import FileSystemMode
+from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.tool import ToolSelectionConfig
 
 
@@ -38,6 +39,8 @@ _REASONING_DISABLE_EXTRAS: dict[str, dict[str, Any]] = {
         "chat_template_kwargs": {"enable_thinking": False}
     },
 }
+
+
 def _agent_memory_enabled(
     agent: Any, memory_plugin_id: str, session_memory_plugin_id: str
 ) -> bool:
@@ -89,7 +92,7 @@ def _continuation_component_config(plugin_id: str) -> dict[str, Any]:
             "status_source": "none",
             "explicit_statuses": [],
             "uses_llm_judge": True,
-            "timeout_seconds": 6.0,
+            "timeout_seconds": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
             "judge_failure": "propagate_error",
         }
     if plugin_id == "sage.agent.continuation.hybrid":

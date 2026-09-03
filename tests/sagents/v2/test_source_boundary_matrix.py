@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import shutil
 import subprocess
@@ -267,6 +268,123 @@ def test_observability_sinks_do_not_import_each_other():
         imported = {target for _, target in _import_targets(path)}
         offenders = sorted((set(plugin_modules.values()) - {module}) & imported)
         assert offenders == [], f"{path.name} imports {offenders}"
+
+
+def test_plugin_implementations_do_not_import_siblings():
+    """A plugin may use other domains, but never another plugin in its domain."""
+
+    offenders: list[str] = []
+    for plugin_dir in sorted(V2_ROOT.rglob("plugins")):
+        if not plugin_dir.is_dir():
+            continue
+        prefix = f"{_module_name(plugin_dir / '__init__.py')}."
+        for path in sorted(plugin_dir.glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            own_module = _module_name(path)
+            for line, module in _import_targets(path):
+                if module.startswith(prefix) and module != own_module:
+                    offenders.append(f"{path.relative_to(V2_ROOT)}:{line}: {module}")
+
+    assert offenders == []
+
+
+@pytest.mark.timeout(30)
+def test_importing_one_plugin_does_not_eager_load_siblings():
+    """Package facades must not turn one plugin import into sibling fan-out."""
+
+    modules = sorted(
+        _module_name(path)
+        for plugin_dir in V2_ROOT.rglob("plugins")
+        if plugin_dir.is_dir()
+        for path in plugin_dir.glob("*.py")
+        if path.name != "__init__.py"
+    )
+    script = r"""
+import importlib
+import json
+import sys
+
+target = sys.argv[1]
+plugin_modules = set(json.loads(sys.argv[2]))
+domain_prefix = target.split(".plugins.", 1)[0] + ".plugins."
+importlib.import_module(target)
+loaded = sorted(
+    name
+    for name in plugin_modules.intersection(sys.modules)
+    if name.startswith(domain_prefix) and name != target
+)
+print(json.dumps(loaded))
+"""
+    offenders: list[str] = []
+    encoded_modules = json.dumps(modules)
+    for module in modules:
+        result = subprocess.run(
+            [sys.executable, "-c", script, module, encoded_modules],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"{module}: {result.stderr}"
+        loaded = json.loads(result.stdout)
+        if loaded:
+            offenders.append(f"{module}: {loaded}")
+
+    assert offenders == []
+
+
+def test_tool_selection_plugins_own_their_state_implementation():
+    """Selection plugins must not inherit a shared plugin implementation."""
+
+    selection_core = V2_ROOT / "tool" / "selection.py"
+    assert "BaseToolSelectionPolicy" not in selection_core.read_text(encoding="utf-8")
+    for path in sorted((V2_ROOT / "tool" / "plugins").glob("selection_*.py")):
+        imports = {module for _, module in _import_targets(path)}
+        assert "sagents.v2.tool.plugins" not in imports
+
+
+def test_scheduler_plugins_own_their_state_machine_implementation():
+    """Scheduler behavior stays inside each plugin instead of a shared extraction."""
+
+    scheduler_root = V2_ROOT / "runtime" / "execution" / "scheduler"
+    assert not (scheduler_root / "state_machine.py").exists()
+    ephemeral = (scheduler_root / "plugins" / "ephemeral.py").read_text(
+        encoding="utf-8"
+    )
+    filesystem = (scheduler_root / "plugins" / "filesystem.py").read_text(
+        encoding="utf-8"
+    )
+    assert "class InMemoryScheduler:" in ephemeral
+    assert "class _FilesystemSchedulerStateMachine:" in filesystem
+
+
+def test_continuation_plugins_do_not_inherit_each_other():
+    """Each continuation plugin owns its policy pipeline."""
+
+    path = V2_ROOT / "agent" / "policy" / "continuation.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    plugin_classes = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and any(
+            isinstance(member, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "plugin_id"
+                for target in member.targets
+            )
+            for member in node.body
+        )
+    }
+    inherited_plugins = {
+        node.name: ast.unparse(base)
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name in plugin_classes
+        for base in node.bases
+        if ast.unparse(base) in plugin_classes
+    }
+    assert inherited_plugins == {}
 
 
 def test_agent_loop_engine_does_not_depend_on_observability():

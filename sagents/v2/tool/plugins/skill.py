@@ -32,6 +32,7 @@ class SkillToolPlugin:
             "type": "object",
             "properties": {"loader": {}, "language": {"type": "string"}},
             "required": ["loader"],
+            "additionalProperties": False,
         },
         capabilities={"decorated_tools": True},
         built_in=True,

@@ -29,10 +29,13 @@ class ExtensionRegistry:
                 )
             )
         if registration.config_model is None:
-            model_name = "".join(
-                value.capitalize()
-                for value in plugin_id.replace("-", ".").split(".")
-            ) + "Config"
+            model_name = (
+                "".join(
+                    value.capitalize()
+                    for value in plugin_id.replace("-", ".").split(".")
+                )
+                + "Config"
+            )
             schema = registration.descriptor.config_schema or {
                 "type": "object",
                 "properties": {},
@@ -104,14 +107,24 @@ T = TypeVar("T")
 
 def _python_type(schema: dict[str, Any]) -> type[Any]:
     value = schema.get("type")
-    return {
+    types = {
         "string": str,
         "integer": int,
         "number": float,
         "boolean": bool,
         "array": list,
         "object": dict,
-    }.get(value, Any)
+        "null": type(None),
+    }
+    if isinstance(value, list):
+        members = tuple(types.get(item, Any) for item in value)
+        if not members or Any in members:
+            return Any
+        resolved = members[0]
+        for member in members[1:]:
+            resolved = resolved | member
+        return resolved
+    return types.get(value, Any)
 
 
 @dataclass(frozen=True)

@@ -264,6 +264,7 @@ class InMemoryScheduler:
 
     async def cancel(self, work_id: str) -> bool:
         async with self._condition:
+            self._ensure_open()
             work = self._items.get(work_id)
             if work is None:
                 return False
@@ -274,9 +275,7 @@ class InMemoryScheduler:
                 if lease is not None:
                     self._run_lease.pop(lease.work.run_id, None)
             self._items.pop(work_id, None)
-            self._pending = [
-                entry for entry in self._pending if entry[3] != work_id
-            ]
+            self._pending = [entry for entry in self._pending if entry[3] != work_id]
             heapq.heapify(self._pending)
             self._remember_terminal_locked(work)
             await self._persist_locked()
@@ -285,6 +284,7 @@ class InMemoryScheduler:
 
     async def reap_expired(self) -> int:
         async with self._condition:
+            self._ensure_open()
             count = self._reap_expired_locked()
             if count:
                 await self._persist_locked()
@@ -293,6 +293,7 @@ class InMemoryScheduler:
 
     async def pending_count(self) -> int:
         async with self._condition:
+            self._ensure_open()
             return sum(
                 1
                 for work_id in self._items
@@ -306,15 +307,26 @@ class InMemoryScheduler:
 
     async def _persist_locked(self) -> None:
         if self._state_store is not None:
-            await self._state_store.save(self._dump_state_locked())
+            try:
+                await self._state_store.save(self._dump_state_locked())
+            except BaseException as exc:
+                self._closed = True
+                self._condition.notify_all()
+                if not isinstance(exc, Exception):
+                    raise
+                raise self._error(
+                    "scheduler.persistence_failed",
+                    ErrorCategory.RESOURCE_LOST,
+                    "scheduler persistence failed; reopen the scheduler before retrying",
+                    retryable=True,
+                    safe_to_resume=False,
+                ) from exc
 
     def _dump_state_locked(self) -> dict[str, Any]:
         return {
             "format": "sage.scheduler-state/v1",
             "pending": [list(value) for value in self._pending],
-            "items": [
-                value.model_dump(mode="json") for value in self._items.values()
-            ],
+            "items": [value.model_dump(mode="json") for value in self._items.values()],
             "idempotency": dict(self._idempotency),
             "leases": [
                 value.model_dump(mode="json") for value in self._leases.values()
@@ -351,8 +363,7 @@ class InMemoryScheduler:
             lease.work.run_id: lease.lease_id for lease in self._leases.values()
         }
         legacy_fences = [
-            int(value)
-            for value in dict(state.get("fence_counters") or {}).values()
+            int(value) for value in dict(state.get("fence_counters") or {}).values()
         ]
         self._fence_sequence = int(
             state.get("fence_sequence") or max(legacy_fences, default=0)
@@ -366,9 +377,7 @@ class InMemoryScheduler:
                 for key, work_id in self._idempotency.items()
                 if work_id not in active_work_ids
             ]
-        self._terminal_idempotency_keys = [
-            str(value) for value in configured_terminal
-        ]
+        self._terminal_idempotency_keys = [str(value) for value in configured_terminal]
         self._terminal_idempotency_key_set = set(self._terminal_idempotency_keys)
         self._prune_terminal_metadata_locked()
         self._sequence = int(state.get("sequence") or 0)
@@ -428,8 +437,7 @@ class InMemoryScheduler:
             if (
                 policy is not None
                 and policy.max_active_per_tenant is not None
-                and active_by_tenant.get(tenant_id, 0)
-                >= policy.max_active_per_tenant
+                and active_by_tenant.get(tenant_id, 0) >= policy.max_active_per_tenant
             ):
                 skipped.append(entry)
                 continue
@@ -493,6 +501,7 @@ class InMemoryScheduler:
             self._push_locked(retry)
 
     def _assert_fence_locked(self, lease: WorkerLease) -> WorkerLease:
+        self._ensure_open()
         current = self._leases.get(lease.lease_id)
         if (
             current is None
@@ -525,6 +534,7 @@ class InMemoryScheduler:
         message: str,
         *,
         retryable: bool = False,
+        safe_to_resume: bool = True,
     ) -> SageV2Error:
         return SageV2Error(
             RuntimeErrorInfo(
@@ -532,7 +542,7 @@ class InMemoryScheduler:
                 category=category,
                 message=message,
                 retryable=retryable,
-                safe_to_resume=True,
+                safe_to_resume=safe_to_resume,
             )
         )
 

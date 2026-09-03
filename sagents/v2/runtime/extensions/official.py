@@ -175,7 +175,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                         {ExtensionScope.AGENT, ExtensionScope.RUN}
                     ),
                     config_schema=(
-                        {"type": "object", "properties": {}, "additionalProperties": False}
+                        {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": False,
+                        }
                         if implementation is DirectToolSelectionPolicy
                         else bounded_config_schema
                     ),
@@ -187,8 +191,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     },
                     built_in=True,
                 ),
-                factory=lambda context, dependencies, implementation=implementation: implementation(
-                    context.config
+                factory=lambda context, dependencies, implementation=implementation: (
+                    implementation(context.config)
                 ),
             )
         )
@@ -208,6 +212,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config["root"]
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema=_root_config_schema(),
     )
     _one(
         registry,
@@ -223,6 +228,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             )
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema=_continuation_config_schema(),
     )
     _one(
         registry,
@@ -240,6 +246,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             ),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema=_continuation_config_schema(uses_model=True),
     )
     _one(
         registry,
@@ -258,6 +265,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             repeat_threshold=int(context.config.get("repeat_threshold", 3)),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema=_continuation_config_schema(uses_model=True),
     )
     _one(
         registry,
@@ -267,6 +275,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             repeat_threshold=int(context.config.get("repeat_threshold", 3))
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema=_continuation_config_schema(),
     )
 
     _one(
@@ -275,6 +284,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "context.token-estimator",
         lambda context, dependencies: JsonHeuristicTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "bytes_per_token": {"type": "number", "exclusiveMinimum": 0},
+                "message_overhead": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -282,6 +299,21 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "context.token-estimator",
         lambda context, dependencies: UnicodeHeuristicTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "ascii_chars_per_token": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "non_ascii_chars_per_token": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "message_overhead": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -289,6 +321,16 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "context.token-estimator",
         lambda context, dependencies: TiktokenTokenEstimator(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "model": {"type": ["string", "null"]},
+                "encoding_name": {"type": "string", "minLength": 1},
+                "encoder": {},
+                "tokens_per_message": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
         availability=ExtensionAvailability(
             available=importlib.util.find_spec("tiktoken") is not None,
             reason=(
@@ -306,6 +348,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config.get("estimator")
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema=_optional_object_config_schema("estimator"),
     )
     _one(
         registry,
@@ -315,6 +358,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config.get("estimator")
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema=_optional_object_config_schema("estimator"),
     )
     _one(
         registry,
@@ -334,6 +378,23 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             unit_compactor=context.config.get("unit_compactor"),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "store": {},
+                "summarizer": {},
+                "estimator": {},
+                "summary_target_tokens": {"type": "integer", "minimum": 1},
+                "protected_recent_units": {"type": "integer", "minimum": 1},
+                "max_summary_source_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                },
+                "unit_compactor": {},
+            },
+            "required": ["store"],
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -350,6 +411,12 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config["derived_state"]
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {"derived_state": {}},
+            "required": ["derived_state"],
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -366,8 +433,25 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config["model"],
             model_binding=str(context.config.get("model_binding", "summary")),
             max_source_tokens=int(context.config.get("max_source_tokens", 24000)),
+            timeout_seconds=float(
+                context.config.get(
+                    "timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                )
+            ),
         ),
         scopes={ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "model": {},
+                "model_binding": {"type": "string", "minLength": 1},
+                "max_source_tokens": {"type": "integer", "minimum": 1},
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "required": ["model"],
+            "additionalProperties": False,
+        },
+        capabilities={"uses_model": True, "bounded_timeout": True},
     )
 
     _one(
@@ -512,6 +596,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             context.config.get("environment"),
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.TENANT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "declarations": {"type": "object"},
+                "environment": {"type": ["object", "null"]},
+            },
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -522,6 +614,14 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             source=str(context.config.get("source", "host")),
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.TENANT},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "values": {"type": "object"},
+                "source": {"type": "string", "minLength": 1},
+            },
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -539,6 +639,15 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             legacy_root=context.config.get("legacy_root"),
         ),
         scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "root": {"type": "string", "minLength": 1},
+                "legacy_root": {"type": ["string", "null"], "minLength": 1},
+            },
+            "required": ["root"],
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -559,6 +668,21 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             min_level=str(context.config.get("min_level", "info")),
         ),
         scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "root": {"type": "string", "minLength": 1},
+                "filename": {"type": "string", "minLength": 1},
+                "max_bytes": {"type": "integer", "minimum": 1024},
+                "backup_count": {"type": "integer", "minimum": 1},
+                "min_level": {
+                    "type": "string",
+                    "enum": ["debug", "info", "warning", "error", "critical"],
+                },
+            },
+            "required": ["root"],
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -650,6 +774,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             language=str(context.config.get("language", "en"))
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+        config_schema={
+            "type": "object",
+            "properties": {"language": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
     )
     _one(
         registry,
@@ -673,12 +802,19 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         scopes={ExtensionScope.PROCESS},
     )
 
-    for adapter in (
-        NativeProtocolAdapter,
-        AgUiProtocolAdapter,
-        AcpProtocolAdapter,
-        A2AProtocolAdapter,
-        McpProtocolAdapter,
+    for adapter, config_schema in (
+        (NativeProtocolAdapter, _strict_empty_config_schema()),
+        (
+            AgUiProtocolAdapter,
+            {
+                "type": "object",
+                "properties": {"enable_sage_extensions": {"type": "boolean"}},
+                "additionalProperties": False,
+            },
+        ),
+        (AcpProtocolAdapter, _strict_empty_config_schema()),
+        (A2AProtocolAdapter, _strict_empty_config_schema()),
+        (McpProtocolAdapter, _strict_empty_config_schema()),
     ):
         _one(
             registry,
@@ -688,6 +824,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             scopes={ExtensionScope.PROCESS, ExtensionScope.RUN},
             provider_name=adapter.plugin_id.rsplit(".", 1)[-1],
             multi_provider=True,
+            config_schema=config_schema,
         )
 
     registry.register(
@@ -706,6 +843,17 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 supported_scopes=frozenset(
                     {ExtensionScope.PROCESS, ExtensionScope.AGENT}
                 ),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "servers": {
+                            "type": "array",
+                            "items": McpServerConfig.model_json_schema(),
+                        },
+                        "session_factory": {},
+                    },
+                    "additionalProperties": False,
+                },
                 built_in=True,
             ),
             factory=lambda context, dependencies: McpToolPlugin(
@@ -761,7 +909,11 @@ def _one(
                     ),
                 ),
                 supported_scopes=frozenset(scopes),
-                config_schema=config_schema or {},
+                config_schema=(
+                    config_schema
+                    if config_schema is not None
+                    else _strict_empty_config_schema()
+                ),
                 capabilities=capabilities or {},
                 availability=availability or ExtensionAvailability(),
                 built_in=True,
@@ -769,6 +921,53 @@ def _one(
             factory=factory,
         )
     )
+
+
+def _strict_empty_config_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+
+
+def _root_config_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"root": {"type": "string", "minLength": 1}},
+        "required": ["root"],
+        "additionalProperties": False,
+    }
+
+
+def _optional_object_config_schema(name: str) -> dict:
+    return {
+        "type": "object",
+        "properties": {name: {}},
+        "additionalProperties": False,
+    }
+
+
+def _continuation_config_schema(*, uses_model: bool = False) -> dict:
+    properties = {
+        "repeat_threshold": {"type": "integer", "minimum": 1},
+    }
+    required = []
+    if uses_model:
+        properties.update(
+            {
+                "model": {},
+                "model_binding": {"type": "string", "minLength": 1},
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+            }
+        )
+        required.append("model")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
 
 
 def _scheduler_config_schema(*, durable: bool) -> dict:
@@ -948,13 +1147,12 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                 **_identity(DirectMemoryRecallQueryGenerator),
                 version="2.0.0",
                 provides=(
-                    CapabilityOffer(
-                        capability="memory.recall-query", api_version="2"
-                    ),
+                    CapabilityOffer(capability="memory.recall-query", api_version="2"),
                 ),
                 supported_scopes=frozenset(
                     {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
                 ),
+                config_schema=_strict_empty_config_schema(),
                 capabilities={"uses_model": False},
                 built_in=True,
             ),
@@ -967,13 +1165,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                 **_identity(LLMMemoryRecallQueryGenerator),
                 version="2.0.0",
                 provides=(
-                    CapabilityOffer(
-                        capability="memory.recall-query", api_version="2"
-                    ),
+                    CapabilityOffer(capability="memory.recall-query", api_version="2"),
                 ),
-                supported_scopes=frozenset(
-                    {ExtensionScope.AGENT, ExtensionScope.RUN}
-                ),
+                supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
                 config_schema={
                     "type": "object",
                     "properties": {
@@ -1007,6 +1201,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     CapabilityOffer(capability="session.store", api_version="2"),
                 ),
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema=_strict_empty_config_schema(),
                 capabilities={"durable": False, "testing": True},
                 built_in=True,
             ),
@@ -1028,6 +1223,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                         ExtensionScope.AGENT,
                     }
                 ),
+                config_schema=_strict_empty_config_schema(),
                 capabilities={"durable": False},
                 built_in=True,
             ),
@@ -1053,6 +1249,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "type": "object",
                     "properties": {"root": {"type": "string", "minLength": 1}},
                     "required": ["root"],
+                    "additionalProperties": False,
                 },
                 capabilities={
                     "durable": True,
@@ -1137,14 +1334,25 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 config_schema={
                     "type": "object",
                     "properties": {
-                        "roots": {"type": "array", "items": {"type": "string"}}
+                        "roots": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "minItems": 1,
+                        },
+                        "max_files": {"type": "integer", "minimum": 1},
+                        "max_total_bytes": {"type": "integer", "minimum": 1},
                     },
                     "required": ["roots"],
+                    "additionalProperties": False,
                 },
                 built_in=True,
             ),
             factory=lambda context, dependencies: FilesystemSkillProvider(
-                tuple(context.config["roots"])
+                tuple(context.config["roots"]),
+                max_files=int(context.config.get("max_files", 2_000)),
+                max_total_bytes=int(
+                    context.config.get("max_total_bytes", 64 * 1024 * 1024)
+                ),
             ),
             start=lambda provider, context, dependencies: {
                 "skill.catalog:filesystem": provider,
@@ -1163,6 +1371,24 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                     ),
                 ),
                 supported_scopes=frozenset({ExtensionScope.RUN}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "runtime": {},
+                        "descriptor": {},
+                        "child_executor": {},
+                        "workspace_policy": {
+                            "type": "string",
+                            "enum": [
+                                "private_child",
+                                "shared_parent",
+                                "read_only_parent",
+                            ],
+                        },
+                    },
+                    "required": ["runtime", "descriptor", "child_executor"],
+                    "additionalProperties": False,
+                },
                 built_in=True,
             ),
             factory=lambda context, dependencies: NativeAgentFlowNode(**context.config),
@@ -1177,7 +1403,7 @@ def _register_model_protocols(registry: ExtensionRegistry) -> None:
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(
                     **_identity(implementation),
-                    version="2.0.0",
+                    version=implementation.plugin_version,
                     provides=(
                         CapabilityOffer(
                             capability="model.provider",
@@ -1190,8 +1416,14 @@ def _register_model_protocols(registry: ExtensionRegistry) -> None:
                     ),
                     config_schema={
                         "type": "object",
-                        "properties": {"route": {"type": "object"}},
+                        "properties": {
+                            "route": {"type": "object"},
+                            "credential": {},
+                            "client": {},
+                            "provider_instance_id": {"type": "string"},
+                        },
                         "required": ["route"],
+                        "additionalProperties": False,
                     },
                     capabilities={"protocol": descriptor.protocol.value},
                     built_in=True,

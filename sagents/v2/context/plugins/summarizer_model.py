@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
-from sagents.v2.context.plugins.summarizer_extractive import (
-    ExtractiveConversationSummarizer,
-)
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.common import new_id
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
-from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.provider import (
+    DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+    ModelProvider,
+    auxiliary_model_timeout_error,
+)
 
 
 class ModelConversationSummarizer:
@@ -64,13 +67,18 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         *,
         model_binding: str = "summary",
         max_source_tokens: int = 24_000,
+        timeout_seconds: float = DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
+        if max_source_tokens <= 0:
+            raise ValueError("max_source_tokens must be greater than zero")
         self.model = model
         self.model_binding = model_binding
         self.max_source_tokens = max_source_tokens
+        self.timeout_seconds = float(timeout_seconds)
 
     async def summarize(self, request: SummarizationRequest) -> str:
-        transcript = ExtractiveConversationSummarizer._content
         parts = []
         if request.previous_summary:
             parts.append(
@@ -78,7 +86,7 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
             )
         parts.append("<history>")
         for message in request.messages:
-            value = transcript(message)
+            value = self._message_text(message)
             if message.tool_calls:
                 value += "\nTool calls: " + ", ".join(
                     f"{call.name}({json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)})"
@@ -88,6 +96,23 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         parts.append("</history>")
         capabilities = await self.model.capabilities(self.model_binding)
         source = "\n".join(parts)
+        estimated_source_tokens = self._estimate_source_tokens(source)
+        if estimated_source_tokens > self.max_source_tokens:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="context.summarizer.source_too_large",
+                    category=ErrorCategory.VALIDATION,
+                    message=(
+                        "conversation summary source exceeds the plugin's "
+                        "configured input limit"
+                    ),
+                    safe_to_resume=True,
+                    metadata={
+                        "estimated_source_tokens": estimated_source_tokens,
+                        "max_source_tokens": self.max_source_tokens,
+                    },
+                )
+            )
         language_instruction = {
             "en": "Write all summary prose in English.",
             "zh": "所有摘要性文字使用中文。",
@@ -133,9 +158,23 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                 },
             )
             completed = None
-            async for event in self.model.stream(model_request):
-                if event.kind == ModelEventKind.COMPLETED:
-                    completed = event.response
+            stream = self.model.stream(model_request)
+            try:
+                async with asyncio.timeout(self.timeout_seconds):
+                    async for event in stream:
+                        if event.kind == ModelEventKind.COMPLETED:
+                            completed = event.response
+            except TimeoutError as exc:
+                raise auxiliary_model_timeout_error(
+                    code="context.summarizer.model_timeout",
+                    operation="Model conversation summarization",
+                    timeout_seconds=self.timeout_seconds,
+                    plugin_id=self.plugin_id,
+                ) from exc
+            finally:
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
             if completed is None or not completed.text.strip():
                 last_error = "summary model completed without usable text"
                 continue
@@ -151,6 +190,29 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         raise RuntimeError(
             f"summary model returned invalid structured output: {last_error}"
         )
+
+    @staticmethod
+    def _message_text(message: ModelMessage) -> str:
+        values = []
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                values.append(block.text)
+            elif isinstance(block, JsonBlock):
+                values.append(
+                    json.dumps(block.value, ensure_ascii=False, sort_keys=True)
+                )
+            else:
+                values.append(
+                    json.dumps(block.model_dump(mode="json"), ensure_ascii=False)
+                )
+        return "\n".join(values)
+
+    @staticmethod
+    def _estimate_source_tokens(value: str) -> int:
+        """Conservative dependency-free bound for this plugin's text payload."""
+
+        ascii_count = sum(character.isascii() for character in value)
+        return (ascii_count + 3) // 4 + (len(value) - ascii_count)
 
     @classmethod
     def _parse_payload(cls, value: str) -> dict[str, object]:

@@ -51,7 +51,7 @@ class AnthropicMessagesConfig(StrictModel):
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
-    timeout_seconds: float = 120
+    timeout_seconds: float = Field(default=120, gt=0)
     prompt_cache: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
@@ -66,8 +66,30 @@ class AnthropicMessagesModelProvider:
     """
 
     plugin_id = "sage.model.anthropic-messages"
+    plugin_version = "3.0.0"
     name = "Anthropic Messages"
     description = "Uses Claude system, content-block, tool-use, and SSE semantics."
+
+    @classmethod
+    def apply_capability_profile(cls, config, profile):
+        """Apply only an Anthropic-owned persisted invocation strategy."""
+
+        extra_body = dict(config.extra_body)
+        if (
+            config.reasoning_effort is None
+            and profile.invocation_strategy.get("reasoning_disable_strategy")
+            == "thinking_type_disabled"
+        ):
+            extra_body["thinking"] = {"type": "disabled"}
+        return config.model_copy(
+            update={
+                "default_max_output_tokens": min(
+                    config.default_max_output_tokens,
+                    profile.effective_max_output_tokens,
+                ),
+                "extra_body": extra_body,
+            }
+        )
 
     def __init__(
         self,
@@ -104,6 +126,80 @@ class AnthropicMessagesModelProvider:
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
+
+    async def probe_capabilities(self, request):
+        """Probe only Anthropic Messages request and response semantics."""
+
+        from sagents.v2.model.capability_probe import (
+            model_capability_profile,
+            negotiate_model_output_limit,
+            probe_model_capabilities,
+            probe_model_reasoning_controls,
+        )
+
+        effective, _ = await negotiate_model_output_limit(self, request)
+
+        def clone(
+            *,
+            reasoning_effort: str | None = None,
+            extra_body: dict[str, Any] | None = None,
+        ):
+            config = self.config.model_copy(
+                update={
+                    "default_max_output_tokens": effective,
+                    "reasoning_effort": reasoning_effort,
+                    "extra_body": dict(extra_body or {}),
+                }
+            )
+            return self.__class__(config, client=self.raw_client)
+
+        model_provider = clone()
+        report = await probe_model_capabilities(
+            model_provider,
+            model_binding=request.model_binding,
+            max_output_tokens=effective,
+            timeout_seconds=request.timeout_seconds,
+        )
+
+        def reasoning_provider(strategy: str, effort: str | None):
+            if effort is not None:
+                return clone(reasoning_effort=effort)
+            if strategy == "thinking_type_disabled":
+                return clone(extra_body={"thinking": {"type": "disabled"}})
+            return clone()
+
+        reasoning, reasoning_metadata = await probe_model_reasoning_controls(
+            base_provider=model_provider,
+            provider_factory=reasoning_provider,
+            report=report,
+            request=request,
+            max_output_tokens=effective,
+            disable_strategies=("omit", "thinking_type_disabled"),
+            effort_strategies=("reasoning_effort",),
+        )
+        return model_capability_profile(
+            plugin_id=self.plugin_id,
+            plugin_version=self.plugin_version,
+            protocol="anthropic-messages",
+            request=request,
+            effective_max_output_tokens=effective,
+            report=report,
+            reasoning=reasoning,
+            invocation_strategy={
+                "reasoning_disable_strategy": reasoning_metadata["disable_strategy"],
+                "reasoning_behavior": reasoning_metadata["behavior"],
+                "reasoning_effort_strategy": reasoning_metadata["effort_strategy"],
+                "supported_reasoning_efforts": reasoning_metadata["supported_efforts"],
+                "text_only_reasoning_efforts": reasoning_metadata["text_only_efforts"],
+                "unsupported_reasoning_efforts": reasoning_metadata[
+                    "unsupported_efforts"
+                ],
+                "supports_json_object": report.supports_json_object,
+                "auxiliary_json_compatible": bool(
+                    reasoning_metadata["auxiliary_json"].get("status") == "supported"
+                ),
+            },
+        )
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         self._validate_request(request)
@@ -302,8 +398,7 @@ class AnthropicMessagesModelProvider:
                     "anthropic_messages",
                     {
                         "thinking_blocks": [
-                            thinking_blocks[index]
-                            for index in sorted(thinking_blocks)
+                            thinking_blocks[index] for index in sorted(thinking_blocks)
                         ]
                     },
                 )
@@ -384,12 +479,8 @@ class AnthropicMessagesModelProvider:
         for message in messages:
             if message.role in {"system", "developer"}:
                 for block in message.content:
-                    system.append(
-                        {"type": "text", "text": self._block_text(block)}
-                    )
-                self._remember_cache_candidate(
-                    message, system, cache_candidates
-                )
+                    system.append({"type": "text", "text": self._block_text(block)})
+                self._remember_cache_candidate(message, system, cache_candidates)
                 continue
             if message.role == "tool":
                 tool_result_content: list[dict[str, Any]] = [
@@ -418,8 +509,7 @@ class AnthropicMessagesModelProvider:
                             dict(block)
                             for block in stored_blocks
                             if isinstance(block, dict)
-                            and block.get("type")
-                            in {"thinking", "redacted_thinking"}
+                            and block.get("type") in {"thinking", "redacted_thinking"}
                         ] + content
             if message.tool_calls:
                 content.extend(

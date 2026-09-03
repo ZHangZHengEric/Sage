@@ -214,7 +214,6 @@ def _runtime_capabilities(
             "legacy_root": str(session_root / "diagnostics"),
         },
         "observability.log-sink": {"root": str(session_root / "logs")},
-        "workspace.initializer": {"language": language},
     }
     capabilities: dict[str, CapabilitySelection] = {}
     for capability in _MANIFEST_CAPABILITIES:
@@ -222,8 +221,14 @@ def _runtime_capabilities(
             capability,
             selections.get(capability, DESKTOP_COMPONENT_DEFAULTS[capability]),
         )
+        host_config = dict(paths.get(capability, {}))
+        if (
+            capability == "workspace.initializer"
+            and plugin_id == "sage.workspace.initializer.claw"
+        ):
+            host_config["language"] = language
         config = {
-            **dict(paths.get(capability, {})),
+            **host_config,
             **dict(configs.get(capability, {})),
         }
         capabilities[capability] = CapabilitySelection(plugin=plugin_id, config=config)

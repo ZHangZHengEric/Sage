@@ -97,6 +97,36 @@ async def test_desktop_adopts_only_unowned_legacy_sessions(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_owner_adoption_ignores_corrupt_already_owned_session(tmp_path: Path):
+    root = tmp_path / "sessions"
+    await _legacy_store(root, FILESYSTEM_SESSION_STORE_FORMAT_V2)
+    first = adopt_unowned_sessions(root, principal_id="default_user")
+    assert first.adopted_sessions == 1
+
+    snapshot_path = next((root / "sessions").rglob("state.json"))
+    payload = json.loads(snapshot_path.read_text())
+    payload["checksum"] = "sha256:corrupt"
+    snapshot_path.write_text(json.dumps(payload))
+
+    second = adopt_unowned_sessions(root, principal_id="default_user")
+
+    assert second.adopted_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_owner_adoption_rejects_corrupt_unowned_session(tmp_path: Path):
+    root = tmp_path / "sessions"
+    await _legacy_store(root, FILESYSTEM_SESSION_STORE_FORMAT_V2)
+    snapshot_path = next((root / "sessions").rglob("state.json"))
+    payload = json.loads(snapshot_path.read_text())
+    payload["checksum"] = "sha256:corrupt"
+    snapshot_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        adopt_unowned_sessions(root, principal_id="default_user")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "legacy_format",
     [FILESYSTEM_SESSION_STORE_FORMAT_V2, FILESYSTEM_SESSION_STORE_FORMAT_V3],

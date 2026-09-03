@@ -427,7 +427,7 @@ class OfficialToolRuntime:
         if self.tool_catalog_resolver is not None:
             value = self.tool_catalog_resolver(run_id)
             available = await value if inspect.isawaitable(value) else value
-        unknown = sorted(set(names) - set(available)) if available else []
+        unknown = sorted(set(names) - set(available))
         if unknown:
             return {"status": "error", "unknown_tools": unknown}
         active = self._expanded_tools.setdefault(run_id, set())

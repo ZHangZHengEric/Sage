@@ -45,7 +45,6 @@ class ExtractiveConversationSummarizer:
                 )
                 content = f"{content}\n{labels[2]} {calls}".strip()
             lines.append(f"{label}: {content}".strip())
-        # Character bounding is deliberately conservative and deterministic.
         maximum = max(256, request.target_tokens * 4)
         value = "\n".join(lines).strip()
         if len(value) <= maximum:

@@ -79,6 +79,9 @@ class RecordingModelProvider:
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return await self.provider.capabilities(model_binding)
 
+    async def probe_capabilities(self, request):
+        return await self.provider.probe_capabilities(request)
+
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
 
