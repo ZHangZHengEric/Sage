@@ -71,6 +71,7 @@ PROMETHEUS_CONFIG_FILE="$PROMETHEUS_BASE_CONFIG"
 ENV_PROJECT_NAME="${SAGE_COMPOSE_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-sage_$DEPLOY_ENV}}"
 SHARED_PROJECT_NAME="${SAGE_SHARED_PROJECT_NAME:-sage_shared}"
 SHARED_NETWORK="${SAGE_SHARED_NETWORK:-sage_shared_default}"
+LING_SHARED_NETWORK="${LING_SHARED_NETWORK:-ling_shared_default}"
 COMPOSE_COMMAND=()
 
 detect_compose_command() {
@@ -348,6 +349,20 @@ ensure_shared_network() {
   docker network create "$SHARED_NETWORK" >/dev/null
 }
 
+ensure_ling_shared_network() {
+  case "$DEPLOY_ENV" in
+    dev|prod)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  if docker network inspect "$LING_SHARED_NETWORK" >/dev/null 2>&1; then
+    return 0
+  fi
+  docker network create "$LING_SHARED_NETWORK" >/dev/null
+}
+
 compose_config_services() {
   local shared_network="${1:-$SHARED_NETWORK}"
   shift || true
@@ -356,6 +371,7 @@ compose_config_services() {
     "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
     "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
     "SAGE_SHARED_NETWORK=$shared_network"
+    "LING_SHARED_NETWORK=$LING_SHARED_NETWORK"
     "SAGE_PROMETHEUS_CONFIG_FILE=$PROMETHEUS_CONFIG_FILE"
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
@@ -371,6 +387,7 @@ run_compose() {
     "SAGE_DEPLOY_DIR=$DEPLOY_DIR"
     "SAGE_COMPOSE_ENV_FILE=$ENV_FILE"
     "SAGE_SHARED_NETWORK=$shared_network"
+    "LING_SHARED_NETWORK=$LING_SHARED_NETWORK"
     "SAGE_PROMETHEUS_CONFIG_FILE=$PROMETHEUS_CONFIG_FILE"
     "COMPOSE_IGNORE_ORPHANS=${COMPOSE_IGNORE_ORPHANS:-true}"
   )
@@ -549,6 +566,7 @@ if [ "${1:-}" = "up" ]; then
   network_start=$SECONDS
   log_step "共享网络 ${SHARED_NETWORK}（准备）"
   ensure_shared_network
+  ensure_ling_shared_network
   log_done "共享网络 ${SHARED_NETWORK}" "$(format_elapsed "$((SECONDS - network_start))")"
   shared_network="$SHARED_NETWORK"
 
@@ -597,4 +615,5 @@ if [ "$ENABLE_OBSERVABILITY" = "true" ] && [ "${1:-}" = "down" ]; then
   exit 0
 fi
 
+ensure_ling_shared_network
 run_compose "" "${COMPOSE_ARGS[@]}" "$@"

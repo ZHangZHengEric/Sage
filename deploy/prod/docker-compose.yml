@@ -40,9 +40,14 @@ services:
       - apparmor=unconfined
     mem_limit: 16g
     cpus: 4.0
+    extra_hosts:
+      - "mcp.withling.top:host-gateway"
     networks:
       default: {}
       shared: {}
+      ling_shared:
+        aliases:
+          - sage.internal
 
   sage-web:
     restart: always
@@ -87,4 +92,7 @@ services:
 networks:
   shared:
     name: ${SAGE_SHARED_NETWORK:-sage_shared_default}
+    external: true
+  ling_shared:
+    name: ${LING_SHARED_NETWORK:-ling_shared_default}
     external: true
