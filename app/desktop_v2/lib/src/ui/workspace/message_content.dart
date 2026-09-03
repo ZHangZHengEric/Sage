@@ -807,6 +807,96 @@ bool _isInlineQuestionnaire(PendingInteraction interaction) {
   return questions is List && questions.any((value) => value is Map);
 }
 
+PendingInteraction? _latestValidatedToolQuestionnaire(
+  Conversation conversation,
+) {
+  final latestUser = conversation.messages
+      .where((message) => message.role == 'user')
+      .lastOrNull;
+  if (latestUser == null) return null;
+  for (final panel in conversation.processPanels.reversed) {
+    if (panel.anchorMessageId != latestUser.id) continue;
+    for (final activity in panel.activities.reversed) {
+      if (activity.label.trim().toLowerCase() != 'questionnaire_async' ||
+          activity.failed ||
+          activity.result.trim().isEmpty) {
+        continue;
+      }
+      Object? decoded;
+      try {
+        decoded = jsonDecode(activity.result);
+      } on FormatException {
+        continue;
+      }
+      if (decoded is! Map ||
+          decoded['success'] != true ||
+          decoded['validation_passed'] != true) {
+        continue;
+      }
+      final questions = decoded['questions'];
+      if (questions is! List || questions.isEmpty) continue;
+      return PendingInteraction(
+        id: 'questionnaire:${panel.runId}:${activity.id}',
+        type: 'questionnaire',
+        allowedDecisions: const ['submit'],
+        payload: {
+          'source': 'questionnaire_async',
+          '_process_panel_id': panel.id,
+          'title': decoded['title']?.toString() ?? '',
+          'questions': questions,
+          if (decoded['questionnaire_kind'] != null)
+            'questionnaire_kind': decoded['questionnaire_kind'],
+        },
+      );
+    }
+  }
+  return null;
+}
+
+String _questionnaireResponseMessage(
+  PendingInteraction questionnaire,
+  Map<String, Object?> answers,
+  String responseLabel,
+) {
+  final title = questionnaire.payload['title']?.toString().trim() ?? '';
+  final rawQuestions = questionnaire.payload['questions'];
+  final lines = <String>[
+    title.isEmpty ? responseLabel : '$responseLabel：$title',
+  ];
+  if (rawQuestions is List) {
+    for (final entry in rawQuestions.indexed) {
+      final raw = entry.$2;
+      if (raw is! Map) continue;
+      final question = raw.cast<Object?, Object?>();
+      final id = question['id']?.toString() ?? 'q${entry.$1 + 1}';
+      final text =
+          question['title']?.toString() ??
+          question['question']?.toString() ??
+          question['text']?.toString() ??
+          id;
+      final rawAnswer = answers[id];
+      final values = rawAnswer is List
+          ? rawAnswer.map((value) => value.toString()).toList(growable: false)
+          : [if (rawAnswer != null) rawAnswer.toString()];
+      final labels = <String, String>{};
+      final options = question['options'];
+      if (options is List) {
+        for (final option in options) {
+          if (option is Map) {
+            final value = option['value']?.toString() ?? '';
+            final label = option['label']?.toString() ?? value;
+            if (value.isNotEmpty) labels[value] = label;
+          }
+        }
+      }
+      lines
+        ..add('${entry.$1 + 1}. $text')
+        ..add(values.map((value) => labels[value] ?? value).join('、'));
+    }
+  }
+  return lines.join('\n');
+}
+
 class _InlineQuestionnaireOtherAnswer {
   const _InlineQuestionnaireOtherAnswer();
 }

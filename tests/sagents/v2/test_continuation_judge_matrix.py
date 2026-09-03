@@ -241,6 +241,16 @@ async def test_llm_judge_preserves_explicit_questionnaire_interaction():
 
     decision = await policy.decide(
         _context(
+            response=_response(
+                "",
+                tools=(
+                    ModelToolCall(
+                        tool_call_id="questionnaire_1",
+                        name="questionnaire_async",
+                        arguments={"questions": []},
+                    ),
+                ),
+            ),
             explicit_status="need_user_input",
             explicit_status_note="Choose a target",
             requested_interaction=questionnaire,
@@ -255,7 +265,7 @@ async def test_llm_judge_preserves_explicit_questionnaire_interaction():
 
 
 @pytest.mark.asyncio
-async def test_llm_judge_does_not_turn_repeated_plain_text_into_a_questionnaire():
+async def test_llm_judge_repeated_plain_text_requests_recovery_guidance():
     ledger = (
         ModelMessage(role="user", content=(TextBlock(text="Find the questionnaire."),)),
         ModelMessage(role="assistant", content=(TextBlock(text="I checked here."),)),
@@ -277,34 +287,12 @@ async def test_llm_judge_does_not_turn_repeated_plain_text_into_a_questionnaire(
         )
     )
 
-    assert decision.action == ContinuationAction.COMPLETE_RUN
-    assert decision.reason_code == "judge.need_user_input"
-    assert decision.interaction is None
-    assert len(model.requests) == 1
-
-
-@pytest.mark.asyncio
-async def test_llm_judge_does_not_treat_inline_markup_as_an_interaction():
-    text = "<questionnaire>Which target should I use?</questionnaire>"
-    model = ScriptedModelProvider(
-        (_judge_step("need_user_input", reason="A target is required."),)
-    )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
-
-    decision = await policy.decide(
-        _context(
-            response=_response(text),
-            ledger=(
-                ModelMessage(role="user", content=(TextBlock(text="Deploy it."),)),
-                ModelMessage(role="assistant", content=(TextBlock(text=text),)),
-            ),
-        )
-    )
-
-    assert decision.action == ContinuationAction.COMPLETE_RUN
-    assert decision.reason_code == "judge.need_user_input"
-    assert decision.interaction is None
-    assert len(model.requests) == 1
+    assert decision.action == ContinuationAction.REQUEST_INTERACTION
+    assert decision.reason_code == "judge.plain_text_no_progress"
+    assert decision.interaction is not None
+    assert decision.interaction.interaction_type == "loop_recovery"
+    assert decision.interaction.payload["stop_reason"] == "plain_text_no_progress"
+    assert model.requests == []
 
 
 @pytest.mark.asyncio

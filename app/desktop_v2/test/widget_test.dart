@@ -1983,6 +1983,63 @@ Map<String, Object?> _persistedSuspendedConversation() => {
   ],
 };
 
+Map<String, Object?> _persistedCompletedQuestionnaireConversation() => {
+  'id': 'conversation-completed-questionnaire',
+  'title': '问卷任务',
+  'agent_id': 'agent_main',
+  'run_id': 'run_completed_questionnaire',
+  'session_id': 'session_completed_questionnaire',
+  'turn_id': 'turn_completed_questionnaire',
+  'run_sequence': 8,
+  'status': 'completed',
+  'messages': const [
+    {'id': 'user-questionnaire', 'role': 'user', 'text': '继续项目'},
+    {
+      'id': 'assistant-questionnaire',
+      'role': 'assistant',
+      'text': '请选择下一步的部署目标。',
+      'sequence': 2,
+    },
+  ],
+  'process_panels': [
+    {
+      'id': 'process-completed-questionnaire',
+      'anchor_message_id': 'user-questionnaire',
+      'run_id': 'run_completed_questionnaire',
+      'started_at': '2026-09-03T09:51:00Z',
+      'completed_at': '2026-09-03T09:51:05Z',
+      'running': false,
+      'activities': [
+        {
+          'id': 'call-questionnaire',
+          'label': 'questionnaire_async',
+          'active': false,
+          'sequence': 4,
+          'result': jsonEncode({
+            'success': true,
+            'status': 'awaiting_user_input',
+            'validation_passed': true,
+            'title': '部署目标',
+            'questions': [
+              {
+                'id': 'target',
+                'type': 'single',
+                'title': '请选择部署目标',
+                'default': 'production',
+                'options': [
+                  {'label': '预发布', 'value': 'staging'},
+                  {'label': '生产', 'value': 'production'},
+                ],
+              },
+            ],
+            'should_end': true,
+          }),
+        },
+      ],
+    },
+  ],
+};
+
 Map<String, Object?> _persistedGroupedActivitiesConversation() => {
   'id': 'conversation-grouped-activities',
   'title': '工具分组',
@@ -5287,6 +5344,74 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'validated questionnaire tool result stays inline after run completion',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [
+            _persistedCompletedQuestionnaireConversation(),
+          ],
+        }),
+      });
+      final api = _FakeApi();
+      final controller = WorkspaceController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(controller.selectedConversation?.status, RunStatus.completed);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('thread-message-list')),
+          matching: find.byKey(const ValueKey('questionnaire-block')),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('部署目标'), findsOneWidget);
+      expect(find.text('请选择部署目标'), findsOneWidget);
+      expect(find.text('请选择下一步的部署目标。'), findsNothing);
+      final processPanel = find.byKey(const ValueKey('process-panel'));
+      final questionnaire = find.byKey(const ValueKey('questionnaire-block'));
+      expect(
+        find.descendant(
+          of: processPanel,
+          matching: find.byIcon(CupertinoIcons.chevron_right),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getBottomLeft(processPanel).dy,
+        lessThan(tester.getTopLeft(questionnaire).dy),
+      );
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('interaction-question-target-option-staging'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 140));
+      await tester.tap(find.byKey(const ValueKey('interaction-submit-submit')));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      final messages = api.lastRunBody?['messages'] as List?;
+      final sent = (messages?.single as Map?)?['text']?.toString() ?? '';
+      expect(sent, contains('问卷回复：部署目标'));
+      expect(sent, contains('1. 请选择部署目标'));
+      expect(sent, contains('预发布'));
+      expect(find.byKey(const ValueKey('questionnaire-block')), findsNothing);
+    },
+  );
 
   for (final brightness in Brightness.values) {
     testWidgets(

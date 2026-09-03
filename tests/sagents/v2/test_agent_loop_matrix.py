@@ -66,6 +66,7 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.contracts.events import ItemEventData, ToolEventData
 from sagents.v2.contracts.items import (
     ItemStatus,
+    JsonBlock,
     TextBlock,
     ToolResultItemData,
     UsageSummary,
@@ -802,6 +803,72 @@ async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input(
 
     assert completed_run.state == RunState.COMPLETED
     assert model.requests[1].messages[-1].content == (TextBlock(text="Use staging."),)
+
+
+@pytest.mark.asyncio
+async def test_validated_questionnaire_result_completes_without_calling_judge():
+    questionnaire_tool = ToolDefinition(
+        name="questionnaire_async",
+        description="Ask the user a structured question.",
+        input_schema={"type": "object", "properties": {}},
+    )
+
+    async def questionnaire_handler(call, context):
+        del context
+        return ToolExecutionResult(
+            tool_call_id=call.tool_call_id,
+            operation_id=call.operation_id,
+            content=(
+                JsonBlock(
+                    value={
+                        "success": True,
+                        "status": "awaiting_user_input",
+                        "validation_passed": True,
+                        "title": "Choose a target",
+                        "questions": [
+                            {
+                                "id": "target",
+                                "type": "single",
+                                "title": "Where should I deploy?",
+                                "options": ["staging", "production"],
+                            }
+                        ],
+                        "should_end": True,
+                    }
+                ),
+            ),
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "Choose a deployment target.",
+                        calls=(tool_call("questionnaire_async", {}),),
+                    ),
+                )
+            ),
+        )
+    )
+    judge = ScriptedModelProvider(())
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(questionnaire_tool,),
+        handlers={"questionnaire_async": questionnaire_handler},
+        continuation_policy=policy,
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    decision = next(event for event in events if event.type == "continuation.decided")
+
+    assert result.state == RunState.COMPLETED
+    assert decision.data.reason_code == "tool.questionnaire_ready"
+    assert decision.data.details["source"] == "questionnaire_async"
+    assert not any(event.type == "interaction.requested" for event in events)
+    assert judge.requests == []
 
 
 @pytest.mark.asyncio
