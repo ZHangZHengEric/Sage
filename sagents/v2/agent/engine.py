@@ -45,6 +45,11 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationDecision,
     InteractionDraft,
 )
+from sagents.v2.agent.policy.approval_memory import (
+    REMEMBER_DECISION,
+    ApprovalMemory,
+    RememberedApproval,
+)
 from sagents.v2.agent.policy.tool_policy import (
     DefaultToolPolicy,
     ToolPolicyAction,
@@ -138,6 +143,7 @@ class AgentLoopEngine:
         tool_catalog: ToolCatalog,
         tool_executor: ToolExecutor,
         tool_policy: DefaultToolPolicy | None = None,
+        approval_memory: ApprovalMemory | None = None,
         tool_selection_policy: ToolSelectionPolicy | None = None,
         continuation_policy: ContinuationPolicy | None = None,
         continuation_signal_provider: ContinuationSignalProvider | None = None,
@@ -157,6 +163,8 @@ class AgentLoopEngine:
         self.tool_catalog = tool_catalog
         self.tool_executor = tool_executor
         self.tool_policy = tool_policy or DefaultToolPolicy()
+        # 审批记忆：没有端口时 approve_and_remember 只等价于 approve_once。
+        self.approval_memory = approval_memory
         self.tool_selection_policy = (
             tool_selection_policy or RecentToolSelectionPolicy()
         )
@@ -374,6 +382,7 @@ class AgentLoopEngine:
                 invocation_mode=command.invocation_mode,
             )
         )
+        policy = await self._consult_approval_memory(run, policy)
         run = await self._record_policy(
             run, call, policy, context, state.turn_id, step_id
         )
@@ -733,6 +742,12 @@ class AgentLoopEngine:
                     return run
             else:
                 approved = resolution.decision.startswith("approve")
+                if resolution.decision == REMEMBER_DECISION:
+                    # 先记后跑：记忆记录的是用户的授权决定，与工具结果无关；
+                    # remember 是幂等的 set，重放 resume 不会重复。
+                    run = await self._remember_tool_approval(
+                        run, state, resolution, context
+                    )
                 if approved:
                     run, result = await self._dispatch_tool(
                         run,
@@ -1158,6 +1173,7 @@ class AgentLoopEngine:
                             invocation_mode=command.invocation_mode,
                         )
                     )
+                    policy = await self._consult_approval_memory(run, policy)
                     run = await self._record_policy(
                         run, tool_call, policy, context, state.turn_id, step_id
                     )
@@ -1703,6 +1719,7 @@ class AgentLoopEngine:
         )
 
     async def _record_policy(self, run, call, policy, context, turn_id, step_id):
+        payload = policy.interaction_payload
         return await self._commit_running(
             run,
             context,
@@ -1716,6 +1733,102 @@ class AgentLoopEngine:
                         decision=policy.action.value,
                         policy_version=policy.policy_version,
                         reason=policy.reason,
+                        remembered_by=payload.get("remembered_by"),
+                        remembered_scope=payload.get("remembered_scope"),
+                    ),
+                ),
+            ),
+        )
+
+    async def _consult_approval_memory(self, run, policy):
+        """用会话内已记住的审批收敛决定；未命中则补上 approve_and_remember 选项。
+
+        只收紧不放宽：只有策略已经判定 REQUIRE_INTERACTION 且允许记住的调用
+        才会查记忆，DENY（缺 scope、plan 模式、assessor 拒绝）永远不被记忆覆盖。
+        """
+
+        if (
+            self.approval_memory is None
+            or policy.action != ToolPolicyAction.REQUIRE_INTERACTION
+            or not policy.persistent_approval_allowed
+            or policy.approval_matcher is None
+        ):
+            return policy
+        remembered = await self.approval_memory.lookup(
+            session_id=run.session_id, matcher=policy.approval_matcher
+        )
+        if remembered is not None:
+            return policy.model_copy(
+                update={
+                    "action": ToolPolicyAction.ALLOW,
+                    "reason": (
+                        f"approved earlier in this {remembered.scope} by "
+                        f"{remembered.remembered_by}: {remembered.matcher.summary}"
+                    ),
+                    "allowed_decisions": (),
+                    "interaction_payload": {
+                        **policy.interaction_payload,
+                        "remembered_by": remembered.remembered_by,
+                        "remembered_scope": remembered.scope,
+                        "remembered_at": remembered.remembered_at.isoformat(),
+                    },
+                }
+            )
+        allowed = list(policy.allowed_decisions)
+        if REMEMBER_DECISION not in allowed:
+            position = (
+                allowed.index("approve_once") + 1 if "approve_once" in allowed else 0
+            )
+            allowed.insert(position, REMEMBER_DECISION)
+        return policy.model_copy(
+            update={
+                "allowed_decisions": tuple(allowed),
+                "interaction_payload": {
+                    **policy.interaction_payload,
+                    "persistent_approval_allowed": True,
+                    "approval_scopes": sorted(self.approval_memory.supported_scopes),
+                },
+            }
+        )
+
+    async def _remember_tool_approval(self, run, state, resolution, context):
+        """approve_and_remember：把匹配器写入审批记忆并留下审计事件。"""
+
+        policy = state.pending_tool_policy
+        if (
+            self.approval_memory is None
+            or policy is None
+            or policy.approval_matcher is None
+            or not policy.persistent_approval_allowed
+        ):
+            # 没有记忆端口或策略不允许记住：宿主自行处理（例如写回自己的配置）。
+            return run
+        supported = self.approval_memory.supported_scopes
+        requested = str(resolution.payload.get("scope") or "session")
+        # 不支持的作用域一律收紧到 session，绝不放宽。
+        scope = requested if requested in supported else "session"
+        approval = RememberedApproval(
+            matcher=policy.approval_matcher,
+            scope=scope,
+            remembered_at=self.clock(),
+            remembered_by=context.actor.principal_id,
+        )
+        await self.approval_memory.remember(session_id=run.session_id, approval=approval)
+        return await self._commit_running(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="policy.approval.remembered",
+                    turn_id=state.turn_id,
+                    step_id=state.pending_tool_step_id,
+                    data=PolicyEventData(
+                        decision_id=policy.decision_id,
+                        decision=REMEMBER_DECISION,
+                        policy_version=policy.policy_version,
+                        reason=approval.matcher.summary,
+                        remembered_by=approval.remembered_by,
+                        remembered_scope=scope,
                     ),
                 ),
             ),
