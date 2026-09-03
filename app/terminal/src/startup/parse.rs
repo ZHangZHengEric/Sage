@@ -192,6 +192,15 @@ fn parse_global_options(args: &[String]) -> Result<(StartupOptions, Vec<String>)
                 options.display_mode = Some(parse_display_mode(value)?);
                 idx += 2;
             }
+            "--runtime" => {
+                let value = args
+                    .get(idx + 1)
+                    .ok_or_else(|| anyhow!("--runtime requires a value"))?;
+                let runtime = crate::backend::BackendRuntime::parse(value)
+                    .ok_or_else(|| anyhow!("--runtime must be one of: v1, v2"))?;
+                options.runtime = Some(runtime.as_str().to_string());
+                idx += 2;
+            }
             _ => break,
         }
     }

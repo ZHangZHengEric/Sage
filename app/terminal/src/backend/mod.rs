@@ -3,6 +3,7 @@ pub(crate) mod contract;
 mod handle;
 mod protocol;
 mod protocol_support;
+mod protocol_v2;
 pub(crate) mod runtime;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -15,8 +16,8 @@ pub(crate) use api::{
 };
 pub(crate) use handle::BackendHandle;
 pub use types::{
-    AgentInfo, BackendEvent, BackendGoal, BackendPhaseTiming, BackendRequest, BackendSessionMeta,
-    BackendStats, BackendToolStep, ConfigInfo, ConfigInitInfo, ProviderInfo, ProviderMutation,
-    ProviderVerifyInfo, SandboxApprovalRequest, SandboxApprovalResolution, SessionDetail,
-    SessionMessage, SessionSummary, SkillInfo,
+    AgentInfo, BackendEvent, BackendGoal, BackendPhaseTiming, BackendRequest, BackendRuntime,
+    BackendSessionMeta, BackendStats, BackendToolStep, ConfigInfo, ConfigInitInfo, ProviderInfo,
+    ProviderMutation, ProviderVerifyInfo, SandboxApprovalRequest, SandboxApprovalResolution,
+    SessionDetail, SessionMessage, SessionSummary, SkillInfo, V2InputRequest,
 };

@@ -138,4 +138,12 @@ between turns the CLI reads one plain-text prompt line from stdin (`/exit` ends 
 while a run is active, stdin lines are interpreted only as decision lines. Every turn after the
 first reuses the `session_id` announced by the first `cli_v2_session` frame.
 
-This surface is not yet consumed by `sage-terminal` and may change until the TUI integration lands.
+`sage-terminal` consumes this surface when started with `--runtime v2` (or after `/runtime set v2`):
+it spawns `sage v2 chat --json --user-id <id> [--workspace <path>]`, passes `--session-id` only for a
+session id it previously received in a `cli_v2_session` frame, maps native `message.delta` /
+`message.completed` / `tool.call.*` events onto its transcript, turns `approval` interactions into the
+existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
+other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
+Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
+`app/terminal/src/backend/tests/protocol_v2.rs`. Steering frames are not sent by the TUI yet, and the
+TUI session picker still lists v1 sessions only. The surface remains experimental.

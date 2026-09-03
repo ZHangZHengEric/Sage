@@ -7,6 +7,7 @@ use crate::backend::protocol_support::{
     is_internal_reasoning_event, live_message_kind, sandbox_approval_from_event,
     sandbox_approval_resolution_from_event, summarize_tool_event, truncate,
 };
+use crate::backend::protocol_v2::{parse_v2_line, V2StreamState};
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
 use super::BackendEvent;
@@ -14,6 +15,7 @@ use super::BackendEvent;
 #[derive(Default)]
 pub(crate) struct BackendProtocolState {
     live_messages: Vec<LiveMessageState>,
+    v2: V2StreamState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,6 +173,14 @@ fn parse_backend_line_with_state(
     line: &str,
     mut state: Option<&mut BackendProtocolState>,
 ) -> Vec<BackendEvent> {
+    // v2 运行时（`sage v2 chat --json`）的 native 事件与 cli_v2_* 帧走独立解析。
+    let v2_events = match state.as_mut() {
+        Some(state) => parse_v2_line(line, &mut state.v2),
+        None => parse_v2_line(line, &mut V2StreamState::default()),
+    };
+    if let Some(events) = v2_events {
+        return events;
+    }
     let mut events = Vec::new();
     let event = match parse_stream_event(line) {
         Some(event) => event,

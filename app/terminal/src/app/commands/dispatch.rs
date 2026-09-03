@@ -461,6 +461,45 @@ impl App {
                     SubmitAction::Handled
                 }
             },
+            "/remember" => match (parts.next(), parts.next()) {
+                (None, None) => SubmitAction::RememberSandboxCommand,
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /remember");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
+            "/runtime" => match (parts.next(), parts.next(), parts.next()) {
+                (None, None, None) | (Some("show"), None, None) => {
+                    self.queue_message(
+                        MessageKind::System,
+                        format!(
+                            "runtime: {}\nUse /runtime set v2 for the SAgents v2 runtime (sage v2 chat), /runtime set v1 for the current one.",
+                            self.runtime.as_str()
+                        ),
+                    );
+                    self.status = format!("runtime  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+                (Some("set"), Some(value), None) => {
+                    match crate::backend::BackendRuntime::parse(value) {
+                        Some(runtime) => self.set_runtime_selection(runtime),
+                        None => {
+                            self.queue_message(
+                                MessageKind::System,
+                                "runtime must be one of: v1, v2",
+                            );
+                            self.status = format!("invalid command  {}", self.session_id);
+                        }
+                    }
+                    SubmitAction::Handled
+                }
+                _ => {
+                    self.queue_message(MessageKind::System, "Usage: /runtime [show|set <v1|v2>]");
+                    self.status = format!("invalid command  {}", self.session_id);
+                    SubmitAction::Handled
+                }
+            },
             "/deny" => match (parts.next(), parts.next()) {
                 (None, None) => SubmitAction::DenySandboxCommand,
                 _ => {
@@ -475,6 +514,7 @@ impl App {
                     if self.busy { "working" } else { "ready" }
                 )];
                 lines.push(format!("session: {}", self.session_id));
+                lines.push(format!("runtime: {}", self.runtime.as_str()));
                 if let Some(agent_config) = self.agent_config_path.as_ref() {
                     lines.push(format!("agent: config {}", agent_config.display()));
                 } else {
