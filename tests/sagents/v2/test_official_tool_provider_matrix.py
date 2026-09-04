@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import asyncio
 import errno
 import hashlib
 
 import pytest
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.jobs import JobState
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.execution.sandbox import (
@@ -26,8 +28,10 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.execution.sandbox.contracts import FileSystemMode
 from sagents.v2.tool import (
+    CancelSemantics,
     ReconcileState,
     ToolCall,
+    ToolCancellationState,
     decorated_tool_definition,
     tool,
 )
@@ -757,3 +761,66 @@ async def test_failures_inside_the_write_keep_the_unknown_outcome_path(
     assert caught.value is failure
     if isinstance(failure, SageV2Error):
         assert "side_effect_state" not in failure.info.metadata
+
+
+@pytest.mark.asyncio
+async def test_shell_wait_is_cancelled_cooperatively_and_jobs_end_with_the_run(
+    tmp_path: Path,
+):
+    """取消只中断对 job 的等待（暂停后还能 await_shell）；Run 终态时 release_run 才终止 job。"""
+
+    plugin = await plugin_for(tmp_path)
+    definitions = {definition.name: definition for definition in plugin.definitions}
+    assert definitions["execute_shell_command"].cancel_semantics == CancelSemantics.COOPERATIVE
+    assert definitions["await_shell"].cancel_semantics == CancelSemantics.COOPERATIVE
+    assert definitions["file_write"].cancel_semantics == CancelSemantics.NOT_STARTED_ONLY
+
+    shell = call("execute_shell_command", {"command": "sleep 5", "block_until_ms": 1500})
+    execution = asyncio.create_task(plugin.executor.execute(shell, CONTEXT))
+    job_runtime = plugin.runtime.job_runtime
+    for _ in range(100):
+        jobs = await job_runtime.list_run_jobs("run_1")
+        if jobs and jobs[0].state == JobState.RUNNING:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("shell job did not start")
+    job_id = jobs[0].job_id
+
+    cancelled = await plugin.executor.cancel(shell.operation_id, CONTEXT)
+    assert cancelled.state == ToolCancellationState.CANCELLED
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+    assert (await job_runtime.inspect(job_id)).state == JobState.RUNNING
+    too_late = await plugin.executor.cancel(shell.operation_id, CONTEXT)
+    assert too_late.state == ToolCancellationState.TOO_LATE
+    unknown = await plugin.executor.cancel("operation_unknown", CONTEXT)
+    assert unknown.state == ToolCancellationState.TOO_LATE
+
+    await plugin.executor.release_run("run_1")
+    assert (await job_runtime.inspect(job_id)).state == JobState.KILLED
+
+
+@pytest.mark.asyncio
+async def test_non_cooperative_tool_reports_cancel_as_unsupported(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    gate = asyncio.Event()
+
+    async def blocked_write(*args, **kwargs):
+        del args, kwargs
+        await gate.wait()
+        raise AssertionError("unreachable")
+
+    plugin.runtime.write_text = blocked_write  # type: ignore[method-assign]
+    write = call("file_write", {"file_path": "notes.txt", "content": "x"})
+    execution = asyncio.create_task(plugin.executor.execute(write, CONTEXT))
+    await asyncio.sleep(0.05)
+
+    result = await plugin.executor.cancel(write.operation_id, CONTEXT)
+
+    assert result.state == ToolCancellationState.NOT_SUPPORTED
+    assert not execution.done()
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
