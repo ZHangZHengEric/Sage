@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import io
 import json
 import sys
@@ -2655,3 +2656,129 @@ async def test_interrupt_during_a_shell_command_cancels_promptly_and_kills_the_j
     assert "tool.call.succeeded" not in outcome.event_types
     assert jobs and all(job.state == JobState.KILLED for job in jobs), [job.state for job in jobs]
     assert "[run cancelled] reason=user_interrupt" in err.getvalue()
+
+
+def update_notes_model(tool_name="file_update"):
+    """第 1 步改 notes.txt（需审批），第 2 步收尾。"""
+
+    if tool_name == "file_update":
+        arguments = {
+            "file_path": "notes.txt",
+            "operations": [
+                {"update_mode": "search_replace", "search_pattern": "beta", "replacement": "gamma"}
+            ],
+        }
+    else:
+        arguments = {"file_path": "notes.txt", "content": "alpha\ngamma\n"}
+    return ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    _completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="call_edit", name=tool_name, arguments=arguments
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(_completed("Done."),)),
+        )
+    )
+
+
+def lose_result_after_write(monkeypatch):
+    """模拟写入落盘后结果丢失（例如沙箱连接中断）：文件已改，工具却抛错。"""
+
+    from sagents.v2.runtime.execution.sandbox.plugins import local as local_provider
+
+    original = local_provider._LocalFileSystem.write_bytes
+
+    async def write_then_lose_result(self, path, content, *, intent, grant, overwrite=True):
+        await original(self, path, content, intent=intent, grant=grant, overwrite=overwrite)
+        raise OSError(errno.EIO, "sandbox connection lost after the write")
+
+    monkeypatch.setattr(local_provider._LocalFileSystem, "write_bytes", write_then_lose_result)
+
+
+async def test_partial_write_of_a_reconcilable_tool_is_verified_from_the_workspace(
+    tmp_path, monkeypatch
+):
+    """file_update 写完后结果丢失 → 结果未知 → 引擎直接从工作区核对成功，不打扰用户。"""
+
+    lose_result_after_write(monkeypatch)
+    workspace, _, agent, command = await make_agent(tmp_path, update_notes_model("file_update"))
+    (workspace / "notes.txt").write_text("alpha\nbeta\n")
+    err = io.StringIO()
+
+    outcome = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=PlainRenderer(io.StringIO(), err),
+        decider=StaticInteractionDecider("approve_once"),
+    )
+    await agent.close()
+
+    assert outcome.state == RunState.COMPLETED
+    assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"
+    assert "tool.call.unknown" in outcome.event_types
+    assert "tool.call.reconciling" in outcome.event_types
+    assert "tool.call.reconciled" in outcome.event_types
+    assert outcome.event_types.count("interaction.requested") == 1
+    assert "[tool] file_update reconciling" in err.getvalue()
+
+
+async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
+    tmp_path, monkeypatch
+):
+    """file_write 写完后结果丢失：无法自动核对，交给用户；答 mark_failed 后 Run 继续并完成。"""
+
+    lose_result_after_write(monkeypatch)
+    workspace, _, agent, command = await make_agent(tmp_path, update_notes_model("file_write"))
+    err = io.StringIO()
+
+    outcome = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=PlainRenderer(io.StringIO(), err),
+        decider=PromptInteractionDecider(line_source("a", "x", "f"), err=err),
+    )
+    await agent.close()
+
+    assert outcome.state == RunState.COMPLETED
+    assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"
+    assert "tool.call.unknown" in outcome.event_types
+    assert "tool.call.reconciled" in outcome.event_types
+    assert "tool.call.cancelled" not in outcome.event_types
+    assert outcome.event_types.count("interaction.requested") == 2
+    prompt = err.getvalue()
+    assert "did the tool call take effect? [s]ucceeded / [f]ailed / [c]ancel:" in prompt
+    assert "tool: file_write" in prompt
+    assert "error: tool.provider_error" in prompt
+    assert prompt.count("please answer one of: [s]ucceeded / [f]ailed / [c]ancel") == 1
+
+
+async def test_prompt_decider_reconciliation_keys_and_static_fallback():
+    interaction = approval_interaction(
+        ("reconcile", "confirm_succeeded", "mark_failed", "cancel"),
+        reason="tool_outcome_unknown",
+        error_code="sandbox.lost",
+        supports_reconciliation=True,
+    )
+    for key, expected in (("r", "reconcile"), ("s", "confirm_succeeded"), ("f", "mark_failed"), ("c", "cancel")):
+        err = io.StringIO()
+        answer = await PromptInteractionDecider(line_source(key), err=err).decide(interaction)
+        assert answer == InteractionAnswer(expected)
+        assert "[r]econcile from the workspace / [s]ucceeded / [f]ailed / [c]ancel" in err.getvalue()
+        assert "error: sandbox.lost" in err.getvalue()
+    # EOF 退化为 cancel；审批键 a/d 在核对里无效。
+    err = io.StringIO()
+    assert await PromptInteractionDecider(line_source("a", "d"), err=err).decide(
+        interaction
+    ) == InteractionAnswer("cancel")
+    assert err.getvalue().count("please answer one of") == 2
+
