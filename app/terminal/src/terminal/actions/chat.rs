@@ -1,7 +1,8 @@
 use anyhow::Result;
+use serde_json::json;
 
-use crate::app::App;
-use crate::backend::{BackendHandle, BackendRequest};
+use crate::app::{App, MessageKind};
+use crate::backend::{BackendHandle, BackendRequest, BackendRuntime, V2InputRequest};
 use crate::terminal::ensure_backend;
 
 pub(super) fn run_task(
@@ -9,7 +10,13 @@ pub(super) fn run_task(
     backend: &mut Option<BackendHandle>,
     task: String,
 ) -> Result<bool> {
+    if let Some(pending) = app.pending_v2_input.clone() {
+        // v2 正在等一个非审批交互的回答：composer 输入就是答案，不是新任务。
+        return answer_v2_input(app, backend, pending, task);
+    }
     let request = BackendRequest {
+        runtime: app.runtime,
+        resume_session: app.v2_session_known,
         session_id: app.session_id.clone(),
         user_id: app.user_id.clone(),
         agent_config: app.agent_config_path.clone(),
@@ -101,6 +108,16 @@ pub(super) fn approve_sandbox_command(
     app: &mut App,
     backend: &mut Option<BackendHandle>,
 ) -> Result<bool> {
+    if app.pending_sandbox_approval.is_none() {
+        if let Some(pending) = app.pending_v2_input.clone() {
+            return answer_v2_input_with_decision(
+                app,
+                backend,
+                &pending,
+                &["retry", "confirm_succeeded"],
+            );
+        }
+    }
     let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
             crate::app::MessageKind::System,
@@ -136,10 +153,148 @@ pub(super) fn approve_sandbox_command(
     Ok(true)
 }
 
+fn answer_v2_input(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+    pending: V2InputRequest,
+    text: String,
+) -> Result<bool> {
+    let decision = if pending
+        .allowed_decisions
+        .iter()
+        .any(|value| value == "submit")
+    {
+        "submit"
+    } else if pending
+        .allowed_decisions
+        .iter()
+        .any(|value| value == "change_direction")
+    {
+        "change_direction"
+    } else {
+        app.push_message(
+            MessageKind::System,
+            "the pending question does not accept free text; use /approve or /deny",
+        );
+        app.set_status(format!("input required  {}", app.session_id));
+        return Ok(true);
+    };
+    let Some(handle) = backend.as_ref() else {
+        app.push_message(
+            MessageKind::System,
+            "backend unavailable to answer the question",
+        );
+        return Ok(true);
+    };
+    handle.send_v2_interaction_decision(
+        &pending.interaction_id,
+        decision,
+        json!({ "text": text }),
+    )?;
+    app.pending_v2_input = None;
+    app.push_message(MessageKind::Tool, format!("answer sent ({decision})"));
+    app.set_status(format!("answer sent  {}", app.session_id));
+    Ok(true)
+}
+
+fn answer_v2_input_with_decision(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+    pending: &V2InputRequest,
+    preferred: &[&str],
+) -> Result<bool> {
+    let Some(decision) = preferred.iter().copied().find(|candidate| {
+        pending
+            .allowed_decisions
+            .iter()
+            .any(|value| value == candidate)
+    }) else {
+        app.push_message(
+            MessageKind::System,
+            format!(
+                "the pending question accepts: {}",
+                pending.allowed_decisions.join(", ")
+            ),
+        );
+        return Ok(true);
+    };
+    let Some(handle) = backend.as_ref() else {
+        app.pending_v2_input = None;
+        app.push_message(
+            MessageKind::System,
+            "backend unavailable to answer the question",
+        );
+        return Ok(true);
+    };
+    handle.send_v2_interaction_decision(&pending.interaction_id, decision, json!({}))?;
+    app.pending_v2_input = None;
+    app.push_message(MessageKind::Tool, format!("answer sent ({decision})"));
+    app.set_status(format!("answer sent  {}", app.session_id));
+    Ok(true)
+}
+
+pub(super) fn remember_sandbox_command(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+) -> Result<bool> {
+    let Some(request) = app.pending_sandbox_approval.clone() else {
+        app.push_message(MessageKind::System, "no pending sandbox approval");
+        app.set_status(format!("approval unavailable  {}", app.session_id));
+        return Ok(true);
+    };
+    let Some(handle) = backend.as_ref() else {
+        app.push_message(
+            MessageKind::System,
+            "backend unavailable for sandbox approval",
+        );
+        app.set_status(format!("approval unavailable  {}", app.session_id));
+        return Ok(true);
+    };
+    if handle.runtime() != BackendRuntime::V2 {
+        app.push_message(
+            MessageKind::System,
+            "/remember is only available on the v2 runtime (/runtime set v2); use /approve",
+        );
+        app.set_status(format!("approval required  {}", app.session_id));
+        return Ok(true);
+    }
+    let remembers = request
+        .hint
+        .as_deref()
+        .map(|hint| hint.contains("/remember"))
+        .unwrap_or(false);
+    if !remembers {
+        app.push_message(
+            MessageKind::System,
+            "this approval cannot be remembered; use /approve or /deny",
+        );
+        app.set_status(format!("approval required  {}", app.session_id));
+        return Ok(true);
+    }
+    handle.send_sandbox_approval_decision(
+        &app.session_id,
+        &request.approval_id,
+        request.command_hash.as_deref(),
+        "remember",
+    )?;
+    app.push_message(
+        MessageKind::Tool,
+        format!(
+            "approval sent and remembered for this session\napproval_id: {}",
+            request.approval_id
+        ),
+    );
+    app.set_status(format!("approval sent  {}", app.session_id));
+    Ok(true)
+}
+
 pub(super) fn deny_sandbox_command(
     app: &mut App,
     backend: &mut Option<BackendHandle>,
 ) -> Result<bool> {
+    if let Some(pending) = app.pending_v2_input.clone() {
+        return answer_v2_input_with_decision(app, backend, &pending, &["cancel", "deny"]);
+    }
     let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
             crate::app::MessageKind::System,

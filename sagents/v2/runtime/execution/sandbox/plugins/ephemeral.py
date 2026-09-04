@@ -18,9 +18,11 @@ import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 from urllib.parse import urlsplit
 
 from sagents.v2.runtime.execution.sandbox.contracts import (
+    MUTATING_FILE_OPERATIONS,
     FileOperation,
     FileStat,
     FileSystemMode,
@@ -733,6 +735,20 @@ class InMemorySandboxProvider:
                 ErrorCategory.POLICY_DENIED,
                 "filesystem operation is outside policy",
             )
+        if operation in MUTATING_FILE_OPERATIONS:
+            root = posixpath.normpath(row.spec.workspace_root).rstrip("/")
+            relative = normalized[len(root) + 1 :] if normalized != root else "."
+            entry = row.spec.filesystem.protected_path_for(relative)
+            if entry is not None:
+                raise self._error(
+                    "sandbox.protected_path",
+                    ErrorCategory.POLICY_DENIED,
+                    f"path {path!r} is protected by sandbox policy ({entry})",
+                    metadata={
+                        "protected_path": entry,
+                        "side_effect_state": "not_applied",
+                    },
+                )
         if operation.value not in grant.allowed_operations:
             raise self._error(
                 "sandbox.permission_denied",
@@ -1086,12 +1102,19 @@ class InMemorySandboxProvider:
         )
 
     @staticmethod
-    def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
+    def _error(
+        code: str,
+        category: ErrorCategory,
+        message: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> SageV2Error:
         return SageV2Error(
             RuntimeErrorInfo(
                 code=code,
                 category=category,
                 message=message,
                 safe_to_resume=True,
+                metadata=dict(metadata or {}),
             )
         )

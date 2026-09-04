@@ -494,9 +494,13 @@ def _add_v2_common_args(parser: argparse.ArgumentParser, *, default_user_id: str
     parser.add_argument(
         "--approval-mode",
         dest="approval_mode",
-        choices=["ask", "approve-all", "deny-all"],
+        choices=["ask", "always", "approve-all", "deny-all"],
         default=None,
-        help="How tool approvals are answered (default: ask on a TTY, deny-all otherwise)",
+        help=(
+            "How tool approvals are handled: ask = approve write-class tools "
+            "(default on a TTY; deny-all otherwise), always = confirm every tool "
+            "call, approve-all = never ask, deny-all = deny everything that asks"
+        ),
     )
     parser.add_argument(
         "--read-only",

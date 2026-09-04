@@ -186,6 +186,9 @@ class PolicyEventData(StrictModel):
     decision: str
     policy_version: str
     reason: str | None = None
+    # 由审批记忆满足/写入时的审计信息：谁记住的、什么作用域。
+    remembered_by: str | None = None
+    remembered_scope: str | None = None
 
 
 class UsageEventData(StrictModel):
@@ -454,7 +457,12 @@ EVENT_CATALOG.update(
 )
 EVENT_CATALOG.update(
     _definitions(
-        ("policy.decision.recorded", "budget.updated", "budget.exhausted"),
+        (
+            "policy.decision.recorded",
+            "policy.approval.remembered",
+            "budget.updated",
+            "budget.exhausted",
+        ),
         "policy",
         terminal=("budget.exhausted",),
         sensitive=True,

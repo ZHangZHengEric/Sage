@@ -312,3 +312,91 @@ fn deny_command_clears_pending_approval() {
     assert!(app.deny_pending_sandbox_approval());
     assert!(app.pending_sandbox_approval.is_none());
 }
+
+fn rendered_history(app: &App) -> String {
+    app.pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn runtime_command_switches_backend_runtime_and_requests_restart() {
+    let mut app = App::new();
+    let _ = app.take_backend_restart_request();
+    let _ = app.take_pending_history_lines();
+
+    assert!(matches!(
+        app.handle_command("/runtime set v2"),
+        SubmitAction::Handled
+    ));
+    assert_eq!(app.runtime, crate::backend::BackendRuntime::V2);
+    assert!(app.take_backend_restart_request());
+    assert!(rendered_history(&app).contains("runtime set: v2"));
+
+    let _ = app.take_pending_history_lines();
+    assert!(matches!(
+        app.handle_command("/runtime set v3"),
+        SubmitAction::Handled
+    ));
+    assert_eq!(app.runtime, crate::backend::BackendRuntime::V2);
+    assert!(rendered_history(&app).contains("runtime must be one of: v1, v2"));
+
+    let _ = app.take_pending_history_lines();
+    assert!(matches!(
+        app.handle_command("/status"),
+        SubmitAction::Handled
+    ));
+    assert!(rendered_history(&app).contains("runtime: v2"));
+
+    assert!(matches!(
+        app.handle_command("/remember"),
+        SubmitAction::RememberSandboxCommand
+    ));
+}
+
+#[test]
+fn v2_session_is_only_known_after_the_backend_announces_it() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    assert!(!app.v2_session_known);
+
+    app.apply_session_meta(crate::backend::BackendSessionMeta {
+        session_id: "session_v2".to_string(),
+        command_mode: Some("chat".to_string()),
+        session_state: Some("active".to_string()),
+        goal: None,
+    });
+    assert!(app.v2_session_known);
+    assert_eq!(app.session_id, "session_v2");
+
+    app.reset_session();
+    assert!(!app.v2_session_known);
+    assert!(app.pending_v2_input.is_none());
+}
+
+#[test]
+fn v2_input_request_is_shown_and_kept_pending() {
+    let mut app = App::new();
+    let _ = app.take_pending_history_lines();
+    app.apply_v2_input_request(crate::backend::V2InputRequest {
+        interaction_id: "interaction_q".to_string(),
+        interaction_type: "user_input".to_string(),
+        prompt: "Which target should I use?".to_string(),
+        allowed_decisions: vec!["submit".to_string(), "cancel".to_string()],
+    });
+
+    let rendered = rendered_history(&app);
+    assert!(rendered.contains("user_input required"));
+    assert!(rendered.contains("Which target should I use?"));
+    assert!(rendered.contains("Type your answer in the composer"));
+    assert_eq!(
+        app.pending_v2_input
+            .as_ref()
+            .map(|value| value.interaction_id.as_str()),
+        Some("interaction_q")
+    );
+    assert!(app.status.starts_with("input required"));
+}

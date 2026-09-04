@@ -4,7 +4,10 @@ use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
 
-use crate::backend::{BackendGoal, BackendSessionMeta, BackendStats, SandboxApprovalRequest};
+use crate::backend::{
+    BackendGoal, BackendRuntime, BackendSessionMeta, BackendStats, SandboxApprovalRequest,
+    V2InputRequest,
+};
 use crate::display_policy::DisplayMode;
 
 pub(crate) const APPROVAL_HISTORY_LIMIT: usize = 20;
@@ -18,6 +21,7 @@ pub enum SubmitAction {
     RetryLastTask,
     ApproveSandboxCommand,
     DenySandboxCommand,
+    RememberSandboxCommand,
     OpenSessionPicker {
         mode: SessionPickerMode,
         limit: usize,
@@ -178,6 +182,10 @@ pub struct App {
     pub(crate) sandbox_approval_mode: String,
     pub(crate) pending_sandbox_approval: Option<SandboxApprovalRequest>,
     pub(crate) sandbox_approval_history: Vec<SandboxApprovalHistoryEntry>,
+    // 后端运行时（v1 / v2）。v2 的会话 id 由 CLI 分配，只有拿到过 cli_v2_session 才回传。
+    pub(crate) runtime: BackendRuntime,
+    pub(crate) v2_session_known: bool,
+    pub(crate) pending_v2_input: Option<V2InputRequest>,
     pub current_goal: Option<BackendGoal>,
     pub pending_goal_mutation: Option<PendingGoalMutation>,
     pub status: String,
@@ -248,6 +256,9 @@ impl App {
             sandbox_approval_mode: "on-request".to_string(),
             pending_sandbox_approval: None,
             sandbox_approval_history: Vec::new(),
+            runtime: BackendRuntime::V1,
+            v2_session_known: false,
+            pending_v2_input: None,
             current_goal: None,
             pending_goal_mutation: None,
             status: String::new(),
@@ -301,6 +312,8 @@ impl App {
         self.pending_goal_mutation = None;
         self.pending_sandbox_approval = None;
         self.sandbox_approval_history.clear();
+        self.v2_session_known = false;
+        self.pending_v2_input = None;
         self.request_started_at = None;
         self.first_output_latency = None;
         self.last_request_duration = None;
@@ -363,6 +376,9 @@ impl App {
 
     pub fn apply_session_meta(&mut self, meta: BackendSessionMeta) {
         self.session_id = meta.session_id;
+        if self.runtime == BackendRuntime::V2 {
+            self.v2_session_known = true;
+        }
         if let Some(goal) = meta.goal {
             self.current_goal = Some(goal);
         }

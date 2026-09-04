@@ -38,6 +38,7 @@ uvicorn[standard]>=0.38.0
 uvloop>=0.21.0; sys_platform != "win32"
 pydantic>=2.5.0
 jsonschema>=4.20.0
+redis>=5.0.0
 
 ##############################
 # 多模型协同（MCP + 工具）
@@ -100,3 +101,4 @@ Pillow
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
 opentelemetry-exporter-otlp>=1.20.0
+prometheus-client>=0.20.0

@@ -80,6 +80,14 @@ class PlainRenderer:
                 line += f" ({data.error.code}: {data.error.message})"
             self.notice(line)
             return
+        if event.type == "policy.approval.remembered":
+            self.notice(
+                f"[approval] remembered for this {data.remembered_scope}: {data.reason}"
+            )
+            return
+        if event.type == "policy.decision.recorded" and data.remembered_by:
+            self.notice(f"[approval] auto-approved ({data.remembered_scope}): {data.reason}")
+            return
         if event.type == "run.failed" and data.error is not None:
             self.notice(f"[run failed] {data.error.code}: {data.error.message}")
             return
