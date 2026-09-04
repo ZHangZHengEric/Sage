@@ -589,3 +589,30 @@ def _add_v2_parser(v2_subparsers, *, default_user_id: str) -> None:
     inspect_parser.add_argument(
         "--verbose", action="store_true", help="Show runtime logs"
     )
+
+    approvals_parser = v2_subparsers.add_parser(
+        "approvals",
+        help="List tool approvals remembered for a workspace (session-scoped ones live in chat)",
+    )
+    _add_v2_approvals_args(approvals_parser)
+    approvals_subparsers = approvals_parser.add_subparsers(dest="approvals_command")
+    forget_parser = approvals_subparsers.add_parser(
+        "forget", help="Forget one remembered approval (<n> from the list) or all of them"
+    )
+    forget_parser.add_argument("selector", help="Entry number from `sage v2 approvals`, or `all`")
+    _add_v2_approvals_args(forget_parser)
+
+
+def _add_v2_approvals_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workspace",
+        dest="workspace",
+        help="Workspace directory the approvals belong to (default: current directory)",
+    )
+    parser.add_argument(
+        "--session-root",
+        dest="session_root",
+        help="Directory of the v2 session store (default: ~/.sage/v2/runtime)",
+    )
+    parser.add_argument("--json", action="store_true", help="Print as JSON")
+    parser.add_argument("--verbose", action="store_true", help="Show runtime logs")

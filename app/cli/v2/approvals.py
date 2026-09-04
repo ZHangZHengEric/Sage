@@ -125,16 +125,19 @@ class WorkspaceApprovalMemory:
     """
 
     VERSION = 1
-    supported_scopes: frozenset[str] = frozenset({"session", "workspace"})
 
     def __init__(
         self,
-        session_memory: ApprovalMemory,
+        session_memory: ApprovalMemory | None = None,
         *,
         store_root: str | Path,
         workspace: str | Path,
     ) -> None:
+        # 不带 session 记忆时只管 workspace 作用域（``sage v2 approvals`` 离线管理用）。
         self.session_memory = session_memory
+        self.supported_scopes: frozenset[str] = frozenset(
+            {"session", "workspace"} if session_memory is not None else {"workspace"}
+        )
         self.workspace = Path(workspace).expanduser().resolve()
         self.path = workspace_approval_store_path(store_root, self.workspace)
         self._lock = asyncio.Lock()
@@ -142,11 +145,12 @@ class WorkspaceApprovalMemory:
     async def lookup(
         self, *, session_id: str, matcher: ApprovalMatcher
     ) -> RememberedApproval | None:
-        remembered = await self.session_memory.lookup(
-            session_id=session_id, matcher=matcher
-        )
-        if remembered is not None:
-            return remembered
+        if self.session_memory is not None:
+            remembered = await self.session_memory.lookup(
+                session_id=session_id, matcher=matcher
+            )
+            if remembered is not None:
+                return remembered
         raw = (await self._entries()).get(matcher.key)
         if raw is None:
             return None
@@ -159,14 +163,15 @@ class WorkspaceApprovalMemory:
     async def remember(
         self, *, session_id: str, approval: RememberedApproval
     ) -> None:
-        if approval.scope == "session":
-            await self.session_memory.remember(session_id=session_id, approval=approval)
-            return
         if approval.scope not in self.supported_scopes:
             raise ValueError(
                 f"approval scope {approval.scope!r} is not supported by "
                 "WorkspaceApprovalMemory"
             )
+        if approval.scope == "session":
+            assert self.session_memory is not None
+            await self.session_memory.remember(session_id=session_id, approval=approval)
+            return
         async with self._lock:
             entries = await self._entries()
             entries[approval.matcher.key] = approval.model_dump(mode="json")
@@ -175,34 +180,48 @@ class WorkspaceApprovalMemory:
     async def forget(
         self, *, session_id: str, matcher: ApprovalMatcher | None = None
     ) -> int:
-        removed = await self.session_memory.forget(
-            session_id=session_id, matcher=matcher
-        )
-        async with self._lock:
-            entries = await self._entries()
-            if matcher is None:
-                removed += len(entries)
-                if entries:
-                    await self._store({})
-                return removed
-            if entries.pop(matcher.key, None) is not None:
-                removed += 1
-                await self._store(entries)
-        return removed
+        removed = 0
+        if self.session_memory is not None:
+            removed = await self.session_memory.forget(
+                session_id=session_id, matcher=matcher
+            )
+        return removed + await self.forget_workspace(matcher)
 
     async def list_remembered(
         self, *, session_id: str
     ) -> tuple[RememberedApproval, ...]:
-        session_entries = await self.session_memory.list_remembered(
-            session_id=session_id
-        )
-        workspace_entries = []
+        session_entries: tuple[RememberedApproval, ...] = ()
+        if self.session_memory is not None:
+            session_entries = await self.session_memory.list_remembered(
+                session_id=session_id
+            )
+        return (*session_entries, *await self.list_workspace())
+
+    async def list_workspace(self) -> tuple[RememberedApproval, ...]:
+        """只列 workspace 作用域的条目（按匹配器 key 排序，与文件顺序无关）。"""
+
+        entries = []
         for _key, raw in sorted((await self._entries()).items()):
             try:
-                workspace_entries.append(RememberedApproval.model_validate(raw))
+                entries.append(RememberedApproval.model_validate(raw))
             except ValueError:
                 continue
-        return (*session_entries, *workspace_entries)
+        return tuple(entries)
+
+    async def forget_workspace(self, matcher: ApprovalMatcher | None = None) -> int:
+        """只撤销 workspace 作用域的一条（或全部）记忆，返回删除条数。"""
+
+        async with self._lock:
+            entries = await self._entries()
+            if matcher is None:
+                removed = len(entries)
+                if removed:
+                    await self._store({})
+                return removed
+            if entries.pop(matcher.key, None) is None:
+                return 0
+            await self._store(entries)
+            return 1
 
     def composition_identity(self) -> dict[str, Any]:
         identity = getattr(self.session_memory, "composition_identity", None)
@@ -249,13 +268,18 @@ class WorkspaceApprovalMemory:
         await asyncio.to_thread(write)
 
 
-def format_remembered_approvals(remembered: Sequence[RememberedApproval]) -> str:
-    if not remembered:
-        return "no remembered approvals in this session or workspace"
-    lines = [
+def format_remembered_approvals(
+    remembered: Sequence[RememberedApproval],
+    *,
+    heading: str = (
         "remembered approvals in this session and workspace "
         "(/forget <n> | /forget all):"
-    ]
+    ),
+    empty: str = "no remembered approvals in this session or workspace",
+) -> str:
+    if not remembered:
+        return empty
+    lines = [heading]
     for index, value in enumerate(remembered, 1):
         lines.append(
             f"  {index}. {value.matcher.summary}  "
@@ -263,6 +287,28 @@ def format_remembered_approvals(remembered: Sequence[RememberedApproval]) -> str
             f"{value.remembered_at:%Y-%m-%d %H:%M} UTC]"
         )
     return "\n".join(lines)
+
+
+def workspace_approvals_json(
+    memory: WorkspaceApprovalMemory, remembered: Sequence[RememberedApproval]
+) -> dict[str, Any]:
+    return {
+        "workspace": memory.workspace.as_posix(),
+        "store": memory.path.as_posix(),
+        "total": len(remembered),
+        "list": [
+            {
+                "index": index,
+                "tool_name": value.matcher.tool_name,
+                "fingerprint": value.matcher.fingerprint,
+                "summary": value.matcher.summary,
+                "scope": value.scope,
+                "remembered_by": value.remembered_by,
+                "remembered_at": value.remembered_at.isoformat(),
+            }
+            for index, value in enumerate(remembered, 1)
+        ],
+    }
 
 
 __all__ = [
@@ -273,4 +319,5 @@ __all__ = [
     "cli_approval_matcher",
     "format_remembered_approvals",
     "workspace_approval_store_path",
+    "workspace_approvals_json",
 ]
