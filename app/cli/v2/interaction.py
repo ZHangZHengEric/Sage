@@ -47,6 +47,21 @@ _RECOVERY_KEYS = {
     "stop": "cancel",
     "cancel": "cancel",
 }
+# 人工核对（工具结果未知）：引擎把它标成 approval 类型，但决定不是放行/拒绝，
+# 而是"确认成功 / 标记失败 / 取消"，可自动核对时还有 reconcile。
+_RECONCILIATION_DECISIONS = frozenset({"confirm_succeeded", "mark_failed"})
+_RECONCILIATION_KEYS = {
+    "r": "reconcile",
+    "reconcile": "reconcile",
+    "s": "confirm_succeeded",
+    "succeeded": "confirm_succeeded",
+    "confirm_succeeded": "confirm_succeeded",
+    "f": "mark_failed",
+    "failed": "mark_failed",
+    "mark_failed": "mark_failed",
+    "c": "cancel",
+    "cancel": "cancel",
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +79,12 @@ def fallback_decision(interaction: InteractionRequest) -> str:
         if candidate in interaction.allowed_decisions:
             return candidate
     return interaction.allowed_decisions[0]
+
+
+def is_reconciliation(interaction: InteractionRequest) -> bool:
+    """工具结果未知后的人工核对：类型是 approval，但答案是核对结论而非放行。"""
+
+    return bool(_RECONCILIATION_DECISIONS & set(interaction.allowed_decisions))
 
 
 def remember_scopes(interaction: InteractionRequest) -> tuple[str, ...]:
@@ -92,7 +113,9 @@ def coerce_answer(
 
 def summarize_interaction(interaction: InteractionRequest) -> str:
     payload = interaction.payload
-    if interaction.interaction_type == InteractionType.APPROVAL:
+    if interaction.interaction_type == InteractionType.APPROVAL and not is_reconciliation(
+        interaction
+    ):
         lines = [
             f"approval required: {payload.get('tool_name')}",
             f"  arguments: {json.dumps(payload.get('arguments'), ensure_ascii=False)}",
@@ -106,6 +129,13 @@ def summarize_interaction(interaction: InteractionRequest) -> str:
     lines = [str(title)]
     if payload.get("prompt"):
         lines.append(f"  {payload['prompt']}")
+    if payload.get("tool_name"):
+        lines.append(
+            f"  tool: {payload.get('tool_name')} "
+            f"{json.dumps(payload.get('arguments'), ensure_ascii=False)}"
+        )
+    if payload.get("error_code"):
+        lines.append(f"  error: {payload.get('error_code')}")
     error = payload.get("error")
     if isinstance(error, dict):
         detail = error.get("message") or ""
@@ -164,6 +194,8 @@ class PromptInteractionDecider:
 
     async def decide(self, interaction: InteractionRequest) -> InteractionAnswer:
         self._write("\n" + summarize_interaction(interaction) + "\n")
+        if is_reconciliation(interaction):
+            return await self._decide_reconciliation(interaction)
         if interaction.interaction_type == InteractionType.APPROVAL:
             return await self._decide_approval(interaction)
         if "submit" in interaction.allowed_decisions:
@@ -194,6 +226,29 @@ class PromptInteractionDecider:
                 and decision != "approve_and_remember"
                 and decision in interaction.allowed_decisions
             ):
+                return InteractionAnswer(decision)
+            self._write(f"please answer one of: {options}\n")
+
+    async def _decide_reconciliation(
+        self, interaction: InteractionRequest
+    ) -> InteractionAnswer:
+        labels = {
+            "reconcile": "[r]econcile from the workspace",
+            "confirm_succeeded": "[s]ucceeded",
+            "mark_failed": "[f]ailed",
+            "cancel": "[c]ancel",
+        }
+        options = " / ".join(
+            labels[decision]
+            for decision in interaction.allowed_decisions
+            if decision in labels
+        )
+        while True:
+            raw = await self._ask(f"did the tool call take effect? {options}: ")
+            if raw is None:
+                return InteractionAnswer(fallback_decision(interaction))
+            decision = _RECONCILIATION_KEYS.get(raw.strip().lower())
+            if decision is not None and decision in interaction.allowed_decisions:
                 return InteractionAnswer(decision)
             self._write(f"please answer one of: {options}\n")
 
