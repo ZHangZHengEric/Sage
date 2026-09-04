@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 enum RunStatus {
@@ -1020,6 +1021,7 @@ class Conversation {
     this.approvalMode = ApprovalMode.highRisk,
     this.invocationMode = InvocationMode.normal,
     this.pendingPlanExecution,
+    this.lastCompletedGoalRunId,
     List<RuntimeProcessPanel>? processPanels,
     List<Conversation>? subSessions,
     DateTime? createdAt,
@@ -1051,6 +1053,7 @@ class Conversation {
   ApprovalMode approvalMode;
   InvocationMode invocationMode;
   Map<String, Object?>? pendingPlanExecution;
+  String? lastCompletedGoalRunId;
   bool get planMode => invocationMode == InvocationMode.plan;
   bool get goalMode => invocationMode == InvocationMode.goal;
   bool archived;
@@ -1059,6 +1062,33 @@ class Conversation {
   final List<RuntimeProcessPanel> processPanels;
   final List<Conversation> subSessions;
   final DateTime createdAt;
+
+  void resetCompletedGoalMode() {
+    if (!goalMode ||
+        status != RunStatus.completed ||
+        pendingPlanExecution != null ||
+        runId.isEmpty ||
+        lastCompletedGoalRunId == runId) {
+      return;
+    }
+    for (final panel in processPanels.where((panel) => panel.runId == runId)) {
+      for (final activity in panel.activities) {
+        if (activity.label != 'goal_complete' || activity.failed) continue;
+        Object? result;
+        try {
+          result = jsonDecode(activity.result);
+        } on FormatException {
+          continue;
+        }
+        if (result is Map && result['status'] == 'completed') {
+          invocationMode = InvocationMode.normal;
+          // Replayed events must not undo a user's next explicit mode choice.
+          lastCompletedGoalRunId = runId;
+          return;
+        }
+      }
+    }
+  }
 
   factory Conversation.fromJson(Map<String, Object?> json) {
     final rawMessages = json['messages'];
@@ -1128,6 +1158,7 @@ class Conversation {
       ),
       pendingPlanExecution: (json['pending_plan_execution'] as Map?)
           ?.cast<String, Object?>(),
+      lastCompletedGoalRunId: json['last_completed_goal_run_id']?.toString(),
       processPanels: processPanels,
       subSessions: rawSubSessions is List
           ? [
@@ -1139,7 +1170,7 @@ class Conversation {
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       archived: json['archived'] == true,
       archivedAt: DateTime.tryParse(json['archived_at']?.toString() ?? ''),
-    );
+    )..resetCompletedGoalMode();
   }
 
   Map<String, Object?> toJson() => {
@@ -1160,6 +1191,7 @@ class Conversation {
     'approval_mode': approvalMode.wireValue,
     'invocation_mode': invocationMode.wireValue,
     'pending_plan_execution': pendingPlanExecution,
+    'last_completed_goal_run_id': lastCompletedGoalRunId,
     'process_panels': [for (final value in processPanels) value.toJson()],
     'sub_sessions': [for (final value in subSessions) value.toJson()],
     'created_at': createdAt.toIso8601String(),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from sagents.v2.i18n import tr
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
@@ -158,7 +159,8 @@ class PlanningTools:
         description=(
             "Complete the active goal after independently verifying every acceptance "
             "criterion. A goal-mode Run cannot finish successfully until this Tool "
-            "succeeds."
+            "succeeds. After success, send a concise user-facing summary of the "
+            "deliverables, actual verification, and remaining limitations."
         ),
         input_schema={
             "type": "object",
@@ -187,6 +189,9 @@ class PlanningTools:
                 "content": state.content,
                 "summary": state.completion_summary,
                 "already_completed": True,
+                "next_step": tr(
+                    "goal.explanation_required", invocation.request_context.language
+                ),
             }
         normalized = summary.strip()
         if not normalized:
@@ -196,6 +201,9 @@ class PlanningTools:
             "content": state.content,
             "summary": normalized,
             "already_completed": False,
+            "next_step": tr(
+                "goal.explanation_required", invocation.request_context.language
+            ),
         }
 
     @tool(
