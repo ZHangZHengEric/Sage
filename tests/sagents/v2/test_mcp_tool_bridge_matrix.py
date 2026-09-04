@@ -662,6 +662,60 @@ async def test_mcp_error_return_is_the_authoritative_failed_result():
     assert reconciled.result == result
 
 
+@pytest.mark.asyncio
+async def test_mcp_discovery_is_cached_and_parallel_across_servers():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    seen: list[str] = []
+    peak = 0
+    active = 0
+
+    class SlowSession(FakeSession):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.name = name
+
+        async def list_tools(self):
+            nonlocal peak, active
+            seen.append(self.name)
+            active += 1
+            peak = max(peak, active)
+            if len(seen) >= 2:
+                entered.set()
+            await release.wait()
+            active -= 1
+            return await super().list_tools()
+
+    @asynccontextmanager
+    async def factory(config):
+        yield SlowSession(config.name)
+
+    bridge = McpToolPlugin(
+        (
+            McpServerConfig(
+                name="alpha", protocol="streamable_http", url="https://a.test"
+            ),
+            McpServerConfig(
+                name="beta", protocol="streamable_http", url="https://b.test"
+            ),
+        ),
+        session_factory=factory,
+    )
+    first = asyncio.create_task(bridge.list_tools(run_id="run_1"))
+    await entered.wait()
+    assert peak == 2
+    release.set()
+    tools = await first
+    assert {value.name for value in tools} == {
+        "mcp_alpha_search_files",
+        "mcp_beta_search_files",
+    }
+    seen.clear()
+    again = await bridge.list_tools(run_id="run_2")
+    assert seen == []
+    assert [value.name for value in again] == [value.name for value in tools]
+
+
 def test_mcp_api_key_is_redacted_by_the_persistable_contract():
     config = McpServerConfig(
         name="drive",

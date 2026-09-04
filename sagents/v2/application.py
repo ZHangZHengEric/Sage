@@ -122,6 +122,8 @@ class SAgentApplication:
         self._pending_agents = list(self._agents.values())
         self._composer: Any | None = None
         self._close_lock = asyncio.Lock()
+        self._materialize_idle = asyncio.Condition(self._close_lock)
+        self._materialize_inflight = 0
         self._closed = False
         self._closing = False
 
@@ -176,6 +178,8 @@ class SAgentApplication:
                 raise RuntimeError(
                     "SAgentApplication.materialize_agent requires a Builder-built application"
                 )
+            self._materialize_inflight += 1
+        try:
             return await self._composer.materialize_agent(
                 package,
                 tenant_id=tenant_id,
@@ -187,6 +191,10 @@ class SAgentApplication:
                 locked_configs=locked_configs,
                 cache_identities=cache_identities,
             )
+        finally:
+            async with self._close_lock:
+                self._materialize_inflight -= 1
+                self._materialize_idle.notify_all()
 
     def entrypoint(self) -> SAgent:
         self._ensure_open()
@@ -253,6 +261,8 @@ class SAgentApplication:
             if self._closed:
                 return
             self._closing = True
+            while self._materialize_inflight:
+                await self._materialize_idle.wait()
             errors: list[Exception] = []
             pending_resources = list(reversed(self._owned_resources))
             for index, resource in enumerate(pending_resources):

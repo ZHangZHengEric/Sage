@@ -248,6 +248,27 @@ async def test_restart_round_trip_and_idempotent_start(postgres_dsn):
 
 
 @pytest.mark.asyncio
+async def test_get_run_does_not_refetch_an_already_loaded_session(postgres_dsn):
+    schema = _schema()
+    store = PostgresSessionStore(postgres_dsn, schema=schema)
+    created = await store.create_run(command("loaded-once"), CONTEXT)
+    fetches = 0
+    original = store._fetch_session
+
+    async def wrapped(session_id):
+        nonlocal fetches
+        fetches += 1
+        return await original(session_id)
+
+    store._fetch_session = wrapped
+    first = await store.get_run(created.handle.run_id)
+    second = await store.get_run(created.handle.run_id)
+    assert first.run_id == second.run_id
+    assert fetches == 0
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_run_events_are_appended_across_commits(postgres_dsn):
     schema = _schema()
     store = PostgresSessionStore(postgres_dsn, schema=schema)

@@ -166,7 +166,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             )
             facade.attach_dispatcher(self.dispatcher)
             stream = await facade.schedule_accepted_run(accepted_handle, context)
-            stream._execution.add_done_callback(
+            stream.add_done_callback(
                 lambda _completed, agent=facade: self._schedule_agent_close(agent)
             )
         except asyncio.CancelledError:
@@ -270,7 +270,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             run_id=stream.handle.run_id,
             attributes={"agent_id": request.agent_id},
         )
-        stream._execution.add_done_callback(
+        stream.add_done_callback(
             lambda _completed, key=stream.handle.run_id, value=driver: (
                 asyncio.create_task(self._discard_driver_if_terminal(key, value))
             )
@@ -293,7 +293,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         finally:
             if observed_boundary:
                 await stream.wait()
-            if stream._execution.done():
+            if stream.execution_done():
                 await self._discard_driver_if_terminal(stream.handle.run_id, driver)
             await self._index_session(stream.handle.session_id)
 

@@ -12,7 +12,7 @@ import hashlib
 import json
 from contextlib import asynccontextmanager, nullcontext
 from collections.abc import AsyncIterator, Callable, Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -92,6 +92,7 @@ from sagents.v2.runtime.execution.resources import (
     ExecutionResourceRecord,
     ExecutionResourceState,
 )
+from sagents.v2.runtime.session.journal import SessionStateDeltaMutation
 
 
 SESSION_AGGREGATE_FORMAT = "sage.session-aggregate/v2"
@@ -144,6 +145,41 @@ class _Subscriber:
 class _SubscriptionOverflow:
     last_delivered: int
     latest_available: int
+
+
+@dataclass
+class _SessionUndo:
+    """Object-level undo watermark for one Session operation.
+
+    Event history is recorded by length only so a failed persist can truncate
+    instead of copying or re-validating the full canonical log.
+    """
+
+    session_id: str
+    existed: bool
+    session: _SessionRow | None
+    runs: dict[str, _RunRow]
+    run_event_lens: dict[str, int]
+    run_event_lists: dict[str, list[RuntimeEvent]]
+    session_event_len: int
+    session_events: list[RuntimeEvent] | None
+    fork_base_events: dict[str, tuple[RuntimeEvent, ...]]
+    start_idempotency: dict[tuple[str | None, PrincipalType, str, str], str]
+    start_idempotency_digests: dict[tuple[str | None, PrincipalType, str, str], str]
+    command_results: dict[tuple[str, str], CommitResult]
+    command_digests: dict[tuple[str, str], str]
+    execution_resources: dict[str, ExecutionResourceRecord]
+    execution_resource_command_results: dict[tuple[str, str], ExecutionResourceRecord]
+    execution_resource_command_digests: dict[tuple[str, str], str]
+    checkpoints: dict[str, Checkpoint]
+    suspensions: dict[str, Suspension]
+    interactions: dict[str, InteractionRequest]
+    interaction_resolutions: dict[str, InteractionResolution]
+    steer_inbox: dict[str, list[SteerInboxEntry]]
+    proposals: dict[str, SessionCommitProposal]
+    proposal_results: dict[tuple[str, str], SessionCommitProposal]
+    proposal_digests: dict[tuple[str, str], str]
+    topology_revision: int
 
 
 class SessionStoreCoordinator:
@@ -227,6 +263,7 @@ class SessionStoreCoordinator:
         ] = {}
         self._session_commit_command_digests: dict[tuple[str, str], str] = {}
         self._subscribers: dict[str, set[_Subscriber]] = {}
+        self._operation_undos: dict[str, _SessionUndo] | None = None
 
     @asynccontextmanager
     async def _session_operation(self, *session_ids: str):
@@ -245,24 +282,25 @@ class SessionStoreCoordinator:
             for lock in locks:
                 await lock.acquire()
                 acquired.append(lock)
-            snapshots = (
+            undos = (
                 {
-                    session_id: (
-                        self._dump_session_state_locked(session_id)
-                        if session_id in self._sessions
-                        else None
-                    )
+                    session_id: self._capture_session_undo_locked(session_id)
                     for session_id in ordered
                 }
                 if self._persistence_can_fail
                 else None
             )
+            previous_undos = self._operation_undos
+            if undos is not None:
+                self._operation_undos = undos
             try:
                 yield
             except BaseException:
-                if snapshots is not None:
-                    self._restore_session_snapshots_locked(snapshots)
+                if undos is not None:
+                    self._restore_session_undos_locked(undos)
                 raise
+            finally:
+                self._operation_undos = previous_undos
         finally:
             for lock in reversed(acquired):
                 lock.release()
@@ -319,6 +357,673 @@ class SessionStoreCoordinator:
                     "session.commit_proposal_not_found", proposal_id
                 )
             yield
+
+    def _session_run_ids_locked(self, session_id: str) -> set[str]:
+        return {
+            row.run_id
+            for row in self._runs.values()
+            if row.session_id == session_id
+        }
+
+    def _capture_session_undo_locked(self, session_id: str) -> _SessionUndo:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return _SessionUndo(
+                session_id=session_id,
+                existed=False,
+                session=None,
+                runs={},
+                run_event_lens={},
+                run_event_lists={},
+                session_event_len=0,
+                session_events=None,
+                fork_base_events={},
+                start_idempotency={},
+                start_idempotency_digests={},
+                command_results={},
+                command_digests={},
+                execution_resources={},
+                execution_resource_command_results={},
+                execution_resource_command_digests={},
+                checkpoints={},
+                suspensions={},
+                interactions={},
+                interaction_resolutions={},
+                steer_inbox={},
+                proposals={},
+                proposal_results={},
+                proposal_digests={},
+                topology_revision=self._topology_revision,
+            )
+        run_ids = self._session_run_ids_locked(session_id)
+        interaction_ids = {
+            value.interaction_id
+            for value in self._interactions.values()
+            if value.run_id in run_ids
+        }
+        proposal_ids = {
+            value.proposal_id
+            for value in self._session_commit_proposals.values()
+            if value.session_id == session_id
+        }
+        start_scopes = {
+            scope: run_id
+            for scope, run_id in self._start_idempotency.items()
+            if run_id in run_ids
+        }
+        command_keys = {key for key in self._command_results if key[0] in run_ids}
+        resource_keys = {
+            key
+            for key in self._execution_resource_command_results
+            if key[0] in run_ids
+        }
+        proposal_keys = {
+            key
+            for key, value in self._session_commit_command_results.items()
+            if value.proposal_id in proposal_ids
+        }
+        return _SessionUndo(
+            session_id=session_id,
+            existed=True,
+            session=replace(
+                session, revision_sequences=dict(session.revision_sequences)
+            ),
+            runs={run_id: replace(self._runs[run_id]) for run_id in run_ids},
+            run_event_lens={
+                run_id: len(self._run_events.get(run_id, ())) for run_id in run_ids
+            },
+            run_event_lists={
+                run_id: self._run_events[run_id]
+                for run_id in run_ids
+                if run_id in self._run_events
+            },
+            session_event_len=len(self._session_events.get(session_id, ())),
+            session_events=self._session_events.get(session_id),
+            fork_base_events={
+                run_id: self._fork_base_events[run_id]
+                for run_id in run_ids
+                if run_id in self._fork_base_events
+            },
+            start_idempotency=dict(start_scopes),
+            start_idempotency_digests={
+                scope: self._start_idempotency_digests[scope] for scope in start_scopes
+            },
+            command_results={
+                key: self._command_results[key] for key in command_keys
+            },
+            command_digests={
+                key: self._command_digests[key] for key in command_keys
+            },
+            execution_resources={
+                run_id: self._execution_resources[run_id]
+                for run_id in run_ids
+                if run_id in self._execution_resources
+            },
+            execution_resource_command_results={
+                key: self._execution_resource_command_results[key]
+                for key in resource_keys
+            },
+            execution_resource_command_digests={
+                key: self._execution_resource_command_digests[key]
+                for key in resource_keys
+            },
+            checkpoints={
+                key: value
+                for key, value in self._checkpoints.items()
+                if value.run_id in run_ids
+            },
+            suspensions={
+                key: value
+                for key, value in self._suspensions.items()
+                if value.run_id in run_ids
+            },
+            interactions={
+                key: value
+                for key, value in self._interactions.items()
+                if value.run_id in run_ids
+            },
+            interaction_resolutions={
+                key: value
+                for key, value in self._interaction_resolutions.items()
+                if key in interaction_ids
+            },
+            steer_inbox={
+                run_id: list(self._steer_inbox[run_id])
+                for run_id in run_ids
+                if run_id in self._steer_inbox
+            },
+            proposals={
+                key: value
+                for key, value in self._session_commit_proposals.items()
+                if key in proposal_ids
+            },
+            proposal_results={
+                key: self._session_commit_command_results[key] for key in proposal_keys
+            },
+            proposal_digests={
+                key: self._session_commit_command_digests[key] for key in proposal_keys
+            },
+            topology_revision=self._topology_revision,
+        )
+
+    def _restore_session_undos_locked(self, undos: dict[str, _SessionUndo]) -> None:
+        for session_id in undos:
+            self._drop_session_objects_locked(session_id)
+        for undo in undos.values():
+            if not undo.existed:
+                continue
+            assert undo.session is not None
+            self._sessions[undo.session_id] = undo.session
+            self._runs.update(undo.runs)
+            for run_id, events in undo.run_event_lists.items():
+                del events[undo.run_event_lens.get(run_id, 0) :]
+                self._run_events[run_id] = events
+            if undo.session_events is not None:
+                del undo.session_events[undo.session_event_len :]
+                self._session_events[undo.session_id] = undo.session_events
+            self._fork_base_events.update(undo.fork_base_events)
+            self._start_idempotency.update(undo.start_idempotency)
+            self._start_idempotency_digests.update(undo.start_idempotency_digests)
+            self._command_results.update(undo.command_results)
+            self._command_digests.update(undo.command_digests)
+            self._execution_resources.update(undo.execution_resources)
+            self._execution_resource_command_results.update(
+                undo.execution_resource_command_results
+            )
+            self._execution_resource_command_digests.update(
+                undo.execution_resource_command_digests
+            )
+            self._checkpoints.update(undo.checkpoints)
+            self._suspensions.update(undo.suspensions)
+            self._interactions.update(undo.interactions)
+            self._interaction_resolutions.update(undo.interaction_resolutions)
+            self._steer_inbox.update(
+                {run_id: list(entries) for run_id, entries in undo.steer_inbox.items()}
+            )
+            self._session_commit_proposals.update(undo.proposals)
+            self._session_commit_command_results.update(undo.proposal_results)
+            self._session_commit_command_digests.update(undo.proposal_digests)
+            if undo.topology_revision < self._topology_revision:
+                self._topology_revision = undo.topology_revision
+
+    def _drop_session_objects_locked(self, session_id: str) -> None:
+        run_ids = self._session_run_ids_locked(session_id)
+        interaction_ids = {
+            value.interaction_id
+            for value in self._interactions.values()
+            if value.run_id in run_ids
+        }
+        proposal_ids = {
+            value.proposal_id
+            for value in self._session_commit_proposals.values()
+            if value.session_id == session_id
+        }
+        self._sessions.pop(session_id, None)
+        self._session_events.pop(session_id, None)
+        for run_id in run_ids:
+            self._runs.pop(run_id, None)
+            self._run_events.pop(run_id, None)
+            self._fork_base_events.pop(run_id, None)
+            self._execution_resources.pop(run_id, None)
+            self._steer_inbox.pop(run_id, None)
+        self._start_idempotency = {
+            scope: run_id
+            for scope, run_id in self._start_idempotency.items()
+            if run_id not in run_ids
+        }
+        self._start_idempotency_digests = {
+            scope: digest
+            for scope, digest in self._start_idempotency_digests.items()
+            if scope in self._start_idempotency
+        }
+        self._command_results = {
+            key: value
+            for key, value in self._command_results.items()
+            if key[0] not in run_ids
+        }
+        self._command_digests = {
+            key: value
+            for key, value in self._command_digests.items()
+            if key[0] not in run_ids
+        }
+        self._execution_resource_command_results = {
+            key: value
+            for key, value in self._execution_resource_command_results.items()
+            if key[0] not in run_ids
+        }
+        self._execution_resource_command_digests = {
+            key: value
+            for key, value in self._execution_resource_command_digests.items()
+            if key[0] not in run_ids
+        }
+        self._checkpoints = {
+            key: value
+            for key, value in self._checkpoints.items()
+            if value.run_id not in run_ids
+        }
+        self._suspensions = {
+            key: value
+            for key, value in self._suspensions.items()
+            if value.run_id not in run_ids
+        }
+        self._interactions = {
+            key: value
+            for key, value in self._interactions.items()
+            if value.run_id not in run_ids
+        }
+        self._interaction_resolutions = {
+            key: value
+            for key, value in self._interaction_resolutions.items()
+            if key not in interaction_ids
+        }
+        self._session_commit_proposals = {
+            key: value
+            for key, value in self._session_commit_proposals.items()
+            if key not in proposal_ids
+        }
+        self._session_commit_command_results = {
+            key: value
+            for key, value in self._session_commit_command_results.items()
+            if value.proposal_id not in proposal_ids
+        }
+        self._session_commit_command_digests = {
+            key: value
+            for key, value in self._session_commit_command_digests.items()
+            if key in self._session_commit_command_results
+        }
+
+    def _session_mutation_locked(self, session_id: str) -> SessionStateDeltaMutation:
+        """Serialize only rows and events changed since the operation watermark."""
+
+        undo = (self._operation_undos or {}).get(session_id)
+        if undo is None:
+            payload = self._dump_session_state_locked(session_id)
+            return SessionStateDeltaMutation(
+                upserts={
+                    key: list(payload.get(key, ()))
+                    for key in (
+                        "sessions",
+                        "runs",
+                        "start_idempotency",
+                        "command_results",
+                        "execution_resources",
+                        "execution_resource_command_results",
+                        "checkpoints",
+                        "suspensions",
+                        "interactions",
+                        "interaction_resolutions",
+                        "session_commit_proposals",
+                        "session_commit_command_results",
+                    )
+                    if payload.get(key)
+                },
+                appends={
+                    key: {
+                        run_id: list(rows)
+                        for run_id, rows in payload.get(key, {}).items()
+                        if rows
+                    }
+                    for key in ("run_events",)
+                    if payload.get(key)
+                },
+                replacements={
+                    key: {
+                        run_id: list(rows)
+                        for run_id, rows in payload.get(key, {}).items()
+                        if rows
+                    }
+                    for key in ("fork_base_events", "steer_inbox")
+                    if payload.get(key)
+                },
+            )
+        current_run_ids = self._session_run_ids_locked(session_id)
+        upserts: dict[str, list[dict[str, Any]]] = {}
+        deletes: dict[str, list[list[Any]]] = {}
+        appends: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        replacements: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        map_deletes: dict[str, list[str]] = {}
+        session = self._sessions[session_id]
+        if (
+            not undo.existed
+            or undo.session is None
+            or undo.session != session
+        ):
+            upserts["sessions"] = [self._session_row_payload(session)]
+        changed_runs = [
+            self._run_row_payload(self._runs[run_id])
+            for run_id in sorted(current_run_ids)
+            if run_id not in undo.runs or undo.runs[run_id] != self._runs[run_id]
+        ]
+        if changed_runs:
+            upserts["runs"] = changed_runs
+        removed_runs = sorted(set(undo.runs) - current_run_ids)
+        if removed_runs:
+            deletes["runs"] = [[run_id] for run_id in removed_runs]
+        event_appends: dict[str, list[dict[str, Any]]] = {}
+        event_replacements: dict[str, list[dict[str, Any]]] = {}
+        for run_id in current_run_ids:
+            events = self._run_events.get(run_id, [])
+            previous_len = undo.run_event_lens.get(run_id, 0)
+            if len(events) < previous_len:
+                event_replacements[run_id] = [
+                    event.model_dump(mode="json") for event in events
+                ]
+            elif len(events) > previous_len:
+                event_appends[run_id] = [
+                    event.model_dump(mode="json") for event in events[previous_len:]
+                ]
+        if event_appends:
+            appends["run_events"] = event_appends
+        if event_replacements:
+            replacements["run_events"] = event_replacements
+        removed_event_runs = sorted(
+            set(undo.run_event_lens) - current_run_ids
+        )
+        if removed_event_runs:
+            map_deletes["run_events"] = removed_event_runs
+        fork_changed = {
+            run_id: [event.model_dump(mode="json") for event in events]
+            for run_id, events in self._fork_base_events.items()
+            if run_id in current_run_ids
+            and undo.fork_base_events.get(run_id) != events
+        }
+        if fork_changed:
+            replacements["fork_base_events"] = fork_changed
+        removed_forks = sorted(set(undo.fork_base_events) - current_run_ids)
+        if removed_forks:
+            map_deletes.setdefault("fork_base_events", []).extend(removed_forks)
+        steer_changed = {
+            run_id: [entry.model_dump(mode="json") for entry in entries]
+            for run_id, entries in self._steer_inbox.items()
+            if run_id in current_run_ids
+            and list(undo.steer_inbox.get(run_id, ())) != list(entries)
+        }
+        if steer_changed:
+            replacements["steer_inbox"] = steer_changed
+        removed_steers = sorted(set(undo.steer_inbox) - current_run_ids)
+        if removed_steers:
+            map_deletes.setdefault("steer_inbox", []).extend(removed_steers)
+
+        current_start = {
+            scope: run_id
+            for scope, run_id in self._start_idempotency.items()
+            if run_id in current_run_ids
+        }
+        start_changed = []
+        for scope, run_id in current_start.items():
+            if undo.start_idempotency.get(scope) != run_id:
+                start_changed.append(
+                    {
+                        "tenant_id": scope[0],
+                        "principal_type": scope[1].value,
+                        "principal_id": scope[2],
+                        "idempotency_key": scope[3],
+                        "run_id": run_id,
+                        "request_digest": self._start_idempotency_digests[scope],
+                    }
+                )
+        if start_changed:
+            upserts["start_idempotency"] = start_changed
+        start_removed = [
+            [scope[0], scope[1].value, scope[2], scope[3]]
+            for scope in undo.start_idempotency
+            if scope not in current_start
+        ]
+        if start_removed:
+            deletes["start_idempotency"] = start_removed
+
+        current_commands = {
+            key: value
+            for key, value in self._command_results.items()
+            if key[0] in current_run_ids
+        }
+        command_changed = [
+            {
+                "run_id": key[0],
+                "idempotency_key": key[1],
+                "request_digest": self._command_digests[key],
+                "result": {
+                    "run": value.run.model_dump(mode="json"),
+                    "session": value.session.model_dump(mode="json"),
+                    "events": [
+                        event.model_dump(mode="json") for event in value.events
+                    ],
+                },
+            }
+            for key, value in current_commands.items()
+            if undo.command_results.get(key) is not value
+        ]
+        if command_changed:
+            upserts["command_results"] = command_changed
+        command_removed = [
+            [key[0], key[1]]
+            for key in undo.command_results
+            if key not in current_commands
+        ]
+        if command_removed:
+            deletes["command_results"] = command_removed
+
+        current_resources = {
+            run_id: self._execution_resources[run_id]
+            for run_id in current_run_ids
+            if run_id in self._execution_resources
+        }
+        resource_changed = [
+            value.model_dump(mode="json")
+            for run_id, value in current_resources.items()
+            if undo.execution_resources.get(run_id) is not value
+        ]
+        if resource_changed:
+            upserts["execution_resources"] = resource_changed
+        resource_removed = [
+            [run_id]
+            for run_id in undo.execution_resources
+            if run_id not in current_resources
+        ]
+        if resource_removed:
+            deletes["execution_resources"] = resource_removed
+
+        current_resource_results = {
+            key: value
+            for key, value in self._execution_resource_command_results.items()
+            if key[0] in current_run_ids
+        }
+        resource_result_changed = [
+            {
+                "run_id": key[0],
+                "idempotency_key": key[1],
+                "request_digest": self._execution_resource_command_digests[key],
+                "record": value.model_dump(mode="json"),
+            }
+            for key, value in current_resource_results.items()
+            if undo.execution_resource_command_results.get(key) is not value
+        ]
+        if resource_result_changed:
+            upserts["execution_resource_command_results"] = resource_result_changed
+        resource_result_removed = [
+            [key[0], key[1]]
+            for key in undo.execution_resource_command_results
+            if key not in current_resource_results
+        ]
+        if resource_result_removed:
+            deletes["execution_resource_command_results"] = resource_result_removed
+
+        current_checkpoints = {
+            key: value
+            for key, value in self._checkpoints.items()
+            if value.run_id in current_run_ids
+        }
+        checkpoint_changed = [
+            value.model_dump(mode="json")
+            for key, value in current_checkpoints.items()
+            if undo.checkpoints.get(key) is not value
+        ]
+        if checkpoint_changed:
+            upserts["checkpoints"] = checkpoint_changed
+        checkpoint_removed = [
+            [key]
+            for key in undo.checkpoints
+            if key not in current_checkpoints
+        ]
+        if checkpoint_removed:
+            deletes["checkpoints"] = checkpoint_removed
+
+        current_suspensions = {
+            key: value
+            for key, value in self._suspensions.items()
+            if value.run_id in current_run_ids
+        }
+        suspension_changed = [
+            value.model_dump(mode="json")
+            for key, value in current_suspensions.items()
+            if undo.suspensions.get(key) is not value
+        ]
+        if suspension_changed:
+            upserts["suspensions"] = suspension_changed
+        suspension_removed = [
+            [key] for key in undo.suspensions if key not in current_suspensions
+        ]
+        if suspension_removed:
+            deletes["suspensions"] = suspension_removed
+
+        current_interactions = {
+            key: value
+            for key, value in self._interactions.items()
+            if value.run_id in current_run_ids
+        }
+        interaction_changed = [
+            value.model_dump(mode="json")
+            for key, value in current_interactions.items()
+            if undo.interactions.get(key) is not value
+        ]
+        if interaction_changed:
+            upserts["interactions"] = interaction_changed
+        interaction_removed = [
+            [key] for key in undo.interactions if key not in current_interactions
+        ]
+        if interaction_removed:
+            deletes["interactions"] = interaction_removed
+
+        current_resolutions = {
+            key: value
+            for key, value in self._interaction_resolutions.items()
+            if key in {item.interaction_id for item in current_interactions.values()}
+            or key in undo.interaction_resolutions
+        }
+        resolution_changed = [
+            value.model_dump(mode="json")
+            for key, value in current_resolutions.items()
+            if undo.interaction_resolutions.get(key) is not value
+        ]
+        if resolution_changed:
+            upserts["interaction_resolutions"] = resolution_changed
+        resolution_removed = [
+            [key]
+            for key in undo.interaction_resolutions
+            if key not in current_resolutions
+        ]
+        if resolution_removed:
+            deletes["interaction_resolutions"] = resolution_removed
+
+        current_proposals = {
+            key: value
+            for key, value in self._session_commit_proposals.items()
+            if value.session_id == session_id
+        }
+        proposal_changed = [
+            value.model_dump(mode="json")
+            for key, value in current_proposals.items()
+            if undo.proposals.get(key) is not value
+        ]
+        if proposal_changed:
+            upserts["session_commit_proposals"] = proposal_changed
+        proposal_removed = [
+            [key] for key in undo.proposals if key not in current_proposals
+        ]
+        if proposal_removed:
+            deletes["session_commit_proposals"] = proposal_removed
+
+        current_proposal_results = {
+            key: value
+            for key, value in self._session_commit_command_results.items()
+            if value.proposal_id in current_proposals
+            or key in undo.proposal_results
+        }
+        proposal_result_changed = [
+            {
+                "target_id": key[0],
+                "idempotency_key": key[1],
+                "request_digest": self._session_commit_command_digests[key],
+                "proposal": value.model_dump(mode="json"),
+            }
+            for key, value in current_proposal_results.items()
+            if undo.proposal_results.get(key) is not value
+        ]
+        if proposal_result_changed:
+            upserts["session_commit_command_results"] = proposal_result_changed
+        proposal_result_removed = [
+            [key[0], key[1]]
+            for key in undo.proposal_results
+            if key not in current_proposal_results
+        ]
+        if proposal_result_removed:
+            deletes["session_commit_command_results"] = proposal_result_removed
+
+        return SessionStateDeltaMutation(
+            upserts=upserts,
+            deletes=deletes,
+            appends=appends,
+            replacements=replacements,
+            map_deletes=map_deletes,
+        )
+
+    def _session_row_payload(self, session: _SessionRow) -> dict[str, Any]:
+        return {
+            "session_id": session.session_id,
+            "revision": session.revision,
+            "last_sequence": session.last_sequence,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "active_serial_run_id": session.active_serial_run_id,
+            "parent_session_id": session.parent_session_id,
+            "owner": (
+                session.owner.model_dump(mode="json")
+                if session.owner is not None
+                else None
+            ),
+            "revision_sequences": {
+                str(revision): sequence
+                for revision, sequence in session.revision_sequences.items()
+            },
+        }
+
+    def _run_row_payload(self, row: _RunRow) -> dict[str, Any]:
+        return {
+            "session_id": row.session_id,
+            "run_id": row.run_id,
+            "state": row.state.value,
+            "revision": row.revision,
+            "last_run_sequence": row.last_run_sequence,
+            "concurrency_mode": row.concurrency_mode.value,
+            "base_session_revision": row.base_session_revision,
+            "base_session_sequence": row.base_session_sequence,
+            "accepted_session_revision": row.accepted_session_revision,
+            "resolved_spec_hash": row.resolved_spec_hash,
+            "created_at": row.created_at.isoformat(),
+            "updated_at": row.updated_at.isoformat(),
+            "suspension_id": row.suspension_id,
+            "checkpoint_id": row.checkpoint_id,
+            "start_command": (
+                row.start_command.model_dump(mode="json")
+                if row.start_command is not None
+                else None
+            ),
+            "request_context": (
+                row.request_context.model_dump(mode="json")
+                if row.request_context is not None
+                else None
+            ),
+        }
 
     def _restore_session_snapshots_locked(
         self, snapshots: dict[str, dict[str, Any] | None]

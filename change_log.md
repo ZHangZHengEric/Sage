@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-04 14:20** 优化 Session 增量提交、Postgres 读路径、Desktop 扫盘/MCP 缓存与公开恢复接口，并收窄 materialize 锁。
+
 - **2026-09-02 19:40** Desktop Run 改走 Application.materialize_agent：删除 open_scope 与假 resolved_plan，next_run 选择可见。
 
 - **2026-09-02 19:00** Desktop 进程根改走 SAgentBuilder：删除 `_process_component`，store/sink 注入后由 Application 提供 dispatcher 与 memory。

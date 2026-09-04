@@ -1715,14 +1715,33 @@ class DesktopRunCompositionMixin:
         if root is None:
             return f"Working directory: {workspace_root}\n(Empty isolated sandbox)"
         entries = []
-        for candidate in sorted(root.rglob("*")):
-            relative = candidate.relative_to(root)
-            if len(relative.parts) > 2 or candidate.is_symlink():
+        try:
+            top_level = sorted(root.iterdir(), key=lambda value: value.name)
+        except OSError:
+            return f"Working directory: {workspace_root}\n(Empty isolated sandbox)"
+        for child in top_level:
+            if child.is_symlink():
                 continue
-            suffix = "/" if candidate.is_dir() else ""
-            entries.append(relative.as_posix() + suffix)
+            suffix = "/" if child.is_dir() else ""
+            entries.append(child.name + suffix)
             if len(entries) >= maximum:
                 entries.append("... (truncated)")
+                break
+            if not child.is_dir():
+                continue
+            try:
+                nested = sorted(child.iterdir(), key=lambda value: value.name)
+            except OSError:
+                continue
+            for grandchild in nested:
+                if grandchild.is_symlink():
+                    continue
+                suffix = "/" if grandchild.is_dir() else ""
+                entries.append(f"{child.name}/{grandchild.name}{suffix}")
+                if len(entries) >= maximum:
+                    entries.append("... (truncated)")
+                    break
+            if entries and entries[-1] == "... (truncated)":
                 break
         return (
             f"Working directory: {workspace_root}"

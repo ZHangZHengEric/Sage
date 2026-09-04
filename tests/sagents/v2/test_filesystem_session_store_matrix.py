@@ -772,6 +772,32 @@ async def test_session_journal_appends_deltas_without_full_state_amplification(
     await restored.close()
 
 
+@pytest.mark.asyncio
+async def test_follow_up_commit_does_not_reserialize_the_full_session(tmp_path):
+    store = FilesystemSessionStore(tmp_path / "session-store")
+    created = await store.create_run(command("mutation-base"), CONTEXT)
+    dumped = 0
+    original = store._dump_session_state_locked
+
+    def wrapped(session_id):
+        nonlocal dumped
+        dumped += 1
+        return original(session_id)
+
+    store._dump_session_state_locked = wrapped
+    await store.create_run(
+        command(
+            "mutation-next",
+            session_id=created.handle.session_id,
+            mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+        ),
+        CONTEXT,
+    )
+    assert dumped == 0
+    assert len(await store.list_session_runs(created.handle.session_id)) == 2
+    await store.close()
+
+
 def test_truncated_v3_journal_tail_is_ignored_but_middle_checksum_is_not(tmp_path):
     path = tmp_path / "session-store"
 

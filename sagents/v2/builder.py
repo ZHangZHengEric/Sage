@@ -2010,6 +2010,8 @@ class _ApplicationComposer:
         self.application: SAgentApplication | None = None
         self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
         self._lock = None
+        self._cache_guard = None
+        self._key_locks: dict[tuple[str, ...], Any] = {}
 
     async def materialize_agent(
         self,
@@ -2026,8 +2028,8 @@ class _ApplicationComposer:
     ) -> MaterializedAgentPorts:
         import asyncio
 
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        if self._cache_guard is None:
+            self._cache_guard = asyncio.Lock()
         tenant_id = tenant_id or self.default_tenant_id
         manifest, resolved = SAgentBuilder()._resolve_package(package)
         declarations = manifest.plugins if manifest is not None else resolved.plugins
@@ -2080,7 +2082,7 @@ class _ApplicationComposer:
         effective_model = model if model is not None else self.process_model
         run_handles: list[Any] = []
         selected_handles: list[Any] = []
-        async with self._lock, self._close_run_handles_on_error(run_handles):
+        async with self._close_run_handles_on_error(run_handles):
             estimator = await self._port(
                 runtime,
                 declarations,
@@ -2335,52 +2337,66 @@ class _ApplicationComposer:
             cache_agent_id or "",
             _config_identity(identity if identity is not None else config),
         )
-        if cacheable and cache_key in self._cache:
-            handle, value = self._cache[cache_key]
+        async with await self._lock_for(cache_key):
+            if cacheable and cache_key in self._cache:
+                handle, value = self._cache[cache_key]
+                selected_handles.append(handle)
+                return value
+            parent = self.process_root
+            if scope == ExtensionScope.RUN:
+                parent = await self._agent_parent(tenant_id, agent_id or "default")
+            value, handle = await self._instantiate(
+                plugin_id,
+                config,
+                capability,
+                scope=scope,
+                scope_id=scope_id,
+                parent=parent,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                run_id=run_id,
+            )
+            if cacheable:
+                self._cache[cache_key] = (handle, value)
+                if self.application is not None:
+                    self.application._scope_handles.append(handle)
+            else:
+                run_handles.append(handle)
             selected_handles.append(handle)
             return value
-        parent = self.process_root
-        if scope == ExtensionScope.RUN:
-            parent = await self._agent_parent(tenant_id, agent_id or "default")
-        value, handle = await self._instantiate(
-            plugin_id,
-            config,
-            capability,
-            scope=scope,
-            scope_id=scope_id,
-            parent=parent,
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            run_id=run_id,
-        )
-        if cacheable:
-            self._cache[cache_key] = (handle, value)
-            if self.application is not None:
-                self.application._scope_handles.append(handle)
-        else:
-            run_handles.append(handle)
-        selected_handles.append(handle)
-        return value
+
+    async def _lock_for(self, cache_key: tuple[str, ...]):
+        import asyncio
+
+        if self._cache_guard is None:
+            self._cache_guard = asyncio.Lock()
+        async with self._cache_guard:
+            lock = self._key_locks.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._key_locks[cache_key] = lock
+        return lock
 
     async def _agent_parent(self, tenant_id: str | None, agent_id: str):
         cache_key = ("__agent_parent__", tenant_id or "", agent_id)
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached[0]
-        handle = await self.host.open_scope(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id=f"materialize-agent:{tenant_id or 'default'}:{agent_id}",
-                tenant_id=tenant_id,
-                agent_id=agent_id,
-            ),
-            self.host.plan(()),
-            parent=self.process_root,
-        )
-        self._cache[cache_key] = (handle, None)
-        if self.application is not None:
-            self.application._scope_handles.append(handle)
-        return handle
+        async with await self._lock_for(cache_key):
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached[0]
+            handle = await self.host.open_scope(
+                ExtensionScopeContext(
+                    scope=ExtensionScope.AGENT,
+                    scope_id=f"materialize-agent:{tenant_id or 'default'}:{agent_id}",
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                ),
+                self.host.plan(()),
+                parent=self.process_root,
+            )
+            self._cache[cache_key] = (handle, None)
+            if self.application is not None:
+                self.application._scope_handles.append(handle)
+            return handle
 
     async def _instantiate(
         self,

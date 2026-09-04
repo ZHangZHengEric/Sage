@@ -126,6 +126,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self._writer_lock_lost = False
         self._session_lock_guard = asyncio.Lock()
         self._session_locks: dict[str, asyncio.Lock] = {}
+        self._load_lock = asyncio.Lock()
         self._loaded_session_ids: set[str] = set()
         self._persisted_run_sequences: dict[str, int] = {}
         self._persisted_session_runs: dict[str, set[str]] = {}
@@ -581,7 +582,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self, session_id: str, namespace: str, key: str
     ) -> Any | None:
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             await super().get_session(session_id)
         assert self._pool is not None
         async with self._pool.acquire() as connection:
@@ -602,7 +603,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self, session_id: str, namespace: str, key: str, value: Any
     ) -> None:
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             await super().put_derived_state(session_id, namespace, key, value)
         await self._ensure_ready()
         async with self._writer_connection() as connection:
@@ -624,7 +625,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self, session_id: str, namespace: str, key: str
     ) -> None:
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             await super().delete_derived_state(session_id, namespace, key)
         await self._ensure_ready()
         async with self._writer_connection() as connection:
@@ -654,141 +655,130 @@ class _PostgresSessionState(SessionStoreCoordinator):
             session_id = await self._read_start_lookup(command, context)
         if session_id is not None:
             async with self._session_scope(session_id):
-                await self._refresh_session(session_id, missing_ok=True)
+                await self._ensure_session_loaded(session_id, missing_ok=True)
                 return await super().create_run(command, context)
         return await super().create_run(command, context)
 
     async def get_session(self, session_id):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             return await super().get_session(session_id)
 
     async def delete_session(self, session_id):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             await self._ensure_descendants_loaded(session_id)
             for child in await super().list_descendant_sessions(session_id):
-                await self._refresh_session(child.session_id, missing_ok=True)
+                await self._ensure_session_loaded(child.session_id, missing_ok=True)
             result = await super().delete_session(session_id)
             self._loaded_session_ids.intersection_update(self._sessions)
             return result
 
     async def list_session_runs(self, session_id):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             return await super().list_session_runs(session_id)
 
     async def list_descendant_sessions(self, session_id):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             await self._ensure_descendants_loaded(session_id)
             return await super().list_descendant_sessions(session_id)
 
     async def read_session_events(self, session_id, **kwargs):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             return await super().read_session_events(session_id, **kwargs)
 
     async def list_session_commit_proposals(self, session_id):
         async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
+            await self._ensure_session_loaded(session_id)
             return await super().list_session_commit_proposals(session_id)
 
     async def get_run(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_run(run_id)
 
     async def get_run_result(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_run_result(run_id)
 
     async def get_start_command(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_start_command(run_id)
 
     async def get_latest_checkpoint(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_latest_checkpoint(run_id)
 
     async def read_events(self, run_id, **kwargs):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().read_events(run_id, **kwargs)
 
     async def read_fork_base_events(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().read_fork_base_events(run_id)
 
     async def commit_run(self, *, run_id, **kwargs):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().commit_run(run_id=run_id, **kwargs)
 
     async def propose_session_commit(self, command, context):
-        await self._refresh_resource("run_id", command.run_id)
+        await self._ensure_resource_loaded("run_id", command.run_id)
         return await super().propose_session_commit(command, context)
 
     async def publish_session_commit(self, command, context):
-        await self._refresh_resource("proposal_id", command.proposal_id)
+        await self._ensure_resource_loaded("proposal_id", command.proposal_id)
         return await super().publish_session_commit(command, context)
 
     async def reject_session_commit(self, command, context):
-        await self._refresh_resource("proposal_id", command.proposal_id)
+        await self._ensure_resource_loaded("proposal_id", command.proposal_id)
         return await super().reject_session_commit(command, context)
 
     async def get_session_commit_proposal(self, proposal_id):
-        await self._refresh_resource("proposal_id", proposal_id)
+        await self._ensure_resource_loaded("proposal_id", proposal_id)
         return await super().get_session_commit_proposal(proposal_id)
 
     async def get_checkpoint(self, checkpoint_id):
-        await self._refresh_resource("checkpoint_id", checkpoint_id)
+        await self._ensure_resource_loaded("checkpoint_id", checkpoint_id)
         return await super().get_checkpoint(checkpoint_id)
 
     async def get_suspension(self, suspension_id):
-        await self._refresh_resource("suspension_id", suspension_id)
+        await self._ensure_resource_loaded("suspension_id", suspension_id)
         return await super().get_suspension(suspension_id)
 
     async def get_interaction(self, interaction_id):
-        await self._refresh_resource("interaction_id", interaction_id)
+        await self._ensure_resource_loaded("interaction_id", interaction_id)
         return await super().get_interaction(interaction_id)
 
     async def get_interaction_resolution(self, interaction_id):
-        await self._refresh_resource("interaction_id", interaction_id)
+        await self._ensure_resource_loaded("interaction_id", interaction_id)
         return await super().get_interaction_resolution(interaction_id)
 
     async def enqueue_steer(self, command, context):
-        await self._refresh_resource("run_id", command.run_id)
+        await self._ensure_resource_loaded("run_id", command.run_id)
         return await super().enqueue_steer(command, context)
 
     async def claim_steers(self, *, run_id, **kwargs):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().claim_steers(run_id=run_id, **kwargs)
 
     async def list_steers(self, run_id):
-        await self._refresh_resource("run_id", run_id)
+        await self._ensure_resource_loaded("run_id", run_id)
         return await super().list_steers(run_id)
 
     async def resolve_interaction(self, command, context):
-        await self._refresh_resource("run_id", command.run_id)
+        await self._ensure_resource_loaded("run_id", command.run_id)
         return await super().resolve_interaction(command, context)
 
     async def request_resume(self, command, context):
-        await self._refresh_resource("run_id", command.run_id)
+        await self._ensure_resource_loaded("run_id", command.run_id)
         return await super().request_resume(command, context)
 
     async def subscribe_events(self, cursor):
-        await self._refresh_resource("run_id", cursor.run_id)
+        await self._ensure_resource_loaded("run_id", cursor.run_id)
         async for event in super().subscribe_events(cursor):
             yield event
-
-    async def _refresh_resource(self, identity_key: str, identity: str) -> None:
-        await self._ensure_ready()
-        session_id = await self._locate_session(identity_key, identity)
-        if session_id is None:
-            session_id = self._session_id_for_loaded(identity_key, identity)
-        if session_id is None:
-            await self._ensure_resource_loaded(identity_key, identity)
-            return
-        async with self._session_scope(session_id):
-            await self._refresh_session(session_id)
 
     def _session_id_for_loaded(
         self, identity_key: str, identity: str
@@ -833,7 +823,22 @@ class _PostgresSessionState(SessionStoreCoordinator):
     async def _ensure_session_loaded(
         self, session_id: str, *, missing_ok: bool = False
     ) -> None:
-        await self._refresh_session(session_id, missing_ok=missing_ok)
+        if session_id in self._loaded_session_ids or session_id in self._sessions:
+            self._loaded_session_ids.add(session_id)
+            return
+        await self._ensure_ready()
+        async with self._load_lock:
+            if session_id in self._loaded_session_ids or session_id in self._sessions:
+                self._loaded_session_ids.add(session_id)
+                return
+            payload = await self._fetch_session(session_id)
+            if payload is None:
+                if missing_ok:
+                    return
+                raise self._not_found("session.not_found", session_id)
+            async with self._lock:
+                if session_id not in self._loaded_session_ids:
+                    self._install_session_locked(payload)
 
     async def _ensure_descendants_loaded(self, session_id: str) -> None:
         await self._ensure_ready()
@@ -855,16 +860,26 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 session_id,
             )
         for row in rows:
-            await self._refresh_session(row["session_id"], missing_ok=True)
+            await self._ensure_session_loaded(row["session_id"], missing_ok=True)
 
     async def _ensure_resource_loaded(self, identity_key: str, identity: str) -> None:
+        if self._resource_is_loaded(identity_key, identity):
+            return
         await self._ensure_ready()
-        session_id = await self._locate_session(identity_key, identity)
-        if session_id is None:
+        async with self._load_lock:
             if self._resource_is_loaded(identity_key, identity):
                 return
-            raise self._not_found(f"{identity_key}.not_found", identity)
-        await self._refresh_session(session_id)
+            session_id = await self._locate_session(identity_key, identity)
+            if session_id is None:
+                raise self._not_found(f"{identity_key}.not_found", identity)
+            if session_id in self._loaded_session_ids:
+                return
+            payload = await self._fetch_session(session_id)
+            if payload is None:
+                raise self._not_found(f"{identity_key}.not_found", identity)
+            async with self._lock:
+                if session_id not in self._loaded_session_ids:
+                    self._install_session_locked(payload)
 
     def _resource_is_loaded(self, identity_key: str, identity: str) -> bool:
         mappings = {

@@ -264,24 +264,20 @@ class DesktopCatalogServiceMixin:
                 }
             )
         await self._initialize_user(user_id)
-        for connection in await self.catalog.list_mcp(user_id):
-            if connection.disabled:
-                continue
-            bridge = McpToolPlugin((self._mcp_config(connection),))
-            try:
-                discovered = await bridge.list_tools(run_id="desktop-tool-catalog")
-            except SageV2Error:
-                # One unavailable external server must not hide native tools or
-                # prevent another connection from being configured.
-                continue
-            definitions.extend(
-                {
-                    **value.model_dump(mode="json"),
-                    "type": "mcp",
-                    "source": _mcp_source(value.name),
-                }
-                for value in discovered
+        try:
+            discovered = await (await self._mcp_plugin(user_id)).list_tools(
+                run_id="desktop-tool-catalog"
             )
+        except SageV2Error:
+            discovered = ()
+        definitions.extend(
+            {
+                **value.model_dump(mode="json"),
+                "type": "mcp",
+                "source": _mcp_source(value.name),
+            }
+            for value in discovered
+        )
         return definitions
 
     def _official_tools(self, runtime: OfficialToolRuntime) -> OfficialToolPlugin:
@@ -301,13 +297,34 @@ class DesktopCatalogServiceMixin:
     async def _mcp_plugin(self, user_id: str) -> McpToolPlugin:
         await self._initialize_user(user_id)
         values = await self.catalog.list_mcp(user_id)
-        return McpToolPlugin(
-            tuple(
-                self._mcp_config(value, required=False)
-                for value in values
-                if not value.disabled
-            )
+        servers = tuple(
+            self._mcp_config(value, required=False)
+            for value in values
+            if not value.disabled
         )
+        fingerprint = McpToolPlugin.servers_fingerprint(servers)
+        cache = getattr(self, "_mcp_plugin_cache", None)
+        if cache is None:
+            self._mcp_plugin_cache = {}
+            cache = self._mcp_plugin_cache
+        key = (user_id, fingerprint)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        plugin = McpToolPlugin(servers)
+        for existing in list(cache):
+            if existing[0] == user_id:
+                cache.pop(existing, None)
+        cache[key] = plugin
+        return plugin
+
+    def _invalidate_mcp_plugins(self, user_id: str) -> None:
+        cache = getattr(self, "_mcp_plugin_cache", None)
+        if not cache:
+            return
+        for existing in list(cache):
+            if existing[0] == user_id:
+                cache.pop(existing, None)
 
     def _mcp_config(
         self, value: DesktopMcpRecord, *, required: bool = True
@@ -806,18 +823,24 @@ class DesktopCatalogServiceMixin:
     async def list_mcp_connections(self, user_id: str) -> list[dict[str, Any]]:
         await self._initialize_user(user_id)
         values = await self.catalog.list_mcp(user_id)
+        discovered_by_source: dict[str, int] = {}
+        connection_errors: dict[str, str] = {}
+        plugin = await self._mcp_plugin(user_id)
+        try:
+            discovered = await plugin.list_tools(run_id="desktop-mcp-catalog")
+        except SageV2Error as exc:
+            discovered = ()
+            for value in values:
+                if not value.disabled:
+                    connection_errors[value.name] = exc.info.message
+        else:
+            discovered_by_source.update(plugin.tool_counts_by_server())
+            for name, error in plugin.discovery_errors().items():
+                connection_errors[name] = error.message
         result = []
         for value in values:
-            tool_count = 0
-            connection_error = ""
-            if not value.disabled:
-                bridge = McpToolPlugin((self._mcp_config(value),))
-                try:
-                    tool_count = len(
-                        await bridge.list_tools(run_id="desktop-mcp-catalog")
-                    )
-                except SageV2Error as exc:
-                    connection_error = exc.info.message
+            tool_count = 0 if value.disabled else discovered_by_source.get(value.name, 0)
+            connection_error = "" if value.disabled else connection_errors.get(value.name, "")
             result.append(
                 {
                     **value.model_dump(
@@ -843,6 +866,7 @@ class DesktopCatalogServiceMixin:
             and not str(request.streamable_http_url or "").strip()
         ):
             raise ValueError("streamable HTTP connection requires URL")
+        self._invalidate_mcp_plugins(user_id)
         await self.catalog.save_mcp(
             DesktopMcpRecord(
                 user_id=user_id,
@@ -872,6 +896,7 @@ class DesktopCatalogServiceMixin:
         )
         if record is None:
             raise ValueError("MCP connection not found")
+        self._invalidate_mcp_plugins(user_id)
         await self.catalog.save_mcp(record.model_copy(update={"disabled": not enabled}))
         values = await self.list_mcp_connections(user_id)
         return next(value for value in values if value["name"] == server_name)
