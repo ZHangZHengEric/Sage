@@ -11,7 +11,8 @@ import asyncio
 import hashlib
 import json
 from contextlib import asynccontextmanager, nullcontext
-from collections.abc import AsyncIterator, Callable, Collection
+from collections.abc import AsyncIterator, Callable, Collection, Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
@@ -182,6 +183,12 @@ class _SessionUndo:
     topology_revision: int
 
 
+@dataclass
+class _SessionOperation:
+    undos: dict[str, _SessionUndo] | None
+    cancellation: asyncio.CancelledError | None = None
+
+
 class SessionStoreCoordinator:
     """Atomic reference state machine for the SessionStore contract.
 
@@ -263,7 +270,9 @@ class SessionStoreCoordinator:
         ] = {}
         self._session_commit_command_digests: dict[tuple[str, str], str] = {}
         self._subscribers: dict[str, set[_Subscriber]] = {}
-        self._operation_undos: dict[str, _SessionUndo] | None = None
+        self._operation: ContextVar[_SessionOperation | None] = ContextVar(
+            "session_operation", default=None
+        )
 
     @asynccontextmanager
     async def _session_operation(self, *session_ids: str):
@@ -290,9 +299,8 @@ class SessionStoreCoordinator:
                 if self._persistence_can_fail
                 else None
             )
-            previous_undos = self._operation_undos
-            if undos is not None:
-                self._operation_undos = undos
+            operation = _SessionOperation(undos)
+            token = self._operation.set(operation)
             try:
                 yield
             except BaseException:
@@ -300,10 +308,35 @@ class SessionStoreCoordinator:
                     self._restore_session_undos_locked(undos)
                 raise
             finally:
-                self._operation_undos = previous_undos
+                self._operation.reset(token)
         finally:
             for lock in reversed(acquired):
                 lock.release()
+        # Storage may already be durable when cancellation arrives. Finish the
+        # in-memory commit and subscriber fanout before propagating it, outside
+        # the rollback guard and after releasing the Session locks.
+        if operation.cancellation is not None:
+            raise operation.cancellation
+
+    async def _settle_storage(self, write: Coroutine[Any, Any, None]) -> None:
+        """Keep ownership until persistence/recovery settles, even on cancellation."""
+
+        if not self._persistence_can_fail:
+            await write
+            return
+        operation = self._operation.get()
+        assert operation is not None
+        task = asyncio.create_task(write)
+        while True:
+            try:
+                await asyncio.shield(task)
+                return
+            except asyncio.CancelledError as exc:
+                if task.cancelled():
+                    raise
+                # Repeated cancel() calls must not detach a filesystem thread
+                # or release the lock while a transaction is still committing.
+                operation.cancellation = exc
 
     @asynccontextmanager
     async def _session_read(self, session_id: str):
@@ -635,7 +668,8 @@ class SessionStoreCoordinator:
     def _session_mutation_locked(self, session_id: str) -> SessionStateDeltaMutation:
         """Serialize only rows and events changed since the operation watermark."""
 
-        undo = (self._operation_undos or {}).get(session_id)
+        operation = self._operation.get()
+        undo = (operation.undos or {}).get(session_id) if operation else None
         if undo is None:
             payload = self._dump_session_state_locked(session_id)
             return SessionStateDeltaMutation(
@@ -1382,7 +1416,7 @@ class SessionStoreCoordinator:
             self._start_idempotency_digests[idempotency_scope] = self._digest(
                 command.model_dump(mode="json")
             )
-            await self._commit_storage_locked(session_id)
+            await self._settle_storage(self._commit_storage_locked(session_id))
             self._fanout_locked(run_id, events)
             return RunCreationResult(handle=self._handle(row), events=events)
 
@@ -1489,7 +1523,7 @@ class SessionStoreCoordinator:
             self._persist_events_locked(row, session, events)
             self._session_commit_command_results[key] = proposal
             self._session_commit_command_digests[key] = digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(row.run_id, events)
             return proposal
 
@@ -1660,7 +1694,7 @@ class SessionStoreCoordinator:
             self._persist_events_locked(row, session, events)
             self._session_commit_command_results[key] = updated
             self._session_commit_command_digests[key] = digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(row.run_id, events)
             return updated
 
@@ -1828,7 +1862,7 @@ class SessionStoreCoordinator:
             )
             self._command_results[command_key] = result
             self._command_digests[command_key] = command_digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(run_id, events)
             return result
 
@@ -1997,7 +2031,7 @@ class SessionStoreCoordinator:
             self._execution_resource_command_results[command_key] = committed
             self._execution_resource_command_digests[command_key] = command_digest
             self._persist_events_locked(run, session, events)
-            await self._commit_storage_locked(run.session_id)
+            await self._settle_storage(self._commit_storage_locked(run.session_id))
             self._fanout_locked(run_id, events)
             return committed
 
@@ -2247,7 +2281,9 @@ class SessionStoreCoordinator:
                 for key, value in self._derived_state.items()
                 if key[0] not in session_ids
             }
-            await self._delete_storage_locked(session_id, frozenset(session_ids))
+            await self._settle_storage(
+                self._delete_storage_locked(session_id, frozenset(session_ids))
+            )
 
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]:
         async with self._session_read(session_id):
@@ -2514,7 +2550,7 @@ class SessionStoreCoordinator:
             )
             self._command_results[command_key] = result
             self._command_digests[command_key] = command_digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(row.run_id, events)
             return result
 
@@ -2629,7 +2665,7 @@ class SessionStoreCoordinator:
             session.revision += 1
             session.updated_at = now
             self._persist_events_locked(row, session, events)
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(run_id, events)
             return SteerClaimResult(
                 run=self._run_snapshot(row), entries=applied, events=events
@@ -2805,7 +2841,7 @@ class SessionStoreCoordinator:
             )
             self._command_results[command_key] = result
             self._command_digests[command_key] = command_digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(row.run_id, events)
             return result
 
@@ -2896,7 +2932,7 @@ class SessionStoreCoordinator:
             )
             self._command_results[command_key] = result
             self._command_digests[command_key] = command_digest
-            await self._commit_storage_locked(row.session_id)
+            await self._settle_storage(self._commit_storage_locked(row.session_id))
             self._fanout_locked(row.run_id, events)
             return result
 
@@ -2914,9 +2950,7 @@ class SessionStoreCoordinator:
             queue=asyncio.Queue(maxsize=self._subscriber_queue_size),
             last_delivered=cursor.run_sequence,
         )
-        async with self._lock:
-            if cursor.run_id not in self._runs:
-                raise self._not_found("run.not_found", cursor.run_id)
+        async with self._run_session_read(cursor.run_id):
             replay = tuple(
                 event
                 for event in self._run_events[cursor.run_id]

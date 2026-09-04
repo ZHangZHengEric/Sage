@@ -125,7 +125,9 @@ class _PostgresSessionState(SessionStoreCoordinator):
         self._writer_connection_lock = asyncio.Lock()
         self._writer_lock_lost = False
         self._session_lock_guard = asyncio.Lock()
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        # Adapter loading scopes may call coordinator operations, which acquire
+        # their own Session locks. Sharing that lock table would self-deadlock.
+        self._session_scope_locks: dict[str, asyncio.Lock] = {}
         self._load_lock = asyncio.Lock()
         self._loaded_session_ids: set[str] = set()
         self._persisted_run_sequences: dict[str, int] = {}
@@ -341,7 +343,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
     @asynccontextmanager
     async def _session_scope(self, session_id: str):
         async with self._session_lock_guard:
-            lock = self._session_locks.setdefault(session_id, asyncio.Lock())
+            lock = self._session_scope_locks.setdefault(session_id, asyncio.Lock())
         async with lock:
             yield
 
@@ -678,6 +680,31 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async with self._session_scope(session_id):
             await self._ensure_session_loaded(session_id)
             return await super().list_session_runs(session_id)
+
+    async def list_dispatchable_runs(self):
+        """Discover durable root intents before the dispatcher rebuilds its queue."""
+
+        await self._ensure_ready()
+        assert self._pool is not None
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                f"""
+                SELECT session_id FROM {self._table("sessions")}
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(compact_state->'runs') AS run
+                    WHERE run->>'state' IN (
+                        'queued', 'running', 'suspend_requested', 'resuming'
+                    )
+                    AND run->'start_command'->>'parent_run_id' IS NULL
+                    AND run->>'request_context' IS NOT NULL
+                )
+                """
+            )
+        for row in rows:
+            async with self._session_scope(row["session_id"]):
+                await self._ensure_session_loaded(row["session_id"], missing_ok=True)
+        return await super().list_dispatchable_runs()
 
     async def list_descendant_sessions(self, session_id):
         async with self._session_scope(session_id):

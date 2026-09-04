@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from weakref import WeakValueDictionary
 
 from pydantic import SecretStr
 
@@ -2065,7 +2066,9 @@ class _ApplicationComposer:
         self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
         self._lock = None
         self._cache_guard = None
-        self._key_locks: dict[tuple[str, ...], Any] = {}
+        # Holders and waiters keep their lock alive; completed Run identities
+        # must not accumulate in the process Application for its entire life.
+        self._key_locks: WeakValueDictionary[tuple[str, ...], Any] = WeakValueDictionary()
 
     async def materialize_agent(
         self,

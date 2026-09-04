@@ -3522,8 +3522,171 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
+async def test_goal_survives_repeated_questionnaires_and_service_restart(
+    tmp_path: Path,
+):
+    from sagents.v2.goal.state import GoalStateService
+
+    goal_text = "Build the website and verify persistence"
+    session_id = None
+    original_goal_id = None
+
+    def active_goal(request):
+        system = "\n".join(
+            block.text
+            for message in request.messages
+            if message.role in {"system", "developer"}
+            for block in message.content
+            if isinstance(block, TextBlock)
+        )
+        assert "<active_goal>" in system
+        assert goal_text in system
+
+    def step(index, name=None, arguments=None, assertion=None):
+        return ScriptedModelStep(
+            assertion=assertion,
+            events=(
+                ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id=f"response_{index}",
+                        text="I have checked the work.",
+                        tool_calls=(
+                            ModelToolCall(
+                                tool_call_id=f"call_{index}",
+                                name=name,
+                                arguments=arguments or {},
+                            ),
+                        )
+                        if name
+                        else (),
+                        finish_reason="tool_calls" if name else "stop",
+                    ),
+                ),
+            ),
+        )
+
+    for round_number in range(3):
+        # Each answer is handled by a fresh service, with no in-memory goal state.
+        service = DesktopV2Service(tmp_path)
+        await service.list_agents("user_1")
+        await service.patch_model_provider(
+            "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
+        )
+        await service.patch_agent_settings(
+            "sage",
+            AgentSettingsPatch(available_tools=["questionnaire_async"]),
+            "user_1",
+        )
+        agent = await service._agent("sage", "user_1")
+        _, loop, sandbox = await service._build_loop(
+            agent=agent,
+            provider=await service._provider(agent, "user_1"),
+            workspace=await service.workspace_root(None, "sage"),
+            preferred_skills=(),
+            approval_mode="high_risk",
+            invocation_mode="goal",
+        )
+        loop.tool_selection_model = scripted_tool_selection(
+            "goal_submit", "questionnaire_async", "goal_complete"
+        )
+        steps = []
+        if round_number == 0:
+            steps.append(step("submit", "goal_submit", {"content": goal_text}))
+        if round_number < 2:
+            steps.append(
+                step(
+                    f"question_{round_number}",
+                    "questionnaire_async",
+                    {
+                        "questions": [
+                            {"id": "style", "type": "text", "title": "Which style?"}
+                        ]
+                    },
+                    active_goal,
+                )
+            )
+        else:
+            # A premature final answer must still be blocked after inheritance.
+            steps.append(step("premature", assertion=active_goal))
+            steps.append(
+                step(
+                    "complete",
+                    "goal_complete",
+                    {"summary": "Persistence verified."},
+                    active_goal,
+                )
+            )
+        loop.model = ScriptedModelProvider(tuple(steps))
+        handle = await service.runtime.start_run(
+            StartRun(
+                session_id=session_id,
+                agent_id="sage",
+                input=(InputItem(role="user", content=(TextBlock(text="Use blue."),)),),
+                resolved_spec_hash=loop.expected_resolved_spec_hash,
+                idempotency_key=f"questionnaire_goal_{round_number}",
+                invocation_mode="goal",
+            ),
+            service._context("user_1"),
+        )
+        session_id = handle.session_id
+        try:
+            async with desktop_execution_lease(service, handle.run_id):
+                result = await loop.execute(handle.run_id, service._context("user_1"))
+            assert result.state.value == "completed", (
+                round_number,
+                [
+                    event.data
+                    for event in await service.session_store.read_events(handle.run_id)
+                    if event.type
+                    in {"run.suspended", "interaction.requested", "tool.call.failed"}
+                ],
+            )
+            state = await GoalStateService(service.session_store).get(handle.run_id)
+            assert state is not None and state.content == goal_text
+            if original_goal_id is None:
+                original_goal_id = state.created_tool_call_id
+            assert state.created_tool_call_id == original_goal_id
+            assert state.completed == (round_number == 2)
+            reasons = [
+                event.data.reason_code
+                for event in await service.session_store.read_events(handle.run_id)
+                if event.type == "continuation.decided"
+            ]
+            if round_number < 2:
+                assert reasons[-1] == "tool.questionnaire_ready"
+            else:
+                assert reasons == ["goal.incomplete", "goal.complete"]
+                next_run = await service.runtime.start_run(
+                    StartRun(
+                        session_id=session_id,
+                        agent_id="sage",
+                        input=(
+                            InputItem(
+                                role="user", content=(TextBlock(text="Next task"),)
+                            ),
+                        ),
+                        resolved_spec_hash=loop.expected_resolved_spec_hash,
+                        idempotency_key="after_completed_goal",
+                        invocation_mode="goal",
+                    ),
+                    service._context("user_1"),
+                )
+                assert (
+                    await GoalStateService(service.session_store).get(next_run.run_id)
+                    is None
+                )
+        finally:
+            await sandbox.close()
+            await service.close()
+
+@pytest.mark.asyncio
 @pytest.mark.timeout(10)
-async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
+@pytest.mark.parametrize("rebuild_before_approval", [False, True])
+async def test_confirmed_plan_becomes_the_goal_system_context(
+    tmp_path: Path, rebuild_before_approval
+):
     service = DesktopV2Service(tmp_path)
     await service.list_agents("user_1")
     await service.patch_model_provider(
@@ -3600,6 +3763,19 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
     interaction = await service.session_store.get_interaction(suspension.interaction_id)
     assert interaction.payload["tool_name"] == "goal_submit"
     assert "Update the implementation" in interaction.payload["arguments"]["content"]
+    if rebuild_before_approval:
+        continuing_model = plan_loop.model
+        await plan_sandbox.close()
+        _, plan_loop, plan_sandbox = await service._build_loop(
+            agent=agent,
+            provider=provider,
+            workspace=workspace,
+            preferred_skills=(),
+            approval_mode="high_risk",
+            invocation_mode="plan",
+        )
+        plan_loop.model = continuing_model
+        plan_loop.tool_selection_model = scripted_tool_selection("goal_submit")
     await service.runtime.reply_interaction(
         ReplyInteraction(
             run_id=plan_handle.run_id,
@@ -3698,7 +3874,6 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path: Path):
     )
     await goal_sandbox.close()
     await service.close()
-
 
 @pytest.mark.asyncio
 async def test_sandbox_workspace_path_can_match_the_real_workspace(tmp_path: Path):

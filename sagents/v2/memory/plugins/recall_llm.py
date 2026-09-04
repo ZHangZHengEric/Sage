@@ -50,9 +50,11 @@ class LLMMemoryRecallQueryGenerator:
         )
         prompt = (
             "提取 3-10 个关键词。优先保留项目名、文件名、路径、函数名、产品名和核心需求；忽略客套、运行时信息和已完成的旧动作。"
+            '如果没有值得检索的内容（例如简短确认），返回 {"query":""}。'
             '只返回 JSON：{"query":"检索词"}\n\n用户请求：\n'
             if chinese
             else "Extract 3-10 keywords. Prefer project names, filenames, paths, functions, products, and the core request; ignore chatter, runtime details, and completed old actions. "
+            'If there is nothing worth searching for (such as a brief acknowledgement), return {"query":""}. '
             'Return JSON only: {"query":"search terms"}\n\nUser request:\n'
         )
         request = ModelRequest(
@@ -113,14 +115,15 @@ class LLMMemoryRecallQueryGenerator:
                 )
             ) from exc
         query = value.get("query") if isinstance(value, dict) else None
-        if not isinstance(query, str) or not query.strip():
+        if not isinstance(query, str):
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="memory.recall_query.output_invalid",
                     category=ErrorCategory.PROVIDER_PERMANENT,
-                    message="LLM Memory recall query returned no query",
+                    message="LLM Memory recall query returned no string query",
                     safe_to_resume=True,
                     metadata={"plugin_id": self.plugin_id},
                 )
             )
+        # An empty query means no recall is needed; the engine skips the search.
         return query.strip()

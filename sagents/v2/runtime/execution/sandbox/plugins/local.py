@@ -222,14 +222,23 @@ class _LocalProcessRuntime:
             stderr_task = asyncio.create_task(
                 self._read_bounded(process.stderr, policy.max_output_bytes)
             )
-            if process.stdin is not None:
-                process.stdin.write(request.stdin or b"")
-                await process.stdin.drain()
-                process.stdin.close()
             timed_out = False
             try:
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                    # Input backpressure is part of execution, so it must share
+                    # the timeout and cancellation cleanup with process.wait().
+                    async with asyncio.timeout(timeout):
+                        if process.stdin is not None:
+                            try:
+                                process.stdin.write(request.stdin or b"")
+                                await process.stdin.drain()
+                            except (BrokenPipeError, ConnectionResetError):
+                                # A command may deliberately exit without
+                                # consuming all input (for example head).
+                                pass
+                            finally:
+                                process.stdin.close()
+                        await process.wait()
                 except TimeoutError:
                     timed_out = True
                     await self._terminate_process_tree(process)
@@ -241,7 +250,7 @@ class _LocalProcessRuntime:
                         stderr_overflow,
                     ),
                 ) = await self._finish_pipe_readers(process, stdout_task, stderr_task)
-            except asyncio.CancelledError:
+            except BaseException:
                 # A child that inherited stdout/stderr can otherwise keep the
                 # reader tasks and the single process slot alive indefinitely.
                 await self._terminate_process_tree(process)

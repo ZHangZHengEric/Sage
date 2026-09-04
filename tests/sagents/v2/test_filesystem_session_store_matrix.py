@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import threading
 
 import pytest
 
@@ -26,6 +27,7 @@ from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
 )
+from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
 from sagents.v2.contracts.commands import (
     InputItem,
     ReplyInteraction,
@@ -33,6 +35,9 @@ from sagents.v2.contracts.commands import (
     StartRun,
 )
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.run_state import EventCursor
+from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
@@ -929,17 +934,22 @@ async def handler(call, context):
     )
 
 
-def loop_for(runtime, model, executor):
+def loop_for(runtime, model, executor, *, tool_selection_policy=None):
     return AgentLoopEngine(
         runtime=runtime,
         model=model,
         tool_catalog=InMemoryToolCatalog((WRITE_TOOL,)),
         tool_executor=executor,
+        tool_selection_policy=tool_selection_policy,
     )
 
 
 @pytest.mark.asyncio
-async def test_suspended_approval_resumes_after_store_process_reopen(tmp_path):
+@pytest.mark.parametrize("selection", ["recent", "llm"])
+@pytest.mark.parametrize("decision", ["approve_once", "deny"])
+async def test_suspended_approval_resumes_after_store_process_reopen(
+    tmp_path, selection, decision
+):
     path = tmp_path / "runtime.db"
     repository = FilesystemSessionStore(path)
     runtime = HarnessRuntime(repository)
@@ -964,9 +974,12 @@ async def test_suspended_approval_resumes_after_store_process_reopen(tmp_path):
     first_executor = InMemoryToolExecutor(
         {"write_value": WRITE_TOOL}, {"write_value": handler}
     )
-    suspended = await loop_for(runtime, first_model, first_executor).execute(
-        handle.run_id, CONTEXT
-    )
+    suspended = await loop_for(
+        runtime,
+        first_model,
+        first_executor,
+        tool_selection_policy=LLMToolSelectionPolicy() if selection == "llm" else None,
+    ).execute(handle.run_id, CONTEXT)
     assert suspended.state == RunState.SUSPENDED
     assert first_executor.calls == []
     await repository.close()
@@ -988,7 +1001,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(tmp_path):
             expected_revision=restored_run.revision,
             expected_suspension_revision=suspension.expected_revision,
             expected_interaction_revision=interaction.expected_revision,
-            decision="approve_once",
+            decision=decision,
             idempotency_key="approve",
         ),
         CONTEXT,
@@ -1001,16 +1014,20 @@ async def test_suspended_approval_resumes_after_store_process_reopen(tmp_path):
         {"write_value": WRITE_TOOL}, {"write_value": handler}
     )
     completed_run = await loop_for(
-        restored_runtime, second_model, second_executor
+        restored_runtime,
+        second_model,
+        second_executor,
+        tool_selection_policy=LLMToolSelectionPolicy() if selection == "llm" else None,
     ).resume(handle.run_id, CONTEXT)
 
     assert completed_run.state == RunState.COMPLETED
-    assert len(second_executor.calls) == 1
+    assert len(second_executor.calls) == (1 if decision == "approve_once" else 0)
     events = await restored_repository.read_events(handle.run_id)
     assert [event.run_sequence for event in events] == list(range(1, len(events) + 1))
-    assert [event.type for event in events].count("tool.call.succeeded") == 1
+    assert [event.type for event in events].count("tool.call.succeeded") == (
+        1 if decision == "approve_once" else 0
+    )
     await restored_repository.close()
-
 
 @pytest.mark.asyncio
 async def test_steer_inbox_and_claim_cursor_survive_filesystem_restarts(tmp_path):
@@ -1143,3 +1160,156 @@ async def test_nested_flow_interaction_stack_survives_filesystem_restart(tmp_pat
     events = await restored_repository.read_events(handle.run_id)
     assert [event.run_sequence for event in events] == list(range(1, len(events) + 1))
     await restored_repository.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "failed", "recoverable"])
+async def test_cancelled_write_settles_before_unlocking_session(tmp_path, outcome):
+    store = FilesystemSessionStore(tmp_path / "cancelled-write")
+    first = await store.create_run(command(), CONTEXT)
+    retry_command = command(
+        "cancelled-write",
+        session_id=first.handle.session_id,
+        mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original = store._persist_session_mutation
+    delay_once = True
+
+    def delayed(*args):
+        nonlocal delay_once
+        if not delay_once:
+            return original(*args)
+        delay_once = False
+        entered.set()
+        assert release.wait(10)
+        if outcome == "failed":
+            raise OSError("injected disk failure")
+        result = original(*args)
+        if outcome == "recoverable":
+            raise OSError("injected failure after durable commit")
+        return result
+
+    store._persist_session_mutation = delayed
+    pending = asyncio.create_task(store.create_run(retry_command, CONTEXT))
+    reader = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        pending.cancel()
+        await asyncio.sleep(0)
+        pending.cancel()
+        # A second cancellation must not detach the writer either.
+        reader = asyncio.create_task(store.get_session(first.handle.session_id))
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert not reader.done()
+        # The cancellation drain holds only the affected Session lock.
+        await asyncio.wait_for(store.create_run(command("unrelated"), CONTEXT), 5)
+        release.set()
+        if outcome == "failed":
+            with pytest.raises(OSError, match="injected disk failure"):
+                await pending
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        await reader
+        retried = await store.create_run(retry_command, CONTEXT)
+        assert retried.duplicate is (outcome != "failed")
+        await store.create_run(
+            command(
+                "later",
+                session_id=first.handle.session_id,
+                mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+            ),
+            CONTEXT,
+        )
+        expected = await store.list_session_runs(first.handle.session_id)
+    finally:
+        release.set()
+        await asyncio.gather(
+            pending, *([reader] if reader else []), return_exceptions=True
+        )
+        await store.close()
+    reopened = FilesystemSessionStore(tmp_path / "cancelled-write")
+    try:
+        assert await reopened.list_session_runs(first.handle.session_id) == expected
+        assert len(expected) == 3
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_write", [False, True])
+async def test_subscription_replay_waits_for_commit_and_does_not_duplicate(
+    tmp_path, fail_write
+):
+    store = FilesystemSessionStore(tmp_path / "subscription")
+    created = await store.create_run(command(), CONTEXT)
+    run_id = created.handle.run_id
+    baseline = (await store.read_events(run_id))[-1].run_sequence
+    entered = threading.Event()
+    release = threading.Event()
+    original = store._persist_session_mutation
+    delay_once = True
+
+    def delayed(*args):
+        nonlocal delay_once
+        if not delay_once:
+            return original(*args)
+        delay_once = False
+        entered.set()
+        assert release.wait(10)
+        if fail_write:
+            raise OSError("injected disk failure")
+        return original(*args)
+
+    async def commit(revision, reason):
+        return await store.commit_run(
+            run_id=run_id,
+            expected_revision=revision,
+            expected_states={RunState.QUEUED, RunState.RUNNING},
+            new_state=RunState.RUNNING,
+            drafts=(
+                EventDraft(
+                    type="run.started",
+                    data=RunEventData(state="running", reason=reason),
+                ),
+            ),
+            context=CONTEXT,
+            idempotency_key=reason,
+        )
+
+    store._persist_session_mutation = delayed
+    pending = asyncio.create_task(commit(0, "first"))
+    stream = store.subscribe_events(EventCursor(run_id=run_id, run_sequence=baseline))
+    next_event = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        next_event = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        assert not next_event.done(), "subscription exposed an uncommitted event"
+        release.set()
+        if fail_write:
+            with pytest.raises(OSError, match="injected disk failure"):
+                await pending
+            await commit(0, "second")
+        else:
+            await pending
+        event = await asyncio.wait_for(next_event, 5)
+        assert event.run_sequence == baseline + 1
+        assert event.data.reason == ("second" if fail_write else "first")
+        next_event = asyncio.create_task(anext(stream))
+        await commit(1, "third")
+        event = await asyncio.wait_for(next_event, 5)
+        assert event.run_sequence == baseline + 2
+        assert event.data.reason == "third"
+    finally:
+        release.set()
+        if next_event is not None:
+            next_event.cancel()
+        await asyncio.gather(
+            pending, *([next_event] if next_event else []), return_exceptions=True
+        )
+        await stream.aclose()
+        await store.close()

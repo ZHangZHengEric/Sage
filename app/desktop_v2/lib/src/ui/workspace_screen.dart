@@ -17,11 +17,14 @@ import '../state/workspace_controller.dart';
 import 'file_preview.dart';
 import 'settings_screen.dart';
 import 'shared/desktop_shell.dart';
+import 'shared/desktop_notice.dart';
 import 'tool_activity_presentation.dart';
 import 'workspace_panels/terminal/terminal_workspace_panel_plugin.dart';
 import 'workspace_panels/workspace_panel_plugin.dart';
 
 part 'workspace/thread.dart';
+part 'workspace/plan_preview.dart';
+part 'workspace/plan_decision_composer.dart';
 part 'workspace/messages.dart';
 part 'workspace/process.dart';
 part 'workspace/message_content.dart';
@@ -61,6 +64,7 @@ class WorkspaceScreen extends StatefulWidget {
 }
 
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
+  final _planPreview = _PlanPreviewState();
   bool _railCollapsed = false;
   bool _workspaceCollapsed = false;
   bool _settingsOpen = false;
@@ -73,6 +77,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   WorkspacePanelServices get _panelServices => WorkspacePanelServices({
     WorkspaceController: widget.controller,
+    _PlanPreviewState: _planPreview,
     TerminalService: widget.controller.terminalService,
     WorkspacePanelSelection: WorkspacePanelSelection(
       agentId: widget.controller.selectedAgentId,
@@ -112,17 +117,36 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   void dispose() {
     if (_ownsPanelDockController) _panelDockController.dispose();
+    _planPreview.dispose();
     super.dispose();
   }
 
   void _rebuildPanelRegistry() {
     _panelRegistry = WorkspacePanelRegistry([
       const _FileWorkspacePanelPlugin(),
+      const _PlanWorkspacePanelPlugin(),
       const TerminalWorkspacePanelPlugin(),
       ...widget.panelPlugins,
     ]);
     _panelDockController.syncPlugins(
       _panelRegistry.plugins.where((plugin) => plugin.supports(_panelServices)),
+    );
+  }
+
+  void _openPlanPreview(String content) {
+    // Hot reload can retain a registry created before the plan panel existed.
+    _rebuildPanelRegistry();
+    _planPreview.value = content;
+    setState(() {
+      _workspaceCollapsed = false;
+      // Make room for the right dock on intermediate desktop widths.
+      if (MediaQuery.sizeOf(context).width >= 760 &&
+          MediaQuery.sizeOf(context).width < 1024) {
+        _railCollapsed = true;
+      }
+    });
+    _panelDockController.dispatch(
+      const WorkspacePanelIntent(pluginId: 'sage.workspace.plan'),
     );
   }
 
@@ -177,19 +201,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                           )
                         : _buildWorkspaceShell(),
                   ),
-                  if (widget.controller.error case final message?)
-                    Positioned(
-                      top: 70,
-                      right: 18,
-                      width: min(
-                        380,
-                        max(0, MediaQuery.sizeOf(context).width - 36),
-                      ),
-                      child: _ErrorNotice(
-                        message: message,
-                        onClose: widget.controller.clearError,
-                      ),
-                    ),
                 ],
               ),
             );
@@ -234,6 +245,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 child: RepaintBoundary(
                   key: const ValueKey('thread-repaint-boundary'),
                   child: _ThreadPanel(
+                    onOpenPlan: _openPlanPreview,
                     controller: widget.controller,
                     compact: true,
                     railCollapsed: _railCollapsed,
@@ -312,6 +324,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   child: RepaintBoundary(
                     key: const ValueKey('thread-repaint-boundary'),
                     child: _ThreadPanel(
+                      onOpenPlan: _openPlanPreview,
                       controller: widget.controller,
                       railCollapsed: _railCollapsed,
                       workspaceCollapsed: _workspaceCollapsed || !showWorkspace,

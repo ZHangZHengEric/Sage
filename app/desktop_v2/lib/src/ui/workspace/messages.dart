@@ -110,7 +110,11 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
   ChatMessage get message => widget.message;
 
-  Future<void> _copy() => Clipboard.setData(ClipboardData(text: message.text));
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: message.text));
+    if (!mounted) return;
+    DesktopNoticeHost.show(context, message: context.l10n.text('common.copied'));
+  }
 
   @override
   void didUpdateWidget(covariant _MessageBubble oldWidget) {
