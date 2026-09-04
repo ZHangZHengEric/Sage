@@ -183,6 +183,15 @@ fn answer_v2_input(
     pending: V2InputRequest,
     text: String,
 ) -> Result<bool> {
+    // 直接输入一个允许的决定名（如 reconcile / mark_failed）就按该决定回答。
+    let typed = text.trim();
+    if pending
+        .allowed_decisions
+        .iter()
+        .any(|decision| decision == typed)
+    {
+        return answer_v2_input_with_decision(app, backend, &pending, &[typed]);
+    }
     let decision = if pending
         .allowed_decisions
         .iter()
@@ -317,7 +326,13 @@ pub(super) fn deny_sandbox_command(
     backend: &mut Option<BackendHandle>,
 ) -> Result<bool> {
     if let Some(pending) = app.pending_v2_input.clone() {
-        return answer_v2_input_with_decision(app, backend, &pending, &["cancel", "deny"]);
+        // 人工核对时 /deny = 标记失败；其余问题 /deny = 取消。
+        return answer_v2_input_with_decision(
+            app,
+            backend,
+            &pending,
+            &["mark_failed", "cancel", "deny"],
+        );
     }
     let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
