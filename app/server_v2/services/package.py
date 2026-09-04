@@ -13,31 +13,48 @@ from sagents.v2.package.manifest.root import (
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 
 from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.domain.catalog import AgentRecord
 
 
 def server_v2_run_manifest(
     settings: ServerV2Settings | None = None,
     *,
+    agent: AgentRecord | None = None,
     agent_id: str = "main",
     skills: tuple[str, ...] = (),
+    tools: tuple[str, ...] = (),
     instructions: str | None = None,
+    name: str | None = None,
 ) -> SageManifest:
-    """Per-run manifest: same host backends, plus the Agent's bound Skills."""
+    """Per-run manifest from a catalog Agent. Process backends stay unchanged."""
 
+    if agent is not None:
+        agent_id = agent.id
+        name = name or agent.name
+        instructions = instructions if instructions is not None else agent.instructions
+        if not tools:
+            tools = tuple(agent.tools)
+    selected_tools = list(tools)
+    if skills and "load_skill" not in selected_tools:
+        selected_tools.append("load_skill")
     base = server_v2_manifest(settings)
     source = base.agents.get("main") or next(iter(base.agents.values()))
-    agent = source.model_copy(
+    composed = source.model_copy(
         update={
+            "name": name or source.name,
+            "description": agent.description if agent is not None else source.description,
             "skills": tuple(skills),
-            "tools": ("load_skill",) if skills else source.tools,
+            "tools": tuple(selected_tools),
             "instructions": Instructions(
-                inline=instructions or source.instructions.inline or "Be helpful."
+                inline=instructions
+                or source.instructions.inline
+                or "Be helpful, concise, and explicit about uncertainty."
             ),
         }
     )
     return base.model_copy(
         update={
-            "agents": {agent_id: agent},
+            "agents": {agent_id: composed},
             "entrypoint": ApplicationEntrypoint(agent=agent_id),
         }
     )

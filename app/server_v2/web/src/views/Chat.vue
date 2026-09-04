@@ -13,6 +13,8 @@ const messages = ref([])
 const pending = ref(false)
 const error = ref('')
 const hasModel = ref(true)
+const agents = ref([])
+const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
 const scroller = ref(null)
 const input = ref(null)
 const agent = shallowRef(null)
@@ -28,6 +30,7 @@ function newId(prefix) {
 
 function bindAgent() {
   agent.value = createAguiAgent({
+    agentId: selectedAgentId.value,
     onMessages(next) {
       messages.value = next
       nextTick(() => scroller.value?.scrollTo(0, scroller.value.scrollHeight))
@@ -36,6 +39,22 @@ function bindAgent() {
       error.value = message
     },
   })
+}
+
+async function loadAgents() {
+  agents.value = await api.listAgents()
+  if (!agents.value.some((item) => item.id === selectedAgentId.value)) {
+    selectedAgentId.value = agents.value[0]?.id || 'main'
+  }
+}
+
+function selectAgent() {
+  localStorage.setItem('sage.server_v2.agent', selectedAgentId.value)
+  bindAgent()
+  if (threadId.value) {
+    agent.value.threadId = threadId.value
+    agent.value.setMessages(messages.value)
+  }
 }
 
 function resizeInput() {
@@ -88,6 +107,7 @@ async function send() {
       threadId: threadId.value,
       runId: newId('run'),
       content,
+      agentId: selectedAgentId.value,
     })
     await loadThreads()
   } catch (exc) {
@@ -103,7 +123,7 @@ async function send() {
 onMounted(async () => {
   bindAgent()
   try {
-    await Promise.all([loadThreads(), loadModels()])
+    await Promise.all([loadThreads(), loadModels(), loadAgents()])
     if (threads.value[0]) await openThread(threads.value[0].thread_id)
     else startNew()
   } catch (exc) {
@@ -127,6 +147,14 @@ onUnmounted(() => {
     <div class="thread-root">
       <header class="thread-bar">
         <h1>{{ threadTitle }}</h1>
+        <label class="agent-pick">
+          <span class="sr-only">智能体</span>
+          <select v-model="selectedAgentId" @change="selectAgent">
+            <option v-for="item in agents" :key="item.id" :value="item.id">
+              {{ item.name }}
+            </option>
+          </select>
+        </label>
       </header>
       <div ref="scroller" class="thread-viewport">
         <AguiTranscript
