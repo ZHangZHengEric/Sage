@@ -38,7 +38,12 @@ class GoalContextProvider:
             body = f"<goal_mode>\n{instructions}\n</goal_mode>"
         else:
             status = "completed" if state.completed else "active"
-            instructions = tr("goal.verify_instruction", language)
+            instructions = tr(
+                "goal.explanation_required"
+                if state.completed
+                else "goal.verify_instruction",
+                language,
+            )
             body = (
                 "<active_goal>\n"
                 f"<source>{state.source}</source>\n"
@@ -69,7 +74,12 @@ class GoalCompletionGatePolicy:
             return await self.base.decide(context)
         state = await self.goals.get(context.run_id)
         if state is not None and state.completed:
-            if not context.response.text.strip():
+            # Text accompanying a Tool call precedes its result. Require a
+            # subsequent user-facing reply after completion has been confirmed.
+            needs_tool_result = any(
+                call.name != "turn_status" for call in context.response.tool_calls
+            )
+            if needs_tool_result or not context.response.text.strip():
                 return ContinuationDecision(
                     action=ContinuationAction.CONTINUE_STEP,
                     reason_code="goal.explanation_required",

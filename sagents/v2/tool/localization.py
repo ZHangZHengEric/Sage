@@ -127,9 +127,9 @@ _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
         "Carregar as instruções e os recursos de um Skill habilitado no Run atual.",
     ),
     "goal_complete": _text(
-        "在独立验证全部验收标准后完成当前目标。",
-        "Complete the active goal after independently verifying every acceptance criterion.",
-        "Concluir o objetivo ativo após verificar de forma independente todos os critérios de aceitação.",
+        "在独立验证全部验收标准后完成当前目标。成功后，向用户简洁总结交付物、实际验证结果和剩余限制。",
+        "Complete the active goal after independently verifying every acceptance criterion. After success, give the user a concise summary of deliverables, actual verification, and remaining limitations.",
+        "Concluir o objetivo ativo após verificar de forma independente todos os critérios de aceitação. Após o sucesso, resumir para o usuário as entregas, a verificação realizada e as limitações restantes.",
     ),
     "sys_spawn_agent": _text(
         "创建一个可在当前会话中复用的通用专家子智能体；system_prompt 用于定义角色与能力，而不是一次性任务。",

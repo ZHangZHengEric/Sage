@@ -12,6 +12,11 @@ from sagents.v2.contracts.events import (
 from sagents.v2.contracts.items import ItemSnapshot, ItemStatus, ToolCallItemData
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.goal.state import GoalStateService
+from sagents.v2.goal.context import GoalCompletionGatePolicy
+from sagents.v2.agent.policy import ContinuationAction, ContinuationContext
+from sagents.v2.model.contracts import ModelResponse, ModelToolCall
+from sagents.v2.tool.official.planning import PlanningTools
+from sagents.v2.i18n import tr
 
 
 def tool_events(run_id, name, arguments, *, succeeded=True):
@@ -169,3 +174,62 @@ async def test_exiting_goal_mode_does_not_inherit_questionnaire_goal():
         side_effect=AssertionError("must not inherit")
     )
     assert await GoalStateService(journal).get("answer") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name,text,expected",
+    [
+        ("goal_complete", "调用 goal_complete。", ContinuationAction.CONTINUE_STEP),
+        ("goal_complete", "", ContinuationAction.CONTINUE_STEP),
+        ("file_read", "正在检查文件。", ContinuationAction.CONTINUE_STEP),
+        (None, "", ContinuationAction.CONTINUE_STEP),
+        (None, "已交付网页，完成代码检查。", ContinuationAction.COMPLETE_RUN),
+        ("turn_status", "已交付网页，完成代码检查。", ContinuationAction.COMPLETE_RUN),
+    ],
+)
+async def test_completed_goal_waits_for_post_tool_summary(tool_name, text, expected):
+    goals = SimpleNamespace(
+        is_goal_mode=AsyncMock(return_value=True),
+        get=AsyncMock(return_value=SimpleNamespace(completed=True)),
+    )
+    base = SimpleNamespace(decide=AsyncMock())
+    response = ModelResponse(
+        response_id="completion",
+        text=text,
+        tool_calls=(ModelToolCall(tool_call_id="call", name=tool_name, arguments={}),)
+        if tool_name
+        else (),
+        finish_reason="tool_calls" if tool_name else "stop",
+    )
+    decision = await GoalCompletionGatePolicy(base, goals).decide(
+        ContinuationContext(
+            run_id="run", step_number=2, max_steps=10, response=response
+        )
+    )
+    assert decision.action == expected
+    base.decide.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed", [False, True])
+async def test_goal_complete_returns_summary_guidance_including_repeated_call(
+    completed,
+):
+    state = SimpleNamespace(
+        completed=completed,
+        content="Deliver the page",
+        completion_summary="Saved summary",
+    )
+    goals = SimpleNamespace(
+        is_goal_mode=AsyncMock(return_value=True), get=AsyncMock(return_value=state)
+    )
+    invocation = SimpleNamespace(
+        call=SimpleNamespace(owner_run_id="run"),
+        request_context=SimpleNamespace(language="zh"),
+    )
+    result = await PlanningTools(
+        SimpleNamespace(goal_state_service=goals)
+    ).goal_complete("Verified summary", invocation)
+    assert result["summary"] == ("Saved summary" if completed else "Verified summary")
+    assert result["next_step"] == tr("goal.explanation_required", "zh")

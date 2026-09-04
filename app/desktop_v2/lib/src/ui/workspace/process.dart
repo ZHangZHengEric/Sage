@@ -697,7 +697,7 @@ class _ProcessActivityLine extends StatelessWidget {
     final detailColor = colors.onSurfaceVariant.withValues(
       alpha: dark ? 0.58 : 0.66,
     );
-    return SizedBox(
+    final line = SizedBox(
       width: double.infinity,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -757,6 +757,28 @@ class _ProcessActivityLine extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+    final content = activity.arguments['content'];
+    final isPlan =
+        activity.label == 'goal_submit' || activity.label == 'plan_submit';
+    if (!isPlan || content is! String || content.trim().isEmpty) return line;
+    final onOpenPlan = _PlanPreviewScope.maybeOf(context);
+    if (onOpenPlan == null) return line;
+    final tooltip = context.l10n.text('workspace.planDetails');
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: '$name · $tooltip',
+        child: InkWell(
+          key: ValueKey('process-open-plan:${activity.id}'),
+          borderRadius: BorderRadius.circular(7),
+          hoverColor: colors.onSurface.withValues(alpha: 0.055),
+          focusColor: colors.primary.withValues(alpha: 0.1),
+          onTap: () => onOpenPlan(content),
+          child: line,
+        ),
       ),
     );
   }
