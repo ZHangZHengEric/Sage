@@ -13,9 +13,11 @@ import asyncio
 import inspect
 import json
 import re
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator, Protocol
 from urllib.parse import urlsplit
 
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.memory import MemoryService
 from sagents.v2.session_memory import SessionMemoryService
 from sagents.v2.agent.policy import ContinuationSignals, InteractionDraft
@@ -55,6 +57,79 @@ class ImageContextPublisher(Protocol):
 
 
 ToolCatalogResolver = Callable[[str], Awaitable[tuple[str, ...]] | tuple[str, ...]]
+
+# Sandbox error codes that a provider raises from its authorization gate,
+# before it touches the workspace. Each of them proves that the requested
+# operation was not applied, so the Tool executor can report a clean failure
+# instead of escalating to the unknown-side-effect reconciliation flow.
+SANDBOX_DENIAL_CODES = frozenset(
+    {
+        "sandbox.permission_denied",
+        "sandbox.protected_path",
+        "sandbox.grant_mismatch",
+        "sandbox.grant_invalid",
+        "sandbox.grant_expired",
+        "sandbox.grant_replayed",
+        "sandbox.policy_stale",
+        "sandbox.resource_exhausted",
+        "sandbox.unavailable",
+        "sandbox.lost",
+        "sandbox.ref_mismatch",
+    }
+)
+
+
+def sandbox_denial_as_not_applied(exc: BaseException) -> SageV2Error | None:
+    """Return the typed ``not_applied`` form of a sandbox denial, else ``None``.
+
+    Only failures that the sandbox contract guarantees happened before any
+    mutation are mapped. Anything else (an ``OSError`` from inside the write,
+    a lost response, an unknown code) keeps its identity so the executor still
+    treats a write-class failure as an unknown outcome.
+    """
+
+    if isinstance(exc, SageV2Error):
+        info = exc.info
+        if info.code not in SANDBOX_DENIAL_CODES:
+            return None
+        if info.metadata.get("side_effect_state") == "not_applied":
+            return None
+        return SageV2Error(
+            info.model_copy(
+                update={
+                    "safe_to_resume": True,
+                    "metadata": {**info.metadata, "side_effect_state": "not_applied"},
+                }
+            )
+        )
+    # Providers raise a bare ``PermissionError(message)`` for policy, path and
+    # grant violations, always before any I/O. A ``PermissionError`` raised by
+    # the operating system from inside an I/O call carries ``errno`` and is
+    # deliberately left alone.
+    if isinstance(exc, PermissionError) and exc.errno is None:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="sandbox.permission_denied",
+                category=ErrorCategory.POLICY_DENIED,
+                message=str(exc) or "sandbox denied the operation",
+                safe_to_resume=True,
+                metadata={"side_effect_state": "not_applied"},
+            )
+        )
+    return None
+
+
+@contextmanager
+def sandbox_denials_not_applied() -> Iterator[None]:
+    """Re-raise sandbox denials as typed errors carrying ``not_applied``."""
+
+    try:
+        yield
+    except (SageV2Error, PermissionError) as exc:
+        typed = sandbox_denial_as_not_applied(exc)
+        if typed is None:
+            raise
+        raise typed from exc
 
 
 class OfficialToolRuntime:
@@ -103,7 +178,8 @@ class OfficialToolRuntime:
     def virtual_path(self, value: str | None) -> str:
         """Ask the active sandbox to resolve a canonical resource path."""
 
-        return self.sandbox.filesystem.normalize_path(value or ".")
+        with sandbox_denials_not_applied():
+            return self.sandbox.filesystem.normalize_path(value or ".")
 
     def _intent(
         self,
@@ -138,9 +214,10 @@ class OfficialToolRuntime:
     async def read_bytes(self, path: str, invocation: ToolInvocation) -> bytes:
         path = self.virtual_path(path)
         intent = self._intent(invocation, FileOperation.READ.value, path=path)
-        return await self.sandbox.filesystem.read_bytes(
-            path, intent=intent, grant=self._grant(intent)
-        )
+        with sandbox_denials_not_applied():
+            return await self.sandbox.filesystem.read_bytes(
+                path, intent=intent, grant=self._grant(intent)
+            )
 
     async def read_text(self, path: str, invocation: ToolInvocation) -> str:
         return (await self.read_bytes(path, invocation)).decode("utf-8")
@@ -149,9 +226,10 @@ class OfficialToolRuntime:
         path = self.virtual_path(path)
         intent = self._intent(invocation, FileOperation.READ.value, path=path)
         try:
-            await self.sandbox.filesystem.stat(
-                path, intent=intent, grant=self._grant(intent)
-            )
+            with sandbox_denials_not_applied():
+                await self.sandbox.filesystem.stat(
+                    path, intent=intent, grant=self._grant(intent)
+                )
         except FileNotFoundError:
             return False
         return True
@@ -159,9 +237,10 @@ class OfficialToolRuntime:
     async def stat(self, path: str, invocation: ToolInvocation):
         path = self.virtual_path(path)
         intent = self._intent(invocation, FileOperation.READ.value, path=path)
-        return await self.sandbox.filesystem.stat(
-            path, intent=intent, grant=self._grant(intent)
-        )
+        with sandbox_denials_not_applied():
+            return await self.sandbox.filesystem.stat(
+                path, intent=intent, grant=self._grant(intent)
+            )
 
     async def write_bytes(
         self,
@@ -178,13 +257,14 @@ class OfficialToolRuntime:
             else FileOperation.CREATE
         )
         intent = self._intent(invocation, operation.value, path=path)
-        stat = await self.sandbox.filesystem.write_bytes(
-            path,
-            content,
-            intent=intent,
-            grant=self._grant(intent),
-            overwrite=overwrite,
-        )
+        with sandbox_denials_not_applied():
+            stat = await self.sandbox.filesystem.write_bytes(
+                path,
+                content,
+                intent=intent,
+                grant=self._grant(intent),
+                overwrite=overwrite,
+            )
         return stat.path
 
     async def write_text(
@@ -203,16 +283,18 @@ class OfficialToolRuntime:
     async def delete_file(self, path: str, invocation: ToolInvocation) -> None:
         path = self.virtual_path(path)
         intent = self._intent(invocation, FileOperation.DELETE.value, path=path)
-        await self.sandbox.filesystem.delete(
-            path, intent=intent, grant=self._grant(intent)
-        )
+        with sandbox_denials_not_applied():
+            await self.sandbox.filesystem.delete(
+                path, intent=intent, grant=self._grant(intent)
+            )
 
     async def list_paths(self, path: str | None, invocation: ToolInvocation):
         path = self.virtual_path(path)
         intent = self._intent(invocation, FileOperation.LIST.value, path=path)
-        return await self.sandbox.filesystem.list_paths(
-            path, intent=intent, grant=self._grant(intent)
-        )
+        with sandbox_denials_not_applied():
+            return await self.sandbox.filesystem.list_paths(
+                path, intent=intent, grant=self._grant(intent)
+            )
 
     async def shell(
         self,

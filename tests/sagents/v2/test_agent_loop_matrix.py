@@ -3436,3 +3436,42 @@ async def test_authoritative_tool_error_content_is_persisted_and_resumable():
     assert persisted.data.error is not None
     assert persisted.data.error.message_key == "error.provider_permanent"
     assert tool_message.content == persisted.data.content
+
+
+@pytest.mark.asyncio
+async def test_write_failure_marked_not_applied_is_a_known_failure():
+    """写工具的错误若带 side_effect_state=not_applied，就是普通失败，不进人工核对。"""
+
+    async def denied_before_write(call, context):
+        del call, context
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="sandbox.permission_denied",
+                category=ErrorCategory.POLICY_DENIED,
+                message="path is outside the workspace",
+                safe_to_resume=True,
+                metadata={"side_effect_state": "not_applied"},
+            )
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(events=(completed("handled"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, handlers={"read_value": tool_handler, "write_value": denied_before_write}
+    )
+    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    failed = next(event for event in events if event.type == "tool.call.failed")
+
+    assert result.state == RunState.COMPLETED
+    assert "tool.call.unknown" not in types
+    assert "interaction.requested" not in types
+    assert failed.data.error.code == "sandbox.permission_denied"
+    assert failed.data.error.metadata["side_effect_state"] == "not_applied"
