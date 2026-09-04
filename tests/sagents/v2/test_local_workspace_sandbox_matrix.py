@@ -655,3 +655,95 @@ async def test_local_workspace_without_protected_paths_keeps_git_writable(
     )
 
     assert hook.read_text(encoding="utf-8") == "#!/bin/sh\necho ok\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["timeout", "cancel"])
+async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, stop):
+    import signal
+    import sys
+
+    issuer, handle = await provision(tmp_path, allowed_executables=(sys.executable,))
+    pid_path = tmp_path / "child.pid"
+    argv = (
+        sys.executable,
+        "-c",
+        "import os,time; from pathlib import Path; "
+        "Path('child.pid').write_text(str(os.getpid())); time.sleep(30)",
+    )
+    request = ProcessRequest(
+        argv=argv,
+        cwd="/workspace",
+        stdin=b"x" * 4_000_000,
+        timeout_seconds=0.3 if stop == "timeout" else 2,
+    )
+    intent, grant = authorization(
+        issuer, handle, "process.run", path=request.cwd, executable=argv[0], argv=argv
+    )
+    task = asyncio.create_task(handle.process.run(request, intent=intent, grant=grant))
+    try:
+        async with asyncio.timeout(1):
+            while not pid_path.exists():
+                await asyncio.sleep(0.01)
+        pid = int(pid_path.read_text())
+        if stop == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2)
+        else:
+            result = await asyncio.wait_for(task, 2)
+            assert result.timed_out
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        # Cleanup must release the process slot for the next command as well.
+        next_request = ProcessRequest(
+            argv=(sys.executable, "-c", "print('alive')"), cwd="/workspace"
+        )
+        next_intent, next_grant = authorization(
+            issuer,
+            handle,
+            "process.run",
+            path=next_request.cwd,
+            executable=sys.executable,
+            argv=next_request.argv,
+        )
+        result = await asyncio.wait_for(
+            handle.process.run(next_request, intent=next_intent, grant=next_grant), 2
+        )
+        assert result.stdout.strip() == b"alive"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if pid_path.exists():
+            try:
+                os.kill(int(pid_path.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        await handle.destroy()
+
+
+@pytest.mark.asyncio
+async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
+    import sys
+
+    issuer, handle = await provision(tmp_path, allowed_executables=(sys.executable,))
+    request = ProcessRequest(
+        argv=(sys.executable, "-c", "print('done')"),
+        cwd="/workspace",
+        stdin=b"x" * 4_000_000,
+    )
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=request.cwd,
+        executable=sys.executable,
+        argv=request.argv,
+    )
+    try:
+        result = await handle.process.run(request, intent=intent, grant=grant)
+        assert result.exit_code == 0
+        assert result.stdout.strip() == b"done"
+        assert not result.timed_out
+    finally:
+        await handle.destroy()

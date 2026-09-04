@@ -448,3 +448,108 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
     }
     assert ("session.store", "sage.session.postgres") in bindings
     await application.close()
+
+
+@pytest.mark.asyncio
+async def test_loaded_session_operations_do_not_reacquire_adapter_lock(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
+
+    source = EphemeralSessionStore()
+    created = await source.create_run(command(), CONTEXT)
+    store = _PostgresSessionState("postgresql://unused/unused")
+    # Exercise the real adapter and coordinator locking paths on already-loaded
+    # state. Database I/O is outside this regression's scope.
+    await store.load_state(await source.export_state())
+    monkeypatch.setattr(store, "_ensure_ready", AsyncMock())
+    monkeypatch.setattr(store, "_commit_storage_locked", AsyncMock())
+    session_id = created.handle.session_id
+    session = await asyncio.wait_for(store.get_session(session_id), 1)
+    assert session.session_id == session_id
+    runs = await asyncio.wait_for(store.list_session_runs(session_id), 1)
+    assert len(runs) == 1
+    events = await asyncio.wait_for(store.read_session_events(session_id), 1)
+    assert len(events) == 3
+    second = await asyncio.wait_for(
+        store.create_run(
+            command("next", session_id=session_id, mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED),
+            CONTEXT,
+        ),
+        1,
+    )
+    assert second.handle.session_id == session_id
+
+
+@pytest.mark.asyncio
+async def test_cold_dispatchable_scan_loads_database_sessions_before_memory_scan():
+    from contextlib import asynccontextmanager
+    from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
+
+    source = EphemeralSessionStore()
+    created = await source.create_run(command(), CONTEXT)
+    payload = await source.export_state()
+    queries, loaded = [], []
+
+    class Connection:
+        async def fetch(self, query):
+            queries.append(query)
+            return [{"session_id": created.handle.session_id}]
+
+    class Pool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield Connection()
+
+    class Store(_PostgresSessionState):
+        async def _ensure_ready(self):
+            self._pool = Pool()
+
+        async def _fetch_session(self, session_id):
+            loaded.append(session_id)
+            return payload
+
+    store = Store("postgresql://unused/unused")
+    assert not store._runs
+    intents = await store.list_dispatchable_runs()
+    assert [intent.run.run_id for intent in intents] == [created.handle.run_id]
+    assert intents[0].context == CONTEXT
+    assert loaded == [created.handle.session_id]
+    assert "jsonb_array_elements" in queries[0]
+    assert "parent_run_id" in queries[0]
+    assert "request_context" in queries[0]
+    assert [intent.run.run_id for intent in await store.list_dispatchable_runs()] == [
+        created.handle.run_id
+    ]
+    assert loaded == [created.handle.session_id]
+
+
+@pytest.mark.asyncio
+async def test_postgres_cold_start_discovers_only_active_root_runs(postgres_dsn):
+    schema = _schema()
+    store = PostgresSessionStore(postgres_dsn, schema=schema)
+    queued = await store.create_run(command("queued"), CONTEXT)
+    running = await store.create_run(command("running"), CONTEXT)
+    cancelled = await store.create_run(command("cancelled"), CONTEXT)
+    await store.commit_run(
+        run_id=running.handle.run_id,
+        expected_revision=running.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.RUNNING,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key="running:start",
+    )
+    await _cancel(store, cancelled, "cancelled:cancel")
+    await store.close()
+    restored = PostgresSessionStore(postgres_dsn, schema=schema)
+    try:
+        intents = await restored.list_dispatchable_runs()
+        assert {intent.run.run_id for intent in intents} == {
+            queued.handle.run_id,
+            running.handle.run_id,
+        }
+        assert cancelled.handle.session_id not in restored._loaded_session_ids
+    finally:
+        await restored.close()

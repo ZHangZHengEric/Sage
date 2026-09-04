@@ -672,6 +672,12 @@ class _WorkspacePanelTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final labelStyle = Theme.of(context).textTheme.labelMedium!.copyWith(
+      fontSize: 12,
+      height: 4 / 3,
+      fontWeight: FontWeight.w600,
+      color: active ? colors.onSurface : colors.onSurfaceVariant,
+    );
     return InkWell(
       key: ValueKey('workspace-panel-tab:${instance.instanceId}'),
       onTap: onActivate,
@@ -688,19 +694,24 @@ class _WorkspacePanelTab extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              plugin.icon,
-              size: 14,
-              color: active ? colors.onSurface : colors.onSurfaceVariant,
+            SizedBox.square(
+              dimension: 16,
+              child: Icon(
+                plugin.icon,
+                size: 14,
+                color: active ? colors.onSurface : colors.onSurfaceVariant,
+              ),
             ),
             const SizedBox(width: 6),
             Text(
               plugin.title(context, services, instance: instance),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                color: active ? colors.onSurface : colors.onSurfaceVariant,
+              style: labelStyle,
+              // Mixed CJK/Latin fallback fonts otherwise shift the baseline.
+              strutStyle: StrutStyle.fromTextStyle(
+                labelStyle,
+                forceStrutHeight: true,
               ),
             ),
             if (onClose != null) ...[

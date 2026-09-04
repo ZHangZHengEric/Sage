@@ -11,6 +11,7 @@ import '../models.dart';
 import '../localization/app_localizations.dart';
 import '../state/workspace_controller.dart';
 import 'shared/desktop_shell.dart';
+import 'shared/desktop_notice.dart';
 import 'usage_overview.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -292,22 +293,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       decodedContext = jsonDecode(_systemContext.text);
     } on FormatException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.l10n.text('settings.systemContextInvalidJson'),
-            ),
-          ),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('settings.systemContextInvalidJson'),
+          isError: true,
+          duration: const Duration(seconds: 4),
         );
       }
       return;
     }
     if (decodedContext is! Map) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.l10n.text('settings.systemContextMustMap')),
-          ),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('settings.systemContextMustMap'),
+          isError: true,
+          duration: const Duration(seconds: 4),
         );
       }
       return;
@@ -6138,14 +6139,18 @@ class _SkillSettingsState extends State<_SkillSettings> {
       });
       await _loadContent(next, refresh: true);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.text('skill.uploadSuccess'))),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('skill.uploadSuccess'),
         );
       }
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.text('skill.uploadFailed'))),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('skill.uploadFailed'),
+          isError: true,
+          duration: const Duration(seconds: 4),
         );
       }
     } finally {
@@ -6231,22 +6236,18 @@ class _SkillSettingsState extends State<_SkillSettings> {
       });
       await _loadContent(next, refresh: true);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.l10n.text('skill.deleteSuccess', {'name': name}),
-            ),
-          ),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('skill.deleteSuccess', {'name': name}),
         );
       }
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.l10n.text('skill.deleteFailed', {'name': name}),
-            ),
-          ),
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('skill.deleteFailed', {'name': name}),
+          isError: true,
+          duration: const Duration(seconds: 4),
         );
       }
     } finally {
@@ -6401,12 +6402,12 @@ class _SkillDocument extends StatelessWidget {
                   tooltip: context.l10n.text('skill.copy'),
                   onPressed: content == null
                       ? null
-                      : () {
-                          Clipboard.setData(ClipboardData(text: content!));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(context.l10n.text('skill.copied')),
-                            ),
+                      : () async {
+                          await Clipboard.setData(ClipboardData(text: content!));
+                          if (!context.mounted) return;
+                          DesktopNoticeHost.show(
+                            context,
+                            message: context.l10n.text('skill.copied'),
                           );
                         },
                   icon: const Icon(CupertinoIcons.doc_on_doc, size: 17),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' show Locale;
 
 import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/runtime_host.dart';
 import '../api/v2_api.dart';
 import '../models.dart';
+import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
 import '../usage_models.dart';
 
@@ -61,6 +63,20 @@ class WorkspaceController extends ChangeNotifier {
   final Map<String, List<ComposerReference>> _composerReferences = {};
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _recoveringStreams = {};
+  final Set<String> _startingApprovedPlans = {};
+  final Map<String, String> _planFeedbackDrafts = {};
+
+  String planFeedbackDraft(String interactionId) =>
+      _planFeedbackDrafts[interactionId] ?? '';
+
+  void setPlanFeedbackDraft(String interactionId, String text) {
+    if (text.isEmpty) {
+      _planFeedbackDrafts.remove(interactionId);
+    } else {
+      _planFeedbackDrafts[interactionId] = text;
+    }
+  }
+
   final Set<ChatMessage> _pendingTextReveals = {};
   final Random _sessionIdRandom = Random.secure();
   Timer? _workspaceRefreshTimer;
@@ -1780,13 +1796,55 @@ class WorkspaceController extends ChangeNotifier {
     if (value == null || interaction == null) return;
     final approvingPlan =
         interaction.payload['tool_name']?.toString() == 'goal_submit' &&
+        interaction.payload['risk_category']?.toString() == 'plan_approval' &&
         {'approve', 'approve_once', 'approve_and_remember'}.contains(decision);
     try {
+      if (approvingPlan && payload['execute_plan'] == true) {
+        final language = settings.language == 'system'
+            ? PlatformDispatcher.instance.locale.languageCode
+            : settings.language;
+        final prompt = SageLocalizations(
+          Locale(language),
+        ).text('plan.executionPrompt');
+        final group = groups
+            .where((group) => group.conversations.contains(value))
+            .firstOrNull;
+        value.pendingPlanExecution = {
+          'plan_run_id': value.runId,
+          'request': {
+            'agent_id': value.agentId.isNotEmpty
+                ? value.agentId
+                : selectedAgentId,
+            'session_id': value.sessionId,
+            if (group != null && group.workspaceId.isNotEmpty)
+              'workspace_id': group.workspaceId,
+            'response_language': language,
+            'messages': [
+              {
+                'role': 'user',
+                'text': prompt,
+                'content': [ChatMessageContent.text(prompt).toJson()],
+              },
+            ],
+            'preferred_skills': preferredSkills.toList()..sort(),
+            'approval_mode': value.approvalMode.wireValue,
+            'invocation_mode': 'goal',
+            'idempotency_key': 'desktop-plan-execute:${value.runId}',
+          },
+        };
+        // Save intent before approval so a restart cannot lose the handoff.
+        await _saveConversations();
+      } else if (decision == 'deny' || decision == 'cancel') {
+        value.pendingPlanExecution = null;
+      }
       await _api.replyInteraction(
         value.runId,
         interactionId: interaction.id,
         decision: decision,
-        payload: {...payload, if (text.trim().isNotEmpty) 'text': text.trim()},
+        payload: {
+          ...(Map<String, Object?>.of(payload)..remove('execute_plan')),
+          if (text.trim().isNotEmpty) 'text': text.trim(),
+        },
       );
       final interactionAgentId = value.agentId.isNotEmpty
           ? value.agentId
@@ -1803,6 +1861,7 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       if (approvingPlan) value.invocationMode = InvocationMode.goal;
+      _planFeedbackDrafts.remove(interaction.id);
       value.pendingInteraction = null;
       value.status = RunStatus.running;
       notifyListeners();
@@ -1830,9 +1889,8 @@ class WorkspaceController extends ChangeNotifier {
         _applyEvent(conversation, event);
       },
       onError: (Object exception, StackTrace _) {
-        if (identical(_streams[conversation.id], subscription)) {
-          _streams.remove(conversation.id);
-        }
+        if (!identical(_streams[conversation.id], subscription)) return;
+        _streams.remove(conversation.id);
         if (_disposed) return;
         conversation.thinking = false;
         error = exception.toString();
@@ -1845,10 +1903,10 @@ class WorkspaceController extends ChangeNotifier {
         _persist();
       },
       onDone: () {
-        if (identical(_streams[conversation.id], subscription)) {
-          _streams.remove(conversation.id);
-        }
+        if (!identical(_streams[conversation.id], subscription)) return;
+        _streams.remove(conversation.id);
         if (!_disposed &&
+            !_startingApprovedPlans.contains(conversation.id) &&
             conversation.runId.isNotEmpty &&
             _isActive(conversation.status)) {
           unawaited(_recoverStream(conversation));
@@ -1926,12 +1984,13 @@ class WorkspaceController extends ChangeNotifier {
       for (final conversation in values) {
         if (conversation.archived) continue;
         if (conversation.runId.isEmpty ||
-            !{
-              RunStatus.starting,
-              RunStatus.running,
-              RunStatus.suspending,
-              RunStatus.suspended,
-            }.contains(conversation.status)) {
+            (conversation.pendingPlanExecution == null &&
+                !{
+                  RunStatus.starting,
+                  RunStatus.running,
+                  RunStatus.suspending,
+                  RunStatus.suspended,
+                }.contains(conversation.status))) {
           continue;
         }
         try {
@@ -1956,6 +2015,11 @@ class WorkspaceController extends ChangeNotifier {
       final handle = event['handle'];
       if (handle is Map) {
         conversation.runId = handle['run_id']?.toString() ?? conversation.runId;
+        if (conversation.pendingPlanExecution != null &&
+            conversation.runId !=
+                conversation.pendingPlanExecution!['plan_run_id']) {
+          conversation.pendingPlanExecution = null;
+        }
         conversation.sessionId = handle['session_id']?.toString();
         conversation.runSequence =
             ((handle['event_cursor'] as Map?)?['run_sequence'] as num?)
@@ -2488,6 +2552,55 @@ class WorkspaceController extends ChangeNotifier {
       promoteFinal: promoteFinal,
       completedAt: completedAt,
     );
+    if (status == RunStatus.completed &&
+        conversation.pendingPlanExecution != null) {
+      scheduleMicrotask(() => _startApprovedPlan(conversation));
+    } else if (status == RunStatus.failed || status == RunStatus.cancelled) {
+      conversation.pendingPlanExecution = null;
+    }
+  }
+
+  Future<void> _startApprovedPlan(Conversation conversation) async {
+    final pending = conversation.pendingPlanExecution;
+    if (_disposed ||
+        pending == null ||
+        conversation.status != RunStatus.completed ||
+        conversation.runId != pending['plan_run_id'] ||
+        !_startingApprovedPlans.add(conversation.id)) {
+      return;
+    }
+    try {
+      final body = (pending['request'] as Map).cast<String, Object?>();
+      final message = (body['messages'] as List).first as Map;
+      final prompt = message['text'].toString();
+      final messageId = 'plan-execution:${pending['plan_run_id']}';
+      if (!conversation.messages.any((item) => item.id == messageId)) {
+        conversation.messages.add(
+          ChatMessage(
+            id: messageId,
+            role: 'user',
+            text: prompt,
+            content: [ChatMessageContent.text(prompt)],
+          ),
+        );
+        conversation.processPanels.add(
+          RuntimeProcessPanel(
+            id: messageId,
+            anchorMessageId: messageId,
+            startedAt: DateTime.now(),
+          ),
+        );
+      }
+      conversation.invocationMode = InvocationMode.goal;
+      conversation.status = RunStatus.starting;
+      conversation.pendingInteraction = null;
+      notifyListeners();
+      await _saveConversations();
+      if (_disposed) return;
+      _listen(conversation, _api.startRun(body));
+    } finally {
+      _startingApprovedPlans.remove(conversation.id);
+    }
   }
 
   int _snapshotRunSequence(Map<String, Object?> snapshot) {
@@ -2810,18 +2923,20 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<void> _saveConversations() async {
+    await _preferences?.setString(
+      _conversationsKey,
+      jsonEncode({
+        for (final entry in _conversations.entries)
+          entry.key: [for (final value in entry.value) value.toJson()],
+      }),
+    );
+  }
+
   void _persist() {
     final preferences = _preferences;
     if (preferences == null) return;
-    unawaited(
-      preferences.setString(
-        _conversationsKey,
-        jsonEncode({
-          for (final entry in _conversations.entries)
-            entry.key: [for (final value in entry.value) value.toJson()],
-        }),
-      ),
-    );
+    unawaited(_saveConversations());
     if (archivedConversationsLoaded) {
       unawaited(
         preferences.setString(

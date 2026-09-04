@@ -37,6 +37,13 @@ class AgentLoopCheckpointState(StrictModel):
     pending_tool_error: dict | None = None
     pending_tool_result: dict | None = None
     pending_child_interactions: tuple[dict, ...] = ()
+    # Resume the unfinished response before asking the model for another one.
+    # Calls/results remain authoritative in the canonical Item ledger.
+    pending_response_step_id: Identifier | None = None
+    pending_response_finish_reason: str = "tool_calls"
+    pending_response_system_requirements: str = ""
+    pending_response_tool_names: tuple[str, ...] = ()
+    pending_questionnaire_completed: bool = False
     retry_model_step: bool = False
     # V1 LLM-Judge continuation requires the next direct model response to use
     # a Tool and injects the Judge reason only into that inference request.

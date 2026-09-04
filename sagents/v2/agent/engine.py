@@ -18,6 +18,7 @@ from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
+    ModelResponse,
     ModelToolCall,
 )
 from sagents.v2.agent.step_request import (
@@ -169,6 +170,7 @@ class AgentLoopEngine:
             tool_selection_policy or RecentToolSelectionPolicy()
         )
         self.tool_selection_model = tool_selection_model or model
+        self._prepared_tool_selection_runs: set[str] = set()
         self.continuation_policy = continuation_policy or CompositeContinuationPolicy()
         self.continuation_signal_provider = continuation_signal_provider
         self.context_assembler = context_assembler or DefaultContextAssembler(
@@ -267,7 +269,10 @@ class AgentLoopEngine:
     async def _prepare_tool_selection(
         self, *, command, run_id: str, messages, language: str | None
     ) -> None:
-        """Prepare the selected plugin beside Memory Recall, once per Run."""
+        """Prepare once per Run in this engine, including reconstructed engines."""
+
+        if run_id in self._prepared_tool_selection_runs:
+            return
 
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
@@ -282,6 +287,7 @@ class AgentLoopEngine:
                 model=self.tool_selection_model,
             )
         )
+        self._prepared_tool_selection_runs.add(run_id)
 
     async def _run_automatic_memory_recall(self, run, state, command, context):
         """Run v1-compatible Memory recall as a real Tool input/output pair."""
@@ -409,7 +415,7 @@ class AgentLoopEngine:
                     safe_to_resume=True,
                 ),
             )
-            run = await self._commit_tool_result(
+            run, result = await self._commit_tool_result(
                 run,
                 call,
                 result,
@@ -525,6 +531,18 @@ class AgentLoopEngine:
             step_number=step_number,
             messages=messages,
             pending_flow_boundary=command.config.flow_boundary,
+            pending_response_step_id=started.step_id,
+            pending_response_system_requirements=self._system_requirements(messages),
+            total_input_tokens=sum(
+                event.data.usage.input_tokens
+                for event in events
+                if isinstance(event.data, UsageEventData)
+            ),
+            total_output_tokens=sum(
+                event.data.usage.output_tokens
+                for event in events
+                if isinstance(event.data, UsageEventData)
+            ),
         )
         try:
             definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run_id)
@@ -594,27 +612,17 @@ class AgentLoopEngine:
                 return run
             state = state.model_copy(
                 update={
+                    "pending_questionnaire_completed": (
+                        self._validated_questionnaire_result(call, result)
+                    ),
                     "messages": (
                         *state.messages,
                         self._tool_result_message(result),
                     ),
-                    "step_number": state.step_number + 1,
                     "expanded_tool_names": (
                         self.tool_selection_policy.expanded_tools(run.run_id)
                     ),
                 }
-            )
-            run = await self._commit_running(
-                run,
-                context,
-                (
-                    EventDraft(
-                        type="step.completed",
-                        turn_id=state.turn_id,
-                        step_id=started.step_id,
-                        data=StepEventData(state="completed", attempt=step_number),
-                    ),
-                ),
             )
             return await self._drive(run, state, context)
         return await self._suspend_for_tool_uncertainty(
@@ -702,6 +710,17 @@ class AgentLoopEngine:
         state = state.model_copy(
             update={"messages": rebuilt_messages, "ledger_digest": rebuilt_digest}
         )
+        if state.pending_tool_call is not None and state.pending_response_step_id is None:
+            # Older checkpoints saved only the current barrier, but all calls
+            # in its model response are already present in the Item ledger.
+            state = state.model_copy(
+                update={
+                    "pending_response_step_id": state.pending_tool_step_id,
+                    "pending_response_system_requirements": self._system_requirements(
+                        rebuilt_messages
+                    ),
+                }
+            )
         resolution = None
         if suspension.interaction_id is not None:
             resolution = await self.runtime.session_store.get_interaction_resolution(
@@ -811,13 +830,19 @@ class AgentLoopEngine:
                         ),
                         context.language,
                     )
+                    feedback = str(resolution.payload.get("text") or "").strip()
+                    declined_content = [TextBlock(text=declined_error.message)]
+                    if feedback and resolution.decision == "deny":
+                        declined_content.append(
+                            TextBlock(text=json.dumps({"user_feedback": feedback}, ensure_ascii=False))
+                        )
                     result = ToolExecutionResult(
                         tool_call_id=state.pending_tool_call.tool_call_id,
                         operation_id=state.pending_tool_call.operation_id,
-                        content=(TextBlock(text=declined_error.message),),
+                        content=tuple(declined_content),
                         error=declined_error,
                     )
-                    run = await self._commit_tool_result(
+                    run, result = await self._commit_tool_result(
                         run,
                         state.pending_tool_call,
                         result,
@@ -829,6 +854,12 @@ class AgentLoopEngine:
             state = state.model_copy(
                 update={
                     "messages": (*state.messages, self._tool_result_message(result)),
+                    "pending_questionnaire_completed": (
+                        state.pending_questionnaire_completed
+                        or self._validated_questionnaire_result(
+                            state.pending_tool_call, result
+                        )
+                    ),
                     "pending_tool_call": None,
                     "pending_tool_policy": None,
                     "pending_tool_phase": None,
@@ -839,7 +870,6 @@ class AgentLoopEngine:
                     "expanded_tool_names": (
                         self.tool_selection_policy.expanded_tools(run.run_id)
                     ),
-                    "step_number": state.step_number + 1,
                 }
             )
         elif suspension.interaction_id is not None and resolution is not None:
@@ -950,214 +980,248 @@ class AgentLoopEngine:
                 await self._release_run_resources(run.run_id)
                 return current
             run = current
-            claimed = await self.runtime.session_store.claim_steers(
-                run_id=run.run_id,
-                expected_revision=run.revision,
-                turn_id=state.turn_id,
-                context=context,
-            )
-            if claimed.entries:
-                # Steering is appended to the model ledger in durable inbox
-                # order. It is not an Interaction reply and does not resume a
-                # suspended Run by itself.
-                run = claimed.run
-                steering_messages = tuple(
-                    ModelMessage(
-                        role=item.role,
-                        content=item.content,
-                        metadata=item.metadata,
-                    )
-                    for entry in claimed.entries
-                    for item in entry.input
+            if state.pending_response_step_id is not None:
+                step_id = state.pending_response_step_id
+                response = self._pending_response(state)
+                system_requirements = state.pending_response_system_requirements
+                available_tools = state.pending_response_tool_names or tuple(
+                    tool.name
+                    for tool in await self.tool_catalog.list_tools(run_id=run.run_id)
                 )
-                state = state.model_copy(
-                    update={"messages": (*state.messages, *steering_messages)}
+            else:
+                claimed = await self.runtime.session_store.claim_steers(
+                    run_id=run.run_id,
+                    expected_revision=run.revision,
+                    turn_id=state.turn_id,
+                    context=context,
                 )
-            step_id = new_id("step")
-            run = await self._commit_running(
-                run,
-                context,
-                (
-                    EventDraft(
-                        type="step.started",
-                        turn_id=state.turn_id,
-                        step_id=step_id,
-                        data=StepEventData(state="started", attempt=state.step_number),
-                    ),
-                ),
-            )
-            # Phase 2: ContextAssembler creates the provider-facing projection.
-            # The raw ledger and canonical RuntimeEvents are left unchanged.
-            prepared_step = await self.step_request_builder.prepare(
-                command=command,
-                run_id=run.run_id,
-                turn_id=state.turn_id,
-                step_id=step_id,
-                messages=state.messages,
-                pending_continuation_reason=state.pending_continuation_reason,
-                language=context.language,
-                additional_input_reserve_tokens=additional_input_reserve_tokens,
-            )
-            request = prepared_step.request
-            tools = prepared_step.tools
-            try:
-                # Phase 3: deltas are emitted as replay-buffered events, followed
-                # by completed Items that are authoritative for final content.
-                run, response, partial_suspension = await self._stream_model(
-                    run, request, context, state, step_id
-                )
-            except SageV2Error as exc:
-                if (
-                    exc.info.code == "model.context_window_exceeded"
-                    and exc.info.retryable
-                    and context_overflow_retries == 0
-                    and getattr(self.context_assembler, "budget", None) is not None
-                ):
-                    context_overflow_retries = 1
-                    estimated = int(
-                        request.metadata.get("request_budget", {}).get(
-                            "estimated_input_tokens", 0
+                if claimed.entries:
+                    # Steering is appended to the model ledger in durable inbox
+                    # order. It is not an Interaction reply and does not resume a
+                    # suspended Run by itself.
+                    run = claimed.run
+                    steering_messages = tuple(
+                        ModelMessage(
+                            role=item.role,
+                            content=item.content,
+                            metadata=item.metadata,
                         )
+                        for entry in claimed.entries
+                        for item in entry.input
                     )
-                    additional_input_reserve_tokens = max(512, estimated // 10)
-                    retry_error = exc.info.model_copy(
-                        update={
-                            "metadata": {
-                                **exc.info.metadata,
-                                "adaptive_input_reserve_tokens": (
-                                    additional_input_reserve_tokens
-                                ),
-                                "transparent_retry_attempt": 1,
-                                "transparent_retry_limit": 1,
-                            }
-                        }
+                    state = state.model_copy(
+                        update={"messages": (*state.messages, *steering_messages)}
                     )
-                    run = await self._commit_running(
-                        run,
-                        context,
-                        (
-                            EventDraft(
-                                type="step.retry_scheduled",
-                                turn_id=state.turn_id,
-                                step_id=step_id,
-                                data=StepEventData(
-                                    state="retry_scheduled",
-                                    attempt=1,
-                                    retry_at=self.clock(),
-                                    error=retry_error,
-                                ),
-                            ),
-                        ),
-                    )
-                    continue
-                if (
-                    exc.info.code == "model.empty_semantic_response"
-                    and empty_response_retries
-                    < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                ):
-                    empty_response_retries += 1
-                    retry_error = exc.info.model_copy(
-                        update={
-                            "retryable": True,
-                            "metadata": {
-                                **exc.info.metadata,
-                                "transparent_retry_attempt": empty_response_retries,
-                                "transparent_retry_limit": (
-                                    self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                                ),
-                            },
-                        }
-                    )
-                    run = await self._commit_running(
-                        run,
-                        context,
-                        (
-                            EventDraft(
-                                type="step.retry_scheduled",
-                                turn_id=state.turn_id,
-                                step_id=step_id,
-                                data=StepEventData(
-                                    state="retry_scheduled",
-                                    attempt=empty_response_retries,
-                                    retry_at=self.clock(),
-                                    error=retry_error,
-                                ),
-                            ),
-                        ),
-                    )
-                    continue
-                error = exc.info
-                if error.code == "model.empty_semantic_response":
-                    error = error.model_copy(
-                        update={
-                            "retryable": True,
-                            "metadata": {
-                                **error.metadata,
-                                "transparent_retries_exhausted": (
-                                    empty_response_retries
-                                ),
-                            },
-                        }
-                    )
-                return await self._fail(run, state, step_id, error, context)
-            except Exception as exc:
-                return await self._fail(
+                step_id = new_id("step")
+                run = await self._commit_running(
                     run,
-                    state,
-                    step_id,
-                    RuntimeErrorInfo(
-                        code="model.provider_error",
-                        category=ErrorCategory.PROVIDER_PERMANENT,
-                        message=str(exc),
-                        safe_to_resume=True,
-                    ),
                     context,
-                )
-            if partial_suspension is not None:
-                return partial_suspension
-            assert response is not None
-            empty_response_retries = 0
-            context_overflow_retries = 0
-            additional_input_reserve_tokens = 0
-            messages = state.messages
-            # Human-readable reasoning remains a separate canonical Item, while
-            # opaque provider continuation state is attached to the assistant
-            # ledger entry. Providers such as MiniMax, OpenAI Responses, and
-            # Anthropic require that state after a tool call.
-            if response.text or response.tool_calls or response.provider_state:
-                messages = (
-                    *messages,
-                    ModelMessage(
-                        role="assistant",
-                        content=(
-                            (TextBlock(text=response.text),) if response.text else ()
+                    (
+                        EventDraft(
+                            type="step.started",
+                            turn_id=state.turn_id,
+                            step_id=step_id,
+                            data=StepEventData(
+                                state="started", attempt=state.step_number
+                            ),
                         ),
-                        tool_calls=response.tool_calls,
-                        provider_state=response.provider_state,
                     ),
                 )
-            state = state.model_copy(
-                update={
-                    "messages": messages,
-                    "total_input_tokens": state.total_input_tokens
-                    + response.usage.input_tokens,
-                    "total_output_tokens": state.total_output_tokens
-                    + response.usage.output_tokens,
-                    "response_fingerprints": (
-                        *state.response_fingerprints,
-                        self._response_fingerprint(response),
-                    ),
-                    "retry_model_step": False,
-                    "force_tool_choice_required_next": False,
-                    "pending_continuation_reason": None,
-                }
-            )
+                # Phase 2: ContextAssembler creates the provider-facing projection.
+                # The raw ledger and canonical RuntimeEvents are left unchanged.
+                # Resume/recovery can use a fresh engine whose selection plugin has
+                # no process-local preparation state. Expanded tools were restored
+                # from the checkpoint; prepare the current catalog before select().
+                await self._prepare_tool_selection(
+                    command=command,
+                    run_id=run.run_id,
+                    messages=state.messages,
+                    language=context.language,
+                )
+                prepared_step = await self.step_request_builder.prepare(
+                    command=command,
+                    run_id=run.run_id,
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    messages=state.messages,
+                    pending_continuation_reason=state.pending_continuation_reason,
+                    language=context.language,
+                    additional_input_reserve_tokens=additional_input_reserve_tokens,
+                )
+                request = prepared_step.request
+                tools = prepared_step.tools
+                system_requirements = self._system_requirements(request.messages)
+                available_tools = tuple(tool.name for tool in tools)
+                try:
+                    # Phase 3: deltas are emitted as replay-buffered events, followed
+                    # by completed Items that are authoritative for final content.
+                    run, response, partial_suspension = await self._stream_model(
+                        run, request, context, state, step_id
+                    )
+                except SageV2Error as exc:
+                    if (
+                        exc.info.code == "model.context_window_exceeded"
+                        and exc.info.retryable
+                        and context_overflow_retries == 0
+                        and getattr(self.context_assembler, "budget", None) is not None
+                    ):
+                        context_overflow_retries = 1
+                        estimated = int(
+                            request.metadata.get("request_budget", {}).get(
+                                "estimated_input_tokens", 0
+                            )
+                        )
+                        additional_input_reserve_tokens = max(512, estimated // 10)
+                        retry_error = exc.info.model_copy(
+                            update={
+                                "metadata": {
+                                    **exc.info.metadata,
+                                    "adaptive_input_reserve_tokens": (
+                                        additional_input_reserve_tokens
+                                    ),
+                                    "transparent_retry_attempt": 1,
+                                    "transparent_retry_limit": 1,
+                                }
+                            }
+                        )
+                        run = await self._commit_running(
+                            run,
+                            context,
+                            (
+                                EventDraft(
+                                    type="step.retry_scheduled",
+                                    turn_id=state.turn_id,
+                                    step_id=step_id,
+                                    data=StepEventData(
+                                        state="retry_scheduled",
+                                        attempt=1,
+                                        retry_at=self.clock(),
+                                        error=retry_error,
+                                    ),
+                                ),
+                            ),
+                        )
+                        continue
+                    if (
+                        exc.info.code == "model.empty_semantic_response"
+                        and empty_response_retries
+                        < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                    ):
+                        empty_response_retries += 1
+                        retry_error = exc.info.model_copy(
+                            update={
+                                "retryable": True,
+                                "metadata": {
+                                    **exc.info.metadata,
+                                    "transparent_retry_attempt": empty_response_retries,
+                                    "transparent_retry_limit": (
+                                        self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                                    ),
+                                },
+                            }
+                        )
+                        run = await self._commit_running(
+                            run,
+                            context,
+                            (
+                                EventDraft(
+                                    type="step.retry_scheduled",
+                                    turn_id=state.turn_id,
+                                    step_id=step_id,
+                                    data=StepEventData(
+                                        state="retry_scheduled",
+                                        attempt=empty_response_retries,
+                                        retry_at=self.clock(),
+                                        error=retry_error,
+                                    ),
+                                ),
+                            ),
+                        )
+                        continue
+                    error = exc.info
+                    if error.code == "model.empty_semantic_response":
+                        error = error.model_copy(
+                            update={
+                                "retryable": True,
+                                "metadata": {
+                                    **error.metadata,
+                                    "transparent_retries_exhausted": (
+                                        empty_response_retries
+                                    ),
+                                },
+                            }
+                        )
+                    return await self._fail(run, state, step_id, error, context)
+                except Exception as exc:
+                    return await self._fail(
+                        run,
+                        state,
+                        step_id,
+                        RuntimeErrorInfo(
+                            code="model.provider_error",
+                            category=ErrorCategory.PROVIDER_PERMANENT,
+                            message=str(exc),
+                            safe_to_resume=True,
+                        ),
+                        context,
+                    )
+                if partial_suspension is not None:
+                    return partial_suspension
+                assert response is not None
+                empty_response_retries = 0
+                context_overflow_retries = 0
+                additional_input_reserve_tokens = 0
+                messages = state.messages
+                # Human-readable reasoning remains a separate canonical Item, while
+                # opaque provider continuation state is attached to the assistant
+                # ledger entry. Providers such as MiniMax, OpenAI Responses, and
+                # Anthropic require that state after a tool call.
+                if response.text or response.tool_calls or response.provider_state:
+                    messages = (
+                        *messages,
+                        ModelMessage(
+                            role="assistant",
+                            content=(
+                                (TextBlock(text=response.text),)
+                                if response.text
+                                else ()
+                            ),
+                            tool_calls=response.tool_calls,
+                            provider_state=response.provider_state,
+                        ),
+                    )
+                state = state.model_copy(
+                    update={
+                        "messages": messages,
+                        "total_input_tokens": state.total_input_tokens
+                        + response.usage.input_tokens,
+                        "total_output_tokens": state.total_output_tokens
+                        + response.usage.output_tokens,
+                        "response_fingerprints": (
+                            *state.response_fingerprints,
+                            self._response_fingerprint(response),
+                        ),
+                        "retry_model_step": False,
+                        "force_tool_choice_required_next": False,
+                        "pending_continuation_reason": None,
+                        "pending_response_step_id": step_id,
+                        "pending_response_finish_reason": response.finish_reason,
+                        "pending_response_system_requirements": system_requirements,
+                        "pending_response_tool_names": available_tools,
+                    }
+                )
 
-            questionnaire_completed = False
+            questionnaire_completed = state.pending_questionnaire_completed
             if response.tool_calls:
                 # Phase 4: proposal and policy decision are committed before any
                 # external ToolExecutor receives the call.
+                settled = {
+                    message.tool_call_id
+                    for message in self._pending_response_results(state)
+                }
                 for model_call in response.tool_calls:
+                    if model_call.tool_call_id in settled:
+                        continue
                     try:
                         definition = await self.tool_catalog.get_tool(
                             model_call.name, run_id=run.run_id
@@ -1188,6 +1252,15 @@ class AgentLoopEngine:
                             )
                             run = await self._record_continuation(
                                 run, decision, context, state.turn_id, step_id
+                            )
+                            # Guidance for an unavailable Tool starts a new
+                            # model decision; retrying this batch would request
+                            # the same missing Tool forever.
+                            state = state.model_copy(
+                                update={
+                                    "pending_response_step_id": None,
+                                    "pending_questionnaire_completed": False,
+                                }
                             )
                             return await self._suspend_for_continuation_interaction(
                                 run, state, decision, context, step_id
@@ -1235,7 +1308,7 @@ class AgentLoopEngine:
                             content=(TextBlock(text=denied.message),),
                             error=denied,
                         )
-                        run = await self._commit_tool_result(
+                        run, result = await self._commit_tool_result(
                             run,
                             tool_call,
                             result,
@@ -1276,6 +1349,7 @@ class AgentLoopEngine:
                     )
                     state = state.model_copy(
                         update={
+                            "pending_questionnaire_completed": questionnaire_completed,
                             "messages": (
                                 *state.messages,
                                 self._tool_result_message(result),
@@ -1301,8 +1375,8 @@ class AgentLoopEngine:
                     or context.language
                     or "en"
                 ),
-                agent_system_requirements=self._system_requirements(request.messages),
-                available_tools=tuple(tool.name for tool in tools),
+                agent_system_requirements=system_requirements,
+                available_tools=available_tools,
                 pending_tool_calls=0,
                 repeated_fingerprint_count=repeated,
                 explicit_status=signals.explicit_status,
@@ -1346,6 +1420,14 @@ class AgentLoopEngine:
                 )
             run = await self._record_continuation(
                 run, decision, context, state.turn_id, step_id
+            )
+            state = state.model_copy(
+                update={
+                    "pending_response_step_id": None,
+                    "pending_response_system_requirements": "",
+                    "pending_response_tool_names": (),
+                    "pending_questionnaire_completed": False,
+                }
             )
             if decision.reason_code in {"flow.node_complete", "flow.node_continue"}:
                 state = state.model_copy(update={"pending_flow_boundary": None})
@@ -1416,6 +1498,43 @@ class AgentLoopEngine:
                 }
             )
         return run
+
+    @staticmethod
+    def _pending_response_results(
+        state: AgentLoopCheckpointState,
+    ) -> tuple[ModelMessage, ...]:
+        """Results from this response only; call IDs may recur in older steps."""
+        for index in range(len(state.messages) - 1, -1, -1):
+            if state.messages[index].role == "assistant":
+                return tuple(
+                    message
+                    for message in state.messages[index + 1 :]
+                    if message.role == "tool"
+                )
+        return ()
+
+    @staticmethod
+    def _pending_response(state: AgentLoopCheckpointState) -> ModelResponse:
+        """Rebuild the unfinished batch without copying ledger text into checkpoints."""
+        message = next(
+            (
+                message
+                for message in reversed(state.messages)
+                if message.role == "assistant"
+            ),
+            None,
+        )
+        return ModelResponse(
+            response_id=state.pending_response_step_id or "recovered-response",
+            text=""
+            if message is None
+            else "\n".join(
+                block.text for block in message.content if isinstance(block, TextBlock)
+            ),
+            tool_calls=() if message is None else message.tool_calls,
+            finish_reason=state.pending_response_finish_reason,
+            provider_state={} if message is None else message.provider_state,
+        )
 
     @staticmethod
     def _system_requirements(messages: tuple[ModelMessage, ...]) -> str:
@@ -2152,7 +2271,7 @@ class AgentLoopEngine:
             return current, None
         run = current
         if run.state == RunState.SUSPEND_REQUESTED:
-            run = await self._commit_tool_result(
+            run, result = await self._commit_tool_result(
                 run,
                 call,
                 result,
@@ -2166,11 +2285,22 @@ class AgentLoopEngine:
             assert state is not None
             paused_state = state.model_copy(
                 update={
-                    "messages": (*state.messages, self._tool_result_message(result))
+                    "messages": (*state.messages, self._tool_result_message(result)),
+                    "pending_tool_call": None,
+                    "pending_tool_policy": None,
+                    "pending_tool_phase": None,
+                    "pending_tool_step_id": None,
+                    "pending_tool_error": None,
+                    "pending_tool_result": None,
+                    "pending_child_interactions": (),
+                    "pending_questionnaire_completed": (
+                        state.pending_questionnaire_completed
+                        or self._validated_questionnaire_result(call, result)
+                    ),
                 }
             )
             return await self._suspend_at_safe_point(run, paused_state, context), None
-        run = await self._commit_tool_result(
+        run, result = await self._commit_tool_result(
             run, call, result, context, turn_id, step_id=step_id
         )
         return run, result
@@ -2290,7 +2420,7 @@ class AgentLoopEngine:
                 ),
                 None,
             )
-        run = await self._commit_tool_result(
+        run, tool_result = await self._commit_tool_result(
             run,
             state.pending_tool_call,
             tool_result,
@@ -2406,7 +2536,7 @@ class AgentLoopEngine:
                     ),
                 )
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
-                run = await self._commit_tool_result(
+                run, result = await self._commit_tool_result(
                     run,
                     call,
                     reconciled.result,
@@ -2415,7 +2545,7 @@ class AgentLoopEngine:
                     step_id=step_id,
                     event_type_override="tool.call.reconciled",
                 )
-                return run, reconciled.result
+                return run, result
             if reconciled.state == ReconcileState.FAILED:
                 result = reconciled.result or ToolExecutionResult(
                     tool_call_id=call.tool_call_id,
@@ -2428,7 +2558,7 @@ class AgentLoopEngine:
                         safe_to_resume=True,
                     ),
                 )
-                run = await self._commit_tool_result(
+                run, result = await self._commit_tool_result(
                     run,
                     call,
                     result,
@@ -2486,7 +2616,7 @@ class AgentLoopEngine:
                 ),
                 metadata={"manually_confirmed": True},
             )
-            run = await self._commit_tool_result(
+            run, result = await self._commit_tool_result(
                 run,
                 call,
                 result,
@@ -2513,7 +2643,7 @@ class AgentLoopEngine:
             error=error,
             metadata={"manually_confirmed": True},
         )
-        run = await self._commit_tool_result(
+        run, result = await self._commit_tool_result(
             run,
             call,
             result,
@@ -2539,14 +2669,28 @@ class AgentLoopEngine:
         event_type_override=None,
         expected_states=None,
     ):
-        """Atomically commit the Tool lifecycle result and model-visible Item."""
+        """Commit and return the same normalized result used by the model ledger."""
 
         if result.error is not None:
             localized = localize_error(result.error, context.language)
+            content = result.content
+            if not content:
+                content = (TextBlock(text=localized.message),)
+            elif (
+                result.metadata.get("tool_result_received") is not True
+                and isinstance(content[0], TextBlock)
+                and content[0].text == result.error.message
+            ):
+                # Translate the generated error text without discarding
+                # provider content or additional user feedback blocks.
+                content = (
+                    content[0].model_copy(update={"text": localized.message}),
+                    *content[1:],
+                )
             result = result.model_copy(
                 update={
                     "error": localized,
-                    "content": (TextBlock(text=localized.message),),
+                    "content": content,
                 }
             )
 
@@ -2578,7 +2722,7 @@ class AgentLoopEngine:
             if result.error is not None
             else "tool.call.succeeded"
         )
-        return await self._commit_running(
+        run = await self._commit_running(
             run,
             context,
             (
@@ -2606,6 +2750,7 @@ class AgentLoopEngine:
             ),
             expected_states=expected_states,
         )
+        return run, result
 
     async def _suspend_for_tool_uncertainty(
         self,
@@ -3123,6 +3268,7 @@ class AgentLoopEngine:
     async def _release_run_resources(self, run_id: str) -> None:
         """Best-effort cleanup after the durable Run reached a terminal state."""
 
+        self._prepared_tool_selection_runs.discard(run_id)
         providers = (
             self.tool_selection_policy,
             self.tool_catalog,

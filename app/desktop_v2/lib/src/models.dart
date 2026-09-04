@@ -1019,6 +1019,7 @@ class Conversation {
     this.pendingInteraction,
     this.approvalMode = ApprovalMode.highRisk,
     this.invocationMode = InvocationMode.normal,
+    this.pendingPlanExecution,
     List<RuntimeProcessPanel>? processPanels,
     List<Conversation>? subSessions,
     DateTime? createdAt,
@@ -1049,6 +1050,7 @@ class Conversation {
   PendingInteraction? pendingInteraction;
   ApprovalMode approvalMode;
   InvocationMode invocationMode;
+  Map<String, Object?>? pendingPlanExecution;
   bool get planMode => invocationMode == InvocationMode.plan;
   bool get goalMode => invocationMode == InvocationMode.goal;
   bool archived;
@@ -1124,6 +1126,8 @@ class Conversation {
         json['invocation_mode']?.toString() ??
             (json['plan_mode'] == true ? 'plan' : null),
       ),
+      pendingPlanExecution: (json['pending_plan_execution'] as Map?)
+          ?.cast<String, Object?>(),
       processPanels: processPanels,
       subSessions: rawSubSessions is List
           ? [
@@ -1155,6 +1159,7 @@ class Conversation {
     'pending_interaction': pendingInteraction?.toJson(),
     'approval_mode': approvalMode.wireValue,
     'invocation_mode': invocationMode.wireValue,
+    'pending_plan_execution': pendingPlanExecution,
     'process_panels': [for (final value in processPanels) value.toJson()],
     'sub_sessions': [for (final value in subSessions) value.toJson()],
     'created_at': createdAt.toIso8601String(),

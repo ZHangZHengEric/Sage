@@ -1714,3 +1714,84 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
         assert list(raw["entries"]) == [remembered[0].matcher.key]
     finally:
         await application.close()
+
+
+@pytest.mark.asyncio
+async def test_closed_run_scopes_do_not_retain_materialization_locks(tmp_path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-lock-cleanup",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    try:
+        for index in range(20):
+            ports = await application.materialize_agent(
+                package, agent_id="assistant", run_id=f"run_{index}"
+            )
+            for handle in reversed(ports.scope_handles):
+                await handle.close()
+        assert not any(key[2] == "run" for key in application._composer._key_locks)
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_materialization_lock_remains_shared_by_concurrent_waiters(
+    tmp_path, monkeypatch
+):
+    import asyncio
+
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.materialize-lock-waiters",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(package)
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = application._composer._instantiate
+    creations = 0
+
+    async def delayed(plugin_id, config, capability, **kwargs):
+        nonlocal creations
+        if capability == "context.token-estimator":
+            creations += 1
+            entered.set()
+            await release.wait()
+        return await original(plugin_id, config, capability, **kwargs)
+
+    monkeypatch.setattr(application._composer, "_instantiate", delayed)
+    tasks = []
+    try:
+        tasks.append(
+            asyncio.create_task(application.materialize_agent(package, run_id="run_1"))
+        )
+        await asyncio.wait_for(entered.wait(), 5)
+        tasks.append(
+            asyncio.create_task(application.materialize_agent(package, run_id="run_2"))
+        )
+        await asyncio.sleep(0)
+        assert creations == 1
+        release.set()
+        first, second = await asyncio.wait_for(asyncio.gather(*tasks), 5)
+        assert creations == 1
+        assert first.token_estimator is second.token_estimator
+        for handle in reversed((*first.scope_handles, *second.scope_handles)):
+            await handle.close()
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await application.close()

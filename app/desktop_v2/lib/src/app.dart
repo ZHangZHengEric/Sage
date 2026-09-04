@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'localization/app_localizations.dart';
 import 'state/workspace_controller.dart';
 import 'ui/workspace_screen.dart';
+import 'ui/shared/desktop_notice.dart';
 import 'ui/workspace_panels/workspace_panel_plugin.dart';
 
 class SageDesktopV2App extends StatefulWidget {
@@ -71,6 +72,17 @@ class _SageDesktopV2AppState extends State<SageDesktopV2App> {
         ...GlobalMaterialLocalizations.delegates,
       ],
       supportedLocales: SageLocalizations.supportedLocales,
+      builder: (context, child) => ListenableBuilder(
+        listenable: _controller,
+        child: child,
+        builder: (context, child) => Overlay.wrap(
+          child: DesktopNoticeHost(
+            error: _controller.error,
+            onClearError: _controller.clearError,
+            child: child!,
+          ),
+        ),
+      ),
       home: WorkspaceScreen(
         controller: _controller,
         themeMode: _themeMode,

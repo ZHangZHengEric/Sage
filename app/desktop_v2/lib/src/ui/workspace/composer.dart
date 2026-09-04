@@ -318,59 +318,121 @@ class _ComposerState extends State<_Composer> {
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {
-                final approvalLabelPainter = TextPainter(
-                  text: TextSpan(
-                    text: _approvalModeLabel(
-                      widget.conversation.approvalMode,
-                      context.l10n,
+                double labelWidth(String label) {
+                  final painter = TextPainter(
+                    text: TextSpan(
+                      text: label,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    textDirection: Directionality.of(context),
+                    textScaler: MediaQuery.textScalerOf(context),
+                    maxLines: 1,
+                  )..layout();
+                  final width = painter.width;
+                  painter.dispose();
+                  return width;
+                }
+
+                final mode = widget.conversation.invocationMode;
+                final hasMode = mode != InvocationMode.normal;
+                final approvalWidth = labelWidth(
+                  _approvalModeLabel(
+                    widget.conversation.approvalMode,
+                    context.l10n,
                   ),
-                  textDirection: Directionality.of(context),
-                  textScaler: MediaQuery.textScalerOf(context),
-                  maxLines: 1,
-                )..layout();
-                final compactApproval =
-                    constraints.maxWidth < 400 + approvalLabelPainter.width;
-                final compactAgent = constraints.maxWidth < 310;
+                );
+                final agent = widget.controller.agents
+                    .where(
+                      (agent) => agent.id == widget.controller.selectedAgentId,
+                    )
+                    .firstOrNull;
+                final agentWidth = labelWidth(
+                  agent?.name ?? context.l10n.text('settings.agent'),
+                );
+                final chipWidth = hasMode
+                    ? labelWidth(
+                            context.l10n.text(
+                              mode == InvocationMode.plan
+                                  ? 'workspace.planModeShort'
+                                  : 'workspace.goalModeShort',
+                            ),
+                          ) +
+                          42
+                    : 0.0;
+                var compactApproval = false;
+                var compactAgent = false;
+                // Include actual localized label widths before falling back to
+                // a second line. The fixed widths cover icons and padding.
+                double toolbarWidth() =>
+                    38 +
+                    34 +
+                    24 +
+                    7 +
+                    (compactAgent ? 44 : 53 + agentWidth) +
+                    (compactApproval ? 44 : 53 + approvalWidth) +
+                    (hasMode ? chipWidth + 8 : 0);
+                if (toolbarWidth() > constraints.maxWidth) {
+                  compactApproval = true;
+                }
+                if (toolbarWidth() > constraints.maxWidth) {
+                  compactAgent = true;
+                }
                 final controlGap = compactApproval ? 5.0 : 8.0;
                 return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     _SkillPicker(
                       controller: widget.controller,
                       conversation: widget.conversation,
+                      modeEnabled: !approvalLocked,
                     ),
                     SizedBox(width: controlGap),
-                    Container(
-                      key: const ValueKey('composer-control-cluster'),
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerHighest.withValues(
-                          alpha: dark ? 0.18 : 0.28,
-                        ),
-                        borderRadius: BorderRadius.circular(11),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    Expanded(
+                      child: Wrap(
+                        spacing: controlGap,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          _AgentPicker(
-                            controller: widget.controller,
-                            compact: compactAgent,
+                          Container(
+                            key: const ValueKey('composer-control-cluster'),
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            decoration: BoxDecoration(
+                              color: colors.surfaceContainerHighest.withValues(
+                                alpha: dark ? 0.18 : 0.28,
+                              ),
+                              borderRadius: BorderRadius.circular(11),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _AgentPicker(
+                                  controller: widget.controller,
+                                  compact: compactAgent,
+                                ),
+                                const _ComposerToolbarDivider(),
+                                _ApprovalModePicker(
+                                  controller: widget.controller,
+                                  conversation: widget.conversation,
+                                  compact: compactApproval,
+                                  enabled: !approvalLocked,
+                                ),
+                              ],
+                            ),
                           ),
-                          const _ComposerToolbarDivider(),
-                          _ApprovalModePicker(
-                            controller: widget.controller,
-                            conversation: widget.conversation,
-                            compact: compactApproval,
-                            enabled: !approvalLocked,
-                          ),
+                          if (hasMode)
+                            _ComposerModeChip(
+                              mode: mode,
+                              enabled: !approvalLocked,
+                              onClose: () => widget.controller
+                                  .setInvocationMode(InvocationMode.normal),
+                            ),
                         ],
                       ),
                     ),
-                    const Spacer(),
+                    SizedBox(width: controlGap),
                     ValueListenableBuilder<TextEditingValue>(
                       valueListenable: _text,
                       builder: (context, value, _) => _ComposerSendButton(
@@ -388,6 +450,101 @@ class _ComposerState extends State<_Composer> {
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerModeChip extends StatelessWidget {
+  const _ComposerModeChip({
+    required this.mode,
+    required this.enabled,
+    required this.onClose,
+  });
+
+  final InvocationMode mode;
+  final bool enabled;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final plan = mode == InvocationMode.plan;
+    final label = context.l10n.text(
+      plan ? 'workspace.planModeShort' : 'workspace.goalModeShort',
+    );
+    final closeLabel = context.l10n.text(
+      plan ? 'workspace.closePlanMode' : 'workspace.closeGoalMode',
+    );
+    return Tooltip(
+      message: closeLabel,
+      excludeFromSemantics: true,
+      child: Semantics(
+        key: const ValueKey('composer-mode-chip'),
+        button: true,
+        enabled: enabled,
+        label: closeLabel,
+        excludeSemantics: true,
+        onTap: enabled ? onClose : null,
+        child: GlassCard(
+          padding: EdgeInsets.zero,
+          shape: const LiquidRoundedSuperellipse(borderRadius: 18),
+          useOwnLayer: true,
+          settings: LiquidGlassSettings(
+            glassColor: colors.surfaceContainerHighest.withValues(
+              alpha: dark ? 0.7 : 0.85,
+            ),
+            thickness: 8,
+            blur: 3,
+            chromaticAberration: 0,
+            lightIntensity: 0.2,
+            glowIntensity: 0,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              key: const ValueKey('composer-mode-close'),
+              borderRadius: BorderRadius.circular(18),
+              onTap: enabled ? onClose : null,
+              focusColor: colors.primary.withValues(alpha: 0.2),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      CupertinoIcons.xmark_circle_fill,
+                      size: 16,
+                      color: enabled
+                          ? colors.onSurfaceVariant
+                          : colors.onSurfaceVariant.withValues(alpha: 0.45),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: enabled
+                                  ? colors.onSurface
+                                  : colors.onSurfaceVariant.withValues(
+                                      alpha: 0.6,
+                                    ),
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1324,9 +1481,11 @@ class _ComposerMenuItem extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.description,
+    this.enabled = true,
     super.key,
   });
 
+  final bool enabled;
   final bool selected;
   final IconData icon;
   final String label;
@@ -1337,69 +1496,79 @@ class _ComposerMenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final hasDescription = description?.isNotEmpty == true;
-    return InkWell(
-      borderRadius: BorderRadius.circular(11),
-      onTap: onTap,
-      child: Container(
-        constraints: BoxConstraints(minHeight: hasDescription ? 56 : 38),
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected
-              ? colors.primary.withValues(alpha: 0.12)
-              : Colors.transparent,
+    return Semantics(
+      button: true,
+      selected: selected,
+      enabled: enabled,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.45,
+        child: InkWell(
           borderRadius: BorderRadius.circular(11),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: selected ? colors.primary : colors.onSurfaceVariant,
+          onTap: enabled ? onTap : null,
+          child: Container(
+            constraints: BoxConstraints(minHeight: hasDescription ? 56 : 38),
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: selected
+                  ? colors.primary.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontSize: 12.5,
-                      color: colors.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (hasDescription) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      description!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontSize: 11,
-                        height: 1.25,
-                        color: colors.onSurfaceVariant,
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 14,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              fontSize: 12.5,
+                              color: colors.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                      if (hasDescription) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          description!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                fontSize: 11,
+                                height: 1.25,
+                                color: colors.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                AnimatedOpacity(
+                  opacity: selected ? 1 : 0,
+                  duration: const Duration(milliseconds: 120),
+                  child: Icon(
+                    CupertinoIcons.check_mark,
+                    size: 13,
+                    color: colors.primary,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            AnimatedOpacity(
-              opacity: selected ? 1 : 0,
-              duration: const Duration(milliseconds: 120),
-              child: Icon(
-                CupertinoIcons.check_mark,
-                size: 13,
-                color: colors.primary,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1427,10 +1596,15 @@ IconData _approvalModeIcon(ApprovalMode mode) => switch (mode) {
 };
 
 class _SkillPicker extends StatefulWidget {
-  const _SkillPicker({required this.controller, required this.conversation});
+  const _SkillPicker({
+    required this.controller,
+    required this.conversation,
+    required this.modeEnabled,
+  });
 
   final WorkspaceController controller;
   final Conversation conversation;
+  final bool modeEnabled;
 
   @override
   State<_SkillPicker> createState() => _SkillPickerState();
@@ -1442,6 +1616,16 @@ class _SkillPickerState extends State<_SkillPicker> {
   OverlayEntry? _overlayEntry;
 
   bool get _isOpen => _overlayEntry != null;
+
+  @override
+  void didUpdateWidget(covariant _SkillPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _overlayEntry?.markNeedsBuild();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -1483,6 +1667,7 @@ class _SkillPickerState extends State<_SkillPicker> {
                     ),
                     _ComposerMenuItem(
                       key: const ValueKey('composer-plan-mode-option'),
+                      enabled: widget.modeEnabled,
                       selected: widget.conversation.planMode,
                       icon: CupertinoIcons.lightbulb,
                       label: context.l10n.text('workspace.planMode'),
@@ -1500,6 +1685,7 @@ class _SkillPickerState extends State<_SkillPicker> {
                     ),
                     _ComposerMenuItem(
                       key: const ValueKey('composer-goal-mode-option'),
+                      enabled: widget.modeEnabled,
                       selected: widget.conversation.goalMode,
                       icon: CupertinoIcons.scope,
                       label: context.l10n.text('workspace.goalMode'),
