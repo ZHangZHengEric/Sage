@@ -224,6 +224,57 @@ async def test_deny_leaves_workspace_untouched(tmp_path):
     assert "tool.call.dispatching" not in outcome.event_types
 
 
+def write_outside_model():
+    """第 1 步把文件写到工作区之外（需要审批），第 2 步收尾。"""
+
+    return ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    _completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="call_out",
+                                name="file_write",
+                                arguments={
+                                    "file_path": "../outside.txt",
+                                    "content": "escaped\n",
+                                },
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(_completed("Done."),)),
+        )
+    )
+
+
+async def test_write_outside_the_workspace_fails_cleanly_without_reconciliation(tmp_path):
+    workspace, _, agent, command = await make_agent(tmp_path, write_outside_model())
+    err = io.StringIO()
+
+    outcome = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=PlainRenderer(io.StringIO(), err),
+        decider=StaticInteractionDecider("approve_once"),
+    )
+    await agent.close()
+
+    # 沙箱在写入之前就拒绝了：这是普通失败（tool.call.failed），
+    # 不是"结果未知"的人工核对；唯一的交互是那次审批。
+    assert outcome.state == RunState.COMPLETED
+    assert "tool.call.failed" in outcome.event_types
+    assert "tool.call.unknown" not in outcome.event_types
+    assert outcome.event_types.count("interaction.requested") == 1
+    assert not (tmp_path / "outside.txt").exists()
+    assert not (workspace / "outside.txt").exists()
+    assert "[tool] file_write failed (sandbox.permission_denied:" in err.getvalue()
+
+
 async def test_json_mode_streams_native_events_and_reads_decision_line(tmp_path):
     workspace, _, agent, command = await make_agent(tmp_path, write_hello_model())
     out = io.StringIO()
@@ -273,6 +324,16 @@ async def test_static_decider_never_widens_to_a_disallowed_decision():
     assert await StaticInteractionDecider("cancel").decide(
         approval_interaction(("approve_once", "cancel"))
     ) == InteractionAnswer("cancel")
+
+
+async def test_static_decider_answers_a_reconciliation_prompt_with_cancel():
+    """人工核对交互（confirm_succeeded / mark_failed / cancel）没有 deny：
+    固定答案只收紧不放宽，approve-all 与 deny-all 都退化为 cancel。"""
+
+    interaction = approval_interaction(("confirm_succeeded", "mark_failed", "cancel"))
+    for fixed in ("approve_once", "deny"):
+        answer = await StaticInteractionDecider(fixed).decide(interaction)
+        assert answer == InteractionAnswer("cancel")
 
 
 def recovery_interaction():
