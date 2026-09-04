@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -46,6 +47,7 @@ from app.cli.v2.signals import (
     read_line_or_interrupt,
 )
 from sagents.v2.contracts.common import new_id
+from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionType
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -1877,11 +1879,14 @@ def test_build_tool_policy_maps_approval_modes():
         build_tool_policy("approve-all").approval_strategy
         == ApprovalStrategy.AUTO_APPROVE
     )
-    assert build_tool_policy("deny-all").approval_strategy == ApprovalStrategy.CONFIGURED
-    # 只有会向用户提问的 ask/deny-all 允许"记住"；approve-all/always 没有可记的东西。
+    assert (
+        build_tool_policy("deny-all").approval_strategy == ApprovalStrategy.CONFIGURED
+    )
+    # 只有 ask 允许审批记忆；deny-all 必须在策略层拒绝。
     assert build_tool_policy("ask").allow_persistent_approval is True
     assert build_tool_policy("approve-all").allow_persistent_approval is False
     assert build_tool_policy("always").allow_persistent_approval is False
+    assert build_tool_policy("deny-all").allow_persistent_approval is False
     assert build_tool_policy("ask").approval_matcher_id == CLI_APPROVAL_MATCHER_ID
 
 
@@ -1890,17 +1895,18 @@ def test_cli_approval_matcher_uses_command_and_path_granularity():
         _policy_context("execute_shell_command", {"command": "  git   status -s "})
     )
     shell_again = cli_approval_matcher(
-        _policy_context(
-            "execute_shell_command", {"command": "git status -s", "workdir": "src"}
-        )
+        _policy_context("execute_shell_command", {"command": "  git   status -s "})
     )
     other = cli_approval_matcher(
         _policy_context("execute_shell_command", {"command": "git push"})
     )
     assert shell is not None and shell == shell_again
-    assert shell.summary == "execute_shell_command: git status -s"
+    assert "git   status -s" in shell.summary
     assert other is not None and other.fingerprint != shell.fingerprint
-    assert cli_approval_matcher(_policy_context("execute_shell_command", {"command": " "})) is None
+    assert (
+        cli_approval_matcher(_policy_context("execute_shell_command", {"command": " "}))
+        is None
+    )
 
     write = cli_approval_matcher(
         _policy_context("file_write", {"file_path": "a.py", "content": "1"})
@@ -2150,3 +2156,122 @@ def test_build_start_run_carries_enabled_tools():
     assert merged.config.enabled_tools == ("grep",)
     assert merged.config.metadata == {"a": 1, "b": 2}
     assert build_start_run(agent_id="coder", task="t", resolved_spec_hash="sha256:x").config.enabled_tools is None
+
+
+@pytest.mark.parametrize(
+    "first,second",
+    [
+        (
+            {"command": "printf safe # comment touch marker"},
+            {"command": "printf safe # comment\ntouch marker"},
+        ),
+        ({"command": "printf 'a b'"}, {"command": "printf 'a  b'"}),
+        (
+            {"command": "git status", "workdir": "src"},
+            {"command": "git status", "workdir": "other"},
+        ),
+        (
+            {"command": "python script.py", "env_vars": '{"PATH":"/bin"}'},
+            {"command": "python script.py", "env_vars": '{"PATH":"./bin"}'},
+        ),
+        ({"command": "git status"}, {"command": "git status", "workdir": "src"}),
+    ],
+)
+def test_shell_approval_does_not_conflate_execution_arguments(first, second):
+    assert cli_approval_matcher(_policy_context("execute_shell_command", first)) != (
+        cli_approval_matcher(_policy_context("execute_shell_command", second))
+    )
+
+
+def test_file_approval_preserves_significant_path_whitespace():
+    assert cli_approval_matcher(
+        _policy_context("file_write", {"file_path": "a.txt"})
+    ) != (cli_approval_matcher(_policy_context("file_write", {"file_path": " a.txt"})))
+
+
+async def test_deny_all_rejects_a_remembered_write_after_reopening_session(tmp_path):
+    workspace, _, agent, command = await make_agent(
+        tmp_path, write_hello_model(), tool_policy=build_tool_policy("ask")
+    )
+
+    first = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=JsonRenderer(io.StringIO()),
+        decider=StaticInteractionDecider("approve_and_remember"),
+    )
+    await agent.close()
+    (workspace / "hello.txt").write_text("keep this content")
+
+    _, _, agent, command = await make_agent(
+        tmp_path, write_hello_model(), tool_policy=build_tool_policy("deny-all")
+    )
+    memory = agent.application.services["agent.approval-memory"]
+    assert len(await memory.list_remembered(session_id=first.session_id)) == 1
+    outcome = await run_task(
+        agent,
+        command.model_copy(update={"session_id": first.session_id}),
+        CONTEXT,
+        renderer=JsonRenderer(io.StringIO()),
+        # Even an approving JSON/host driver must not override deny-all.
+        decider=StaticInteractionDecider("approve_once"),
+    )
+    await agent.close()
+    assert outcome.state == RunState.COMPLETED
+    assert (workspace / "hello.txt").read_text() == "keep this content"
+    assert "tool.call.dispatching" not in outcome.event_types
+    assert "tool.call.awaiting_approval" not in outcome.event_types
+
+
+@pytest.mark.parametrize("text_json", [False, True])
+def test_plain_renderer_displays_inline_questionnaire_once(text_json):
+    capture = (
+        Path(__file__).resolve().parents[3]
+        / "app/terminal/src/backend/tests/fixtures/v2_inline_questionnaire.ndjson"
+    )
+    err = io.StringIO()
+    renderer = PlainRenderer(io.StringIO(), err)
+    for line in capture.read_text().splitlines():
+        frame = json.loads(line)
+        if frame["type"].startswith("cli_v2_"):
+            renderer.frame(frame)
+            continue
+        if text_json and "Where should I deploy?" in line:
+            block = frame["data"]["item"]["data"]["content"][0]
+            block["value"]["questions"][0]["options"][0] = {
+                "value": "staging",
+                "label": "预发布",
+            }
+            frame["data"]["item"]["data"]["content"] = [
+                {"kind": "text", "text": json.dumps(block["value"])}
+            ]
+        event = RuntimeEvent.model_validate(frame)
+        renderer.handle(event)
+        if "Where should I deploy?" in line:
+            renderer.handle(event)
+    assert err.getvalue().count("Where should I deploy?") == 1
+    assert "production" in err.getvalue()
+    assert ("[staging] 预发布" if text_json else "staging") in err.getvalue()
+
+
+@pytest.mark.parametrize("tool,kind,value,arguments", [
+    ("file_write", "path", "a.txt", {"file_path": "a.txt", "content": "new"}),
+    ("execute_shell_command", "command", "git status", {"command": "git status"}),
+])
+async def test_old_cli_fingerprints_require_fresh_approval(tool, kind, value, arguments):
+    import hashlib
+    from sagents.v2.agent.policy import ApprovalMatcher, RememberedApproval, SessionApprovalMemory
+    from sagents.v2.runtime.session import InMemoryDerivedStateStore
+
+    # v1 collapsed shell whitespace and stripped paths: these records cannot be migrated safely.
+    digest = hashlib.sha256(f"{tool}:{kind}:{value}".encode()).hexdigest()
+    legacy = ApprovalMatcher(tool_name=tool, fingerprint=f"{kind}:sha256:{digest}",
+                             summary=f"{tool}: {value}")
+    memory = SessionApprovalMemory(InMemoryDerivedStateStore())
+    await memory.remember(session_id="s1", approval=RememberedApproval(
+        matcher=legacy, scope="session", remembered_at=datetime.now(timezone.utc),
+        remembered_by="cli-user",
+    ))
+    current = cli_approval_matcher(_policy_context(tool, arguments))
+    assert await memory.lookup(session_id="s1", matcher=current) is None
