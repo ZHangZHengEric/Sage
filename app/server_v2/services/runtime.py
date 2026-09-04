@@ -32,6 +32,8 @@ from app.server_v2.services.models import (
     reset_model_user,
 )
 from app.server_v2.services.package import server_v2_manifest
+from app.server_v2.services.skill_runtime import install_skill_driver
+from app.server_v2.services.skills import SkillCatalogService
 from app.server_v2.storage import prepare_server_v2_storage
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ class ServerV2Service:
         users=None,
         catalog=None,
         threads=None,
+        skills=None,
         replay=None,
     ) -> None:
         self.settings = settings
@@ -57,8 +60,15 @@ class ServerV2Service:
         injected = users is not None and catalog is not None and threads is not None
         if injected:
             self.users, self.catalog, self.threads = users, catalog, threads
+            from app.server_v2.repositories.skills import MemorySkillStore
+
+            self.skills = skills if skills is not None else MemorySkillStore()
         else:
             self.users, self.catalog, self.threads = _mysql_repositories(database)
+            from app.server_v2.repositories.skills import DatabaseSkillStore
+
+            self.skills = skills if skills is not None else DatabaseSkillStore(database)
+        self.skill_catalog = SkillCatalogService(self.skills, self.paths.data_root)
         self.replay = replay if replay is not None else _redis_replay(redis)
         self._fallback_model = model_provider
         self._host_models: HostModelProvider | None = None
@@ -92,6 +102,7 @@ class ServerV2Service:
             .with_model_provider(self._host_models)
             .build(server_v2_manifest(self.settings))
         )
+        install_skill_driver(self)
         self._log_sagents_registration()
 
     async def close(self) -> None:
@@ -178,10 +189,18 @@ class ServerV2Service:
         user_id: str,
         last_event_id: str | None,
     ):
+        props = request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
+        requested_agent = str(props.get("agentId") or "").strip()
+        agent_hint = (
+            requested_agent
+            or self.application.resolved_plan.entrypoint_agent_id
+        )
+        enabled = await self.skill_catalog.bound_names(user_id, agent_hint)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
             composition_hash=self.application.composition_hash,
             default_agent_id=self.application.resolved_plan.entrypoint_agent_id,
+            enabled_skills=enabled,
         )
         try:
             self.application.agent(agent_id)

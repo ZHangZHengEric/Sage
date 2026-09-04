@@ -7,6 +7,7 @@ from app.server_v2.domain.catalog import (
     apply_upsert,
     empty_catalog,
 )
+from app.server_v2.repositories.skills import MemorySkillStore
 from app.server_v2.domain.threads import ThreadRecord, require_owned_thread
 from app.server_v2.domain.users import (
     Role,

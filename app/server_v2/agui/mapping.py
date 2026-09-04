@@ -7,7 +7,7 @@ from ag_ui.core import RunAgentInput
 from pydantic import TypeAdapter
 
 from app.server_v2.core.errors import ServerV2Error
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.common import Identifier
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 
@@ -87,6 +87,7 @@ def to_start_run(
     *,
     composition_hash: str,
     default_agent_id: str,
+    enabled_skills: tuple[str, ...] | None = None,
 ) -> tuple[str, str, str, StartRun]:
     thread_id = validate_agui_id(request.thread_id, field="threadId")
     run_id = validate_agui_id(request.run_id, field="runId")
@@ -96,6 +97,7 @@ def to_start_run(
         session_id=thread_id,
         agent_id=agent_id,
         input=(latest_user_input(request),),
+        config=RunConfig(enabled_skills=enabled_skills),
         resolved_spec_hash=composition_hash,
         idempotency_key=run_id,
     )

@@ -12,9 +12,14 @@ from app.server_v2.schemas.http import (
     ModelBody,
     ModelPublic,
     RegisterBody,
+    SkillBindBody,
+    SkillPublic,
+    SkillPublishBody,
+    SkillUpdateBody,
     ThreadPublic,
     TokenPayload,
     UserPublic,
+    WorkspaceSkillBody,
 )
 
 __all__ = [
@@ -31,7 +36,12 @@ __all__ = [
     "ModelBody",
     "ModelPublic",
     "RegisterBody",
+    "SkillBindBody",
+    "SkillPublic",
+    "SkillPublishBody",
+    "SkillUpdateBody",
     "ThreadPublic",
     "TokenPayload",
     "UserPublic",
+    "WorkspaceSkillBody",
 ]

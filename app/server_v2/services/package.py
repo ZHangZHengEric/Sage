@@ -15,6 +15,34 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 from app.server_v2.core.settings import ServerV2Settings
 
 
+def server_v2_run_manifest(
+    settings: ServerV2Settings | None = None,
+    *,
+    agent_id: str = "main",
+    skills: tuple[str, ...] = (),
+    instructions: str | None = None,
+) -> SageManifest:
+    """Per-run manifest: same host backends, plus the Agent's bound Skills."""
+
+    base = server_v2_manifest(settings)
+    source = base.agents.get("main") or next(iter(base.agents.values()))
+    agent = source.model_copy(
+        update={
+            "skills": tuple(skills),
+            "tools": ("load_skill",) if skills else source.tools,
+            "instructions": Instructions(
+                inline=instructions or source.instructions.inline or "Be helpful."
+            ),
+        }
+    )
+    return base.model_copy(
+        update={
+            "agents": {agent_id: agent},
+            "entrypoint": ApplicationEntrypoint(agent=agent_id),
+        }
+    )
+
+
 def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest:
     """In-process package: no yaml, no env credentials, no model routes.
 

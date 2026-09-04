@@ -44,6 +44,17 @@ def test_maps_latest_user_message_and_ids():
     assert command.session_id == "thread-1"
     assert command.idempotency_key == "run-1"
     assert command.input[0].content[0].text == "hello"
+    assert command.config.enabled_skills is None
+
+
+def test_maps_enabled_skills_from_catalog_bindings():
+    *_, command = to_start_run(
+        _input(),
+        composition_hash="sha256:test",
+        default_agent_id="main",
+        enabled_skills=("demo",),
+    )
+    assert command.config.enabled_skills == ("demo",)
 
 
 def test_rejects_invalid_run_id():
