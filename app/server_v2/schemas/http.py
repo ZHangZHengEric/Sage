@@ -42,6 +42,50 @@ class ModelBody(BaseModel):
     is_default: bool = True
 
 
+class AgentBody(BaseModel):
+    id: str | None = None
+    name: str
+    description: str = ""
+    instructions: str = ""
+    model_id: str = ""
+    tools: list[str] = Field(default_factory=list)
+
+
+class AgentPublic(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    instructions: str = ""
+    model_id: str | None = None
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+
+
+class McpBody(BaseModel):
+    name: str
+    protocol: str = "stdio"
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    api_key: str = ""
+    disabled: bool = False
+    description: str = ""
+
+
+class McpPublic(BaseModel):
+    name: str
+    protocol: str
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    disabled: bool = False
+    description: str = ""
+    tools: list[str] = Field(default_factory=list)
+    has_api_key: bool = False
+
+
 class AgentRunBody(BaseModel):
     threadId: str
     runId: str

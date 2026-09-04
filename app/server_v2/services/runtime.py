@@ -26,6 +26,7 @@ from app.server_v2.agui.sse import (
 from app.server_v2.core.errors import ServerV2Error, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.domain.catalog import require_agent
 from app.server_v2.services.models import (
     HostModelProvider,
     bind_model_user,
@@ -191,21 +192,17 @@ class ServerV2Service:
     ):
         props = request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
         requested_agent = str(props.get("agentId") or "").strip()
-        agent_hint = (
-            requested_agent
-            or self.application.resolved_plan.entrypoint_agent_id
-        )
-        enabled = await self.skill_catalog.bound_names(user_id, agent_hint)
+        catalog = await self.catalog.get(user_id)
+        record = require_agent(catalog, requested_agent or None)
+        enabled = await self.skill_catalog.bound_names(user_id, record.id)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
             composition_hash=self.application.composition_hash,
-            default_agent_id=self.application.resolved_plan.entrypoint_agent_id,
+            default_agent_id=record.id,
             enabled_skills=enabled,
         )
-        try:
-            self.application.agent(agent_id)
-        except KeyError as exc:
-            raise ServerV2Error("validation", f"unknown agent {agent_id}") from exc
+        if agent_id != record.id:
+            record = require_agent(catalog, agent_id)
         existing = await self.threads.find(thread_id)
         if existing is not None and existing.user_id != user_id:
             raise ServerV2Error("not_found", "thread not found")
@@ -285,7 +282,10 @@ class ServerV2Service:
                 )
                 return
             stream = await self.application.run_interface(
-                "ag_ui", command, context, agent_id=agent_id
+                "ag_ui",
+                command,
+                context,
+                agent_id=self.application.resolved_plan.entrypoint_agent_id,
             )
             async for result in stream.results:
                 for frame in result.frames:

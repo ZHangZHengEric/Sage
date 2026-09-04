@@ -2,6 +2,7 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-04 17:25** server_v2 支持多 Agent（提示词/模型/MCP/skill）；对话按 catalog 取配置后 materialize_agent 加载 sagents/v2。
 
 - **2026-09-04 14:20** 优化 Session 增量提交、Postgres 读路径、Desktop 扫盘/MCP 缓存与公开恢复接口，并收窄 materialize 锁。
 

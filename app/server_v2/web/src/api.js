@@ -38,6 +38,20 @@ export const api = {
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
+  listAgents: () => request('/api/agents'),
+  getAgent: (id) => request(`/api/agents/${id}`),
+  createAgent: (body) =>
+    request('/api/agents', { method: 'POST', body: JSON.stringify(body) }),
+  updateAgent: (id, body) =>
+    request(`/api/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteAgent: (id) => request(`/api/agents/${id}`, { method: 'DELETE' }),
+  listMcp: () => request('/api/mcp'),
+  createMcp: (body) =>
+    request('/api/mcp', { method: 'POST', body: JSON.stringify(body) }),
+  updateMcp: (name, body) =>
+    request(`/api/mcp/${name}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteMcp: (name) => request(`/api/mcp/${name}`, { method: 'DELETE' }),
+  refreshMcp: (name) => request(`/api/mcp/${name}/refresh`, { method: 'POST' }),
   listSkills: () => request('/api/skills'),
   publishSkill: (body) =>
     request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),

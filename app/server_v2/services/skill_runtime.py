@@ -14,15 +14,18 @@ from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.model import RecordingModelProvider
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.skill import (
     InMemorySkillActivationRepository,
     SkillBundle,
     SkillDescriptor,
 )
+from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
+from app.server_v2.domain.catalog import catalog_model, enabled_mcp_servers, require_agent
 from app.server_v2.domain.skills import (
     SkillRecord,
     inspect_skill_directory,
@@ -30,8 +33,8 @@ from app.server_v2.domain.skills import (
     resolve_artifact_path,
     workspace_skill_path,
 )
+from app.server_v2.services.mcp import mcp_plugin
 from app.server_v2.services.package import server_v2_run_manifest
-from app.server_v2.services.skills import SkillCatalogService
 
 
 class CatalogSkillProvider:
@@ -92,99 +95,168 @@ class ReadThroughSkillWorkspace:
         return str(resolve_artifact_path(self.data_root, record.artifact_path))
 
 
-class SkillAwareRunDriver:
-    """Use the process loop when no Skills are bound; otherwise compose a v2 loader."""
+class CatalogRunDriver:
+    """Load the catalog Agent, then materialize a sagents/v2 loop for this run."""
 
-    def __init__(self, service, inner_factory, run_id: str) -> None:
+    def __init__(self, service, run_id: str) -> None:
         self.service = service
-        self.inner_factory = inner_factory
         self.run_id = run_id
         self._driver = None
+        self._ports = None
 
     async def _resolve(self, context: RequestContext):
         if self._driver is not None:
             return self._driver
         runtime = self.service.application.entrypoint().runtime
         command = await runtime.session_store.get_start_command(self.run_id)
-        names = await self.service.skill_catalog.bound_names(
-            context.actor.principal_id, command.agent_id
-        )
-        if not names:
-            self._driver = self.inner_factory(self.run_id)
-            return self._driver
-        self._driver = await compose_skill_loop(
+        self._driver, self._ports = await compose_catalog_loop(
             self.service,
             command,
             user_id=context.actor.principal_id,
-            names=names,
         )
         return self._driver
 
     async def execute(self, run_id: str, context: RequestContext):
-        return await (await self._resolve(context)).execute(run_id, context)
+        try:
+            return await (await self._resolve(context)).execute(run_id, context)
+        finally:
+            await self._close_ports()
 
     async def resume(self, run_id: str, context: RequestContext):
-        return await (await self._resolve(context)).resume(run_id, context)
+        try:
+            return await (await self._resolve(context)).resume(run_id, context)
+        finally:
+            await self._close_ports()
+
+    async def _close_ports(self) -> None:
+        ports = self._ports
+        self._ports = None
+        if ports is None:
+            return
+        for handle in ports.scope_handles:
+            closer = getattr(handle, "close", None)
+            if closer is not None:
+                await closer()
 
 
-async def compose_skill_loop(service, command: StartRun, *, user_id: str, names: tuple[str, ...]):
+SkillAwareRunDriver = CatalogRunDriver
+
+
+async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
+    catalog = await service.catalog.get(user_id)
+    agent = require_agent(catalog, command.agent_id)
+    names = await service.skill_catalog.bound_names(user_id, agent.id)
     records = tuple(
         await service.skill_catalog.bound_skills(
-            owner_user_id=user_id, agent_id=command.agent_id
+            owner_user_id=user_id, agent_id=agent.id
         )
-    )
-    provider = CatalogSkillProvider(records, service.paths.data_root)
-    workspace = ReadThroughSkillWorkspace(service.paths.data_root, user_id, records)
-    runtime = service.application.entrypoint().runtime
-    factory = AgentCompositionFactory(
-        runtime,
-        context_components=_context_components(service),
     )
     manifest = server_v2_run_manifest(
         service.settings,
-        agent_id=command.agent_id,
+        agent=agent,
         skills=names,
+        tools=tuple(agent.tools),
     )
     resolved = CompositionResolver().resolve(manifest)
-    activations = InMemorySkillActivationRepository()
+    model = _recorded_model(service, _run_model(service, catalog, agent))
+    ports = await service.application.materialize_agent(
+        manifest,
+        tenant_id=user_id,
+        agent_id=agent.id,
+        run_id=command.idempotency_key,
+        model=model,
+    )
+    factory = AgentCompositionFactory(
+        service.application.entrypoint().runtime,
+        context_components=ContextComponentBundle(
+            token_estimator=ports.token_estimator,
+            summary_store=_optional_service(service, "context.summary-store"),
+            summarizer=ports.summarizer,
+            reducer=ports.context_reducer,
+        ),
+    )
+    provider = CatalogSkillProvider(records, service.paths.data_root)
+    workspace = ReadThroughSkillWorkspace(service.paths.data_root, user_id, records)
     loader = factory.create_skill_loader(
         resolved,
-        command.agent_id,
+        agent.id,
         catalog=provider,
         source=provider,
         workspace=workspace,
-        activations=activations,
+        activations=InMemorySkillActivationRepository(),
         enabled_skills=names,
         workspace_root="/workspace",
     )
-    skill_tool = SkillToolPlugin(loader, language=service.settings.language)
-    catalogs = [skill_tool.catalog]
-    executors = [skill_tool.executor]
+    catalogs = []
+    executors = []
     try:
-        catalogs.insert(0, service.application.service("tool.catalog"))
-        executors.insert(0, service.application.service("tool.executor"))
+        catalogs.append(service.application.service("tool.catalog"))
+        executors.append(service.application.service("tool.executor"))
     except KeyError:
         pass
+    if names:
+        skill_tool = SkillToolPlugin(loader, language=service.settings.language)
+        catalogs.append(skill_tool.catalog)
+        executors.append(skill_tool.executor)
+    mcp = mcp_plugin(enabled_mcp_servers(catalog))
+    if mcp is not None:
+        catalogs.append(mcp)
+        executors.append(mcp)
+    if catalogs:
+        tool_catalog = CompositeToolCatalog(tuple(catalogs))
+        tool_executor = CompositeToolExecutor(tuple(executors))
+    else:
+        tool_catalog = ports.tool_catalog or InMemoryToolCatalog(())
+        tool_executor = ports.tool_executor or InMemoryToolExecutor({}, {})
     loop = factory.create_loop(
         resolved,
-        command.agent_id,
-        model=service._host_models or service.application.service("model.provider"),
-        tool_catalog=CompositeToolCatalog(tuple(catalogs)),
-        tool_executor=CompositeToolExecutor(tuple(executors)),
-        skill_loader=loader,
+        agent.id,
+        model=model,
+        tool_catalog=tool_catalog,
+        tool_executor=tool_executor,
+        skill_loader=loader if names else None,
+        continuation_policy=ports.continuation_policy,
+        tool_selection_policy=ports.tool_selection_policy,
         log_sink=service.application.service("observability.log-sink"),
         trace_sink=_optional_service(service, "observability.trace-sink"),
     )
-    # StartRun 带着进程 Application 的 composition_hash；per-run 带 skills 的
-    # manifest 会算出另一个 hash。对齐方式与 loop_factory 相同：创建后再改。
     loop.expected_resolved_spec_hash = command.resolved_spec_hash
+    return loop, ports
+
+
+async def compose_skill_loop(service, command: StartRun, *, user_id: str, names: tuple[str, ...]):
+    del names
+    loop, _ports = await compose_catalog_loop(service, command, user_id=user_id)
     return loop
 
 
 def install_skill_driver(service) -> None:
     agent = service.application.entrypoint()
-    inner = agent.driver_factory
-    agent.driver_factory = lambda run_id: SkillAwareRunDriver(service, inner, run_id)
+    agent.driver_factory = lambda run_id: CatalogRunDriver(service, run_id)
+
+
+def _run_model(service, catalog, agent):
+    record = catalog_model(catalog, agent.model_id)
+    if record is not None:
+        return record.to_provider()
+    return service._host_models or service.application.service("model.provider")
+
+
+def _recorded_model(service, model):
+    if isinstance(model, RecordingModelProvider):
+        return model
+    runtime = service.application.entrypoint().runtime
+
+    async def resolve_session_id(run_id: str) -> str:
+        return (await runtime.session_store.get_run(run_id)).session_id
+
+    return RecordingModelProvider(
+        model,
+        sink=service.application.service("observability.diagnostic-sink"),
+        log_sink=service.application.service("observability.log-sink"),
+        trace_sink=_optional_service(service, "observability.trace-sink"),
+        session_id_resolver=resolve_session_id,
+    )
 
 
 def workspace_content_hash(path: Path) -> str:

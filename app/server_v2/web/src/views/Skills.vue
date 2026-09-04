@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
 
 const skills = ref([])
+const agents = ref([])
+const agentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
 const bound = ref([])
 const error = ref('')
 const pending = ref(false)
@@ -16,8 +18,18 @@ const hasSkills = computed(() => skills.value.length > 0)
 const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
 
 async function refresh() {
-  skills.value = await api.listSkills()
-  bound.value = await api.listAgentSkills('main')
+  const [nextSkills, nextAgents] = await Promise.all([api.listSkills(), api.listAgents()])
+  skills.value = nextSkills
+  agents.value = nextAgents
+  if (!agents.value.some((item) => item.id === agentId.value)) {
+    agentId.value = agents.value[0]?.id || 'main'
+  }
+  bound.value = await api.listAgentSkills(agentId.value)
+}
+
+function changeAgent() {
+  localStorage.setItem('sage.server_v2.agent', agentId.value)
+  refresh()
 }
 
 async function save() {
@@ -58,7 +70,7 @@ async function toggleBind(item) {
   const next = names.includes(item.name)
     ? names.filter((name) => name !== item.name)
     : [...names, item.name]
-  await api.bindAgentSkills('main', next)
+  await api.bindAgentSkills(agentId.value, next)
   await refresh()
 }
 
@@ -75,6 +87,14 @@ onMounted(async () => {
   <section>
     <header class="page-head">
       <h1>技能</h1>
+      <label class="field" style="margin:0;min-width:12rem">
+        <span>关联到智能体</span>
+        <select v-model="agentId" @change="changeAgent">
+          <option v-for="item in agents" :key="item.id" :value="item.id">
+            {{ item.name }}
+          </option>
+        </select>
+      </label>
     </header>
     <form class="panel" @submit.prevent="save">
       <label class="field">

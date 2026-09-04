@@ -29,7 +29,9 @@ async function logout() {
       <div class="brand">Sage <span>Server v2</span></div>
       <nav aria-label="主导航">
         <router-link to="/">对话</router-link>
+        <router-link to="/agents">智能体</router-link>
         <router-link to="/models">模型</router-link>
+        <router-link to="/mcp">MCP</router-link>
         <router-link to="/skills">技能</router-link>
         <router-link v-if="isAdmin()" to="/admin">总览</router-link>
       </nav>
