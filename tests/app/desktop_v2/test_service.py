@@ -3435,6 +3435,26 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
         assert "<active_goal>" in system
         assert "Ship the verified change" in system
 
+    def assert_completion_guidance(request):
+        from sagents.v2.i18n import tr
+
+        result_message = next(
+            message for message in request.messages
+            if message.role == "tool" and message.tool_call_id == "goal_complete_call"
+        )
+        result = result_message.content[0].value
+        assert result["status"] == "completed"
+        assert result["summary"] == "All acceptance checks pass."
+        assert result["next_step"] == tr(
+            "goal.explanation_required", service._context("user_1").language
+        )
+        system = "\n".join(
+            block.text for message in request.messages
+            if message.role in {"system", "developer"}
+            for block in message.content if isinstance(block, TextBlock)
+        )
+        assert "<status>completed</status>" in system
+
     loop.model = ScriptedModelProvider(
         (
             ScriptedModelStep(
@@ -3477,7 +3497,7 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
                         kind=ModelEventKind.COMPLETED,
                         response=ModelResponse(
                             response_id="goal_complete_response",
-                            text="The tests pass and the goal is complete.",
+                            text="所有验收标准均已通过代码级验证。调用 goal_complete。",
                             tool_calls=(
                                 ModelToolCall(
                                     tool_call_id="goal_complete_call",
@@ -3491,6 +3511,19 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
                         ),
                     ),
                 )
+            ),
+            ScriptedModelStep(
+                assertion=assert_completion_guidance,
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="goal_final_summary",
+                            text="Delivered the change. All acceptance checks pass.",
+                            finish_reason="stop",
+                        ),
+                    ),
+                ),
             ),
         )
     )
@@ -3516,7 +3549,13 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
 
     assert result.state.value == "completed"
     assert decisions.count("goal.incomplete") == 2
+    assert decisions[-2] == "goal.explanation_required"
     assert decisions[-1] == "goal.complete"
+    assert sum(
+        event.type == "tool.call.succeeded" and event.data.tool_name == "goal_complete"
+        for event in events
+    ) == 1
+    assert len(loop.model.requests) == 4
     await sandbox.close()
     await service.close()
 
@@ -3618,6 +3657,7 @@ async def test_goal_survives_repeated_questionnaires_and_service_restart(
                     active_goal,
                 )
             )
+            steps.append(step("final_summary"))
         loop.model = ScriptedModelProvider(tuple(steps))
         handle = await service.runtime.start_run(
             StartRun(
@@ -3657,7 +3697,9 @@ async def test_goal_survives_repeated_questionnaires_and_service_restart(
             if round_number < 2:
                 assert reasons[-1] == "tool.questionnaire_ready"
             else:
-                assert reasons == ["goal.incomplete", "goal.complete"]
+                assert reasons == [
+                    "goal.incomplete", "goal.explanation_required", "goal.complete"
+                ]
                 next_run = await service.runtime.start_run(
                     StartRun(
                         session_id=session_id,
@@ -3838,6 +3880,18 @@ async def test_confirmed_plan_becomes_the_goal_system_context(
                                 ),
                             ),
                             finish_reason="tool_calls",
+                        ),
+                    ),
+                ),
+            ),
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="confirmed_plan_summary",
+                            text="The implementation was updated and its checks passed.",
+                            finish_reason="stop",
                         ),
                     ),
                 ),

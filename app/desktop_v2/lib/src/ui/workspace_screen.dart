@@ -199,7 +199,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                             onClose: () =>
                                 setState(() => _settingsOpen = false),
                           )
-                        : _buildWorkspaceShell(),
+                        : _PlanPreviewScope(
+                            onOpen: _openPlanPreview,
+                            child: _buildWorkspaceShell(),
+                          ),
                   ),
                 ],
               ),
