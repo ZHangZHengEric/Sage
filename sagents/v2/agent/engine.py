@@ -742,7 +742,41 @@ class AgentLoopEngine:
                     return run
             else:
                 approved = resolution.decision.startswith("approve")
-                if resolution.decision == REMEMBER_DECISION:
+                current_policy = None
+                if approved:
+                    # Host policy may have tightened while this Run was suspended.
+                    # A saved approval cannot override a current DENY.
+                    definition = await self.tool_catalog.get_tool(
+                        state.pending_tool_call.tool_name, run_id=run.run_id
+                    )
+                    current_policy = await self.tool_policy.decide(
+                        ToolPolicyContext(
+                            run_id=run.run_id,
+                            actor=context.actor,
+                            definition=definition,
+                            call=state.pending_tool_call,
+                            invocation_mode=command.invocation_mode,
+                        )
+                    )
+                    if current_policy.action == ToolPolicyAction.DENY:
+                        approved = False
+                        run = await self._record_policy(
+                            run,
+                            state.pending_tool_call,
+                            current_policy,
+                            context,
+                            state.turn_id,
+                            state.pending_tool_step_id,
+                        )
+                if (
+                    approved
+                    and resolution.decision == REMEMBER_DECISION
+                    and current_policy is not None
+                    and current_policy.persistent_approval_allowed
+                    and state.pending_tool_policy is not None
+                    and current_policy.approval_matcher
+                    == state.pending_tool_policy.approval_matcher
+                ):
                     # 先记后跑：记忆记录的是用户的授权决定，与工具结果无关；
                     # remember 是幂等的 set，重放 resume 不会重复。
                     run = await self._remember_tool_approval(
@@ -760,12 +794,19 @@ class AgentLoopEngine:
                     if result is None:
                         return run
                 else:
+                    policy_denied = (
+                        current_policy is not None
+                        and current_policy.action == ToolPolicyAction.DENY
+                    )
                     declined_error = localize_error(
                         RuntimeErrorInfo(
-                            code="tool.declined",
+                            code="tool.policy_denied" if policy_denied else "tool.declined",
                             category=ErrorCategory.POLICY_DENIED,
-                            message=f"tool call declined with {resolution.decision}",
-                            message_key="error.tool.declined",
+                            message=(
+                                current_policy.reason if policy_denied
+                                else f"tool call declined with {resolution.decision}"
+                            ),
+                            message_key=None if policy_denied else "error.tool.declined",
                             safe_to_resume=True,
                         ),
                         context.language,

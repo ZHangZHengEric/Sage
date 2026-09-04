@@ -7,7 +7,13 @@ import sys
 from typing import Any, Protocol, TextIO
 
 from sagents.v2.contracts.events import RuntimeEvent
-from sagents.v2.contracts.items import MessageItemData, TextBlock
+from sagents.v2.contracts.items import (
+    JsonBlock,
+    MessageItemData,
+    TextBlock,
+    ToolCallItemData,
+    ToolResultItemData,
+)
 from sagents.v2.contracts.run_state import RunResult
 
 
@@ -40,10 +46,31 @@ class PlainRenderer:
         self._assistant_items: set[str] = set()
         self._streamed_chars: dict[str, int] = {}
         self._announced_session: str | None = None
+        self._tool_names: dict[tuple[str, str], str] = {}
+        self._questionnaires: set[tuple[str, str]] = set()
 
     def handle(self, event: RuntimeEvent) -> None:
         self.last_sequence = max(self.last_sequence, event.run_sequence)
         data = event.data
+        if event.type == "item.completed":
+            item = data.item
+            if item is None or item.visibility != "public":
+                return
+            body = item.data
+            if isinstance(body, ToolCallItemData):
+                self._tool_names[(event.run_id, body.tool_call_id)] = body.tool_name
+            elif isinstance(body, ToolResultItemData):
+                key = (event.run_id, body.tool_call_id)
+                if (
+                    self._tool_names.get(key) == "questionnaire_async"
+                    and body.error is None
+                    and key not in self._questionnaires
+                ):
+                    text = _questionnaire_text(body)
+                    if text:
+                        self._questionnaires.add(key)
+                        self.notice(text)
+            return
         if event.type == "message.started":
             item = data.item
             if isinstance(getattr(item, "data", None), MessageItemData):
@@ -56,9 +83,9 @@ class PlainRenderer:
                 return
             text = data.delta if isinstance(data.delta, str) else ""
             if text:
-                self._streamed_chars[item_id] = (
-                    self._streamed_chars.get(item_id, 0) + len(text)
-                )
+                self._streamed_chars[item_id] = self._streamed_chars.get(
+                    item_id, 0
+                ) + len(text)
                 self.out.write(text)
                 self.out.flush()
             return
@@ -86,7 +113,9 @@ class PlainRenderer:
             )
             return
         if event.type == "policy.decision.recorded" and data.remembered_by:
-            self.notice(f"[approval] auto-approved ({data.remembered_scope}): {data.reason}")
+            self.notice(
+                f"[approval] auto-approved ({data.remembered_scope}): {data.reason}"
+            )
             return
         if event.type == "run.failed" and data.error is not None:
             self.notice(f"[run failed] {data.error.code}: {data.error.message}")
@@ -106,7 +135,9 @@ class PlainRenderer:
                 self.notice(f"run_id: {payload.get('run_id')}")
         elif kind == "cli_v2_steer":
             if payload.get("status") == "accepted":
-                self.notice(f"(steer) queued for the next model step: {payload.get('text')}")
+                self.notice(
+                    f"(steer) queued for the next model step: {payload.get('text')}"
+                )
             elif payload.get("status") == "unapplied":
                 self.notice(
                     f"(steer) the run ended before it could be applied: {payload.get('text')}"
@@ -116,9 +147,12 @@ class PlainRenderer:
                     f"(steer) not applied: {payload.get('detail') or 'rejected'}"
                     + (f" — {payload.get('text')}" if payload.get("text") else "")
                 )
-        elif kind == "cli_v2_result" and payload.get("state") != "completed":
-            suffix = " (interrupted)" if payload.get("interrupted") else ""
-            self.notice(f"[result] state={payload.get('state')}{suffix}")
+        elif kind == "cli_v2_result":
+            self._tool_names.clear()
+            self._questionnaires.clear()
+            if payload.get("state") != "completed":
+                suffix = " (interrupted)" if payload.get("interrupted") else ""
+                self.notice(f"[result] state={payload.get('state')}{suffix}")
 
     def notice(self, text: str) -> None:
         self.err.write(text + "\n")
@@ -149,6 +183,42 @@ class JsonRenderer:
 
 def _message_text(data: MessageItemData) -> str:
     return "".join(block.text for block in data.content if isinstance(block, TextBlock))
+
+
+def _questionnaire_text(data: ToolResultItemData) -> str:
+    for block in data.content:
+        if isinstance(block, JsonBlock):
+            payload = block.value
+        elif isinstance(block, TextBlock):
+            try:
+                payload = json.loads(block.text)
+            except json.JSONDecodeError:
+                continue
+        else:
+            continue
+        if not isinstance(payload, dict) or not all(
+            payload.get(key) is True
+            for key in ("success", "validation_passed", "should_end")
+        ):
+            continue
+        questions = payload.get("questions")
+        if not isinstance(questions, list) or not questions:
+            continue
+        lines = [str(payload["title"])] if payload.get("title") else []
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            title = question.get("title") or question.get("question")
+            if title:
+                lines.append(f"- {title}")
+            for option in question.get("options") or ():
+                if isinstance(option, str):
+                    lines.append(f"  - {option}")
+                elif isinstance(option, dict):
+                    value = option.get("value", "")
+                    lines.append(f"  - [{value}] {option.get('label', value)}")
+        return "\n".join(lines)
+    return ""
 
 
 def final_assistant_text(result: RunResult) -> str:

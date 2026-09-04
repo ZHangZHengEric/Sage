@@ -130,3 +130,51 @@ def test_composition_identity_is_stable():
         "scopes": ["session"],
         "version": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_invalid_entries_are_ignored_without_losing_valid_approvals():
+    store = InMemoryDerivedStateStore()
+    memory = SessionApprovalMemory(store)
+    good = approval(matcher())
+    malformed = matcher(fingerprint="sha256:bad")
+    workspace = approval(matcher(fingerprint="sha256:workspace"), scope="workspace")
+    await store.put_derived_state(
+        "s1",
+        memory.NAMESPACE,
+        memory.KEY,
+        {
+            "version": 1,
+            "entries": {
+                good.matcher.key: good.model_dump(mode="json"),
+                malformed.key: {"malformed": True},
+                workspace.matcher.key: workspace.model_dump(mode="json"),
+                "wrong-key": good.model_dump(mode="json"),
+                "null": None,
+            },
+        },
+    )
+    assert await memory.lookup(session_id="s1", matcher=malformed) is None
+    assert await memory.lookup(session_id="s1", matcher=workspace.matcher) is None
+    assert await memory.list_remembered(session_id="s1") == (good,)
+    assert await memory.lookup(session_id="s1", matcher=good.matcher) == good
+    await memory.remember(session_id="s1", approval=good)
+    raw = await store.get_derived_state("s1", memory.NAMESPACE, memory.KEY)
+    assert list(raw["entries"]) == [good.matcher.key]
+
+
+@pytest.mark.asyncio
+async def test_forget_all_removes_even_a_completely_corrupt_document():
+    store = InMemoryDerivedStateStore()
+    memory = SessionApprovalMemory(store)
+    await store.put_derived_state(
+        "s1",
+        memory.NAMESPACE,
+        memory.KEY,
+        {
+            "version": 1,
+            "entries": {matcher().key: {"malformed": True}},
+        },
+    )
+    assert await memory.forget(session_id="s1") == 0
+    assert await store.get_derived_state("s1", memory.NAMESPACE, memory.KEY) is None
