@@ -88,6 +88,34 @@ def authorization(issuer, handle, operation, **fields):
 
 
 @pytest.mark.asyncio
+async def test_protected_paths_guard_file_api_without_claiming_process_isolation(tmp_path):
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/config",), allowed_executables=("sh",)
+    )
+    caps = await handle.provider.capabilities()
+    assert caps.isolation_level.value == "none"
+    (tmp_path / ".git").mkdir()
+    target = tmp_path / ".git/config"
+    target.write_text("original")
+    intent, grant = authorization(issuer, handle, "write", path=".git/config")
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.write_bytes(".git/config", b"changed", intent=intent, grant=grant)
+    assert denied.value.info.code == "sandbox.protected_path"
+    assert target.read_text() == "original"
+    # Explicitly granted host processes have no OS filesystem isolation.
+    argv = ("sh", "-c", "printf process > .git/config")
+    intent, grant = authorization(
+        issuer, handle, "process.run", executable="sh", argv=argv, path="/workspace"
+    )
+    result = await handle.process.run(
+        ProcessRequest(argv=argv, cwd="/workspace"), intent=intent, grant=grant
+    )
+    assert result.exit_code == 0
+    assert target.read_text() == "process"
+    await handle.destroy()
+
+
+@pytest.mark.asyncio
 async def test_local_workspace_reads_and_writes_only_with_matching_signed_grants(
     tmp_path: Path,
 ):

@@ -90,25 +90,37 @@ The driver answers a `cli_v2_interaction` by writing one JSON line to the CLI's 
 Approval interactions (`interaction_type: "approval"`) list `approve_once`, `deny`, `cancel` and,
 when the call may be remembered, `approve_and_remember`. The `payload` then also carries
 `approval_matcher` (`tool_name`, `fingerprint`, `summary` — what exactly would be remembered:
-the CLI matcher uses the whole normalised command for `execute_shell_command`, the `file_path`
+the CLI matcher uses exact arguments for `execute_shell_command` (including unchanged shell
+text, `workdir` and `env_vars`), the original `file_path`
 for `file_write` / `file_update`, and the full arguments otherwise), `approval_scopes`
 (currently `["session"]`) and `persistent_approval_allowed: true`. Answering
 `approve_and_remember` makes the runtime skip the approval for later calls that match within
 the same session; those calls surface a `policy.approval.remembered` event when remembered and a
 `policy.decision.recorded` event with `remembered_by` / `remembered_scope` when auto-approved.
 `sage v2 chat` exposes `/approvals` (list) and `/forget <n>|all` (revoke) for the session.
+Legacy shell/path fingerprints are not reused after the matcher upgrade; those operations
+require approval again. Invalid remembered entries are ignored individually, retaining valid
+entries, and `/forget all` also removes corrupt approval documents.
 
 `--approval-mode` selects the runtime approval policy before any interaction is raised:
 `ask` (default on a TTY) asks for write-class tools and allows remembering, `always` asks for
 every tool call and never remembers, `approve-all` never raises an approval interaction, and
-`deny-all` keeps the policy but answers every approval with `deny`. The policy is a per-process
+`deny-all` rejects approval-requiring calls in the policy, before memory lookup or driver
+interaction; read-only calls that do not require approval remain available. The policy is a per-process
 preference: a run suspended under one mode can be resumed under another.
 
 `--mode plan` hides write-class tools from the model (`RunConfig.enabled_tools` is set to the
 agent's read-only / plan-safe tools; `goal_submit` stays available) on top of the read-only
-sandbox. Independently of the mode, the local workspace sandbox refuses writes under
-`.git/hooks` and `.git/config`; such calls fail with `sandbox.protected_path` and never touch
-the file.
+sandbox. The local workspace **filesystem API** refuses writes under `.git/hooks` and
+`.git/config`; those file API calls fail with `sandbox.protected_path` before writing.
+This provider reports `IsolationLevel.NONE`: host subprocesses (including shell and Git)
+can still modify these paths. `protected_paths` is not process isolation. A host needing
+that guarantee must disable process execution or use an OS-isolated provider.
+
+Validated `questionnaire_async` results arrive as public `item.completed` tool-result items.
+The Run completes without a pending Interaction; the CLI and TUI display the supplied title,
+questions and options, and the answer is the next ordinary user turn. Recovery Interactions
+still use the decision frames above.
 
 While a run is active (no interaction pending) the driver may append input for the next model step:
 

@@ -2522,6 +2522,53 @@ def _session_memory(runtime):
     return SessionApprovalMemory(runtime.session_store)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updated_policy", ["deny", "always", "changed-matcher"])
+async def test_pending_approval_cannot_override_tightened_host_policy(updated_policy):
+    from sagents.v2.agent.policy.tool_policy import (
+        ToolOperationAssessment, ToolPolicyAction, exact_arguments_matcher,
+    )
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    runtime, handle, loop, executor = await setup_loop(
+        model, tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(_approval_reply(
+        handle.run_id, suspended, suspension, interaction,
+        "approve_and_remember", "remember_before_policy_change",
+    ), CONTEXT)
+    if updated_policy == "deny":
+        loop.tool_policy = DefaultToolPolicy(
+            operation_assessor=lambda _: ToolOperationAssessment(
+                action=ToolPolicyAction.DENY, reason="host now forbids this operation"
+            ), operation_assessor_id="deny/v1",
+        )
+    elif updated_policy == "always":
+        loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK)
+    else:
+        loop.tool_policy = DefaultToolPolicy(
+            allow_persistent_approval=True,
+            approval_matcher=lambda ctx: exact_arguments_matcher(ctx).model_copy(
+                update={"fingerprint": "new-matcher"}
+            ), approval_matcher_id="new/v1",
+        )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(executor.calls) == (0 if updated_policy == "deny" else 1)
+    assert await loop.approval_memory.list_remembered(session_id=result.session_id) == ()
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert "policy.approval.remembered" not in [event.type for event in events]
+    if updated_policy == "deny":
+        assert any(event.type == "policy.decision.recorded" and event.data.decision == "deny"
+                   for event in events)
+
+
 def _write_call(call_id: str, key: str = "a", value: str = "1") -> ModelToolCall:
     return ModelToolCall(
         tool_call_id=call_id, name="write_value", arguments={"key": key, "value": value}

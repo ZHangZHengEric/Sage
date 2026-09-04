@@ -42,8 +42,8 @@ DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
     "node",
 )
 DEFAULT_ALLOWED_ENV_NAMES: tuple[str, ...] = ("PATH", "PYTHONPATH")
-# 可写 workspace 里仍然只读的子路径：hooks 会被 git 执行，config 决定远端与别名。
-# 先小后大：不保护 .git/objects 等，否则 git commit 都会被挡。
+# 文件 API 拒绝写入这些子路径；本地 provider 无 OS 隔离，不能限制 shell 的文件访问。
+# hooks 会被 git 执行，config 决定远端与别名；进程操作仍需独立审批。
 DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (".git/hooks", ".git/config")
 
 

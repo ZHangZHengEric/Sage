@@ -4,6 +4,9 @@ This provider enforces signed v2 operation grants, path containment, file
 limits, argv-only process execution, environment allowlists, timeouts, and
 output limits.  It reports `IsolationLevel.NONE` honestly: policy enforcement
 is useful, but a subprocess on the host is not an OS sandbox boundary.
+`FileSystemPolicy.protected_paths` applies only to this provider's filesystem
+API. Host subprocesses can access those paths; process grants do not imply
+read-only subtrees. Use an OS-isolated provider for that guarantee.
 """
 
 from __future__ import annotations
