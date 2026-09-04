@@ -254,7 +254,7 @@ class CliSession:
         return format_remembered_approvals(remembered)
 
     async def forget_approvals(self, session_id: str | None, selector: str) -> str:
-        """``/forget [all|<n>]``：撤销本 Session 记住的审批，编号来自 ``/approvals``。"""
+        """``/forget [all|<n>]``：撤销记住的审批（session 与 workspace 两级），编号来自 ``/approvals``。"""
 
         if session_id is None:
             return "(no session yet)"

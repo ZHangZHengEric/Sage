@@ -31,6 +31,13 @@ _APPROVAL_KEYS = {
     "c": "cancel",
     "cancel": "cancel",
 }
+# "记住"的作用域：r = 本会话，w = 本工作区（仅当运行时在 approval_scopes 里提供时）。
+_REMEMBER_SCOPE_KEYS = {
+    "r": "session",
+    "remember": "session",
+    "w": "workspace",
+    "workspace": "workspace",
+}
 _RECOVERY_KEYS = {
     "r": "retry",
     "retry": "retry",
@@ -57,6 +64,18 @@ def fallback_decision(interaction: InteractionRequest) -> str:
         if candidate in interaction.allowed_decisions:
             return candidate
     return interaction.allowed_decisions[0]
+
+
+def remember_scopes(interaction: InteractionRequest) -> tuple[str, ...]:
+    """本次审批可"记住"的作用域；不能记住时为空。``session`` 始终排最前。"""
+
+    if "approve_and_remember" not in interaction.allowed_decisions:
+        return ()
+    raw = interaction.payload.get("approval_scopes")
+    scopes = [str(value) for value in raw] if isinstance(raw, list) else []
+    if "session" not in scopes:
+        scopes.insert(0, "session")
+    return tuple(scopes)
 
 
 def coerce_answer(
@@ -154,15 +173,27 @@ class PromptInteractionDecider:
         return await self._decide_by_name(interaction)
 
     async def _decide_approval(self, interaction: InteractionRequest) -> InteractionAnswer:
+        scopes = remember_scopes(interaction)
         options = "[a]pprove once / [d]eny / [c]ancel"
-        if "approve_and_remember" in interaction.allowed_decisions:
-            options = "[a]pprove once / [r]emember / [d]eny / [c]ancel"
+        if scopes:
+            remember = "[r]emember for this session"
+            if "workspace" in scopes:
+                remember += " / [w] remember for this workspace"
+            options = f"[a]pprove once / {remember} / [d]eny / [c]ancel"
         while True:
             raw = await self._ask(f"{options}: ")
             if raw is None:
                 return InteractionAnswer(fallback_decision(interaction))
-            decision = _APPROVAL_KEYS.get(raw.strip().lower())
-            if decision is not None and decision in interaction.allowed_decisions:
+            key = raw.strip().lower()
+            scope = _REMEMBER_SCOPE_KEYS.get(key)
+            if scope is not None and scope in scopes:
+                return InteractionAnswer("approve_and_remember", {"scope": scope})
+            decision = _APPROVAL_KEYS.get(key)
+            if (
+                decision is not None
+                and decision != "approve_and_remember"
+                and decision in interaction.allowed_decisions
+            ):
                 return InteractionAnswer(decision)
             self._write(f"please answer one of: {options}\n")
 

@@ -12,7 +12,7 @@ import json
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from weakref import WeakValueDictionary
 
 from pydantic import SecretStr
@@ -345,6 +345,9 @@ class SAgentBuilder:
         self._tool_selection: ToolSelectionPolicy | None = None
         self._tool_policy: DefaultToolPolicy | None = None
         self._approval_memory: ApprovalMemory | None = None
+        self._approval_memory_layer: (
+            Callable[[ApprovalMemory], ApprovalMemory] | None
+        ) = None
         self._execution_binding_provider: ExecutionBindingProvider | None = None
         self._log_sink: LogSink | None = None
         self._diagnostic_sink: DiagnosticSink | None = None
@@ -434,6 +437,21 @@ class SAgentBuilder:
         """
 
         self._approval_memory = value
+        return self
+
+    def with_approval_memory_layer(
+        self, factory: Callable[[ApprovalMemory], ApprovalMemory]
+    ) -> "SAgentBuilder":
+        """Layer a host-owned approval memory over the kernel session memory.
+
+        ``with_approval_memory`` 整个替换记忆实现，宿主就得自己重做 ``session``
+        作用域；这里则把 Kernel 的 ``SessionApprovalMemory``（或已注入的记忆）交给
+        ``factory``，宿主只叠加更宽的作用域（例如 ``workspace``），``session`` 仍由
+        Kernel 记在会话派生状态里、随 Session 删除清理。``factory`` 在 ``build()``
+        内调用一次。
+        """
+
+        self._approval_memory_layer = factory
         return self
 
     def with_log_sink(self, value: LogSink) -> "SAgentBuilder":
@@ -550,6 +568,8 @@ class SAgentBuilder:
         approval_memory = self._approval_memory or SessionApprovalMemory(
             derived_state
         )
+        if self._approval_memory_layer is not None:
+            approval_memory = self._approval_memory_layer(approval_memory)
         credential_provider = await self._create_capability(
             extension_host,
             process_root,
@@ -1183,7 +1203,10 @@ class SAgentBuilder:
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
-                    ("agent.approval-memory", self._approval_memory),
+                    (
+                        "agent.approval-memory",
+                        self._approval_memory or self._approval_memory_layer,
+                    ),
                     ("observability.log-sink", self._log_sink),
                     ("observability.diagnostic-sink", self._diagnostic_sink),
                 )
