@@ -130,34 +130,32 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         }
 
     async def _commit_storage_locked(self, session_id: str) -> None:
-        state = self._dump_session_state_locked(session_id)
-        state = SessionAggregate(
-            SessionAggregateSnapshotV2.model_validate(state)
-        ).snapshot.model_dump(mode="json")
-        # These entries are also materialized as a lookup that can be rebuilt
-        # from state.json after a crash; removing the lookup never loses data.
-        start_entries = list(state.get("start_idempotency", ()))
+        mutation = self._session_mutation_locked(session_id)
+        start_entries = list(mutation.upserts.get("start_idempotency", ()))
         storage_lock = self._storage_locks.setdefault(session_id, asyncio.Lock())
         # The coordinator now owns a per-Session operation lock. Different
         # aggregates may persist concurrently while the same aggregate remains
         # serialized through this storage queue.
+        prepared: list[dict[str, Any]] = []
         async with storage_lock:
+            durable = self._persisted_states.get(session_id)
             previous = (
-                None
-                if session_id in self._storage_recovery_required
-                else self._persisted_states.get(session_id)
+                None if session_id in self._storage_recovery_required else durable
             )
             try:
-                await asyncio.to_thread(
-                    self._write_session_state,
+                state = await asyncio.to_thread(
+                    self._persist_session_mutation,
                     session_id,
-                    state,
+                    mutation,
                     start_entries,
                     previous,
+                    durable,
+                    prepared,
                 )
             except BaseException:
                 self._storage_recovery_required.add(session_id)
-                if await asyncio.to_thread(
+                state = prepared[0] if prepared else None
+                if state is not None and await asyncio.to_thread(
                     self._recover_and_matches_state, session_id, state
                 ):
                     # The canonical snapshot/journal was committed and only a
@@ -174,9 +172,38 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 # recently frozen in-memory aggregate. Advancing it before the
                 # write succeeds can make the next journal envelope skip a
                 # revision after a transient I/O failure.
-                self._persisted_states[session_id] = deepcopy(state)
+                self._persisted_states[session_id] = state
                 self._storage_recovery_required.discard(session_id)
         self._loaded_session_ids.add(session_id)
+
+    def _persist_session_mutation(
+        self,
+        session_id: str,
+        mutation: SessionStateDeltaMutation,
+        start_entries: list[dict[str, Any]],
+        previous: dict[str, Any] | None,
+        durable: dict[str, Any] | None,
+        prepared: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        state = self._state_from_mutation(durable, mutation)
+        prepared.append(state)
+        self._write_session_state(session_id, state, start_entries, previous)
+        return deepcopy(state)
+
+    @staticmethod
+    def _state_from_mutation(
+        previous: dict[str, Any] | None, mutation: SessionStateDeltaMutation
+    ) -> dict[str, Any]:
+        if previous is None:
+            state = SessionAggregateSnapshotV2(sessions=()).model_dump(mode="json")
+        else:
+            state = deepcopy(previous)
+        _FilesystemSessionState._apply_state_delta(
+            state, mutation.model_dump(mode="json", exclude={"kind"})
+        )
+        return SessionAggregate(
+            SessionAggregateSnapshotV2.model_validate(state)
+        ).snapshot.model_dump(mode="json")
 
     def _recover_and_matches_state(
         self, session_id: str, expected: dict[str, Any]

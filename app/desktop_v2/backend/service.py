@@ -92,11 +92,14 @@ class _DesktopRecoveryAgent:
         self.service = service
         self.runtime = service.driver_runtime
 
-    def _ensure_execution(self, run_id, context, *, resume):
+    def ensure_execution(self, run_id, context, *, resume):
         return asyncio.create_task(
             self._execute(run_id, context, resume=resume),
             name=f"desktop-recovery:{run_id}",
         )
+
+    def _ensure_execution(self, run_id, context, *, resume):
+        return self.ensure_execution(run_id, context, resume=resume)
 
     async def _compose_driver(self, run_id, context):
         command = await self.service.session_store.get_start_command(run_id)
@@ -143,13 +146,13 @@ class _DesktopRecoveryAgent:
             memory_scope={"recall": False, "auto_write": memory_enabled},
         )
         try:
-            execution = facade._ensure_execution(run_id, context, resume=resume)
+            execution = facade.ensure_execution(run_id, context, resume=resume)
             return await execution
         finally:
             if self.service._drivers.get(run_id) is driver:
                 self.service._drivers.pop(run_id, None)
 
-    async def _recover_interrupted_run(self, run_id, context):
+    async def recover_interrupted_run(self, run_id, context):
         driver, _ = await self._compose_driver(run_id, context)
         try:
             await driver._ensure_composed()
@@ -159,9 +162,15 @@ class _DesktopRecoveryAgent:
             if self.service._drivers.get(run_id) is driver:
                 self.service._drivers.pop(run_id, None)
 
-    async def _fail_driver_crash(self, run_id, error, context):
+    async def _recover_interrupted_run(self, run_id, context):
+        return await self.recover_interrupted_run(run_id, context)
+
+    async def fail_driver_crash(self, run_id, error, context):
         facade = SAgent(runtime=self.runtime, driver_factory=lambda _: None)
-        return await facade._fail_driver_crash(run_id, error, context)
+        return await facade.fail_driver_crash(run_id, error, context)
+
+    async def _fail_driver_crash(self, run_id, error, context):
+        return await self.fail_driver_crash(run_id, error, context)
 
 
 class DesktopV2Service(
@@ -196,6 +205,7 @@ class DesktopV2Service(
         self._host_model_providers: dict[tuple[Any, ...], Any] = {}
         self._sandbox_providers: dict[str, Any] = {}
         self._last_run_plan = None
+        self._mcp_plugin_cache: dict[tuple[str, str], Any] = {}
         if log_sink is None:
             self._owns_log_sink = True
             self.log_plugin_id, self.log_sink = create_desktop_log_sink(

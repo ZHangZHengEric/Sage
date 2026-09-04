@@ -4740,3 +4740,19 @@ async def test_desktop_index_failure_does_not_rollback_session_commit(tmp_path: 
     await service._index_session(handle.session_id)
     assert (await service.session_store.get_session(handle.session_id)).revision == 1
     await service.session_store.close()
+
+
+def test_workspace_prompt_listing_stays_within_two_levels(tmp_path: Path):
+    root = tmp_path / "workspace"
+    nested = root / "src" / "pkg" / "deep"
+    nested.mkdir(parents=True)
+    (nested / "hidden.py").write_text("secret", encoding="utf-8")
+    (root / "README.md").write_text("hello", encoding="utf-8")
+    (root / "src" / "main.py").write_text("print()", encoding="utf-8")
+
+    listing = DesktopV2Service._workspace_prompt_listing(root)
+
+    assert "README.md" in listing
+    assert "src/main.py" in listing
+    assert "src/pkg" in listing
+    assert "hidden.py" not in listing

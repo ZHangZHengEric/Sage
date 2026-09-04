@@ -63,7 +63,21 @@ class SAgentRunStream:
 
     handle: RunHandle
     events: AsyncIterator[RuntimeEvent]
-    _execution: asyncio.Future[RunSnapshot]
+    execution: asyncio.Future[RunSnapshot] | None = None
+    _execution: asyncio.Future[RunSnapshot] | None = None
+
+    def __post_init__(self) -> None:
+        future = self.execution or self._execution
+        if future is None:
+            raise TypeError("SAgentRunStream requires an execution future")
+        self.execution = future
+        self._execution = future
+
+    def add_done_callback(self, callback) -> None:
+        self.execution.add_done_callback(callback)
+
+    def execution_done(self) -> bool:
+        return self.execution.done()
 
     async def detach(self) -> None:
         """Detach only this observer; execution ownership stays with Runtime."""
@@ -74,7 +88,23 @@ class SAgentRunStream:
     async def wait(self) -> RunSnapshot:
         """Wait for this process's driver without transferring cancellation."""
 
-        return await asyncio.shield(self._execution)
+        return await asyncio.shield(self.execution)
+
+
+class RecoveryAgent(Protocol):
+    """Host-visible protocol for dispatcher recovery and crash settlement."""
+
+    runtime: RuntimePort
+
+    def ensure_execution(
+        self, run_id, context, *, resume
+    ) -> asyncio.Future[RunSnapshot]: ...
+
+    async def fail_driver_crash(self, run_id, exc, context) -> RunSnapshot: ...
+
+    async def recover_interrupted_run(
+        self, run_id, context
+    ) -> RunSnapshot | None: ...
 
 
 class SAgent:
@@ -139,7 +169,7 @@ class SAgent:
             events=self._terminal_stream(
                 EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
-            _execution=execution,
+            execution=execution,
         )
 
     def drive_accepted_run(
@@ -162,7 +192,7 @@ class SAgent:
             events=self._terminal_stream(
                 EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
-            _execution=execution,
+            execution=execution,
         )
 
     async def schedule_accepted_run(
@@ -185,7 +215,7 @@ class SAgent:
             events=self._terminal_stream(
                 EventCursor(run_id=handle.run_id, run_sequence=0), context
             ),
-            _execution=execution,
+            execution=execution,
         )
 
     async def propose_session_commit(
@@ -393,6 +423,15 @@ class SAgent:
         return command.model_copy(
             update={"config": command.config.model_copy(update={"metadata": metadata})}
         )
+
+    def ensure_execution(self, run_id, context, *, resume):
+        return self._ensure_execution(run_id, context, resume=resume)
+
+    async def fail_driver_crash(self, run_id, exc, context):
+        return await self._fail_driver_crash(run_id, exc, context)
+
+    async def recover_interrupted_run(self, run_id, context):
+        return await self._recover_interrupted_run(run_id, context)
 
     def _ensure_execution(self, run_id, context, *, resume):
         # There may be many observers, but this facade owns at most one live

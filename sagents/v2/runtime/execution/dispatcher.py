@@ -41,6 +41,13 @@ class _CleanupRequest:
     result: asyncio.Future[Any]
 
 
+def _agent_method(agent: Any, public: str, private: str):
+    method = getattr(agent, public, None)
+    if method is None:
+        method = getattr(agent, private)
+    return method
+
+
 class LocalWorkerDispatcher:
     """Drive accepted Runs under bounded, renewable Scheduler leases."""
 
@@ -302,6 +309,8 @@ class LocalWorkerDispatcher:
                             RunState.SUSPEND_REQUESTED,
                         }:
                             recover_barrier = getattr(
+                                request.agent, "recover_interrupted_run", None
+                            ) or getattr(
                                 request.agent, "_recover_interrupted_run", None
                             )
                             if recover_barrier is not None:
@@ -348,7 +357,9 @@ class LocalWorkerDispatcher:
                         else:
                             request.resume = recovered.state == RunState.RESUMING
                     if snapshot is None:
-                        execution = request.agent._ensure_execution(
+                        execution = _agent_method(
+                            request.agent, "ensure_execution", "_ensure_execution"
+                        )(
                             lease.work.run_id,
                             request.context,
                             resume=request.resume,
@@ -364,7 +375,11 @@ class LocalWorkerDispatcher:
                                 renewal_error = RuntimeError(
                                     "scheduler lease renewer stopped"
                                 )
-                            await request.agent._fail_driver_crash(
+                            await _agent_method(
+                                request.agent,
+                                "fail_driver_crash",
+                                "_fail_driver_crash",
+                            )(
                                 lease.work.run_id,
                                 renewal_error,
                                 request.context,
@@ -565,7 +580,9 @@ class LocalWorkerDispatcher:
         """Resolve a submitted Future even when failure recording is unavailable."""
 
         try:
-            snapshot = await request.agent._fail_driver_crash(
+            snapshot = await _agent_method(
+                request.agent, "fail_driver_crash", "_fail_driver_crash"
+            )(
                 run_id,
                 self._shutdown_error(),
                 request.context,
