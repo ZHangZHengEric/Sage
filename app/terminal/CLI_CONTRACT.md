@@ -102,7 +102,9 @@ workspace is covered (the file is never written into the workspace itself). A sc
 does not offer is tightened to `session`. Remembered calls surface a `policy.approval.remembered`
 event when remembered and a `policy.decision.recorded` event with `remembered_by` /
 `remembered_scope` when auto-approved. `sage v2 chat` exposes `/approvals` (list, both scopes)
-and `/forget <n>|all` (revoke).
+and `/forget <n>|all` (revoke). `sage v2 approvals [--workspace <path>] [--json]` lists the
+workspace-scoped entries without opening the session store (one JSON object with `workspace`,
+`store`, `total`, `list`), and `sage v2 approvals forget <n>|all` revokes them.
 Legacy shell/path fingerprints are not reused after the matcher upgrade; those operations
 require approval again. Invalid remembered entries are ignored individually, retaining valid
 entries, and `/forget all` also removes corrupt approval documents.

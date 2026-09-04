@@ -870,6 +870,23 @@ def test_parser_v2_sessions():
     assert (args.v2_command, args.limit, args.json) == ("sessions", 5, False)
 
 
+def test_parser_v2_approvals():
+    parser = build_argument_parser()
+    args = parser.parse_args(["v2", "approvals", "--workspace", "/tmp/ws", "--json"])
+    assert (args.v2_command, args.approvals_command, args.workspace, args.json) == (
+        "approvals",
+        None,
+        "/tmp/ws",
+        True,
+    )
+    args = parser.parse_args(["v2", "approvals", "forget", "2", "--session-root", "/tmp/r"])
+    assert (args.approvals_command, args.selector, args.session_root) == (
+        "forget",
+        "2",
+        "/tmp/r",
+    )
+
+
 
 # ---------- 取消安全：CAS 撞车、审批等待期间中断、关闭容忍 ----------
 
@@ -2530,4 +2547,58 @@ async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_w
     await third.close()
     assert "interaction.requested" in outcome.event_types
     assert not (other / "hello.txt").exists()
+
+
+async def test_v2_approvals_command_lists_and_forgets_workspace_entries(tmp_path, capsys):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store_root = tmp_path / "runtime" / "approvals"
+    memory = WorkspaceApprovalMemory(store_root=store_root, workspace=workspace)
+    assert memory.supported_scopes == frozenset({"workspace"})
+    for path in ("a.txt", "b.txt"):
+        await memory.remember(session_id="", approval=_remembered(_matcher(path), "workspace"))
+
+    def args(*, selector=None, json_output=False):
+        return argparse.Namespace(
+            workspace=str(workspace),
+            session_root=str(tmp_path / "runtime"),
+            json=json_output,
+            verbose=False,
+            approvals_command="forget" if selector is not None else None,
+            selector=selector,
+        )
+
+    assert await v2_command.v2_approvals_command(args()) == 0
+    listed = capsys.readouterr().out
+    assert f"remembered approvals for workspace {workspace}" in listed
+    assert "1. file_write: a.txt  [workspace, by cli-user, 2026-09-04 00:00 UTC]" in listed
+    assert "2. file_write: b.txt" in listed
+
+    assert await v2_command.v2_approvals_command(args(json_output=True)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace"] == workspace.as_posix()
+    assert payload["store"] == memory.path.as_posix()
+    assert payload["total"] == 2
+    assert [entry["summary"] for entry in payload["list"]] == [
+        "file_write: a.txt",
+        "file_write: b.txt",
+    ]
+    assert payload["list"][0]["scope"] == "workspace"
+
+    assert await v2_command.v2_approvals_command(args(selector="1")) == 0
+    assert "forgot #1: file_write: a.txt" in capsys.readouterr().out
+    with pytest.raises(CLIError):
+        await v2_command.v2_approvals_command(args(selector="7"))
+    with pytest.raises(CLIError):
+        await v2_command.v2_approvals_command(args(selector="x"))
+    assert [value.matcher.summary for value in await memory.list_workspace()] == [
+        "file_write: b.txt"
+    ]
+
+    assert await v2_command.v2_approvals_command(args(selector="all")) == 0
+    assert "forgot 1 remembered approval(s)" in capsys.readouterr().out
+    assert await v2_command.v2_approvals_command(args()) == 0
+    assert f"no remembered approvals for workspace {workspace}" in capsys.readouterr().out
+    # 离线命令只碰 approvals 目录，不创建会话存储。
+    assert sorted(path.name for path in (tmp_path / "runtime").iterdir()) == ["approvals"]
 
