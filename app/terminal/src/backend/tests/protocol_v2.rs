@@ -2,6 +2,97 @@ use crate::app::MessageKind;
 use crate::backend::protocol::{parse_backend_line, BackendProtocolState};
 use crate::backend::BackendEvent;
 
+const INLINE_QUESTIONNAIRE: &str = include_str!("fixtures/v2_inline_questionnaire.ndjson");
+
+#[test]
+fn v2_inline_questionnaire_renders_actual_runtime_result_without_pending_interaction() {
+    let mut state = BackendProtocolState::default();
+    let mut events = Vec::new();
+    for line in INLINE_QUESTIONNAIRE.lines() {
+        events.extend(state.parse_line(line));
+        if line.contains("Where should I deploy?") {
+            assert!(
+                state.parse_line(line).is_empty(),
+                "duplicate result must not repeat questions"
+            );
+        }
+    }
+    let questions: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            BackendEvent::Message(MessageKind::Tool, text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        questions,
+        vec!["Choose target\n- Where should I deploy?\n  - staging\n  - production"]
+    );
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, BackendEvent::InputRequested(_))));
+    assert!(matches!(events.last(), Some(BackendEvent::Finished)));
+}
+
+#[test]
+fn v2_inline_questionnaire_accepts_text_json_and_object_options() {
+    let mut state = BackendProtocolState::default();
+    let mut visible = String::new();
+    for line in INLINE_QUESTIONNAIRE.lines() {
+        let mut frame: serde_json::Value = serde_json::from_str(line).unwrap();
+        if line.contains("Where should I deploy?") {
+            let block = &mut frame["data"]["item"]["data"]["content"][0];
+            let mut value = block["value"].clone();
+            value["questions"][0]["options"] = serde_json::json!([
+                {"label": "预发布", "value": "staging"}, "production"
+            ]);
+            *block = serde_json::json!({"kind": "text", "text": value.to_string()});
+        }
+        for event in state.parse_line(&frame.to_string()) {
+            if let BackendEvent::Message(MessageKind::Tool, text) = event {
+                visible.push_str(&text);
+            }
+        }
+    }
+    assert!(visible.contains("[staging] 预发布"));
+    assert!(visible.contains("production"));
+}
+
+#[test]
+fn v2_inline_questionnaire_ignores_failed_private_and_unrelated_results() {
+    for variant in ["failed", "private", "other-tool", "unvalidated", "empty"] {
+        let mut state = BackendProtocolState::default();
+        for line in INLINE_QUESTIONNAIRE.lines() {
+            let mut frame: serde_json::Value = serde_json::from_str(line).unwrap();
+            if variant == "other-tool" && line.contains("questionnaire_async") {
+                frame["data"]["item"]["data"]["tool_name"] = serde_json::json!("other_tool");
+            }
+            if line.contains("Where should I deploy?") {
+                let item = &mut frame["data"]["item"];
+                match variant {
+                    "failed" => item["data"]["error"] = serde_json::json!({"code":"failed"}),
+                    "private" => item["visibility"] = serde_json::json!("private"),
+                    "unvalidated" => {
+                        item["data"]["content"][0]["value"]["validation_passed"] =
+                            serde_json::json!(false)
+                    }
+                    "empty" => {
+                        item["data"]["content"][0]["value"]["questions"] = serde_json::json!([])
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                !state
+                    .parse_line(&frame.to_string())
+                    .iter()
+                    .any(|event| { matches!(event, BackendEvent::Message(MessageKind::Tool, _)) }),
+                "{variant}"
+            );
+        }
+    }
+}
+
 fn native(event_type: &str, item_id: Option<&str>, data: serde_json::Value) -> String {
     serde_json::json!({
         "protocol_version": "sage.runtime/v2",

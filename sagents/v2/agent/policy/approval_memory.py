@@ -11,6 +11,8 @@ import asyncio
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
+from pydantic import ValidationError
+
 from sagents.v2.agent.policy.tool_policy import ApprovalMatcher
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.runtime.session.contracts import DerivedStateStore
@@ -79,9 +81,7 @@ class SessionApprovalMemory:
         # 指纹相同但工具名不同（几乎不可能）也不放行：匹配器必须完全一致。
         return remembered if remembered.matcher == matcher else None
 
-    async def remember(
-        self, *, session_id: str, approval: RememberedApproval
-    ) -> None:
+    async def remember(self, *, session_id: str, approval: RememberedApproval) -> None:
         if approval.scope not in self.supported_scopes:
             raise ValueError(
                 f"approval scope {approval.scope!r} is not supported by "
@@ -99,10 +99,9 @@ class SessionApprovalMemory:
             entries = await self._entries(session_id)
             if matcher is None:
                 removed = len(entries)
-                if removed:
-                    await self._derived_state.delete_derived_state(
-                        session_id, self.NAMESPACE, self.KEY
-                    )
+                await self._derived_state.delete_derived_state(
+                    session_id, self.NAMESPACE, self.KEY
+                )
                 return removed
             if entries.pop(matcher.key, None) is None:
                 return 0
@@ -133,7 +132,21 @@ class SessionApprovalMemory:
             # 版本不认识就当作没有记忆：只会多问一次，不会放宽。
             return {}
         entries = raw.get("entries")
-        return dict(entries) if isinstance(entries, dict) else {}
+        if not isinstance(entries, dict):
+            return {}
+        valid = {}
+        for key, value in entries.items():
+            try:
+                approval = RememberedApproval.model_validate(value)
+            except ValidationError:
+                continue
+            if (
+                approval.scope not in self.supported_scopes
+                or key != approval.matcher.key
+            ):
+                continue
+            valid[key] = approval.model_dump(mode="json")
+        return valid
 
     async def _store(self, session_id: str, entries: dict[str, Any]) -> None:
         await self._derived_state.put_derived_state(

@@ -23,12 +23,16 @@ pub(crate) const V2_DECISION_TYPE: &str = "v2_interaction_decision";
 pub(crate) struct V2StreamState {
     streamed_items: HashSet<String>,
     streamed_chars: HashMap<String, usize>,
+    tool_names: HashMap<(String, String), String>,
+    rendered_questionnaires: HashSet<(String, String)>,
 }
 
 impl V2StreamState {
     fn reset(&mut self) {
         self.streamed_items.clear();
         self.streamed_chars.clear();
+        self.tool_names.clear();
+        self.rendered_questionnaires.clear();
     }
 }
 
@@ -243,6 +247,9 @@ fn parse_native_event(
         .unwrap_or(&empty);
     let item_id = str_field(object, "item_id").unwrap_or_default();
     match event_type {
+        "item.completed" => {
+            parse_completed_tool_item(data, str_field(object, "run_id").unwrap_or_default(), state)
+        }
         "message.delta" => {
             // 增量只来自模型输出（assistant）；用户/工具消息不会走 delta。
             let Some(delta) = data.get("delta").and_then(Value::as_str) else {
@@ -408,4 +415,91 @@ fn parse_native_event(
         }
         _ => Vec::new(),
     }
+}
+
+fn parse_completed_tool_item(
+    data: &Map<String, Value>,
+    run_id: &str,
+    state: &mut V2StreamState,
+) -> Vec<BackendEvent> {
+    let Some(item) = data.get("item").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    if str_field(item, "visibility") != Some("public") {
+        return Vec::new();
+    }
+    let Some(body) = item.get("data").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(call_id) = str_field(body, "tool_call_id") else {
+        return Vec::new();
+    };
+    let key = (run_id.to_string(), call_id.to_string());
+    if str_field(body, "kind") == Some("tool_call") {
+        if let Some(name) = str_field(body, "tool_name") {
+            state.tool_names.insert(key, name.to_string());
+        }
+        return Vec::new();
+    }
+    if str_field(body, "kind") != Some("tool_result")
+        || state.tool_names.get(&key).map(String::as_str) != Some("questionnaire_async")
+        || body.get("error").is_some_and(|value| !value.is_null())
+        || state.rendered_questionnaires.contains(&key)
+    {
+        return Vec::new();
+    }
+    let Some(content) = body.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    for block in content {
+        let payload = match block.get("kind").and_then(Value::as_str) {
+            Some("json") => block.get("value").cloned(),
+            Some("text") => block
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(|text| serde_json::from_str::<Value>(text).ok()),
+            _ => None,
+        };
+        let Some(payload) = payload.as_ref().and_then(Value::as_object) else {
+            continue;
+        };
+        if payload.get("success").and_then(Value::as_bool) != Some(true)
+            || payload.get("validation_passed").and_then(Value::as_bool) != Some(true)
+            || payload.get("should_end").and_then(Value::as_bool) != Some(true)
+        {
+            continue;
+        }
+        let Some(questions) = payload.get("questions").and_then(Value::as_array) else {
+            continue;
+        };
+        if questions.is_empty() {
+            continue;
+        }
+        let mut lines = Vec::new();
+        if let Some(title) = str_field(payload, "title") {
+            lines.push(title.to_string());
+        }
+        for question in questions.iter().filter_map(Value::as_object) {
+            if let Some(title) =
+                str_field(question, "title").or_else(|| str_field(question, "question"))
+            {
+                lines.push(format!("- {title}"));
+            }
+            if let Some(options) = question.get("options").and_then(Value::as_array) {
+                for option in options {
+                    if let Some(text) = option.as_str() {
+                        lines.push(format!("  - {text}"));
+                    } else if let Some(option) = option.as_object() {
+                        let value = str_field(option, "value").unwrap_or_default();
+                        let label = str_field(option, "label").unwrap_or(value);
+                        lines.push(format!("  - [{value}] {label}"));
+                    }
+                }
+            }
+        }
+        state.rendered_questionnaires.insert(key);
+        // Inline questionnaire: the Run has completed; the composer starts the next turn.
+        return vec![BackendEvent::Message(MessageKind::Tool, lines.join("\n"))];
+    }
+    Vec::new()
 }

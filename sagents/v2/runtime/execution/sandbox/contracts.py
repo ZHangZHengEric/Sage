@@ -148,8 +148,9 @@ MUTATING_FILE_OPERATIONS: frozenset[FileOperation] = frozenset(
 class FileSystemPolicy(StrictModel):
     allowed_operations: frozenset[FileOperation]
     allowed_roots: tuple[str, ...] = ("/workspace",)
-    # 可写根目录内的只读子路径（相对 workspace_root，如 ".git/hooks"）。
+    # 文件 API 内的只读子路径（相对 workspace_root，如 ".git/hooks"）。
     # 命中的路径及其子树拒绝 write/create/delete/rename，read/list 不受影响。
+    # 不代表进程级文件隔离；特别是 IsolationLevel.NONE 的宿主子进程不受此检查约束。
     protected_paths: tuple[str, ...] = ()
     max_file_bytes: int | None = Field(default=None, gt=0)
     max_total_bytes: int | None = Field(default=None, gt=0)
