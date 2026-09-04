@@ -81,7 +81,7 @@ _EN = {
     "questionnaire.missing_options": "Question {index} requires at least one option.",
     "goal.create_instruction": "This Run is in goal mode. Before substantive execution, call goal_submit exactly once with the concrete goal and its acceptance criteria. The Run cannot finish until goal_complete succeeds.",
     "goal.verify_instruction": "Do not claim completion until every acceptance criterion has been checked. Call goal_complete only after verification; that Tool is the only successful completion gate for this Run.",
-    "goal.explanation_required": "goal_complete succeeded; provide the user-facing completion summary before ending the Run.",
+    "goal.explanation_required": "The goal is recorded as completed. In your next reply, briefly tell the user what was delivered, where to find or use it, what was actually verified, and any remaining limitations. Distinguish code inspection from executed tests; do not invent verification. Use natural language rather than narrating internal tool calls. Do not call goal_complete again.",
     "goal.complete_reason": "goal_complete succeeded and the result was reported.",
     "goal.create_required": "No active goal exists. Call goal_submit before continuing.",
     "goal.incomplete": "The active goal is not complete. Re-check every acceptance criterion and call goal_complete only after verification.",
@@ -158,7 +158,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "questionnaire.missing_options": "第 {index} 个问题至少需要一个选项。",
             "goal.create_instruction": "当前 Run 处于目标模式。开始实质执行前，必须调用一次 goal_submit，写入明确目标和验收标准。只有 goal_complete 成功后 Run 才能结束。",
             "goal.verify_instruction": "在声称完成前逐项检查全部验收标准；只有验证通过后才能调用 goal_complete。该工具是本 Run 唯一的成功完成门禁。",
-            "goal.explanation_required": "goal_complete 已成功；结束 Run 前还需要向用户说明完成结果。",
+            "goal.explanation_required": "目标已记录为完成。请在下一条回复中简洁总结：完成了什么、交付物在哪里或如何使用、实际做了哪些验证，以及仍有哪些限制。区分代码检查和实际运行测试，不要编造验证结果。自然地向用户说明结果，不要播报内部工具调用，也不要再次调用 goal_complete。",
             "goal.complete_reason": "goal_complete 已成功，且完成结果已经报告。",
             "goal.create_required": "当前还没有活动目标，请先调用 goal_submit。",
             "goal.incomplete": "活动目标尚未完成。请重新检查每项验收标准，仅在验证通过后调用 goal_complete。",
@@ -616,7 +616,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "pt": {
         "goal.create_instruction": "Esta execução está no modo de objetivo. Antes do trabalho principal, chame goal_submit uma única vez com o objetivo e os critérios de aceitação. A execução só termina após goal_complete.",
         "goal.verify_instruction": "Verifique todos os critérios antes de declarar conclusão. Chame goal_complete somente após a verificação; essa ferramenta é a única porta de conclusão desta execução.",
-        "goal.explanation_required": "goal_complete foi concluído; apresente o resumo final ao usuário antes de encerrar a execução.",
+        "goal.explanation_required": "O objetivo foi registrado como concluído. Na próxima resposta, resuma as entregas, onde encontrá-las ou como usá-las, a verificação realizada e as limitações restantes. Distinga inspeção de código de testes executados; não invente verificações. Fale naturalmente, sem narrar chamadas internas. Não chame goal_complete novamente.",
         "goal.complete_reason": "goal_complete foi concluído e o resultado foi informado.",
         "goal.create_required": "Não há objetivo ativo. Chame goal_submit antes de continuar.",
         "goal.incomplete": "O objetivo ativo ainda não foi concluído. Verifique novamente cada critério e chame goal_complete somente após a validação.",
@@ -628,7 +628,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "es": {
         "goal.create_instruction": "Esta ejecución está en modo objetivo. Antes del trabajo principal, llama una sola vez a goal_submit con el objetivo y sus criterios de aceptación. La ejecución no puede terminar hasta que goal_complete tenga éxito.",
         "goal.verify_instruction": "Comprueba todos los criterios antes de declarar la finalización. Llama a goal_complete solo después de verificarlos; esa herramienta es la única puerta de finalización.",
-        "goal.explanation_required": "goal_complete se completó; presenta al usuario el resumen final antes de terminar la ejecución.",
+        "goal.explanation_required": "El objetivo se registró como completado. En la siguiente respuesta, resume las entregas, dónde encontrarlas o cómo usarlas, la verificación realizada y las limitaciones restantes. Distingue la inspección de código de las pruebas ejecutadas; no inventes verificaciones. Habla con naturalidad, sin narrar llamadas internas. No vuelvas a llamar a goal_complete.",
         "goal.complete_reason": "goal_complete se completó y se informó del resultado.",
         "goal.create_required": "No hay un objetivo activo. Llama a goal_submit antes de continuar.",
         "goal.incomplete": "El objetivo activo no está completo. Revisa cada criterio y llama a goal_complete solo después de verificarlo.",
@@ -640,7 +640,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "fr": {
         "goal.create_instruction": "Cette exécution est en mode objectif. Avant le travail principal, appelez goal_submit une seule fois avec l’objectif et ses critères d’acceptation. Elle ne peut se terminer qu’après la réussite de goal_complete.",
         "goal.verify_instruction": "Vérifiez tous les critères avant d’annoncer la fin. Appelez goal_complete uniquement après vérification ; cet outil est l’unique porte de réussite.",
-        "goal.explanation_required": "goal_complete a réussi ; présentez le résumé final à l’utilisateur avant de terminer l’exécution.",
+        "goal.explanation_required": "L’objectif est enregistré comme terminé. Dans la prochaine réponse, résumez les livrables, où les trouver ou comment les utiliser, les vérifications réalisées et les limites restantes. Distinguez l’inspection du code des tests exécutés ; n’inventez pas de vérifications. Parlez naturellement sans décrire les appels internes. Ne rappelez pas goal_complete.",
         "goal.complete_reason": "goal_complete a réussi et le résultat a été communiqué.",
         "goal.create_required": "Aucun objectif n’est actif. Appelez goal_submit avant de continuer.",
         "goal.incomplete": "L’objectif actif n’est pas terminé. Revérifiez chaque critère et appelez goal_complete uniquement après validation.",
@@ -652,7 +652,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "de": {
         "goal.create_instruction": "Dieser Lauf befindet sich im Zielmodus. Rufen Sie vor der eigentlichen Arbeit goal_submit genau einmal mit Ziel und Abnahmekriterien auf. Der Lauf endet erst nach erfolgreichem goal_complete.",
         "goal.verify_instruction": "Prüfen Sie alle Kriterien, bevor Sie den Abschluss melden. Rufen Sie goal_complete erst nach der Prüfung auf; dieses Werkzeug ist das einzige Erfolgstor.",
-        "goal.explanation_required": "goal_complete war erfolgreich; geben Sie vor dem Ende eine Zusammenfassung für den Benutzer aus.",
+        "goal.explanation_required": "Das Ziel wurde als abgeschlossen erfasst. Fasse in der nächsten Antwort die Ergebnisse, deren Ort oder Verwendung, die tatsächlich durchgeführten Prüfungen und verbleibende Einschränkungen zusammen. Unterscheide Codeprüfung von ausgeführten Tests; erfinde keine Prüfungen. Antworte natürlich, ohne interne Werkzeugaufrufe zu beschreiben. Rufe goal_complete nicht erneut auf.",
         "goal.complete_reason": "goal_complete war erfolgreich und das Ergebnis wurde gemeldet.",
         "goal.create_required": "Es gibt kein aktives Ziel. Rufen Sie vor dem Fortfahren goal_submit auf.",
         "goal.incomplete": "Das aktive Ziel ist noch nicht abgeschlossen. Prüfen Sie jedes Kriterium erneut und rufen Sie goal_complete erst danach auf.",
@@ -664,7 +664,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "ja": {
         "goal.create_instruction": "この実行は目標モードです。本作業の前に、具体的な目標と受け入れ条件を指定して goal_submit を一度だけ呼び出してください。goal_complete が成功するまで終了できません。",
         "goal.verify_instruction": "完了を宣言する前に、すべての受け入れ条件を確認してください。検証後にのみ goal_complete を呼び出してください。このツールが唯一の完了ゲートです。",
-        "goal.explanation_required": "goal_complete が成功しました。終了前にユーザー向けの完了概要を提示してください。",
+        "goal.explanation_required": "目標は完了として記録されました。次の返信で、成果物、その場所や使い方、実際に行った検証、残る制限を簡潔にまとめてください。コードの確認と実行したテストを区別し、検証結果を作り上げないでください。内部ツールの呼び出しを実況せず、自然に結果を伝えてください。goal_complete を再度呼び出さないでください。",
         "goal.complete_reason": "goal_complete が成功し、結果が報告されました。",
         "goal.create_required": "有効な目標がありません。続行前に goal_submit を呼び出してください。",
         "goal.incomplete": "有効な目標は未完了です。各受け入れ条件を再確認し、検証後にのみ goal_complete を呼び出してください。",
@@ -676,7 +676,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "ko": {
         "goal.create_instruction": "이 실행은 목표 모드입니다. 본 작업 전에 구체적인 목표와 승인 기준으로 goal_submit를 한 번만 호출하세요. goal_complete가 성공해야 종료할 수 있습니다.",
         "goal.verify_instruction": "완료를 선언하기 전에 모든 승인 기준을 확인하세요. 검증 후에만 goal_complete를 호출해야 하며, 이 도구가 유일한 완료 관문입니다.",
-        "goal.explanation_required": "goal_complete가 성공했습니다. 실행을 끝내기 전에 사용자에게 완료 요약을 제공하세요.",
+        "goal.explanation_required": "목표가 완료로 기록되었습니다. 다음 답변에서 결과물, 위치나 사용법, 실제 검증 내용과 남은 제약을 간결하게 요약하세요. 코드 검토와 실행한 테스트를 구분하고 검증 결과를 지어내지 마세요. 내부 도구 호출을 중계하지 말고 자연스럽게 결과를 설명하세요. goal_complete를 다시 호출하지 마세요.",
         "goal.complete_reason": "goal_complete가 성공했고 결과가 보고되었습니다.",
         "goal.create_required": "활성 목표가 없습니다. 계속하기 전에 goal_submit를 호출하세요.",
         "goal.incomplete": "활성 목표가 아직 완료되지 않았습니다. 각 승인 기준을 다시 확인하고 검증 후에만 goal_complete를 호출하세요.",
@@ -688,7 +688,7 @@ _MODE_LOCALE_TEXT: dict[str, dict[str, str]] = {
     "ru": {
         "goal.create_instruction": "Этот запуск работает в режиме цели. До основной работы один раз вызовите goal_submit с конкретной целью и критериями приёмки. Запуск завершится только после успешного goal_complete.",
         "goal.verify_instruction": "Проверьте все критерии перед заявлением о завершении. Вызывайте goal_complete только после проверки; этот инструмент — единственный шлюз успешного завершения.",
-        "goal.explanation_required": "goal_complete выполнен; перед завершением покажите пользователю итоговую сводку.",
+        "goal.explanation_required": "Цель отмечена как выполненная. В следующем ответе кратко опишите результаты, где их найти или как использовать, выполненные проверки и оставшиеся ограничения. Отличайте проверку кода от запущенных тестов; не выдумывайте проверки. Пишите естественно, не описывая внутренние вызовы инструментов. Не вызывайте goal_complete повторно.",
         "goal.complete_reason": "goal_complete выполнен, и результат был сообщён.",
         "goal.create_required": "Активной цели нет. Вызовите goal_submit перед продолжением.",
         "goal.incomplete": "Активная цель ещё не выполнена. Повторно проверьте каждый критерий и вызывайте goal_complete только после проверки.",

@@ -2341,6 +2341,127 @@ void main() {
     },
   );
 
+  for (final scenario in [
+    'completed',
+    'running',
+    'failed',
+    'questionnaire',
+    'old_run',
+    'tool_failed',
+    'missing_result',
+  ]) {
+    test('goal mode resets only for confirmed completion: $scenario', () {
+      final cached = _persistedGroupedActivitiesConversation();
+      cached['invocation_mode'] = 'goal';
+      if (scenario == 'running' || scenario == 'failed') {
+        cached['status'] = scenario;
+      }
+      final panel = (cached['process_panels'] as List).single as Map;
+      if (scenario == 'old_run') panel['run_id'] = 'old-run';
+      panel['activities'] = [
+        {
+          'id': 'finish',
+          'label': scenario == 'questionnaire'
+              ? 'questionnaire_async'
+              : 'goal_complete',
+          'active': false,
+          'failed': scenario == 'tool_failed',
+          'result': scenario == 'missing_result'
+              ? ''
+              : '{"status":"completed"}',
+        },
+      ];
+      final restored = Conversation.fromJson(cached);
+      expect(
+        restored.invocationMode,
+        scenario == 'completed' ? InvocationMode.normal : InvocationMode.goal,
+      );
+      if (scenario == 'completed') {
+        // A deliberate new goal selection must survive replay and restart.
+        restored.invocationMode = InvocationMode.goal;
+        restored.resetCompletedGoalMode();
+        expect(
+          Conversation.fromJson(restored.toJson()).invocationMode,
+          InvocationMode.goal,
+        );
+      }
+    });
+  }
+
+  testWidgets(
+    'goal mode chip clears after completion and persists normal mode',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final api = _ControlledProcessApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      controller.setInvocationMode(InvocationMode.goal);
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '完成目标',
+      );
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      api.emitRunningProcess();
+      await tester.pump();
+      void emit(String type, int sequence, Map<String, Object?> data) {
+        api._events.add({
+          'type': type,
+          'run_id': 'run_controlled',
+          'session_id': 'session_controlled',
+          'run_sequence': sequence,
+          'data': data,
+        });
+      }
+
+      emit('tool.call.succeeded', 3, {
+        'tool_call_id': 'complete-goal',
+        'tool_name': 'goal_complete',
+      });
+      emit('item.completed', 4, {
+        'item': {
+          'data': {
+            'kind': 'tool_result',
+            'tool_call_id': 'complete-goal',
+            'content': [
+              {
+                'kind': 'json',
+                'value': {'status': 'completed', 'summary': '已交付'},
+              },
+            ],
+          },
+        },
+      });
+      await tester.pump();
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.goal,
+      );
+      emit('run.completed', 5, {'state': 'completed'});
+      await api._events.close();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('composer-mode-chip')), findsNothing);
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.normal,
+      );
+      final preferences = await SharedPreferences.getInstance();
+      final saved =
+          jsonDecode(preferences.getString('sage.desktop_v2.conversations.v1')!)
+              as Map;
+      final restored = Conversation.fromJson(
+        (saved.values.first as List).first.cast<String, Object?>(),
+      );
+      expect(restored.invocationMode, InvocationMode.normal);
+    },
+  );
+
   test(
     'failed parent keeps active child manageable and blocks tree deletion',
     () async {
@@ -4393,6 +4514,129 @@ void main() {
     expect(find.text('正在检查实现。'), findsOneWidget);
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'historical goal submissions reopen their full plans in the right dock in ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final firstPlan =
+            '# 原始计划\n\n${List.filled(40, '实现功能并验证结果。').join('\n\n')}';
+        const secondPlan = '# 修订计划\n\n保留用户输入与文件名。';
+        final persisted = _persistedGroupedActivitiesConversation();
+        final process = (persisted['process_panels'] as List).single as Map;
+        process['activities'] = [
+          {
+            'id': 'plan-first',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 10,
+            'arguments': {'content': firstPlan},
+            'result': 'approved',
+          },
+          {
+            'id': 'read-between',
+            'label': 'file_read',
+            'active': false,
+            'sequence': 30,
+            'arguments': {'path': 'todo.html'},
+          },
+          {
+            'id': 'plan-second',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 50,
+            'arguments': {'content': secondPlan},
+            'result': 'approved',
+          },
+          {
+            'id': 'plan-empty',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 60,
+            'arguments': {'content': ''},
+          },
+        ];
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [persisted],
+          }),
+        });
+        final api = _FakeApi();
+        api.desktopSettings = api.desktopSettings.copyWith(
+          themeMode: brightness.name,
+        );
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        expect(controller.selectedConversation!.pendingInteraction, isNull);
+        await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+        await tester.pump();
+        final first = find.byKey(
+          const ValueKey('process-open-plan:plan-first'),
+        );
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        final panel = find.byKey(const ValueKey('plan-detail-panel'));
+        String displayedPlan() => tester
+            .widget<MarkdownBody>(
+              find.descendant(of: panel, matching: find.byType(MarkdownBody)),
+            )
+            .data;
+        expect(displayedPlan(), firstPlan);
+        expect(
+          tester.getTopLeft(panel).dx,
+          greaterThan(tester.getTopRight(first).dx),
+        );
+        await tester.drag(panel, const Offset(0, -350));
+        await tester.pumpAndSettle();
+        final scrollable = find.descendant(
+          of: panel,
+          matching: find.byType(Scrollable),
+        );
+        expect(
+          tester.state<ScrollableState>(scrollable).position.pixels,
+          greaterThan(0),
+        );
+
+        final group = find.byKey(
+          const ValueKey('process-operation-group:plan-second'),
+        );
+        await tester.tap(
+          find.descendant(of: group, matching: find.byType(InkWell)).first,
+        );
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('process-open-plan:plan-empty')),
+          findsNothing,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('process-open-plan:plan-second')),
+        );
+        await tester.pumpAndSettle();
+        expect(displayedPlan(), secondPlan);
+        expect(tester.state<ScrollableState>(scrollable).position.pixels, 0);
+        await tester.tap(
+          find.byKey(
+            const ValueKey('workspace-panel-close:sage.workspace.plan:1'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(panel, findsNothing);
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        expect(displayedPlan(), firstPlan);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('large stream deltas are revealed progressively', (tester) async {
     tester.platformDispatcher.localeTestValue = const Locale('zh');
     tester.platformDispatcher.localesTestValue = const [Locale('zh')];
@@ -5021,6 +5265,19 @@ void main() {
           tester.view.physicalSize = const Size(1200, 800);
           await tester.pumpWidget(SageDesktopV2App(controller: controller));
           await tester.pumpAndSettle();
+          final sendCenter = tester.getCenter(
+            find.byKey(const ValueKey('send-button')),
+          );
+          for (final key in [
+            'composer-upload-button',
+            'agent-picker',
+            'approval-mode-picker',
+          ]) {
+            expect(
+              tester.getCenter(find.byKey(ValueKey(key))).dy,
+              closeTo(sendCenter.dy, 0.1),
+            );
+          }
           controller.setInvocationMode(InvocationMode.plan);
           await tester.pumpAndSettle();
           final chip = find.byKey(const ValueKey('composer-mode-chip'));
@@ -5056,10 +5313,27 @@ void main() {
                   ),
               isFalse,
             );
-            if (width == 280) {
+            final add = tester.getRect(
+              find.byKey(const ValueKey('composer-upload-button')),
+            );
+            final send = tester.getRect(
+              find.byKey(const ValueKey('send-button')),
+            );
+            final agent = tester.getRect(
+              find.byKey(const ValueKey('agent-picker')),
+            );
+            final approval = tester.getRect(
+              find.byKey(const ValueKey('approval-mode-picker')),
+            );
+            expect(add.center.dy, closeTo(send.center.dy, 0.1));
+            expect(agent.center.dy, closeTo(approval.center.dy, 0.1));
+            expect(add.height, lessThanOrEqualTo(32));
+            expect(agent.height, lessThanOrEqualTo(28));
+            if (tester.getRect(chip).top < tester.getRect(cluster).bottom) {
+              expect(agent.center.dy, closeTo(add.center.dy, 0.1));
               expect(
-                tester.getRect(chip).top,
-                greaterThanOrEqualTo(tester.getRect(cluster).bottom),
+                tester.getRect(chip).center.dy,
+                closeTo(add.center.dy, 0.1),
               );
             }
           }

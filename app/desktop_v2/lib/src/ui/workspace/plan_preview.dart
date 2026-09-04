@@ -1,5 +1,18 @@
 part of '../workspace_screen.dart';
 
+class _PlanPreviewScope extends InheritedWidget {
+  const _PlanPreviewScope({required this.onOpen, required super.child});
+
+  final ValueChanged<String> onOpen;
+
+  static ValueChanged<String>? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_PlanPreviewScope>()?.onOpen;
+
+  @override
+  bool updateShouldNotify(_PlanPreviewScope oldWidget) =>
+      oldWidget.onOpen != onOpen;
+}
+
 class _PlanPreviewState extends ValueNotifier<String> {
   _PlanPreviewState() : super('');
 }
@@ -28,10 +41,13 @@ class _PlanWorkspacePanelPlugin extends WorkspacePanelPluginBase {
           key: const ValueKey('plan-detail-surface'),
           color: Theme.of(context).colorScheme.surface.withValues(alpha: 1),
           child: SizedBox.expand(
-            child: SingleChildScrollView(
-              key: const ValueKey('plan-detail-panel'),
-              padding: const EdgeInsets.all(20),
-              child: _ConversationMarkdown(data: content),
+            child: KeyedSubtree(
+              key: ValueKey(content),
+              child: SingleChildScrollView(
+                key: const ValueKey('plan-detail-panel'),
+                padding: const EdgeInsets.all(20),
+                child: _ConversationMarkdown(data: content),
+              ),
             ),
           ),
         ),

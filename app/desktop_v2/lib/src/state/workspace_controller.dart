@@ -2462,6 +2462,7 @@ class WorkspaceController extends ChangeNotifier {
       activity.active = false;
       activity.failed = value['error'] != null;
       activity.completedAt ??= DateTime.now();
+      conversation.resetCompletedGoalMode();
       return;
     }
   }
@@ -2552,6 +2553,7 @@ class WorkspaceController extends ChangeNotifier {
       promoteFinal: promoteFinal,
       completedAt: completedAt,
     );
+    conversation.resetCompletedGoalMode();
     if (status == RunStatus.completed &&
         conversation.pendingPlanExecution != null) {
       scheduleMicrotask(() => _startApprovedPlan(conversation));
