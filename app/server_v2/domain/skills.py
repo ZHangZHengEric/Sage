@@ -217,7 +217,9 @@ def inspect_skill_zip(payload: bytes, *, filename: str = "") -> SkillPackage:
 
 
 def _safe_zip_path(filename: str) -> str | None:
-    relative = str(filename or "").replace("\\", "/").lstrip("./")
+    relative = str(filename or "").replace("\\", "/")
+    while relative.startswith("./"):
+        relative = relative[2:]
     if not relative or relative.endswith("/"):
         return None
     parts = [part for part in relative.split("/") if part not in {"", "."}]
