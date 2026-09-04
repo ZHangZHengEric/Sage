@@ -14,6 +14,7 @@ from app.server_v2.domain.skills import (
     copy_skill_tree,
     inspect_skill_directory,
     inspect_skill_markdown,
+    inspect_skill_zip,
     new_skill_id,
     new_version_id,
     normalize_skill_name,
@@ -69,6 +70,70 @@ class SkillCatalogService:
             dimension=dimension,
             owner_user_id="" if dimension == "system" else user_id,
         )
+
+    async def publish_zip(
+        self,
+        payload: bytes,
+        *,
+        filename: str,
+        user_id: str,
+        role: str,
+        dimension: SkillDimension = "user",
+    ) -> SkillRecord:
+        if dimension == "system" and role != "admin":
+            raise ServerV2Error("forbidden", "only admin can publish system skills")
+        package = inspect_skill_zip(payload, filename=filename)
+        return await self._publish_package(
+            package,
+            dimension=dimension,
+            owner_user_id="" if dimension == "system" else user_id,
+        )
+
+    async def publish_zips(
+        self,
+        items: list[tuple[str, bytes]],
+        *,
+        user_id: str,
+        role: str,
+        dimension: SkillDimension = "user",
+    ) -> dict[str, object]:
+        results: list[dict[str, object]] = []
+        skills: list[SkillRecord] = []
+        for filename, payload in items:
+            try:
+                if not str(filename).lower().endswith(".zip"):
+                    raise ServerV2Error("validation", "仅支持 ZIP 文件")
+                record = await self.publish_zip(
+                    payload,
+                    filename=filename,
+                    user_id=user_id,
+                    role=role,
+                    dimension=dimension,
+                )
+                skills.append(record)
+                results.append(
+                    {
+                        "filename": filename,
+                        "success": True,
+                        "message": f"技能 {record.name} 已发布",
+                        "skill": record.public_dict(),
+                    }
+                )
+            except ServerV2Error as exc:
+                results.append(
+                    {
+                        "filename": filename,
+                        "success": False,
+                        "message": exc.message,
+                        "skill": None,
+                    }
+                )
+        return {
+            "results": results,
+            "success_count": sum(1 for item in results if item["success"]),
+            "failed_count": sum(1 for item in results if not item["success"]),
+            "skills": [item.public_dict() for item in skills],
+        }
 
     async def publish_directory(
         self,

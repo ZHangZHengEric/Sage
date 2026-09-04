@@ -8,7 +8,11 @@ from app.server_v2.domain.catalog import (
     empty_catalog,
 )
 from app.server_v2.repositories.skills import MemorySkillStore
-from app.server_v2.domain.threads import ThreadRecord, require_owned_thread
+from app.server_v2.domain.threads import (
+    ThreadRecord,
+    apply_thread_upsert,
+    require_owned_thread,
+)
 from app.server_v2.domain.users import (
     Role,
     UserRecord,
@@ -136,15 +140,20 @@ class MemoryThreadIndex:
         return self._threads.get(thread_id)
 
     async def upsert(
-        self, thread_id: str, user_id: str, *, title: str = ""
+        self,
+        thread_id: str,
+        user_id: str,
+        *,
+        title: str = "",
+        agent_id: str | None = None,
     ) -> ThreadRecord:
         existing = self._threads.get(thread_id)
-        if existing is not None:
-            require_owned_thread(existing, user_id)
-        record = ThreadRecord(
+        record = apply_thread_upsert(
+            existing,
             thread_id=thread_id,
             user_id=user_id,
-            title=title or (existing.title if existing else title),
+            title=title,
+            agent_id=agent_id,
         )
         self._threads[thread_id] = record
         return record

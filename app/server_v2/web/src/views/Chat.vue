@@ -19,10 +19,11 @@ const scroller = ref(null)
 const input = ref(null)
 const agent = shallowRef(null)
 
-const threadTitle = computed(() => {
-  const current = threads.value.find((item) => item.thread_id === threadId.value)
-  return current?.title || '新对话'
-})
+const currentThread = computed(() =>
+  threads.value.find((item) => item.thread_id === threadId.value)
+)
+const threadTitle = computed(() => currentThread.value?.title || '新对话')
+const agentLocked = computed(() => Boolean(currentThread.value?.agent_id))
 
 function newId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`
@@ -73,9 +74,18 @@ async function loadModels() {
   hasModel.value = items.length > 0
 }
 
+function applyThreadAgent(id) {
+  const current = threads.value.find((item) => item.thread_id === id)
+  if (current?.agent_id && current.agent_id !== selectedAgentId.value) {
+    selectedAgentId.value = current.agent_id
+    bindAgent()
+  }
+}
+
 async function openThread(id) {
   threadId.value = id
   error.value = ''
+  applyThreadAgent(id)
   const events = await api.threadEvents(id)
   const history = messagesFromEvents(events)
   messages.value = history
@@ -149,7 +159,12 @@ onUnmounted(() => {
         <h1>{{ threadTitle }}</h1>
         <label class="agent-pick">
           <span class="sr-only">智能体</span>
-          <select v-model="selectedAgentId" @change="selectAgent">
+          <select
+            v-model="selectedAgentId"
+            :disabled="agentLocked"
+            :title="agentLocked ? '本会话已绑定智能体' : '选择智能体'"
+            @change="selectAgent"
+          >
             <option v-for="item in agents" :key="item.id" :value="item.id">
               {{ item.name }}
             </option>

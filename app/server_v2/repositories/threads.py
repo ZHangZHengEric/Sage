@@ -6,7 +6,11 @@ from app.server_v2.core.database import Database
 from sqlalchemy import select
 
 from app.server_v2.db.models import ThreadRow
-from app.server_v2.domain.threads import ThreadRecord, require_owned_thread
+from app.server_v2.domain.threads import (
+    ThreadRecord,
+    apply_thread_upsert,
+    require_owned_thread,
+)
 
 
 class ThreadIndex(Protocol):
@@ -14,7 +18,12 @@ class ThreadIndex(Protocol):
     async def list_for(self, user_id: str) -> list[ThreadRecord]: ...
     async def find(self, thread_id: str) -> ThreadRecord | None: ...
     async def upsert(
-        self, thread_id: str, user_id: str, *, title: str = ""
+        self,
+        thread_id: str,
+        user_id: str,
+        *,
+        title: str = "",
+        agent_id: str | None = None,
     ) -> ThreadRecord: ...
     async def remove(self, thread_id: str, user_id: str) -> None: ...
 
@@ -54,14 +63,21 @@ class DatabaseThreadIndex:
             row = await session.get(ThreadRow, thread_id)
         return None if row is None else _thread_from_row(row)
 
-    async def upsert(self, thread_id: str, user_id: str, *, title: str = "") -> ThreadRecord:
+    async def upsert(
+        self,
+        thread_id: str,
+        user_id: str,
+        *,
+        title: str = "",
+        agent_id: str | None = None,
+    ) -> ThreadRecord:
         existing = await self.find(thread_id)
-        if existing is not None:
-            require_owned_thread(existing, user_id)
-        record = ThreadRecord(
+        record = apply_thread_upsert(
+            existing,
             thread_id=thread_id,
             user_id=user_id,
-            title=title or (existing.title if existing else title),
+            title=title,
+            agent_id=agent_id,
         )
         async with self.database.transaction() as session:
             await session.merge(
@@ -69,6 +85,7 @@ class DatabaseThreadIndex:
                     thread_id=record.thread_id,
                     user_id=record.user_id,
                     title=record.title,
+                    agent_id=record.agent_id,
                     updated_at=record.updated_at,
                 )
             )
@@ -87,5 +104,6 @@ def _thread_from_row(row: ThreadRow) -> ThreadRecord:
         thread_id=row.thread_id,
         user_id=row.user_id,
         title=row.title,
+        agent_id=getattr(row, "agent_id", "") or "",
         updated_at=row.updated_at,
     )

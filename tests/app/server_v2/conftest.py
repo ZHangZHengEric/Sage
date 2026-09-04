@@ -39,23 +39,24 @@ def make_settings(tmp_path: Path, **overrides) -> ServerV2Settings:
     return ServerV2Settings(**values)
 
 
-def scripted_hello() -> ScriptedModelProvider:
+def scripted_hello(steps: int = 1) -> ScriptedModelProvider:
     return ScriptedModelProvider(
-        (
+        tuple(
             ScriptedModelStep(
                 events=(
                     ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="hello"),
                     ModelStreamEvent(
                         kind=ModelEventKind.COMPLETED,
                         response=ModelResponse(
-                            response_id="response_1",
+                            response_id=f"response_{index + 1}",
                             text="hello",
                             finish_reason="stop",
                             usage=UsageSummary(input_tokens=3, output_tokens=1),
                         ),
                     ),
                 )
-            ),
+            )
+            for index in range(steps)
         )
     )
 

@@ -14,6 +14,7 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 
 from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.domain.catalog import AgentRecord
+from app.server_v2.services.official import resolve_agent_tools
 
 
 def server_v2_run_manifest(
@@ -34,9 +35,7 @@ def server_v2_run_manifest(
         instructions = instructions if instructions is not None else agent.instructions
         if not tools:
             tools = tuple(agent.tools)
-    selected_tools = list(tools)
-    if skills and "load_skill" not in selected_tools:
-        selected_tools.append("load_skill")
+    selected_tools = list(resolve_agent_tools(tools, has_skills=bool(skills)))
     base = server_v2_manifest(settings)
     source = base.agents.get("main") or next(iter(base.agents.values()))
     composed = source.model_copy(

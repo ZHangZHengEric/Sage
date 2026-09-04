@@ -38,6 +38,7 @@ export const api = {
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
+  listTools: () => request('/api/tools'),
   listAgents: () => request('/api/agents'),
   getAgent: (id) => request(`/api/agents/${id}`),
   createAgent: (body) =>
@@ -55,6 +56,11 @@ export const api = {
   listSkills: () => request('/api/skills'),
   publishSkill: (body) =>
     request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),
+  uploadSkills: (files) => {
+    const body = new FormData()
+    for (const file of files) body.append('files', file)
+    return request('/api/skills/upload', { method: 'POST', body })
+  },
   getSkill: (id) => request(`/api/skills/${id}`),
   updateSkill: (id, body) =>
     request(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

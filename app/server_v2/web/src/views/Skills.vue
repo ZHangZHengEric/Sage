@@ -8,14 +8,16 @@ const agentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
 const bound = ref([])
 const error = ref('')
 const pending = ref(false)
-const editing = ref('')
-const form = ref({
-  name: '',
-  content: '---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n\nFollow this skill.\n',
-})
+const files = ref([])
+const results = ref([])
+const dragging = ref(false)
+const picker = ref(null)
 
 const hasSkills = computed(() => skills.value.length > 0)
 const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
+const currentAgent = computed(
+  () => agents.value.find((item) => item.id === agentId.value)?.name || agentId.value
+)
 
 async function refresh() {
   const [nextSkills, nextAgents] = await Promise.all([api.listSkills(), api.listAgents()])
@@ -32,19 +34,53 @@ function changeAgent() {
   refresh()
 }
 
-async function save() {
+function isZip(file) {
+  return Boolean(file?.name?.toLowerCase().endsWith('.zip'))
+}
+
+function addFiles(list) {
+  const incoming = Array.from(list || [])
+  const rejected = incoming.filter((item) => !isZip(item))
+  const accepted = incoming.filter(isZip)
+  const seen = new Set(files.value.map((item) => `${item.name}:${item.size}`))
+  for (const item of accepted) {
+    const key = `${item.name}:${item.size}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    files.value.push(item)
+  }
+  results.value = rejected.map((item) => ({
+    filename: item.name,
+    success: false,
+    message: '仅支持 ZIP 文件',
+  }))
+  error.value = accepted.length ? '' : rejected[0] ? '仅支持 ZIP 文件' : error.value
+}
+
+function onPick(event) {
+  addFiles(event.target.files)
+  event.target.value = ''
+}
+
+function onDrop(event) {
+  dragging.value = false
+  addFiles(event.dataTransfer?.files)
+}
+
+function removeFile(index) {
+  files.value.splice(index, 1)
+}
+
+async function upload() {
+  if (!files.value.length || pending.value) return
   error.value = ''
   pending.value = true
   try {
-    if (editing.value) {
-      await api.updateSkill(editing.value, { content: form.value.content })
-    } else {
-      await api.publishSkill({ name: form.value.name, content: form.value.content })
-    }
-    editing.value = ''
-    form.value = {
-      name: '',
-      content: '---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n\nFollow this skill.\n',
+    const payload = await api.uploadSkills(files.value)
+    results.value = payload.results || []
+    files.value = []
+    if (payload.failed_count) {
+      error.value = `${payload.success_count} 个成功，${payload.failed_count} 个失败`
     }
     await refresh()
   } catch (exc) {
@@ -52,12 +88,6 @@ async function save() {
   } finally {
     pending.value = false
   }
-}
-
-async function edit(item) {
-  const detail = await api.getSkill(item.skill_id)
-  editing.value = item.skill_id
-  form.value = { name: item.name, content: detail.content || '' }
 }
 
 async function remove(id) {
@@ -96,23 +126,48 @@ onMounted(async () => {
         </select>
       </label>
     </header>
-    <form class="panel" @submit.prevent="save">
-      <label class="field">
-        <span>名称</span>
-        <input v-model="form.name" :disabled="Boolean(editing)" required />
-      </label>
-      <label class="field">
-        <span>SKILL.md</span>
-        <textarea v-model="form.content" rows="10" required />
-      </label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button class="btn cta" type="submit" :disabled="pending">
-        {{ editing ? '保存新版本' : '发布技能' }}
+    <div class="panel">
+      <input
+        ref="picker"
+        class="sr-only"
+        type="file"
+        accept=".zip,application/zip"
+        multiple
+        @change="onPick"
+      />
+      <button
+        class="dropzone"
+        type="button"
+        :class="{ active: dragging }"
+        @click="picker?.click()"
+        @dragenter.prevent="dragging = true"
+        @dragover.prevent="dragging = true"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
+      >
+        <strong>批量选择 ZIP 技能包</strong>
+        <span>可一次选多个，或拖到这里。每个 ZIP 需包含 SKILL.md。</span>
       </button>
-    </form>
+      <ul v-if="files.length" class="file-list">
+        <li v-for="(item, index) in files" :key="`${item.name}-${index}`">
+          <span>{{ item.name }}</span>
+          <button class="btn ghost" type="button" @click="removeFile(index)">移除</button>
+        </li>
+      </ul>
+      <ul v-if="results.length" class="file-list">
+        <li v-for="item in results" :key="item.filename" :class="{ fail: !item.success }">
+          <span>{{ item.filename }}</span>
+          <small :class="item.success ? 'muted' : 'error'">{{ item.message }}</small>
+        </li>
+      </ul>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <button class="btn cta" type="button" :disabled="pending || !files.length" @click="upload">
+        {{ pending ? '正在上传…' : '上传技能包' }}
+      </button>
+    </div>
     <div class="panel stack">
       <h2>已发布</h2>
-      <p v-if="!hasSkills" class="empty">还没有技能。发布后勾选即可给对话使用，未修改时不会拷到工作区。</p>
+      <p v-if="!hasSkills" class="empty">还没有技能。上传 ZIP 后勾选即可给对话使用，未修改时不会拷到工作区。</p>
       <table v-else>
         <thead>
           <tr><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
@@ -131,11 +186,10 @@ onMounted(async () => {
                   :checked="boundNames.has(item.name)"
                   @change="toggleBind(item)"
                 />
-                关联 main
+                关联 {{ currentAgent }}
               </label>
             </td>
             <td class="row">
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
               <button class="btn ghost" type="button" @click="remove(item.skill_id)">删除</button>
             </td>
           </tr>

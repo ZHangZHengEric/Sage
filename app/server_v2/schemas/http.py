@@ -61,6 +61,13 @@ class AgentPublic(BaseModel):
     skills: list[str] = Field(default_factory=list)
 
 
+class ToolPublic(BaseModel):
+    name: str
+    category: str = ""
+    source: str = "official"
+    default: bool = False
+
+
 class McpBody(BaseModel):
     name: str
     protocol: str = "stdio"
@@ -154,6 +161,20 @@ class SkillPublic(BaseModel):
     workspace_status: str | None = None
 
 
+class SkillUploadItem(BaseModel):
+    filename: str
+    success: bool
+    message: str
+    skill: SkillPublic | None = None
+
+
+class SkillUploadResult(BaseModel):
+    results: list[SkillUploadItem] = Field(default_factory=list)
+    success_count: int = 0
+    failed_count: int = 0
+    skills: list[SkillPublic] = Field(default_factory=list)
+
+
 class ModelPublic(BaseModel):
     id: str
     protocol: str
@@ -166,6 +187,7 @@ class ThreadPublic(BaseModel):
     thread_id: str
     user_id: str
     title: str
+    agent_id: str = ""
     updated_at: str
 
 

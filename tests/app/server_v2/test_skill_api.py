@@ -1,7 +1,20 @@
+import io
+import zipfile
+
 from fastapi.testclient import TestClient
 
 from app.server_v2.app import create_app
+from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.domain.skills import inspect_skill_zip
 from tests.app.server_v2.conftest import make_test_service, register_and_login
+
+
+def _zip_bytes(files: dict[str, str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return buffer.getvalue()
 
 
 def _client(tmp_path):
@@ -68,3 +81,51 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
         ).read_text(encoding="utf-8")
         assert "# Demo" in catalog_text
         assert "# Local" not in catalog_text
+
+
+def test_inspect_zip_unwraps_wrapper_folder_and_rejects_traversal():
+    wrapped = _zip_bytes(
+        {
+            "demo/SKILL.md": "---\nname: demo\ndescription: From zip\n---\n\n# Demo\n",
+            "demo/notes.txt": "keep",
+        }
+    )
+    package = inspect_skill_zip(wrapped, filename="demo.zip")
+    assert package.name == "demo"
+    assert set(package.files) == {"SKILL.md", "notes.txt"}
+
+    sneaky = io.BytesIO()
+    with zipfile.ZipFile(sneaky, "w") as archive:
+        archive.writestr("../SKILL.md", "---\nname: evil\ndescription: no\n---\n")
+    try:
+        inspect_skill_zip(sneaky.getvalue(), filename="evil.zip")
+    except ServerV2Error as exc:
+        assert exc.reason == "validation"
+    else:
+        raise AssertionError("zip slip should be rejected")
+
+
+def test_upload_zip_batch_partial_success(tmp_path):
+    good = _zip_bytes(
+        {"writer/SKILL.md": "---\nname: writer\ndescription: Writer\n---\n\n# Writer\n"}
+    )
+    with _client(tmp_path)[0] as client:
+        token = register_and_login(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/skills/upload",
+            files=[
+                ("files", ("writer.zip", good, "application/zip")),
+                ("files", ("notes.txt", b"not a zip", "text/plain")),
+            ],
+            headers=headers,
+        )
+        assert response.status_code == 200
+        payload = response.json()["data"]
+        assert payload["success_count"] == 1
+        assert payload["failed_count"] == 1
+        assert payload["skills"][0]["name"] == "writer"
+        assert payload["skills"][0]["artifact_path"].startswith("users/")
+        assert payload["results"][1]["success"] is False
+        listed = client.get("/api/skills", headers=headers)
+        assert [item["name"] for item in listed.json()["data"]] == ["writer"]
