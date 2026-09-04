@@ -6,6 +6,7 @@ use std::path::PathBuf;
 const VALID_AGENT_MODES: &[&str] = &["simple", "fibre", "team"];
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_startup_options(
         &mut self,
         agent_id: Option<String>,
@@ -15,7 +16,14 @@ impl App {
         workspace: Option<PathBuf>,
         sandbox_type: Option<String>,
         sandbox_approval_mode: Option<String>,
+        runtime: Option<String>,
     ) {
+        if let Some(runtime) = runtime
+            .as_deref()
+            .and_then(crate::backend::BackendRuntime::parse)
+        {
+            self.runtime = runtime;
+        }
         self.agent_config_path = agent_config;
         self.selected_agent_id = if self.agent_config_path.is_some() {
             None

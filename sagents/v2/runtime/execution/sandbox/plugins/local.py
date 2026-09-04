@@ -22,7 +22,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from sagents.v2.contracts.common import new_id, utc_now
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.execution.sandbox.contracts import (
+    MUTATING_FILE_OPERATIONS,
     FileOperation,
     FileStat,
     FileSystemMode,
@@ -597,17 +599,21 @@ class LocalWorkspaceSandboxProvider:
             raise ValueError("sandbox reference is unknown")
         return row
 
+    @staticmethod
+    def _requested_path(row: _LocalRow, path: str) -> Path:
+        """把 wire path / 宿主绝对路径 / 相对路径统一成未解析的宿主路径。"""
+
+        root_prefix = row.spec.workspace_root.rstrip("/") + "/"
+        if path == row.spec.workspace_root:
+            return row.root
+        if path.startswith(root_prefix):
+            return row.root / path[len(root_prefix) :]
+        if Path(path).is_absolute():
+            return Path(path).expanduser()
+        return row.root / path
+
     def _path(self, row: _LocalRow, path: str) -> Path:
-        relative = path
-        if relative == row.spec.workspace_root:
-            candidate = row.root
-        elif relative.startswith(row.spec.workspace_root.rstrip("/") + "/"):
-            relative = relative[len(row.spec.workspace_root.rstrip("/")) + 1 :]
-            candidate = (row.root / relative).resolve()
-        elif Path(relative).is_absolute():
-            candidate = Path(relative).expanduser().resolve()
-        else:
-            candidate = (row.root / relative).resolve()
+        candidate = self._requested_path(row, path).resolve()
         if candidate != row.root and row.root not in candidate.parents:
             raise PermissionError("path is outside the workspace")
         allowed = False
@@ -649,12 +655,53 @@ class LocalWorkspaceSandboxProvider:
         if operation not in row.spec.filesystem.allowed_operations:
             raise PermissionError(f"file operation {operation.value!r} is not allowed")
         candidate = self._path(row, path)
+        if operation in MUTATING_FILE_OPERATIONS:
+            self._deny_protected(row, path, candidate)
         if (
             operation in {FileOperation.READ, FileOperation.LIST, FileOperation.DELETE}
             and not candidate.exists()
         ):
             raise FileNotFoundError(path)
         return candidate
+
+    def _deny_protected(self, row: _LocalRow, path: str, candidate: Path) -> None:
+        """写类操作命中 `protected_paths` 时拒绝。
+
+        同时检查解析后的真实路径（symlink 指向受保护目录）和未解析的字面路径
+        （受保护条目本身是指向工作区内其他目录的 symlink），两者任一命中即拒绝。
+        """
+
+        policy = row.spec.filesystem
+        if not policy.protected_paths:
+            return
+        subjects = [candidate.relative_to(row.root).as_posix()]
+        lexical = Path(os.path.normpath(self._requested_path(row, path)))
+        try:
+            subjects.append(lexical.relative_to(row.root).as_posix())
+        except ValueError:
+            # 字面路径落在工作区外（例如经宿主 symlink 进入）；解析后的路径
+            # 已经在上面覆盖。
+            pass
+        for subject in subjects:
+            entry = policy.protected_path_for(subject)
+            if entry is not None:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="sandbox.protected_path",
+                        category=ErrorCategory.POLICY_DENIED,
+                        message=(
+                            f"path {path!r} is protected by sandbox policy "
+                            f"({entry})"
+                        ),
+                        safe_to_resume=True,
+                        # 拒绝发生在任何写入之前：让执行器按"干净失败"处理，
+                        # 不进入 outcome-unknown 的人工核对流程。
+                        metadata={
+                            "protected_path": entry,
+                            "side_effect_state": "not_applied",
+                        },
+                    )
+                )
 
     def _verify(self, row, operation, intent, grant):
         signature = hmac.new(

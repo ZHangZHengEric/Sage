@@ -384,6 +384,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
         workspace: None,
         sandbox_type: None,
         sandbox_approval_mode: None,
+        runtime: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
@@ -393,6 +394,7 @@ fn startup_options_merge_drops_agent_fallbacks_when_config_present() {
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
         sandbox_approval_mode: Some("untrusted".to_string()),
+        runtime: None,
     });
 
     assert_eq!(merged.agent_id.as_deref(), None);
@@ -417,6 +419,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
         workspace: None,
         sandbox_type: Some("remote".to_string()),
         sandbox_approval_mode: Some("never".to_string()),
+        runtime: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("agent_demo".to_string()),
@@ -426,6 +429,7 @@ fn startup_options_merge_uses_agent_fallbacks_without_config() {
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("local".to_string()),
         sandbox_approval_mode: Some("untrusted".to_string()),
+        runtime: None,
     });
 
     assert_eq!(merged.agent_id.as_deref(), Some("agent_demo"));
@@ -447,6 +451,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
         workspace: None,
         sandbox_type: None,
         sandbox_approval_mode: None,
+        runtime: None,
     }
     .with_fallbacks(super::StartupOptions {
         agent_id: Some("persisted_agent".to_string()),
@@ -456,6 +461,7 @@ fn startup_options_merge_keeps_explicit_mode_with_config() {
         workspace: Some("/tmp/demo-workspace".to_string()),
         sandbox_type: Some("passthrough".to_string()),
         sandbox_approval_mode: Some("untrusted".to_string()),
+        runtime: None,
     });
 
     assert_eq!(merged.agent_id, None);
@@ -541,4 +547,32 @@ impl StartupBehavior {
     fn matches_run_none(&self) -> bool {
         matches!(self, StartupBehavior::Run { action: None, .. })
     }
+}
+
+#[test]
+fn runtime_option_selects_the_v2_backend() {
+    let parsed = super::parse_startup_action(
+        ["--runtime", "v2", "run", "hello"]
+            .into_iter()
+            .map(ToString::to_string),
+    )
+    .expect("runtime option should parse");
+    let super::StartupBehavior::Run { options, .. } = parsed else {
+        panic!("expected a run behaviour");
+    };
+    assert_eq!(options.runtime.as_deref(), Some("v2"));
+
+    let invalid =
+        super::parse_startup_action(["--runtime", "v3"].into_iter().map(ToString::to_string));
+    assert!(invalid
+        .err()
+        .map(|err| err.to_string().contains("--runtime must be one of: v1, v2"))
+        .unwrap_or(false));
+
+    let merged = super::StartupOptions::default().with_fallbacks(super::StartupOptions {
+        runtime: Some("v2".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(merged.runtime.as_deref(), Some("v2"));
+    assert!(super::help::usage_text().contains("--runtime <v1|v2>"));
 }
