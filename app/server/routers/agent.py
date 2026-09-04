@@ -371,7 +371,7 @@ async def download_file(
         logger.info(f"Download resolved: path={path}")
         return FileResponse(path=path, filename=filename, media_type=media_type)
     except Exception as e:
-        logger.error(f"Download failed: {e}")
+        logger.warning(f"Download failed: {e}")
         raise
 
 
