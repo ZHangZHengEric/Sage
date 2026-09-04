@@ -151,7 +151,11 @@ fn parse_interaction(object: &Map<String, Value>) -> Vec<BackendEvent> {
         .and_then(Value::as_object)
         .unwrap_or(&empty);
 
-    if interaction_type == "approval" {
+    // 人工核对（工具结果未知）也是 approval 类型，但决定是 confirm_succeeded /
+    // mark_failed / cancel（可自动核对时还有 reconcile），不是放行：按输入请求处理。
+    let is_sandbox_approval =
+        interaction_type == "approval" && allowed.iter().any(|decision| decision == "approve_once");
+    if is_sandbox_approval {
         let tool_name = str_field(payload, "tool_name").unwrap_or("tool");
         let arguments = payload
             .get("arguments")
@@ -207,6 +211,19 @@ fn parse_interaction(object: &Map<String, Value>) -> Vec<BackendEvent> {
     }
     if let Some(prompt) = str_field(payload, "prompt") {
         lines.push(prompt.to_string());
+    }
+    if let Some(tool_name) = str_field(payload, "tool_name") {
+        let arguments = payload
+            .get("arguments")
+            .map(|value| match value {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default();
+        lines.push(truncate(&format!("tool: {tool_name} {arguments}"), 400));
+    }
+    if let Some(code) = str_field(payload, "error_code") {
+        lines.push(format!("error: {code}"));
     }
     if let Some(error) = payload.get("error").and_then(Value::as_object) {
         let code = str_field(error, "code").unwrap_or("error");

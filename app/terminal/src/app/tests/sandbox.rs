@@ -466,6 +466,28 @@ fn v1_input_while_busy_is_still_submitted_as_a_task() {
 }
 
 #[test]
+fn v2_reconciliation_request_explains_approve_and_deny() {
+    let mut app = App::new();
+    let _ = app.take_pending_history_lines();
+    app.apply_v2_input_request(crate::backend::V2InputRequest {
+        interaction_id: "interaction_r".to_string(),
+        interaction_type: "approval".to_string(),
+        prompt: "tool: file_write {\"file_path\":\"notes.txt\"}\nerror: tool.provider_error"
+            .to_string(),
+        allowed_decisions: vec![
+            "confirm_succeeded".to_string(),
+            "mark_failed".to_string(),
+            "cancel".to_string(),
+        ],
+    });
+
+    let rendered = rendered_history(&app);
+    assert!(rendered.contains("allowed: confirm_succeeded, mark_failed, cancel"));
+    assert!(rendered.contains("/approve (it succeeded) / /deny (mark it failed)"));
+    assert!(app.pending_v2_input.is_some());
+}
+
+#[test]
 fn v2_input_request_is_shown_and_kept_pending() {
     let mut app = App::new();
     let _ = app.take_pending_history_lines();

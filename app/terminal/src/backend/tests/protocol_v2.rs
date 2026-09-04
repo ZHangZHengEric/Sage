@@ -263,6 +263,26 @@ fn v2_approval_interaction_becomes_a_sandbox_approval_request() {
 }
 
 #[test]
+fn v2_reconciliation_prompt_is_an_input_request_not_a_sandbox_approval() {
+    let events = parse_backend_line(
+        r#"{"type":"cli_v2_interaction","run_id":"run_1","interaction_id":"interaction_r","interaction_type":"approval","allowed_decisions":["confirm_succeeded","mark_failed","cancel"],"payload":{"title":"Tool outcome unknown","prompt":"Did the call take effect?","reason":"tool_outcome_unknown","tool_name":"file_write","arguments":{"file_path":"notes.txt"},"error_code":"tool.provider_error"}}"#,
+    );
+    let [BackendEvent::InputRequested(request)] = events.as_slice() else {
+        panic!("expected an input request, got {} events", events.len());
+    };
+    assert_eq!(request.interaction_id, "interaction_r");
+    assert_eq!(
+        request.allowed_decisions,
+        vec!["confirm_succeeded", "mark_failed", "cancel"]
+    );
+    assert!(request.prompt.contains("Did the call take effect?"));
+    assert!(request
+        .prompt
+        .contains("tool: file_write {\"file_path\":\"notes.txt\"}"));
+    assert!(request.prompt.contains("error: tool.provider_error"));
+}
+
+#[test]
 fn v2_non_approval_interaction_becomes_an_input_request() {
     let events = parse_backend_line(
         r#"{"type":"cli_v2_interaction","run_id":"run_1","interaction_id":"interaction_q","interaction_type":"user_input",

@@ -103,9 +103,16 @@ impl App {
         if !request.prompt.trim().is_empty() {
             lines.push(request.prompt.clone());
         }
+        let reconciles = request
+            .allowed_decisions
+            .iter()
+            .any(|decision| decision == "confirm_succeeded");
         lines.push(format!("allowed: {}", request.allowed_decisions.join(", ")));
         lines.push(if accepts_text {
             "Type your answer in the composer to reply; /deny cancels.".to_string()
+        } else if reconciles {
+            "Type one of the allowed decisions, or /approve (it succeeded) / /deny (mark it failed)."
+                .to_string()
         } else {
             "Use /approve to retry or /deny to cancel.".to_string()
         });
