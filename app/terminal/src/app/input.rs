@@ -1,4 +1,5 @@
-use crate::app::{App, SubmitAction};
+use crate::app::{App, MessageKind, SubmitAction};
+use crate::backend::BackendRuntime;
 
 impl App {
     pub fn submit_input(&mut self) -> SubmitAction {
@@ -21,8 +22,32 @@ impl App {
             return SubmitAction::Handled;
         }
 
+        if self.busy && self.runtime == BackendRuntime::V2 && self.pending_v2_input.is_none() {
+            return self.begin_steer(text);
+        }
+
         self.begin_task_submission(text.clone(), true);
         SubmitAction::RunTask(text)
+    }
+
+    /// v2 Run 进行中的 composer 输入：发 `v2_steer` 帧，在下一个安全模型边界生效。
+    ///
+    /// 审批挂起时 CLI 正在等决策帧、不读 steer，所以先让用户回答审批；
+    /// 非审批交互（`pending_v2_input`）的输入是答案，不走这里。
+    pub(crate) fn begin_steer(&mut self, text: String) -> SubmitAction {
+        if self.pending_sandbox_approval.is_some() {
+            self.queue_message(
+                MessageKind::System,
+                "answer the pending approval first (/approve, /remember or /deny); \
+                 input typed now is not sent to the run",
+            );
+            self.status = format!("approval required  {}", self.session_label());
+            return SubmitAction::Handled;
+        }
+        self.queue_message(MessageKind::User, text.clone());
+        self.record_input_history(&text);
+        self.status = format!("steering  {}", self.session_label());
+        SubmitAction::SteerTask(text)
     }
 
     pub(crate) fn begin_task_submission(&mut self, task: String, queue_user_message: bool) {

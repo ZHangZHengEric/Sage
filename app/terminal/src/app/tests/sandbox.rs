@@ -378,6 +378,71 @@ fn v2_session_is_only_known_after_the_backend_announces_it() {
 }
 
 #[test]
+fn v2_input_while_busy_becomes_a_steer_instead_of_a_new_task() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    app.input = "first task".to_string();
+    app.input_cursor = app.input.len();
+    assert!(matches!(app.submit_input(), SubmitAction::RunTask(_)));
+    assert!(app.busy);
+    let _ = app.take_pending_history_lines();
+
+    app.input = "also update the tests".to_string();
+    app.input_cursor = app.input.len();
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::SteerTask(text) if text == "also update the tests"));
+    // 仍是同一个任务在跑：不重置计时、不覆盖 current_task。
+    assert!(app.busy);
+    assert_eq!(app.current_task.as_deref(), Some("first task"));
+    assert_eq!(app.last_submitted_task.as_deref(), Some("first task"));
+    assert!(rendered_history(&app).contains("also update the tests"));
+    assert_eq!(
+        app.input_history.last().map(String::as_str),
+        Some("also update the tests")
+    );
+    assert!(app.status.starts_with("steering"));
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn v2_steer_is_refused_while_an_approval_is_pending() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    app.begin_task_submission("first task".to_string(), true);
+    app.pending_sandbox_approval = Some(SandboxApprovalRequest {
+        command: "file_write hello.txt".to_string(),
+        approval_id: "interaction_1".to_string(),
+        command_hash: None,
+        category: Some("write".to_string()),
+        reason: None,
+        approval_mode: None,
+        hint: Some("/approve once · /deny".to_string()),
+    });
+    let _ = app.take_pending_history_lines();
+
+    app.input = "also update the tests".to_string();
+    app.input_cursor = app.input.len();
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::Handled));
+    assert!(rendered_history(&app).contains("answer the pending approval first"));
+    assert!(app.status.starts_with("approval required"));
+}
+
+#[test]
+fn v1_input_while_busy_is_still_submitted_as_a_task() {
+    let mut app = App::new();
+    app.begin_task_submission("first task".to_string(), true);
+
+    app.input = "next prompt".to_string();
+    app.input_cursor = app.input.len();
+
+    assert!(matches!(app.submit_input(), SubmitAction::RunTask(text) if text == "next prompt"));
+    assert_eq!(app.current_task.as_deref(), Some("next prompt"));
+}
+
+#[test]
 fn v2_input_request_is_shown_and_kept_pending() {
     let mut app = App::new();
     let _ = app.take_pending_history_lines();

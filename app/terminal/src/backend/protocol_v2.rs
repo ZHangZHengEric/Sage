@@ -17,6 +17,7 @@ use crate::backend::types::{
 
 pub(crate) const V2_PROTOCOL_VERSION: &str = "sage.runtime/v2";
 pub(crate) const V2_DECISION_TYPE: &str = "v2_interaction_decision";
+pub(crate) const V2_STEER_TYPE: &str = "v2_steer";
 
 /// 一次 Run 内的流式状态：哪些 item 已经以增量形式输出过。
 #[derive(Default)]
