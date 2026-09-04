@@ -5265,6 +5265,19 @@ void main() {
           tester.view.physicalSize = const Size(1200, 800);
           await tester.pumpWidget(SageDesktopV2App(controller: controller));
           await tester.pumpAndSettle();
+          final sendCenter = tester.getCenter(
+            find.byKey(const ValueKey('send-button')),
+          );
+          for (final key in [
+            'composer-upload-button',
+            'agent-picker',
+            'approval-mode-picker',
+          ]) {
+            expect(
+              tester.getCenter(find.byKey(ValueKey(key))).dy,
+              closeTo(sendCenter.dy, 0.1),
+            );
+          }
           controller.setInvocationMode(InvocationMode.plan);
           await tester.pumpAndSettle();
           final chip = find.byKey(const ValueKey('composer-mode-chip'));
@@ -5300,10 +5313,27 @@ void main() {
                   ),
               isFalse,
             );
-            if (width == 280) {
+            final add = tester.getRect(
+              find.byKey(const ValueKey('composer-upload-button')),
+            );
+            final send = tester.getRect(
+              find.byKey(const ValueKey('send-button')),
+            );
+            final agent = tester.getRect(
+              find.byKey(const ValueKey('agent-picker')),
+            );
+            final approval = tester.getRect(
+              find.byKey(const ValueKey('approval-mode-picker')),
+            );
+            expect(add.center.dy, closeTo(send.center.dy, 0.1));
+            expect(agent.center.dy, closeTo(approval.center.dy, 0.1));
+            expect(add.height, lessThanOrEqualTo(32));
+            expect(agent.height, lessThanOrEqualTo(28));
+            if (tester.getRect(chip).top < tester.getRect(cluster).bottom) {
+              expect(agent.center.dy, closeTo(add.center.dy, 0.1));
               expect(
-                tester.getRect(chip).top,
-                greaterThanOrEqualTo(tester.getRect(cluster).bottom),
+                tester.getRect(chip).center.dy,
+                closeTo(add.center.dy, 0.1),
               );
             }
           }

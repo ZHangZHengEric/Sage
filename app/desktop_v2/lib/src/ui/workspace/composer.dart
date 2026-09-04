@@ -1,5 +1,8 @@
 part of '../workspace_screen.dart';
 
+const _composerActionSize = 32.0;
+const _composerControlHeight = 28.0;
+
 class _Composer extends StatefulWidget {
   const _Composer({required this.controller, required this.conversation});
 
@@ -360,29 +363,28 @@ class _ComposerState extends State<_Composer> {
                                   : 'workspace.goalModeShort',
                             ),
                           ) +
-                          42
+                          36
                     : 0.0;
                 var compactApproval = false;
                 var compactAgent = false;
                 // Include actual localized label widths before falling back to
                 // a second line. The fixed widths cover icons and padding.
                 double toolbarWidth() =>
-                    38 +
-                    34 +
-                    24 +
+                    _composerActionSize * 2 +
+                    12 +
                     7 +
-                    (compactAgent ? 44 : 53 + agentWidth) +
-                    (compactApproval ? 44 : 53 + approvalWidth) +
-                    (hasMode ? chipWidth + 8 : 0);
+                    (compactAgent ? 40 : 49 + agentWidth) +
+                    (compactApproval ? 40 : 49 + approvalWidth) +
+                    (hasMode ? chipWidth + 6 : 0);
                 if (toolbarWidth() > constraints.maxWidth) {
                   compactApproval = true;
                 }
                 if (toolbarWidth() > constraints.maxWidth) {
                   compactAgent = true;
                 }
-                final controlGap = compactApproval ? 5.0 : 8.0;
+                const controlGap = 6.0;
                 return Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     _SkillPicker(
                       controller: widget.controller,
@@ -509,17 +511,20 @@ class _ComposerModeChip extends StatelessWidget {
               borderRadius: BorderRadius.circular(18),
               onTap: enabled ? onClose : null,
               focusColor: colors.primary.withValues(alpha: 0.2),
-              child: Padding(
+              child: Container(
+                constraints: const BoxConstraints(
+                  minHeight: _composerControlHeight,
+                ),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
+                  horizontal: 8,
+                  vertical: 4,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       CupertinoIcons.xmark_circle_fill,
-                      size: 16,
+                      size: 14,
                       color: enabled
                           ? colors.onSurfaceVariant
                           : colors.onSurfaceVariant.withValues(alpha: 0.45),
@@ -1213,10 +1218,10 @@ class _AgentPickerState extends State<_AgentPicker> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               curve: Curves.easeOutCubic,
-              padding: EdgeInsets.symmetric(
-                horizontal: widget.compact ? 8 : 10,
-                vertical: 6,
+              constraints: const BoxConstraints(
+                minHeight: _composerControlHeight,
               ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: _isOpen
                     ? colors.primary.withValues(alpha: 0.12)
@@ -1384,10 +1389,10 @@ class _ApprovalModePickerState extends State<_ApprovalModePicker> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               curve: Curves.easeOutCubic,
-              padding: EdgeInsets.symmetric(
-                horizontal: widget.compact ? 8 : 10,
-                vertical: 6,
+              constraints: const BoxConstraints(
+                minHeight: _composerControlHeight,
               ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: _isOpen
                     ? colors.primary.withValues(alpha: 0.12)
@@ -1771,7 +1776,9 @@ class _SkillPickerState extends State<_SkillPicker> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 140),
                 curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                width: _composerActionSize,
+                height: _composerActionSize,
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color:
                       _isOpen ||
@@ -1783,7 +1790,7 @@ class _SkillPickerState extends State<_SkillPicker> {
                 ),
                 child: Icon(
                   CupertinoIcons.add,
-                  size: 20,
+                  size: 18,
                   color:
                       _isOpen ||
                           widget.conversation.invocationMode !=
@@ -1834,8 +1841,8 @@ class _ComposerSendButton extends StatelessWidget {
         onTap: enabled ? (shouldStop ? onStop : onSend) : null,
         borderRadius: BorderRadius.circular(17),
         child: SizedBox(
-          width: 34,
-          height: 34,
+          width: _composerActionSize,
+          height: _composerActionSize,
           child: Center(
             child: Container(
               width: 28,
