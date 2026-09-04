@@ -59,6 +59,7 @@ class AgentRecord(BaseModel):
     id: str
     name: str
     instructions: str = ""
+    skills: list[str] = Field(default_factory=list)
 
 
 class UserCatalog(BaseModel):

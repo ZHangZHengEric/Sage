@@ -18,6 +18,7 @@ from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.services.runtime import ServerV2Service
 from tests.app.server_v2.fakes import (
     MemoryCatalogStore,
+    MemorySkillStore,
     MemoryThreadIndex,
     MemoryUserStore,
 )
@@ -78,6 +79,7 @@ def make_test_service(
         users=MemoryUserStore(),
         catalog=MemoryCatalogStore(),
         threads=MemoryThreadIndex(),
+        skills=MemorySkillStore(),
         replay=None if redis is not None else AguiReplayStore(),
     )
 

@@ -38,6 +38,24 @@ export const api = {
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
+  listSkills: () => request('/api/skills'),
+  publishSkill: (body) =>
+    request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),
+  getSkill: (id) => request(`/api/skills/${id}`),
+  updateSkill: (id, body) =>
+    request(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteSkill: (id) => request(`/api/skills/${id}`, { method: 'DELETE' }),
+  listAgentSkills: (agentId) => request(`/api/agents/${agentId}/skills`),
+  bindAgentSkills: (agentId, names) =>
+    request(`/api/agents/${agentId}/skills`, {
+      method: 'PUT',
+      body: JSON.stringify({ names }),
+    }),
+  writeWorkspaceSkill: (name, content) =>
+    request(`/api/workspace/skills/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
   listThreads: () => request('/api/threads'),
   threadEvents: (id) => request(`/api/threads/${id}/events`),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),

@@ -30,6 +30,7 @@ async function logout() {
       <nav aria-label="主导航">
         <router-link to="/">对话</router-link>
         <router-link to="/models">模型</router-link>
+        <router-link to="/skills">技能</router-link>
         <router-link v-if="isAdmin()" to="/admin">总览</router-link>
       </nav>
       <div class="userbox">
