@@ -1,4 +1,5 @@
 use crate::app::{App, MessageKind};
+use crate::backend::BackendRuntime;
 
 impl App {
     pub fn load_resumed_session(
@@ -8,6 +9,9 @@ impl App {
     ) {
         self.sync_session_sequence(&session_id);
         self.session_id = session_id;
+        // v2 的会话 id 来自 v2 存储（列表 / inspect），下次起后端可以回传 --session-id。
+        self.v2_session_known = self.runtime == BackendRuntime::V2;
+        self.pending_v2_input = None;
         self.clear_input();
         self.busy = false;
         self.clear_live_response_state();
