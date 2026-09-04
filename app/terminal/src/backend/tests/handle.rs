@@ -287,8 +287,11 @@ fn backend_handle_spawns_v2_chat_and_writes_v2_decision_frames() {
             serde_json::json!({"text": "staging"}),
         )
         .expect("answer should be written");
-    // 让假后端把三行决策都吃掉（每行触发一轮输出）。
-    for _ in 0..3 {
+    handle
+        .send_v2_steer("also update the tests")
+        .expect("steer should be written");
+    // 让假后端把四行都吃掉（每行触发一轮输出）。
+    for _ in 0..4 {
         let _ = collect_round_trip(&handle);
     }
 
@@ -321,6 +324,9 @@ fn backend_handle_spawns_v2_chat_and_writes_v2_decision_frames() {
     assert_eq!(answer["interaction_id"], "interaction_2");
     assert_eq!(answer["decision"], "submit");
     assert_eq!(answer["payload"]["text"], "staging");
+    let steer: Value = serde_json::from_str(prompt_lines.next().expect("steer line")).unwrap();
+    assert_eq!(steer["type"], "v2_steer");
+    assert_eq!(steer["text"], "also update the tests");
 
     handle.stop();
     let _ = wait_for_exit(&handle);

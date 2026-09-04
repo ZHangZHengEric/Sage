@@ -352,6 +352,25 @@ fn v2_notices_and_remembered_approvals_show_in_the_transcript() {
 }
 
 #[test]
+fn v2_steer_frames_report_acceptance_and_rejection() {
+    let accepted = parse_backend_line(
+        r#"{"type":"cli_v2_steer","run_id":"run_1","status":"accepted","text":"also update the tests","detail":null}"#,
+    );
+    assert!(matches!(
+        accepted.as_slice(),
+        [BackendEvent::Message(MessageKind::Process, text)] if text == "steer accepted: also update the tests"
+    ));
+
+    let rejected = parse_backend_line(
+        r#"{"type":"cli_v2_steer","run_id":"run_1","status":"rejected","text":"too late","detail":"run is already completed"}"#,
+    );
+    assert!(matches!(
+        rejected.as_slice(),
+        [BackendEvent::Message(MessageKind::Process, text)] if text == "steer rejected (run is already completed): too late"
+    ));
+}
+
+#[test]
 fn v1_lines_are_still_parsed_by_the_legacy_protocol() {
     let events = parse_backend_line(r#"{"type":"cli_notice","content":"legacy notice"}"#);
     assert!(matches!(

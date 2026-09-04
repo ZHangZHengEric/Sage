@@ -25,6 +25,7 @@ pub(super) fn handle_submit_action(
         SubmitAction::Noop => Ok(false),
         SubmitAction::Handled => Ok(true),
         SubmitAction::RunTask(task) => chat::run_task(app, backend, task),
+        SubmitAction::SteerTask(text) => chat::steer_task(app, backend, text),
         SubmitAction::Interrupt => chat::interrupt_task(app, backend),
         SubmitAction::RetryLastTask => chat::retry_last_task(app, backend),
         SubmitAction::ApproveSandboxCommand => chat::approve_sandbox_command(app, backend),

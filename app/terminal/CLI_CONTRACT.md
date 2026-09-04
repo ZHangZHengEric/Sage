@@ -164,5 +164,7 @@ session id it previously received in a `cli_v2_session` frame, maps native `mess
 existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
 other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
 Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
-`app/terminal/src/backend/tests/protocol_v2.rs`. Steering frames are not sent by the TUI yet, and the
-TUI session picker still lists v1 sessions only. The surface remains experimental.
+`app/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
+`v2_steer` frame and the `cli_v2_steer` answer is shown in the transcript; an approval must be
+answered first (the CLI reads only decision lines then). The TUI session picker still lists v1
+sessions only. The surface remains experimental.
