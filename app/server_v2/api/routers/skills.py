@@ -1,13 +1,14 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
-from app.server_v2.core.errors import success
+from app.server_v2.core.errors import ServerV2Error, success
 from app.server_v2.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.server_v2.schemas.http import (
     SkillBindBody,
     SkillPublic,
     SkillPublishBody,
     SkillUpdateBody,
+    SkillUploadResult,
     WorkspaceSkillBody,
 )
 
@@ -18,6 +19,28 @@ router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERROR
 async def list_skills(user: CurrentUser, service: ServiceDep):
     skills = await service.skill_catalog.list_visible(user_id=user.user_id, role=user.role)
     return success([item.public_dict() for item in skills])
+
+
+@router.post("/api/skills/upload", response_model=ApiResponse[SkillUploadResult])
+async def upload_skills(
+    user: CurrentUser,
+    service: ServiceDep,
+    files: list[UploadFile] = File(...),
+):
+    if not files:
+        raise ServerV2Error("validation", "select at least one zip")
+    payloads: list[tuple[str, bytes]] = []
+    for item in files:
+        filename = item.filename or "unknown.zip"
+        if not filename.lower().endswith(".zip"):
+            payloads.append((filename, b""))
+            continue
+        payloads.append((filename, await item.read()))
+    return success(
+        await service.skill_catalog.publish_zips(
+            payloads, user_id=user.user_id, role=user.role
+        )
+    )
 
 
 @router.post("/api/skills", response_model=ApiResponse[SkillPublic])

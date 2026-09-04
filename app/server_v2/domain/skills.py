@@ -7,9 +7,11 @@ the Server data root at the edge (repository / runtime), never persisted.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import stat
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -163,7 +165,6 @@ def inspect_skill_directory(source: Path) -> SkillPackage:
     if not skill_md.is_file() or skill_md.is_symlink():
         raise ServerV2Error("validation", "skill package must contain SKILL.md")
     files: dict[str, bytes] = {}
-    digest = hashlib.sha256()
     total = 0
     for candidate in sorted(root.rglob("*")):
         if any(part in {"__pycache__", "node_modules"} for part in candidate.parts):
@@ -180,14 +181,90 @@ def inspect_skill_directory(source: Path) -> SkillPackage:
             raise ServerV2Error("validation", "skill package exceeds size limits")
         files[relative] = content
         total += len(content)
+    return _package_from_files(files, fallback_name=root.name)
+
+
+def inspect_skill_zip(payload: bytes, *, filename: str = "") -> SkillPackage:
+    """Read one skill ZIP in memory. A wrapper folder around SKILL.md is allowed."""
+
+    if not payload:
+        raise ServerV2Error("validation", "zip is empty")
+    if len(payload) > 32 * 1024 * 1024:
+        raise ServerV2Error("validation", "zip exceeds size limits")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload))
+    except zipfile.BadZipFile as exc:
+        raise ServerV2Error("validation", "invalid zip file") from exc
+    files: dict[str, bytes] = {}
+    total = 0
+    with archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            relative = _safe_zip_path(info.filename)
+            if relative is None:
+                continue
+            if info.file_size > 64 * 1024 * 1024:
+                raise ServerV2Error("validation", "skill package exceeds size limits")
+            content = archive.read(info)
+            if len(files) >= 2_000 or total + len(content) > 64 * 1024 * 1024:
+                raise ServerV2Error("validation", "skill package exceeds size limits")
+            files[relative] = content
+            total += len(content)
+    files = _unwrap_zip_root(files)
+    fallback = Path(filename or "skill").stem
+    return _package_from_files(files, fallback_name=fallback)
+
+
+def _safe_zip_path(filename: str) -> str | None:
+    relative = str(filename or "").replace("\\", "/").lstrip("./")
+    if not relative or relative.endswith("/"):
+        return None
+    parts = [part for part in relative.split("/") if part not in {"", "."}]
+    if not parts:
+        return None
+    if parts[0] == "__MACOSX" or parts[-1] in {".DS_Store"}:
+        return None
+    if any(part in {"__pycache__", "node_modules", ".."} for part in parts):
+        if ".." in parts:
+            raise ServerV2Error("validation", f"unsafe path in zip: {filename!r}")
+        return None
+    if relative.startswith("/") or (len(relative) > 1 and relative[1] == ":"):
+        raise ServerV2Error("validation", f"unsafe path in zip: {filename!r}")
+    if relative in {".skill-manifest.json", ".materialized-skill.json"}:
+        return None
+    return "/".join(parts)
+
+
+def _unwrap_zip_root(files: dict[str, bytes]) -> dict[str, bytes]:
+    if "SKILL.md" in files:
+        return files
+    prefixes = {
+        path[: -len("SKILL.md")]
+        for path in files
+        if path.endswith("/SKILL.md")
+    }
+    if len(prefixes) != 1:
+        return files
+    prefix = next(iter(prefixes))
+    if not prefix or not all(path.startswith(prefix) for path in files):
+        return files
+    return {path[len(prefix) :]: body for path, body in files.items() if path[len(prefix) :]}
+
+
+def _package_from_files(files: dict[str, bytes], *, fallback_name: str) -> SkillPackage:
+    if "SKILL.md" not in files:
+        raise ServerV2Error("validation", "skill package must contain SKILL.md")
+    digest = hashlib.sha256()
+    total = 0
+    for relative, content in sorted(files.items()):
         digest.update(relative.encode())
         digest.update(b"\0")
         digest.update(content)
         digest.update(b"\0")
-    if "SKILL.md" not in files:
-        raise ServerV2Error("validation", "skill package must contain SKILL.md")
+        total += len(content)
     description = _description(files["SKILL.md"])
-    name = _front_matter_name(files["SKILL.md"]) or root.name
+    name = _front_matter_name(files["SKILL.md"]) or fallback_name
     return SkillPackage(
         name=normalize_skill_name(name),
         description=description,

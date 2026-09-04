@@ -6,6 +6,7 @@ const agents = ref([])
 const models = ref([])
 const mcp = ref([])
 const skills = ref([])
+const officialTools = ref([])
 const bound = ref([])
 const error = ref('')
 const pending = ref(false)
@@ -15,6 +16,15 @@ const form = ref(emptyForm())
 const hasAgents = computed(() => agents.value.length > 0)
 const mcpTools = computed(() => [...new Set(mcp.value.flatMap((item) => item.tools || []))])
 const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
+const officialGroups = computed(() => {
+  const groups = new Map()
+  for (const item of officialTools.value) {
+    const key = item.category || 'other'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(item)
+  }
+  return [...groups.entries()]
+})
 
 function emptyForm() {
   return {
@@ -27,16 +37,18 @@ function emptyForm() {
 }
 
 async function refresh() {
-  const [nextAgents, nextModels, nextMcp, nextSkills] = await Promise.all([
+  const [nextAgents, nextModels, nextMcp, nextSkills, nextTools] = await Promise.all([
     api.listAgents(),
     api.listModels(),
     api.listMcp(),
     api.listSkills(),
+    api.listTools(),
   ])
   agents.value = nextAgents
   models.value = nextModels
   mcp.value = nextMcp
   skills.value = nextSkills
+  officialTools.value = nextTools
   if (editing.value) {
     bound.value = await api.listAgentSkills(editing.value)
   }
@@ -141,6 +153,21 @@ onMounted(async () => {
           </option>
         </select>
       </label>
+      <div v-if="officialGroups.length" class="field">
+        <span>官方工具</span>
+        <p class="muted">未勾选时对话默认启用文件 / 搜索 / Shell。</p>
+        <div v-for="[category, items] in officialGroups" :key="category" class="stack">
+          <small class="muted">{{ category }}</small>
+          <label v-for="item in items" :key="item.name" class="row">
+            <input
+              type="checkbox"
+              :checked="form.tools.includes(item.name)"
+              @change="toggleTool(item.name)"
+            />
+            {{ item.name }}
+          </label>
+        </div>
+      </div>
       <div v-if="mcpTools.length" class="field">
         <span>MCP 工具</span>
         <label v-for="name in mcpTools" :key="name" class="row">

@@ -30,7 +30,7 @@ const emit = defineEmits(['select', 'create'])
         @click="emit('select', item.thread_id)"
       >
         <span>{{ item.title || '未命名' }}</span>
-        <small>{{ item.thread_id }}</small>
+        <small>{{ item.agent_id ? item.agent_id : item.thread_id }}</small>
       </button>
     </div>
   </aside>

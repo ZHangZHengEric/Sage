@@ -14,7 +14,7 @@ from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
 
-from app.server_v2.agui.mapping import to_start_run
+from app.server_v2.agui.mapping import to_start_run, validate_agui_id
 from app.server_v2.agui.redis_store import RedisAguiReplayStore
 from app.server_v2.agui.replay import AguiRun
 from app.server_v2.agui.sse import (
@@ -27,11 +27,13 @@ from app.server_v2.core.errors import ServerV2Error, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.domain.catalog import require_agent
+from app.server_v2.domain.threads import resolve_thread_agent_id
 from app.server_v2.services.models import (
     HostModelProvider,
     bind_model_user,
     reset_model_user,
 )
+from app.server_v2.services.official import install_sandbox
 from app.server_v2.services.package import server_v2_manifest
 from app.server_v2.services.skill_runtime import install_skill_driver
 from app.server_v2.services.skills import SkillCatalogService
@@ -75,6 +77,9 @@ class ServerV2Service:
         self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
+        self._sandbox_grant_issuer = None
+        self._sandbox_provider = None
+        install_sandbox(self)
 
     @property
     def application(self) -> SAgentApplication:
@@ -192,8 +197,14 @@ class ServerV2Service:
     ):
         props = request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
         requested_agent = str(props.get("agentId") or "").strip()
+        thread_id = validate_agui_id(request.thread_id, field="threadId")
+        existing = await self.threads.find(thread_id)
+        if existing is not None and existing.user_id != user_id:
+            raise ServerV2Error("not_found", "thread not found")
         catalog = await self.catalog.get(user_id)
-        record = require_agent(catalog, requested_agent or None)
+        record = require_agent(
+            catalog, resolve_thread_agent_id(existing, requested_agent) or None
+        )
         enabled = await self.skill_catalog.bound_names(user_id, record.id)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
@@ -201,11 +212,10 @@ class ServerV2Service:
             default_agent_id=record.id,
             enabled_skills=enabled,
         )
-        if agent_id != record.id:
-            record = require_agent(catalog, agent_id)
-        existing = await self.threads.find(thread_id)
-        if existing is not None and existing.user_id != user_id:
-            raise ServerV2Error("not_found", "thread not found")
+        if command.agent_id != record.id:
+            command = command.model_copy(update={"agent_id": record.id})
+            agent_id = record.id
+        await self.threads.upsert(thread_id, user_id, agent_id=record.id)
         claim = await self.replay.claim(
             user_id=user_id, thread_id=thread_id, run_id=run_id
         )
@@ -300,7 +310,9 @@ class ServerV2Service:
             if command.input:
                 first = command.input[0].content[0]
                 title = getattr(first, "text", "")[:80]
-            await self.threads.upsert(run.thread_id, user_id, title=title)
+            await self.threads.upsert(
+                run.thread_id, user_id, title=title, agent_id=agent_id
+            )
             await self.replay.finish(run, "completed")
             logger.info("agui.run.completed", "AG-UI run completed")
         except SageV2Error as exc:

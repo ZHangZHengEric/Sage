@@ -4,9 +4,15 @@ from app.server_v2.api.deps import CurrentUser, ServiceDep
 from app.server_v2.core.errors import success
 from app.server_v2.domain.catalog import delete_agent, require_agent, upsert_agent
 from app.server_v2.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
-from app.server_v2.schemas.http import AgentBody, AgentPublic
+from app.server_v2.schemas.http import AgentBody, AgentPublic, ToolPublic
+from app.server_v2.services.official import official_tool_catalog
 
 router = APIRouter(tags=["agents"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
+
+
+@router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])
+async def list_tools(_: CurrentUser):
+    return success(official_tool_catalog())
 
 
 @router.get("/api/agents", response_model=ApiResponse[list[AgentPublic]])

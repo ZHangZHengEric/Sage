@@ -30,6 +30,7 @@ class ThreadRow(Base):
     thread_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(512))
+    agent_id: Mapped[str] = mapped_column(String(191), default="")
     updated_at: Mapped[str] = mapped_column(String(64))
 
 
@@ -85,3 +86,18 @@ async def create_host_schema(database: Database) -> None:
         raise RuntimeError("database is not started")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(_ensure_thread_agent_id)
+
+
+def _ensure_thread_agent_id(connection) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(connection)
+    if "threads" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("threads")}
+    if "agent_id" in columns:
+        return
+    connection.execute(
+        text("ALTER TABLE threads ADD COLUMN agent_id VARCHAR(191) DEFAULT ''")
+    )

@@ -7,6 +7,7 @@ the tenant workspace already has a local copy.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 from sagents.v2.agent.factory import AgentCompositionFactory
@@ -21,7 +22,6 @@ from sagents.v2.skill import (
     SkillBundle,
     SkillDescriptor,
 )
-from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
@@ -34,6 +34,7 @@ from app.server_v2.domain.skills import (
     workspace_skill_path,
 )
 from app.server_v2.services.mcp import mcp_plugin
+from app.server_v2.services.official import attach_official_tools, resolve_agent_tools
 from app.server_v2.services.package import server_v2_run_manifest
 
 
@@ -151,11 +152,12 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             owner_user_id=user_id, agent_id=agent.id
         )
     )
+    tools = resolve_agent_tools(agent.tools, has_skills=bool(names))
     manifest = server_v2_run_manifest(
         service.settings,
         agent=agent,
         skills=names,
-        tools=tuple(agent.tools),
+        tools=tools,
     )
     resolved = CompositionResolver().resolve(manifest)
     model = _recorded_model(service, _run_model(service, catalog, agent))
@@ -166,62 +168,65 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         run_id=command.idempotency_key,
         model=model,
     )
-    factory = AgentCompositionFactory(
-        service.application.entrypoint().runtime,
-        context_components=ContextComponentBundle(
-            token_estimator=ports.token_estimator,
-            summary_store=_optional_service(service, "context.summary-store"),
-            summarizer=ports.summarizer,
-            reducer=ports.context_reducer,
-        ),
-    )
-    provider = CatalogSkillProvider(records, service.paths.data_root)
-    workspace = ReadThroughSkillWorkspace(service.paths.data_root, user_id, records)
-    loader = factory.create_skill_loader(
-        resolved,
-        agent.id,
-        catalog=provider,
-        source=provider,
-        workspace=workspace,
-        activations=InMemorySkillActivationRepository(),
-        enabled_skills=names,
-        workspace_root="/workspace",
-    )
-    catalogs = []
-    executors = []
+    extra = []
     try:
-        catalogs.append(service.application.service("tool.catalog"))
-        executors.append(service.application.service("tool.executor"))
-    except KeyError:
-        pass
-    if names:
-        skill_tool = SkillToolPlugin(loader, language=service.settings.language)
-        catalogs.append(skill_tool.catalog)
-        executors.append(skill_tool.executor)
-    mcp = mcp_plugin(enabled_mcp_servers(catalog))
-    if mcp is not None:
-        catalogs.append(mcp)
-        executors.append(mcp)
-    if catalogs:
-        tool_catalog = CompositeToolCatalog(tuple(catalogs))
-        tool_executor = CompositeToolExecutor(tuple(executors))
-    else:
-        tool_catalog = ports.tool_catalog or InMemoryToolCatalog(())
-        tool_executor = ports.tool_executor or InMemoryToolExecutor({}, {})
-    loop = factory.create_loop(
-        resolved,
-        agent.id,
-        model=model,
-        tool_catalog=tool_catalog,
-        tool_executor=tool_executor,
-        skill_loader=loader if names else None,
-        continuation_policy=ports.continuation_policy,
-        tool_selection_policy=ports.tool_selection_policy,
-        log_sink=service.application.service("observability.log-sink"),
-        trace_sink=_optional_service(service, "observability.trace-sink"),
-    )
-    loop.expected_resolved_spec_hash = command.resolved_spec_hash
-    return loop, ports
+        official, official_runtime, sandbox_handle = await attach_official_tools(
+            service, command, user_id=user_id
+        )
+        extra.extend([official_runtime, sandbox_handle])
+        factory = AgentCompositionFactory(
+            service.application.entrypoint().runtime,
+            context_components=ContextComponentBundle(
+                token_estimator=ports.token_estimator,
+                summary_store=_optional_service(service, "context.summary-store"),
+                summarizer=ports.summarizer,
+                reducer=ports.context_reducer,
+            ),
+        )
+        provider = CatalogSkillProvider(records, service.paths.data_root)
+        workspace = ReadThroughSkillWorkspace(service.paths.data_root, user_id, records)
+        loader = factory.create_skill_loader(
+            resolved,
+            agent.id,
+            catalog=provider,
+            source=provider,
+            workspace=workspace,
+            activations=InMemorySkillActivationRepository(),
+            enabled_skills=names,
+            workspace_root="/workspace",
+        )
+        catalogs = [official.catalog]
+        executors = [official.executor]
+        if names:
+            skill_tool = SkillToolPlugin(loader, language=service.settings.language)
+            catalogs.append(skill_tool.catalog)
+            executors.append(skill_tool.executor)
+        mcp = mcp_plugin(enabled_mcp_servers(catalog))
+        if mcp is not None:
+            catalogs.append(mcp)
+            executors.append(mcp)
+        loop = factory.create_loop(
+            resolved,
+            agent.id,
+            model=model,
+            tool_catalog=CompositeToolCatalog(tuple(catalogs)),
+            tool_executor=CompositeToolExecutor(tuple(executors)),
+            skill_loader=loader if names else None,
+            continuation_policy=ports.continuation_policy,
+            tool_selection_policy=ports.tool_selection_policy,
+            log_sink=service.application.service("observability.log-sink"),
+            trace_sink=_optional_service(service, "observability.trace-sink"),
+        )
+        loop.expected_resolved_spec_hash = command.resolved_spec_hash
+        return loop, replace(
+            ports, scope_handles=(*ports.scope_handles, *extra)
+        )
+    except BaseException:
+        for handle in extra:
+            closer = getattr(handle, "close", None)
+            if closer is not None:
+                await closer()
+        raise
 
 
 async def compose_skill_loop(service, command: StartRun, *, user_id: str, names: tuple[str, ...]):
