@@ -25,6 +25,7 @@ from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.execution import (
     ExecutionBindingLifecycleCoordinator,
     ExecutionResourceState,
+    RunExecutionBinding,
 )
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.sandbox import (
@@ -351,3 +352,73 @@ async def test_release_failure_keeps_approval_suspended_and_retries_durably():
     released = await coordinator.reconcile_run(run_id=run_id, context=CONTEXT)
     assert released is not None and released.state == ExecutionResourceState.RELEASED
     assert (await provider.inspect(handle.ref)).state == SandboxState.TERMINATED
+
+
+# ---------- RunExecutionBinding.on_suspended 与 lifecycle 字段 ----------
+
+
+def _binding_for(handle, issuer, lifecycle=None) -> RunExecutionBinding:
+    return RunExecutionBinding(
+        run_id=handle.ref.owner_run_id,
+        agent_id="agent",
+        workspace_root="/workspace",
+        workspace_policy="shared_parent",
+        sandbox=handle,
+        grant_issuer=issuer,
+        lifecycle=lifecycle,
+    )
+
+
+@pytest.mark.asyncio
+async def test_binding_without_lifecycle_treats_suspension_as_a_noop():
+    issuer = SandboxGrantIssuer(b"test-key-32-bytes-minimum-length!!")
+    provider = InMemorySandboxProvider(issuer.verification_key)
+    handle = await provider.provision(sandbox_spec(), CONTEXT, run_id="run_plain")
+    binding = _binding_for(handle, issuer)
+
+    assert binding.lifecycle is None
+    await binding.on_suspended(CONTEXT)
+
+    assert binding.closed is False
+    assert (await provider.inspect(handle.ref)).state == SandboxState.READY
+
+
+@pytest.mark.asyncio
+async def test_binding_forwards_suspension_to_its_lifecycle_coordinator():
+    class RecordingLifecycle:
+        def __init__(self):
+            self.calls = []
+
+        async def suspend(self, *, run_id, context):
+            self.calls.append((run_id, context))
+            return None
+
+    issuer = SandboxGrantIssuer(b"test-key-32-bytes-minimum-length!!")
+    provider = InMemorySandboxProvider(issuer.verification_key)
+    handle = await provider.provision(sandbox_spec(), CONTEXT, run_id="run_recorded")
+    lifecycle = RecordingLifecycle()
+    binding = _binding_for(handle, issuer, lifecycle=lifecycle)
+
+    await binding.on_suspended(CONTEXT)
+
+    assert lifecycle.calls == [("run_recorded", CONTEXT)]
+    # 挂起只释放算力，不等于关闭绑定；关闭仍由 Runtime 显式驱动。
+    assert binding.closed is False
+
+
+@pytest.mark.asyncio
+async def test_binding_suspension_releases_safe_compute_through_real_coordinator():
+    store, provider, _jobs, coordinator, _spec, handle = await lifecycle_fixture()
+    run_id = handle.ref.owner_run_id
+    issuer = SandboxGrantIssuer(b"test-key-32-bytes-minimum-length!!")
+    binding = _binding_for(handle, issuer, lifecycle=coordinator)
+    await suspend_run(store, run_id)
+
+    await binding.on_suspended(CONTEXT)
+
+    record = await store.get_execution_resource(run_id)
+    assert record is not None
+    assert record.state == ExecutionResourceState.RELEASED
+    assert record.compute_released is True
+    assert (await provider.inspect(handle.ref)).state == SandboxState.TERMINATED
+    assert (await store.get_run(run_id)).state == RunState.SUSPENDED

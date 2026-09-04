@@ -9,7 +9,12 @@ from sagents.v2.builder import _ExecutionBoundDriver
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
+from sagents.v2.model.contracts import (
+    ModelEventKind,
+    ModelResponse,
+    ModelStreamEvent,
+    ModelToolCall,
+)
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.root import PluginDeclaration
 from sagents.v2.package.manifest.runtime import CapabilitySelection
@@ -25,7 +30,13 @@ from sagents.v2.runtime.extensions import (
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.agent.policy import ExplicitStatusContinuationPolicy
+from sagents.v2.agent.policy import (
+    ApprovalStrategy,
+    DefaultToolPolicy,
+    ExplicitStatusContinuationPolicy,
+    SessionApprovalMemory,
+)
+from sagents.v2.contracts.commands import ReplyInteraction
 from sagents.v2.context import (
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
@@ -52,7 +63,16 @@ from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
 )
+from sagents.v2.tool.contracts import (
+    SideEffectLevel,
+    ToolDefinition,
+    ToolExecutionResult,
+)
 from sagents.v2.tool.official import OfficialToolRuntime
+from sagents.v2.tool.plugins.ephemeral import (
+    InMemoryToolCatalog,
+    InMemoryToolExecutor,
+)
 
 
 class _AuthoritativeOnlySessionStore:
@@ -1340,4 +1360,357 @@ async def test_materialize_agent_rolls_back_run_scopes_on_later_failure(
         assert all(handle._closed for handle in opened_run_handles)
     finally:
         composer._port = original_port
+        await application.close()
+
+
+# ---------- with_tool_policy：宿主注入审批策略 ----------
+
+_POLICY_USER = RequestContext(
+    actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
+)
+_POLICY_READ_TOOL = ToolDefinition(
+    name="read_value",
+    description="read a value",
+    input_schema={
+        "type": "object",
+        "properties": {"key": {"type": "string"}},
+        "required": ["key"],
+        "additionalProperties": False,
+    },
+    side_effect_level=SideEffectLevel.READ,
+)
+_POLICY_WRITE_TOOL = ToolDefinition(
+    name="write_value",
+    description="write a value",
+    input_schema={
+        "type": "object",
+        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
+        "required": ["key", "value"],
+        "additionalProperties": False,
+    },
+    side_effect_level=SideEffectLevel.WRITE,
+    requires_approval=True,
+)
+
+
+def _policy_package(package_id: str):
+    """assistant 预设换成两个内存工具，避免依赖官方工具沙箱。"""
+
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id=package_id,
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    agent_id = package.entrypoint.agent
+    definition = package.agents[agent_id].model_copy(
+        update={"tools": (_POLICY_READ_TOOL.name, _POLICY_WRITE_TOOL.name)}
+    )
+    return package.model_copy(
+        update={"agents": {**package.agents, agent_id: definition}}
+    )
+
+
+def _tool_calling_model(tool_name: str) -> ScriptedModelProvider:
+    """第一步调用指定工具，拿到结果后第二步给出最终文本。"""
+
+    arguments = (
+        {"key": "answer"}
+        if tool_name == _POLICY_READ_TOOL.name
+        else {"key": "answer", "value": "1"}
+    )
+    return ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="step_1",
+                            text="",
+                            tool_calls=(
+                                ModelToolCall(
+                                    tool_call_id="call_1",
+                                    name=tool_name,
+                                    arguments=arguments,
+                                ),
+                            ),
+                            finish_reason="tool_calls",
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="step_2", text="done", finish_reason="stop"
+                        ),
+                    ),
+                )
+            ),
+        )
+    )
+
+
+async def _policy_tool_handler(call, context):
+    del context
+    return ToolExecutionResult(
+        tool_call_id=call.tool_call_id,
+        operation_id=call.operation_id,
+        content=(TextBlock(text="ok"),),
+    )
+
+
+async def _build_with_tool_policy(session_root: Path, package, policy, model):
+    tools = (_POLICY_READ_TOOL, _POLICY_WRITE_TOOL)
+    builder = (
+        SAgentBuilder()
+        .with_defaults(session_root=session_root)
+        .with_model_provider(model)
+        .with_tool_provider(
+            InMemoryToolCatalog(tools),
+            InMemoryToolExecutor(
+                {tool.name: tool for tool in tools},
+                {tool.name: _policy_tool_handler for tool in tools},
+            ),
+        )
+    )
+    if policy is not None:
+        builder = builder.with_tool_policy(policy)
+    return await builder.build(package)
+
+
+async def _run_to_boundary(application: SAgentApplication, package, *, key: str):
+    stream = await application.entrypoint().run_stream(
+        StartRun(
+            agent_id=package.entrypoint.agent,
+            input=(InputItem(role="user", content=(TextBlock(text="go"),)),),
+            resolved_spec_hash=application.composition_hash,
+            idempotency_key=key,
+        ),
+        _POLICY_USER,
+    )
+    event_types = [event.type async for event in stream.events]
+    return event_types, await stream.wait()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "tool_name", "expects_approval"),
+    [
+        # 未注入：沿用引擎默认 CONFIGURED，写工具必须审批。
+        pytest.param(None, "write_value", True, id="default-write-asks"),
+        pytest.param(
+            ApprovalStrategy.AUTO_APPROVE, "write_value", False, id="auto-write-runs"
+        ),
+        pytest.param(
+            ApprovalStrategy.CONFIGURED, "read_value", False, id="configured-read-runs"
+        ),
+        pytest.param(
+            ApprovalStrategy.ALWAYS_ASK, "read_value", True, id="always-ask-read-asks"
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_builder_applies_host_injected_tool_policy_to_the_loop(
+    tmp_path: Path, strategy, tool_name: str, expects_approval: bool
+):
+    package = _policy_package("test.tool-policy")
+    policy = (
+        DefaultToolPolicy(approval_strategy=strategy) if strategy is not None else None
+    )
+    application = await _build_with_tool_policy(
+        tmp_path / "session-store", package, policy, _tool_calling_model(tool_name)
+    )
+    try:
+        event_types, result = await _run_to_boundary(
+            application, package, key=f"policy-{tool_name}"
+        )
+    finally:
+        await application.close()
+
+    if expects_approval:
+        assert "tool.call.awaiting_approval" in event_types
+        assert "tool.call.succeeded" not in event_types
+        assert result.state == RunState.SUSPENDED
+    else:
+        assert "tool.call.awaiting_approval" not in event_types
+        assert "tool.call.succeeded" in event_types
+        assert result.state == RunState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_host_tool_policy_is_visible_in_the_plan_but_does_not_fence_runs(
+    tmp_path: Path,
+):
+    package = _policy_package("test.tool-policy-identity")
+    session_root = tmp_path / "session-store"
+    hashes: dict[str, str] = {}
+    # 同一 session_root 顺序构建，排除存储身份带来的差异。
+    for label, policy in (
+        ("default", None),
+        ("auto", DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)),
+        ("ask", DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK)),
+    ):
+        application = await _build_with_tool_policy(
+            session_root, package, policy, ScriptedModelProvider(())
+        )
+        try:
+            hashes[label] = application.composition_hash
+            plan = application.resolved_plan
+            # 策略不是服务：既不暴露给 application.services，也不进入 hash。
+            assert "agent.tool-policy" not in application.services
+            if policy is None:
+                assert all(
+                    value.capability != "agent.tool-policy" for value in plan.providers
+                )
+                continue
+            binding = _host_binding(plan, "agent.tool-policy")
+            assert binding.source == "host"
+            assert binding.plugin_id is None
+            assert policy.composition_identity() == policy.policy_hash
+            loop = application.entrypoint().driver_factory("run_identity")
+            assert loop.tool_policy is policy
+        finally:
+            await application.close()
+
+    # 审批模式是宿主运行偏好：换一档不改变 composition hash，
+    # 上个进程挂起的 Run 在新的审批模式下仍能续跑。
+    assert hashes["default"] == hashes["auto"] == hashes["ask"]
+
+
+# ---------- 审批记忆接线 ----------
+
+
+def _write_steps(*calls: tuple[str, dict]) -> ScriptedModelProvider:
+    steps = [
+        ScriptedModelStep(
+            events=(
+                ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id=call_id,
+                        text="",
+                        tool_calls=(
+                            ModelToolCall(
+                                tool_call_id=call_id,
+                                name=_POLICY_WRITE_TOOL.name,
+                                arguments=arguments,
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                    ),
+                ),
+            )
+        )
+        for call_id, arguments in calls
+    ]
+    steps.append(
+        ScriptedModelStep(
+            events=(
+                ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="final", text="done", finish_reason="stop"
+                    ),
+                ),
+            )
+        )
+    )
+    return ScriptedModelProvider(tuple(steps))
+
+
+@pytest.mark.asyncio
+async def test_builder_wires_session_approval_memory_and_accepts_a_host_memory(
+    tmp_path: Path,
+):
+    package = _policy_package("test.approval-memory")
+    application = await _build_with_tool_policy(
+        tmp_path / "default", package, None, ScriptedModelProvider(())
+    )
+    try:
+        memory = application.services["agent.approval-memory"]
+        assert isinstance(memory, SessionApprovalMemory)
+        loop = application.entrypoint().driver_factory("run_memory")
+        assert loop.approval_memory is memory
+        assert (
+            _host_binding(application.resolved_plan, "agent.approval-memory").source
+            == "host"
+        )
+    finally:
+        await application.close()
+
+    host_memory = SessionApprovalMemory(InMemoryDerivedStateStore())
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "host")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_approval_memory(host_memory)
+        .build(package)
+    )
+    try:
+        assert application.services["agent.approval-memory"] is host_memory
+        loop = application.entrypoint().driver_factory("run_host")
+        assert loop.approval_memory is host_memory
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_remembers_approvals_in_the_session_derived_state(
+    tmp_path: Path,
+):
+    package = _policy_package("test.approval-memory-e2e")
+    arguments = {"key": "answer", "value": "1"}
+    application = await _build_with_tool_policy(
+        tmp_path / "session-store",
+        package,
+        DefaultToolPolicy(allow_persistent_approval=True),
+        _write_steps(("call_1", arguments), ("call_2", arguments)),
+    )
+    try:
+        agent = application.entrypoint()
+        store = agent.runtime.session_store
+        event_types, suspended = await _run_to_boundary(
+            application, package, key="remember-e2e"
+        )
+        assert suspended.state == RunState.SUSPENDED
+        assert event_types.count("tool.call.awaiting_approval") == 1
+        suspension = await store.get_suspension(suspended.suspension_id)
+        interaction = await store.get_interaction(suspension.interaction_id)
+        assert "approve_and_remember" in interaction.allowed_decisions
+
+        await agent.runtime.reply_interaction(
+            ReplyInteraction(
+                run_id=suspended.run_id,
+                suspension_id=suspension.suspension_id,
+                interaction_id=interaction.interaction_id,
+                expected_revision=suspended.revision,
+                expected_suspension_revision=suspension.expected_revision,
+                expected_interaction_revision=interaction.expected_revision,
+                decision="approve_and_remember",
+                idempotency_key="remember-e2e-reply",
+            ),
+            _POLICY_USER,
+        )
+        final = await (await agent.continue_run(suspended.run_id, _POLICY_USER))
+
+        assert final.state == RunState.COMPLETED
+        types = [event.type for event in await store.read_events(suspended.run_id)]
+        assert types.count("tool.call.awaiting_approval") == 1
+        assert types.count("tool.call.succeeded") == 2
+        assert types.count("policy.approval.remembered") == 1
+        memory = application.services["agent.approval-memory"]
+        remembered = await memory.list_remembered(session_id=final.session_id)
+        assert [value.matcher.tool_name for value in remembered] == ["write_value"]
+        # 记忆真的落在 Session 存储的派生状态里，重开进程后同一 Session 仍可复用。
+        raw = await store.get_derived_state(
+            final.session_id,
+            SessionApprovalMemory.NAMESPACE,
+            SessionApprovalMemory.KEY,
+        )
+        assert raw["version"] == 1
+        assert list(raw["entries"]) == [remembered[0].matcher.key]
+    finally:
         await application.close()

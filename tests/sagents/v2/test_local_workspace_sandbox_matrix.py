@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
@@ -37,6 +38,8 @@ async def provision(
     allowed_roots: tuple[str, ...] = ("/workspace",),
     process_read_only: bool = False,
     allowed_executables: tuple[str, ...] = ("python",),
+    protected_paths: tuple[str, ...] = (),
+    allow_symlinks: bool = False,
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -47,8 +50,10 @@ async def provision(
             filesystem=FileSystemPolicy(
                 allowed_operations=frozenset(FileOperation),
                 allowed_roots=allowed_roots,
+                protected_paths=protected_paths,
                 max_file_bytes=1024,
                 max_total_bytes=max_total_bytes,
+                allow_symlinks=allow_symlinks,
             ),
             process=ProcessPolicy(
                 enabled=True,
@@ -456,3 +461,169 @@ async def test_local_process_binds_grant_to_argv_and_does_not_inherit_secrets(
     )
     result = await handle.process.run(changed, intent=clean_intent, grant=clean_grant)
     assert result.stdout.strip() == b"absent"
+
+
+# ---------- FileSystemPolicy.protected_paths（本地 provider） ----------
+
+
+def _seed_git_dir(root: Path) -> tuple[Path, Path]:
+    hooks = root / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\n", encoding="utf-8")
+    config = root / ".git" / "config"
+    config.write_text("[core]\n", encoding="utf-8")
+    return hook, config
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_denies_every_mutating_spelling_of_protected_paths(
+    tmp_path: Path,
+):
+    hook, config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks", ".git/config")
+    )
+
+    attempts = (
+        ("create", ".git/hooks/post-commit"),
+        ("write", ".git/hooks/pre-commit"),
+        ("write", "/workspace/.git/config"),
+        ("write", str(config)),  # 宿主绝对路径写法
+        ("create", ".GIT/HOOKS/post-commit"),  # 大小写变体
+        ("create", "src/../.git/hooks/post-commit"),
+        ("create", ".git//hooks//post-commit"),
+        ("create", ".git/config:stream"),  # Windows ADS 写法
+        ("create", ".git/hooks/nested/deeper"),
+    )
+    for operation, path in attempts:
+        intent, grant = authorization(issuer, handle, operation, path=path)
+        with pytest.raises(SageV2Error) as denied:
+            await handle.filesystem.write_bytes(
+                path, b"evil", intent=intent, grant=grant
+            )
+        assert denied.value.info.code == "sandbox.protected_path", path
+        assert denied.value.info.category == ErrorCategory.POLICY_DENIED
+        assert denied.value.info.safe_to_resume is True
+        assert denied.value.info.metadata["side_effect_state"] == "not_applied"
+        assert denied.value.info.metadata["protected_path"] in {
+            ".git/hooks",
+            ".git/config",
+        }
+    delete_intent, delete_grant = authorization(
+        issuer, handle, "delete", path=".git/hooks/pre-commit"
+    )
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.delete(
+            ".git/hooks/pre-commit", intent=delete_intent, grant=delete_grant
+        )
+    assert denied.value.info.code == "sandbox.protected_path"
+
+    assert hook.read_text(encoding="utf-8") == "#!/bin/sh\n"
+    assert config.read_text(encoding="utf-8") == "[core]\n"
+    assert sorted(value.name for value in (tmp_path / ".git").iterdir()) == [
+        "config",
+        "hooks",
+    ]
+    assert [value.name for value in (tmp_path / ".git" / "hooks").iterdir()] == [
+        "pre-commit"
+    ]
+    assert not (tmp_path / ".GIT").exists() or (tmp_path / ".GIT").samefile(
+        tmp_path / ".git"
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_protected_paths_stay_readable_and_siblings_writable(
+    tmp_path: Path,
+):
+    hook, _config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(tmp_path, protected_paths=(".git",))
+
+    read_intent, read_grant = authorization(
+        issuer, handle, "read", path=".git/hooks/pre-commit"
+    )
+    assert (
+        await handle.filesystem.read_bytes(
+            ".git/hooks/pre-commit", intent=read_intent, grant=read_grant
+        )
+        == b"#!/bin/sh\n"
+    )
+    stat_intent, stat_grant = authorization(issuer, handle, "read", path=".git/config")
+    assert (
+        await handle.filesystem.stat(".git/config", intent=stat_intent, grant=stat_grant)
+    ).is_file is True
+    list_intent, list_grant = authorization(issuer, handle, "list", path=".git/hooks")
+    listed = await handle.filesystem.list_paths(
+        ".git/hooks", intent=list_intent, grant=list_grant
+    )
+    assert [value.path for value in listed] == ["/workspace/.git/hooks/pre-commit"]
+
+    # ".git" 受保护不能误伤 ".gitignore" 这类同前缀兄弟路径。
+    for path in (".gitignore", "src/main.py", ".github/workflows/ci.yml"):
+        intent, grant = authorization(issuer, handle, "create", path=path)
+        await handle.filesystem.write_bytes(path, b"ok", intent=intent, grant=grant)
+        assert (tmp_path / path).read_bytes() == b"ok"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+@pytest.mark.asyncio
+async def test_local_workspace_protects_paths_reached_through_symlinks(
+    tmp_path: Path,
+):
+    hooks = tmp_path / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(hooks, target_is_directory=True)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks",), allow_symlinks=True
+    )
+    intent, grant = authorization(issuer, handle, "create", path="link/pre-commit")
+
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.write_bytes(
+            "link/pre-commit", b"evil", intent=intent, grant=grant
+        )
+
+    assert denied.value.info.code == "sandbox.protected_path"
+    assert not (hooks / "pre-commit").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+@pytest.mark.asyncio
+async def test_local_workspace_protects_a_symlinked_protected_entry_itself(
+    tmp_path: Path,
+):
+    real_hooks = tmp_path / "real_git" / "hooks"
+    real_hooks.mkdir(parents=True)
+    (tmp_path / ".git").symlink_to(tmp_path / "real_git", target_is_directory=True)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks",), allow_symlinks=True
+    )
+    intent, grant = authorization(
+        issuer, handle, "create", path=".git/hooks/pre-commit"
+    )
+
+    # 解析后的真实路径是 real_git/hooks/pre-commit，不在策略里；
+    # 但模型请求的字面路径命中 ".git/hooks"，仍须拒绝。
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.write_bytes(
+            ".git/hooks/pre-commit", b"evil", intent=intent, grant=grant
+        )
+
+    assert denied.value.info.code == "sandbox.protected_path"
+    assert not (real_hooks / "pre-commit").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_without_protected_paths_keeps_git_writable(
+    tmp_path: Path,
+):
+    hook, _config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(tmp_path)
+    intent, grant = authorization(issuer, handle, "write", path=".git/hooks/pre-commit")
+
+    await handle.filesystem.write_bytes(
+        ".git/hooks/pre-commit", b"#!/bin/sh\necho ok\n", intent=intent, grant=grant
+    )
+
+    assert hook.read_text(encoding="utf-8") == "#!/bin/sh\necho ok\n"

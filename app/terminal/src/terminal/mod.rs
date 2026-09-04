@@ -219,6 +219,7 @@ fn drain_backend(app: &mut App, backend: &mut Option<BackendHandle>) -> bool {
                 BackendEvent::SandboxApprovalResolved(resolution) => {
                     app.apply_sandbox_approval_resolution(resolution)
                 }
+                BackendEvent::InputRequested(request) => app.apply_v2_input_request(*request),
                 BackendEvent::Stats(stats) => app.apply_backend_stats(stats),
                 BackendEvent::Error(message) => app.fail_request(message),
                 BackendEvent::Finished => {

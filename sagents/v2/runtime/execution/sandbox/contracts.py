@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
+import unicodedata
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field, field_serializer, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 
@@ -132,9 +134,23 @@ class MountSpec(StrictModel):
     allow_symlinks: bool = False
 
 
+# 会改变工作区内容的文件操作；受保护路径只对这些操作生效。
+MUTATING_FILE_OPERATIONS: frozenset[FileOperation] = frozenset(
+    {
+        FileOperation.WRITE,
+        FileOperation.CREATE,
+        FileOperation.DELETE,
+        FileOperation.RENAME,
+    }
+)
+
+
 class FileSystemPolicy(StrictModel):
     allowed_operations: frozenset[FileOperation]
     allowed_roots: tuple[str, ...] = ("/workspace",)
+    # 可写根目录内的只读子路径（相对 workspace_root，如 ".git/hooks"）。
+    # 命中的路径及其子树拒绝 write/create/delete/rename，read/list 不受影响。
+    protected_paths: tuple[str, ...] = ()
     max_file_bytes: int | None = Field(default=None, gt=0)
     max_total_bytes: int | None = Field(default=None, gt=0)
     allow_symlinks: bool = False
@@ -146,6 +162,52 @@ class FileSystemPolicy(StrictModel):
         """Keep persisted policy JSON and hashes stable across processes."""
 
         return sorted(operation.value for operation in value)
+
+    @field_validator("protected_paths")
+    @classmethod
+    def normalize_protected_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """规范化为去重、排序的相对 posix 路径，保证 policy_hash 与写法无关。"""
+
+        normalized: set[str] = set()
+        for raw in value:
+            candidate = unicodedata.normalize("NFC", raw).replace("\\", "/")
+            if "\x00" in candidate:
+                raise ValueError("protected_paths cannot contain NUL")
+            candidate = posixpath.normpath(candidate)
+            if (
+                candidate.startswith("/")
+                or candidate in {".", ".."}
+                or candidate.startswith("../")
+            ):
+                raise ValueError(
+                    f"protected path {raw!r} must be a relative path inside the "
+                    "workspace"
+                )
+            normalized.add(candidate)
+        return tuple(sorted(normalized))
+
+    def protected_path_for(self, relative_path: str) -> str | None:
+        """返回 `relative_path` 命中的受保护条目；未命中返回 None。
+
+        `relative_path` 是相对 workspace_root 的路径（不带前导 "/"）。匹配时
+        统一做 NFC 与 casefold，避免在大小写/规范化不敏感的文件系统（macOS、
+        Windows）上用 `.GIT/hooks` 绕过；`entry:stream` 视作同一文件，覆盖
+        Windows 备用数据流（ADS）。
+        """
+
+        if not self.protected_paths:
+            return None
+        subject = unicodedata.normalize("NFC", relative_path).replace("\\", "/")
+        subject = posixpath.normpath(subject.strip("/")).casefold()
+        for entry in self.protected_paths:
+            folded = entry.casefold()
+            if (
+                subject == folded
+                or subject.startswith(folded + "/")
+                or subject.startswith(folded + ":")
+            ):
+                return entry
+        return None
 
 
 class ProcessPolicy(StrictModel):

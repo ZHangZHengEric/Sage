@@ -87,6 +87,29 @@ The driver answers a `cli_v2_interaction` by writing one JSON line to the CLI's 
 `decision` must be one of `allowed_decisions`; anything else is coerced to `deny`/`cancel`.
 `payload` carries `{"text": "..."}` for `submit` / `change_direction` answers.
 
+Approval interactions (`interaction_type: "approval"`) list `approve_once`, `deny`, `cancel` and,
+when the call may be remembered, `approve_and_remember`. The `payload` then also carries
+`approval_matcher` (`tool_name`, `fingerprint`, `summary` — what exactly would be remembered:
+the CLI matcher uses the whole normalised command for `execute_shell_command`, the `file_path`
+for `file_write` / `file_update`, and the full arguments otherwise), `approval_scopes`
+(currently `["session"]`) and `persistent_approval_allowed: true`. Answering
+`approve_and_remember` makes the runtime skip the approval for later calls that match within
+the same session; those calls surface a `policy.approval.remembered` event when remembered and a
+`policy.decision.recorded` event with `remembered_by` / `remembered_scope` when auto-approved.
+`sage v2 chat` exposes `/approvals` (list) and `/forget <n>|all` (revoke) for the session.
+
+`--approval-mode` selects the runtime approval policy before any interaction is raised:
+`ask` (default on a TTY) asks for write-class tools and allows remembering, `always` asks for
+every tool call and never remembers, `approve-all` never raises an approval interaction, and
+`deny-all` keeps the policy but answers every approval with `deny`. The policy is a per-process
+preference: a run suspended under one mode can be resumed under another.
+
+`--mode plan` hides write-class tools from the model (`RunConfig.enabled_tools` is set to the
+agent's read-only / plan-safe tools; `goal_submit` stays available) on top of the read-only
+sandbox. Independently of the mode, the local workspace sandbox refuses writes under
+`.git/hooks` and `.git/config`; such calls fail with `sandbox.protected_path` and never touch
+the file.
+
 While a run is active (no interaction pending) the driver may append input for the next model step:
 
 ```json
@@ -115,4 +138,12 @@ between turns the CLI reads one plain-text prompt line from stdin (`/exit` ends 
 while a run is active, stdin lines are interpreted only as decision lines. Every turn after the
 first reuses the `session_id` announced by the first `cli_v2_session` frame.
 
-This surface is not yet consumed by `sage-terminal` and may change until the TUI integration lands.
+`sage-terminal` consumes this surface when started with `--runtime v2` (or after `/runtime set v2`):
+it spawns `sage v2 chat --json --user-id <id> [--workspace <path>]`, passes `--session-id` only for a
+session id it previously received in a `cli_v2_session` frame, maps native `message.delta` /
+`message.completed` / `tool.call.*` events onto its transcript, turns `approval` interactions into the
+existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
+other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
+Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
+`app/terminal/src/backend/tests/protocol_v2.rs`. Steering frames are not sent by the TUI yet, and the
+TUI session picker still lists v1 sessions only. The surface remains experimental.

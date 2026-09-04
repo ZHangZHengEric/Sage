@@ -1,5 +1,6 @@
 mod contract;
 mod handle;
+mod protocol_v2;
 mod runtime;
 
 use std::env;
@@ -81,6 +82,7 @@ pub(super) fn collect_round_trip(handle: &BackendHandle) -> Vec<String> {
             | Some(BackendEvent::ToolStarted(_))
             | Some(BackendEvent::SandboxApprovalRequested(_))
             | Some(BackendEvent::SandboxApprovalResolved(_))
+            | Some(BackendEvent::InputRequested(_))
             | Some(BackendEvent::Stats(_))
             | Some(BackendEvent::ToolFinished(_)) => {}
             Some(BackendEvent::Finished) => return assistant_chunks,

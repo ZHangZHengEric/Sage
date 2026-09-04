@@ -17,7 +17,12 @@ from typing import Any
 from pydantic import SecretStr
 
 from sagents.v2.agent.factory import AgentCompositionFactory
-from sagents.v2.agent.policy import CompositeContinuationPolicy
+from sagents.v2.agent.policy import (
+    ApprovalMemory,
+    CompositeContinuationPolicy,
+    DefaultToolPolicy,
+    SessionApprovalMemory,
+)
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     JsonHeuristicTokenEstimator,
@@ -337,6 +342,8 @@ class SAgentBuilder:
         self._tool_executor: ToolExecutor | None = None
         self._tool_runtime: OfficialToolRuntime | None = None
         self._tool_selection: ToolSelectionPolicy | None = None
+        self._tool_policy: DefaultToolPolicy | None = None
+        self._approval_memory: ApprovalMemory | None = None
         self._execution_binding_provider: ExecutionBindingProvider | None = None
         self._log_sink: LogSink | None = None
         self._diagnostic_sink: DiagnosticSink | None = None
@@ -403,6 +410,29 @@ class SAgentBuilder:
         """Inject the model-visible Tool projection policy."""
 
         self._tool_selection = value
+        return self
+
+    def with_tool_policy(self, value: DefaultToolPolicy) -> "SAgentBuilder":
+        """Inject the host-owned Tool approval policy used by every Loop.
+
+        审批策略（何时向宿主请求确认）属于产品层决定，Kernel 只负责执行。
+        未注入时沿用引擎默认的 ``DefaultToolPolicy()``；注入后 root 与
+        子 Run 的 Loop 共用同一实例。它在 ``resolved_plan`` 里以 host 来源
+        可见，但不参与 composition hash：审批模式是宿主的运行偏好，
+        换一档不该让上个进程挂起的 Run 因 resolved_spec 不兼容而无法续跑。
+        """
+
+        self._tool_policy = value
+        return self
+
+    def with_approval_memory(self, value: ApprovalMemory) -> "SAgentBuilder":
+        """Inject a host-owned approval memory (e.g. one that adds workspace scope).
+
+        未注入时使用 ``SessionApprovalMemory``：记在 Session 的派生状态里，
+        随 Session 删除而清理。宿主实现至少要支持 ``session`` 作用域。
+        """
+
+        self._approval_memory = value
         return self
 
     def with_log_sink(self, value: LogSink) -> "SAgentBuilder":
@@ -515,6 +545,10 @@ class SAgentBuilder:
                 if session_store_was_injected
                 else session_store
             )
+        # 审批记忆默认落在会话派生状态：非权威、可重建、随 Session 删除清理。
+        approval_memory = self._approval_memory or SessionApprovalMemory(
+            derived_state
+        )
         credential_provider = await self._create_capability(
             extension_host,
             process_root,
@@ -872,6 +906,8 @@ class SAgentBuilder:
                     session_memory_service=(
                         session_memory_service if member_memory_enabled else None
                     ),
+                    tool_policy=self._tool_policy,
+                    approval_memory=approval_memory,
                     continuation_policy=continuation_policy,
                     continuation_signal_provider=(
                         active_runtime.consume_continuation_signals
@@ -1084,6 +1120,7 @@ class SAgentBuilder:
             "context.unit-compactor": unit_compactor,
             "context.reducer": context_reducer,
             "agent.continuation-policy": continuation_policy,
+            "agent.approval-memory": approval_memory,
         }
         await self._validate_required_guarantees(
             runtime_config,
@@ -1145,10 +1182,14 @@ class SAgentBuilder:
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
+                    ("agent.approval-memory", self._approval_memory),
                     ("observability.log-sink", self._log_sink),
                     ("observability.diagnostic-sink", self._diagnostic_sink),
                 )
                 if injected is not None
+            ),
+            unfenced_host_capabilities=(
+                ("agent.tool-policy",) if self._tool_policy is not None else ()
             ),
             deferred_plugins=(
                 ((OfficialToolPlugin.plugin_id, ExtensionScope.RUN),)
@@ -1904,6 +1945,7 @@ class SAgentBuilder:
         composition_hash,
         host_capabilities,
         deferred_plugins,
+        unfenced_host_capabilities=(),
     ) -> ResolvedApplicationPlan:
         bindings: set[ResolvedProviderBinding] = set()
         dependencies: set[tuple[str, str]] = set()
@@ -1952,6 +1994,18 @@ class SAgentBuilder:
                 and capability not in host_capabilities
             ) or capability == "execution.dispatcher":
                 continue
+            bindings.add(
+                ResolvedProviderBinding(
+                    capability=capability,
+                    name="default",
+                    api_version="2",
+                    plugin_id=None,
+                    scope="process",
+                    source="host",
+                )
+            )
+        for capability in unfenced_host_capabilities:
+            # 宿主运行偏好（如审批策略）：在 plan 里可见，但不进入 composition hash。
             bindings.add(
                 ResolvedProviderBinding(
                     capability=capability,

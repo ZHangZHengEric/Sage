@@ -54,6 +54,8 @@ pub(crate) fn load_startup_preferences() -> Result<StartupOptions> {
             .sandbox_approval_mode
             .as_deref()
             .and_then(normalize_sandbox_approval_mode),
+        // 运行时选择不持久化：v2 仍是实验性接入，每次显式指定。
+        runtime: None,
     })
 }
 
@@ -239,6 +241,7 @@ mod tests {
             options.workspace.map(PathBuf::from),
             options.sandbox_type,
             options.sandbox_approval_mode,
+            None,
         );
 
         assert_eq!(restored.selected_agent_id.as_deref(), Some("agent_demo"));
