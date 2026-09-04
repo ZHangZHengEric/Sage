@@ -10,6 +10,7 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationPolicy,
     ContinuationSignalProvider,
 )
+from sagents.v2.agent.policy.approval_memory import ApprovalMemory
 from sagents.v2.agent.policy.tool_policy import DefaultToolPolicy
 from sagents.v2.context.assembler import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.components import ContextComponentBundle
@@ -114,6 +115,7 @@ class AgentCompositionFactory:
         tool_executor: ToolExecutor,
         context_assembler: ContextAssembler,
         tool_policy: DefaultToolPolicy | None = None,
+        approval_memory: ApprovalMemory | None = None,
         continuation_policy: ContinuationPolicy | None = None,
         continuation_signal_provider: ContinuationSignalProvider | None = None,
         tool_selection_policy: ToolSelectionPolicy | None = None,
@@ -139,6 +141,7 @@ class AgentCompositionFactory:
             tool_catalog=tool_catalog,
             tool_executor=tool_executor,
             tool_policy=tool_policy,
+            approval_memory=approval_memory,
             continuation_policy=continuation_policy,
             continuation_signal_provider=continuation_signal_provider,
             tool_selection_policy=tool_selection_policy,
@@ -165,6 +168,7 @@ class AgentCompositionFactory:
         tool_catalog: ToolCatalog,
         tool_executor: ToolExecutor,
         tool_policy: DefaultToolPolicy | None = None,
+        approval_memory: ApprovalMemory | None = None,
         continuation_policy: ContinuationPolicy | None = None,
         continuation_signal_provider: ContinuationSignalProvider | None = None,
         tool_selection_policy: ToolSelectionPolicy | None = None,
@@ -259,6 +263,7 @@ class AgentCompositionFactory:
             ),
             tool_executor=tool_executor,
             tool_policy=tool_policy,
+            approval_memory=approval_memory,
             continuation_policy=selected_continuation_policy,
             continuation_signal_provider=continuation_signal_provider,
             tool_selection_policy=tool_selection_policy,

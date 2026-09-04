@@ -12,7 +12,9 @@ use crate::app::runtime_support::{
 };
 use crate::app::{ActiveToolRecord, App, MessageKind};
 use crate::app_render::{format_message, format_message_continuation, welcome_lines};
-use crate::backend::{SandboxApprovalRequest, SandboxApprovalResolution};
+use crate::backend::{
+    BackendRuntime, SandboxApprovalRequest, SandboxApprovalResolution, V2InputRequest,
+};
 use crate::display_policy::{is_visible_tool, DisplayMode};
 
 use super::state::{SandboxApprovalHistoryEntry, APPROVAL_HISTORY_LIMIT};
@@ -89,6 +91,45 @@ impl App {
 
     pub fn clear_pending_sandbox_approval(&mut self) {
         self.pending_sandbox_approval = None;
+    }
+
+    /// v2 的非审批交互：把问题贴到 transcript，等 composer 输入或 /approve /deny。
+    pub fn apply_v2_input_request(&mut self, request: V2InputRequest) {
+        let accepts_text = request
+            .allowed_decisions
+            .iter()
+            .any(|decision| decision == "submit" || decision == "change_direction");
+        let mut lines = vec![format!("{} required", request.interaction_type)];
+        if !request.prompt.trim().is_empty() {
+            lines.push(request.prompt.clone());
+        }
+        lines.push(format!("allowed: {}", request.allowed_decisions.join(", ")));
+        lines.push(if accepts_text {
+            "Type your answer in the composer to reply; /deny cancels.".to_string()
+        } else {
+            "Use /approve to retry or /deny to cancel.".to_string()
+        });
+        self.pending_v2_input = Some(request);
+        self.queue_message(MessageKind::Tool, lines.join("\n"));
+        self.status = format!("input required  {}", self.session_label());
+    }
+
+    pub fn set_runtime_selection(&mut self, runtime: BackendRuntime) {
+        let changed = self.runtime != runtime;
+        self.runtime = runtime;
+        if changed {
+            self.backend_restart_requested = true;
+            self.v2_session_known = false;
+            self.pending_v2_input = None;
+        }
+        self.queue_message(
+            MessageKind::System,
+            format!(
+                "runtime set: {} (backend restarts on the next task; sessions are runtime-specific)",
+                runtime.as_str()
+            ),
+        );
+        self.status = format!("runtime  {}", self.session_label());
     }
 
     pub fn apply_sandbox_approval_resolution(&mut self, resolution: SandboxApprovalResolution) {

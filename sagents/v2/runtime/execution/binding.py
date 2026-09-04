@@ -40,6 +40,9 @@ class RunExecutionBinding:
     sandbox: SandboxHandle
     grant_issuer: SandboxGrantIssuer
     parent_run_id: str | None = None
+    # 宿主可选携带的生命周期协调器：挂起时释放可安全暂停的算力。
+    # 缺省为 None，`on_suspended` 即为空操作。
+    lifecycle: ExecutionBindingLifecycleCoordinator | None = None
     _closed: bool = field(default=False, init=False, repr=False)
     _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _close_lock: asyncio.Lock = field(

@@ -18,6 +18,7 @@ from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 from sagents.v2.package.manifest.root import SageManifest
 
 from app.cli.services.base import CLIError
+from app.cli.v2.approvals import build_tool_policy, format_remembered_approvals
 from app.cli.v2.host import (
     LocalWorkspaceBindingProvider,
     WorkspaceSandboxSettings,
@@ -34,7 +35,7 @@ from app.cli.v2.package import (
     CliModelSettings,
     build_preset_package,
     load_package,
-    with_cli_job_runtime,
+    plan_visible_tools,
     without_filesystem_scheduler,
 )
 from app.cli.v2.render import EventRenderer, JsonRenderer, PlainRenderer
@@ -65,10 +66,12 @@ AgentFactory = Callable[..., Any]
 CHAT_INPUT_PROMPT = "Sage> "
 CHAT_HELP = (
     "built-in commands:\n"
-    "  /help     show this help\n"
-    "  /session  print the current session id\n"
-    "  /exit     leave the session\n"
-    "  /quit     leave the session\n"
+    "  /help       show this help\n"
+    "  /session    print the current session id\n"
+    "  /approvals  list tool approvals remembered in this session\n"
+    "  /forget     forget remembered approvals: /forget <n> | /forget all\n"
+    "  /exit       leave the session\n"
+    "  /quit       leave the session\n"
     "\n"
     "Ctrl-C during a run cancels that run; Ctrl-C at the prompt leaves the session.\n"
     "resume later with: sage v2 resume <session_id>"
@@ -101,8 +104,8 @@ def resolve_package(
 ) -> SageManifest:
     package_path = getattr(args, "package", None)
     if package_path:
-        # 用户自带的 package 原样尊重（含 scheduler 选择）；只在它没选 job runtime 时补 CLI 的。
-        return with_cli_job_runtime(load_package(package_path))
+        # 用户自带的 package 原样尊重（含 scheduler 选择）。
+        return load_package(package_path)
     model = (cfg.default_llm_model_name or "").strip()
     base_url = (cfg.default_llm_api_base_url or "").strip()
     api_key = (os.environ.get(DEFAULT_CREDENTIAL_ENV) or "").strip()
@@ -200,6 +203,8 @@ class CliSession:
     # Run 进行中读到的 stdin 行是否作为 SteerRun 追加：TTY 交互和 --json 驱动时开启，
     # 管道喂入的纯文本脚本关闭（那些行是后续提示词，不是对当前 Run 的补充）。
     steer_enabled: bool = False
+    # plan 模式下对模型可见的工具子集（None = 不限制）。
+    enabled_tools: tuple[str, ...] | None = None
 
     def origin(self) -> dict[str, str]:
         """随 StartRun 落盘的来源信息，`sage v2 sessions` 据此展示。"""
@@ -225,6 +230,7 @@ class CliSession:
                 session_id=session_id,
                 metadata=self.origin(),
                 invocation_mode=self.invocation_mode,
+                enabled_tools=self.enabled_tools,
             ),
             self.context,
             renderer=self.renderer,
@@ -236,6 +242,36 @@ class CliSession:
             interrupt=interrupt,
             **self._steer_kwargs(),
         )
+
+    @property
+    def approval_memory(self):
+        return self.application.services["agent.approval-memory"]
+
+    async def describe_approvals(self, session_id: str | None) -> str:
+        if session_id is None:
+            return "(no session yet)"
+        remembered = await self.approval_memory.list_remembered(session_id=session_id)
+        return format_remembered_approvals(remembered)
+
+    async def forget_approvals(self, session_id: str | None, selector: str) -> str:
+        """``/forget [all|<n>]``：撤销本 Session 记住的审批，编号来自 ``/approvals``。"""
+
+        if session_id is None:
+            return "(no session yet)"
+        memory = self.approval_memory
+        if selector in {"", "all"}:
+            removed = await memory.forget(session_id=session_id)
+            return f"forgot {removed} remembered approval(s)"
+        remembered = await memory.list_remembered(session_id=session_id)
+        try:
+            index = int(selector)
+        except ValueError:
+            return "usage: /forget <n> (from /approvals) | /forget all"
+        if not 1 <= index <= len(remembered):
+            return f"no remembered approval #{index} (see /approvals)"
+        target = remembered[index - 1]
+        await memory.forget(session_id=session_id, matcher=target.matcher)
+        return f"forgot #{index}: {target.matcher.summary}"
 
     def _steer_kwargs(self) -> dict[str, Any]:
         if not self.steer_enabled:
@@ -360,14 +396,18 @@ async def open_cli_session(
     mode = getattr(args, "mode", None) or "normal"
     if mode not in {"normal", "plan", "goal"}:
         raise CLIError(f"unknown invocation mode {mode!r}")
-    # plan 模式只做检查与提案：沙箱退到只读，写类工具会以类型化错误返回给模型。
+    # plan 模式只做检查与提案：沙箱退到只读，写类工具对模型隐藏（即使被调用也会被策略拒绝）。
     read_only = bool(getattr(args, "read_only", False)) or mode == "plan"
     bindings = LocalWorkspaceBindingProvider(
         workspace, settings=WorkspaceSandboxSettings(read_only=read_only)
     )
+    tool_policy = build_tool_policy(getattr(args, "approval_mode", None))
     try:
         application = await build_agent_fn(
-            package=package, session_root=session_root, bindings=bindings
+            package=package,
+            session_root=session_root,
+            bindings=bindings,
+            tool_policy=tool_policy,
         )
     except SageV2Error as exc:
         if _has_error_code(exc, "session_store.in_use"):
@@ -389,7 +429,10 @@ async def open_cli_session(
         )
         package = fallback
         application = await build_agent_fn(
-            package=package, session_root=session_root, bindings=bindings
+            package=package,
+            session_root=session_root,
+            bindings=bindings,
+            tool_policy=tool_policy,
         )
     context = RequestContext(
         actor=ActorRef(principal_id=args.user_id, principal_type=PrincipalType.USER)
@@ -409,6 +452,7 @@ async def open_cli_session(
         session_root=session_root,
         invocation_mode=None if mode == "normal" else mode,
         steer_enabled=bool(args.json) or stdin.isatty(),
+        enabled_tools=plan_visible_tools(package, agent_id) if mode == "plan" else None,
     )
 
 
@@ -498,6 +542,16 @@ async def v2_chat_command(
                     continue
                 if prompt == "/session":
                     renderer.notice(session_id or "(no session yet)")
+                    continue
+                if prompt == "/approvals":
+                    renderer.notice(await session.describe_approvals(session_id))
+                    continue
+                if prompt == "/forget" or prompt.startswith("/forget "):
+                    renderer.notice(
+                        await session.forget_approvals(
+                            session_id, prompt[len("/forget") :].strip()
+                        )
+                    )
                     continue
                 try:
                     outcome = await session.run(

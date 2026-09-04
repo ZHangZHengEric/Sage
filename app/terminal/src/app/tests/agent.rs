@@ -208,6 +208,7 @@ fn startup_options_apply_without_emitting_messages() {
         None,
         Some("local".to_string()),
         Some("untrusted".to_string()),
+        None,
     );
 
     assert_eq!(app.selected_agent_id.as_deref(), Some("agent_demo"));
@@ -228,6 +229,7 @@ fn startup_options_apply_explicit_workspace_override() {
         Some("team".to_string()),
         Some(DisplayMode::Compact),
         Some(PathBuf::from("/tmp/demo-workspace")),
+        None,
         None,
         None,
     );
@@ -253,6 +255,7 @@ fn startup_options_warn_when_coding_config_has_no_workspace() {
     app.apply_startup_options(
         None,
         Some(PathBuf::from("coding")),
+        None,
         None,
         None,
         None,

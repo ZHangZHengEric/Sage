@@ -14,6 +14,7 @@ pub(crate) struct StartupOptions {
     pub(crate) workspace: Option<String>,
     pub(crate) sandbox_type: Option<String>,
     pub(crate) sandbox_approval_mode: Option<String>,
+    pub(crate) runtime: Option<String>,
 }
 
 impl StartupOptions {
@@ -38,11 +39,13 @@ impl StartupOptions {
             sandbox_approval_mode: self
                 .sandbox_approval_mode
                 .or(defaults.sandbox_approval_mode),
+            runtime: self.runtime.or(defaults.runtime),
         }
     }
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum StartupBehavior {
     Run {
         action: Option<crate::app::SubmitAction>,

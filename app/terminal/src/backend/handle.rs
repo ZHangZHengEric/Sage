@@ -7,15 +7,15 @@ use std::thread;
 
 use anyhow::{anyhow, Result};
 use serde_json::json;
-#[cfg(test)]
 use serde_json::Value;
 
 use crate::backend::protocol::{flush_complete_lines, BackendProtocolState};
 use crate::backend::protocol_support::truncate;
+use crate::backend::protocol_v2::V2_DECISION_TYPE;
 use crate::backend::runtime::{
     apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_runtime_root, CliInvoker,
 };
-use crate::backend::types::{BackendEvent, BackendRequest};
+use crate::backend::types::{BackendEvent, BackendRequest, BackendRuntime};
 
 pub struct BackendHandle {
     receiver: Receiver<BackendEvent>,
@@ -26,6 +26,7 @@ pub struct BackendHandle {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BackendConfig {
+    runtime: BackendRuntime,
     session_id: String,
     user_id: String,
     agent_id: Option<String>,
@@ -107,22 +108,55 @@ impl BackendHandle {
             }
         };
         command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if request.runtime == BackendRuntime::V2 {
+            // v2：会话 id 由 CLI 分配并通过 cli_v2_session 帧告知；只有已知会话才回传。
+            command
+                .arg("v2")
+                .arg("chat")
+                .arg("--json")
+                .arg("--user-id")
+                .arg(&request.user_id);
+            if request.resume_session {
+                command.arg("--session-id").arg(&request.session_id);
+            }
+            if let Some(workspace) = &workspace {
+                command.arg("--workspace").arg(workspace);
+            }
+        } else {
+            Self::apply_v1_args(&mut command, request, workspace.as_ref());
+        }
+        apply_state_env(&mut command, &state_root);
+        if let Some(model) = &request.model_override {
+            command.env("SAGE_DEFAULT_LLM_MODEL_NAME", model);
+        }
+
+        let child = command.spawn().map_err(|err| {
+            anyhow!(
+                "failed to launch Sage CLI backend with {}: {err}",
+                cli.display()
+            )
+        })?;
+        Self::attach(child, request, workspace)
+    }
+
+    fn apply_v1_args(command: &mut Command, request: &BackendRequest, workspace: Option<&PathBuf>) {
+        command
             .arg("chat")
             .arg("--json")
             .arg("--stats")
             .arg("--session-id")
             .arg(&request.session_id)
             .arg("--user-id")
-            .arg(&request.user_id)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .arg(&request.user_id);
         if let Some(max_loop_count) = request.max_loop_count {
             command
                 .arg("--max-loop-count")
                 .arg(max_loop_count.to_string());
         }
-        if let Some(workspace) = &workspace {
+        if let Some(workspace) = workspace {
             command.arg("--workspace").arg(workspace);
         }
         if let Some(sandbox_type) = &request.sandbox_type {
@@ -159,17 +193,13 @@ impl BackendHandle {
         for skill in &request.skills {
             command.arg("--skill").arg(skill);
         }
-        apply_state_env(&mut command, &state_root);
-        if let Some(model) = &request.model_override {
-            command.env("SAGE_DEFAULT_LLM_MODEL_NAME", model);
-        }
+    }
 
-        let mut child = command.spawn().map_err(|err| {
-            anyhow!(
-                "failed to launch Sage CLI backend with {}: {err}",
-                cli.display()
-            )
-        })?;
+    fn attach(
+        mut child: Child,
+        request: &BackendRequest,
+        workspace: Option<PathBuf>,
+    ) -> Result<Self> {
         let stdout = child
             .stdout
             .take()
@@ -264,6 +294,7 @@ impl BackendHandle {
             child,
             stdin,
             config: BackendConfig {
+                runtime: request.runtime,
                 session_id: request.session_id.clone(),
                 user_id: request.user_id.clone(),
                 agent_id: request.agent_id.clone(),
@@ -299,6 +330,26 @@ impl BackendHandle {
         self.write_stdin_line(prompt)
     }
 
+    pub fn runtime(&self) -> BackendRuntime {
+        self.config.runtime
+    }
+
+    /// v2：回答一个 `cli_v2_interaction`（审批 / 用户输入 / 恢复问题）。
+    pub fn send_v2_interaction_decision(
+        &self,
+        interaction_id: &str,
+        decision: &str,
+        payload: Value,
+    ) -> Result<()> {
+        let frame = json!({
+            "type": V2_DECISION_TYPE,
+            "interaction_id": interaction_id,
+            "decision": decision,
+            "payload": payload,
+        });
+        self.write_stdin_line(&frame.to_string())
+    }
+
     pub fn send_sandbox_approval_decision(
         &self,
         session_id: &str,
@@ -306,6 +357,16 @@ impl BackendHandle {
         command_hash: Option<&str>,
         decision: &str,
     ) -> Result<()> {
+        if self.config.runtime == BackendRuntime::V2 {
+            // v1 的 approve/deny 语义映射到 v2 的审批决策；remember 只有 v2 才有。
+            let mapped = match decision {
+                "approve" => "approve_once",
+                "remember" => "approve_and_remember",
+                "deny" => "deny",
+                other => other,
+            };
+            return self.send_v2_interaction_decision(approval_id, mapped, json!({}));
+        }
         let mut payload = json!({
             "type": "sandbox_approval_decision",
             "session_id": session_id,
@@ -336,7 +397,8 @@ impl BackendHandle {
     }
 
     pub fn matches(&self, request: &BackendRequest) -> bool {
-        self.config.session_id == request.session_id
+        self.config.runtime == request.runtime
+            && self.config.session_id == request.session_id
             && self.config.user_id == request.user_id
             && self.config.agent_id == request.agent_id
             && self.config.agent_config == request.agent_config

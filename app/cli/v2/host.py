@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sagents.v2 import SAgentApplication, SAgentBuilder
+from sagents.v2.agent.policy import DefaultToolPolicy
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.runtime.execution import (
@@ -28,8 +29,6 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
 
-from app.cli.v2.jobs import cli_job_runtime_registration
-
 # 与 desktop_v2 的本地 workspace 沙箱保持同一档默认值，行为可对照。
 DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
     "bash",
@@ -43,6 +42,9 @@ DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
     "node",
 )
 DEFAULT_ALLOWED_ENV_NAMES: tuple[str, ...] = ("PATH", "PYTHONPATH")
+# 可写 workspace 里仍然只读的子路径：hooks 会被 git 执行，config 决定远端与别名。
+# 先小后大：不保护 .git/objects 等，否则 git commit 都会被挡。
+DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (".git/hooks", ".git/config")
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class WorkspaceSandboxSettings:
     read_only: bool = False
     allowed_executables: tuple[str, ...] = DEFAULT_ALLOWED_EXECUTABLES
     allowed_env_names: tuple[str, ...] = DEFAULT_ALLOWED_ENV_NAMES
+    protected_paths: tuple[str, ...] = DEFAULT_PROTECTED_PATHS
     max_wall_time_seconds: float = 300
     max_output_bytes: int = 4 * 1024 * 1024
     max_file_bytes: int = 64 * 1024 * 1024
@@ -94,6 +97,7 @@ class LocalWorkspaceBindingProvider:
                 else frozenset(FileOperation)
             ),
             allowed_roots=(self.workspace_root,),
+            protected_paths=settings.protected_paths,
             max_file_bytes=settings.max_file_bytes,
             max_total_bytes=settings.max_total_bytes,
         )
@@ -143,21 +147,10 @@ class LocalWorkspaceBindingProvider:
             workspace_policy=request.workspace_policy,
             sandbox=handle,
             grant_issuer=self.issuer,
+            lifecycle=request.lifecycle,
         )
-        # upstream a4bb126f：RunExecutionBinding.on_suspended 读取 self.lifecycle，但该字段只在
-        # ExecutionBindingRequest 上声明；这里显式带过去（builder 目前传 None），避免每次挂起
-        # 都记一条 AttributeError 日志。
-        binding.lifecycle = getattr(request, "lifecycle", None)
         self.bindings.append(binding)
         return binding
-
-    def binding_for_run(self, run_id: str) -> RunExecutionBinding | None:
-        """CLI job runtime 用它把 shell 作业送回所属 Run 的沙箱。"""
-
-        for binding in reversed(self.bindings):
-            if binding.run_id == run_id:
-                return binding
-        return None
 
     async def close(self) -> None:
         # 沙箱句柄由各 Run 的 binding 自己关闭；provider 本身无进程级资源。
@@ -170,19 +163,23 @@ async def build_cli_application(
     session_root: str | Path,
     bindings: LocalWorkspaceBindingProvider,
     model_provider: ModelProvider | None = None,
+    tool_policy: DefaultToolPolicy | None = None,
 ) -> SAgentApplication:
     """用唯一组合根 ``SAgentBuilder`` 构建 CLI 使用的 ``SAgentApplication``。
 
     ``model_provider`` 仅供测试/脚本化场景注入；生产路径由 manifest 的模型路由决定。
-    调用方通过 ``application.entrypoint()`` 取 ``SAgent``，用 ``application.close()`` 释放全部资源。
+    ``tool_policy`` 是 ``--approval-mode`` 决定的审批策略（见 ``app.cli.v2.approvals``），
+    None 时沿用引擎默认。调用方通过 ``application.entrypoint()`` 取 ``SAgent``，
+    用 ``application.close()`` 释放全部资源。
     """
 
     builder = (
         SAgentBuilder()
         .with_defaults(session_root=Path(session_root).expanduser())
         .with_execution_binding_provider(bindings)
-        .register(cli_job_runtime_registration(bindings))
     )
     if model_provider is not None:
         builder = builder.with_model_provider(model_provider)
+    if tool_policy is not None:
+        builder = builder.with_tool_policy(tool_policy)
     return await builder.build(package)
