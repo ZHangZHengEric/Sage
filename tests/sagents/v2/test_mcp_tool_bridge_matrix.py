@@ -726,3 +726,117 @@ def test_mcp_api_key_is_redacted_by_the_persistable_contract():
 
     assert "super-secret" not in repr(config)
     assert config.model_dump(mode="json")["api_key"] == "**********"
+
+
+def test_mcp_discovery_fingerprint_detects_secret_rotation_without_exposing_it():
+    first = McpServerConfig(
+        name="drive",
+        protocol="streamable_http",
+        url="https://mcp.test",
+        api_key="first-secret",
+    )
+    second = McpServerConfig(
+        name="drive",
+        protocol="streamable_http",
+        url="https://mcp.test",
+        api_key="second-secret",
+    )
+    assert McpToolPlugin.servers_fingerprint(
+        (first,)
+    ) != McpToolPlugin.servers_fingerprint((second,))
+
+
+@pytest.mark.asyncio
+async def test_cancelling_one_discovery_waiter_does_not_cancel_another():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    class SlowSession(FakeSession):
+        async def list_tools(self):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await release.wait()
+            return await super().list_tools()
+
+    @asynccontextmanager
+    async def factory(config):
+        yield SlowSession()
+
+    plugin = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="fake"),),
+        session_factory=factory,
+    )
+    first = asyncio.create_task(plugin.list_tools(run_id="one"))
+    await entered.wait()
+    second = asyncio.create_task(plugin.list_tools(run_id="two"))
+    await asyncio.sleep(0)
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    release.set()
+    try:
+        tools = await asyncio.wait_for(second, 2)
+    except asyncio.CancelledError:
+        pytest.fail("another waiter's cancellation cancelled shared discovery")
+    assert len(tools) == 1
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_discovery_invalidated_in_flight_does_not_publish_stale_routes():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class NamedSession(FakeSession):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        async def list_tools(self):
+            if self.name == "old":
+                entered.set()
+                await release.wait()
+            return {"tools": [{"name": self.name, "inputSchema": {"type": "object"}}]}
+
+    @asynccontextmanager
+    async def factory(config):
+        yield NamedSession(config.command)
+
+    plugin = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="old"),),
+        session_factory=factory,
+    )
+    old = asyncio.create_task(plugin.list_tools(run_id="old"))
+    await entered.wait()
+    plugin.servers = (McpServerConfig(name="drive", protocol="stdio", command="new"),)
+    new = await plugin.list_tools(run_id="new")
+    release.set()
+    await old
+    current = await plugin.list_tools(run_id="current")
+    assert [t.name for t in current] == [t.name for t in new] == ["mcp_drive_new"]
+
+
+@pytest.mark.asyncio
+async def test_optional_mcp_recovers_after_transient_discovery_failure():
+    attempts = 0
+
+    @asynccontextmanager
+    async def factory(config):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporarily offline")
+        yield FakeSession()
+
+    plugin = McpToolPlugin(
+        (
+            McpServerConfig(
+                name="drive", protocol="stdio", command="fake", required=False
+            ),
+        ),
+        session_factory=factory,
+    )
+    assert await plugin.list_tools(run_id="one") == ()
+    assert len(await plugin.list_tools(run_id="two")) == 1
+    assert plugin.discovery_errors() == {}

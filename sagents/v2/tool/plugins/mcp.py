@@ -131,13 +131,21 @@ class McpToolPlugin:
         self._discovery_fingerprint = self.servers_fingerprint(self.servers)
         self._discovery_complete = False
         self._discovery_task: asyncio.Task[tuple[ToolDefinition, ...]] | None = None
+        self._discovery_generation = 0
 
     @staticmethod
     def servers_fingerprint(servers: tuple[McpServerConfig, ...]) -> str:
-        payload = [
-            value.model_dump(mode="json")
-            for value in sorted(servers, key=lambda item: item.name)
-        ]
+        payload = []
+        for value in sorted(servers, key=lambda item: item.name):
+            entry = value.model_dump(mode="json")
+            # Persisted configuration stays redacted; cache identity must still
+            # change on credential rotation. Never expose the credential itself.
+            entry["api_key"] = (
+                hashlib.sha256(value.api_key.get_secret_value().encode()).hexdigest()
+                if value.api_key is not None
+                else None
+            )
+            payload.append(entry)
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), default=str
         ).encode()
@@ -153,6 +161,7 @@ class McpToolPlugin:
         return counts
 
     def invalidate_discovery(self) -> None:
+        self._discovery_generation += 1
         self._discovery_complete = False
         self._definitions = {}
         self._routes = {}
@@ -162,31 +171,44 @@ class McpToolPlugin:
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         del run_id
-        fingerprint = self.servers_fingerprint(self.servers)
-        async with self._lock:
-            if (
-                self._discovery_complete
-                and self._discovery_fingerprint == fingerprint
-            ):
-                return tuple(self._definitions[name] for name in sorted(self._definitions))
-            if self._discovery_fingerprint != fingerprint:
-                self.invalidate_discovery()
-                self._discovery_fingerprint = fingerprint
-            if self._discovery_task is not None:
-                task = self._discovery_task
-            else:
-                task = asyncio.create_task(self._discover_tools())
-                self._discovery_task = task
-        try:
-            return await task
-        finally:
+        while True:
+            fingerprint = self.servers_fingerprint(self.servers)
             async with self._lock:
-                if self._discovery_task is task:
-                    self._discovery_task = None
+                if (
+                    self._discovery_complete
+                    and self._discovery_fingerprint == fingerprint
+                ):
+                    return tuple(
+                        self._definitions[name] for name in sorted(self._definitions)
+                    )
+                if self._discovery_fingerprint != fingerprint:
+                    self.invalidate_discovery()
+                generation = self._discovery_generation
+                if self._discovery_task is None:
+                    self._discovery_task = asyncio.create_task(
+                        self._discover_tools(self.servers, generation)
+                    )
+                    self._discovery_task.add_done_callback(self._discovery_finished)
+                task = self._discovery_task
+            # Observers do not own this shared read-only discovery task.
+            result = await asyncio.shield(task)
+            if (
+                generation == self._discovery_generation
+                and fingerprint == self.servers_fingerprint(self.servers)
+            ):
+                return result
 
-    async def _discover_tools(self) -> tuple[ToolDefinition, ...]:
+    def _discovery_finished(self, task) -> None:
+        if self._discovery_task is task:
+            self._discovery_task = None
+        if not task.cancelled():
+            task.exception()  # Retrieve failures even when all observers detached.
+
+    async def _discover_tools(
+        self, servers: tuple[McpServerConfig, ...], generation: int
+    ) -> tuple[ToolDefinition, ...]:
         results = await asyncio.gather(
-            *(self._discover_server(server) for server in self.servers)
+            *(self._discover_server(server) for server in servers)
         )
         discovered: dict[str, ToolDefinition] = {}
         routes: dict[str, tuple[McpServerConfig, str]] = {}
@@ -207,10 +229,15 @@ class McpToolPlugin:
             discovered.update(server_definitions)
             routes.update(server_routes)
         async with self._lock:
-            self._definitions = discovered
-            self._routes = routes
-            self._discovery_errors = discovery_errors
-            self._discovery_complete = True
+            if generation == self._discovery_generation and self.servers_fingerprint(
+                servers
+            ) == self.servers_fingerprint(self.servers):
+                self._definitions = discovered
+                self._routes = routes
+                self._discovery_errors = discovery_errors
+                # A temporarily unavailable optional server must be discoverable
+                # on a later request without requiring a settings change.
+                self._discovery_complete = not discovery_errors
         return tuple(discovered[name] for name in sorted(discovered))
 
     async def _discover_server(
