@@ -6,6 +6,7 @@ import io
 import json
 import sys
 from pathlib import Path
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -50,6 +51,7 @@ from app.cli.v2.signals import (
 )
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.events import RuntimeEvent
+from sagents.v2.contracts.jobs import JobState
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionType
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -2602,3 +2604,54 @@ async def test_v2_approvals_command_lists_and_forgets_workspace_entries(tmp_path
     # 离线命令只碰 approvals 目录，不创建会话存储。
     assert sorted(path.name for path in (tmp_path / "runtime").iterdir()) == ["approvals"]
 
+
+# ---------- 可靠性端到端：命令执行中中断、部分写入 ----------
+
+
+class InterruptOnToolStart(PlainRenderer):
+    def __init__(self, interrupt: asyncio.Event, out, err):
+        super().__init__(out, err)
+        self.interrupt = interrupt
+
+    def handle(self, event):
+        super().handle(event)
+        if event.type == "tool.call.started" and not self.interrupt.is_set():
+            self.interrupt.set()
+
+
+async def test_interrupt_during_a_shell_command_cancels_promptly_and_kills_the_job(
+    tmp_path,
+):
+    """Ctrl-C 打断一条长命令：Run 立刻取消（不等命令跑完），该 Run 的 shell job 被终止。"""
+
+    _, _, agent, command = await make_shell_agent(tmp_path, shell_model("sleep 30"))
+    interrupt = asyncio.Event()
+    err = io.StringIO()
+    started = time.monotonic()
+
+    outcome = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=InterruptOnToolStart(interrupt, io.StringIO(), err),
+        decider=StaticInteractionDecider("approve_once"),
+        interrupt=interrupt,
+    )
+    elapsed = time.monotonic() - started
+    # Run 终态后 driver 异步释放 Run 资源（终止 job），给它最多 1s。
+    job_runtime = agent.application.services["execution.job-runtime"]
+    for _ in range(100):
+        jobs = await job_runtime.list_run_jobs(outcome.run_id)
+        if jobs and all(job.state == JobState.KILLED for job in jobs):
+            break
+        await asyncio.sleep(0.01)
+    await agent.close()
+
+    assert outcome.state == RunState.CANCELLED
+    assert outcome.exit_code == 130
+    assert elapsed < 1.5, f"cancel waited for the command: {elapsed:.2f}s"
+    assert "tool.call.started" in outcome.event_types
+    assert "run.cancelled" in outcome.event_types
+    assert "tool.call.succeeded" not in outcome.event_types
+    assert jobs and all(job.state == JobState.KILLED for job in jobs), [job.state for job in jobs]
+    assert "[run cancelled] reason=user_interrupt" in err.getvalue()

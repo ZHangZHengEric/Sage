@@ -3475,3 +3475,55 @@ async def test_write_failure_marked_not_applied_is_a_known_failure():
     assert "interaction.requested" not in types
     assert failed.data.error.code == "sandbox.permission_denied"
     assert failed.data.error.metadata["side_effect_state"] == "not_applied"
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_a_cooperative_tool_releases_run_resources():
+    """Run 在工具执行中被取消：循环不会回到安全点，dispatch 必须自己释放 Run 级工具资源。"""
+
+    started = asyncio.Event()
+    tool = ToolDefinition(
+        name="cooperative_wait",
+        description="wait cooperatively",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+        cancel_semantics=CancelSemantics.COOPERATIVE,
+    )
+    call = ModelToolCall(tool_call_id="call_cooperative", name=tool.name, arguments={})
+
+    async def handler(tool_call, _context):
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(call,)),)),)
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model, tools=(tool,), handlers={tool.name: handler}
+    )
+    released = []
+    original_release = executor.release_run
+
+    async def release_run(run_id):
+        released.append(run_id)
+        await original_release(run_id)
+
+    executor.release_run = release_run
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.cancel_run(
+        CancelRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="cancel-cooperative-tool",
+        ),
+        CONTEXT,
+    )
+
+    result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.state == RunState.CANCELLED
+    assert released == [handle.run_id]
+
