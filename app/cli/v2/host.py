@@ -28,6 +28,9 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxGrantIssuer,
 )
 from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    READ_ONLY_SHELL_EXECUTABLES,
+)
 
 from app.cli.v2.approvals import WorkspaceApprovalMemory
 
@@ -103,10 +106,17 @@ class LocalWorkspaceBindingProvider:
             max_file_bytes=settings.max_file_bytes,
             max_total_bytes=settings.max_total_bytes,
         )
+        # 只读（plan）模式下进程只能跑 read_only_shell 的检查语法，且不经 shell：
+        # 白名单换成该语法能启动的命令，bash/python 等一概不在其中。
+        allowed_executables = (
+            tuple(sorted(READ_ONLY_SHELL_EXECUTABLES))
+            if settings.read_only
+            else settings.allowed_executables
+        )
         process = ProcessPolicy(
             enabled=settings.process_enabled,
             read_only=settings.read_only,
-            allowed_executables=settings.allowed_executables,
+            allowed_executables=allowed_executables,
             allowed_env_names=settings.allowed_env_names,
             max_wall_time_seconds=settings.max_wall_time_seconds,
             max_output_bytes=settings.max_output_bytes,

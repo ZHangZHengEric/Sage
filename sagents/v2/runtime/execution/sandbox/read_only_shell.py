@@ -52,11 +52,29 @@ _FIND_SIDE_EFFECTS = {
 }
 
 
+# Every executable the read-only grammar can start; hosts use it as the
+# process allowlist for read-only sandboxes (no shell is part of it).
+READ_ONLY_SHELL_EXECUTABLES: frozenset[str] = frozenset(
+    {*_SIMPLE_READ_COMMANDS, "find", "git"}
+)
+
+
 def validate_read_only_shell_command(command: str) -> None:
     """Allow common inspection pipelines and reject everything else.
 
     This intentionally accepts a small grammar. A Plan can inspect source and
     Git state through Shell without granting a general-purpose host process.
+    """
+
+    parse_read_only_shell_command(command)
+
+
+def parse_read_only_shell_command(command: str) -> tuple[tuple[str, ...], ...]:
+    """Validate ``command`` and return its pipeline stages as argv tuples.
+
+    Stages are meant to be started directly (no shell in between): the grammar
+    has no expansion, redirection or control operators, and every executable
+    must be a bare command name resolved through PATH.
     """
 
     value = command.strip()
@@ -67,6 +85,7 @@ def validate_read_only_shell_command(command: str) -> None:
             "shell control or redirection is unavailable in read-only mode"
         )
 
+    stages: list[tuple[str, ...]] = []
     for segment in value.split("|"):
         try:
             argv = shlex.split(segment)
@@ -79,7 +98,12 @@ def validate_read_only_shell_command(command: str) -> None:
                 "empty pipeline stage is unavailable in read-only mode"
             )
         executable = PurePath(argv[0]).name
+        if executable != argv[0]:
+            raise PermissionError(
+                "read-only shell commands must name executables without a path"
+            )
         arguments = argv[1:]
+        stages.append(tuple(argv))
         if any(_escapes_workspace(argument) for argument in arguments):
             raise PermissionError(
                 "read-only shell paths must stay inside the workspace"
@@ -103,6 +127,7 @@ def validate_read_only_shell_command(command: str) -> None:
         raise PermissionError(
             f"executable {executable!r} is unavailable in read-only shell mode"
         )
+    return tuple(stages)
 
 
 def _escapes_workspace(argument: str) -> bool:
@@ -124,4 +149,8 @@ def _validate_git(arguments: list[str]) -> None:
         raise PermissionError("Git output hooks are unavailable in read-only mode")
 
 
-__all__ = ["validate_read_only_shell_command"]
+__all__ = [
+    "READ_ONLY_SHELL_EXECUTABLES",
+    "parse_read_only_shell_command",
+    "validate_read_only_shell_command",
+]

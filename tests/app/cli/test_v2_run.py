@@ -1742,6 +1742,33 @@ async def test_read_only_sandbox_rejects_mutating_shell_commands(tmp_path):
     assert "kind_unsupported" not in err.getvalue()
 
 
+async def test_read_only_sandbox_runs_inspection_commands_without_a_shell(tmp_path):
+    """plan 模式（只读沙箱）可以跑 read_only_shell 语法的检查命令：各段直接启动、不经 bash。"""
+
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+    (tmp_path / "workspace" / "README.md").write_text("hello plan mode\n")
+    model = shell_model("cat README.md | head -n 1")
+    _, bindings, agent, command = await make_shell_agent(tmp_path, model, read_only=True)
+    spec = bindings.sandbox_spec()
+    outcome = await run_task(
+        agent,
+        command,
+        CONTEXT,
+        renderer=PlainRenderer(io.StringIO(), io.StringIO()),
+        decider=StaticInteractionDecider("approve_once"),
+    )
+    await agent.close()
+
+    assert spec.process.read_only is True
+    assert "bash" not in spec.process.allowed_executables
+    assert {"cat", "git", "rg"} <= set(spec.process.allowed_executables)
+    assert outcome.state == RunState.COMPLETED
+    result = shell_tool_result(model.requests[1])
+    assert result["success"] is True
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "hello plan mode\n"
+
+
 
 
 

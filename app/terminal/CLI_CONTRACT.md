@@ -118,7 +118,12 @@ preference: a run suspended under one mode can be resumed under another.
 
 `--mode plan` hides write-class tools from the model (`RunConfig.enabled_tools` is set to the
 agent's read-only / plan-safe tools; `goal_submit` stays available) on top of the read-only
-sandbox. The local workspace **filesystem API** refuses writes under `.git/hooks` and
+sandbox. In that sandbox `execute_shell_command` accepts only the read-only inspection grammar
+(`cat`, `grep`, `rg`, `find`, `ls`, `head`, `wc`, read-only `git` subcommands, … joined by pipes;
+no redirection, control operators or paths in executables); the stages run directly from argv
+without a shell and `git` runs with repository hooks, fsmonitor, pager, external diff and gpg
+disabled. Anything else fails with `job.runner_failed` and a read-only message; the file
+system stays read-only regardless. The local workspace **filesystem API** refuses writes under `.git/hooks` and
 `.git/config`; those file API calls fail with `sandbox.protected_path` before writing.
 This provider reports `IsolationLevel.NONE`: host subprocesses (including shell and Git)
 can still modify these paths. `protected_paths` is not process isolation. A host needing
