@@ -3249,3 +3249,190 @@ async def test_unavailable_tool_guidance_starts_new_model_decision():
         TextBlock(text="Skip that tool."),
     )
     assert executor.calls == []
+
+
+async def reply_pending_interaction(runtime, handle, snapshot, decision, key):
+    """回答当前挂起的交互，返回该交互以便断言其 allowed_decisions。"""
+
+    suspension = await runtime.session_store.get_suspension(snapshot.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=snapshot.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision=decision,
+            idempotency_key=key,
+        ),
+        CONTEXT,
+    )
+    return interaction
+
+
+def persisted_tool_result(events, tool_call_id):
+    """从 canonical Item 事件里取出某次工具调用落盘的结果 Item。"""
+
+    for event in events:
+        if event.type != "item.completed":
+            continue
+        item = event.data.item
+        if (
+            isinstance(item.data, ToolResultItemData)
+            and item.data.tool_call_id == tool_call_id
+        ):
+            return item
+    raise AssertionError(f"no persisted tool result for {tool_call_id}")
+
+
+def two_write_steps_model():
+    """两步都调用 write_value（各需一次审批），第三步收尾。"""
+
+    return ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="call_2",
+                                name="write_value",
+                                arguments={"key": "b", "value": "2"},
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["cancel", "mark_failed"])
+async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumable(
+    decision,
+):
+    """人工核对以 cancel / mark_failed 结束后，下一次挂起再 resume 不能报 ledger 不一致。
+
+    写进 checkpoint 的 ledger 摘要按内存 messages 计算，resume 时按 canonical Item
+    事件重建；两者必须一致，所以内存里的工具结果消息必须来自真正落盘的 Item。
+    """
+
+    dispatches = []
+
+    async def first_call_outcome_unknown(call, context):
+        dispatches.append(call.tool_call_id)
+        if len(dispatches) == 1:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="remote.rejected",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="remote rejected the write",
+                    safe_to_resume=True,
+                )
+            )
+        return await tool_handler(call, context)
+
+    model = two_write_steps_model()
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        handlers={"read_value": tool_handler, "write_value": first_call_outcome_unknown},
+    )
+
+    awaiting_first = await loop.execute(handle.run_id, CONTEXT)
+    await reply_pending_interaction(
+        runtime, handle, awaiting_first, "approve_once", "approve_1"
+    )
+    unknown = await loop.resume(handle.run_id, CONTEXT)
+    interaction = await reply_pending_interaction(
+        runtime, handle, unknown, decision, "resolve_1"
+    )
+    awaiting_second = await loop.resume(handle.run_id, CONTEXT)
+
+    assert unknown.state == RunState.SUSPENDED
+    assert interaction.allowed_decisions == ("confirm_succeeded", "mark_failed", "cancel")
+    assert awaiting_second.state == RunState.SUSPENDED
+
+    await reply_pending_interaction(
+        runtime, handle, awaiting_second, "approve_once", "approve_2"
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    persisted = persisted_tool_result(events, "call_1")
+    tool_message = next(
+        message
+        for message in model.requests[1].messages
+        if message.role == "tool" and message.tool_call_id == "call_1"
+    )
+
+    assert result.state == RunState.COMPLETED
+    assert dispatches == ["call_1", "call_2"]
+    assert types.count("tool.call.unknown") == 1
+    assert ("tool.call.cancelled" if decision == "cancel" else "tool.call.reconciled") in types
+    assert persisted.status == (
+        ItemStatus.DECLINED if decision == "cancel" else ItemStatus.FAILED
+    )
+    assert persisted.data.error is not None
+    assert persisted.data.error.code == "tool.outcome_manually_failed"
+    assert tool_message.content == persisted.data.content
+    assert tool_message.metadata["manually_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_authoritative_tool_error_content_is_persisted_and_resumable():
+    """带 tool_result_received 的失败：模型看到的内容与落盘 Item 一致，之后仍可 resume。"""
+
+    class RejectedWriteExecutor:
+        async def execute(self, call, context):
+            del context
+            return ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(TextBlock(text="remote rejected the write: quota exceeded"),),
+                error=RuntimeErrorInfo(
+                    code="remote.write_rejected",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="write rejected",
+                    safe_to_resume=True,
+                    metadata={"tool_result_received": True},
+                ),
+                metadata={"tool_result_received": True},
+            )
+
+    model = two_write_steps_model()
+    runtime, handle, loop, _ = await setup_loop(model, tools=(WRITE_TOOL,))
+    loop.tool_executor = RejectedWriteExecutor()
+
+    awaiting_first = await loop.execute(handle.run_id, CONTEXT)
+    await reply_pending_interaction(
+        runtime, handle, awaiting_first, "approve_once", "approve_1"
+    )
+    awaiting_second = await loop.resume(handle.run_id, CONTEXT)
+    assert awaiting_second.state == RunState.SUSPENDED
+    await reply_pending_interaction(
+        runtime, handle, awaiting_second, "approve_once", "approve_2"
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    persisted = persisted_tool_result(events, "call_1")
+    tool_message = next(
+        message
+        for message in model.requests[1].messages
+        if message.role == "tool" and message.tool_call_id == "call_1"
+    )
+
+    assert result.state == RunState.COMPLETED
+    assert types.count("tool.call.failed") == 2
+    assert "tool.call.unknown" not in types
+    assert persisted.status == ItemStatus.FAILED
+    assert persisted.data.content[0].text == "remote rejected the write: quota exceeded"
+    assert persisted.data.error is not None
+    assert persisted.data.error.message_key == "error.provider_permanent"
+    assert tool_message.content == persisted.data.content
