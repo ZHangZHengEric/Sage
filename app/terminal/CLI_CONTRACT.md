@@ -166,5 +166,8 @@ other interactions (`submit` / `change_direction`) with the next composer input 
 Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
 `app/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
 `v2_steer` frame and the `cli_v2_steer` answer is shown in the transcript; an approval must be
-answered first (the CLI reads only decision lines then). The TUI session picker still lists v1
-sessions only. The surface remains experimental.
+answered first (the CLI reads only decision lines then). With the v2 runtime selected, `/sessions`,
+`/resume` and `/sessions inspect` read the v2 store through `sage v2 sessions --json` and
+`sage v2 sessions inspect <id> --json` (the picker shows the first task, the run count and the last
+run state; resuming replays the transcript entries and passes `--session-id` to the next backend).
+The surface remains experimental.

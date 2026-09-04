@@ -378,6 +378,29 @@ fn v2_session_is_only_known_after_the_backend_announces_it() {
 }
 
 #[test]
+fn resuming_a_v2_session_marks_it_known_and_restarts_the_backend() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    let _ = app.take_backend_restart_request();
+
+    app.load_resumed_session(
+        "session_v2".to_string(),
+        vec![(
+            crate::app::MessageKind::User,
+            "create hello.txt".to_string(),
+        )],
+    );
+
+    assert_eq!(app.session_id, "session_v2");
+    assert!(app.v2_session_known);
+    assert!(app.take_backend_restart_request());
+
+    let mut legacy = App::new();
+    legacy.load_resumed_session("local-000123".to_string(), Vec::new());
+    assert!(!legacy.v2_session_known);
+}
+
+#[test]
 fn v2_input_while_busy_becomes_a_steer_instead_of_a_new_task() {
     let mut app = App::new();
     app.set_runtime_selection(crate::backend::BackendRuntime::V2);
