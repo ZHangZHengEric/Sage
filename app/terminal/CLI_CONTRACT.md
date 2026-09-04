@@ -93,11 +93,16 @@ when the call may be remembered, `approve_and_remember`. The `payload` then also
 the CLI matcher uses exact arguments for `execute_shell_command` (including unchanged shell
 text, `workdir` and `env_vars`), the original `file_path`
 for `file_write` / `file_update`, and the full arguments otherwise), `approval_scopes`
-(currently `["session"]`) and `persistent_approval_allowed: true`. Answering
-`approve_and_remember` makes the runtime skip the approval for later calls that match within
-the same session; those calls surface a `policy.approval.remembered` event when remembered and a
-`policy.decision.recorded` event with `remembered_by` / `remembered_scope` when auto-approved.
-`sage v2 chat` exposes `/approvals` (list) and `/forget <n>|all` (revoke) for the session.
+(`["session", "workspace"]`) and `persistent_approval_allowed: true`. Answering
+`approve_and_remember` makes the runtime skip the approval for later calls that match; the
+decision line may carry `"payload": {"scope": "session" | "workspace"}` (default `session`).
+`session` lives in the session's derived state; `workspace` is kept by the CLI under
+`<session_root>/approvals/` keyed by the workspace path, so every later session in the same
+workspace is covered (the file is never written into the workspace itself). A scope the runtime
+does not offer is tightened to `session`. Remembered calls surface a `policy.approval.remembered`
+event when remembered and a `policy.decision.recorded` event with `remembered_by` /
+`remembered_scope` when auto-approved. `sage v2 chat` exposes `/approvals` (list, both scopes)
+and `/forget <n>|all` (revoke).
 Legacy shell/path fingerprints are not reused after the matcher upgrade; those operations
 require approval again. Invalid remembered entries are ignored individually, retaining valid
 entries, and `/forget all` also removes corrupt approval documents.

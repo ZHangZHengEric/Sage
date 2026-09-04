@@ -6,11 +6,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+import os
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 from sagents.v2.agent.policy import (
     ApprovalMatcher,
+    ApprovalMemory,
     ApprovalStrategy,
     DefaultToolPolicy,
     RememberedApproval,
@@ -98,10 +104,158 @@ def build_tool_policy(approval_mode: str | None) -> DefaultToolPolicy:
     )
 
 
+def workspace_approval_store_path(store_root: str | Path, workspace: str | Path) -> Path:
+    """workspace 作用域记忆的文件位置：宿主目录下按工作区路径散列分文件。
+
+    刻意不放进工作区本身：仓库里带一份"预先批准"的文件会变成供应链入口。
+    """
+
+    resolved = Path(workspace).expanduser().resolve()
+    digest = hashlib.sha256(resolved.as_posix().encode("utf-8")).hexdigest()[:24]
+    return Path(store_root).expanduser() / f"{digest}.json"
+
+
+class WorkspaceApprovalMemory:
+    """在 Kernel 的 session 记忆之上叠加 ``workspace`` 作用域。
+
+    ``session`` 作用域原样交给被包装的记忆（会话派生状态，随 Session 删除清理）；
+    ``workspace`` 作用域记在 ``session_root/approvals/<workspace-hash>.json``，同一
+    工作区的后续进程/会话都能命中。文件损坏、版本不认识或工作区不匹配一律当作没有
+    记忆：只会多问一次，不会放宽。
+    """
+
+    VERSION = 1
+    supported_scopes: frozenset[str] = frozenset({"session", "workspace"})
+
+    def __init__(
+        self,
+        session_memory: ApprovalMemory,
+        *,
+        store_root: str | Path,
+        workspace: str | Path,
+    ) -> None:
+        self.session_memory = session_memory
+        self.workspace = Path(workspace).expanduser().resolve()
+        self.path = workspace_approval_store_path(store_root, self.workspace)
+        self._lock = asyncio.Lock()
+
+    async def lookup(
+        self, *, session_id: str, matcher: ApprovalMatcher
+    ) -> RememberedApproval | None:
+        remembered = await self.session_memory.lookup(
+            session_id=session_id, matcher=matcher
+        )
+        if remembered is not None:
+            return remembered
+        raw = (await self._entries()).get(matcher.key)
+        if raw is None:
+            return None
+        try:
+            remembered = RememberedApproval.model_validate(raw)
+        except ValueError:
+            return None
+        return remembered if remembered.matcher == matcher else None
+
+    async def remember(
+        self, *, session_id: str, approval: RememberedApproval
+    ) -> None:
+        if approval.scope == "session":
+            await self.session_memory.remember(session_id=session_id, approval=approval)
+            return
+        if approval.scope not in self.supported_scopes:
+            raise ValueError(
+                f"approval scope {approval.scope!r} is not supported by "
+                "WorkspaceApprovalMemory"
+            )
+        async with self._lock:
+            entries = await self._entries()
+            entries[approval.matcher.key] = approval.model_dump(mode="json")
+            await self._store(entries)
+
+    async def forget(
+        self, *, session_id: str, matcher: ApprovalMatcher | None = None
+    ) -> int:
+        removed = await self.session_memory.forget(
+            session_id=session_id, matcher=matcher
+        )
+        async with self._lock:
+            entries = await self._entries()
+            if matcher is None:
+                removed += len(entries)
+                if entries:
+                    await self._store({})
+                return removed
+            if entries.pop(matcher.key, None) is not None:
+                removed += 1
+                await self._store(entries)
+        return removed
+
+    async def list_remembered(
+        self, *, session_id: str
+    ) -> tuple[RememberedApproval, ...]:
+        session_entries = await self.session_memory.list_remembered(
+            session_id=session_id
+        )
+        workspace_entries = []
+        for _key, raw in sorted((await self._entries()).items()):
+            try:
+                workspace_entries.append(RememberedApproval.model_validate(raw))
+            except ValueError:
+                continue
+        return (*session_entries, *workspace_entries)
+
+    def composition_identity(self) -> dict[str, Any]:
+        identity = getattr(self.session_memory, "composition_identity", None)
+        return {
+            "provider": "sage.cli.workspace-approval-memory",
+            "scopes": sorted(self.supported_scopes),
+            "version": self.VERSION,
+            "session": identity() if callable(identity) else None,
+        }
+
+    async def _entries(self) -> dict[str, Any]:
+        def read() -> dict[str, Any]:
+            try:
+                raw = json.loads(self.path.read_text("utf-8"))
+            except (OSError, ValueError):
+                return {}
+            if (
+                not isinstance(raw, dict)
+                or raw.get("version") != self.VERSION
+                or raw.get("workspace") != self.workspace.as_posix()
+            ):
+                return {}
+            entries = raw.get("entries")
+            return dict(entries) if isinstance(entries, dict) else {}
+
+        return await asyncio.to_thread(read)
+
+    async def _store(self, entries: dict[str, Any]) -> None:
+        payload = {
+            "version": self.VERSION,
+            "workspace": self.workspace.as_posix(),
+            "entries": entries,
+        }
+
+        def write() -> None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_name(self.path.name + ".tmp")
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                "utf-8",
+            )
+            os.replace(temporary, self.path)
+
+        await asyncio.to_thread(write)
+
+
 def format_remembered_approvals(remembered: Sequence[RememberedApproval]) -> str:
     if not remembered:
-        return "no remembered approvals in this session"
-    lines = ["remembered approvals in this session (/forget <n> | /forget all):"]
+        return "no remembered approvals in this session or workspace"
+    lines = [
+        "remembered approvals in this session and workspace "
+        "(/forget <n> | /forget all):"
+    ]
     for index, value in enumerate(remembered, 1):
         lines.append(
             f"  {index}. {value.matcher.summary}  "
@@ -114,7 +268,9 @@ def format_remembered_approvals(remembered: Sequence[RememberedApproval]) -> str
 __all__ = [
     "APPROVAL_STRATEGIES",
     "CLI_APPROVAL_MATCHER_ID",
+    "WorkspaceApprovalMemory",
     "build_tool_policy",
     "cli_approval_matcher",
     "format_remembered_approvals",
+    "workspace_approval_store_path",
 ]

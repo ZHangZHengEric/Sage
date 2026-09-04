@@ -1658,6 +1658,51 @@ async def test_builder_wires_session_approval_memory_and_accepts_a_host_memory(
 
 
 @pytest.mark.asyncio
+async def test_builder_layers_a_host_approval_memory_over_the_session_memory(
+    tmp_path: Path,
+):
+    class Layer:
+        supported_scopes = frozenset({"session", "workspace"})
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def lookup(self, *, session_id, matcher):
+            return await self.inner.lookup(session_id=session_id, matcher=matcher)
+
+        async def remember(self, *, session_id, approval):
+            await self.inner.remember(session_id=session_id, approval=approval)
+
+        async def forget(self, *, session_id, matcher=None):
+            return await self.inner.forget(session_id=session_id, matcher=matcher)
+
+        async def list_remembered(self, *, session_id):
+            return await self.inner.list_remembered(session_id=session_id)
+
+    package = _policy_package("test.approval-memory-layer")
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "layer")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_approval_memory_layer(Layer)
+        .build(package)
+    )
+    try:
+        memory = application.services["agent.approval-memory"]
+        assert isinstance(memory, Layer)
+        # 叠层收到的是 Kernel 的 session 记忆，session 作用域仍由它负责。
+        assert isinstance(memory.inner, SessionApprovalMemory)
+        loop = application.entrypoint().driver_factory("run_layer")
+        assert loop.approval_memory is memory
+        assert (
+            _host_binding(application.resolved_plan, "agent.approval-memory").source
+            == "host"
+        )
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
 async def test_builder_remembers_approvals_in_the_session_derived_state(
     tmp_path: Path,
 ):
