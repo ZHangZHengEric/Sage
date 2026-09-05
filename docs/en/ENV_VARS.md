@@ -108,7 +108,7 @@ Advanced overrides are not listed in `.env.example` unless a deployment needs to
 | `SAGE_SHARED_PYTHON_ENV` | `false` | Share a single Python env across sessions |
 | `SAGE_SHARED_PYTHON_ENV_DIR` | — | Shared venv directory |
 | `SAGE_LOCAL_CPU_TIME_LIMIT` | — | Local sandbox CPU time limit (s) |
-| `SAGE_LOCAL_MEMORY_LIMIT_MB` | — | Local sandbox memory limit (MB) |
+| `SAGE_LOCAL_MEMORY_LIMIT_MB` | `4096` | v1 Linux local/bwrap per-process virtual memory limit (MiB, positive integer) |
 | `SAGE_LOCAL_LINUX_ISOLATION` | `false` | Linux namespace isolation |
 | `SAGE_LOCAL_MACOS_ISOLATION` | `false` | macOS sandbox-exec isolation |
 | `SAGE_USE_CLAW_MODE` | `true` | Inject IDENTITY/AGENT/SOUL/USER/MEMORY md into the system prompt |
@@ -123,6 +123,19 @@ Server agent processes receive a minimal allowlisted environment rather than
 the Sage server environment. Server `local` mode requires Linux `bwrap`; use
 `remote` mode when that boundary is unavailable. Desktop keeps its existing
 single-user environment inheritance for compatibility.
+
+For v1 Linux local/bwrap, `SAGE_LOCAL_MEMORY_LIMIT_MB=512` sets both soft and
+hard `RLIMIT_AS` limits before executing foreground shells, background shells,
+or Python payloads. Children inherit the limit. `prlimit` from `util-linux` is
+required; command execution fails if it is unavailable. Rebuild the server image
+and recreate the container to deploy the fix; restart Sage after changing the
+environment so new sandbox instances receive the new value.
+
+This limits each process's **virtual address space**, not the combined RSS of a
+sandbox or all sessions. Runtimes reserving large address ranges (for example
+Node/V8) may require a larger setting even with low RSS. Keep a separate container
+memory limit and concurrency budget; aggregate process-tree accounting requires
+cgroups. This change does not add limits to v2, passthrough, or macOS/Windows.
 
 ### 4.1 OpenSandbox (remote)
 
