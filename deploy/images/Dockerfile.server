@@ -22,6 +22,7 @@ RUN apt-get update && \
     pandoc \
     libreoffice \
     bubblewrap \
+    util-linux \
     fonts-noto-cjk \
     fonts-dejavu-core \
     fonts-wqy-microhei \

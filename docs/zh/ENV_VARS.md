@@ -114,7 +114,7 @@ Kubernetes 模板单独保留 `NAMESPACE`、`SAGE_HOST`、`SAGE_PUBLIC_URL`、`I
 | `SAGE_SHARED_PYTHON_ENV`          | `false`       | 是否共享 Python 环境                             |
 | `SAGE_SHARED_PYTHON_ENV_DIR`      | —             | 共享 Python venv 目录                          |
 | `SAGE_LOCAL_CPU_TIME_LIMIT`       | —             | 本地沙箱 CPU 时限（秒）                             |
-| `SAGE_LOCAL_MEMORY_LIMIT_MB`      | —             | 本地沙箱内存上限（MB）                               |
+| `SAGE_LOCAL_MEMORY_LIMIT_MB`      | `4096`        | v1 Linux local/bwrap 每进程虚拟内存上限（MiB，正整数） |
 | `SAGE_LOCAL_LINUX_ISOLATION`      | `false`       | Linux 命名空间隔离开关                             |
 | `SAGE_LOCAL_MACOS_ISOLATION`      | `false`       | macOS sandbox-exec 隔离开关                    |
 | `SAGE_USE_CLAW_MODE`              | `true`        | 是否启用 IDENTITY/AGENT/SOUL/USER/MEMORY md 注入 |
@@ -129,6 +129,17 @@ Server 的 Agent 子进程只接收最小白名单环境，不继承 Sage Server
 环境变量。Server 使用 `local` 模式时必须运行在 Linux `bwrap` 隔离中；
 无法提供该边界时应使用 `remote` 模式。Desktop 为兼容现有单用户本机工作流，
 继续保持原有环境继承行为。
+
+v1 Linux local/bwrap 下，设置 `SAGE_LOCAL_MEMORY_LIMIT_MB=512` 会在同步 shell、
+后台 shell 和 Python 任务执行前设置 `RLIMIT_AS` 软、硬上限，子进程继承该限制。
+需要 `util-linux` 提供的 `prlimit`；缺失时命令执行失败，不会退回无限制执行。
+部署修复需要重新构建服务端镜像并重建容器；修改环境变量后需重启 Sage，
+让新建沙箱读取新配置。
+
+该限制针对每个进程的**虚拟地址空间**，不是单沙箱或所有会话的 RSS 合计配额。
+Node/V8 等会预留较大虚拟地址空间的运行时，即使 RSS 较低也可能需要更大的配置。
+仍需设置独立的容器内存上限和并发预算；进程树合计配额需要 cgroup 支持。
+本次修改不为 v2、passthrough 或 macOS/Windows 增加限制。
 
 ### 4.1 OpenSandbox（远程）
 
