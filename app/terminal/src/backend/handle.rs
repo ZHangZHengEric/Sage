@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::backend::protocol::{flush_complete_lines, BackendProtocolState};
 use crate::backend::protocol_support::truncate;
-use crate::backend::protocol_v2::V2_DECISION_TYPE;
+use crate::backend::protocol_v2::{V2_DECISION_TYPE, V2_STEER_TYPE};
 use crate::backend::runtime::{
     apply_state_env, prepare_state_root, resolve_cli_invoker, resolve_runtime_root, CliInvoker,
 };
@@ -346,6 +346,15 @@ impl BackendHandle {
             "interaction_id": interaction_id,
             "decision": decision,
             "payload": payload,
+        });
+        self.write_stdin_line(&frame.to_string())
+    }
+
+    /// v2：Run 进行中把 composer 输入作为 steer 送到下一个安全模型边界。
+    pub fn send_v2_steer(&self, text: &str) -> Result<()> {
+        let frame = json!({
+            "type": V2_STEER_TYPE,
+            "text": text,
         });
         self.write_stdin_line(&frame.to_string())
     }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -40,6 +42,7 @@ async def provision(
     allowed_executables: tuple[str, ...] = ("python",),
     protected_paths: tuple[str, ...] = (),
     allow_symlinks: bool = False,
+    max_output_bytes: int = 32,
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -60,7 +63,7 @@ async def provision(
                 read_only=process_read_only,
                 allowed_executables=allowed_executables,
                 max_wall_time_seconds=2,
-                max_output_bytes=32,
+                max_output_bytes=max_output_bytes,
             ),
             policy_hash="sha256:policy",
             metadata={"host_workspace": str(root)},
@@ -390,28 +393,137 @@ async def test_local_process_denies_unlisted_executable(tmp_path: Path):
         await handle.process.run(request, intent=intent, grant=grant)
 
 
-@pytest.mark.asyncio
-async def test_read_only_process_fails_closed_without_os_isolation(tmp_path: Path):
-    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+READ_ONLY_EXECUTABLES = ("cat", "head", "wc", "ls", "grep", "find", "git")
+
+
+async def run_read_only(tmp_path: Path, argv: tuple[str, ...], **provision_kwargs):
     issuer, handle = await provision(
         tmp_path,
         process_read_only=True,
-        allowed_executables=("bash",),
+        allowed_executables=provision_kwargs.pop("allowed_executables", READ_ONLY_EXECUTABLES),
+        **provision_kwargs,
     )
-    request = ProcessRequest(
-        argv=("bash", "-c", "cat note.txt | head -n 1"), cwd="/workspace"
-    )
+    request = ProcessRequest(argv=argv, cwd="/workspace")
     intent, grant = authorization(
         issuer,
         handle,
         "process.run",
         path=request.cwd,
-        executable="bash",
-        argv=request.argv,
+        executable=argv[0],
+        argv=argv,
+    )
+    return await handle.process.run(request, intent=intent, grant=grant)
+
+
+@pytest.mark.asyncio
+async def test_read_only_process_runs_inspection_pipelines_without_a_shell(
+    tmp_path: Path,
+):
+    """只读模式接受 read_only_shell 语法的管道，各段直接以 argv 启动、用管道相连。"""
+
+    (tmp_path / "note.txt").write_text("needle\nhay\n", encoding="utf-8")
+
+    result = await run_read_only(tmp_path, ("bash", "-c", "cat note.txt | head -n 1"))
+    assert (result.exit_code, result.stdout, result.stderr) == (0, b"needle\n", b"")
+    assert result.argv == ("bash", "-c", "cat note.txt | head -n 1")
+
+    counted = await run_read_only(tmp_path, ("sh", "-c", "cat note.txt | wc -l"))
+    assert counted.exit_code == 0
+    assert counted.stdout.strip() == b"2"
+
+    # 管道最后一段的退出码就是结果；各段的 stderr 汇总到一起。
+    failed = await run_read_only(tmp_path, ("bash", "-c", "cat missing.txt | head -n 1"))
+    assert failed.exit_code == 0
+    assert failed.stdout == b""
+    assert b"missing.txt" in failed.stderr
+    single = await run_read_only(tmp_path, ("bash", "-c", "cat missing.txt"))
+    assert single.exit_code != 0
+    assert b"missing.txt" in single.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "argv, message",
+    (
+        (("python", "-c", "print(1)"), "accepts only a validated shell command"),
+        (("bash", "-lc", "ls"), "accepts only a validated shell command"),
+        (("bash", "-c", "./cat note.txt"), "without a path"),
+        (("bash", "-c", "/bin/cat note.txt"), "without a path"),
+        (("bash", "-c", "cat note.txt > out.txt"), "read-only"),
+        (("bash", "-c", "cat $(pwd)/note.txt"), "read-only"),
+        (("bash", "-c", "cat ../secret.txt"), "inside the workspace"),
+    ),
+)
+async def test_read_only_process_rejects_everything_outside_the_grammar(
+    tmp_path: Path, argv: tuple[str, ...], message: str
+):
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError, match=message):
+        await run_read_only(tmp_path, argv)
+
+    assert not (tmp_path / "out.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_read_only_process_honours_the_executable_allowlist(tmp_path: Path):
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError, match="not allowed"):
+        await run_read_only(
+            tmp_path, ("bash", "-c", "cat note.txt"), allowed_executables=("ls",)
+        )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+@pytest.mark.asyncio
+async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path):
+    """仓库配置里的 fsmonitor / external diff / hooks 都不会被只读 git 执行。"""
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ("git", *args),
+            cwd=tmp_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    marker = tmp_path / "marker"
+    helper = tmp_path / "helper.sh"
+    helper.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    helper.chmod(0o755)
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    git("config", "core.fsmonitor", str(helper))
+    git("config", "diff.external", str(helper))
+    git("config", "core.hooksPath", str(tmp_path / "hooks"))
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks" / "post-index-change").write_text(
+        f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8"
+    )
+    (tmp_path / "hooks" / "post-index-change").chmod(0o755)
+    (tmp_path / "tracked.txt").write_text("one\n", encoding="utf-8")
+    git("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "tracked.txt")
+    git("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "one")
+    (tmp_path / "tracked.txt").write_text("two\n", encoding="utf-8")
+    marker.unlink(missing_ok=True)
+
+    status = await run_read_only(
+        tmp_path, ("bash", "-c", "git status --short"), max_output_bytes=4096
+    )
+    diff = await run_read_only(tmp_path, ("bash", "-c", "git diff"), max_output_bytes=4096)
+    log = await run_read_only(
+        tmp_path, ("bash", "-c", "git log --oneline | head -n 1"), max_output_bytes=4096
     )
 
-    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
-        await handle.process.run(request, intent=intent, grant=grant)
+    assert status.exit_code == 0
+    assert b"tracked.txt" in status.stdout
+    assert diff.exit_code == 0
+    assert b"-one" in diff.stdout and b"+two" in diff.stdout
+    assert log.exit_code == 0 and b"one" in log.stdout
+    assert not marker.exists(), "a repository-configured helper was executed"
 
 
 @pytest.mark.asyncio
@@ -428,26 +540,14 @@ async def test_read_only_process_fails_closed_without_os_isolation(tmp_path: Pat
 async def test_read_only_process_rejects_mutating_shell_commands(
     tmp_path: Path, command: str
 ):
-    issuer, handle = await provision(
-        tmp_path,
-        process_read_only=True,
-        allowed_executables=("bash",),
-    )
-    request = ProcessRequest(argv=("bash", "-c", command), cwd="/workspace")
-    intent, grant = authorization(
-        issuer,
-        handle,
-        "process.run",
-        path=request.cwd,
-        executable="bash",
-        argv=request.argv,
-    )
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
 
-    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
-        await handle.process.run(request, intent=intent, grant=grant)
+    with pytest.raises(PermissionError, match="read-only"):
+        await run_read_only(tmp_path, ("bash", "-c", command))
 
     assert not (tmp_path / "changed.txt").exists()
     assert not (tmp_path / "changed.patch").exists()
+    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "needle\n"
 
 
 @pytest.mark.asyncio

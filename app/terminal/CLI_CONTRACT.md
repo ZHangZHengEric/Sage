@@ -93,11 +93,18 @@ when the call may be remembered, `approve_and_remember`. The `payload` then also
 the CLI matcher uses exact arguments for `execute_shell_command` (including unchanged shell
 text, `workdir` and `env_vars`), the original `file_path`
 for `file_write` / `file_update`, and the full arguments otherwise), `approval_scopes`
-(currently `["session"]`) and `persistent_approval_allowed: true`. Answering
-`approve_and_remember` makes the runtime skip the approval for later calls that match within
-the same session; those calls surface a `policy.approval.remembered` event when remembered and a
-`policy.decision.recorded` event with `remembered_by` / `remembered_scope` when auto-approved.
-`sage v2 chat` exposes `/approvals` (list) and `/forget <n>|all` (revoke) for the session.
+(`["session", "workspace"]`) and `persistent_approval_allowed: true`. Answering
+`approve_and_remember` makes the runtime skip the approval for later calls that match; the
+decision line may carry `"payload": {"scope": "session" | "workspace"}` (default `session`).
+`session` lives in the session's derived state; `workspace` is kept by the CLI under
+`<session_root>/approvals/` keyed by the workspace path, so every later session in the same
+workspace is covered (the file is never written into the workspace itself). A scope the runtime
+does not offer is tightened to `session`. Remembered calls surface a `policy.approval.remembered`
+event when remembered and a `policy.decision.recorded` event with `remembered_by` /
+`remembered_scope` when auto-approved. `sage v2 chat` exposes `/approvals` (list, both scopes)
+and `/forget <n>|all` (revoke). `sage v2 approvals [--workspace <path>] [--json]` lists the
+workspace-scoped entries without opening the session store (one JSON object with `workspace`,
+`store`, `total`, `list`), and `sage v2 approvals forget <n>|all` revokes them.
 Legacy shell/path fingerprints are not reused after the matcher upgrade; those operations
 require approval again. Invalid remembered entries are ignored individually, retaining valid
 entries, and `/forget all` also removes corrupt approval documents.
@@ -111,7 +118,12 @@ preference: a run suspended under one mode can be resumed under another.
 
 `--mode plan` hides write-class tools from the model (`RunConfig.enabled_tools` is set to the
 agent's read-only / plan-safe tools; `goal_submit` stays available) on top of the read-only
-sandbox. The local workspace **filesystem API** refuses writes under `.git/hooks` and
+sandbox. In that sandbox `execute_shell_command` accepts only the read-only inspection grammar
+(`cat`, `grep`, `rg`, `find`, `ls`, `head`, `wc`, read-only `git` subcommands, … joined by pipes;
+no redirection, control operators or paths in executables); the stages run directly from argv
+without a shell and `git` runs with repository hooks, fsmonitor, pager, external diff and gpg
+disabled. Anything else fails with `job.runner_failed` and a read-only message; the file
+system stays read-only regardless. The local workspace **filesystem API** refuses writes under `.git/hooks` and
 `.git/config`; those file API calls fail with `sandbox.protected_path` before writing.
 This provider reports `IsolationLevel.NONE`: host subprocesses (including shell and Git)
 can still modify these paths. `protected_paths` is not process isolation. A host needing
@@ -157,5 +169,10 @@ session id it previously received in a `cli_v2_session` frame, maps native `mess
 existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
 other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
 Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
-`app/terminal/src/backend/tests/protocol_v2.rs`. Steering frames are not sent by the TUI yet, and the
-TUI session picker still lists v1 sessions only. The surface remains experimental.
+`app/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
+`v2_steer` frame and the `cli_v2_steer` answer is shown in the transcript; an approval must be
+answered first (the CLI reads only decision lines then). With the v2 runtime selected, `/sessions`,
+`/resume` and `/sessions inspect` read the v2 store through `sage v2 sessions --json` and
+`sage v2 sessions inspect <id> --json` (the picker shows the first task, the run count and the last
+run state; resuming replays the transcript entries and passes `--session-id` to the next backend).
+The surface remains experimental.

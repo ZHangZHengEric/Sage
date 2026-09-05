@@ -23,9 +23,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    parse_read_only_shell_command,
+)
 from sagents.v2.runtime.execution.sandbox.contracts import (
     MUTATING_FILE_OPERATIONS,
     FileOperation,
@@ -58,6 +62,50 @@ def _grant_payload(grant: SandboxGrant) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode()
+
+
+# 只读模式下 git 段的加固：命令行 -c 覆盖仓库/全局配置里能启动外部程序的项，
+# 环境变量再关掉全局/系统配置与终端提示。仍不是安全边界，只是把已知入口关掉。
+_READ_ONLY_GIT_OPTIONS: tuple[str, ...] = tuple(
+    option
+    for setting in (
+        "core.fsmonitor=false",
+        "core.hooksPath=/dev/null",
+        "core.pager=cat",
+        "core.editor=true",
+        "core.sshCommand=false",
+        "diff.external=",
+        "gpg.program=false",
+        "gpg.ssh.program=false",
+        "protocol.allow=never",
+    )
+    for option in ("-c", setting)
+)
+_READ_ONLY_GIT_DIFF_COMMANDS = frozenset({"diff", "log", "show"})
+_READ_ONLY_GIT_ENV = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def _read_only_stages(argv: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    if argv[:2] not in {("bash", "-c"), ("sh", "-c")} or len(argv) != 3:
+        raise PermissionError(
+            "read-only process mode accepts only a validated shell command"
+        )
+    return parse_read_only_shell_command(argv[2])
+
+
+def _harden_read_only_stage(stage: tuple[str, ...]) -> tuple[str, ...]:
+    if stage[0] != "git":
+        return stage
+    hardened = ("git", *_READ_ONLY_GIT_OPTIONS, *stage[1:])
+    if len(stage) > 1 and stage[1] in _READ_ONLY_GIT_DIFF_COMMANDS:
+        # textconv / external diff drivers come from .gitattributes plus repo
+        # config; the diff-family commands accept explicit opt-outs.
+        hardened = (*hardened, "--no-textconv", "--no-ext-diff")
+    return hardened
 
 
 @dataclass
@@ -167,22 +215,34 @@ class _LocalProcessRuntime:
         if not policy.enabled:
             raise PermissionError("process execution is disabled")
         if policy.read_only:
-            # This provider intentionally reports IsolationLevel.NONE.  A
-            # command allowlist cannot make a host shell read-only: shell
-            # expansion, symlinks, Git helpers, and executable behavior can
-            # all reach outside the mapped workspace.  Fail closed instead of
-            # advertising a security boundary that this provider cannot
-            # enforce. Providers with a real OS sandbox may implement the
-            # read-only ProcessPolicy contract themselves.
-            raise PermissionError(
-                "read-only process execution requires an isolated sandbox"
+            # This provider reports IsolationLevel.NONE: it cannot make an
+            # arbitrary host shell read-only, so it does not try. Read-only mode
+            # accepts only the small inspection grammar of ``read_only_shell``
+            # and never starts a shell: the validated stages are spawned
+            # directly from argv and connected with pipes, so there is no
+            # expansion, redirection or subshell. Git stages additionally
+            # disable every external program a repository config could inject
+            # (hooks, fsmonitor, pager, external diff, textconv, gpg). This is
+            # still not a security boundary; it lets a Plan read code and Git
+            # state without a general-purpose process.
+            stages = tuple(
+                _harden_read_only_stage(stage)
+                for stage in _read_only_stages(request.argv)
             )
-        executable = request.argv[0]
-        if policy.allowed_executables and executable not in policy.allowed_executables:
-            raise PermissionError(f"executable {executable!r} is not allowed")
-        resolved_executable = shutil.which(executable)
-        if resolved_executable is None:
-            raise FileNotFoundError(executable)
+        else:
+            stages = (request.argv,)
+        resolved: list[tuple[str, tuple[str, ...]]] = []
+        for stage in stages:
+            executable = stage[0]
+            if (
+                policy.allowed_executables
+                and executable not in policy.allowed_executables
+            ):
+                raise PermissionError(f"executable {executable!r} is not allowed")
+            resolved_executable = shutil.which(executable)
+            if resolved_executable is None:
+                raise FileNotFoundError(executable)
+            resolved.append((resolved_executable, tuple(stage[1:])))
         cwd = self.provider._path(self.row, request.cwd)
         if not cwd.is_dir():
             raise NotADirectoryError(request.cwd)
@@ -201,47 +261,44 @@ class _LocalProcessRuntime:
             for name in policy.allowed_env_names
             if name in os.environ
         }
+        env = {**inherited_env, **request.env}
+        if policy.read_only:
+            env.update(_READ_ONLY_GIT_ENV)
         started = time.monotonic()
         async with self.row.process_slots:
-            process = await asyncio.create_subprocess_exec(
-                resolved_executable,
-                *request.argv[1:],
-                cwd=cwd,
-                env={**inherited_env, **request.env},
-                stdin=asyncio.subprocess.PIPE if request.stdin is not None else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                # Shell commands commonly spawn npm/node/flutter children.  A
-                # dedicated POSIX session lets cancellation terminate the full
-                # process group instead of only the immediate bash process.
-                start_new_session=os.name == "posix",
+            processes, stderr_reader = await self._spawn_pipeline(
+                resolved, cwd, env, request.stdin
             )
+            last = processes[-1]
             stdout_task = asyncio.create_task(
-                self._read_bounded(process.stdout, policy.max_output_bytes)
+                self._read_bounded(last.stdout, policy.max_output_bytes)
             )
             stderr_task = asyncio.create_task(
-                self._read_bounded(process.stderr, policy.max_output_bytes)
+                self._read_bounded(stderr_reader, policy.max_output_bytes)
             )
             timed_out = False
             try:
                 try:
                     # Input backpressure is part of execution, so it must share
-                    # the timeout and cancellation cleanup with process.wait().
+                    # the timeout and cancellation cleanup with the waits.
                     async with asyncio.timeout(timeout):
-                        if process.stdin is not None:
+                        first = processes[0]
+                        if first.stdin is not None:
                             try:
-                                process.stdin.write(request.stdin or b"")
-                                await process.stdin.drain()
+                                first.stdin.write(request.stdin or b"")
+                                await first.stdin.drain()
                             except (BrokenPipeError, ConnectionResetError):
                                 # A command may deliberately exit without
                                 # consuming all input (for example head).
                                 pass
                             finally:
-                                process.stdin.close()
-                        await process.wait()
+                                first.stdin.close()
+                        await asyncio.gather(
+                            *(process.wait() for process in processes)
+                        )
                 except TimeoutError:
                     timed_out = True
-                    await self._terminate_process_tree(process)
+                    await self._terminate_processes(processes)
 
                 (
                     (stdout, stdout_overflow),
@@ -249,11 +306,11 @@ class _LocalProcessRuntime:
                         stderr,
                         stderr_overflow,
                     ),
-                ) = await self._finish_pipe_readers(process, stdout_task, stderr_task)
+                ) = await self._finish_pipe_readers(processes, stdout_task, stderr_task)
             except BaseException:
                 # A child that inherited stdout/stderr can otherwise keep the
                 # reader tasks and the single process slot alive indefinitely.
-                await self._terminate_process_tree(process)
+                await self._terminate_processes(processes)
                 await self._cancel_pipe_readers(stdout_task, stderr_task)
                 raise
         limit = policy.max_output_bytes
@@ -265,13 +322,93 @@ class _LocalProcessRuntime:
         return ProcessResult(
             process_id=new_id("process"),
             argv=request.argv,
-            exit_code=process.returncode,
+            exit_code=last.returncode,
             stdout=stdout,
             stderr=stderr,
             timed_out=timed_out,
             duration_seconds=time.monotonic() - started,
             truncated=truncated,
         )
+
+    async def _spawn_pipeline(self, resolved, cwd, env, stdin):
+        """Start the stages as separate processes joined by pipes (no shell).
+
+        A single stage keeps the plain layout (its own stdout/stderr pipes).
+        With several stages each one's stdout feeds the next one's stdin, the
+        last stage's stdout is read, and all stages share one stderr pipe. Each
+        stage gets its own session so ``_terminate_processes`` can reap the
+        whole tree stage by stage.
+        """
+
+        processes: list[asyncio.subprocess.Process] = []
+        pipe_read: int | None = None
+        shared_stderr: tuple[int, int] | None = os.pipe() if len(resolved) > 1 else None
+        try:
+            for index, (executable, arguments) in enumerate(resolved):
+                is_first = index == 0
+                is_last = index == len(resolved) - 1
+                next_read: int | None = None
+                stdout: int | Any = asyncio.subprocess.PIPE
+                if not is_last:
+                    next_read, stdout = os.pipe()
+                stdin_target: int | Any | None
+                if is_first:
+                    stdin_target = (
+                        asyncio.subprocess.PIPE if stdin is not None else None
+                    )
+                else:
+                    stdin_target = pipe_read
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        executable,
+                        *arguments,
+                        cwd=cwd,
+                        env=env,
+                        stdin=stdin_target,
+                        stdout=stdout,
+                        stderr=(
+                            asyncio.subprocess.PIPE
+                            if shared_stderr is None
+                            else shared_stderr[1]
+                        ),
+                        # Shell commands commonly spawn npm/node/flutter
+                        # children.  A dedicated POSIX session lets cancellation
+                        # terminate the full process group instead of only the
+                        # immediate process.
+                        start_new_session=os.name == "posix",
+                    )
+                finally:
+                    # The child owns its copies now; the parent must drop its
+                    # ends or the readers never see EOF.
+                    if pipe_read is not None:
+                        os.close(pipe_read)
+                        pipe_read = None
+                    if next_read is not None:
+                        os.close(stdout)
+                pipe_read = next_read
+                processes.append(process)
+        except BaseException:
+            if pipe_read is not None:
+                os.close(pipe_read)
+            if shared_stderr is not None:
+                os.close(shared_stderr[0])
+                os.close(shared_stderr[1])
+            await self._terminate_processes(processes)
+            raise
+        if shared_stderr is None:
+            return processes, processes[-1].stderr
+        os.close(shared_stderr[1])
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        await loop.connect_read_pipe(
+            lambda: asyncio.StreamReaderProtocol(reader),
+            os.fdopen(shared_stderr[0], "rb", buffering=0),
+        )
+        return processes, reader
+
+    async def _terminate_processes(self, processes) -> None:
+        for process in processes:
+            await self._terminate_process_tree(process)
 
     async def _terminate_process_tree(
         self, process: asyncio.subprocess.Process
@@ -315,7 +452,7 @@ class _LocalProcessRuntime:
                 process.kill()
                 await process.wait()
 
-    async def _finish_pipe_readers(self, process, stdout_task, stderr_task):
+    async def _finish_pipe_readers(self, processes, stdout_task, stderr_task):
         """Drain process output without allowing inherited pipes to hang."""
 
         readers = (stdout_task, stderr_task)
@@ -323,8 +460,8 @@ class _LocalProcessRuntime:
         if pending:
             # The direct process exited but a descendant still owns a pipe.
             # Background jobs are not supported by this sandbox, so reap the
-            # remaining process group before releasing the process slot.
-            await self._terminate_process_tree(process)
+            # remaining process groups before releasing the process slot.
+            await self._terminate_processes(processes)
             _, pending = await asyncio.wait(
                 readers, timeout=self._PIPE_DRAIN_GRACE_SECONDS
             )

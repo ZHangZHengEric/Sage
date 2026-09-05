@@ -341,6 +341,19 @@ class OfficialToolRuntime:
             handle.job_id, block_until_ms=block_until_ms, pattern=None
         )
 
+    async def release_run(self, run_id: str) -> None:
+        """Terminate every job the Run still owns once the Run is terminal.
+
+        Shell jobs are private to their Run: a later Run cannot adopt them and
+        the sandbox they run in is released with the Run, so leaving them alive
+        would only leak processes.
+        """
+
+        for job in await self.job_runtime.list_run_jobs(run_id):
+            if job.state in {JobState.COMPLETED, JobState.FAILED, JobState.KILLED}:
+                continue
+            await self.job_runtime.cancel(job.job_id, force=True)
+
     async def close(self) -> None:
         """Cancel private ephemeral jobs before their sandbox is released."""
 

@@ -28,6 +28,11 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxGrantIssuer,
 )
 from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    READ_ONLY_SHELL_EXECUTABLES,
+)
+
+from app.cli.v2.approvals import WorkspaceApprovalMemory
 
 # 与 desktop_v2 的本地 workspace 沙箱保持同一档默认值，行为可对照。
 DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
@@ -101,10 +106,17 @@ class LocalWorkspaceBindingProvider:
             max_file_bytes=settings.max_file_bytes,
             max_total_bytes=settings.max_total_bytes,
         )
+        # 只读（plan）模式下进程只能跑 read_only_shell 的检查语法，且不经 shell：
+        # 白名单换成该语法能启动的命令，bash/python 等一概不在其中。
+        allowed_executables = (
+            tuple(sorted(READ_ONLY_SHELL_EXECUTABLES))
+            if settings.read_only
+            else settings.allowed_executables
+        )
         process = ProcessPolicy(
             enabled=settings.process_enabled,
             read_only=settings.read_only,
-            allowed_executables=settings.allowed_executables,
+            allowed_executables=allowed_executables,
             allowed_env_names=settings.allowed_env_names,
             max_wall_time_seconds=settings.max_wall_time_seconds,
             max_output_bytes=settings.max_output_bytes,
@@ -164,13 +176,16 @@ async def build_cli_application(
     bindings: LocalWorkspaceBindingProvider,
     model_provider: ModelProvider | None = None,
     tool_policy: DefaultToolPolicy | None = None,
+    approval_store: str | Path | None = None,
 ) -> SAgentApplication:
     """用唯一组合根 ``SAgentBuilder`` 构建 CLI 使用的 ``SAgentApplication``。
 
     ``model_provider`` 仅供测试/脚本化场景注入；生产路径由 manifest 的模型路由决定。
     ``tool_policy`` 是 ``--approval-mode`` 决定的审批策略（见 ``app.cli.v2.approvals``），
-    None 时沿用引擎默认。调用方通过 ``application.entrypoint()`` 取 ``SAgent``，
-    用 ``application.close()`` 释放全部资源。
+    None 时沿用引擎默认。审批记忆在 Kernel 的 session 作用域之上叠加 ``workspace``
+    作用域，文件放在 ``approval_store``（默认 ``session_root/approvals``，宿主目录、
+    不进用户仓库）下、按 ``bindings.workspace`` 分文件。调用方通过
+    ``application.entrypoint()`` 取 ``SAgent``，用 ``application.close()`` 释放全部资源。
     """
 
     builder = (
@@ -182,4 +197,15 @@ async def build_cli_application(
         builder = builder.with_model_provider(model_provider)
     if tool_policy is not None:
         builder = builder.with_tool_policy(tool_policy)
+    store_root = (
+        Path(approval_store).expanduser()
+        if approval_store is not None
+        else Path(session_root).expanduser() / "approvals"
+    )
+    workspace = bindings.workspace
+    builder = builder.with_approval_memory_layer(
+        lambda session_memory: WorkspaceApprovalMemory(
+            session_memory, store_root=store_root, workspace=workspace
+        )
+    )
     return await builder.build(package)

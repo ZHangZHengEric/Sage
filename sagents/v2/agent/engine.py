@@ -2176,6 +2176,10 @@ class AgentLoopEngine:
         try:
             run, result = await self._execute_tool_with_control(run, call, context)
             if result is None:
+                # The Run reached a terminal state while the Tool was being
+                # cancelled; the loop will not come back to its safe point, so
+                # release Run-scoped Tool resources (e.g. shell jobs) here.
+                await self._release_run_resources(run.run_id)
                 return run, None
         except SageV2Error as exc:
             localized = localize_error(exc.info, context.language)
@@ -2268,6 +2272,7 @@ class AgentLoopEngine:
             )
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
+            await self._release_run_resources(run.run_id)
             return current, None
         run = current
         if run.state == RunState.SUSPEND_REQUESTED:

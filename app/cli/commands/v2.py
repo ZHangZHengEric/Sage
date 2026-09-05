@@ -18,7 +18,12 @@ from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 from sagents.v2.package.manifest.root import SageManifest
 
 from app.cli.services.base import CLIError
-from app.cli.v2.approvals import build_tool_policy, format_remembered_approvals
+from app.cli.v2.approvals import (
+    WorkspaceApprovalMemory,
+    build_tool_policy,
+    format_remembered_approvals,
+    workspace_approvals_json,
+)
 from app.cli.v2.host import (
     LocalWorkspaceBindingProvider,
     WorkspaceSandboxSettings,
@@ -254,7 +259,7 @@ class CliSession:
         return format_remembered_approvals(remembered)
 
     async def forget_approvals(self, session_id: str | None, selector: str) -> str:
-        """``/forget [all|<n>]``：撤销本 Session 记住的审批，编号来自 ``/approvals``。"""
+        """``/forget [all|<n>]``：撤销记住的审批（session 与 workspace 两级），编号来自 ``/approvals``。"""
 
         if session_id is None:
             return "(no session yet)"
@@ -594,6 +599,68 @@ async def v2_sessions_command(args: argparse.Namespace) -> int:
         sys.stderr.write(
             f"skipped {len(unreadable)} unreadable session(s): {', '.join(unreadable)}\n"
         )
+    return 0
+
+
+async def v2_approvals_command(args: argparse.Namespace) -> int:
+    """``sage v2 approvals [forget <n>|all]``：离线管理 workspace 作用域的审批记忆。
+
+    只碰 ``session_root/approvals`` 下的文件，不打开会话存储（不取写锁），
+    另一个 ``sage v2`` 进程在跑时也能用。session 作用域的条目在 ``sage v2 chat``
+    里用 ``/approvals`` / ``/forget`` 管理。
+    """
+
+    from app.cli.service import configure_cli_logging
+
+    configure_cli_logging(verbose=args.verbose)
+    workspace = resolve_workspace(getattr(args, "workspace", None))
+    session_root = resolve_session_root(getattr(args, "session_root", None))
+    memory = WorkspaceApprovalMemory(
+        store_root=session_root / "approvals", workspace=workspace
+    )
+    if getattr(args, "approvals_command", None) == "forget":
+        return await _forget_workspace_approvals(args, memory)
+    remembered = await memory.list_workspace()
+    if args.json:
+        print(json.dumps(workspace_approvals_json(memory, remembered), ensure_ascii=False))
+        return 0
+    print(
+        format_remembered_approvals(
+            remembered,
+            heading=(
+                f"remembered approvals for workspace {memory.workspace} "
+                "(sage v2 approvals forget <n> | forget all):"
+            ),
+            empty=f"no remembered approvals for workspace {memory.workspace}",
+        )
+    )
+    return 0
+
+
+async def _forget_workspace_approvals(
+    args: argparse.Namespace, memory: WorkspaceApprovalMemory
+) -> int:
+    selector = str(getattr(args, "selector", "") or "").strip()
+    if selector == "all":
+        removed = await memory.forget_workspace()
+        print(f"forgot {removed} remembered approval(s) for workspace {memory.workspace}")
+        return 0
+    remembered = await memory.list_workspace()
+    try:
+        index = int(selector)
+    except ValueError:
+        raise CLIError(
+            f"invalid selector {selector!r}",
+            next_steps=["Use: sage v2 approvals forget <n> (from `sage v2 approvals`) | all"],
+        ) from None
+    if not 1 <= index <= len(remembered):
+        raise CLIError(
+            f"no remembered approval #{index} for workspace {memory.workspace}",
+            next_steps=["List remembered approvals with: sage v2 approvals"],
+        )
+    target = remembered[index - 1]
+    await memory.forget_workspace(target.matcher)
+    print(f"forgot #{index}: {target.matcher.summary}")
     return 0
 
 

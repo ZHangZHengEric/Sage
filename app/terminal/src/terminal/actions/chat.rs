@@ -60,6 +60,30 @@ pub(super) fn run_task(
     Ok(true)
 }
 
+/// v2 Run 进行中的输入：以 `v2_steer` 帧交给后端；后端用 `cli_v2_steer` 回报接受/拒绝。
+pub(super) fn steer_task(
+    app: &mut App,
+    backend: &mut Option<BackendHandle>,
+    text: String,
+) -> Result<bool> {
+    let Some(handle) = backend.as_ref() else {
+        app.push_message(
+            MessageKind::System,
+            "backend unavailable; no run is active to steer",
+        );
+        app.set_status(format!("ready  {}", app.session_id));
+        return Ok(true);
+    };
+    if handle.runtime() != BackendRuntime::V2 {
+        // 只有 v2 才有 steer；v1 后端把运行中的输入当下一条 prompt。
+        handle.send_prompt(&text)?;
+        return Ok(true);
+    }
+    handle.send_v2_steer(&text)?;
+    app.set_status(format!("steer sent  {}", app.session_id));
+    Ok(true)
+}
+
 pub(super) fn interrupt_task(app: &mut App, backend: &mut Option<BackendHandle>) -> Result<bool> {
     if !app.busy {
         app.push_message(
@@ -159,6 +183,15 @@ fn answer_v2_input(
     pending: V2InputRequest,
     text: String,
 ) -> Result<bool> {
+    // 直接输入一个允许的决定名（如 reconcile / mark_failed）就按该决定回答。
+    let typed = text.trim();
+    if pending
+        .allowed_decisions
+        .iter()
+        .any(|decision| decision == typed)
+    {
+        return answer_v2_input_with_decision(app, backend, &pending, &[typed]);
+    }
     let decision = if pending
         .allowed_decisions
         .iter()
@@ -293,7 +326,13 @@ pub(super) fn deny_sandbox_command(
     backend: &mut Option<BackendHandle>,
 ) -> Result<bool> {
     if let Some(pending) = app.pending_v2_input.clone() {
-        return answer_v2_input_with_decision(app, backend, &pending, &["cancel", "deny"]);
+        // 人工核对时 /deny = 标记失败；其余问题 /deny = 取消。
+        return answer_v2_input_with_decision(
+            app,
+            backend,
+            &pending,
+            &["mark_failed", "cancel", "deny"],
+        );
     }
     let Some(request) = app.pending_sandbox_approval.clone() else {
         app.push_message(
