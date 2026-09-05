@@ -136,7 +136,8 @@ def test_bwrap_shell_uses_clean_environment_and_pid_namespace(monkeypatch, tmp_p
     )
 
     assert os.path.isabs(command[0])
-    assert command[0].endswith("/bwrap")
+    assert command[0] == "/usr/bin/prlimit"
+    assert command[3].endswith("/bwrap")
     assert "--clearenv" in command
     assert "--unshare-pid" in command
     assert "must-not-leak" not in command
@@ -194,6 +195,8 @@ async def test_bwrap_supervisor_does_not_receive_agent_environment(
     assert captured["env"]["PATH"] != str(workspace)
     assert "LD_PRELOAD" not in captured["env"]
     assert "LD_PRELOAD" in captured["command"]
+    assert captured["command"][0] == "/usr/bin/prlimit"
+    assert captured["command"].index("LD_PRELOAD") > 3
     assert info_messages == [
         "[BwrapIsolation] 执行完成: command='env', return_code=0"
     ]
@@ -493,12 +496,20 @@ async def test_server_local_background_command_is_wrapped_by_bwrap(
     await provider.start_background(
         "env",
         workdir=str(workspace),
-        env_vars={"TASK_INPUT": "agent-visible"},
+        env_vars={
+            "TASK_INPUT": "agent-visible",
+            "LD_PRELOAD": str(workspace / "agent.so"),
+            "LD_AUDIT": str(workspace / "audit.so"),
+        },
     )
 
     assert captured["shell"] is False
     assert captured["env_vars"] is None
     assert os.path.isabs(captured["command"][0])
+    assert captured["command"][0] == "/usr/bin/prlimit"
+    assert captured["command"][3].endswith("/bwrap")
+    assert captured["command"].index("LD_PRELOAD") > 3
+    assert captured["command"].index("LD_AUDIT") > 3
     assert "--clearenv" in captured["command"]
     assert "--unshare-pid" in captured["command"]
     assert captured["command"][-3:] == ["/bin/sh", "-c", "env"]
