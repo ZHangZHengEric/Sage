@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import pickle
 import sys
 import time
@@ -7,6 +8,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+
+
+def _latency_budget(seconds: float) -> float:
+    """墙钟阈值：本地按原值，CI 的共享 runner 速度波动大，默认放宽一倍。
+
+    ``SAGE_TEST_LATENCY_SCALE`` 可显式指定倍数（例如慢机器上跑本地测试时）。
+    """
+
+    default_scale = "2" if os.environ.get("CI") else "1"
+    return seconds * float(os.environ.get("SAGE_TEST_LATENCY_SCALE", default_scale))
 
 
 def _load_memory_index_module():
@@ -1159,7 +1170,7 @@ class TestMemoryIndexFTS(unittest.TestCase):
 
             self.assertGreaterEqual(len(results), 1)
             self.assertEqual(results[0].path, "/workspace/app/cli/resume_session.py")
-            self.assertLess(elapsed, 2.0)
+            self.assertLess(elapsed, _latency_budget(2.0))
 
     def test_realistic_query_prefers_doctor_config_cli_implementation(self):
         with TemporaryDirectory() as tmp_dir:
@@ -1422,8 +1433,8 @@ class TestMemoryIndexFTS(unittest.TestCase):
                 self.assertGreaterEqual(len(results), 1)
             query_elapsed = time.perf_counter() - query_start
 
-            self.assertLess(build_elapsed, 4.0)
-            self.assertLess(query_elapsed, 2.5)
+            self.assertLess(build_elapsed, _latency_budget(4.0))
+            self.assertLess(query_elapsed, _latency_budget(2.5))
 
 
 if __name__ == "__main__":

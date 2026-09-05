@@ -41,6 +41,12 @@ pub(crate) enum CliJsonCommand<'a> {
         user_id: &'a str,
         agent_id: Option<&'a str>,
     },
+    V2SessionsList {
+        limit: usize,
+    },
+    V2SessionInspect {
+        session_id: &'a str,
+    },
     SkillsList {
         user_id: &'a str,
         agent_id: Option<&'a str>,
@@ -84,6 +90,8 @@ impl CliJsonCommand<'_> {
             Self::SessionsList { .. } => "sessions.list",
             Self::AgentsList { .. } => "agents.list",
             Self::SessionInspect { .. } => "sessions.inspect",
+            Self::V2SessionsList { .. } => "v2.sessions.list",
+            Self::V2SessionInspect { .. } => "v2.sessions.inspect",
             Self::SkillsList { .. } => "skills.list",
             Self::ProvidersList { .. } => "provider.list",
             Self::ProviderInspect { .. } => "provider.inspect",
@@ -111,6 +119,8 @@ impl CliJsonCommand<'_> {
                 user_id,
                 agent_id,
             } => sessions::session_inspect_args(session_id, user_id, *agent_id),
+            Self::V2SessionsList { limit } => sessions::v2_sessions_list_args(*limit),
+            Self::V2SessionInspect { session_id } => sessions::v2_session_inspect_args(session_id),
             Self::SkillsList {
                 user_id,
                 agent_id,

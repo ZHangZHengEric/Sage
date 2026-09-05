@@ -15,9 +15,12 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.tool.contracts import (
+    CancelSemantics,
     ReconcileResult,
     ReconcileState,
     ToolCall,
+    ToolCancellationResult,
+    ToolCancellationState,
     ToolDefinition,
     ToolExecutionResult,
 )
@@ -64,6 +67,8 @@ class _DecoratedToolExecutor:
         self._operation_keys: dict[str, str] = {}
         self._call_fingerprints: dict[str, str] = {}
         self._call_run_ids: dict[str, str] = {}
+        # 正在执行的调用：operation_id → (执行它的 task, 工具定义)，供协作取消用。
+        self._executions: dict[str, tuple[asyncio.Task[Any], ToolDefinition]] = {}
 
     async def execute(
         self, call: ToolCall, context: RequestContext
@@ -118,6 +123,9 @@ class _DecoratedToolExecutor:
                 self._call_fingerprints[call.idempotency_key] = fingerprint
                 self._call_run_ids[call.idempotency_key] = call.owner_run_id
                 owner = True
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    self._executions[call.operation_id] = (current_task, definition)
             else:
                 owner = False
         if not owner:
@@ -150,6 +158,42 @@ class _DecoratedToolExecutor:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._operation_keys.pop(call.operation_id, None)
+                self._executions.pop(call.operation_id, None)
+
+    async def cancel(
+        self, operation_id: str, context: RequestContext
+    ) -> ToolCancellationResult:
+        """协作取消：中断仍在执行的调用；已结束的报 TOO_LATE。
+
+        只对声明了 COOPERATIVE / FORCEABLE 的工具生效。取消只是让执行任务收到
+        CancelledError（例如停止等待一个 shell job）；副作用本身（如 job 进程）由
+        工具在 ``release_run`` 里按 Run 收尾。
+        """
+
+        del context
+        async with self._lock:
+            execution = self._executions.get(operation_id)
+            if execution is None:
+                return ToolCancellationResult(
+                    operation_id=operation_id, state=ToolCancellationState.TOO_LATE
+                )
+            task, definition = execution
+            if definition.cancel_semantics not in {
+                CancelSemantics.COOPERATIVE,
+                CancelSemantics.FORCEABLE,
+            }:
+                return ToolCancellationResult(
+                    operation_id=operation_id,
+                    state=ToolCancellationState.NOT_SUPPORTED,
+                )
+            if task.done():
+                return ToolCancellationResult(
+                    operation_id=operation_id, state=ToolCancellationState.TOO_LATE
+                )
+            task.cancel()
+        return ToolCancellationResult(
+            operation_id=operation_id, state=ToolCancellationState.CANCELLED
+        )
 
     async def release_run(self, run_id: str) -> None:
         async with self._lock:
@@ -210,6 +254,7 @@ class DecoratedToolProvider:
         definitions: dict[str, ToolDefinition] = {}
         handlers: dict[str, Any] = {}
         reconcilers: dict[str, Any] = {}
+        self._owners = owners
         for owner in owners:
             for _, method in inspect.getmembers(owner, callable):
                 definition = decorated_tool_definition(method)
@@ -272,6 +317,27 @@ class DecoratedToolProvider:
         self, call: ToolCall, context: RequestContext
     ) -> ToolExecutionResult:
         return await self.executor.execute(call, context)
+
+    async def cancel(
+        self, operation_id: str, context: RequestContext
+    ) -> ToolCancellationResult:
+        return await self.executor.cancel(operation_id, context)
+
+    async def release_run(self, run_id: str) -> None:
+        """Run 到终态：清掉幂等缓存，并让各工具实现收尾自己的 Run 级资源。
+
+        实现对象可定义 ``release_run(run_id)``（同步或异步），例如 shell 工具用它
+        终止该 Run 名下还没结束的后台 job。
+        """
+
+        await self.executor.release_run(run_id)
+        for owner in self._owners:
+            release = getattr(owner, "release_run", None)
+            if not callable(release):
+                continue
+            value = release(run_id)
+            if inspect.isawaitable(value):
+                await value
 
     async def reconcile(
         self, operation_id: str, context: RequestContext

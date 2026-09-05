@@ -17,6 +17,8 @@ pub enum SubmitAction {
     Noop,
     Handled,
     RunTask(String),
+    /// v2 运行中的输入：作为 steer 排入下一个安全模型边界，不是新任务。
+    SteerTask(String),
     Interrupt,
     RetryLastTask,
     ApproveSandboxCommand,
