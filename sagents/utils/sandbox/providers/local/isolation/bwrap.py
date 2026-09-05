@@ -103,8 +103,10 @@ class BwrapIsolation:
     def _limit_command(self, command: List[str]) -> List[str]:
         """Apply v1's configured per-process address-space limit before exec.
 
-        Run trusted prlimit inside bwrap's read-only /usr mount. Both the soft
-        and hard limits are inherited across fork/exec; shell commands must not
+        Run trusted prlimit BEFORE bwrap with the launcher's sanitized environment.
+        Agent variables (including LD_PRELOAD/LD_AUDIT) are only bwrap --setenv
+        arguments until the limits are installed. Both the soft and hard limits
+        are inherited across fork/exec; shell commands must not
         bypass this by skipping the Python pickle launcher. This is not an
         aggregate cgroup budget for all processes in a sandbox.
         """
@@ -123,8 +125,8 @@ class BwrapIsolation:
         """Build a bwrap command for an agent-controlled background shell."""
 
         bwrap_cmd, _ = self._build_base_command(cwd=cwd, env_vars=env_vars)
-        bwrap_cmd.extend(self._limit_command(["/bin/sh", "-c", command]))
-        return bwrap_cmd
+        bwrap_cmd.extend(["/bin/sh", "-c", command])
+        return self._limit_command(bwrap_cmd)
 
     async def execute(self, payload: Dict[str, Any], cwd: Optional[str] = None) -> Any:
         """
@@ -153,9 +155,8 @@ class BwrapIsolation:
                 cwd=cwd,
                 env_vars=payload.get("env_vars"),
             )
-            bwrap_cmd.extend(self._limit_command(
-                [python_bin, launcher_path, input_pkl, output_pkl]
-            ))
+            bwrap_cmd.extend([python_bin, launcher_path, input_pkl, output_pkl])
+            bwrap_cmd = self._limit_command(bwrap_cmd)
 
             # 流式执行：launcher 内部跑命令时，stdout 实时转发到本进程 stdout
             # （受 SAGE_ECHO_SHELL_OUTPUT 控制），stderr 完整捕获用于报错

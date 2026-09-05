@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -42,10 +43,11 @@ async def test_env_limit_reaches_background_shell(tmp_path, monkeypatch):
         "python3 task.py",
         env_vars={"SAGE_LOCAL_MEMORY_LIMIT_MB": "999999", "PATH": str(tmp_path)},
     )
-    assert cmd[-6:] == [
+    assert cmd[:3] == [
         "/usr/bin/prlimit", "--as=134217728:134217728", "--",
-        "/bin/sh", "-c", "python3 task.py",
     ]
+    assert cmd[3] == module._TRUSTED_BWRAP_EXECUTABLE
+    assert cmd[-3:] == ["/bin/sh", "-c", "python3 task.py"]
 
 
 @pytest.mark.parametrize("memory", [0, -1, True, "4096", None])
@@ -67,10 +69,11 @@ async def test_sync_shell_uses_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "run_with_streaming_stdout", run)
     result = await isolation(tmp_path).execute({"mode": "shell", "command": "echo ok"})
     assert result["success"]
-    assert captured[-6:] == [
+    assert captured[:3] == [
         "/usr/bin/prlimit", "--as=67108864:67108864", "--",
-        "/bin/sh", "-c", "echo ok",
     ]
+    assert captured[3] == module._TRUSTED_BWRAP_EXECUTABLE
+    assert captured[-3:] == ["/bin/sh", "-c", "echo ok"]
 
 
 @pytest.mark.asyncio
@@ -84,15 +87,22 @@ async def test_python_payload_uses_same_limit(tmp_path, monkeypatch):
 
     def run(cmd, **kwargs):
         captured.extend(cmd)
+        assert "LD_PRELOAD" not in kwargs["env"]
+        assert "LD_AUDIT" not in kwargs["env"]
         return 0, "", ""
 
     monkeypatch.setattr(module, "run_with_streaming_stdout", run)
-    assert await isolation(tmp_path).execute({"mode": "python"}) == 42
+    assert await isolation(tmp_path).execute({
+        "mode": "python",
+        "env_vars": {"LD_PRELOAD": "/workspace/agent.so", "LD_AUDIT": "/workspace/audit.so"},
+    }) == 42
     index = captured.index("/usr/bin/prlimit")
+    assert index == 0
     assert captured[index:index + 3] == [
         "/usr/bin/prlimit", "--as=67108864:67108864", "--",
     ]
     assert captured[-3:] == ["launcher", "input", "output"]
+    assert captured.index("LD_PRELOAD") > captured.index(module._TRUSTED_BWRAP_EXECUTABLE)
 
 
 LINUX = pytest.mark.skipif(
@@ -164,3 +174,41 @@ else:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert "hard-limit-enforced" in result.stdout
+
+
+@LINUX
+@pytest.mark.asyncio
+async def test_preload_constructor_runs_only_after_limit(tmp_path, monkeypatch):
+    """Exercise real ld.so constructors without requiring namespace privileges.
+
+    env stands in for bwrap's --setenv stage. The previous ordering executes
+    the constructor in prlimit before setrlimit, and exits with code 86.
+    The probe only reads limits; it never allocates unbounded memory.
+    """
+    compiler = shutil.which("cc")
+    if not compiler:
+        pytest.skip("requires a C compiler for the loader regression")
+    source = tmp_path / "probe.c"
+    library = tmp_path / "probe.so"
+    source.write_text('''
+#include <sys/resource.h>
+#include <unistd.h>
+__attribute__((constructor)) static void check_limit(void) {
+    struct rlimit limit;
+    if (getrlimit(RLIMIT_AS, &limit) != 0 ||
+        limit.rlim_cur != 67108864 || limit.rlim_max != 67108864) {
+        _exit(86);
+    }
+    const char message[] = "constructor-is-limited\\n";
+    write(1, message, sizeof(message) - 1);
+}
+''')
+    subprocess.run([compiler, "-shared", "-fPIC", str(source), "-o", str(library)],
+                   check=True, capture_output=True, timeout=30)
+    sandbox = isolation(tmp_path)
+    monkeypatch.setattr(sandbox, "_build_base_command", lambda **kwargs: (
+        ["/usr/bin/env", f"LD_PRELOAD={library}"], {}
+    ))
+    result = await sandbox.execute({"mode": "shell", "command": "true", "timeout_seconds": 5})
+    assert result["success"], result
+    assert "constructor-is-limited" in result["output"]
