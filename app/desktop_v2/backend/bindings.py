@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from sagents.v2.agent.multi_agent import WorkspaceSharingPolicy
@@ -19,6 +20,7 @@ from sagents.v2.runtime.execution.sandbox import (
     NetworkPolicy,
     ProcessPolicy,
     ResolvedSandboxSpec,
+    ResourceLimits,
     SandboxGrantIssuer,
 )
 
@@ -50,6 +52,7 @@ class DesktopExecutionBindingProvider:
         private_workspace_root: str | Path | None = None,
         read_only: bool = False,
         process_enabled: bool = True,
+        resources: ResourceLimits | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -73,6 +76,9 @@ class DesktopExecutionBindingProvider:
         )
         self.read_only = read_only
         self.process_enabled = process_enabled
+        self.resources = resources or ResourceLimits(
+            require_hard_limits=sys.platform != "darwin"
+        )
         self.bindings: list[RunExecutionBinding] = []
         self._lock = asyncio.Lock()
         self._closed = False
@@ -99,6 +105,7 @@ class DesktopExecutionBindingProvider:
             enabled=self.process_enabled and not effective_read_only,
             read_only=effective_read_only,
             allowed_executables=DEFAULT_ALLOWED_EXECUTABLES,
+            allow_shell=True,
             allowed_env_names=DEFAULT_ALLOWED_ENV_NAMES,
             max_wall_time_seconds=300,
             max_output_bytes=4 * 1024 * 1024,
@@ -109,6 +116,7 @@ class DesktopExecutionBindingProvider:
                 "filesystem": filesystem.model_dump(mode="json"),
                 "process": process.model_dump(mode="json"),
                 "network": network.model_dump(mode="json"),
+                "resources": self.resources.model_dump(mode="json"),
             },
             sort_keys=True,
         )
@@ -129,6 +137,7 @@ class DesktopExecutionBindingProvider:
             filesystem=filesystem,
             process=process,
             network=network,
+            resources=self.resources,
             policy_hash=policy_hash,
             metadata={"host_workspace": str(resolved_workspace)},
         )

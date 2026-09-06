@@ -1,9 +1,7 @@
-"""Native local-workspace sandbox provider for trusted Desktop execution.
+"""Native local workspace provider with mandatory platform execution isolation.
 
-This provider enforces signed v2 operation grants, path containment, file
-limits, argv-only process execution, environment allowlists, timeouts, and
-output limits.  It reports `IsolationLevel.NONE` honestly: policy enforcement
-is useful, but a subprocess on the host is not an OS sandbox boundary.
+Linux uses bubblewrap, cgroup v2 and enforced XFS project quotas. macOS uses
+Seatbelt plus explicitly best-effort aggregate resource supervision.
 """
 
 from __future__ import annotations
@@ -16,6 +14,8 @@ import os
 import signal
 import shutil
 import time
+import sys
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -69,6 +69,8 @@ class _LocalRow:
     process_slots: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(1)
     )
+    boundary: object = None
+    active_tasks: set = field(default_factory=set)
 
 
 class _LocalFileSystem:
@@ -83,7 +85,16 @@ class _LocalFileSystem:
         candidate = self.provider._authorize(
             self.row, FileOperation.READ, path, intent, grant
         )
-        return await asyncio.to_thread(candidate.read_bytes)
+        from ..local_support import files as local_files
+
+        limit = min(
+            self.row.spec.filesystem.max_file_bytes
+            or self.row.spec.resources.memory_mb * 1024**2,
+            self.row.spec.resources.memory_mb * 1024**2,
+        )
+        return await asyncio.to_thread(
+            local_files.read, self.row.root, candidate.relative_to(self.row.root), limit
+        )
 
     async def write_bytes(self, path, content, *, intent, grant, overwrite=True):
         operation = (
@@ -98,15 +109,30 @@ class _LocalFileSystem:
         if policy.max_file_bytes is not None and len(content) > policy.max_file_bytes:
             raise ValueError("file exceeds max_file_bytes")
         async with self.row.mutation_lock:
+            if self.row.state != SandboxState.READY:
+                raise PermissionError("sandbox is not ready")
             previous_size = candidate.stat().st_size if candidate.is_file() else 0
-            if policy.max_total_bytes is not None:
+            total_limit = min(
+                policy.max_total_bytes or self.row.spec.resources.disk_mb * 1024**2,
+                self.row.spec.resources.disk_mb * 1024**2,
+            )
+            if total_limit is not None:
                 total = await asyncio.to_thread(
                     self.provider._total_file_bytes, self.row
                 )
-                if total - previous_size + len(content) > policy.max_total_bytes:
+                if total - previous_size + len(content) > total_limit:
                     raise ValueError("workspace exceeds max_total_bytes")
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(candidate.write_bytes, bytes(content))
+            from ..local_support import files as local_files
+
+            await asyncio.to_thread(
+                local_files.write,
+                self.row.root,
+                candidate.relative_to(self.row.root),
+                bytes(content),
+                create=operation == FileOperation.CREATE,
+                uid=self.row.boundary.execution_uid,
+                gid=self.row.boundary.execution_gid,
+            )
             self.row.revision += 1
             self.row.updated_at = utc_now()
         return self.provider._stat(self.row, candidate)
@@ -118,7 +144,13 @@ class _LocalFileSystem:
         if candidate.is_dir():
             raise IsADirectoryError(path)
         async with self.row.mutation_lock:
-            await asyncio.to_thread(candidate.unlink)
+            if self.row.state != SandboxState.READY:
+                raise PermissionError("sandbox is not ready")
+            from ..local_support import files as local_files
+
+            await asyncio.to_thread(
+                local_files.delete, self.row.root, candidate.relative_to(self.row.root)
+            )
             self.row.revision += 1
             self.row.updated_at = utc_now()
 
@@ -156,23 +188,24 @@ class _LocalProcessRuntime:
             intent.executable != request.argv[0]
             or intent.argv != request.argv
             or intent.path != request.cwd
+            or intent.metadata.get("process_request_digest") != request.digest()
         ):
             raise PermissionError("process request does not match the signed intent")
         policy = self.row.spec.process
         if not policy.enabled:
             raise PermissionError("process execution is disabled")
-        if policy.read_only:
-            # This provider intentionally reports IsolationLevel.NONE.  A
-            # command allowlist cannot make a host shell read-only: shell
-            # expansion, symlinks, Git helpers, and executable behavior can
-            # all reach outside the mapped workspace.  Fail closed instead of
-            # advertising a security boundary that this provider cannot
-            # enforce. Providers with a real OS sandbox may implement the
-            # read-only ProcessPolicy contract themselves.
+        if policy.read_only and sys.platform != "linux":
+            # Keep read-only process execution unavailable on macOS until its
+            # temporary-file semantics have their own policy contract.
             raise PermissionError(
                 "read-only process execution requires an isolated sandbox"
             )
         executable = request.argv[0]
+        if (
+            Path(executable).name in {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+            and not policy.allow_shell
+        ):
+            raise PermissionError("shell execution is disabled")
         if policy.allowed_executables and executable not in policy.allowed_executables:
             raise PermissionError(f"executable {executable!r} is not allowed")
         resolved_executable = shutil.which(executable)
@@ -186,7 +219,17 @@ class _LocalProcessRuntime:
             raise PermissionError(
                 f"environment variables are not allowed: {sorted(unknown_env)}"
             )
-        timeout = request.timeout_seconds or policy.max_wall_time_seconds
+        if any(
+            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None or "\x00" in value
+            for key, value in request.env.items()
+        ):
+            raise PermissionError("invalid environment variable")
+        if (
+            request.stdin is not None
+            and len(request.stdin) > self.row.spec.resources.memory_mb * 1024**2
+        ):
+            raise ValueError("stdin exceeds sandbox memory limit")
+        timeout = request.timeout_seconds or policy.max_wall_time_seconds or 300
         if policy.max_wall_time_seconds is not None and (
             timeout is None or timeout > policy.max_wall_time_seconds
         ):
@@ -198,50 +241,82 @@ class _LocalProcessRuntime:
         }
         started = time.monotonic()
         async with self.row.process_slots:
-            process = await asyncio.create_subprocess_exec(
-                resolved_executable,
-                *request.argv[1:],
-                cwd=cwd,
-                env={**inherited_env, **request.env},
-                stdin=asyncio.subprocess.PIPE if request.stdin is not None else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                # Shell commands commonly spawn npm/node/flutter children.  A
-                # dedicated POSIX session lets cancellation terminate the full
-                # process group instead of only the immediate bash process.
-                start_new_session=os.name == "posix",
-            )
-            stdout_task = asyncio.create_task(
-                self._read_bounded(process.stdout, policy.max_output_bytes)
-            )
-            stderr_task = asyncio.create_task(
-                self._read_bounded(process.stderr, policy.max_output_bytes)
-            )
-            if process.stdin is not None:
-                process.stdin.write(request.stdin or b"")
-                await process.stdin.drain()
-                process.stdin.close()
+            # Recheck after queueing: terminate may have run while we waited.
+            if self.row.state != SandboxState.READY:
+                raise PermissionError("sandbox is not ready")
+            task = asyncio.current_task()
+            self.row.active_tasks.add(task)
+            environment = {**inherited_env, **request.env}
+            process = None
+            readers = ()
+            launch_fds = []
             timed_out = False
             try:
+                command, job, launch_fds = self.row.boundary.command(
+                    resolved_executable, request.argv[1:], cwd, environment
+                )
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=cwd,
+                    env=environment,
+                    stdin=asyncio.subprocess.PIPE
+                    if request.stdin is not None
+                    else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
+                    pass_fds=tuple(launch_fds),
+                )
+                for fd in launch_fds:
+                    os.close(fd)
+                launch_fds = []
+                self.row.boundary.started(process, job)
+                readers = (
+                    asyncio.create_task(
+                        self._read_bounded(process.stdout, policy.max_output_bytes)
+                    ),
+                    asyncio.create_task(
+                        self._read_bounded(process.stderr, policy.max_output_bytes)
+                    ),
+                )
+
+                async def communicate():
+                    if process.stdin is not None:
+                        try:
+                            process.stdin.write(request.stdin or b"")
+                            await process.stdin.drain()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        finally:
+                            process.stdin.close()
+                    await process.wait()
+
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                    await asyncio.wait_for(communicate(), timeout=timeout)
                 except TimeoutError:
                     timed_out = True
                     await self._terminate_process_tree(process)
-
                 (
                     (stdout, stdout_overflow),
-                    (
-                        stderr,
-                        stderr_overflow,
-                    ),
-                ) = await self._finish_pipe_readers(process, stdout_task, stderr_task)
-            except asyncio.CancelledError:
-                # A child that inherited stdout/stderr can otherwise keep the
-                # reader tasks and the single process slot alive indefinitely.
-                await self._terminate_process_tree(process)
-                await self._cancel_pipe_readers(stdout_task, stderr_task)
+                    (stderr, stderr_overflow),
+                ) = await self._finish_pipe_readers(process, *readers)
+            except BaseException:
+                if process is not None:
+                    await self._terminate_process_tree(process)
+                await self._cancel_pipe_readers(*readers)
                 raise
+            finally:
+                try:
+                    if process is not None:
+                        # Reap even descendants that closed stdout or called setsid.
+                        await self._terminate_process_tree(process)
+                        await self.row.boundary.finish(process)
+                    elif "job" in locals() and job is not None:
+                        await self.row.boundary.finish_job(job)
+                finally:
+                    for fd in launch_fds:
+                        os.close(fd)
+                    self.row.active_tasks.discard(task)
         limit = policy.max_output_bytes
         truncated = (
             stdout_overflow or stderr_overflow or len(stdout) + len(stderr) > limit
@@ -263,6 +338,7 @@ class _LocalProcessRuntime:
         self, process: asyncio.subprocess.Process
     ) -> None:
         """Terminate the managed process and its POSIX descendants."""
+        self.row.boundary.kill_job(process.pid)
 
         if os.name != "posix":
             if process.returncode is None:
@@ -395,11 +471,13 @@ class _LocalHandle:
 
 
 class LocalWorkspaceSandboxProvider:
-    """Grant-enforcing host filesystem/process provider without OS isolation."""
+    """Grant-enforcing local provider with platform-specific OS containment."""
 
     plugin_id = "sage.sandbox.local-workspace"
     name = "Local workspace sandbox provider"
-    description = "Runs sandbox work against the local workspace directory."
+    description = (
+        "Isolates local execution with Linux cgroups/quotas or macOS Seatbelt."
+    )
     provider_id = "sage.sandbox.local-workspace"
     provider_version = "3.0.0"
 
@@ -410,6 +488,10 @@ class LocalWorkspaceSandboxProvider:
         clock: Callable[[], datetime] = utc_now,
         terminal_ttl_seconds: int = 86_400,
         max_retained_terminal_items: int = 1024,
+        linux_cgroup_root: str | None = None,
+        linux_quota_mount: str | None = None,
+        linux_execution_uid: int | None = None,
+        linux_execution_gid: int | None = None,
     ) -> None:
         if terminal_ttl_seconds < 1:
             raise ValueError("terminal_ttl_seconds must be positive")
@@ -422,18 +504,32 @@ class LocalWorkspaceSandboxProvider:
         self._rows: dict[str, _LocalRow] = {}
         self._used_nonces: dict[str, str] = {}
         self._release_receipts: dict[tuple[str, str], SandboxReleaseReceipt] = {}
+        self._boundary_options = dict(
+            cgroup_root=linux_cgroup_root,
+            quota_mount=linux_quota_mount,
+            execution_uid=linux_execution_uid,
+            execution_gid=linux_execution_gid,
+        )
 
     async def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
-            isolation_level=IsolationLevel.NONE,
+            isolation_level=IsolationLevel.PROCESS,
             os=os.name,
             architectures=("native",),
             filesystem_modes=frozenset({FileSystemMode.WORKSPACE}),
             network_modes=frozenset({NetworkMode.NONE}),
             process=ProcessCapabilities(
-                available=True, supports_argv=True, max_processes=1
+                available=sys.platform in {"darwin", "linux"},
+                supports_argv=True,
+                supports_shell=True,
             ),
-            resources=ResourceLimitCapabilities(wall_time=True),
+            resources=ResourceLimitCapabilities(
+                wall_time=True,
+                cpu=sys.platform == "linux",
+                memory=sys.platform == "linux",
+                disk=sys.platform == "linux",
+                process_count=sys.platform == "linux",
+            ),
             supports_background_jobs=False,
             supports_suspend=False,
             supports_snapshot=False,
@@ -452,6 +548,21 @@ class LocalWorkspaceSandboxProvider:
         )
 
     async def provision(self, spec, context, *, run_id):
+        from ..admission import validate_resource_support
+        from ..local_support.resources import LocalResourceBoundary
+
+        validate_resource_support(spec, await self.capabilities())
+        if (
+            spec.architecture != "native"
+            or spec.filesystem_mode != FileSystemMode.WORKSPACE
+        ):
+            raise ValueError(
+                "local sandbox requires native architecture and workspace filesystem mode"
+            )
+        if spec.process.allow_background_jobs:
+            raise ValueError(
+                "detached sandbox processes are not supported; use managed Shell jobs"
+            )
         self._sweep_terminated()
         root_value = spec.metadata.get("host_workspace")
         if not isinstance(root_value, str):
@@ -478,12 +589,21 @@ class LocalWorkspaceSandboxProvider:
             now,
             process_slots=asyncio.Semaphore(spec.process.max_processes),
         )
+        row.boundary = LocalResourceBoundary(row, **self._boundary_options)
+        try:
+            await row.boundary.prepare()
+        except BaseException:
+            row.boundary.remove()
+            raise
         self._rows[ref.sandbox_id] = row
         return _LocalHandle(self, row)
 
     async def attach(self, ref, context):
         row = self._row(ref)
-        if row.state == SandboxState.TERMINATED:
+        from ..admission import validate_resource_support
+
+        validate_resource_support(row.spec, await self.capabilities())
+        if row.state != SandboxState.READY:
             raise RuntimeError("sandbox is terminated")
         if row.ref.tenant_id != context.actor.tenant_id:
             raise PermissionError("tenant does not own sandbox")
@@ -515,13 +635,13 @@ class LocalWorkspaceSandboxProvider:
         raise RuntimeError("local-workspace does not support snapshots")
 
     async def release(self, request: SandboxReleaseRequest, context):
+        row = self._row(request.ref)
+        if row.ref.tenant_id != context.actor.tenant_id:
+            raise PermissionError("tenant does not own sandbox")
         key = (request.ref.sandbox_id, request.idempotency_key)
         previous = self._release_receipts.get(key)
         if previous is not None:
             return previous.model_copy(update={"duplicate": True})
-        row = self._row(request.ref)
-        if row.ref.tenant_id != context.actor.tenant_id:
-            raise PermissionError("tenant does not own sandbox")
         if row.revision != request.expected_revision:
             raise RuntimeError("sandbox revision does not match release request")
         if request.disposition == SandboxReleaseDisposition.SNAPSHOT_AND_TERMINATE:
@@ -541,10 +661,20 @@ class LocalWorkspaceSandboxProvider:
     async def terminate(self, ref, mode):
         del mode
         row = self._row(ref)
-        if row.state != SandboxState.TERMINATED:
-            row.state = SandboxState.TERMINATED
-            row.revision += 1
-            row.updated_at = self._clock()
+        if row.state == SandboxState.TERMINATED:
+            return
+        row.state = SandboxState.LOST  # Fence admission while compute is being reaped.
+        await row.boundary.terminate()
+        tasks = tuple(row.active_tasks)
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                raise RuntimeError("sandbox process cleanup failed") from result
+        row.state = SandboxState.TERMINATED
+        row.revision += 1
+        row.updated_at = self._clock()
         self._sweep_terminated()
 
     async def purge_terminated(self, ref) -> None:
@@ -558,8 +688,7 @@ class LocalWorkspaceSandboxProvider:
             (
                 row
                 for row in self._rows.values()
-                if row.state == SandboxState.TERMINATED
-                and row.attached_clients == 0
+                if row.state == SandboxState.TERMINATED and row.attached_clients == 0
             ),
             key=lambda row: (row.updated_at, row.ref.sandbox_id),
         )
@@ -579,6 +708,9 @@ class LocalWorkspaceSandboxProvider:
     def _purge_row(self, sandbox_id: str) -> None:
         # Local workspace contents belong to the host. Retention removes only
         # kernel metadata and consumed grant nonces.
+        row = self._rows.get(sandbox_id)
+        if row is not None:
+            row.boundary.remove()
         self._rows.pop(sandbox_id, None)
         self._used_nonces = {
             nonce: owner_sandbox_id
@@ -603,11 +735,11 @@ class LocalWorkspaceSandboxProvider:
             candidate = row.root
         elif relative.startswith(row.spec.workspace_root.rstrip("/") + "/"):
             relative = relative[len(row.spec.workspace_root.rstrip("/")) + 1 :]
-            candidate = (row.root / relative).resolve()
+            candidate = Path(os.path.abspath(row.root / relative))
         elif Path(relative).is_absolute():
-            candidate = Path(relative).expanduser().resolve()
+            candidate = Path(os.path.abspath(Path(relative).expanduser()))
         else:
-            candidate = (row.root / relative).resolve()
+            candidate = Path(os.path.abspath(row.root / relative))
         if candidate != row.root and row.root not in candidate.parents:
             raise PermissionError("path is outside the workspace")
         allowed = False
@@ -621,18 +753,20 @@ class LocalWorkspaceSandboxProvider:
                 ]
             elif Path(policy_relative).is_absolute():
                 continue
-            policy_root = (row.root / policy_relative).resolve()
+            policy_root = Path(os.path.abspath(row.root / policy_relative))
+            if policy_root != row.root and row.root not in policy_root.parents:
+                continue
             if candidate == policy_root or policy_root in candidate.parents:
                 allowed = True
                 break
         if not allowed:
             raise PermissionError("path is outside the allowed filesystem roots")
-        if not row.spec.filesystem.allow_symlinks:
-            current = row.root
-            for part in candidate.relative_to(row.root).parts:
-                current = current / part
-                if current.is_symlink():
-                    raise PermissionError("symlinks are not allowed")
+        # Native providers never follow workspace symlinks, even when requested.
+        current = row.root
+        for part in candidate.relative_to(row.root).parts:
+            current = current / part
+            if current.is_symlink():
+                raise PermissionError("symlinks are not allowed")
         return candidate
 
     def _wire_path(self, row: _LocalRow, path: str) -> str:
@@ -662,7 +796,7 @@ class LocalWorkspaceSandboxProvider:
         ).hexdigest()
         if not hmac.compare_digest(signature, grant.signature):
             raise PermissionError("sandbox grant signature is invalid")
-        if grant.expires_at < utc_now() or grant.nonce in self._used_nonces:
+        if grant.expires_at <= self._clock() or grant.nonce in self._used_nonces:
             raise PermissionError("sandbox grant is expired or already used")
         if row.state != SandboxState.READY:
             raise PermissionError("sandbox is not ready")
@@ -694,15 +828,15 @@ class LocalWorkspaceSandboxProvider:
 
     @staticmethod
     def _stat(row: _LocalRow, candidate: Path) -> FileStat:
+        from ..local_support import files as local_files
+
         relative = candidate.relative_to(row.root).as_posix()
         wire_path = row.spec.workspace_root.rstrip("/") + (
             f"/{relative}" if relative != "." else ""
         )
         content_hash = None
         if candidate.is_file():
-            content_hash = (
-                f"sha256:{hashlib.sha256(candidate.read_bytes()).hexdigest()}"
-            )
+            content_hash = f"sha256:{hashlib.sha256(local_files.read(row.root, candidate.relative_to(row.root), row.spec.filesystem.max_file_bytes or row.spec.resources.memory_mb * 1024**2)).hexdigest()}"
         return FileStat(
             path=wire_path,
             size=candidate.stat().st_size if candidate.is_file() else 0,

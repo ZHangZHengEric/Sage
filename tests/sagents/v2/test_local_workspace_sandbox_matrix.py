@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
@@ -36,12 +38,14 @@ async def provision(
     max_total_bytes: int = 2048,
     allowed_roots: tuple[str, ...] = ("/workspace",),
     process_read_only: bool = False,
+    process_enabled: bool = True,
     allowed_executables: tuple[str, ...] = ("python",),
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
     handle = await provider.provision(
         ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash="sha256:spec",
             architecture="native",
             filesystem=FileSystemPolicy(
@@ -51,9 +55,10 @@ async def provision(
                 max_total_bytes=max_total_bytes,
             ),
             process=ProcessPolicy(
-                enabled=True,
+                enabled=process_enabled,
                 read_only=process_read_only,
                 allowed_executables=allowed_executables,
+                allow_shell=True,
                 max_wall_time_seconds=2,
                 max_output_bytes=32,
             ),
@@ -67,6 +72,9 @@ async def provision(
 
 
 def authorization(issuer, handle, operation, **fields):
+    if operation == "process.run":
+        request = ProcessRequest(argv=fields["argv"], cwd=fields["path"])
+        fields.setdefault("metadata", {"process_request_digest": request.digest()})
     intent = OperationIntent(
         operation=operation,
         run_id="run_1",
@@ -120,6 +128,7 @@ async def test_local_workspace_retention_removes_only_kernel_metadata(tmp_path: 
         max_retained_terminal_items=1,
     )
     resolved = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:retention",
         architecture="native",
         filesystem=FileSystemPolicy(
@@ -152,6 +161,7 @@ async def test_active_workspace_release_reprovisions_without_losing_host_files(
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
     resolved = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:active-workspace",
         architecture="native",
         filesystem=FileSystemPolicy(
@@ -255,7 +265,7 @@ async def test_local_workspace_enforces_total_workspace_bytes(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_local_workspace_enforces_configured_subdirectory_roots(tmp_path: Path):
     (tmp_path / "allowed").mkdir()
-    issuer, handle = await provision(tmp_path, allowed_roots=("/workspace/allowed",))
+    issuer, handle = await provision(tmp_path, allowed_roots=("/workspace/allowed",), process_enabled=False)
     intent, grant = authorization(issuer, handle, "create", path="outside.txt")
 
     with pytest.raises(PermissionError, match="allowed filesystem roots"):

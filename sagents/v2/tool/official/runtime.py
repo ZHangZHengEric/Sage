@@ -288,6 +288,7 @@ class OfficialToolRuntime:
             path=cwd,
             executable="bash",
             argv=argv,
+            metadata={"process_request_digest": request.digest()},
         )
         result = await self.sandbox.process.run(
             request, intent=intent, grant=self._grant(intent)

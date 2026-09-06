@@ -575,6 +575,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "execution.sandbox",
         lambda context, dependencies: LocalWorkspaceSandboxProvider(
             _bytes(context.config["verification_key"]),
+            **{key: context.config[key] for key in ("linux_cgroup_root", "linux_quota_mount", "linux_execution_uid", "linux_execution_gid") if key in context.config},
             terminal_ttl_seconds=int(
                 context.config.get("terminal_ttl_seconds", 86_400)
             ),
@@ -1015,6 +1016,13 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
         "terminal_ttl_seconds": {"type": "integer", "minimum": 1},
         "max_retained_terminal_items": {"type": "integer", "minimum": 0},
     }
+    if not in_memory:
+        properties.update({
+            "linux_cgroup_root": {"type": "string"},
+            "linux_quota_mount": {"type": "string"},
+            "linux_execution_uid": {"type": "integer", "minimum": 1},
+            "linux_execution_gid": {"type": "integer", "minimum": 1},
+        })
     if in_memory:
         properties.update(
             {

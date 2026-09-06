@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 from datetime import datetime, timezone
 
 import pytest
@@ -45,6 +47,7 @@ def setup(*, policy=None, handler=None):
         clock=lambda: NOW,
     )
     spec = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:spec",
         architecture="portable",
         filesystem=FileSystemPolicy(allowed_operations=frozenset({FileOperation.READ})),

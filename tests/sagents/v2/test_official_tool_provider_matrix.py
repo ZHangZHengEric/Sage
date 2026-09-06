@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 from pathlib import Path
 import hashlib
 
@@ -69,6 +71,7 @@ async def plugin_for(root: Path) -> OfficialToolPlugin:
     digest = hashlib.sha256(str(root).encode()).hexdigest()
     handle = await provider.provision(
         ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash=f"sha256:{digest}",
             architecture="native",
             filesystem=FileSystemPolicy(
@@ -77,6 +80,7 @@ async def plugin_for(root: Path) -> OfficialToolPlugin:
             process=ProcessPolicy(
                 enabled=True,
                 allowed_executables=("bash",),
+                allow_shell=True,
                 max_wall_time_seconds=10,
             ),
             network=NetworkPolicy(),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 import asyncio
 import json
 import shutil
@@ -581,6 +583,7 @@ def test_snapshot_checksum_uses_stable_file_operation_order(tmp_path):
         store = FilesystemSessionStore(path)
         created = await store.create_run(command(), CONTEXT)
         spec = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash="sha256:sandbox-spec",
             architecture="native",
             filesystem=FileSystemPolicy(
@@ -648,6 +651,7 @@ def test_snapshot_repairs_known_legacy_file_operation_order_checksum(tmp_path):
         store = FilesystemSessionStore(path)
         created = await store.create_run(command(), CONTEXT)
         spec = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash="sha256:sandbox-spec",
             architecture="native",
             filesystem=FileSystemPolicy(

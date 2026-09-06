@@ -437,6 +437,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _sandbox() {
     final mapped = _sandboxMapsWorkspace;
     final useHostPath = _sandboxUsesHostPath;
+    final resourceConfig = <String, Object?>{..._sandboxConfig};
+    for (final component in widget.controller.components) {
+      if (component.id == 'execution.sandbox') {
+        resourceConfig.putIfAbsent(
+          'resources',
+          () => component.activeConfig['resources'],
+        );
+      }
+    }
     return _SettingsContent(
       title: context.l10n.languageCode == 'zh' ? '沙箱' : 'Sandbox',
       status: _saving,
@@ -558,6 +567,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+        _SandboxResourceConfigEditor(
+          key: const ValueKey('settings-sandbox-resource-limits'),
+          config: resourceConfig,
+          onSave: (config) => _saveDesktopSettings(
+            _draft.copyWith(
+              componentConfigs: {
+                ..._draft.componentConfigs,
+                'execution.sandbox': config,
+              },
+            ),
           ),
         ),
       ],
@@ -1761,6 +1782,12 @@ class _ComponentSettingsCard extends StatelessWidget {
               ],
             ),
             if (component.id == 'execution.sandbox')
+              _SandboxResourceConfigEditor(
+                key: ValueKey('sandbox-resources-$selected'),
+                config: component.activeConfig,
+                onSave: (config) => onSelect(selected, config),
+              ),
+            if (component.id == 'execution.sandbox')
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
@@ -1962,6 +1989,141 @@ class _ComponentSettingsCard extends StatelessWidget {
     return '$path\n'
         'Workspace mode: ${mapped ? 'use current workspace' : 'use temporary blank sandbox'} · '
         'Filesystem: ${config['filesystem_mode'] ?? '—'}';
+  }
+}
+
+class _SandboxResourceConfigEditor extends StatefulWidget {
+  const _SandboxResourceConfigEditor({
+    super.key,
+    required this.config,
+    required this.onSave,
+  });
+  final Map<String, Object?> config;
+  final ValueChanged<Map<String, Object?>> onSave;
+
+  @override
+  State<_SandboxResourceConfigEditor> createState() =>
+      _SandboxResourceConfigEditorState();
+}
+
+class _SandboxResourceConfigEditorState
+    extends State<_SandboxResourceConfigEditor> {
+  final _form = GlobalKey<FormState>();
+  final _controllers = <String, TextEditingController>{};
+  bool _hard = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  void _sync() {
+    final raw = widget.config['resources'];
+    final values = raw is Map ? raw : const {};
+    for (final entry in const {
+      'cpu_percent': 100,
+      'memory_mb': 1024,
+      'disk_mb': 4096,
+      'max_processes': 64,
+    }.entries) {
+      (_controllers[entry.key] ??= TextEditingController()).text =
+          '${values[entry.key] ?? entry.value}';
+    }
+    _hard = values['require_hard_limits'] != false;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SandboxResourceConfigEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (jsonEncode(oldWidget.config) != jsonEncode(widget.config)) _sync();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final zh = context.l10n.languageCode == 'zh';
+    final labels = {
+      'cpu_percent': zh ? 'CPU（单核百分比）' : 'CPU (% of one core)',
+      'memory_mb': zh ? '内存（MiB）' : 'Memory (MiB)',
+      'disk_mb': zh ? '磁盘（MiB）' : 'Disk (MiB)',
+      'max_processes': zh ? '进程数上限' : 'Process limit',
+    };
+    return Material(
+      type: MaterialType.transparency,
+      child: Form(
+        key: _form,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final entry in labels.entries)
+                  SizedBox(
+                    width: 170,
+                    child: TextFormField(
+                      key: ValueKey('sandbox-resource-${entry.key}'),
+                      controller: _controllers[entry.key],
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(labelText: entry.value),
+                      validator: (text) {
+                        final value = entry.key == 'cpu_percent'
+                            ? double.tryParse(text ?? '')
+                            : int.tryParse(text ?? '');
+                        if (value == null ||
+                            !value.isFinite ||
+                            value < (entry.key == 'max_processes' ? 4 : 1)) {
+                          return zh
+                              ? '请输入有效的正数'
+                              : 'Enter a valid positive number';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(zh ? '要求内核硬限制' : 'Require kernel-enforced limits'),
+              subtitle: Text(
+                zh
+                    ? 'Linux 需要 cgroup v2 和文件系统配额。macOS 原生模式需关闭此项；CPU、内存和总目录容量仅为尽力限制，可能短暂超限。'
+                    : 'Linux requires cgroup v2 and filesystem quotas. Native macOS requires this off; CPU, memory and total workspace size are best effort and can overshoot.',
+              ),
+              value: _hard,
+              onChanged: (value) => setState(() => _hard = value),
+            ),
+            TextButton(
+              onPressed: () {
+                if (!(_form.currentState?.validate() ?? false)) return;
+                widget.onSave({
+                  ...widget.config,
+                  'resources': {
+                    for (final entry in _controllers.entries)
+                      entry.key: entry.key == 'cpu_percent'
+                          ? double.parse(entry.value.text)
+                          : int.parse(entry.value.text),
+                    'require_hard_limits': _hard,
+                  },
+                });
+              },
+              child: Text(zh ? '保存资源限制' : 'Save resource limits'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

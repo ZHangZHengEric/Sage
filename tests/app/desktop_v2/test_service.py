@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import sqlite3
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -2177,6 +2178,13 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "workspace_mapping": "active_workspace",
         "filesystem_mode": "workspace",
         "workspace_path_mode": "virtual",
+        "resources": {
+            "cpu_percent": 100.0,
+            "memory_mb": 1024,
+            "disk_mb": 4096,
+            "max_processes": 64,
+            "require_hard_limits": sys.platform != "darwin",
+        },
     }
     assert {
         value["plugin_id"] for value in by_id["workspace.initializer"]["plugins"]

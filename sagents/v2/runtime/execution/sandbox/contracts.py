@@ -91,6 +91,21 @@ class ResourceLimitCapabilities(StrictModel):
     network_bytes: bool = False
 
 
+class ResourceLimits(StrictModel):
+    """Standard, sandbox-wide limits (including descendants and scratch files).
+
+    CPU is expressed as a percentage of one logical core, not elapsed CPU
+    seconds. Best-effort mode is an explicit host choice for trusted execution;
+    it must never be presented as hard isolation.
+    """
+
+    cpu_percent: float = Field(default=100, ge=1, allow_inf_nan=False, strict=True)
+    memory_mb: int = Field(default=1024, gt=0, strict=True)
+    disk_mb: int = Field(default=4096, gt=0, strict=True)
+    max_processes: int = Field(default=64, ge=4, strict=True)
+    require_hard_limits: bool = Field(default=True, strict=True)
+
+
 class SandboxCapabilities(StrictModel):
     api_version: Literal["3"] = "3"
     isolation_level: IsolationLevel
@@ -228,6 +243,7 @@ class ResolvedSandboxSpec(StrictModel):
     mounts: tuple[MountSpec, ...] = ()
     filesystem: FileSystemPolicy
     process: ProcessPolicy = Field(default_factory=ProcessPolicy)
+    resources: ResourceLimits = Field(default_factory=ResourceLimits)
     network: NetworkPolicy = Field(default_factory=NetworkPolicy)
     lifecycle: LifecyclePolicy = Field(default_factory=LifecyclePolicy)
     policy_hash: str
@@ -369,6 +385,15 @@ class ProcessRequest(StrictModel):
         if not self.argv or not self.argv[0]:
             raise ValueError("process argv must include an executable")
         return self
+
+    def digest(self) -> str:
+        """Bind every execution input, including binary stdin, to its grant."""
+        payload = self.model_dump(exclude={"stdin"})
+        payload["stdin_sha256"] = (
+            hashlib.sha256(self.stdin).hexdigest() if self.stdin is not None else None
+        )
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 class ProcessResult(StrictModel):

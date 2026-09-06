@@ -1,3 +1,4 @@
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
 from pathlib import Path
 import hashlib
 from types import SimpleNamespace
@@ -780,6 +781,7 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
     digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()
     handle = await provider.provision(
         ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash=f"sha256:{digest}",
             architecture="native",
             filesystem=FileSystemPolicy(allowed_operations=frozenset(FileOperation)),
@@ -836,6 +838,7 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
             digest = hashlib.sha256(request.run_id.encode()).hexdigest()
             handle = await sandbox_provider.provision(
                 ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
                     spec_hash=f"sha256:{digest}",
                     architecture="native",
                     filesystem=FileSystemPolicy(
@@ -937,6 +940,7 @@ async def test_execution_bound_driver_rejects_mismatched_policy_and_closes(
     sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
     handle = await sandbox_provider.provision(
         ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
             spec_hash="sha256:mismatch",
             architecture="native",
             filesystem=FileSystemPolicy(allowed_operations=frozenset(FileOperation)),

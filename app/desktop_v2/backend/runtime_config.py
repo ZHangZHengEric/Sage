@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from app.desktop_v2.backend.package import (
 )
 from app.desktop_v2.backend.run_context import _virtual_workspace_root
 from app.desktop_v2.backend.schemas import DesktopV2Settings
-from sagents.v2.runtime.execution.sandbox import FileSystemMode
+from sagents.v2.runtime.execution.sandbox import FileSystemMode, ResourceLimits
 from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.tool import ToolSelectionConfig
 
@@ -177,6 +178,11 @@ def _resolved_sandbox_config(
     )
     config = dict(_SANDBOX_DEFAULTS.get(plugin_id, {}))
     config.update(settings.component_configs.get("execution.sandbox", {}))
+    resource_config = {"require_hard_limits": sys.platform != "darwin"}
+    resource_config.update(config.get("resources", {}))
+    config["resources"] = ResourceLimits.model_validate(resource_config).model_dump(
+        mode="json"
+    )
     config["workspace_root"] = _virtual_workspace_root(config.get("workspace_root"))
     path_mode = str(config.get("workspace_path_mode", "virtual"))
     if path_mode not in {"virtual", "host"}:

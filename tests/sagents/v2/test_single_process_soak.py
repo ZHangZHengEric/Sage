@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 import asyncio
 import os
 import time
@@ -148,6 +150,7 @@ async def test_one_hundred_concurrent_sessions_remain_ordered_and_bounded():
         max_retained_terminal_items=32,
     )
     sandbox_spec = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:soak-sandbox",
         architecture="portable",
         filesystem=FileSystemPolicy(

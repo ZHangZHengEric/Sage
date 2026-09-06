@@ -94,7 +94,6 @@ from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
     InMemorySandboxProvider,
-    IsolationLevel,
     LifecyclePolicy,
     LocalWorkspaceSandboxProvider,
     NetworkPolicy,
@@ -127,7 +126,6 @@ from app.desktop_v2.backend.run_lifecycle import (
 )
 from app.desktop_v2.backend.run_context import (
     AgentRosterContextProvider,
-    LocalSkillWorkspace,
     PreferredSkillsContextProvider,
     SandboxSkillWorkspace,
 )
@@ -505,7 +503,7 @@ class DesktopRunCompositionMixin:
         sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(settings)
         workspace_root = _sandbox_workspace_root(sandbox_config, workspace)
         issuer = self._sandbox_grant_issuer
-        sandbox_provider = self._sandbox_provider(sandbox_plugin_id)
+        sandbox_provider = self._sandbox_provider(sandbox_plugin_id, sandbox_config)
         capabilities = await sandbox_provider.capabilities()
         architecture = str(
             sandbox_config.get("architecture") or capabilities.architectures[0]
@@ -523,7 +521,7 @@ class DesktopRunCompositionMixin:
         # execution when no enforceable OS isolation boundary exists.
         if (
             invocation_mode == "plan"
-            and capabilities.isolation_level == IsolationLevel.NONE
+            and sandbox_plugin_id == LocalWorkspaceSandboxProvider.plugin_id
         ):
             process_enabled = False
         if process_enabled and not capabilities.process.available:
@@ -548,6 +546,7 @@ class DesktopRunCompositionMixin:
             workspace_root=workspace_root,
             architecture=architecture,
             filesystem_mode=filesystem_mode,
+            resources=sandbox_config["resources"],
             filesystem=FileSystemPolicy(
                 allowed_operations=(
                     frozenset({FileOperation.READ, FileOperation.LIST})
@@ -561,6 +560,7 @@ class DesktopRunCompositionMixin:
             process=ProcessPolicy(
                 enabled=process_enabled,
                 read_only=invocation_mode == "plan",
+                allow_shell=True,
                 allowed_executables=(
                     "git",
                     "rg",
@@ -623,11 +623,7 @@ class DesktopRunCompositionMixin:
                 run_id=run_id or new_id("desktop_sandbox"),
             )
         sandbox_observer(sandbox_handle)
-        skill_workspace = (
-            LocalSkillWorkspace(workspace, workspace_root=workspace_root)
-            if sandbox_config["workspace_mapping"] == "active_workspace"
-            else SandboxSkillWorkspace(sandbox_handle, issuer)
-        )
+        skill_workspace = SandboxSkillWorkspace(sandbox_handle, issuer)
         loader = factory.create_skill_loader(
             resolved,
             agent.agent_id,
@@ -992,18 +988,30 @@ class DesktopRunCompositionMixin:
             official_runtime.job_runtime,
         )
 
-    def _sandbox_provider(self, plugin_id: str):
-        cached = self._sandbox_providers.get(plugin_id)
+    def _sandbox_provider(self, plugin_id: str, config=None):
+        options = {
+            key: value
+            for key, value in (config or {}).items()
+            if key
+            in {
+                "linux_cgroup_root",
+                "linux_quota_mount",
+                "linux_execution_uid",
+                "linux_execution_gid",
+            }
+        }
+        cache_key = plugin_id + json.dumps(options, sort_keys=True)
+        cached = self._sandbox_providers.get(cache_key)
         if cached is not None:
             return cached
         verification_key = self._sandbox_grant_issuer.verification_key
         if plugin_id == LocalWorkspaceSandboxProvider.plugin_id:
-            provider = LocalWorkspaceSandboxProvider(verification_key)
+            provider = LocalWorkspaceSandboxProvider(verification_key, **options)
         elif plugin_id == InMemorySandboxProvider.plugin_id:
             provider = InMemorySandboxProvider(verification_key)
         else:
             raise ValueError(f"unsupported sandbox plugin {plugin_id!r}")
-        self._sandbox_providers[plugin_id] = provider
+        self._sandbox_providers[cache_key] = provider
         return provider
 
     async def _session_id_for_run(self, run_id: str) -> str:

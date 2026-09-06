@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 import asyncio
 from datetime import datetime, timezone
 
@@ -53,6 +55,7 @@ def setup(*, allowed=("echo",), max_output=1024, max_wall_time=1):
         clock=clock,
     )
     spec = ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:spec",
         architecture="portable",
         filesystem=FileSystemPolicy(
@@ -79,6 +82,7 @@ def authorization(issuer, ref, request, *, argv=None, executable=None, cwd=None)
         path=cwd or request.cwd,
         executable=executable or request.argv[0],
         argv=argv or request.argv,
+        metadata={"process_request_digest": request.digest()},
     )
     grant = issuer.issue(
         ref=ref,

@@ -180,7 +180,11 @@ class _MemoryFileSystem:
         total = (
             sum(len(value) for value in row.files.values()) - previous + len(content)
         )
-        if policy.max_total_bytes is not None and total > policy.max_total_bytes:
+        total_limit = min(
+            policy.max_total_bytes or row.spec.resources.disk_mb * 1024**2,
+            row.spec.resources.disk_mb * 1024**2,
+        )
+        if total > total_limit:
             raise self._provider._error(
                 "sandbox.resource_exhausted",
                 ErrorCategory.POLICY_DENIED,
@@ -469,6 +473,9 @@ class InMemorySandboxProvider:
     ) -> _MemoryHandle:
         self._sweep_terminated()
         caps = await self.capabilities()
+        from ..admission import validate_resource_support
+
+        validate_resource_support(spec, caps)
         if spec.architecture not in caps.architectures:
             raise self._error(
                 "sandbox.capability_unsupported",
@@ -514,6 +521,11 @@ class InMemorySandboxProvider:
         return _MemoryHandle(self, ref)
 
     async def attach(self, ref: SandboxRef, context: RequestContext) -> _MemoryHandle:
+        from ..admission import validate_resource_support
+
+        validate_resource_support(
+            self._row(ref.sandbox_id).spec, await self.capabilities()
+        )
         row = self._validate_ref(ref)
         if row.state == SandboxState.TERMINATED:
             raise self._error(
@@ -662,8 +674,7 @@ class InMemorySandboxProvider:
             (
                 row
                 for row in self._rows.values()
-                if row.state == SandboxState.TERMINATED
-                and row.attached_clients == 0
+                if row.state == SandboxState.TERMINATED and row.attached_clients == 0
             ),
             key=lambda row: (row.updated_at, row.ref.sandbox_id),
         )
@@ -828,6 +839,7 @@ class InMemorySandboxProvider:
             or intent.executable != executable
             or intent.argv != request.argv
             or intent.path != request.cwd
+            or intent.metadata.get("process_request_digest") != request.digest()
         ):
             raise self._error(
                 "sandbox.grant_mismatch",

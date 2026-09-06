@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
 import asyncio
 from datetime import timedelta
 
@@ -81,6 +83,7 @@ def sandbox_spec(
     ),
 ) -> ResolvedSandboxSpec:
     return ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:sandbox-spec",
         architecture="portable",
         filesystem=FileSystemPolicy(
