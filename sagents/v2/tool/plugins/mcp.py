@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Callable
@@ -127,38 +128,98 @@ class McpToolPlugin:
         self._call_run_ids: dict[str, str] = {}
         self._discovery_errors: dict[str, RuntimeErrorInfo] = {}
         self._lock = asyncio.Lock()
+        self._discovery_fingerprint = self.servers_fingerprint(self.servers)
+        self._discovery_complete = False
+        self._discovery_task: asyncio.Task[tuple[ToolDefinition, ...]] | None = None
+        self._discovery_generation = 0
+
+    @staticmethod
+    def servers_fingerprint(servers: tuple[McpServerConfig, ...]) -> str:
+        payload = []
+        for value in sorted(servers, key=lambda item: item.name):
+            entry = value.model_dump(mode="json")
+            # Persisted configuration stays redacted; cache identity must still
+            # change on credential rotation. Never expose the credential itself.
+            entry["api_key"] = (
+                hashlib.sha256(value.api_key.get_secret_value().encode()).hexdigest()
+                if value.api_key is not None
+                else None
+            )
+            payload.append(entry)
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    def discovery_errors(self) -> dict[str, RuntimeErrorInfo]:
+        return dict(self._discovery_errors)
+
+    def tool_counts_by_server(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for server, _remote in self._routes.values():
+            counts[server.name] = counts.get(server.name, 0) + 1
+        return counts
+
+    def invalidate_discovery(self) -> None:
+        self._discovery_generation += 1
+        self._discovery_complete = False
+        self._definitions = {}
+        self._routes = {}
+        self._discovery_errors = {}
+        self._discovery_task = None
+        self._discovery_fingerprint = self.servers_fingerprint(self.servers)
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         del run_id
+        while True:
+            fingerprint = self.servers_fingerprint(self.servers)
+            async with self._lock:
+                if (
+                    self._discovery_complete
+                    and self._discovery_fingerprint == fingerprint
+                ):
+                    return tuple(
+                        self._definitions[name] for name in sorted(self._definitions)
+                    )
+                if self._discovery_fingerprint != fingerprint:
+                    self.invalidate_discovery()
+                generation = self._discovery_generation
+                if self._discovery_task is None:
+                    self._discovery_task = asyncio.create_task(
+                        self._discover_tools(self.servers, generation)
+                    )
+                    self._discovery_task.add_done_callback(self._discovery_finished)
+                task = self._discovery_task
+            # Observers do not own this shared read-only discovery task.
+            result = await asyncio.shield(task)
+            if (
+                generation == self._discovery_generation
+                and fingerprint == self.servers_fingerprint(self.servers)
+            ):
+                return result
+
+    def _discovery_finished(self, task) -> None:
+        if self._discovery_task is task:
+            self._discovery_task = None
+        if not task.cancelled():
+            task.exception()  # Retrieve failures even when all observers detached.
+
+    async def _discover_tools(
+        self, servers: tuple[McpServerConfig, ...], generation: int
+    ) -> tuple[ToolDefinition, ...]:
+        results = await asyncio.gather(
+            *(self._discover_server(server) for server in servers)
+        )
         discovered: dict[str, ToolDefinition] = {}
         routes: dict[str, tuple[McpServerConfig, str]] = {}
         discovery_errors: dict[str, RuntimeErrorInfo] = {}
-        for server in self.servers:
-            try:
-                async with self.session_factory(server) as session:
-                    raw_tools = await self._list_server_tools(server, session)
-            except SageV2Error as error:
-                if server.required:
-                    raise
-                discovery_errors[server.name] = error.info
-                continue
-            except Exception as exc:
-                # Discovery is read-only and happens before a tool call is
-                # dispatched, so its failure cannot leave an uncertain side
-                # effect behind and is safe to retry.
-                error = self._provider_error(
-                    "mcp.discovery_failed",
-                    server,
-                    exc,
-                    category=ErrorCategory.PROVIDER_TRANSIENT,
-                )
-                if server.required:
-                    raise error from exc
-                discovery_errors[server.name] = error.info
+        for server, raw_tools, error in results:
+            if error is not None:
+                discovery_errors[server.name] = error
                 continue
             try:
                 server_definitions, server_routes = self._project_tools(
-                    server, raw_tools, existing_names=frozenset(discovered)
+                    server, raw_tools or (), existing_names=frozenset(discovered)
                 )
             except SageV2Error as exc:
                 if server.required:
@@ -168,10 +229,41 @@ class McpToolPlugin:
             discovered.update(server_definitions)
             routes.update(server_routes)
         async with self._lock:
-            self._definitions = discovered
-            self._routes = routes
-            self._discovery_errors = discovery_errors
+            if generation == self._discovery_generation and self.servers_fingerprint(
+                servers
+            ) == self.servers_fingerprint(self.servers):
+                self._definitions = discovered
+                self._routes = routes
+                self._discovery_errors = discovery_errors
+                # A temporarily unavailable optional server must be discoverable
+                # on a later request without requiring a settings change.
+                self._discovery_complete = not discovery_errors
         return tuple(discovered[name] for name in sorted(discovered))
+
+    async def _discover_server(
+        self, server: McpServerConfig
+    ) -> tuple[McpServerConfig, tuple[Any, ...] | None, RuntimeErrorInfo | None]:
+        try:
+            async with self.session_factory(server) as session:
+                raw_tools = await self._list_server_tools(server, session)
+        except SageV2Error as error:
+            if server.required:
+                raise
+            return server, None, error.info
+        except Exception as exc:
+            # Discovery is read-only and happens before a tool call is
+            # dispatched, so its failure cannot leave an uncertain side
+            # effect behind and is safe to retry.
+            error = self._provider_error(
+                "mcp.discovery_failed",
+                server,
+                exc,
+                category=ErrorCategory.PROVIDER_TRANSIENT,
+            )
+            if server.required:
+                raise error from exc
+            return server, None, error.info
+        return server, raw_tools, None
 
     async def _list_server_tools(
         self, server: McpServerConfig, session: Any

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemChannels;
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
@@ -17,6 +19,7 @@ import 'package:sage_desktop_v2/src/models.dart';
 import 'package:sage_desktop_v2/src/state/workspace_controller.dart';
 import 'package:sage_desktop_v2/src/usage_models.dart';
 import 'package:sage_desktop_v2/src/ui/file_preview.dart';
+import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
@@ -1843,12 +1846,59 @@ class _PlanSuspendedRunApi extends _SuspendedRunApi {
       'allowed_decisions': ['approve_once', 'deny', 'cancel'],
       'payload': {
         'tool_name': 'goal_submit',
-        'arguments': {'content': '# 实施计划\n\n1. 检查现状\n2. 修改实现\n3. 运行验证'},
+        'arguments': {
+          'content':
+              '# 实施计划\n\n1. 检查现状\n2. 修改实现\n3. 运行验证\n\n| 功能 | 验收 |\n| --- | --- |\n| 保存 | 刷新保留 |\n\n```js\nconst ready = true;\n```',
+        },
         'risk_category': 'plan_approval',
         'side_effect_level': 'none',
       },
     },
   };
+}
+
+class _DeferredPlanApi extends _PlanSuspendedRunApi {
+  final events = StreamController<Map<String, Object?>>.broadcast();
+  bool planCompleted = false;
+  int executionStarts = 0;
+
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async {
+    final snapshot = await super.getRun(runId);
+    if (planCompleted && runId == 'run_suspended') {
+      return {
+        'run': {
+          ...(snapshot['run'] as Map),
+          'state': 'completed',
+          'last_run_sequence': 5,
+        },
+      };
+    }
+    return snapshot;
+  }
+
+  @override
+  Stream<Map<String, Object?>> subscribeRun(
+    String runId, {
+    int afterSequence = 0,
+  }) => events.stream;
+
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) {
+    executionStarts++;
+    return super.startRun(body);
+  }
+
+  void completePlan() {
+    planCompleted = true;
+    events.add({
+      'type': 'run.completed',
+      'run_id': 'run_suspended',
+      'session_id': 'session_suspended',
+      'run_sequence': 5,
+      'data': {'kind': 'run', 'state': 'completed'},
+    });
+  }
 }
 
 class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
@@ -2288,6 +2338,127 @@ void main() {
       expect(restored.invocationMode, InvocationMode.goal);
       expect(restored.toJson()['invocation_mode'], 'goal');
       expect(legacy.invocationMode, InvocationMode.plan);
+    },
+  );
+
+  for (final scenario in [
+    'completed',
+    'running',
+    'failed',
+    'questionnaire',
+    'old_run',
+    'tool_failed',
+    'missing_result',
+  ]) {
+    test('goal mode resets only for confirmed completion: $scenario', () {
+      final cached = _persistedGroupedActivitiesConversation();
+      cached['invocation_mode'] = 'goal';
+      if (scenario == 'running' || scenario == 'failed') {
+        cached['status'] = scenario;
+      }
+      final panel = (cached['process_panels'] as List).single as Map;
+      if (scenario == 'old_run') panel['run_id'] = 'old-run';
+      panel['activities'] = [
+        {
+          'id': 'finish',
+          'label': scenario == 'questionnaire'
+              ? 'questionnaire_async'
+              : 'goal_complete',
+          'active': false,
+          'failed': scenario == 'tool_failed',
+          'result': scenario == 'missing_result'
+              ? ''
+              : '{"status":"completed"}',
+        },
+      ];
+      final restored = Conversation.fromJson(cached);
+      expect(
+        restored.invocationMode,
+        scenario == 'completed' ? InvocationMode.normal : InvocationMode.goal,
+      );
+      if (scenario == 'completed') {
+        // A deliberate new goal selection must survive replay and restart.
+        restored.invocationMode = InvocationMode.goal;
+        restored.resetCompletedGoalMode();
+        expect(
+          Conversation.fromJson(restored.toJson()).invocationMode,
+          InvocationMode.goal,
+        );
+      }
+    });
+  }
+
+  testWidgets(
+    'goal mode chip clears after completion and persists normal mode',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final api = _ControlledProcessApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      controller.setInvocationMode(InvocationMode.goal);
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '完成目标',
+      );
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      api.emitRunningProcess();
+      await tester.pump();
+      void emit(String type, int sequence, Map<String, Object?> data) {
+        api._events.add({
+          'type': type,
+          'run_id': 'run_controlled',
+          'session_id': 'session_controlled',
+          'run_sequence': sequence,
+          'data': data,
+        });
+      }
+
+      emit('tool.call.succeeded', 3, {
+        'tool_call_id': 'complete-goal',
+        'tool_name': 'goal_complete',
+      });
+      emit('item.completed', 4, {
+        'item': {
+          'data': {
+            'kind': 'tool_result',
+            'tool_call_id': 'complete-goal',
+            'content': [
+              {
+                'kind': 'json',
+                'value': {'status': 'completed', 'summary': '已交付'},
+              },
+            ],
+          },
+        },
+      });
+      await tester.pump();
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.goal,
+      );
+      emit('run.completed', 5, {'state': 'completed'});
+      await api._events.close();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('composer-mode-chip')), findsNothing);
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.normal,
+      );
+      final preferences = await SharedPreferences.getInstance();
+      final saved =
+          jsonDecode(preferences.getString('sage.desktop_v2.conversations.v1')!)
+              as Map;
+      final restored = Conversation.fromJson(
+        (saved.values.first as List).first.cast<String, Object?>(),
+      );
+      expect(restored.invocationMode, InvocationMode.normal);
     },
   );
 
@@ -4343,6 +4514,129 @@ void main() {
     expect(find.text('正在检查实现。'), findsOneWidget);
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'historical goal submissions reopen their full plans in the right dock in ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final firstPlan =
+            '# 原始计划\n\n${List.filled(40, '实现功能并验证结果。').join('\n\n')}';
+        const secondPlan = '# 修订计划\n\n保留用户输入与文件名。';
+        final persisted = _persistedGroupedActivitiesConversation();
+        final process = (persisted['process_panels'] as List).single as Map;
+        process['activities'] = [
+          {
+            'id': 'plan-first',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 10,
+            'arguments': {'content': firstPlan},
+            'result': 'approved',
+          },
+          {
+            'id': 'read-between',
+            'label': 'file_read',
+            'active': false,
+            'sequence': 30,
+            'arguments': {'path': 'todo.html'},
+          },
+          {
+            'id': 'plan-second',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 50,
+            'arguments': {'content': secondPlan},
+            'result': 'approved',
+          },
+          {
+            'id': 'plan-empty',
+            'label': 'goal_submit',
+            'active': false,
+            'sequence': 60,
+            'arguments': {'content': ''},
+          },
+        ];
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [persisted],
+          }),
+        });
+        final api = _FakeApi();
+        api.desktopSettings = api.desktopSettings.copyWith(
+          themeMode: brightness.name,
+        );
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        expect(controller.selectedConversation!.pendingInteraction, isNull);
+        await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+        await tester.pump();
+        final first = find.byKey(
+          const ValueKey('process-open-plan:plan-first'),
+        );
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        final panel = find.byKey(const ValueKey('plan-detail-panel'));
+        String displayedPlan() => tester
+            .widget<MarkdownBody>(
+              find.descendant(of: panel, matching: find.byType(MarkdownBody)),
+            )
+            .data;
+        expect(displayedPlan(), firstPlan);
+        expect(
+          tester.getTopLeft(panel).dx,
+          greaterThan(tester.getTopRight(first).dx),
+        );
+        await tester.drag(panel, const Offset(0, -350));
+        await tester.pumpAndSettle();
+        final scrollable = find.descendant(
+          of: panel,
+          matching: find.byType(Scrollable),
+        );
+        expect(
+          tester.state<ScrollableState>(scrollable).position.pixels,
+          greaterThan(0),
+        );
+
+        final group = find.byKey(
+          const ValueKey('process-operation-group:plan-second'),
+        );
+        await tester.tap(
+          find.descendant(of: group, matching: find.byType(InkWell)).first,
+        );
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('process-open-plan:plan-empty')),
+          findsNothing,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('process-open-plan:plan-second')),
+        );
+        await tester.pumpAndSettle();
+        expect(displayedPlan(), secondPlan);
+        expect(tester.state<ScrollableState>(scrollable).position.pixels, 0);
+        await tester.tap(
+          find.byKey(
+            const ValueKey('workspace-panel-close:sage.workspace.plan:1'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(panel, findsNothing);
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        expect(displayedPlan(), firstPlan);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('large stream deltas are revealed progressively', (tester) async {
     tester.platformDispatcher.localeTestValue = const Locale('zh');
     tester.platformDispatcher.localesTestValue = const [Locale('zh')];
@@ -4724,6 +5018,330 @@ void main() {
     );
   });
 
+  testWidgets(
+    'composer mode chip switches exclusively and preserves draft assets',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final chip = find.byKey(const ValueKey('composer-mode-chip'));
+      expect(chip, findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-composer')),
+        '保留草稿',
+      );
+      controller.referenceWorkspaceNode(
+        const WorkspaceFileNode(
+          name: 'notes.md',
+          path: 'notes.md',
+          isDirectory: false,
+          size: 48,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final draft = tester
+          .widget<TextField>(find.byKey(const ValueKey('agent-composer')))
+          .controller!
+          .text;
+      final attachments = List.of(controller.attachments);
+      for (final mode in [
+        InvocationMode.plan,
+        InvocationMode.goal,
+        InvocationMode.plan,
+      ]) {
+        await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(ValueKey('composer-${mode.wireValue}-mode-option')),
+        );
+        await tester.pumpAndSettle();
+        expect(chip, findsOneWidget);
+        expect(
+          find.descendant(
+            of: chip,
+            matching: find.text(mode == InvocationMode.plan ? '计划' : '目标'),
+          ),
+          findsOneWidget,
+        );
+        expect(controller.selectedConversation!.invocationMode, mode);
+        expect(
+          controller.selectedConversation!.planMode &&
+              controller.selectedConversation!.goalMode,
+          isFalse,
+        );
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('agent-composer')))
+              .controller!
+              .text,
+          draft,
+        );
+        expect(controller.attachments, attachments);
+        await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+        await tester.pumpAndSettle();
+        for (final candidate in [InvocationMode.plan, InvocationMode.goal]) {
+          final item = find.byKey(
+            ValueKey('composer-${candidate.wireValue}-mode-option'),
+          );
+          final state = tester.widget<Semantics>(
+            find.descendant(of: item, matching: find.byType(Semantics)).first,
+          );
+          expect(state.properties.selected, candidate == mode);
+        }
+        await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+        await tester.pumpAndSettle();
+      }
+      expect(tester.getSemantics(chip).label, '关闭计划模式');
+      expect(
+        tester
+            .getSemantics(chip)
+            .getSemanticsData()
+            .hasAction(ui.SemanticsAction.tap),
+        isTrue,
+      );
+      // Tab navigation must reach the same dismiss action as pointer activation.
+      FocusManager.instance.primaryFocus?.unfocus();
+      for (var index = 0; index < 30; index++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        final focusContext = FocusManager.instance.primaryFocus?.context;
+        if (focusContext != null &&
+            find
+                .ancestor(
+                  of: find.byWidget(focusContext.widget),
+                  matching: chip,
+                )
+                .evaluate()
+                .isNotEmpty) {
+          break;
+        }
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(chip, findsNothing);
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.normal,
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('agent-composer')))
+            .controller!
+            .text,
+        draft,
+      );
+      expect(controller.attachments, attachments);
+      await tester.tap(find.byKey(const ValueKey('send-button')));
+      await tester.pumpAndSettle();
+      expect(api.lastRunBody?['invocation_mode'], 'normal');
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
+    'composer mode chip follows conversation selection and restoration',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final controller = await _controller();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      controller.setInvocationMode(InvocationMode.plan);
+      final first = controller.selectedConversation!.id;
+      controller.createConversation();
+      controller.setInvocationMode(InvocationMode.goal);
+      await tester.pumpAndSettle();
+      expect(find.text('目标'), findsOneWidget);
+      await controller.selectConversation(controller.selectedGroupId, first);
+      await tester.pumpAndSettle();
+      expect(find.text('计划'), findsOneWidget);
+      expect(find.text('目标'), findsNothing);
+      // Reuse saved preferences instead of resetting the store via _controller.
+      final restored = WorkspaceController(
+        api: _FakeApi(),
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(restored.dispose);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        SageDesktopV2App(key: const ValueKey('restored'), controller: restored),
+      );
+      await tester.pumpAndSettle();
+      await restored.selectConversation(restored.selectedGroupId, first);
+      await tester.pumpAndSettle();
+      expect(find.text('计划'), findsOneWidget);
+      expect(
+        restored.selectedConversation!.invocationMode,
+        InvocationMode.plan,
+      );
+    },
+  );
+
+  testWidgets('composer mode chip and open menu lock with execution status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await _controller();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    for (final status in [
+      RunStatus.starting,
+      RunStatus.running,
+      RunStatus.suspending,
+      RunStatus.suspended,
+    ]) {
+      controller.selectedConversation!.status = RunStatus.idle;
+      controller.setInvocationMode(InvocationMode.plan);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+      await tester.pumpAndSettle();
+      controller.selectedConversation!.status = status;
+      // Trigger the normal controller listener path while the overlay is open.
+      controller.toggleSkill('test-status-refresh');
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InkWell>(find.byKey(const ValueKey('composer-mode-close')))
+            .onTap,
+        isNull,
+      );
+      for (final mode in ['plan', 'goal']) {
+        final option = find.byKey(ValueKey('composer-$mode-mode-option'));
+        expect(
+          tester
+              .widget<InkWell>(
+                find.descendant(of: option, matching: find.byType(InkWell)),
+              )
+              .onTap,
+          isNull,
+        );
+      }
+      controller.setInvocationMode(InvocationMode.goal);
+      expect(
+        controller.selectedConversation!.invocationMode,
+        InvocationMode.plan,
+      );
+      await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+      await tester.pumpAndSettle();
+    }
+    controller.selectedConversation!.status = RunStatus.completed;
+    controller.toggleSkill('test-status-refresh');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('composer-mode-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('composer-mode-chip')), findsNothing);
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'composer mode chip layout in ${brightness.name} across locales and widths',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        for (final locale in SageLocalizations.supportedLocales) {
+          final api = _FakeApi();
+          api.desktopSettings = api.desktopSettings.copyWith(
+            themeMode: brightness.name,
+            language: locale.languageCode,
+          );
+          final controller = await _controller(api: api);
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(const SizedBox());
+          tester.view.physicalSize = const Size(1200, 800);
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pumpAndSettle();
+          final sendCenter = tester.getCenter(
+            find.byKey(const ValueKey('send-button')),
+          );
+          for (final key in [
+            'composer-upload-button',
+            'agent-picker',
+            'approval-mode-picker',
+          ]) {
+            expect(
+              tester.getCenter(find.byKey(ValueKey(key))).dy,
+              closeTo(sendCenter.dy, 0.1),
+            );
+          }
+          controller.setInvocationMode(InvocationMode.plan);
+          await tester.pumpAndSettle();
+          final chip = find.byKey(const ValueKey('composer-mode-chip'));
+          final cluster = find.byKey(
+            const ValueKey('composer-control-cluster'),
+          );
+          expect(
+            tester.getRect(chip).left,
+            greaterThan(tester.getRect(cluster).right),
+          );
+          for (final width in [600.0, 375.0, 280.0]) {
+            controller.setInvocationMode(
+              width == 600 ? InvocationMode.plan : InvocationMode.goal,
+            );
+            tester.view.physicalSize = Size(width, 800);
+            await tester.pumpAndSettle();
+            expect(
+              tester.takeException(),
+              isNull,
+              reason: '${locale.languageCode} $width',
+            );
+            expect(chip, findsOneWidget);
+            final surface = tester.getRect(
+              find.byKey(const ValueKey('thread-composer-surface')),
+            );
+            expect(surface.contains(tester.getRect(chip).topLeft), isTrue);
+            expect(surface.contains(tester.getRect(chip).bottomRight), isTrue);
+            expect(
+              tester
+                  .getRect(chip)
+                  .overlaps(
+                    tester.getRect(find.byKey(const ValueKey('send-button'))),
+                  ),
+              isFalse,
+            );
+            final add = tester.getRect(
+              find.byKey(const ValueKey('composer-upload-button')),
+            );
+            final send = tester.getRect(
+              find.byKey(const ValueKey('send-button')),
+            );
+            final agent = tester.getRect(
+              find.byKey(const ValueKey('agent-picker')),
+            );
+            final approval = tester.getRect(
+              find.byKey(const ValueKey('approval-mode-picker')),
+            );
+            expect(add.center.dy, closeTo(send.center.dy, 0.1));
+            expect(agent.center.dy, closeTo(approval.center.dy, 0.1));
+            expect(add.height, lessThanOrEqualTo(32));
+            expect(agent.height, lessThanOrEqualTo(28));
+            if (tester.getRect(chip).top < tester.getRect(cluster).bottom) {
+              expect(agent.center.dy, closeTo(add.center.dy, 0.1));
+              expect(
+                tester.getRect(chip).center.dy,
+                closeTo(add.center.dy, 0.1),
+              );
+            }
+          }
+        }
+      },
+    );
+  }
+
   testWidgets('plus menu enables plan mode for the conversation and run', (
     tester,
   ) async {
@@ -4993,6 +5611,49 @@ void main() {
           findsNothing,
         );
         expect(branchAction, findsOneWidget);
+        final copyAction = find.byKey(
+          const ValueKey('message-copy:assistant-branch-1'),
+        );
+        String? copiedText;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copiedText = (call.arguments as Map)['text'] as String;
+            }
+            return null;
+          },
+        );
+        addTearDown(() {
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          );
+        });
+        await tester.tap(copyAction);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(copiedText, isNotEmpty);
+        expect(find.byType(DesktopNotice), findsOneWidget);
+        expect(find.widgetWithText(DesktopNotice, '已复制'), findsOneWidget);
+        final copyNotice = find.byKey(
+          const ValueKey('desktop-transient-notice'),
+        );
+        expect(tester.getTopRight(copyNotice), const Offset(1182, 70));
+        expect(tester.getSize(copyNotice).width, 380);
+        expect(find.byType(SnackBar), findsNothing);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.tap(
+          find.byKey(const ValueKey('message-copy:user-branch-2')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.widgetWithText(DesktopNotice, '已复制'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.widgetWithText(DesktopNotice, '已复制'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+        expect(find.byType(DesktopNotice), findsNothing);
         expect(
           find.byKey(const ValueKey('message-branch:assistant-branch-2')),
           findsOneWidget,
@@ -5462,6 +6123,217 @@ void main() {
     );
   }
 
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'plan approval stays compact, opens Markdown details and sends rejection feedback in ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final persisted = _persistedSuspendedConversation();
+        persisted['invocation_mode'] = 'plan';
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [persisted],
+          }),
+        });
+        final api = _PlanSuspendedRunApi();
+        api.desktopSettings = api.desktopSettings.copyWith(
+          themeMode: brightness.name,
+        );
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        final card = find.byKey(const ValueKey('plan-approval-card'));
+        expect(find.byKey(const ValueKey('interaction-preview')), findsNothing);
+        expect(tester.getSize(card).height, lessThanOrEqualTo(64));
+        expect(
+          tester
+              .getSize(find.byKey(const ValueKey('thread-message-list')))
+              .height,
+          greaterThan(400),
+        );
+        final arguments =
+            controller
+                    .selectedConversation!
+                    .pendingInteraction!
+                    .payload['arguments']
+                as Map;
+        final source = arguments['content'] as String;
+        await tester.tap(find.byKey(const ValueKey('interaction-open-plan')));
+        await tester.pumpAndSettle();
+        final panel = find.byKey(const ValueKey('plan-detail-panel'));
+        expect(panel, findsOneWidget);
+        final surface = find.byKey(const ValueKey('plan-detail-surface'));
+        final surfaceColor = tester.widget<ColoredBox>(surface).color;
+        expect(surfaceColor.a, 1);
+        expect(
+          surfaceColor,
+          Theme.of(
+            tester.element(panel),
+          ).colorScheme.surface.withValues(alpha: 1),
+        );
+        expect(tester.getSize(surface), tester.getSize(panel));
+        expect(
+          tester.getTopLeft(panel).dx,
+          greaterThan(tester.getTopLeft(card).dx),
+        );
+        expect(
+          tester
+              .widget<MarkdownBody>(
+                find.descendant(of: panel, matching: find.byType(MarkdownBody)),
+              )
+              .data,
+          source,
+        );
+        expect(
+          find.descendant(of: panel, matching: find.byType(Table)),
+          findsOneWidget,
+        );
+        expect(api.repliedDecision, isNull);
+        // Intermediate desktop widths must reveal the dock rather than hide it.
+        tester.view.physicalSize = const Size(820, 1100);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('interaction-open-plan')));
+        await tester.pumpAndSettle();
+        expect(panel, findsOneWidget);
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('agent-composer')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('plan-decision-composer')),
+          findsOneWidget,
+        );
+        expect(find.text('跳过'), findsOneWidget);
+        final input = find.byKey(const ValueKey('plan-feedback-input'));
+        await tester.enterText(
+          find.descendant(of: input, matching: find.byType(EditableText)),
+          '请补充测试方案，再提交计划。',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('跳过'), findsNothing);
+        expect(find.text('提交'), findsOneWidget);
+        tester.view.physicalSize = const Size(375, 1000);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const ValueKey('plan-feedback-submit')).hitTestable(),
+          findsOneWidget,
+        );
+
+        expect(api.repliedDecision, isNull);
+        await tester.tap(find.byKey(const ValueKey('plan-feedback-submit')));
+        await tester.pumpAndSettle();
+        expect(api.repliedDecision, 'deny');
+        expect(api.repliedPayload?['text'], '请补充测试方案，再提交计划。');
+        expect(
+          controller.selectedConversation!.invocationMode,
+          InvocationMode.plan,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('plan skip declines without feedback or execution', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final persisted = _persistedSuspendedConversation()
+      ..['invocation_mode'] = 'plan';
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [persisted],
+      }),
+    });
+    final api = _PlanSuspendedRunApi();
+    final controller = WorkspaceController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('plan-feedback-submit')));
+    await tester.pumpAndSettle();
+    expect(api.repliedDecision, 'deny');
+    expect(api.repliedPayload?['text'], isNull);
+    expect(api.lastRunBody, isNull);
+    expect(
+      controller.selectedConversation!.invocationMode,
+      InvocationMode.plan,
+    );
+  });
+
+  for (final restart in [false, true]) {
+    test(
+      'approved plan waits for completion and targets its original session, restart=$restart',
+      () async {
+        final persisted = _persistedSuspendedConversation()
+          ..['invocation_mode'] = 'plan';
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({
+            WorkspaceController.agentWorkspaceId: [persisted],
+          }),
+        });
+        final api = _DeferredPlanApi();
+        final controller = WorkspaceController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        await controller.initialize();
+        final original = controller.selectedConversation!;
+        await controller.replyInteraction(
+          'approve_once',
+          payload: {'execute_plan': true},
+        );
+        expect(api.executionStarts, 0);
+        expect(original.pendingPlanExecution, isNotNull);
+        final preferences = await SharedPreferences.getInstance();
+        expect(
+          preferences.getString('sage.desktop_v2.conversations.v1'),
+          contains('desktop-plan-execute:run_suspended'),
+        );
+        if (restart) {
+          controller.dispose();
+          await api.events.close();
+          final reopenedApi = _DeferredPlanApi()..planCompleted = true;
+          final reopened = WorkspaceController(
+            api: reopenedApi,
+            preferencesLoader: SharedPreferences.getInstance,
+          );
+          addTearDown(reopened.dispose);
+          addTearDown(reopenedApi.events.close);
+          await reopened.initialize();
+          await pumpEventQueue();
+          expect(reopenedApi.executionStarts, 1);
+          expect(reopenedApi.lastRunBody?['session_id'], 'session_suspended');
+          expect(reopened.selectedConversation!.pendingPlanExecution, isNull);
+        } else {
+          addTearDown(controller.dispose);
+          addTearDown(api.events.close);
+          controller.createConversation();
+          final other = controller.selectedConversation!;
+          api.completePlan();
+          api.completePlan();
+          await pumpEventQueue();
+          expect(api.executionStarts, 1);
+          expect(api.lastRunBody?['session_id'], 'session_suspended');
+          expect(api.lastRunBody?['agent_id'], original.agentId);
+          expect(other.messages, isEmpty);
+          expect(original.pendingPlanExecution, isNull);
+        }
+      },
+    );
+  }
+
   testWidgets(
     'plan submission shows full text and approval selects goal mode',
     (tester) async {
@@ -5488,9 +6360,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('审批计划'), findsOneWidget);
-      expect(find.text('计划全文'), findsOneWidget);
-      expect(find.textContaining('3. 运行验证'), findsOneWidget);
-      expect(find.text('批准计划'), findsOneWidget);
+      expect(find.text('计划全文'), findsNothing);
+      expect(find.text('运行验证'), findsNothing);
+      expect(find.text('实施此计划'), findsOneWidget);
 
       await tester.tap(
         find.byKey(const ValueKey('interaction-submit-approve_once')),
@@ -5498,6 +6370,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(api.repliedDecision, 'approve_once');
+      expect(api.lastRunBody?['invocation_mode'], 'goal');
+      expect(api.lastRunBody?['session_id'], 'session_suspended');
+      expect(
+        api.lastRunBody?['idempotency_key'],
+        'desktop-plan-execute:run_suspended',
+      );
+      expect(controller.selectedConversation?.pendingPlanExecution, isNull);
+
       expect(
         controller.selectedConversation?.invocationMode,
         InvocationMode.goal,
@@ -5526,6 +6406,13 @@ void main() {
     expect(tester.getTopLeft(notice).dy, lessThan(120));
     expect(tester.getSize(notice).width, lessThanOrEqualTo(380));
     expect(find.text('任务状态已变化，此审批请求已失效'), findsOneWidget);
+    expect(tester.getTopRight(notice), const Offset(1182, 70));
+    await tester.tap(
+      find.descendant(of: notice, matching: find.byTooltip('关闭')),
+    );
+    await tester.pump();
+    expect(controller.error, isNull);
+    expect(notice, findsNothing);
   });
 
   testWidgets('settings exposes the effective security scope', (tester) async {
@@ -6428,6 +7315,14 @@ void main() {
     expect(api.lastDeletedSkillName, 'code-review');
     expect(deleteButton, findsNothing);
     expect(find.text('已删除 code-review'), findsOneWidget);
+    final notice = find.byKey(const ValueKey('desktop-transient-notice'));
+    expect(tester.getTopRight(notice), const Offset(1182, 70));
+    expect(tester.getSize(notice).width, 380);
+    await tester.tap(
+      find.descendant(of: notice, matching: find.byTooltip('关闭')),
+    );
+    await tester.pump();
+    expect(notice, findsNothing);
     expect(tester.takeException(), isNull);
   });
 

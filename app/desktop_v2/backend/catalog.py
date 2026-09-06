@@ -177,10 +177,12 @@ class JsonDesktopCatalogStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = asyncio.Lock()
+        self._cached: DesktopCatalogState | None = None
+        self._cached_mtime: float | None = None
 
     async def initialize_user(self, user_id: str) -> None:
         async with self._lock:
-            state = self._read()
+            state = await asyncio.to_thread(self._read)
             changed = False
             if not any(value.user_id == user_id for value in state.agents):
                 state = state.model_copy(
@@ -218,20 +220,22 @@ class JsonDesktopCatalogStore:
                 )
                 changed = True
             if changed:
-                self._write(state)
+                await asyncio.to_thread(self._write, state)
 
     async def list_agents(self, user_id: str) -> tuple[DesktopAgentRecord, ...]:
         async with self._lock:
+            state = await asyncio.to_thread(self._read)
             return tuple(
-                value for value in self._read().agents if value.user_id == user_id
+                value for value in state.agents if value.user_id == user_id
             )
 
     async def get_agent(self, agent_id: str, user_id: str) -> DesktopAgentRecord | None:
         async with self._lock:
+            state = await asyncio.to_thread(self._read)
             return next(
                 (
                     value
-                    for value in self._read().agents
+                    for value in state.agents
                     if value.agent_id == agent_id and value.user_id == user_id
                 ),
                 None,
@@ -247,9 +251,10 @@ class JsonDesktopCatalogStore:
         self, user_id: str
     ) -> tuple[DesktopModelProviderRecord, ...]:
         async with self._lock:
+            state = await asyncio.to_thread(self._read)
             return tuple(
                 value
-                for value in self._read().model_providers
+                for value in state.model_providers
                 if value.user_id == user_id
             )
 
@@ -257,10 +262,11 @@ class JsonDesktopCatalogStore:
         self, provider_id: str, user_id: str
     ) -> DesktopModelProviderRecord | None:
         async with self._lock:
+            state = await asyncio.to_thread(self._read)
             return next(
                 (
                     value
-                    for value in self._read().model_providers
+                    for value in state.model_providers
                     if value.id == provider_id and value.user_id == user_id
                 ),
                 None,
@@ -274,9 +280,10 @@ class JsonDesktopCatalogStore:
 
     async def list_mcp(self, user_id: str) -> tuple[DesktopMcpRecord, ...]:
         async with self._lock:
+            state = await asyncio.to_thread(self._read)
             return tuple(
                 value
-                for value in self._read().mcp_connections
+                for value in state.mcp_connections
                 if value.user_id == user_id
             )
 
@@ -287,7 +294,7 @@ class JsonDesktopCatalogStore:
         self, field: str, key: str, identity: str, user_id: str, value
     ) -> None:
         async with self._lock:
-            state = self._read()
+            state = await asyncio.to_thread(self._read)
             values = [
                 current
                 for current in getattr(state, field)
@@ -296,11 +303,13 @@ class JsonDesktopCatalogStore:
                 )
             ]
             values.append(value)
-            self._write(state.model_copy(update={field: tuple(values)}))
+            await asyncio.to_thread(
+                self._write, state.model_copy(update={field: tuple(values)})
+            )
 
     async def _delete(self, field: str, key: str, identity: str, user_id: str) -> None:
         async with self._lock:
-            state = self._read()
+            state = await asyncio.to_thread(self._read)
             values = tuple(
                 current
                 for current in getattr(state, field)
@@ -308,14 +317,22 @@ class JsonDesktopCatalogStore:
                     getattr(current, key) == identity and current.user_id == user_id
                 )
             )
-            self._write(state.model_copy(update={field: values}))
+            await asyncio.to_thread(self._write, state.model_copy(update={field: values}))
 
     def _read(self) -> DesktopCatalogState:
         if not self.path.exists():
-            return DesktopCatalogState()
-        return DesktopCatalogState.model_validate_json(
+            self._cached = DesktopCatalogState()
+            self._cached_mtime = None
+            return self._cached
+        mtime = self.path.stat().st_mtime
+        if self._cached is not None and self._cached_mtime == mtime:
+            return self._cached
+        state = DesktopCatalogState.model_validate_json(
             self.path.read_text(encoding="utf-8")
         )
+        self._cached = state
+        self._cached_mtime = mtime
+        return state
 
     def _write(self, state: DesktopCatalogState) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,3 +340,5 @@ class JsonDesktopCatalogStore:
         temporary.write_text(state.model_dump_json(indent=2), encoding="utf-8")
         os.chmod(temporary, 0o600)
         temporary.replace(self.path)
+        self._cached = state
+        self._cached_mtime = self.path.stat().st_mtime

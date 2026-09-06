@@ -101,10 +101,19 @@ class DesktopWorkspaceServiceMixin:
 
     def _read_settings_sync(self) -> DesktopV2Settings:
         if not self.settings_path.exists():
-            return DesktopV2Settings()
-        return DesktopV2Settings.model_validate_json(
+            self._settings_cache = DesktopV2Settings()
+            self._settings_cache_mtime = None
+            return self._settings_cache
+        mtime = self.settings_path.stat().st_mtime
+        cached = getattr(self, "_settings_cache", None)
+        if cached is not None and getattr(self, "_settings_cache_mtime", None) == mtime:
+            return cached
+        settings = DesktopV2Settings.model_validate_json(
             self.settings_path.read_text(encoding="utf-8")
         )
+        self._settings_cache = settings
+        self._settings_cache_mtime = mtime
+        return settings
 
     async def save_settings(self, value: DesktopV2Settings) -> DesktopV2Settings:
         _resolved_sandbox_config(value)
@@ -122,10 +131,15 @@ class DesktopWorkspaceServiceMixin:
             }
         )
         async with self._settings_lock:
-            temporary = self.settings_path.with_suffix(".tmp")
-            temporary.write_text(normalized.model_dump_json(indent=2), encoding="utf-8")
-            temporary.replace(self.settings_path)
+            await asyncio.to_thread(self._write_settings_sync, normalized)
         return normalized
+
+    def _write_settings_sync(self, value: DesktopV2Settings) -> None:
+        temporary = self.settings_path.with_suffix(".tmp")
+        temporary.write_text(value.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(self.settings_path)
+        self._settings_cache = value
+        self._settings_cache_mtime = self.settings_path.stat().st_mtime
 
     async def add_project(self, name: str, path: str) -> DesktopProject:
         root = Path(path).expanduser().resolve(strict=True)

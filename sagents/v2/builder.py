@@ -12,12 +12,18 @@ import json
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from weakref import WeakValueDictionary
 
 from pydantic import SecretStr
 
 from sagents.v2.agent.factory import AgentCompositionFactory
-from sagents.v2.agent.policy import CompositeContinuationPolicy
+from sagents.v2.agent.policy import (
+    ApprovalMemory,
+    CompositeContinuationPolicy,
+    DefaultToolPolicy,
+    SessionApprovalMemory,
+)
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     JsonHeuristicTokenEstimator,
@@ -337,6 +343,11 @@ class SAgentBuilder:
         self._tool_executor: ToolExecutor | None = None
         self._tool_runtime: OfficialToolRuntime | None = None
         self._tool_selection: ToolSelectionPolicy | None = None
+        self._tool_policy: DefaultToolPolicy | None = None
+        self._approval_memory: ApprovalMemory | None = None
+        self._approval_memory_layer: (
+            Callable[[ApprovalMemory], ApprovalMemory] | None
+        ) = None
         self._execution_binding_provider: ExecutionBindingProvider | None = None
         self._log_sink: LogSink | None = None
         self._diagnostic_sink: DiagnosticSink | None = None
@@ -403,6 +414,44 @@ class SAgentBuilder:
         """Inject the model-visible Tool projection policy."""
 
         self._tool_selection = value
+        return self
+
+    def with_tool_policy(self, value: DefaultToolPolicy) -> "SAgentBuilder":
+        """Inject the host-owned Tool approval policy used by every Loop.
+
+        审批策略（何时向宿主请求确认）属于产品层决定，Kernel 只负责执行。
+        未注入时沿用引擎默认的 ``DefaultToolPolicy()``；注入后 root 与
+        子 Run 的 Loop 共用同一实例。它在 ``resolved_plan`` 里以 host 来源
+        可见，但不参与 composition hash：审批模式是宿主的运行偏好，
+        换一档不该让上个进程挂起的 Run 因 resolved_spec 不兼容而无法续跑。
+        """
+
+        self._tool_policy = value
+        return self
+
+    def with_approval_memory(self, value: ApprovalMemory) -> "SAgentBuilder":
+        """Inject a host-owned approval memory (e.g. one that adds workspace scope).
+
+        未注入时使用 ``SessionApprovalMemory``：记在 Session 的派生状态里，
+        随 Session 删除而清理。宿主实现至少要支持 ``session`` 作用域。
+        """
+
+        self._approval_memory = value
+        return self
+
+    def with_approval_memory_layer(
+        self, factory: Callable[[ApprovalMemory], ApprovalMemory]
+    ) -> "SAgentBuilder":
+        """Layer a host-owned approval memory over the kernel session memory.
+
+        ``with_approval_memory`` 整个替换记忆实现，宿主就得自己重做 ``session``
+        作用域；这里则把 Kernel 的 ``SessionApprovalMemory``（或已注入的记忆）交给
+        ``factory``，宿主只叠加更宽的作用域（例如 ``workspace``），``session`` 仍由
+        Kernel 记在会话派生状态里、随 Session 删除清理。``factory`` 在 ``build()``
+        内调用一次。
+        """
+
+        self._approval_memory_layer = factory
         return self
 
     def with_log_sink(self, value: LogSink) -> "SAgentBuilder":
@@ -515,6 +564,12 @@ class SAgentBuilder:
                 if session_store_was_injected
                 else session_store
             )
+        # 审批记忆默认落在会话派生状态：非权威、可重建、随 Session 删除清理。
+        approval_memory = self._approval_memory or SessionApprovalMemory(
+            derived_state
+        )
+        if self._approval_memory_layer is not None:
+            approval_memory = self._approval_memory_layer(approval_memory)
         credential_provider = await self._create_capability(
             extension_host,
             process_root,
@@ -872,6 +927,8 @@ class SAgentBuilder:
                     session_memory_service=(
                         session_memory_service if member_memory_enabled else None
                     ),
+                    tool_policy=self._tool_policy,
+                    approval_memory=approval_memory,
                     continuation_policy=continuation_policy,
                     continuation_signal_provider=(
                         active_runtime.consume_continuation_signals
@@ -1084,6 +1141,7 @@ class SAgentBuilder:
             "context.unit-compactor": unit_compactor,
             "context.reducer": context_reducer,
             "agent.continuation-policy": continuation_policy,
+            "agent.approval-memory": approval_memory,
         }
         await self._validate_required_guarantees(
             runtime_config,
@@ -1145,10 +1203,17 @@ class SAgentBuilder:
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
+                    (
+                        "agent.approval-memory",
+                        self._approval_memory or self._approval_memory_layer,
+                    ),
                     ("observability.log-sink", self._log_sink),
                     ("observability.diagnostic-sink", self._diagnostic_sink),
                 )
                 if injected is not None
+            ),
+            unfenced_host_capabilities=(
+                ("agent.tool-policy",) if self._tool_policy is not None else ()
             ),
             deferred_plugins=(
                 ((OfficialToolPlugin.plugin_id, ExtensionScope.RUN),)
@@ -1904,6 +1969,7 @@ class SAgentBuilder:
         composition_hash,
         host_capabilities,
         deferred_plugins,
+        unfenced_host_capabilities=(),
     ) -> ResolvedApplicationPlan:
         bindings: set[ResolvedProviderBinding] = set()
         dependencies: set[tuple[str, str]] = set()
@@ -1962,6 +2028,18 @@ class SAgentBuilder:
                     source="host",
                 )
             )
+        for capability in unfenced_host_capabilities:
+            # 宿主运行偏好（如审批策略）：在 plan 里可见，但不进入 composition hash。
+            bindings.add(
+                ResolvedProviderBinding(
+                    capability=capability,
+                    name="default",
+                    api_version="2",
+                    plugin_id=None,
+                    scope="process",
+                    source="host",
+                )
+            )
         bindings.add(
             ResolvedProviderBinding(
                 capability="execution.dispatcher",
@@ -2010,6 +2088,10 @@ class _ApplicationComposer:
         self.application: SAgentApplication | None = None
         self._cache: dict[tuple[str, ...], tuple[Any, Any]] = {}
         self._lock = None
+        self._cache_guard = None
+        # Holders and waiters keep their lock alive; completed Run identities
+        # must not accumulate in the process Application for its entire life.
+        self._key_locks: WeakValueDictionary[tuple[str, ...], Any] = WeakValueDictionary()
 
     async def materialize_agent(
         self,
@@ -2026,8 +2108,8 @@ class _ApplicationComposer:
     ) -> MaterializedAgentPorts:
         import asyncio
 
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        if self._cache_guard is None:
+            self._cache_guard = asyncio.Lock()
         tenant_id = tenant_id or self.default_tenant_id
         manifest, resolved = SAgentBuilder()._resolve_package(package)
         declarations = manifest.plugins if manifest is not None else resolved.plugins
@@ -2080,7 +2162,7 @@ class _ApplicationComposer:
         effective_model = model if model is not None else self.process_model
         run_handles: list[Any] = []
         selected_handles: list[Any] = []
-        async with self._lock, self._close_run_handles_on_error(run_handles):
+        async with self._close_run_handles_on_error(run_handles):
             estimator = await self._port(
                 runtime,
                 declarations,
@@ -2335,52 +2417,66 @@ class _ApplicationComposer:
             cache_agent_id or "",
             _config_identity(identity if identity is not None else config),
         )
-        if cacheable and cache_key in self._cache:
-            handle, value = self._cache[cache_key]
+        async with await self._lock_for(cache_key):
+            if cacheable and cache_key in self._cache:
+                handle, value = self._cache[cache_key]
+                selected_handles.append(handle)
+                return value
+            parent = self.process_root
+            if scope == ExtensionScope.RUN:
+                parent = await self._agent_parent(tenant_id, agent_id or "default")
+            value, handle = await self._instantiate(
+                plugin_id,
+                config,
+                capability,
+                scope=scope,
+                scope_id=scope_id,
+                parent=parent,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                run_id=run_id,
+            )
+            if cacheable:
+                self._cache[cache_key] = (handle, value)
+                if self.application is not None:
+                    self.application._scope_handles.append(handle)
+            else:
+                run_handles.append(handle)
             selected_handles.append(handle)
             return value
-        parent = self.process_root
-        if scope == ExtensionScope.RUN:
-            parent = await self._agent_parent(tenant_id, agent_id or "default")
-        value, handle = await self._instantiate(
-            plugin_id,
-            config,
-            capability,
-            scope=scope,
-            scope_id=scope_id,
-            parent=parent,
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            run_id=run_id,
-        )
-        if cacheable:
-            self._cache[cache_key] = (handle, value)
-            if self.application is not None:
-                self.application._scope_handles.append(handle)
-        else:
-            run_handles.append(handle)
-        selected_handles.append(handle)
-        return value
+
+    async def _lock_for(self, cache_key: tuple[str, ...]):
+        import asyncio
+
+        if self._cache_guard is None:
+            self._cache_guard = asyncio.Lock()
+        async with self._cache_guard:
+            lock = self._key_locks.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._key_locks[cache_key] = lock
+        return lock
 
     async def _agent_parent(self, tenant_id: str | None, agent_id: str):
         cache_key = ("__agent_parent__", tenant_id or "", agent_id)
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached[0]
-        handle = await self.host.open_scope(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id=f"materialize-agent:{tenant_id or 'default'}:{agent_id}",
-                tenant_id=tenant_id,
-                agent_id=agent_id,
-            ),
-            self.host.plan(()),
-            parent=self.process_root,
-        )
-        self._cache[cache_key] = (handle, None)
-        if self.application is not None:
-            self.application._scope_handles.append(handle)
-        return handle
+        async with await self._lock_for(cache_key):
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached[0]
+            handle = await self.host.open_scope(
+                ExtensionScopeContext(
+                    scope=ExtensionScope.AGENT,
+                    scope_id=f"materialize-agent:{tenant_id or 'default'}:{agent_id}",
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                ),
+                self.host.plan(()),
+                parent=self.process_root,
+            )
+            self._cache[cache_key] = (handle, None)
+            if self.application is not None:
+                self.application._scope_handles.append(handle)
+            return handle
 
     async def _instantiate(
         self,

@@ -15,6 +15,7 @@ from app.cli.commands.management import (
 )
 from app.cli.commands.tui import tui_command as _tui_command
 from app.cli.commands.v2 import (
+    v2_approvals_command as _v2_approvals_command,
     v2_chat_command as _v2_chat_command,
     v2_run_command as _v2_run_command,
     v2_sessions_command as _v2_sessions_command,
@@ -160,6 +161,8 @@ async def _main_async(args: argparse.Namespace) -> int:
             return await _v2_chat_command(args, command_mode=args.v2_command)
         if args.command == "v2" and args.v2_command == "sessions":
             return await _v2_sessions_command(args)
+        if args.command == "v2" and args.v2_command == "approvals":
+            return await _v2_approvals_command(args)
         raise ValueError(f"Unsupported command: {args.command}")
     except Exception as exc:
         return _emit_cli_error(

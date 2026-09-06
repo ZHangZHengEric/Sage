@@ -13,6 +13,50 @@ from sagents.v2.package.manifest.root import (
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 
 from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.domain.catalog import AgentRecord
+from app.server_v2.services.official import resolve_agent_tools
+
+
+def server_v2_run_manifest(
+    settings: ServerV2Settings | None = None,
+    *,
+    agent: AgentRecord | None = None,
+    agent_id: str = "main",
+    skills: tuple[str, ...] = (),
+    tools: tuple[str, ...] = (),
+    instructions: str | None = None,
+    name: str | None = None,
+) -> SageManifest:
+    """Per-run manifest from a catalog Agent. Process backends stay unchanged."""
+
+    if agent is not None:
+        agent_id = agent.id
+        name = name or agent.name
+        instructions = instructions if instructions is not None else agent.instructions
+        if not tools:
+            tools = tuple(agent.tools)
+    selected_tools = list(resolve_agent_tools(tools, has_skills=bool(skills)))
+    base = server_v2_manifest(settings)
+    source = base.agents.get("main") or next(iter(base.agents.values()))
+    composed = source.model_copy(
+        update={
+            "name": name or source.name,
+            "description": agent.description if agent is not None else source.description,
+            "skills": tuple(skills),
+            "tools": tuple(selected_tools),
+            "instructions": Instructions(
+                inline=instructions
+                or source.instructions.inline
+                or "Be helpful, concise, and explicit about uncertainty."
+            ),
+        }
+    )
+    return base.model_copy(
+        update={
+            "agents": {agent_id: composed},
+            "entrypoint": ApplicationEntrypoint(agent=agent_id),
+        }
+    )
 
 
 def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest:

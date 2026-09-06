@@ -42,6 +42,57 @@ class ModelBody(BaseModel):
     is_default: bool = True
 
 
+class AgentBody(BaseModel):
+    id: str | None = None
+    name: str
+    description: str = ""
+    instructions: str = ""
+    model_id: str = ""
+    tools: list[str] = Field(default_factory=list)
+
+
+class AgentPublic(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    instructions: str = ""
+    model_id: str | None = None
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+
+
+class ToolPublic(BaseModel):
+    name: str
+    category: str = ""
+    source: str = "official"
+    default: bool = False
+
+
+class McpBody(BaseModel):
+    name: str
+    protocol: str = "stdio"
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    api_key: str = ""
+    disabled: bool = False
+    description: str = ""
+
+
+class McpPublic(BaseModel):
+    name: str
+    protocol: str
+    url: str | None = None
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    disabled: bool = False
+    description: str = ""
+    tools: list[str] = Field(default_factory=list)
+    has_api_key: bool = False
+
+
 class AgentRunBody(BaseModel):
     threadId: str
     runId: str
@@ -75,6 +126,55 @@ class TokenPayload(BaseModel):
     user: UserPublic
 
 
+class SkillPublishBody(BaseModel):
+    name: str
+    content: str
+    dimension: str = "user"
+
+
+class SkillUpdateBody(BaseModel):
+    content: str
+
+
+class SkillBindBody(BaseModel):
+    names: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSkillBody(BaseModel):
+    content: str
+
+
+class SkillPublic(BaseModel):
+    skill_id: str
+    version_id: str
+    revision: int
+    dimension: str
+    owner_user_id: str | None = None
+    name: str
+    description: str
+    artifact_path: str
+    package_sha256: str
+    file_count: int
+    total_bytes: int
+    status: str
+    content: str | None = None
+    workspace_status: str | None = None
+
+
+class SkillUploadItem(BaseModel):
+    filename: str
+    success: bool
+    message: str
+    skill: SkillPublic | None = None
+
+
+class SkillUploadResult(BaseModel):
+    results: list[SkillUploadItem] = Field(default_factory=list)
+    success_count: int = 0
+    failed_count: int = 0
+    skills: list[SkillPublic] = Field(default_factory=list)
+
+
 class ModelPublic(BaseModel):
     id: str
     protocol: str
@@ -87,6 +187,7 @@ class ThreadPublic(BaseModel):
     thread_id: str
     user_id: str
     title: str
+    agent_id: str = ""
     updated_at: str
 
 

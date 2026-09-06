@@ -38,8 +38,8 @@ services:
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
-    mem_limit: 16g
-    cpus: 4.0
+    mem_limit: 4g
+    cpus: 2.0
     extra_hosts:
       - "mcp.withling.top:host-gateway"
     networks:

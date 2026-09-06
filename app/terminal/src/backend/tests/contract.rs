@@ -5,6 +5,25 @@ use crate::backend::protocol::{parse_backend_line, BackendProtocolState};
 use crate::backend::BackendEvent;
 
 #[test]
+fn v2_session_commands_target_the_v2_session_store() {
+    assert_eq!(
+        CliJsonCommand::V2SessionsList { limit: 7 }.args(),
+        ["v2", "sessions", "--json", "--limit", "7"]
+    );
+    assert_eq!(
+        CliJsonCommand::V2SessionsList { limit: 0 }.args(),
+        ["v2", "sessions", "--json", "--limit", "1"]
+    );
+    assert_eq!(
+        CliJsonCommand::V2SessionInspect {
+            session_id: "session_a"
+        }
+        .args(),
+        ["v2", "sessions", "inspect", "session_a", "--json"]
+    );
+}
+
+#[test]
 fn parse_stream_event_collects_tool_fields_from_multiple_locations() {
     let event = parse_stream_event(
         r#"{

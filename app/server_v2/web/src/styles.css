@@ -121,7 +121,13 @@ nav a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-v
 }
 
 .panel.stack { margin-top: var(--space-5); }
-.page-head { margin-bottom: var(--space-5); }
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
 .page-head h1, h1, h2 { margin: 0 0 var(--space-2); font-weight: 650; }
 .page-head p, p { margin: 0 0 var(--space-3); }
 .muted { color: var(--muted-foreground); }
@@ -137,6 +143,41 @@ nav a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-v
   border: 1px solid var(--border);
   font-size: 0.75rem;
 }
+
+.dropzone {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-5);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+  color: var(--foreground);
+  text-align: left;
+}
+.dropzone span { color: var(--muted-foreground); font-size: 0.875rem; }
+.dropzone.active { border-color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, var(--muted)); }
+.file-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+.file-list li.fail { color: var(--danger); }
 
 .field { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
 .field span { font-size: 0.8125rem; color: var(--muted-foreground); }
@@ -250,8 +291,20 @@ input, textarea, select {
 
 .thread-bar {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   padding: 14px 24px 10px;
   border-bottom: 1px solid var(--border);
+}
+.agent-pick select {
+  min-width: 10rem;
+  margin: 0;
+}
+.agent-pick select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 .thread-bar h1 {
   margin: 0;

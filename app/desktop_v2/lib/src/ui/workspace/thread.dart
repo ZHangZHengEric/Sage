@@ -7,6 +7,7 @@ class _ThreadPanel extends StatelessWidget {
     required this.workspaceCollapsed,
     required this.onToggleRail,
     required this.onToggleWorkspace,
+    required this.onOpenPlan,
     this.compact = false,
   });
 
@@ -16,12 +17,25 @@ class _ThreadPanel extends StatelessWidget {
   final VoidCallback onToggleRail;
   final VoidCallback onToggleWorkspace;
   final bool compact;
+  final ValueChanged<String> onOpenPlan;
 
   @override
   Widget build(BuildContext context) {
     final conversation = controller.selectedDisplayConversation;
     if (conversation == null) return const SizedBox.shrink();
     final readOnly = controller.viewingSubSession;
+    final interaction = conversation.pendingInteraction;
+    final interactionCard =
+        interaction != null && !_isInlineQuestionnaire(interaction)
+        ? _InteractionCard(
+            key: ValueKey(interaction.id),
+            interaction: interaction,
+            onOpenPlan: onOpenPlan,
+            onReply: readOnly
+                ? controller.replyDisplayInteraction
+                : controller.replyInteraction,
+          )
+        : null;
     return DecoratedBox(
       decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface),
       child: Column(
@@ -43,25 +57,30 @@ class _ThreadPanel extends StatelessWidget {
                   constraints: const BoxConstraints(maxWidth: 900),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          context.l10n.text('workspace.emptyPrompt'),
-                          style: Theme.of(context).textTheme.headlineMedium
-                              ?.copyWith(
-                                fontSize: 30,
-                                fontWeight: FontWeight.w500,
-                                letterSpacing: -0.6,
-                              ),
-                        ),
-                        const SizedBox(height: 42),
-                        if (!readOnly)
-                          _Composer(
-                            controller: controller,
-                            conversation: conversation,
+                    // Keep the input controls visible when localized text or
+                    // the mode toolbar needs additional lines.
+                    child: SingleChildScrollView(
+                      reverse: true,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            context.l10n.text('workspace.emptyPrompt'),
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: -0.6,
+                                ),
                           ),
-                      ],
+                          const SizedBox(height: 42),
+                          if (!readOnly)
+                            _Composer(
+                              controller: controller,
+                              conversation: conversation,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -76,15 +95,34 @@ class _ThreadPanel extends StatelessWidget {
                     controller.selectedConversation?.subSessions ?? const [],
               ),
             ),
-            if (conversation.pendingInteraction case final interaction?
-                when !_isInlineQuestionnaire(interaction))
-              _InteractionCard(
-                interaction: interaction,
-                onReply: readOnly
-                    ? controller.replyDisplayInteraction
-                    : controller.replyInteraction,
-              ),
-            if (!readOnly)
+            ?interactionCard,
+            if (_isPlanApproval(conversation.pendingInteraction))
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(20, 2, 20, compact ? 18 : 24),
+                    child: _PlanDecisionComposer(
+                      key: ValueKey(
+                        'plan-decision:${conversation.pendingInteraction!.id}',
+                      ),
+                      interaction: conversation.pendingInteraction!,
+                      initialFeedback: controller.planFeedbackDraft(
+                        conversation.pendingInteraction!.id,
+                      ),
+                      onFeedbackChanged: (text) =>
+                          controller.setPlanFeedbackDraft(
+                            conversation.pendingInteraction!.id,
+                            text,
+                          ),
+                      onReply: readOnly
+                          ? controller.replyDisplayInteraction
+                          : controller.replyInteraction,
+                    ),
+                  ),
+                ),
+              )
+            else if (!readOnly)
               Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 820),

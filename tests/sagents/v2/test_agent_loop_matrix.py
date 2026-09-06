@@ -40,6 +40,7 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationSignals,
     InteractionDraft,
 )
+from sagents.v2.agent.policy.approval_memory import SessionApprovalMemory
 from sagents.v2.agent.policy.tool_policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
@@ -218,6 +219,8 @@ async def setup_loop(
     context_assembler=None,
     trace_sink=None,
     log_sink=None,
+    tool_policy=None,
+    approval_memory=None,
 ):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(
@@ -272,6 +275,13 @@ async def setup_loop(
         loop_kwargs["memory_recall_query_generator"] = memory_recall_query_generator
     if context_assembler is not None:
         loop_kwargs["context_assembler"] = context_assembler
+    if tool_policy is not None:
+        loop_kwargs["tool_policy"] = tool_policy
+    if approval_memory is not None:
+        # 传 callable 时用 runtime 现场构造（例如 SessionApprovalMemory(store)）。
+        loop_kwargs["approval_memory"] = (
+            approval_memory(runtime) if callable(approval_memory) else approval_memory
+        )
     if trace_sink is not None or log_sink is not None:
         loop = ObservedRunDriver(
             **loop_kwargs,
@@ -1432,11 +1442,16 @@ async def test_write_tool_suspends_before_dispatch_and_approval_resumes_once():
 
 
 @pytest.mark.asyncio
-async def test_declined_write_never_dispatches_and_model_receives_decline_result():
+@pytest.mark.parametrize("feedback", ["", "请先补充测试方案，再提交计划。"])
+async def test_declined_write_never_dispatches_and_model_receives_decline_result(feedback):
     def assert_decline(request):
         tool_result = request.messages[-1]
         assert tool_result.role == "tool"
         assert "declined" in tool_result.content[0].text
+        if feedback:
+            assert feedback in tool_result.content[1].text
+        else:
+            assert len(tool_result.content) == 1
 
     model = ScriptedModelProvider(
         (
@@ -1461,6 +1476,7 @@ async def test_declined_write_never_dispatches_and_model_receives_decline_result
             expected_suspension_revision=0,
             expected_interaction_revision=0,
             decision="deny",
+            payload={"text": feedback},
             idempotency_key="deny_1",
         ),
         CONTEXT,
@@ -1473,6 +1489,18 @@ async def test_declined_write_never_dispatches_and_model_receives_decline_result
     assert executor.calls == []
     assert "tool.call.cancelled" in types
     assert "tool.call.dispatching" not in types
+    if feedback:
+        events = await runtime.session_store.read_events(handle.run_id)
+        results = [
+            event.data.item.data
+            for event in events
+            if event.type == "item.completed"
+            and isinstance(event.data, ItemEventData)
+            and event.data.item is not None
+            and isinstance(event.data.item.data, ToolResultItemData)
+        ]
+        assert any(feedback in block.text for item in results for block in item.content if isinstance(block, TextBlock))
+
 
 
 @pytest.mark.asyncio
@@ -2503,3 +2531,999 @@ async def test_non_reconcilable_unknown_requires_explicit_manual_resolution():
     assert len(executor.calls) == 1
     assert executor.reconciliations == []
     assert types.count("tool.call.reconciled") == 1
+
+
+# ---------- 审批记忆：approve_and_remember ----------
+
+
+def _session_memory(runtime):
+    return SessionApprovalMemory(runtime.session_store)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updated_policy", ["deny", "always", "changed-matcher"])
+async def test_pending_approval_cannot_override_tightened_host_policy(updated_policy):
+    from sagents.v2.agent.policy.tool_policy import (
+        ToolOperationAssessment, ToolPolicyAction, exact_arguments_matcher,
+    )
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    runtime, handle, loop, executor = await setup_loop(
+        model, tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(_approval_reply(
+        handle.run_id, suspended, suspension, interaction,
+        "approve_and_remember", "remember_before_policy_change",
+    ), CONTEXT)
+    if updated_policy == "deny":
+        loop.tool_policy = DefaultToolPolicy(
+            operation_assessor=lambda _: ToolOperationAssessment(
+                action=ToolPolicyAction.DENY, reason="host now forbids this operation"
+            ), operation_assessor_id="deny/v1",
+        )
+    elif updated_policy == "always":
+        loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK)
+    else:
+        loop.tool_policy = DefaultToolPolicy(
+            allow_persistent_approval=True,
+            approval_matcher=lambda ctx: exact_arguments_matcher(ctx).model_copy(
+                update={"fingerprint": "new-matcher"}
+            ), approval_matcher_id="new/v1",
+        )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(executor.calls) == (0 if updated_policy == "deny" else 1)
+    assert await loop.approval_memory.list_remembered(session_id=result.session_id) == ()
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert "policy.approval.remembered" not in [event.type for event in events]
+    if updated_policy == "deny":
+        assert any(event.type == "policy.decision.recorded" and event.data.decision == "deny"
+                   for event in events)
+
+
+def _write_call(call_id: str, key: str = "a", value: str = "1") -> ModelToolCall:
+    return ModelToolCall(
+        tool_call_id=call_id, name="write_value", arguments={"key": key, "value": value}
+    )
+
+
+async def _pending_interaction(runtime, suspended):
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    return suspension, interaction
+
+
+def _approval_reply(run_id, suspended, suspension, interaction, decision, key, **payload):
+    return ReplyInteraction(
+        run_id=run_id,
+        suspension_id=suspension.suspension_id,
+        interaction_id=interaction.interaction_id,
+        expected_revision=suspended.revision,
+        expected_suspension_revision=suspension.expected_revision,
+        expected_interaction_revision=interaction.expected_revision,
+        decision=decision,
+        payload=payload,
+        idempotency_key=key,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_session():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_2"),)),)),
+            ScriptedModelStep(
+                events=(completed("", calls=(_write_call("call_3", key="b"),)),)
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    memory = loop.approval_memory
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    assert interaction.allowed_decisions == (
+        "approve_once",
+        "approve_and_remember",
+        "deny",
+        "cancel",
+    )
+    assert interaction.payload["persistent_approval_allowed"] is True
+    assert interaction.payload["approval_scopes"] == ["session"]
+    assert interaction.payload["approval_matcher"]["tool_name"] == "write_value"
+
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_1",
+        ),
+        CONTEXT,
+    )
+    again = await loop.resume(handle.run_id, CONTEXT)
+
+    # call_2 参数完全相同 → 直接放行；call_3 参数不同 → 再次挂起。
+    assert again.state == RunState.SUSPENDED
+    assert [call.tool_call_id for call in executor.calls] == ["call_1", "call_2"]
+    remembered = await memory.list_remembered(session_id=session_id)
+    assert len(remembered) == 1
+    assert remembered[0].scope == "session"
+    assert remembered[0].remembered_by == "user_1"
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    assert types.count("tool.call.awaiting_approval") == 2
+    assert types.count("policy.approval.remembered") == 1
+    assert types.index("policy.approval.remembered") < types.index(
+        "tool.call.dispatching"
+    )
+    audit = next(event for event in events if event.type == "policy.approval.remembered")
+    assert audit.data.remembered_by == "user_1"
+    assert audit.data.remembered_scope == "session"
+    assert audit.data.decision == "approve_and_remember"
+    auto_allowed = [
+        event
+        for event in events
+        if event.type == "policy.decision.recorded"
+        and event.data.remembered_by == "user_1"
+    ]
+    assert len(auto_allowed) == 1
+    assert auto_allowed[0].data.decision == "allow"
+    assert auto_allowed[0].data.remembered_scope == "session"
+
+    suspension, interaction = await _pending_interaction(runtime, again)
+    assert (
+        interaction.payload["approval_matcher"]["fingerprint"]
+        != remembered[0].matcher.fingerprint
+    )
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id, again, suspension, interaction, "approve_once", "approve_3"
+        ),
+        CONTEXT,
+    )
+    final = await loop.resume(handle.run_id, CONTEXT)
+
+    assert final.state == RunState.COMPLETED
+    assert len(executor.calls) == 3
+    # approve_once 不写记忆。
+    assert len(await memory.list_remembered(session_id=session_id)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_policy", "with_memory"),
+    [
+        pytest.param(None, True, id="default-policy-with-memory"),
+        pytest.param(
+            DefaultToolPolicy(allow_persistent_approval=True),
+            False,
+            id="persistent-policy-without-memory",
+        ),
+        pytest.param(
+            DefaultToolPolicy(
+                approval_strategy=ApprovalStrategy.ALWAYS_ASK,
+                allow_persistent_approval=True,
+            ),
+            True,
+            id="always-ask-with-memory",
+        ),
+    ],
+)
+async def test_remember_is_only_offered_when_policy_and_memory_both_allow(
+    tool_policy, with_memory
+):
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),)
+    )
+    runtime, handle, loop, _executor = await setup_loop(
+        model,
+        tool_policy=tool_policy,
+        approval_memory=_session_memory if with_memory else None,
+    )
+
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    _suspension, interaction = await _pending_interaction(runtime, suspended)
+
+    assert interaction.allowed_decisions == ("approve_once", "deny", "cancel")
+    assert "approval_scopes" not in interaction.payload
+
+
+@pytest.mark.asyncio
+async def test_remembered_approval_never_overrides_a_denial():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_2"),)),)),
+            ScriptedModelStep(events=(completed("denied anyway"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_1",
+        ),
+        CONTEXT,
+    )
+    assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    assert len(await loop.approval_memory.list_remembered(session_id=session_id)) == 1
+
+    # 同一 Session 里换一个没有 filesystem:write scope 的 actor：策略先 DENY，
+    # 记忆只能收敛 REQUIRE_INTERACTION，绝不把 DENY 变成 ALLOW。
+    unscoped = RequestContext(
+        actor=ActorRef(
+            principal_id="user_1",
+            principal_type=PrincipalType.USER,
+            tenant_id="tenant_1",
+        )
+    )
+    second = await runtime.start_run(
+        StartRun(
+            session_id=session_id,
+            agent_id="agent_test",
+            input=(InputItem(role="user", content=(TextBlock(text="again"),)),),
+            config=RunConfig(model_bindings={"primary": "test-model"}, max_steps=10),
+            resolved_spec_hash="sha256:agent",
+            idempotency_key="start_2",
+        ),
+        unscoped,
+    )
+    result = await loop.execute(second.run_id, unscoped)
+
+    assert result.state == RunState.COMPLETED
+    assert [call.tool_call_id for call in executor.calls] == ["call_1"]
+    events = await runtime.session_store.read_events(second.run_id)
+    decisions = [event for event in events if event.type == "policy.decision.recorded"]
+    assert [event.data.decision for event in decisions] == ["deny"]
+    assert decisions[0].data.remembered_by is None
+    assert "tool.call.dispatching" not in [event.type for event in events]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_scope_is_tightened_to_session():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, _executor = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        approval_memory=_session_memory,
+    )
+    session_id = (await runtime.get_run(handle.run_id)).session_id
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_workspace",
+            scope="workspace",
+        ),
+        CONTEXT,
+    )
+    assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+
+    remembered = await loop.approval_memory.list_remembered(session_id=session_id)
+    assert [value.scope for value in remembered] == ["session"]
+    audit = next(
+        event
+        for event in await runtime.session_store.read_events(handle.run_id)
+        if event.type == "policy.approval.remembered"
+    )
+    assert audit.data.remembered_scope == "session"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["cancel", "mark_failed", "confirm_succeeded"])
+@pytest.mark.parametrize("language", ["en", "zh"])
+async def test_manual_tool_resolution_survives_subsequent_approval(decision, language):
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_2"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model, response_language=language
+    )
+    uncertain = UncertainToolExecutor(())
+    loop.tool_executor = uncertain
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id, suspended, suspension, interaction, decision, "resolve"
+        ),
+        CONTEXT,
+    )
+    loop.tool_executor = executor
+    suspended = await loop.resume(handle.run_id, CONTEXT)
+    assert suspended.state == RunState.SUSPENDED
+    suspension, interaction = await _pending_interaction(runtime, suspended)
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id, suspended, suspension, interaction, "approve_once", "approve"
+        ),
+        CONTEXT,
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(uncertain.calls) == 1
+    assert [call.tool_call_id for call in executor.calls] == ["call_2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_decision", ["approve_once", "deny"])
+@pytest.mark.parametrize("legacy_checkpoint", [False, True])
+async def test_approval_restores_whole_tool_batch_before_next_model_request(
+    first_decision,
+    legacy_checkpoint,
+):
+    calls = (
+        tool_call("write_value"),
+        ModelToolCall(
+            tool_call_id="call_2",
+            name="write_value",
+            arguments={"key": "b", "value": "2"},
+        ),
+        ModelToolCall(tool_call_id="call_3", name="read_value", arguments={"key": "b"}),
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(model)
+    run = await loop.execute(handle.run_id, CONTEXT)
+    for index, decision in enumerate((first_decision, "approve_once")):
+        assert run.state == RunState.SUSPENDED
+        assert len(model.requests) == 1
+        suspension, interaction = await _pending_interaction(runtime, run)
+        if legacy_checkpoint:
+            checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+            runtime.session_store._checkpoints[checkpoint.checkpoint_id] = (
+                checkpoint.model_copy(
+                    update={
+                        "state": {
+                            key: value
+                            for key, value in checkpoint.state.items()
+                            if not key.startswith("pending_response_")
+                            and key != "pending_questionnaire_completed"
+                        }
+                    }
+                )
+            )
+        await runtime.reply_interaction(
+            _approval_reply(
+                run.run_id, run, suspension, interaction, decision, f"batch:{index}"
+            ),
+            CONTEXT,
+        )
+        # A new engine must recover the queue exclusively from the checkpoint
+        # and canonical ledger, without any old loop-local response object.
+        loop = AgentLoopEngine(
+            runtime=runtime,
+            model=model,
+            tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
+            tool_executor=executor,
+        )
+        run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert [call.tool_call_id for call in executor.calls] == (
+        ["call_1", "call_2", "call_3"]
+        if first_decision == "approve_once"
+        else ["call_2", "call_3"]
+    )
+    request = model.requests[-1]
+    assert [
+        call.tool_call_id for message in request.messages for call in message.tool_calls
+    ] == ["call_1", "call_2", "call_3"]
+    assert [
+        message.tool_call_id for message in request.messages if message.role == "tool"
+    ] == ["call_1", "call_2", "call_3"]
+    events = await runtime.session_store.read_events(run.run_id)
+    assert len([event for event in events if event.type == "step.started"]) == 2
+    assert len([event for event in events if event.type == "step.completed"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_pause_during_tool_preserves_remaining_batch():
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def blocking(call, context):
+        if call.tool_call_id == "call_1":
+            started.set()
+            await finish.wait()
+        return await tool_handler(call, context)
+
+    calls = (
+        tool_call(),
+        ModelToolCall(tool_call_id="call_2", name="read_value", arguments={"key": "b"}),
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model, tools=(READ_TOOL,), handlers={"read_value": blocking}
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), 1)
+    run = await runtime.get_run(handle.run_id)
+    await runtime.pause_run(
+        PauseRun(
+            run_id=run.run_id,
+            expected_revision=run.revision,
+            idempotency_key="pause-batch",
+        ),
+        CONTEXT,
+    )
+    finish.set()
+    run = await asyncio.wait_for(task, 1)
+    assert run.state == RunState.SUSPENDED
+    suspension = await runtime.session_store.get_suspension(run.suspension_id)
+    await runtime.resume_run(
+        ResumeRun(
+            run_id=run.run_id,
+            suspension_id=run.suspension_id,
+            expected_revision=run.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            idempotency_key="resume-batch",
+        ),
+        CONTEXT,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert [call.tool_call_id for call in executor.calls] == ["call_1", "call_2"]
+    assert [
+        message.tool_call_id
+        for message in model.requests[-1].messages
+        if message.role == "tool"
+    ] == ["call_1", "call_2"]
+
+
+@pytest.mark.asyncio
+async def test_worker_restart_restores_token_budget_before_continuing_model():
+    started = asyncio.Event()
+
+    async def interrupted(call, context):
+        started.set()
+        await asyncio.Event().wait()
+
+    runtime, handle, loop, _ = await setup_loop(
+        ScriptedModelProvider(
+            (
+                ScriptedModelStep(
+                    events=(
+                        completed(
+                            "",
+                            calls=(tool_call(),),
+                            input_tokens=900,
+                            output_tokens=100,
+                        ),
+                    )
+                ),
+            )
+        ),
+        tools=(READ_TOOL,),
+        handlers={"read_value": interrupted},
+        max_total_tokens=1000,
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    model = ScriptedModelProvider(())
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=InMemoryToolExecutor(
+            {"read_value": READ_TOOL}, {"read_value": tool_handler}
+        ),
+    )
+    run = await loop.recover_interrupted(handle.run_id, CONTEXT)
+    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+    assert (state.total_input_tokens, state.total_output_tokens) == (900, 100)
+    suspension, interaction = await _pending_interaction(runtime, run)
+    await runtime.reply_interaction(
+        _approval_reply(
+            run.run_id,
+            run,
+            suspension,
+            interaction,
+            "confirm_succeeded",
+            "confirm-recovered",
+        ),
+        CONTEXT,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(run.run_id)
+    reasons = [
+        event.data.reason_code
+        for event in events
+        if event.type == "continuation.decided"
+    ]
+    assert reasons[-1] == "budget.max_tokens"
+    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+    assert (state.total_input_tokens, state.total_output_tokens) == (900, 100)
+    assert model.requests == []
+
+
+@pytest.mark.asyncio
+async def test_worker_recovery_keeps_unstarted_calls_in_same_response():
+    started = asyncio.Event()
+
+    async def interrupted(call, context):
+        started.set()
+        await asyncio.Event().wait()
+
+    calls = (
+        tool_call(),
+        ModelToolCall(tool_call_id="call_2", name="read_value", arguments={"key": "b"}),
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        ScriptedModelProvider(
+            (ScriptedModelStep(events=(completed("", calls=calls),)),)
+        ),
+        tools=(READ_TOOL,),
+        handlers={"read_value": interrupted},
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+    executor = InMemoryToolExecutor(
+        {"read_value": READ_TOOL}, {"read_value": tool_handler}
+    )
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=executor,
+    )
+    run = await loop.recover_interrupted(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, run)
+    await runtime.reply_interaction(
+        _approval_reply(
+            run.run_id,
+            run,
+            suspension,
+            interaction,
+            "confirm_succeeded",
+            "recover-batch",
+        ),
+        CONTEXT,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert [call.tool_call_id for call in executor.calls] == ["call_2"]
+    assert [
+        message.tool_call_id
+        for message in model.requests[-1].messages
+        if message.role == "tool"
+    ] == ["call_1", "call_2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("questionnaire_first", [True, False])
+async def test_questionnaire_completion_survives_batch_approval(questionnaire_first):
+    questionnaire = ToolDefinition(
+        name="questionnaire_async", description="Ask a question", input_schema={}
+    )
+    payload = {
+        "success": True,
+        "status": "awaiting_user_input",
+        "validation_passed": True,
+        "should_end": True,
+        "questions": [{"id": "choice", "title": "Choose", "options": ["a", "b"]}],
+    }
+
+    async def ask(call, context):
+        return ToolExecutionResult(
+            tool_call_id=call.tool_call_id,
+            operation_id=call.operation_id,
+            content=(JsonBlock(value=payload),),
+        )
+
+    calls = (
+        ModelToolCall(
+            tool_call_id="question", name="questionnaire_async", arguments={}
+        ),
+        tool_call("write_value"),
+    )
+    if not questionnaire_first:
+        calls = tuple(reversed(calls))
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=calls),)),)
+    )
+    judge = ScriptedModelProvider(())
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tools=(questionnaire, WRITE_TOOL),
+        handlers={"questionnaire_async": ask, "write_value": tool_handler},
+        continuation_policy=policy,
+    )
+    run = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, run)
+    await runtime.reply_interaction(
+        _approval_reply(
+            run.run_id, run, suspension, interaction, "approve_once", "question-batch"
+        ),
+        CONTEXT,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(executor.calls) == 2
+    assert len(model.requests) == 1
+    assert judge.requests == []
+    events = await runtime.session_store.read_events(run.run_id)
+    assert (
+        next(
+            event.data.reason_code
+            for event in events
+            if event.type == "continuation.decided"
+        )
+        == "tool.questionnaire_ready"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unavailable_tool_guidance_starts_new_model_decision():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="missing", name="not_enabled", arguments={}
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(completed("done without that tool"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(model, tools=(READ_TOOL,))
+    run = await loop.execute(handle.run_id, CONTEXT)
+    suspension, interaction = await _pending_interaction(runtime, run)
+    reply = _approval_reply(
+        run.run_id, run, suspension, interaction, "submit", "missing-tool-guidance"
+    )
+    await runtime.reply_interaction(
+        reply.model_copy(update={"payload": {"text": "Skip that tool."}}), CONTEXT
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    assert model.requests[-1].messages[-1].content == (
+        TextBlock(text="Skip that tool."),
+    )
+    assert executor.calls == []
+
+
+async def reply_pending_interaction(runtime, handle, snapshot, decision, key):
+    """回答当前挂起的交互，返回该交互以便断言其 allowed_decisions。"""
+
+    suspension = await runtime.session_store.get_suspension(snapshot.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=snapshot.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision=decision,
+            idempotency_key=key,
+        ),
+        CONTEXT,
+    )
+    return interaction
+
+
+def persisted_tool_result(events, tool_call_id):
+    """从 canonical Item 事件里取出某次工具调用落盘的结果 Item。"""
+
+    for event in events:
+        if event.type != "item.completed":
+            continue
+        item = event.data.item
+        if (
+            isinstance(item.data, ToolResultItemData)
+            and item.data.tool_call_id == tool_call_id
+        ):
+            return item
+    raise AssertionError(f"no persisted tool result for {tool_call_id}")
+
+
+def two_write_steps_model():
+    """两步都调用 write_value（各需一次审批），第三步收尾。"""
+
+    return ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="call_2",
+                                name="write_value",
+                                arguments={"key": "b", "value": "2"},
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["cancel", "mark_failed"])
+async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumable(
+    decision,
+):
+    """人工核对以 cancel / mark_failed 结束后，下一次挂起再 resume 不能报 ledger 不一致。
+
+    写进 checkpoint 的 ledger 摘要按内存 messages 计算，resume 时按 canonical Item
+    事件重建；两者必须一致，所以内存里的工具结果消息必须来自真正落盘的 Item。
+    """
+
+    dispatches = []
+
+    async def first_call_outcome_unknown(call, context):
+        dispatches.append(call.tool_call_id)
+        if len(dispatches) == 1:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="remote.rejected",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="remote rejected the write",
+                    safe_to_resume=True,
+                )
+            )
+        return await tool_handler(call, context)
+
+    model = two_write_steps_model()
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        handlers={"read_value": tool_handler, "write_value": first_call_outcome_unknown},
+    )
+
+    awaiting_first = await loop.execute(handle.run_id, CONTEXT)
+    await reply_pending_interaction(
+        runtime, handle, awaiting_first, "approve_once", "approve_1"
+    )
+    unknown = await loop.resume(handle.run_id, CONTEXT)
+    interaction = await reply_pending_interaction(
+        runtime, handle, unknown, decision, "resolve_1"
+    )
+    awaiting_second = await loop.resume(handle.run_id, CONTEXT)
+
+    assert unknown.state == RunState.SUSPENDED
+    assert interaction.allowed_decisions == ("confirm_succeeded", "mark_failed", "cancel")
+    assert awaiting_second.state == RunState.SUSPENDED
+
+    await reply_pending_interaction(
+        runtime, handle, awaiting_second, "approve_once", "approve_2"
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    persisted = persisted_tool_result(events, "call_1")
+    tool_message = next(
+        message
+        for message in model.requests[1].messages
+        if message.role == "tool" and message.tool_call_id == "call_1"
+    )
+
+    assert result.state == RunState.COMPLETED
+    assert dispatches == ["call_1", "call_2"]
+    assert types.count("tool.call.unknown") == 1
+    assert ("tool.call.cancelled" if decision == "cancel" else "tool.call.reconciled") in types
+    assert persisted.status == (
+        ItemStatus.DECLINED if decision == "cancel" else ItemStatus.FAILED
+    )
+    assert persisted.data.error is not None
+    assert persisted.data.error.code == "tool.outcome_manually_failed"
+    assert tool_message.content == persisted.data.content
+    assert tool_message.metadata["manually_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_authoritative_tool_error_content_is_persisted_and_resumable():
+    """带 tool_result_received 的失败：模型看到的内容与落盘 Item 一致，之后仍可 resume。"""
+
+    class RejectedWriteExecutor:
+        async def execute(self, call, context):
+            del context
+            return ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(TextBlock(text="remote rejected the write: quota exceeded"),),
+                error=RuntimeErrorInfo(
+                    code="remote.write_rejected",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="write rejected",
+                    safe_to_resume=True,
+                    metadata={"tool_result_received": True},
+                ),
+                metadata={"tool_result_received": True},
+            )
+
+    model = two_write_steps_model()
+    runtime, handle, loop, _ = await setup_loop(model, tools=(WRITE_TOOL,))
+    loop.tool_executor = RejectedWriteExecutor()
+
+    awaiting_first = await loop.execute(handle.run_id, CONTEXT)
+    await reply_pending_interaction(
+        runtime, handle, awaiting_first, "approve_once", "approve_1"
+    )
+    awaiting_second = await loop.resume(handle.run_id, CONTEXT)
+    assert awaiting_second.state == RunState.SUSPENDED
+    await reply_pending_interaction(
+        runtime, handle, awaiting_second, "approve_once", "approve_2"
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    persisted = persisted_tool_result(events, "call_1")
+    tool_message = next(
+        message
+        for message in model.requests[1].messages
+        if message.role == "tool" and message.tool_call_id == "call_1"
+    )
+
+    assert result.state == RunState.COMPLETED
+    assert types.count("tool.call.failed") == 2
+    assert "tool.call.unknown" not in types
+    assert persisted.status == ItemStatus.FAILED
+    assert persisted.data.content[0].text == "remote rejected the write: quota exceeded"
+    assert persisted.data.error is not None
+    assert persisted.data.error.message_key == "error.provider_permanent"
+    assert tool_message.content == persisted.data.content
+
+
+@pytest.mark.asyncio
+async def test_write_failure_marked_not_applied_is_a_known_failure():
+    """写工具的错误若带 side_effect_state=not_applied，就是普通失败，不进人工核对。"""
+
+    async def denied_before_write(call, context):
+        del call, context
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="sandbox.permission_denied",
+                category=ErrorCategory.POLICY_DENIED,
+                message="path is outside the workspace",
+                safe_to_resume=True,
+                metadata={"side_effect_state": "not_applied"},
+            )
+        )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(events=(completed("handled"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, handlers={"read_value": tool_handler, "write_value": denied_before_write}
+    )
+    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    types = [event.type for event in events]
+    failed = next(event for event in events if event.type == "tool.call.failed")
+
+    assert result.state == RunState.COMPLETED
+    assert "tool.call.unknown" not in types
+    assert "interaction.requested" not in types
+    assert failed.data.error.code == "sandbox.permission_denied"
+    assert failed.data.error.metadata["side_effect_state"] == "not_applied"
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_a_cooperative_tool_releases_run_resources():
+    """Run 在工具执行中被取消：循环不会回到安全点，dispatch 必须自己释放 Run 级工具资源。"""
+
+    started = asyncio.Event()
+    tool = ToolDefinition(
+        name="cooperative_wait",
+        description="wait cooperatively",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+        cancel_semantics=CancelSemantics.COOPERATIVE,
+    )
+    call = ModelToolCall(tool_call_id="call_cooperative", name=tool.name, arguments={})
+
+    async def handler(tool_call, _context):
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=(call,)),)),)
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model, tools=(tool,), handlers={tool.name: handler}
+    )
+    released = []
+    original_release = executor.release_run
+
+    async def release_run(run_id):
+        released.append(run_id)
+        await original_release(run_id)
+
+    executor.release_run = release_run
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.cancel_run(
+        CancelRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="cancel-cooperative-tool",
+        ),
+        CONTEXT,
+    )
+
+    result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.state == RunState.CANCELLED
+    assert released == [handle.run_id]
+

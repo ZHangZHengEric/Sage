@@ -4,11 +4,14 @@ from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
 import asyncio
 import os
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
@@ -40,6 +43,9 @@ async def provision(
     process_read_only: bool = False,
     process_enabled: bool = True,
     allowed_executables: tuple[str, ...] = ("python",),
+    protected_paths: tuple[str, ...] = (),
+    allow_symlinks: bool = False,
+    max_output_bytes: int = 32,
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -51,8 +57,10 @@ async def provision(
             filesystem=FileSystemPolicy(
                 allowed_operations=frozenset(FileOperation),
                 allowed_roots=allowed_roots,
+                protected_paths=protected_paths,
                 max_file_bytes=1024,
                 max_total_bytes=max_total_bytes,
+                allow_symlinks=allow_symlinks,
             ),
             process=ProcessPolicy(
                 enabled=process_enabled,
@@ -60,7 +68,7 @@ async def provision(
                 allowed_executables=allowed_executables,
                 allow_shell=True,
                 max_wall_time_seconds=2,
-                max_output_bytes=32,
+                max_output_bytes=max_output_bytes,
             ),
             policy_hash="sha256:policy",
             metadata={"host_workspace": str(root)},
@@ -88,6 +96,36 @@ def authorization(issuer, handle, operation, **fields):
         allowed_operations=frozenset({operation}),
     )
     return intent, grant
+
+
+@pytest.mark.asyncio
+async def test_protected_paths_guard_file_api_and_refuse_writable_processes(tmp_path):
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/config",), allowed_executables=("sh",)
+    )
+    caps = await handle.provider.capabilities()
+    assert caps.isolation_level.value == "process"
+    (tmp_path / ".git").mkdir()
+    target = tmp_path / ".git/config"
+    target.write_text("original")
+    intent, grant = authorization(issuer, handle, "write", path=".git/config")
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.write_bytes(
+            ".git/config", b"changed", intent=intent, grant=grant
+        )
+    assert denied.value.info.code == "sandbox.protected_path"
+    assert target.read_text() == "original"
+    # A process grant cannot override a protected-path policy.
+    argv = ("sh", "-c", "printf process > .git/config")
+    intent, grant = authorization(
+        issuer, handle, "process.run", executable="sh", argv=argv, path="/workspace"
+    )
+    with pytest.raises(PermissionError, match="protected_paths"):
+        await handle.process.run(
+            ProcessRequest(argv=argv, cwd="/workspace"), intent=intent, grant=grant
+        )
+    assert target.read_text() == "original"
+    await handle.destroy()
 
 
 @pytest.mark.asyncio
@@ -128,7 +166,7 @@ async def test_local_workspace_retention_removes_only_kernel_metadata(tmp_path: 
         max_retained_terminal_items=1,
     )
     resolved = ResolvedSandboxSpec(
-            resources=ResourceLimits(require_hard_limits=False),
+        resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:retention",
         architecture="native",
         filesystem=FileSystemPolicy(
@@ -161,7 +199,7 @@ async def test_active_workspace_release_reprovisions_without_losing_host_files(
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
     resolved = ResolvedSandboxSpec(
-            resources=ResourceLimits(require_hard_limits=False),
+        resources=ResourceLimits(require_hard_limits=False),
         spec_hash="sha256:active-workspace",
         architecture="native",
         filesystem=FileSystemPolicy(
@@ -265,7 +303,9 @@ async def test_local_workspace_enforces_total_workspace_bytes(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_local_workspace_enforces_configured_subdirectory_roots(tmp_path: Path):
     (tmp_path / "allowed").mkdir()
-    issuer, handle = await provision(tmp_path, allowed_roots=("/workspace/allowed",), process_enabled=False)
+    issuer, handle = await provision(
+        tmp_path, allowed_roots=("/workspace/allowed",), process_enabled=False
+    )
     intent, grant = authorization(issuer, handle, "create", path="outside.txt")
 
     with pytest.raises(PermissionError, match="allowed filesystem roots"):
@@ -367,28 +407,159 @@ async def test_local_process_denies_unlisted_executable(tmp_path: Path):
         await handle.process.run(request, intent=intent, grant=grant)
 
 
-@pytest.mark.asyncio
-async def test_read_only_process_fails_closed_without_os_isolation(tmp_path: Path):
-    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+READ_ONLY_EXECUTABLES = ("cat", "head", "wc", "ls", "grep", "find", "git")
+
+
+async def run_read_only(tmp_path: Path, argv: tuple[str, ...], **provision_kwargs):
     issuer, handle = await provision(
         tmp_path,
         process_read_only=True,
-        allowed_executables=("bash",),
+        allowed_executables=provision_kwargs.pop(
+            "allowed_executables", READ_ONLY_EXECUTABLES
+        ),
+        **provision_kwargs,
     )
-    request = ProcessRequest(
-        argv=("bash", "-c", "cat note.txt | head -n 1"), cwd="/workspace"
-    )
+    request = ProcessRequest(argv=argv, cwd="/workspace")
     intent, grant = authorization(
         issuer,
         handle,
         "process.run",
         path=request.cwd,
-        executable="bash",
-        argv=request.argv,
+        executable=argv[0],
+        argv=argv,
+    )
+    return await handle.process.run(request, intent=intent, grant=grant)
+
+
+@pytest.mark.asyncio
+async def test_read_only_process_runs_validated_pipelines_inside_os_sandbox(
+    tmp_path: Path,
+):
+    """只读模式接受 read_only_shell 语法的管道，在系统只读沙箱中执行。"""
+
+    (tmp_path / "note.txt").write_text("needle\nhay\n", encoding="utf-8")
+
+    result = await run_read_only(tmp_path, ("bash", "-c", "cat note.txt | head -n 1"))
+    assert (result.exit_code, result.stdout, result.stderr) == (0, b"needle\n", b"")
+    assert result.argv == ("bash", "-c", "cat note.txt | head -n 1")
+
+    counted = await run_read_only(tmp_path, ("sh", "-c", "cat note.txt | wc -l"))
+    assert counted.exit_code == 0
+    assert counted.stdout.strip() == b"2"
+
+    # 管道最后一段的退出码就是结果；各段的 stderr 汇总到一起。
+    failed = await run_read_only(
+        tmp_path, ("bash", "-c", "cat missing.txt | head -n 1")
+    )
+    assert failed.exit_code == 0
+    assert failed.stdout == b""
+    assert b"missing.txt" in failed.stderr
+    single = await run_read_only(tmp_path, ("bash", "-c", "cat missing.txt"))
+    assert single.exit_code != 0
+    assert b"missing.txt" in single.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "argv, message",
+    (
+        (("python", "-c", "print(1)"), "accepts only a validated shell command"),
+        (("bash", "-lc", "ls"), "accepts only a validated shell command"),
+        (("bash", "-c", "./cat note.txt"), "without a path"),
+        (("bash", "-c", "/bin/cat note.txt"), "without a path"),
+        (("bash", "-c", "cat note.txt > out.txt"), "read-only"),
+        (("bash", "-c", "cat $(pwd)/note.txt"), "read-only"),
+        (("bash", "-c", "cat ../secret.txt"), "inside the workspace"),
+    ),
+)
+async def test_read_only_process_rejects_everything_outside_the_grammar(
+    tmp_path: Path, argv: tuple[str, ...], message: str
+):
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError, match=message):
+        await run_read_only(tmp_path, argv)
+
+    assert not (tmp_path / "out.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_read_only_process_honours_the_executable_allowlist(tmp_path: Path):
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError, match="not allowed"):
+        await run_read_only(
+            tmp_path, ("bash", "-c", "cat note.txt"), allowed_executables=("ls",)
+        )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+@pytest.mark.asyncio
+async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path):
+    """仓库配置里的 fsmonitor / external diff / hooks 都不会被只读 git 执行。"""
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ("git", *args),
+            cwd=tmp_path,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    marker = tmp_path / "marker"
+    helper = tmp_path / "helper.sh"
+    helper.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    helper.chmod(0o755)
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    git("config", "core.fsmonitor", str(helper))
+    git("config", "diff.external", str(helper))
+    git("config", "core.hooksPath", str(tmp_path / "hooks"))
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks" / "post-index-change").write_text(
+        f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8"
+    )
+    (tmp_path / "hooks" / "post-index-change").chmod(0o755)
+    (tmp_path / "tracked.txt").write_text("one\n", encoding="utf-8")
+    git(
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "add",
+        "tracked.txt",
+    )
+    git(
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-q",
+        "-m",
+        "one",
+    )
+    (tmp_path / "tracked.txt").write_text("two\n", encoding="utf-8")
+    marker.unlink(missing_ok=True)
+
+    status = await run_read_only(
+        tmp_path, ("bash", "-c", "git status --short"), max_output_bytes=4096
+    )
+    diff = await run_read_only(
+        tmp_path, ("bash", "-c", "git diff"), max_output_bytes=4096
+    )
+    log = await run_read_only(
+        tmp_path, ("bash", "-c", "git log --oneline | head -n 1"), max_output_bytes=4096
     )
 
-    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
-        await handle.process.run(request, intent=intent, grant=grant)
+    assert status.exit_code == 0
+    assert b"tracked.txt" in status.stdout
+    assert diff.exit_code == 0
+    assert b"-one" in diff.stdout and b"+two" in diff.stdout
+    assert log.exit_code == 0 and b"one" in log.stdout
+    assert not marker.exists(), "a repository-configured helper was executed"
 
 
 @pytest.mark.asyncio
@@ -405,26 +576,14 @@ async def test_read_only_process_fails_closed_without_os_isolation(tmp_path: Pat
 async def test_read_only_process_rejects_mutating_shell_commands(
     tmp_path: Path, command: str
 ):
-    issuer, handle = await provision(
-        tmp_path,
-        process_read_only=True,
-        allowed_executables=("bash",),
-    )
-    request = ProcessRequest(argv=("bash", "-c", command), cwd="/workspace")
-    intent, grant = authorization(
-        issuer,
-        handle,
-        "process.run",
-        path=request.cwd,
-        executable="bash",
-        argv=request.argv,
-    )
+    (tmp_path / "note.txt").write_text("needle\n", encoding="utf-8")
 
-    with pytest.raises(PermissionError, match="requires an isolated sandbox"):
-        await handle.process.run(request, intent=intent, grant=grant)
+    with pytest.raises(PermissionError, match="read-only"):
+        await run_read_only(tmp_path, ("bash", "-c", command))
 
     assert not (tmp_path / "changed.txt").exists()
     assert not (tmp_path / "changed.patch").exists()
+    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "needle\n"
 
 
 @pytest.mark.asyncio
@@ -466,3 +625,268 @@ async def test_local_process_binds_grant_to_argv_and_does_not_inherit_secrets(
     )
     result = await handle.process.run(changed, intent=clean_intent, grant=clean_grant)
     assert result.stdout.strip() == b"absent"
+
+
+# ---------- FileSystemPolicy.protected_paths（本地 provider） ----------
+
+
+def _seed_git_dir(root: Path) -> tuple[Path, Path]:
+    hooks = root / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\n", encoding="utf-8")
+    config = root / ".git" / "config"
+    config.write_text("[core]\n", encoding="utf-8")
+    return hook, config
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_denies_every_mutating_spelling_of_protected_paths(
+    tmp_path: Path,
+):
+    hook, config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks", ".git/config")
+    )
+
+    attempts = (
+        ("create", ".git/hooks/post-commit"),
+        ("write", ".git/hooks/pre-commit"),
+        ("write", "/workspace/.git/config"),
+        ("write", str(config)),  # 宿主绝对路径写法
+        ("create", ".GIT/HOOKS/post-commit"),  # 大小写变体
+        ("create", "src/../.git/hooks/post-commit"),
+        ("create", ".git//hooks//post-commit"),
+        ("create", ".git/config:stream"),  # Windows ADS 写法
+        ("create", ".git/hooks/nested/deeper"),
+    )
+    for operation, path in attempts:
+        intent, grant = authorization(issuer, handle, operation, path=path)
+        with pytest.raises(SageV2Error) as denied:
+            await handle.filesystem.write_bytes(
+                path, b"evil", intent=intent, grant=grant
+            )
+        assert denied.value.info.code == "sandbox.protected_path", path
+        assert denied.value.info.category == ErrorCategory.POLICY_DENIED
+        assert denied.value.info.safe_to_resume is True
+        assert denied.value.info.metadata["side_effect_state"] == "not_applied"
+        assert denied.value.info.metadata["protected_path"] in {
+            ".git/hooks",
+            ".git/config",
+        }
+    delete_intent, delete_grant = authorization(
+        issuer, handle, "delete", path=".git/hooks/pre-commit"
+    )
+    with pytest.raises(SageV2Error) as denied:
+        await handle.filesystem.delete(
+            ".git/hooks/pre-commit", intent=delete_intent, grant=delete_grant
+        )
+    assert denied.value.info.code == "sandbox.protected_path"
+
+    assert hook.read_text(encoding="utf-8") == "#!/bin/sh\n"
+    assert config.read_text(encoding="utf-8") == "[core]\n"
+    assert sorted(value.name for value in (tmp_path / ".git").iterdir()) == [
+        "config",
+        "hooks",
+    ]
+    assert [value.name for value in (tmp_path / ".git" / "hooks").iterdir()] == [
+        "pre-commit"
+    ]
+    assert not (tmp_path / ".GIT").exists() or (tmp_path / ".GIT").samefile(
+        tmp_path / ".git"
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_protected_paths_stay_readable_and_siblings_writable(
+    tmp_path: Path,
+):
+    hook, _config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(tmp_path, protected_paths=(".git",))
+
+    read_intent, read_grant = authorization(
+        issuer, handle, "read", path=".git/hooks/pre-commit"
+    )
+    assert (
+        await handle.filesystem.read_bytes(
+            ".git/hooks/pre-commit", intent=read_intent, grant=read_grant
+        )
+        == b"#!/bin/sh\n"
+    )
+    stat_intent, stat_grant = authorization(issuer, handle, "read", path=".git/config")
+    assert (
+        await handle.filesystem.stat(
+            ".git/config", intent=stat_intent, grant=stat_grant
+        )
+    ).is_file is True
+    list_intent, list_grant = authorization(issuer, handle, "list", path=".git/hooks")
+    listed = await handle.filesystem.list_paths(
+        ".git/hooks", intent=list_intent, grant=list_grant
+    )
+    assert [value.path for value in listed] == ["/workspace/.git/hooks/pre-commit"]
+
+    # ".git" 受保护不能误伤 ".gitignore" 这类同前缀兄弟路径。
+    for path in (".gitignore", "src/main.py", ".github/workflows/ci.yml"):
+        intent, grant = authorization(issuer, handle, "create", path=path)
+        await handle.filesystem.write_bytes(path, b"ok", intent=intent, grant=grant)
+        assert (tmp_path / path).read_bytes() == b"ok"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+@pytest.mark.asyncio
+async def test_local_workspace_protects_paths_reached_through_symlinks(
+    tmp_path: Path,
+):
+    hooks = tmp_path / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(hooks, target_is_directory=True)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks",), allow_symlinks=True
+    )
+    intent, grant = authorization(issuer, handle, "create", path="link/pre-commit")
+
+    with pytest.raises(PermissionError, match="symlinks"):
+        await handle.filesystem.write_bytes(
+            "link/pre-commit", b"evil", intent=intent, grant=grant
+        )
+
+    assert not (hooks / "pre-commit").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+@pytest.mark.asyncio
+async def test_local_workspace_protects_a_symlinked_protected_entry_itself(
+    tmp_path: Path,
+):
+    real_hooks = tmp_path / "real_git" / "hooks"
+    real_hooks.mkdir(parents=True)
+    (tmp_path / ".git").symlink_to(tmp_path / "real_git", target_is_directory=True)
+    issuer, handle = await provision(
+        tmp_path, protected_paths=(".git/hooks",), allow_symlinks=True
+    )
+    intent, grant = authorization(
+        issuer, handle, "create", path=".git/hooks/pre-commit"
+    )
+
+    # 解析后的真实路径是 real_git/hooks/pre-commit，不在策略里；
+    # 但模型请求的字面路径命中 ".git/hooks"，仍须拒绝。
+    with pytest.raises(PermissionError, match="symlinks"):
+        await handle.filesystem.write_bytes(
+            ".git/hooks/pre-commit", b"evil", intent=intent, grant=grant
+        )
+
+    assert not (real_hooks / "pre-commit").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_workspace_without_protected_paths_keeps_git_writable(
+    tmp_path: Path,
+):
+    hook, _config = _seed_git_dir(tmp_path)
+    issuer, handle = await provision(tmp_path)
+    intent, grant = authorization(issuer, handle, "write", path=".git/hooks/pre-commit")
+
+    await handle.filesystem.write_bytes(
+        ".git/hooks/pre-commit", b"#!/bin/sh\necho ok\n", intent=intent, grant=grant
+    )
+
+    assert hook.read_text(encoding="utf-8") == "#!/bin/sh\necho ok\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["timeout", "cancel"])
+async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, stop):
+    import signal
+    import sys
+
+    issuer, handle = await provision(tmp_path, allowed_executables=(sys.executable,))
+    pid_path = tmp_path / "child.pid"
+    argv = (
+        sys.executable,
+        "-c",
+        "import os,time; from pathlib import Path; "
+        "Path('child.pid').write_text(str(os.getpid())); time.sleep(30)",
+    )
+    request = ProcessRequest(
+        argv=argv,
+        cwd="/workspace",
+        stdin=b"x" * 4_000_000,
+        timeout_seconds=0.3 if stop == "timeout" else 2,
+    )
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=request.cwd,
+        executable=argv[0],
+        argv=argv,
+        metadata={"process_request_digest": request.digest()},
+    )
+    task = asyncio.create_task(handle.process.run(request, intent=intent, grant=grant))
+    try:
+        async with asyncio.timeout(1):
+            while not pid_path.exists():
+                await asyncio.sleep(0.01)
+        pid = int(pid_path.read_text())
+        if stop == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2)
+        else:
+            result = await asyncio.wait_for(task, 2)
+            assert result.timed_out
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        # Cleanup must release the process slot for the next command as well.
+        next_request = ProcessRequest(
+            argv=(sys.executable, "-c", "print('alive')"), cwd="/workspace"
+        )
+        next_intent, next_grant = authorization(
+            issuer,
+            handle,
+            "process.run",
+            path=next_request.cwd,
+            executable=sys.executable,
+            argv=next_request.argv,
+        )
+        result = await asyncio.wait_for(
+            handle.process.run(next_request, intent=next_intent, grant=next_grant), 2
+        )
+        assert result.stdout.strip() == b"alive"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if pid_path.exists():
+            try:
+                os.kill(int(pid_path.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        await handle.destroy()
+
+
+@pytest.mark.asyncio
+async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
+    import sys
+
+    issuer, handle = await provision(tmp_path, allowed_executables=(sys.executable,))
+    request = ProcessRequest(
+        argv=(sys.executable, "-c", "print('done')"),
+        cwd="/workspace",
+        stdin=b"x" * 4_000_000,
+    )
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "process.run",
+        path=request.cwd,
+        executable=sys.executable,
+        argv=request.argv,
+        metadata={"process_request_digest": request.digest()},
+    )
+    try:
+        result = await handle.process.run(request, intent=intent, grant=grant)
+        assert result.exit_code == 0
+        assert result.stdout.strip() == b"done"
+        assert not result.timed_out
+    finally:
+        await handle.destroy()

@@ -10,6 +10,8 @@ from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.presets.factory import BuiltinPackageFactory
+from sagents.v2.tool.contracts import SideEffectLevel
+from sagents.v2.tool.plugins.official import official_tool_definitions
 
 DEFAULT_PRESET = "coder"
 # 与 v1 CLI 共用同一个 API key 环境变量，避免用户维护两套配置。
@@ -24,9 +26,6 @@ SCHEDULER_CAPABILITY = "execution.scheduler"
 # 孤儿 Run 的恢复靠 worker 租约过期后重新入队；CLI 是单机交互工具，租约短一点让
 # 崩溃后的 resume 只需等几秒（dispatcher 每 lease/3 续一次租）。
 CLI_SCHEDULER_LEASE_SECONDS = 5.0
-# 见 app/cli/v2/jobs.py：通用 builder 路径下官方 shell 工具需要一个知道每 Run 沙箱的 job runtime。
-JOB_RUNTIME_CAPABILITY = "execution.job-runtime"
-CLI_JOB_RUNTIME_PLUGIN = "sage.cli.job-runtime"
 
 
 @dataclass(frozen=True)
@@ -86,7 +85,6 @@ def build_preset_package(
         "tool.selection-policy": CapabilitySelection(
             plugin=DIRECT_TOOL_SELECTION_PLUGIN
         ),
-        JOB_RUNTIME_CAPABILITY: CapabilitySelection(plugin=CLI_JOB_RUNTIME_PLUGIN),
     }
     if scheduler_root is not None:
         capabilities[SCHEDULER_CAPABILITY] = CapabilitySelection(
@@ -96,24 +94,6 @@ def build_preset_package(
                 "lease_seconds": CLI_SCHEDULER_LEASE_SECONDS,
             },
         )
-    return manifest.model_copy(
-        update={
-            "runtime": manifest.runtime.model_copy(
-                update={"capabilities": capabilities}
-            )
-        }
-    )
-
-
-def with_cli_job_runtime(manifest: SageManifest) -> SageManifest:
-    """用户自带的 package 若没选 job runtime，补上 CLI 的，否则 shell 工具不可用。"""
-
-    if JOB_RUNTIME_CAPABILITY in manifest.runtime.capabilities:
-        return manifest
-    capabilities = {
-        **manifest.runtime.capabilities,
-        JOB_RUNTIME_CAPABILITY: CapabilitySelection(plugin=CLI_JOB_RUNTIME_PLUGIN),
-    }
     return manifest.model_copy(
         update={
             "runtime": manifest.runtime.model_copy(
@@ -149,4 +129,26 @@ def load_package(path: str | Path) -> SageManifest:
     """加载用户自带的 ``sage.yaml``；其 runtime 配置原样尊重。"""
 
     return SageManifestLoader().load(Path(path).expanduser())
+
+
+def plan_visible_tools(package: SageManifest, agent_id: str) -> tuple[str, ...]:
+    """plan 模式下对模型可见的工具：agent 自己的工具里只留无副作用/只读/plan_safe 的。
+
+    写类工具在 plan 模式本来就会被策略拒绝，但让模型根本看不到它们更省一轮
+    "调用 → 被拒"。``goal_submit`` 由 Runtime 按模式单独授予，不在此列表里。
+    非官方工具（用户 package 里的）无从判断副作用等级，一律隐藏。
+    """
+
+    definitions = {tool.name: tool for tool in official_tool_definitions()}
+    visible: list[str] = []
+    for name in package.agents[agent_id].tools:
+        definition = definitions.get(name)
+        if definition is None:
+            continue
+        if definition.plan_safe or definition.side_effect_level in {
+            SideEffectLevel.NONE,
+            SideEffectLevel.READ,
+        }:
+            visible.append(name)
+    return tuple(visible)
 

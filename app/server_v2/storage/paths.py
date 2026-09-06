@@ -27,7 +27,8 @@ def prepare_server_v2_storage(data_root: Path) -> ServerV2Paths:
     runtime = root / "runtime"
     sessions = runtime / "sessions"
     tenants = root / "tenants"
-    for path in (root, runtime, sessions, tenants):
+    skills = root / "skills"
+    for path in (root, runtime, sessions, tenants, skills):
         path.mkdir(parents=True, exist_ok=True)
     return ServerV2Paths(
         data_root=root,

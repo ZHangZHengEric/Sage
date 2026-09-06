@@ -4,26 +4,36 @@ from __future__ import annotations
 
 from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import asyncio
+import errno
 import hashlib
 
 import pytest
 
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.jobs import JobState
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
+    InMemorySandboxProvider,
+    LifecyclePolicy,
     LocalWorkspaceSandboxProvider,
     NetworkPolicy,
     ProcessPolicy,
     ResolvedSandboxSpec,
+    SandboxDurability,
     SandboxGrantIssuer,
 )
+from sagents.v2.runtime.execution.sandbox.contracts import FileSystemMode
 from sagents.v2.tool import (
+    CancelSemantics,
     ReconcileState,
     ToolCall,
+    ToolCancellationState,
     decorated_tool_definition,
     tool,
 )
@@ -65,7 +75,9 @@ CONTEXT = RequestContext(
 )
 
 
-async def plugin_for(root: Path) -> OfficialToolPlugin:
+async def plugin_for(
+    root: Path, *, filesystem: FileSystemPolicy | None = None
+) -> OfficialToolPlugin:
     issuer = SandboxGrantIssuer()
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
     digest = hashlib.sha256(str(root).encode()).hexdigest()
@@ -74,11 +86,12 @@ async def plugin_for(root: Path) -> OfficialToolPlugin:
             resources=ResourceLimits(require_hard_limits=False),
             spec_hash=f"sha256:{digest}",
             architecture="native",
-            filesystem=FileSystemPolicy(
+            filesystem=filesystem
+            or FileSystemPolicy(
                 allowed_operations=frozenset(FileOperation),
             ),
             process=ProcessPolicy(
-                enabled=True,
+                enabled=filesystem is None,
                 allowed_executables=("bash",),
                 allow_shell=True,
                 max_wall_time_seconds=10,
@@ -86,6 +99,50 @@ async def plugin_for(root: Path) -> OfficialToolPlugin:
             network=NetworkPolicy(),
             policy_hash=f"sha256:{digest}",
             metadata={"host_workspace": str(root)},
+        ),
+        CONTEXT,
+        run_id="run_1",
+    )
+    return OfficialToolPlugin(
+        ExtensionScopeContext(
+            scope=ExtensionScope.AGENT,
+            scope_id="test-official-tools",
+            config={"runtime": OfficialToolRuntime(handle, issuer)},
+        )
+    )
+
+
+NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+
+
+async def ephemeral_plugin_for(
+    filesystem: FileSystemPolicy,
+    *,
+    issuer_clock=None,
+    provider_clock=None,
+) -> OfficialToolPlugin:
+    """Same official plugin on the in-memory provider, which raises typed errors."""
+
+    issuer = SandboxGrantIssuer(
+        b"official-tool-test-key-32-bytes!!", clock=issuer_clock or (lambda: NOW)
+    )
+    provider = InMemorySandboxProvider(
+        issuer.verification_key, clock=provider_clock or (lambda: NOW)
+    )
+    handle = await provider.provision(
+        ResolvedSandboxSpec(
+            resources=ResourceLimits(require_hard_limits=False),
+            spec_hash="sha256:spec",
+            architecture="portable",
+            filesystem_mode=FileSystemMode.WORKSPACE,
+            filesystem=filesystem,
+            process=ProcessPolicy(),
+            network=NetworkPolicy(),
+            lifecycle=LifecyclePolicy(
+                durability=SandboxDurability.SNAPSHOTABLE,
+                pause_behavior="snapshot",
+            ),
+            policy_hash="sha256:policy",
         ),
         CONTEXT,
         run_id="run_1",
@@ -526,3 +583,253 @@ def test_v2_tool_decorator_infers_arguments_and_hides_runtime_injection():
         "required": ["text"],
         "additionalProperties": False,
     }
+
+
+OUTSIDE_ROOTS = FileSystemPolicy(
+    allowed_operations=frozenset(FileOperation),
+    allowed_roots=("/workspace/src",),
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name, arguments",
+    [
+        ("file_write", {"file_path": "notes/outside.txt", "content": "x\n"}),
+        (
+            "file_update",
+            {
+                "file_path": "notes/outside.txt",
+                "operations": [
+                    {
+                        "update_mode": "search_replace",
+                        "search_pattern": "a",
+                        "replacement": "b",
+                    }
+                ],
+            },
+        ),
+        (
+            "apply_patch",
+            {
+                "patch": "*** Begin Patch\n*** Add File: notes/outside.txt\n+x\n"
+                "*** End Patch"
+            },
+        ),
+    ],
+)
+async def test_local_sandbox_denial_is_a_typed_not_applied_failure(
+    tmp_path: Path, tool_name: str, arguments: dict
+):
+    plugin = await plugin_for(tmp_path, filesystem=OUTSIDE_ROOTS)
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(call(tool_name, arguments), CONTEXT)
+
+    info = caught.value.info
+    assert info.code == "sandbox.permission_denied"
+    assert info.category == ErrorCategory.POLICY_DENIED
+    assert info.safe_to_resume is True
+    assert info.metadata["side_effect_state"] == "not_applied"
+    assert info.message == "path is outside the allowed filesystem roots"
+    assert not (tmp_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_denied_midway_rolls_back_before_reporting_not_applied(
+    tmp_path: Path,
+):
+    plugin = await plugin_for(tmp_path, filesystem=OUTSIDE_ROOTS)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "old.txt").write_text("one\n")
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(
+            call(
+                "apply_patch",
+                {
+                    "patch": """*** Begin Patch
+*** Update File: src/old.txt
+@@
+-one
++two
+*** Add File: docs/new.txt
++created
+*** End Patch"""
+                },
+            ),
+            CONTEXT,
+        )
+
+    assert caught.value.info.code == "sandbox.permission_denied"
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+    assert (tmp_path / "src" / "old.txt").read_text() == "one\n"
+    assert not (tmp_path / "docs").exists()
+
+
+@pytest.mark.asyncio
+async def test_in_memory_sandbox_policy_denial_keeps_its_code_and_category():
+    plugin = await ephemeral_plugin_for(
+        FileSystemPolicy(
+            allowed_operations=frozenset({FileOperation.READ, FileOperation.LIST})
+        )
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(
+            call("file_write", {"file_path": "notes.txt", "content": "x\n"}), CONTEXT
+        )
+
+    info = caught.value.info
+    provider_error = caught.value.__cause__
+    assert info.code == "sandbox.permission_denied"
+    assert info.category == ErrorCategory.POLICY_DENIED
+    assert info.safe_to_resume is True
+    assert info.metadata["side_effect_state"] == "not_applied"
+    assert isinstance(provider_error, SageV2Error)
+    assert provider_error.info.code == "sandbox.permission_denied"
+    assert "side_effect_state" not in provider_error.info.metadata
+
+
+@pytest.mark.asyncio
+async def test_in_memory_sandbox_resource_limit_is_not_applied():
+    plugin = await ephemeral_plugin_for(
+        FileSystemPolicy(allowed_operations=frozenset(FileOperation), max_file_bytes=4)
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(
+            call("file_write", {"file_path": "notes.txt", "content": "too long\n"}),
+            CONTEXT,
+        )
+
+    assert caught.value.info.code == "sandbox.resource_exhausted"
+    assert caught.value.info.category == ErrorCategory.POLICY_DENIED
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+
+
+@pytest.mark.asyncio
+async def test_in_memory_sandbox_grant_expiry_is_not_applied():
+    plugin = await ephemeral_plugin_for(
+        FileSystemPolicy(allowed_operations=frozenset(FileOperation)),
+        provider_clock=lambda: NOW + timedelta(hours=1),
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(
+            call("file_write", {"file_path": "notes.txt", "content": "x\n"}), CONTEXT
+        )
+
+    assert caught.value.info.code == "sandbox.grant_expired"
+    assert caught.value.info.category == ErrorCategory.AUTHORIZATION
+    assert caught.value.info.safe_to_resume is True
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        PermissionError(errno.EACCES, "Permission denied"),
+        OSError(errno.ENOSPC, "No space left on device"),
+        SageV2Error(
+            RuntimeErrorInfo(
+                code="sandbox.network_timeout",
+                category=ErrorCategory.PROVIDER_TRANSIENT,
+                message="the sandbox stopped responding",
+            )
+        ),
+    ],
+    ids=["os-permission-error", "os-error", "non-denial-sandbox-error"],
+)
+async def test_failures_inside_the_write_keep_the_unknown_outcome_path(
+    tmp_path: Path, monkeypatch, failure: BaseException
+):
+    """Only the sandbox's own denials are mapped; an error raised from inside
+    the I/O may have left a partial write and must stay on the reconciliation path."""
+
+    plugin = await plugin_for(tmp_path)
+
+    async def failing_write(path, content, *, intent, grant, overwrite=True):
+        del path, content, intent, grant, overwrite
+        raise failure
+
+    monkeypatch.setattr(plugin.runtime.sandbox.filesystem, "write_bytes", failing_write)
+
+    with pytest.raises(type(failure)) as caught:
+        await plugin.executor.execute(
+            call("file_write", {"file_path": "notes.txt", "content": "x\n"}), CONTEXT
+        )
+
+    assert caught.value is failure
+    if isinstance(failure, SageV2Error):
+        assert "side_effect_state" not in failure.info.metadata
+
+
+@pytest.mark.asyncio
+async def test_shell_wait_is_cancelled_cooperatively_and_jobs_end_with_the_run(
+    tmp_path: Path,
+):
+    """取消只中断对 job 的等待（暂停后还能 await_shell）；Run 终态时 release_run 才终止 job。"""
+
+    plugin = await plugin_for(tmp_path)
+    definitions = {definition.name: definition for definition in plugin.definitions}
+    assert (
+        definitions["execute_shell_command"].cancel_semantics
+        == CancelSemantics.COOPERATIVE
+    )
+    assert definitions["await_shell"].cancel_semantics == CancelSemantics.COOPERATIVE
+    assert (
+        definitions["file_write"].cancel_semantics == CancelSemantics.NOT_STARTED_ONLY
+    )
+
+    shell = call(
+        "execute_shell_command", {"command": "sleep 5", "block_until_ms": 1500}
+    )
+    execution = asyncio.create_task(plugin.executor.execute(shell, CONTEXT))
+    job_runtime = plugin.runtime.job_runtime
+    for _ in range(100):
+        jobs = await job_runtime.list_run_jobs("run_1")
+        if jobs and jobs[0].state == JobState.RUNNING:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("shell job did not start")
+    job_id = jobs[0].job_id
+
+    cancelled = await plugin.executor.cancel(shell.operation_id, CONTEXT)
+    assert cancelled.state == ToolCancellationState.CANCELLED
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+    assert (await job_runtime.inspect(job_id)).state == JobState.RUNNING
+    too_late = await plugin.executor.cancel(shell.operation_id, CONTEXT)
+    assert too_late.state == ToolCancellationState.TOO_LATE
+    unknown = await plugin.executor.cancel("operation_unknown", CONTEXT)
+    assert unknown.state == ToolCancellationState.TOO_LATE
+
+    await plugin.executor.release_run("run_1")
+    assert (await job_runtime.inspect(job_id)).state == JobState.KILLED
+
+
+@pytest.mark.asyncio
+async def test_non_cooperative_tool_reports_cancel_as_unsupported(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    gate = asyncio.Event()
+
+    async def blocked_write(*args, **kwargs):
+        del args, kwargs
+        await gate.wait()
+        raise AssertionError("unreachable")
+
+    plugin.runtime.write_text = blocked_write  # type: ignore[method-assign]
+    write = call("file_write", {"file_path": "notes.txt", "content": "x"})
+    execution = asyncio.create_task(plugin.executor.execute(write, CONTEXT))
+    await asyncio.sleep(0.05)
+
+    result = await plugin.executor.cancel(write.operation_id, CONTEXT)
+
+    assert result.state == ToolCancellationState.NOT_SUPPORTED
+    assert not execution.done()
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution

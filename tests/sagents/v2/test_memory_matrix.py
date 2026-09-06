@@ -298,6 +298,88 @@ async def test_llm_memory_query_plugin_generates_keywords():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["", " \n\t "])
+async def test_empty_llm_recall_query_skips_search_and_completes_run(query):
+    model = ScriptedModelProvider(
+        tuple(
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id=f"response_{index}",
+                            text=text,
+                            finish_reason="stop",
+                        ),
+                    ),
+                ),
+            )
+            for index, text in enumerate([json.dumps({"query": query}), "继续执行"])
+        )
+    )
+    runtime = ephemeral_runtime()
+    definition = ToolDefinition(
+        name="search_memory",
+        description="Search long-term Memory.",
+        input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+    )
+    executor = InMemoryToolExecutor({"search_memory": definition}, {})
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((definition,)),
+        tool_executor=executor,
+        automatic_memory_recall=True,
+        memory_recall_query_generator=LLMMemoryRecallQueryGenerator(model),
+    )
+    agent = SAgent(runtime=runtime, driver_factory=lambda _run_id: loop)
+    request = command(memory=True).model_copy(
+        update={"input": (InputItem(role="user", content=(TextBlock(text="没有"),)),)}
+    )
+
+    stream = await agent.run_stream(request, CONTEXT)
+    events = [event async for event in stream.events]
+    result = await stream.wait()
+
+    assert result.state.value == "completed"
+    assert not any(event.type == "run.failed" for event in events)
+    assert executor.calls == []
+    assert len(model.requests) == 2
+    assert model.requests[0].metadata["purpose"] == "memory_recall_query"
+    assert model.requests[1].messages[-1].content[0].text == "没有"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text", ["not JSON", "{}", '{"query":null}', '{"query":42}', '{"query":[]}', "[]"]
+)
+async def test_llm_recall_query_rejects_malformed_output(text):
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="invalid_query",
+                            text=text,
+                            finish_reason="stop",
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+    generator = LLMMemoryRecallQueryGenerator(model)
+
+    with pytest.raises(SageV2Error) as caught:
+        await generator.generate("没有", run_id="run_1")
+
+    assert caught.value.info.code == "memory.recall_query.output_invalid"
+
+
+@pytest.mark.asyncio
 async def test_llm_memory_query_timeout_is_reported_by_selected_plugin():
     class SlowModel:
         def stream(self, request):

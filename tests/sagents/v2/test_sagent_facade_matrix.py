@@ -72,6 +72,8 @@ async def test_run_stream_returns_handle_and_individual_canonical_events_to_term
     assert events[0].type == "run.accepted"
     assert events[-1].type == "run.completed"
     assert all(not isinstance(event, list) for event in events)
+    assert stream.execution is stream._execution
+    assert stream.execution_done() is True
 
 
 @pytest.mark.asyncio

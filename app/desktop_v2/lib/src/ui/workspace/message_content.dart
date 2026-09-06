@@ -755,7 +755,14 @@ class _MessageCodeBlock extends StatelessWidget {
                   message: context.l10n.text('common.copy'),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(7),
-                    onTap: () => Clipboard.setData(ClipboardData(text: source)),
+                    onTap: () async {
+                      await Clipboard.setData(ClipboardData(text: source));
+                      if (!context.mounted) return;
+                      DesktopNoticeHost.show(
+                        context,
+                        message: context.l10n.text('common.copied'),
+                      );
+                    },
                     child: Padding(
                       padding: const EdgeInsets.all(7),
                       child: Icon(
@@ -1393,7 +1400,14 @@ class _InlineQuestionnaireSubmitButton extends StatelessWidget {
 }
 
 class _InteractionCard extends StatefulWidget {
-  const _InteractionCard({required this.interaction, required this.onReply});
+  const _InteractionCard({
+    required this.interaction,
+    required this.onReply,
+    required this.onOpenPlan,
+    super.key,
+  });
+
+  final ValueChanged<String> onOpenPlan;
 
   final PendingInteraction interaction;
   final Future<void> Function(
@@ -1414,7 +1428,7 @@ class _InteractionCardState extends State<_InteractionCard> {
   bool _submitting = false;
   bool _previewExpanded = false;
 
-  Future<void> _reply(String decision) async {
+  Future<void> _reply(String decision, {String? rejectionReason}) async {
     if (_submitting) return;
     setState(() => _submitting = true);
     try {
@@ -1424,12 +1438,27 @@ class _InteractionCardState extends State<_InteractionCard> {
       }
       await widget.onReply(
         decision,
-        text: answers.isEmpty ? _answer.text : jsonEncode({'answers': answers}),
+        text:
+            rejectionReason ??
+            (answers.isEmpty ? _answer.text : jsonEncode({'answers': answers})),
         payload: answers.isEmpty ? const {} : {'answers': answers},
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  Future<void> _requestRejection() async {
+    if (_submitting) return;
+    final interactionId = widget.interaction.id;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => const _PlanRejectionFeedbackDialog(),
+    );
+    if (!mounted || reason == null || widget.interaction.id != interactionId) {
+      return;
+    }
+    await _reply('deny', rejectionReason: reason);
   }
 
   List<String> _visibleDecisions(bool approval) {
@@ -1615,187 +1644,253 @@ class _InteractionCardState extends State<_InteractionCard> {
             context.l10n,
           )
         : null;
+    final compactPlan =
+        approval &&
+        toolName == 'goal_submit' &&
+        riskCategory == 'plan_approval' &&
+        !recovery &&
+        !elevatedRisk;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 680),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
-          child: Container(
-            width: double.infinity,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerHigh.withValues(alpha: 0.96),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: elevatedRisk
-                    ? colors.error.withValues(alpha: 0.22)
-                    : colors.outlineVariant.withValues(alpha: 0.65),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.shadow.withValues(alpha: 0.18),
-                  blurRadius: 28,
-                  offset: const Offset(0, 12),
-                ),
-              ],
-            ),
+          child: _InteractionSurface(
+            compactPlan: compactPlan,
+            elevatedRisk: elevatedRisk,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 17, 18, 14),
+                  padding: compactPlan
+                      ? const EdgeInsets.symmetric(horizontal: 14, vertical: 8)
+                      : const EdgeInsets.fromLTRB(18, 17, 18, 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: recovery
-                                  ? colors.errorContainer.withValues(alpha: 0.5)
-                                  : colors.primaryContainer.withValues(
-                                      alpha: 0.55,
-                                    ),
-                              borderRadius: BorderRadius.circular(12),
+                      if (compactPlan)
+                        Row(
+                          children: [
+                            Icon(
+                              CupertinoIcons.list_bullet,
+                              size: 18,
+                              color: colors.onSurfaceVariant,
                             ),
-                            child: Icon(
-                              _interactionIcon(toolName, approval, recovery),
-                              size: 19,
-                              color: recovery
-                                  ? colors.onErrorContainer
-                                  : colors.onPrimaryContainer,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: -0.2,
-                                      ),
-                                ),
-                                if (subtitle.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    subtitle,
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: colors.onSurfaceVariant,
-                                          height: 1.35,
-                                        ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          if (badge != null) ...[
-                            const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color:
-                                    (elevatedRisk
-                                            ? colors.errorContainer
-                                            : colors.tertiaryContainer)
-                                        .withValues(alpha: 0.55),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
+                            const SizedBox(width: 8),
+                            Expanded(
                               child: Text(
-                                badge,
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: elevatedRisk
-                                          ? colors.onErrorContainer
-                                          : colors.onTertiaryContainer,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                title,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            TextButton.icon(
+                              key: const ValueKey('interaction-open-plan'),
+                              onPressed: () => widget.onOpenPlan(
+                                arguments['content']?.toString() ?? '',
+                              ),
+                              icon: const Icon(
+                                CupertinoIcons.sidebar_right,
+                                size: 14,
+                              ),
+                              label: Text(
+                                context.l10n.text('workspace.planDetails'),
+                              ),
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 28),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                           ],
-                        ],
-                      ),
-                      if (presentation != null) ...[
-                        const SizedBox(height: 14),
-                        Container(
-                          key: const ValueKey('interaction-command'),
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: colors.surfaceContainerHighest.withValues(
-                              alpha: 0.62,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: colors.outlineVariant.withValues(
-                                alpha: 0.7,
+                        )
+                      else
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: recovery
+                                    ? colors.errorContainer.withValues(
+                                        alpha: 0.5,
+                                      )
+                                    : colors.primaryContainer.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                _interactionIcon(toolName, approval, recovery),
+                                size: 19,
+                                color: recovery
+                                    ? colors.onErrorContainer
+                                    : colors.onPrimaryContainer,
                               ),
                             ),
-                          ),
-                          child: Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              SelectableText(
-                                presentation.summary,
-                                style: TextStyle(
-                                  color: colors.onSurface,
-                                  fontFamily: 'monospace',
-                                  fontSize: 12.5,
-                                  height: 1.45,
-                                  fontWeight: FontWeight.w600,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: -0.2,
+                                        ),
+                                  ),
+                                  if (subtitle.isNotEmpty) ...[
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      subtitle,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: colors.onSurfaceVariant,
+                                            height: 1.35,
+                                          ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            if (badge != null) ...[
+                              const SizedBox(width: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      (elevatedRisk
+                                              ? colors.errorContainer
+                                              : colors.tertiaryContainer)
+                                          .withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  badge,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: elevatedRisk
+                                            ? colors.onErrorContainer
+                                            : colors.onTertiaryContainer,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                 ),
                               ),
-                              for (final fact in presentation.facts)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
+                            ],
+                          ],
+                        ),
+                      if (presentation != null && !compactPlan) ...[
+                        if (!compactPlan) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            key: const ValueKey('interaction-command'),
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.surfaceContainerHighest.withValues(
+                                alpha: 0.62,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: colors.outlineVariant.withValues(
+                                  alpha: 0.7,
+                                ),
+                              ),
+                            ),
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                SelectableText(
+                                  presentation.summary,
+                                  style: TextStyle(
+                                    color: colors.onSurface,
+                                    fontFamily: 'monospace',
+                                    fontSize: 12.5,
+                                    height: 1.45,
+                                    fontWeight: FontWeight.w600,
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: colors.surface.withValues(
-                                      alpha: 0.5,
+                                ),
+                                for (final fact in presentation.facts)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
                                     ),
-                                    borderRadius: BorderRadius.circular(6),
+                                    decoration: BoxDecoration(
+                                      color: colors.surface.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      fact,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: colors.onSurfaceVariant,
+                                          ),
+                                    ),
                                   ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (presentation.preview case final preview?) ...[
+                          const SizedBox(height: 10),
+                          if (!compactPlan) ...[
+                            Row(
+                              children: [
+                                Expanded(
                                   child: Text(
-                                    fact,
+                                    presentation.previewLabel ?? '',
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
                                         ?.copyWith(
                                           color: colors.onSurfaceVariant,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                   ),
                                 ),
-                            ],
-                          ),
-                        ),
-                        if (presentation.preview case final preview?) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            presentation.previewLabel ?? '',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(height: 5),
+                                if (toolName == 'goal_submit')
+                                  TextButton.icon(
+                                    key: const ValueKey(
+                                      'interaction-open-plan',
+                                    ),
+                                    onPressed: () => widget.onOpenPlan(preview),
+                                    icon: const Icon(
+                                      CupertinoIcons.sidebar_right,
+                                      size: 14,
+                                    ),
+                                    label: Text(
+                                      context.l10n.text(
+                                        'workspace.planDetails',
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                          ],
                           Container(
                             key: const ValueKey('interaction-preview'),
                             width: double.infinity,
@@ -1818,7 +1913,17 @@ class _InteractionCardState extends State<_InteractionCard> {
                               ),
                             ),
                             child: SingleChildScrollView(
-                              child: presentation.previewLines.isNotEmpty
+                              child: toolName == 'goal_submit'
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(11),
+                                      child: _ConversationMarkdown(
+                                        key: const ValueKey(
+                                          'interaction-plan-markdown',
+                                        ),
+                                        data: preview,
+                                      ),
+                                    )
+                                  : presentation.previewLines.isNotEmpty
                                   ? _ApprovalDiffPreview(
                                       lines: presentation.previewLines,
                                     )
@@ -1886,47 +1991,98 @@ class _InteractionCardState extends State<_InteractionCard> {
                     ],
                   ),
                 ),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: colors.outlineVariant.withValues(alpha: 0.45),
+                if (!_isPlanApproval(widget.interaction))
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: colors.outlineVariant.withValues(alpha: 0.45),
+                        ),
                       ),
                     ),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(16, 11, 16, 12),
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 9,
-                    runSpacing: 8,
-                    children: [
-                      for (final decision in decisions)
-                        _InteractionDecisionButton(
-                          decision: decision,
-                          label: _interactionDecisionLabel(
-                            decision,
-                            toolName,
-                            context.l10n,
+                    padding: const EdgeInsets.fromLTRB(16, 11, 16, 12),
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 9,
+                      runSpacing: 8,
+                      children: [
+                        for (final decision in decisions)
+                          _InteractionDecisionButton(
+                            decision: decision,
+                            label: _interactionDecisionLabel(
+                              decision,
+                              toolName,
+                              context.l10n,
+                            ),
+                            primary:
+                                decision == 'approve_and_remember' ||
+                                (decision != 'deny' &&
+                                    decision != 'cancel' &&
+                                    !(decision == 'approve_once' &&
+                                        decisions.contains(
+                                          'approve_and_remember',
+                                        ))),
+                            submitting: _submitting,
+                            onPressed: approval && decision == 'deny'
+                                ? _requestRejection
+                                : () => _reply(decision),
                           ),
-                          primary:
-                              decision == 'approve_and_remember' ||
-                              (decision != 'deny' &&
-                                  decision != 'cancel' &&
-                                  !(decision == 'approve_once' &&
-                                      decisions.contains(
-                                        'approve_and_remember',
-                                      ))),
-                          submitting: _submitting,
-                          onPressed: () => _reply(decision),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _InteractionSurface extends StatelessWidget {
+  const _InteractionSurface({
+    required this.compactPlan,
+    required this.elevatedRisk,
+    required this.child,
+  });
+
+  final bool compactPlan;
+  final bool elevatedRisk;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (compactPlan) {
+      return GlassCard(
+        key: const ValueKey('plan-approval-card'),
+        padding: EdgeInsets.zero,
+        shape: const LiquidRoundedSuperellipse(borderRadius: 18),
+        useOwnLayer: true,
+        settings: _composerGlassSettings(context),
+        child: child,
+      );
+    }
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHigh.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: elevatedRisk
+              ? colors.error.withValues(alpha: 0.22)
+              : colors.outlineVariant.withValues(alpha: 0.65),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow.withValues(alpha: 0.18),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 }

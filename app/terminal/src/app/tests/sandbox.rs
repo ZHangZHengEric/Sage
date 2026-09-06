@@ -312,3 +312,201 @@ fn deny_command_clears_pending_approval() {
     assert!(app.deny_pending_sandbox_approval());
     assert!(app.pending_sandbox_approval.is_none());
 }
+
+fn rendered_history(app: &App) -> String {
+    app.pending_history_lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn runtime_command_switches_backend_runtime_and_requests_restart() {
+    let mut app = App::new();
+    let _ = app.take_backend_restart_request();
+    let _ = app.take_pending_history_lines();
+
+    assert!(matches!(
+        app.handle_command("/runtime set v2"),
+        SubmitAction::Handled
+    ));
+    assert_eq!(app.runtime, crate::backend::BackendRuntime::V2);
+    assert!(app.take_backend_restart_request());
+    assert!(rendered_history(&app).contains("runtime set: v2"));
+
+    let _ = app.take_pending_history_lines();
+    assert!(matches!(
+        app.handle_command("/runtime set v3"),
+        SubmitAction::Handled
+    ));
+    assert_eq!(app.runtime, crate::backend::BackendRuntime::V2);
+    assert!(rendered_history(&app).contains("runtime must be one of: v1, v2"));
+
+    let _ = app.take_pending_history_lines();
+    assert!(matches!(
+        app.handle_command("/status"),
+        SubmitAction::Handled
+    ));
+    assert!(rendered_history(&app).contains("runtime: v2"));
+
+    assert!(matches!(
+        app.handle_command("/remember"),
+        SubmitAction::RememberSandboxCommand
+    ));
+}
+
+#[test]
+fn v2_session_is_only_known_after_the_backend_announces_it() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    assert!(!app.v2_session_known);
+
+    app.apply_session_meta(crate::backend::BackendSessionMeta {
+        session_id: "session_v2".to_string(),
+        command_mode: Some("chat".to_string()),
+        session_state: Some("active".to_string()),
+        goal: None,
+    });
+    assert!(app.v2_session_known);
+    assert_eq!(app.session_id, "session_v2");
+
+    app.reset_session();
+    assert!(!app.v2_session_known);
+    assert!(app.pending_v2_input.is_none());
+}
+
+#[test]
+fn resuming_a_v2_session_marks_it_known_and_restarts_the_backend() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    let _ = app.take_backend_restart_request();
+
+    app.load_resumed_session(
+        "session_v2".to_string(),
+        vec![(
+            crate::app::MessageKind::User,
+            "create hello.txt".to_string(),
+        )],
+    );
+
+    assert_eq!(app.session_id, "session_v2");
+    assert!(app.v2_session_known);
+    assert!(app.take_backend_restart_request());
+
+    let mut legacy = App::new();
+    legacy.load_resumed_session("local-000123".to_string(), Vec::new());
+    assert!(!legacy.v2_session_known);
+}
+
+#[test]
+fn v2_input_while_busy_becomes_a_steer_instead_of_a_new_task() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    app.input = "first task".to_string();
+    app.input_cursor = app.input.len();
+    assert!(matches!(app.submit_input(), SubmitAction::RunTask(_)));
+    assert!(app.busy);
+    let _ = app.take_pending_history_lines();
+
+    app.input = "also update the tests".to_string();
+    app.input_cursor = app.input.len();
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::SteerTask(text) if text == "also update the tests"));
+    // 仍是同一个任务在跑：不重置计时、不覆盖 current_task。
+    assert!(app.busy);
+    assert_eq!(app.current_task.as_deref(), Some("first task"));
+    assert_eq!(app.last_submitted_task.as_deref(), Some("first task"));
+    assert!(rendered_history(&app).contains("also update the tests"));
+    assert_eq!(
+        app.input_history.last().map(String::as_str),
+        Some("also update the tests")
+    );
+    assert!(app.status.starts_with("steering"));
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn v2_steer_is_refused_while_an_approval_is_pending() {
+    let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V2);
+    app.begin_task_submission("first task".to_string(), true);
+    app.pending_sandbox_approval = Some(SandboxApprovalRequest {
+        command: "file_write hello.txt".to_string(),
+        approval_id: "interaction_1".to_string(),
+        command_hash: None,
+        category: Some("write".to_string()),
+        reason: None,
+        approval_mode: None,
+        hint: Some("/approve once · /deny".to_string()),
+    });
+    let _ = app.take_pending_history_lines();
+
+    app.input = "also update the tests".to_string();
+    app.input_cursor = app.input.len();
+    let action = app.submit_input();
+
+    assert!(matches!(action, SubmitAction::Handled));
+    assert!(rendered_history(&app).contains("answer the pending approval first"));
+    assert!(app.status.starts_with("approval required"));
+}
+
+#[test]
+fn v1_input_while_busy_is_still_submitted_as_a_task() {
+    let mut app = App::new();
+    app.begin_task_submission("first task".to_string(), true);
+
+    app.input = "next prompt".to_string();
+    app.input_cursor = app.input.len();
+
+    assert!(matches!(app.submit_input(), SubmitAction::RunTask(text) if text == "next prompt"));
+    assert_eq!(app.current_task.as_deref(), Some("next prompt"));
+}
+
+#[test]
+fn v2_reconciliation_request_explains_approve_and_deny() {
+    let mut app = App::new();
+    let _ = app.take_pending_history_lines();
+    app.apply_v2_input_request(crate::backend::V2InputRequest {
+        interaction_id: "interaction_r".to_string(),
+        interaction_type: "approval".to_string(),
+        prompt: "tool: file_write {\"file_path\":\"notes.txt\"}\nerror: tool.provider_error"
+            .to_string(),
+        allowed_decisions: vec![
+            "confirm_succeeded".to_string(),
+            "mark_failed".to_string(),
+            "cancel".to_string(),
+        ],
+    });
+
+    let rendered = rendered_history(&app);
+    assert!(rendered.contains("allowed: confirm_succeeded, mark_failed, cancel"));
+    assert!(rendered.contains("/approve (it succeeded) / /deny (mark it failed)"));
+    assert!(app.pending_v2_input.is_some());
+}
+
+#[test]
+fn v2_input_request_is_shown_and_kept_pending() {
+    let mut app = App::new();
+    let _ = app.take_pending_history_lines();
+    app.apply_v2_input_request(crate::backend::V2InputRequest {
+        interaction_id: "interaction_q".to_string(),
+        interaction_type: "user_input".to_string(),
+        prompt: "Which target should I use?".to_string(),
+        allowed_decisions: vec!["submit".to_string(), "cancel".to_string()],
+    });
+
+    let rendered = rendered_history(&app);
+    assert!(rendered.contains("user_input required"));
+    assert!(rendered.contains("Which target should I use?"));
+    assert!(rendered.contains("Type your answer in the composer"));
+    assert_eq!(
+        app.pending_v2_input
+            .as_ref()
+            .map(|value| value.interaction_id.as_str()),
+        Some("interaction_q")
+    );
+    assert!(app.status.starts_with("input required"));
+}

@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sagents.v2 import SAgentApplication, SAgentBuilder
+from sagents.v2.agent.policy import DefaultToolPolicy
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.runtime.execution import (
@@ -24,11 +26,15 @@ from sagents.v2.runtime.execution.sandbox import (
     NetworkPolicy,
     ProcessPolicy,
     ResolvedSandboxSpec,
+    ResourceLimits,
     SandboxGrantIssuer,
 )
 from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    READ_ONLY_SHELL_EXECUTABLES,
+)
 
-from app.cli.v2.jobs import cli_job_runtime_registration
+from app.cli.v2.approvals import WorkspaceApprovalMemory
 
 # 与 desktop_v2 的本地 workspace 沙箱保持同一档默认值，行为可对照。
 DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
@@ -43,16 +49,24 @@ DEFAULT_ALLOWED_EXECUTABLES: tuple[str, ...] = (
     "node",
 )
 DEFAULT_ALLOWED_ENV_NAMES: tuple[str, ...] = ("PATH", "PYTHONPATH")
+# 保护 hooks 与 config；配置受保护子路径时，沙箱拒绝可写进程请求。
+DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (".git/hooks", ".git/config")
 
 
 @dataclass(frozen=True)
 class WorkspaceSandboxSettings:
     """CLI 本地 workspace 沙箱的策略参数。"""
 
+    resources: ResourceLimits = field(
+        default_factory=lambda: ResourceLimits(
+            require_hard_limits=sys.platform != "darwin"
+        )
+    )
     process_enabled: bool = True
     read_only: bool = False
     allowed_executables: tuple[str, ...] = DEFAULT_ALLOWED_EXECUTABLES
     allowed_env_names: tuple[str, ...] = DEFAULT_ALLOWED_ENV_NAMES
+    protected_paths: tuple[str, ...] = DEFAULT_PROTECTED_PATHS
     max_wall_time_seconds: float = 300
     max_output_bytes: int = 4 * 1024 * 1024
     max_file_bytes: int = 64 * 1024 * 1024
@@ -94,13 +108,22 @@ class LocalWorkspaceBindingProvider:
                 else frozenset(FileOperation)
             ),
             allowed_roots=(self.workspace_root,),
+            protected_paths=settings.protected_paths,
             max_file_bytes=settings.max_file_bytes,
             max_total_bytes=settings.max_total_bytes,
         )
+        # 只读（plan）模式下进程只能在 OS 只读沙箱内跑受限检查语法：
+        # 白名单换成该语法能启动的命令，bash/python 等一概不在其中。
+        allowed_executables = (
+            tuple(sorted(READ_ONLY_SHELL_EXECUTABLES))
+            if settings.read_only
+            else settings.allowed_executables
+        )
         process = ProcessPolicy(
             enabled=settings.process_enabled,
+            allow_shell=True,
             read_only=settings.read_only,
-            allowed_executables=settings.allowed_executables,
+            allowed_executables=allowed_executables,
             allowed_env_names=settings.allowed_env_names,
             max_wall_time_seconds=settings.max_wall_time_seconds,
             max_output_bytes=settings.max_output_bytes,
@@ -111,6 +134,7 @@ class LocalWorkspaceBindingProvider:
                 "filesystem": filesystem.model_dump(mode="json"),
                 "process": process.model_dump(mode="json"),
                 "network": network.model_dump(mode="json"),
+                "resources": settings.resources.model_dump(mode="json"),
             },
             sort_keys=True,
         )
@@ -121,6 +145,7 @@ class LocalWorkspaceBindingProvider:
         )
         spec_hash = f"sha256:{hashlib.sha256(spec_source.encode()).hexdigest()}"
         return ResolvedSandboxSpec(
+            resources=settings.resources,
             spec_hash=spec_hash,
             workspace_root=self.workspace_root,
             architecture="native",
@@ -143,21 +168,10 @@ class LocalWorkspaceBindingProvider:
             workspace_policy=request.workspace_policy,
             sandbox=handle,
             grant_issuer=self.issuer,
+            lifecycle=request.lifecycle,
         )
-        # upstream a4bb126f：RunExecutionBinding.on_suspended 读取 self.lifecycle，但该字段只在
-        # ExecutionBindingRequest 上声明；这里显式带过去（builder 目前传 None），避免每次挂起
-        # 都记一条 AttributeError 日志。
-        binding.lifecycle = getattr(request, "lifecycle", None)
         self.bindings.append(binding)
         return binding
-
-    def binding_for_run(self, run_id: str) -> RunExecutionBinding | None:
-        """CLI job runtime 用它把 shell 作业送回所属 Run 的沙箱。"""
-
-        for binding in reversed(self.bindings):
-            if binding.run_id == run_id:
-                return binding
-        return None
 
     async def close(self) -> None:
         # 沙箱句柄由各 Run 的 binding 自己关闭；provider 本身无进程级资源。
@@ -170,19 +184,37 @@ async def build_cli_application(
     session_root: str | Path,
     bindings: LocalWorkspaceBindingProvider,
     model_provider: ModelProvider | None = None,
+    tool_policy: DefaultToolPolicy | None = None,
+    approval_store: str | Path | None = None,
 ) -> SAgentApplication:
     """用唯一组合根 ``SAgentBuilder`` 构建 CLI 使用的 ``SAgentApplication``。
 
     ``model_provider`` 仅供测试/脚本化场景注入；生产路径由 manifest 的模型路由决定。
-    调用方通过 ``application.entrypoint()`` 取 ``SAgent``，用 ``application.close()`` 释放全部资源。
+    ``tool_policy`` 是 ``--approval-mode`` 决定的审批策略（见 ``app.cli.v2.approvals``），
+    None 时沿用引擎默认。审批记忆在 Kernel 的 session 作用域之上叠加 ``workspace``
+    作用域，文件放在 ``approval_store``（默认 ``session_root/approvals``，宿主目录、
+    不进用户仓库）下、按 ``bindings.workspace`` 分文件。调用方通过
+    ``application.entrypoint()`` 取 ``SAgent``，用 ``application.close()`` 释放全部资源。
     """
 
     builder = (
         SAgentBuilder()
         .with_defaults(session_root=Path(session_root).expanduser())
         .with_execution_binding_provider(bindings)
-        .register(cli_job_runtime_registration(bindings))
     )
     if model_provider is not None:
         builder = builder.with_model_provider(model_provider)
+    if tool_policy is not None:
+        builder = builder.with_tool_policy(tool_policy)
+    store_root = (
+        Path(approval_store).expanduser()
+        if approval_store is not None
+        else Path(session_root).expanduser() / "approvals"
+    )
+    workspace = bindings.workspace
+    builder = builder.with_approval_memory_layer(
+        lambda session_memory: WorkspaceApprovalMemory(
+            session_memory, store_root=store_root, workspace=workspace
+        )
+    )
     return await builder.build(package)

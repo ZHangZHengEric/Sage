@@ -13,6 +13,7 @@ import json
 import os
 import signal
 import shutil
+import shlex
 import time
 import sys
 import re
@@ -22,7 +23,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from sagents.v2.contracts.common import new_id, utc_now
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    parse_read_only_shell_command,
+)
 from sagents.v2.runtime.execution.sandbox.contracts import (
+    MUTATING_FILE_OPERATIONS,
     FileOperation,
     FileStat,
     FileSystemMode,
@@ -53,6 +59,50 @@ def _grant_payload(grant: SandboxGrant) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode()
+
+
+# 只读模式下 git 段的加固：命令行 -c 覆盖仓库/全局配置里能启动外部程序的项，
+# 环境变量再关掉全局/系统配置与终端提示。仍不是安全边界，只是把已知入口关掉。
+_READ_ONLY_GIT_OPTIONS: tuple[str, ...] = tuple(
+    option
+    for setting in (
+        "core.fsmonitor=false",
+        "core.hooksPath=/dev/null",
+        "core.pager=cat",
+        "core.editor=true",
+        "core.sshCommand=false",
+        "diff.external=",
+        "gpg.program=false",
+        "gpg.ssh.program=false",
+        "protocol.allow=never",
+    )
+    for option in ("-c", setting)
+)
+_READ_ONLY_GIT_DIFF_COMMANDS = frozenset({"diff", "log", "show"})
+_READ_ONLY_GIT_ENV = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+}
+
+
+def _read_only_stages(argv: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    if argv[:2] not in {("bash", "-c"), ("sh", "-c")} or len(argv) != 3:
+        raise PermissionError(
+            "read-only process mode accepts only a validated shell command"
+        )
+    return parse_read_only_shell_command(argv[2])
+
+
+def _harden_read_only_stage(stage: tuple[str, ...]) -> tuple[str, ...]:
+    if stage[0] != "git":
+        return stage
+    hardened = ("git", *_READ_ONLY_GIT_OPTIONS, *stage[1:])
+    if len(stage) > 1 and stage[1] in _READ_ONLY_GIT_DIFF_COMMANDS:
+        # textconv / external diff drivers come from .gitattributes plus repo
+        # config; the diff-family commands accept explicit opt-outs.
+        hardened = (*hardened, "--no-textconv", "--no-ext-diff")
+    return hardened
 
 
 @dataclass
@@ -194,23 +244,39 @@ class _LocalProcessRuntime:
         policy = self.row.spec.process
         if not policy.enabled:
             raise PermissionError("process execution is disabled")
-        if policy.read_only and sys.platform != "linux":
-            # Keep read-only process execution unavailable on macOS until its
-            # temporary-file semantics have their own policy contract.
-            raise PermissionError(
-                "read-only process execution requires an isolated sandbox"
+        if self.row.spec.filesystem.protected_paths and not policy.read_only:
+            raise PermissionError("protected_paths require read-only process execution")
+        if policy.read_only:
+            stages = tuple(
+                _harden_read_only_stage(stage)
+                for stage in _read_only_stages(request.argv)
             )
-        executable = request.argv[0]
-        if (
-            Path(executable).name in {"sh", "bash", "zsh", "dash", "ksh", "fish"}
-            and not policy.allow_shell
-        ):
-            raise PermissionError("shell execution is disabled")
-        if policy.allowed_executables and executable not in policy.allowed_executables:
-            raise PermissionError(f"executable {executable!r} is not allowed")
-        resolved_executable = shutil.which(executable)
-        if resolved_executable is None:
-            raise FileNotFoundError(executable)
+        else:
+            stages = (request.argv,)
+        resolved = []
+        for stage in stages:
+            executable = stage[0]
+            if (
+                Path(executable).name in {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+                and not policy.allow_shell
+            ):
+                raise PermissionError("shell execution is disabled")
+            if (
+                policy.allowed_executables
+                and executable not in policy.allowed_executables
+            ):
+                raise PermissionError(f"executable {executable!r} is not allowed")
+            resolved_executable = shutil.which(executable)
+            if resolved_executable is None:
+                raise FileNotFoundError(executable)
+            resolved.append((resolved_executable, *stage[1:]))
+        if policy.read_only:
+            # Only fully parsed argv stages enter this pipeline; quote every
+            # argument and run the pipeline inside the OS read-only boundary.
+            resolved_executable = "/bin/sh"
+            arguments = ("-c", " | ".join(shlex.join(stage) for stage in resolved))
+        else:
+            resolved_executable, *arguments = resolved[0]
         cwd = self.provider._path(self.row, request.cwd)
         if not cwd.is_dir():
             raise NotADirectoryError(request.cwd)
@@ -247,13 +313,15 @@ class _LocalProcessRuntime:
             task = asyncio.current_task()
             self.row.active_tasks.add(task)
             environment = {**inherited_env, **request.env}
+            if policy.read_only:
+                environment.update(_READ_ONLY_GIT_ENV)
             process = None
             readers = ()
             launch_fds = []
             timed_out = False
             try:
                 command, job, launch_fds = self.row.boundary.command(
-                    resolved_executable, request.argv[1:], cwd, environment
+                    resolved_executable, arguments, cwd, environment
                 )
                 process = await asyncio.create_subprocess_exec(
                     *command,
@@ -729,6 +797,19 @@ class LocalWorkspaceSandboxProvider:
             raise ValueError("sandbox reference is unknown")
         return row
 
+    @staticmethod
+    def _requested_path(row: _LocalRow, path: str) -> Path:
+        """把 wire path / 宿主绝对路径 / 相对路径统一成未解析的宿主路径。"""
+
+        root_prefix = row.spec.workspace_root.rstrip("/") + "/"
+        if path == row.spec.workspace_root:
+            return row.root
+        if path.startswith(root_prefix):
+            return row.root / path[len(root_prefix) :]
+        if Path(path).is_absolute():
+            return Path(path).expanduser()
+        return row.root / path
+
     def _path(self, row: _LocalRow, path: str) -> Path:
         relative = path
         if relative == row.spec.workspace_root:
@@ -783,12 +864,52 @@ class LocalWorkspaceSandboxProvider:
         if operation not in row.spec.filesystem.allowed_operations:
             raise PermissionError(f"file operation {operation.value!r} is not allowed")
         candidate = self._path(row, path)
+        if operation in MUTATING_FILE_OPERATIONS:
+            self._deny_protected(row, path, candidate)
         if (
             operation in {FileOperation.READ, FileOperation.LIST, FileOperation.DELETE}
             and not candidate.exists()
         ):
             raise FileNotFoundError(path)
         return candidate
+
+    def _deny_protected(self, row: _LocalRow, path: str, candidate: Path) -> None:
+        """写类操作命中 `protected_paths` 时拒绝。
+
+        同时检查解析后的真实路径（symlink 指向受保护目录）和未解析的字面路径
+        （受保护条目本身是指向工作区内其他目录的 symlink），两者任一命中即拒绝。
+        """
+
+        policy = row.spec.filesystem
+        if not policy.protected_paths:
+            return
+        subjects = [candidate.relative_to(row.root).as_posix()]
+        lexical = Path(os.path.normpath(self._requested_path(row, path)))
+        try:
+            subjects.append(lexical.relative_to(row.root).as_posix())
+        except ValueError:
+            # 字面路径落在工作区外（例如经宿主 symlink 进入）；解析后的路径
+            # 已经在上面覆盖。
+            pass
+        for subject in subjects:
+            entry = policy.protected_path_for(subject)
+            if entry is not None:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="sandbox.protected_path",
+                        category=ErrorCategory.POLICY_DENIED,
+                        message=(
+                            f"path {path!r} is protected by sandbox policy ({entry})"
+                        ),
+                        safe_to_resume=True,
+                        # 拒绝发生在任何写入之前：让执行器按"干净失败"处理，
+                        # 不进入 outcome-unknown 的人工核对流程。
+                        metadata={
+                            "protected_path": entry,
+                            "side_effect_state": "not_applied",
+                        },
+                    )
+                )
 
     def _verify(self, row, operation, intent, grant):
         signature = hmac.new(

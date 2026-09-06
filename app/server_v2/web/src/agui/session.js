@@ -10,10 +10,10 @@ export function messageForAguiError(event, fallback) {
   return event?.message || fallback?.message || fallback || 'run failed'
 }
 
-export function createAguiAgent({ onMessages, onError } = {}) {
+export function createAguiAgent({ onMessages, onError, agentId = 'main' } = {}) {
   const agent = new HttpAgent({
     url: '/api/agent',
-    agentId: 'main',
+    agentId,
     fetch: createResumableFetch(),
   })
   agent.subscribe({
@@ -30,7 +30,7 @@ export function createAguiAgent({ onMessages, onError } = {}) {
   return agent
 }
 
-export async function runAgui(agent, { threadId, runId, content }) {
+export async function runAgui(agent, { threadId, runId, content, agentId = 'main' }) {
   agent.headers = { Authorization: `Bearer ${getToken()}` }
   agent.threadId = threadId
   agent.addMessage({
@@ -42,6 +42,6 @@ export async function runAgui(agent, { threadId, runId, content }) {
     runId,
     tools: [],
     context: [],
-    forwardedProps: { agentId: 'main' },
+    forwardedProps: { agentId },
   })
 }

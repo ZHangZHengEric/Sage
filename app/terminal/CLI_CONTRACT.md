@@ -87,6 +87,53 @@ The driver answers a `cli_v2_interaction` by writing one JSON line to the CLI's 
 `decision` must be one of `allowed_decisions`; anything else is coerced to `deny`/`cancel`.
 `payload` carries `{"text": "..."}` for `submit` / `change_direction` answers.
 
+Approval interactions (`interaction_type: "approval"`) list `approve_once`, `deny`, `cancel` and,
+when the call may be remembered, `approve_and_remember`. The `payload` then also carries
+`approval_matcher` (`tool_name`, `fingerprint`, `summary` — what exactly would be remembered:
+the CLI matcher uses exact arguments for `execute_shell_command` (including unchanged shell
+text, `workdir` and `env_vars`), the original `file_path`
+for `file_write` / `file_update`, and the full arguments otherwise), `approval_scopes`
+(`["session", "workspace"]`) and `persistent_approval_allowed: true`. Answering
+`approve_and_remember` makes the runtime skip the approval for later calls that match; the
+decision line may carry `"payload": {"scope": "session" | "workspace"}` (default `session`).
+`session` lives in the session's derived state; `workspace` is kept by the CLI under
+`<session_root>/approvals/` keyed by the workspace path, so every later session in the same
+workspace is covered (the file is never written into the workspace itself). A scope the runtime
+does not offer is tightened to `session`. Remembered calls surface a `policy.approval.remembered`
+event when remembered and a `policy.decision.recorded` event with `remembered_by` /
+`remembered_scope` when auto-approved. `sage v2 chat` exposes `/approvals` (list, both scopes)
+and `/forget <n>|all` (revoke). `sage v2 approvals [--workspace <path>] [--json]` lists the
+workspace-scoped entries without opening the session store (one JSON object with `workspace`,
+`store`, `total`, `list`), and `sage v2 approvals forget <n>|all` revokes them.
+Legacy shell/path fingerprints are not reused after the matcher upgrade; those operations
+require approval again. Invalid remembered entries are ignored individually, retaining valid
+entries, and `/forget all` also removes corrupt approval documents.
+
+`--approval-mode` selects the runtime approval policy before any interaction is raised:
+`ask` (default on a TTY) asks for write-class tools and allows remembering, `always` asks for
+every tool call and never remembers, `approve-all` never raises an approval interaction, and
+`deny-all` rejects approval-requiring calls in the policy, before memory lookup or driver
+interaction; read-only calls that do not require approval remain available. The policy is a per-process
+preference: a run suspended under one mode can be resumed under another.
+
+`--mode plan` hides write-class tools from the model (`RunConfig.enabled_tools` is set to the
+agent's read-only / plan-safe tools; `goal_submit` stays available) on top of the read-only
+sandbox. In that sandbox `execute_shell_command` accepts only the read-only inspection grammar
+(`cat`, `grep`, `rg`, `find`, `ls`, `head`, `wc`, read-only `git` subcommands, … joined by pipes;
+no redirection, control operators or paths in executables); the stages run directly from argv
+without a shell and `git` runs with repository hooks, fsmonitor, pager, external diff and gpg
+disabled. Anything else fails with `job.runner_failed` and a read-only message; the file
+system stays read-only regardless. The local workspace **filesystem API** refuses writes under `.git/hooks` and
+`.git/config`; those file API calls fail with `sandbox.protected_path` before writing.
+This provider reports `IsolationLevel.NONE`: host subprocesses (including shell and Git)
+can still modify these paths. `protected_paths` is not process isolation. A host needing
+that guarantee must disable process execution or use an OS-isolated provider.
+
+Validated `questionnaire_async` results arrive as public `item.completed` tool-result items.
+The Run completes without a pending Interaction; the CLI and TUI display the supplied title,
+questions and options, and the answer is the next ordinary user turn. Recovery Interactions
+still use the decision frames above.
+
 While a run is active (no interaction pending) the driver may append input for the next model step:
 
 ```json
@@ -115,4 +162,17 @@ between turns the CLI reads one plain-text prompt line from stdin (`/exit` ends 
 while a run is active, stdin lines are interpreted only as decision lines. Every turn after the
 first reuses the `session_id` announced by the first `cli_v2_session` frame.
 
-This surface is not yet consumed by `sage-terminal` and may change until the TUI integration lands.
+`sage-terminal` consumes this surface when started with `--runtime v2` (or after `/runtime set v2`):
+it spawns `sage v2 chat --json --user-id <id> [--workspace <path>]`, passes `--session-id` only for a
+session id it previously received in a `cli_v2_session` frame, maps native `message.delta` /
+`message.completed` / `tool.call.*` events onto its transcript, turns `approval` interactions into the
+existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
+other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
+Rust-side parsing lives in `app/terminal/src/backend/protocol_v2.rs` with tests in
+`app/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
+`v2_steer` frame and the `cli_v2_steer` answer is shown in the transcript; an approval must be
+answered first (the CLI reads only decision lines then). With the v2 runtime selected, `/sessions`,
+`/resume` and `/sessions inspect` read the v2 store through `sage v2 sessions --json` and
+`sage v2 sessions inspect <id> --json` (the picker shows the first task, the run count and the last
+run state; resuming replays the transcript entries and passes `--session-id` to the next backend).
+The surface remains experimental.

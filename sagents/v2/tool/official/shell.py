@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
+from sagents.v2.tool import CancelSemantics, SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 
@@ -13,6 +13,13 @@ class ShellTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
 
+    async def release_run(self, run_id: str) -> None:
+        """Run 到终态：终止它名下还没结束的 shell job（进程组一起收）。"""
+
+        await self.runtime.release_run(run_id)
+
+    # 等待 shell job 是可协作取消的：Run 被取消/暂停时引擎中断等待，job 本身
+    # 继续跑（暂停后还能 await_shell），直到 Run 终态由 release_run 统一终止。
     @tool(
         description=(
             "Execute a shell command in the workspace. block_until_ms=0 runs "
@@ -20,6 +27,7 @@ class ShellTools:
         ),
         side_effect_level=SideEffectLevel.WRITE,
         requires_approval=True,
+        cancel_semantics=CancelSemantics.COOPERATIVE,
     )
     async def execute_shell_command(
         self,
@@ -51,7 +59,10 @@ class ShellTools:
             block_until_ms=max(0, block_until_ms),
         )
 
-    @tool(description="Wait for a background shell task and read its output.")
+    @tool(
+        description="Wait for a background shell task and read its output.",
+        cancel_semantics=CancelSemantics.COOPERATIVE,
+    )
     async def await_shell(
         self,
         task_id: str,
