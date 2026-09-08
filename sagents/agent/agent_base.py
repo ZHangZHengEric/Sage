@@ -2783,7 +2783,7 @@ class AgentBase(ABC):
                     if skill_infos:
                         semi_buf += "<available_skills>\n"
                         for skill in skill_infos:
-                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50] + '...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
+                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description}</skill_description>\n</skill>\n"
                         semi_buf += "</available_skills>\n"
 
                         skills_hint = prompt_manager.get_prompt(

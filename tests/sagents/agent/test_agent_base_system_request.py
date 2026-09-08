@@ -118,6 +118,41 @@ async def test_build_system_segments_explains_runtime_context_boundary():
 
 
 @pytest.mark.asyncio
+async def test_build_system_segments_keeps_full_skill_description(monkeypatch):
+    agent = CommonAgent(model=object(), model_config={})
+    long_description = (
+        "Use this skill whenever the user wants to do anything with PDF files, "
+        "including extracting text, merging documents, and filling forms."
+    )
+    assert len(long_description) > 50
+    skill_manager = SimpleNamespace(
+        load_new_skills=lambda: None,
+        list_skill_info=lambda: [
+            SimpleNamespace(name="pdf", description=long_description)
+        ],
+    )
+    session_context = SimpleNamespace(
+        sandbox=None,
+        system_context={"session_id": "sess"},
+        effective_skill_manager=skill_manager,
+    )
+    monkeypatch.setattr(
+        agent, "_get_live_session_context", lambda _session_id: session_context
+    )
+
+    segments = await agent._build_system_segments(
+        session_id="sess",
+        include_sections=["available_skills"],
+        language="en",
+    )
+
+    assert f"<skill_description>{long_description}</skill_description>" in segments[
+        "semi_stable"
+    ]
+    assert "..." not in segments["semi_stable"]
+
+
+@pytest.mark.asyncio
 async def test_build_system_segments_always_includes_fresh_response_language_contract(
     monkeypatch,
 ):
