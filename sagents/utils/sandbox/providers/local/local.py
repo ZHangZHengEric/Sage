@@ -293,12 +293,22 @@ class LocalSandboxProvider(ISandboxHandle):
         if os.path.exists(self._venv_dir):
             return
 
+        # Acquiring a process file lock is blocking. Keep the entire critical
+        # section in one worker thread so concurrent sandbox initialization
+        # cannot block the asyncio event loop while another task owns the lock.
+        await asyncio.to_thread(self._ensure_venv_sync)
+
+    def _ensure_venv_sync(self):
+        """Create and prepare the venv while holding the cross-process lock."""
+        if not self._venv_dir:
+            raise RuntimeError("venv directory is not initialized")
+        if os.path.exists(self._venv_dir):
+            return
+
         lock_path = os.path.join(os.path.dirname(self._venv_dir), ".venv.lock")
         with file_lock(lock_path):
             if os.path.exists(self._venv_dir):
                 return
-
-            import subprocess
 
             os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
 
@@ -311,8 +321,7 @@ class LocalSandboxProvider(ISandboxHandle):
             logger.info(
                 f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}"
             )
-            result = await asyncio.to_thread(
-                subprocess.run,
+            result = subprocess.run(
                 [system_python, "-m", "venv", self._venv_dir],
                 capture_output=True,
                 text=True,
@@ -329,12 +338,14 @@ class LocalSandboxProvider(ISandboxHandle):
             self._ensure_python_executable()
 
             # 尝试在 venv 内预装 uv（失败不阻塞）
-            await self._ensure_uv_in_venv()
+            self._ensure_uv_in_venv_sync()
 
     async def _ensure_uv_in_venv(self):
         """在 venv 中安装 uv，便于后续按需使用。"""
-        import subprocess
+        await asyncio.to_thread(self._ensure_uv_in_venv_sync)
 
+    def _ensure_uv_in_venv_sync(self):
+        """Synchronously install uv; callers must keep this off the event loop."""
         # Server images provide a pinned global uv under /usr/local/bin. Keep
         # workspace-local installation for Desktop and CLI compatibility.
         if is_server_process():
@@ -366,8 +377,8 @@ class LocalSandboxProvider(ISandboxHandle):
             "--trusted-host",
             "mirrors.aliyun.com",
         ]
-        result = await asyncio.to_thread(
-            subprocess.run, install_cmd, capture_output=True, text=True, timeout=180
+        result = subprocess.run(
+            install_cmd, capture_output=True, text=True, timeout=180
         )
         if result.returncode == 0:
             logger.info("[LocalSandboxProvider] uv 已安装到 venv")
@@ -375,8 +386,8 @@ class LocalSandboxProvider(ISandboxHandle):
 
         # 镜像失败时回退到默认源
         fallback_cmd = [venv_python, "-m", "pip", "install", "-U", "uv"]
-        fallback_result = await asyncio.to_thread(
-            subprocess.run, fallback_cmd, capture_output=True, text=True, timeout=180
+        fallback_result = subprocess.run(
+            fallback_cmd, capture_output=True, text=True, timeout=180
         )
         if fallback_result.returncode == 0:
             logger.info("[LocalSandboxProvider] uv 已安装到 venv（默认源）")
