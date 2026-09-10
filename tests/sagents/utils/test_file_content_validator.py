@@ -37,6 +37,27 @@ def test_yaml_validation_reports_error_for_invalid_yaml():
     assert "YAML syntax error" in result["message"]
 
 
+def test_yaml_validation_rejects_duplicate_keys():
+    result = FileContentValidator.validate(
+        "/tmp/render.yaml",
+        "style:\n  accent_color: '#abc'\n  cta: start\n  accent_color: '#def'\n",
+    )
+
+    assert result["status"] == "error"
+    assert result["passed"] is False
+    assert "duplicate key" in result["message"]
+
+
+def test_yaml_validation_allows_same_key_in_different_mappings():
+    result = FileContentValidator.validate(
+        "/tmp/render.yaml",
+        "title:\n  accent_color: '#abc'\ncta:\n  accent_color: '#def'\n",
+    )
+
+    assert result["status"] == "passed"
+    assert result["passed"] is True
+
+
 def test_python_validation_passes_for_valid_python():
     result = FileContentValidator.validate(
         "/tmp/sample.py", "def hello():\n    return 1\n"

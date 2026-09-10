@@ -29,19 +29,9 @@ class FileSystemTool:
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """对文本内容执行按行区间替换。行号为 0-based，start/end 都是包含边界。"""
+        """对文本内容执行按行区间替换。行号为 1-based，start/end 都是包含边界。"""
         lines = content.splitlines(keepends=True)
         total_lines = len(lines)
-        normalized_start = 0 if start_line is None else max(0, start_line)
-        normalized_end = (
-            (total_lines - 1) if end_line is None else min(total_lines - 1, end_line)
-        )
-
-        if normalized_start > normalized_end:
-            return make_tool_error(
-                ToolErrorCode.INVALID_ARGUMENT,
-                "start_line cannot be greater than end_line",
-            )
 
         if total_lines == 0:
             return make_tool_error(
@@ -49,7 +39,45 @@ class FileSystemTool:
                 "The file is empty, so line-based replacement cannot be applied",
             )
 
-        normalized_end_exclusive = normalized_end + 1
+        if start_line is None:
+            start_line = 1
+        if end_line is None:
+            end_line = total_lines
+
+        if not isinstance(start_line, int) or not isinstance(end_line, int):
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                "start_line and end_line must be integers",
+            )
+
+        if start_line < 1 or end_line < 1:
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                (
+                    "start_line and end_line are 1-based inclusive; "
+                    "the first line is 1. Use the same numbers shown by file_read."
+                ),
+            )
+
+        if start_line > end_line:
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                "start_line cannot be greater than end_line",
+            )
+
+        if start_line > total_lines or end_line > total_lines:
+            return make_tool_error(
+                ToolErrorCode.INVALID_ARGUMENT,
+                (
+                    f"line range {start_line}-{end_line} is outside the file "
+                    f"({total_lines} lines). Line numbers are 1-based inclusive "
+                    "and refer to the original file."
+                ),
+            )
+
+        normalized_start = start_line - 1
+        normalized_end = end_line - 1
+        normalized_end_exclusive = end_line
 
         original_segment = "".join(lines[normalized_start:normalized_end_exclusive])
         replacement_segment = replacement
@@ -69,15 +97,12 @@ class FileSystemTool:
         )
         replace_count = 1 if original_segment != replacement_segment else 0
 
-        if normalized_start == normalized_end and not replacement_segment:
-            replace_count = 0
-
         return {
             "status": "success",
             "content": new_content,
             "replacements": replace_count,
-            "start_line": normalized_start,
-            "end_line": normalized_end,
+            "start_line": start_line,
+            "end_line": end_line,
             "lines_replaced": max(0, normalized_end_exclusive - normalized_start),
         }
 
@@ -122,7 +147,7 @@ class FileSystemTool:
             snippet = content[snippet_start:snippet_end].replace("\n", "\\n")
             contexts.append(
                 {
-                    "line": line_no,
+                    "line": line_no + 1,
                     "column": pos - line_start,
                     "line_text": line_text,
                     "snippet": snippet,
@@ -243,6 +268,21 @@ class FileSystemTool:
                     ToolErrorCode.INVALID_ARGUMENT,
                     "按行替换模式下不要同时提供 search_pattern",
                 )
+            start_value = op.get("start_line")
+            end_value = op.get("end_line")
+            if not isinstance(start_value, int) or not isinstance(end_value, int):
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "按行替换时必须同时提供 start_line 和 end_line，且二者都为整数",
+                )
+            if start_value < 1 or end_value < 1:
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    (
+                        "start_line 和 end_line 为 1-based 闭区间，第一行是 1，"
+                        "请填写 file_read 左侧展示的行号"
+                    ),
+                )
             return {
                 "status": "success",
                 "update_mode": "line_range",
@@ -304,18 +344,18 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "读取文本文件指定行范围内容",
-            "en": "Read text file within a line range",
+            "zh": "读取文本文件指定行范围内容。行号从 1 开始、两端都包含，与左侧展示行号和 file_update 一致",
+            "en": "Read text file within a 1-based inclusive line range; displayed numbers match file_update",
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "start_line": {
-                "zh": "开始行号，默认0",
-                "en": "Start line number, default 0",
+                "zh": "起始行号，从 1 开始，含该行，默认 1。与返回内容左侧行号、file_update 使用同一套编号",
+                "en": "Start line (1-based, inclusive), default 1. Same numbering as displayed lines and file_update",
             },
             "end_line": {
-                "zh": "结束行号（不包含），默认400，None表示读取到文件末尾",
-                "en": "End line number (exclusive), default 400, None means read to end",
+                "zh": "结束行号，从 1 开始，含该行，默认 400；None 表示读到文件末尾",
+                "en": "End line (1-based, inclusive), default 400; None means read to end",
             },
             "include_line_numbers": {
                 "zh": "是否在返回内容中附带行号，默认true",
@@ -328,8 +368,8 @@ class FileSystemTool:
         },
         param_schema={
             "file_path": {"type": "string", "description": "File virtual path"},
-            "start_line": {"type": "integer", "default": 0},
-            "end_line": {"type": "integer", "default": 400},
+            "start_line": {"type": "integer", "default": 1, "minimum": 1},
+            "end_line": {"type": "integer", "default": 400, "minimum": 1},
             "include_line_numbers": {"type": "boolean", "default": True},
             "session_id": {"type": "string", "description": "Session ID"},
         },
@@ -337,7 +377,7 @@ class FileSystemTool:
     async def file_read(
         self,
         file_path: str,
-        start_line: int = 0,
+        start_line: int = 1,
         end_line: Optional[int] = 400,
         include_line_numbers: bool = True,
         session_id: str = None,  # pyright: ignore[reportArgumentType]
@@ -346,8 +386,8 @@ class FileSystemTool:
 
         Args:
             file_path: 文件虚拟路径
-            start_line: 开始行号，默认0
-            end_line: 结束行号（不包含），默认400
+            start_line: 起始行号（1-based，含），默认 1
+            end_line: 结束行号（1-based，含），默认 400
             session_id: 会话ID（必填）
 
         Returns:
@@ -363,18 +403,32 @@ class FileSystemTool:
             lines = content.splitlines()
             total_lines = len(lines)
 
-            if end_line is None:
-                end_line = total_lines
-            start_line = max(0, start_line)
-            end_line = min(total_lines, end_line)
+            if start_line < 1 or (end_line is not None and end_line < 1):
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    (
+                        "start_line and end_line are 1-based inclusive; "
+                        "the first line is 1."
+                    ),
+                    file_path=file_path,
+                )
+            if end_line is not None and end_line < start_line:
+                return make_tool_error(
+                    ToolErrorCode.INVALID_ARGUMENT,
+                    "start_line cannot be greater than end_line",
+                    file_path=file_path,
+                )
 
-            selected_lines = lines[start_line:end_line]
+            start_index = start_line - 1
+            end_exclusive = total_lines if end_line is None else min(total_lines, end_line)
+
+            selected_lines = lines[start_index:end_exclusive]
             selected_content = "\n".join(selected_lines)
             numbered_content = selected_content
 
             if include_line_numbers:
                 numbered_content = "\n".join(
-                    f"{line_number + 1:>4} | {line_text}"
+                    f"{line_number:>4} | {line_text}"
                     for line_number, line_text in enumerate(
                         selected_lines, start=start_line
                     )
@@ -386,7 +440,7 @@ class FileSystemTool:
                 "raw_content": selected_content,
                 "total_lines": total_lines,
                 "start_line": start_line,
-                "end_line": end_line,
+                "end_line": end_exclusive,
                 "lines_read": len(selected_lines),
                 "file_path": file_path,
                 "line_numbers_included": include_line_numbers,
@@ -416,8 +470,8 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "写入文本到文件。适合短内容写入；较长的代码或文档请拆成多次追加写入，每次 content 不超过 1000 个字。",
-            "en": "Write text to a file. Best for short content; for longer code or documents, write in multiple append calls, keeping each content under 1000 characters.",
+            "zh": "写入文本到文件。mode=overwrite 覆盖整个文件，append 追加到末尾。",
+            "en": "Write text to a file. mode=overwrite replaces the whole file; append adds to the end.",
         },
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
@@ -426,8 +480,8 @@ class FileSystemTool:
                 "en": "Write mode: overwrite replaces the file, append adds to the end of the file",
             },
             "content": {
-                "zh": "要写入的文本内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入",
-                "en": "Text content to write, must not exceed 1000 characters; for longer code or documents, use multiple append calls",
+                "zh": "要写入的文本内容",
+                "en": "Text content to write",
             },
             "session_id": {
                 "zh": "会话ID（必填，自动注入）",
@@ -444,7 +498,7 @@ class FileSystemTool:
             },
             "content": {
                 "type": "string",
-                "description": "Text content to write. Keep it under 1000 characters; for longer code or documents, use multiple append calls",
+                "description": "Text content to write",
             },
             "session_id": {"type": "string", "description": "Session ID"},
         },
@@ -486,7 +540,7 @@ class FileSystemTool:
 
         Args:
             file_path: 文件虚拟路径
-            content: 要写入的内容，不能超过 1000 个字；较长的代码或文档请分多次追加写入
+            content: 要写入的文本内容
             mode: 写入模式，overwrite 覆盖写入，append 追加到文件末尾
             session_id: 会话ID（必填）
 
@@ -560,8 +614,8 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件虚拟路径", "en": "File virtual path"},
             "operations": {
-                "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement，默认要求 search_pattern 在文件中唯一命中，多匹配会返回 MULTIPLE_MATCHES 错误；如确需批量替换，对该 operation 显式设置 replace_all=true。line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（0-based），且二者必须同时提供。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
-                "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement and by default REQUIRES the pattern to match uniquely in the file; multi-match returns MULTIPLE_MATCHES error. Set replace_all=true on the operation to opt-in batch replace. line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (0-based) and must be provided together. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
+                "zh": "替换操作列表。每项必须明确指定一种模式：search_replace 或 line_range。search_replace 只传 search_pattern + replacement，默认要求 search_pattern 在文件中唯一命中，多匹配会返回 MULTIPLE_MATCHES 错误；如确需批量替换，对该 operation 显式设置 replace_all=true。line_range 只传 start_line、end_line + replacement。按行替换时 start_line 和 end_line 都是包含边界（1-based，与 file_read 左侧行号相同），且二者必须同时提供。同一调用内多个 line_range 都按本次调用开始时的原文件行号计算，从文件底部往上应用。search_pattern 可以是普通文本，也可以是正则表达式；执行时会先按普通文本匹配，未命中再按正则处理。请不要用它整文件重写",
+                "en": "Replacement operations. Each item must explicitly choose one mode: search_replace or line_range. search_replace accepts only search_pattern + replacement and by default REQUIRES the pattern to match uniquely in the file; multi-match returns MULTIPLE_MATCHES error. Set replace_all=true on the operation to opt-in batch replace. line_range accepts only start_line, end_line + replacement. For line-range mode, both start_line and end_line are inclusive (1-based, same numbers as file_read) and must be provided together. Multiple line_range ops in one call use original-file line numbers and are applied from the bottom of the file upward. search_pattern can be plain text or a regex; execution first tries plain-text matching, then falls back to regex if not found. Do not use it to rewrite the whole file",
             },
             "session_id": {
                 "zh": "会话ID（必填，自动注入）",
@@ -591,11 +645,13 @@ class FileSystemTool:
                         },
                         "start_line": {
                             "type": "integer",
-                            "description": "Start line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range",
+                            "minimum": 1,
+                            "description": "Start line number (inclusive, 1-based, same as file_read). Use only when update_mode is line_range",
                         },
                         "end_line": {
                             "type": "integer",
-                            "description": "End line number (inclusive, 0-based) for line-range replacement. Use only when update_mode is line_range",
+                            "minimum": 1,
+                            "description": "End line number (inclusive, 1-based, same as file_read). Use only when update_mode is line_range",
                         },
                         "replace_all": {
                             "type": "boolean",
@@ -646,7 +702,7 @@ class FileSystemTool:
             file_path: 文件虚拟路径
             operations: 同一文件的替换操作列表。优先传局部更新，每项支持两种形式：
                 1. {"update_mode": "search_replace", "search_pattern": "...", "replacement": "..."}
-                2. {"update_mode": "line_range", "start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（0-based）
+                2. {"update_mode": "line_range", "start_line": 10, "end_line": 12, "replacement": "..."}，其中 start_line 和 end_line 都是包含边界（1-based，与 file_read 左侧行号相同）
             session_id: 会话ID（必填）
 
         Returns:
@@ -738,7 +794,8 @@ class FileSystemTool:
                         (
                             f"Operation {index + 1} did not replace any lines "
                             f"(start_line={requested_start}, end_line={requested_end}). "
-                            "This tool uses 0-based inclusive start_line/end_line values; "
+                            "This tool uses 1-based inclusive start_line/end_line values "
+                            "(the same numbers shown by file_read); "
                             "check whether the line numbers are valid."
                         ),
                         file_path=file_path,
@@ -790,15 +847,14 @@ class FileSystemTool:
                 )
                 operation_summaries.append(op_summary)
 
-            if total_replacements == 0 and not line_range_ops:
-                return make_tool_error(
-                    ToolErrorCode.NO_MATCH,
-                    "No matches were found, so no replacements were made",
-                    file_path=file_path,
-                    replacements=0,
-                )
-
-            if total_replacements == 0 and line_range_ops:
+            if current_content == content:
+                if not line_range_ops:
+                    return make_tool_error(
+                        ToolErrorCode.NO_MATCH,
+                        "No matches were found, so no replacements were made",
+                        file_path=file_path,
+                        replacements=0,
+                    )
                 validation = self._build_validation_result(file_path, current_content)
                 return {
                     "status": "success",
@@ -820,6 +876,9 @@ class FileSystemTool:
                     else operation_summaries[0]["update_mode"],
                     "validation": validation,
                 }
+
+            if total_replacements == 0:
+                total_replacements = 1
 
             await sandbox.write_file(file_path, current_content, mode="overwrite")
             validation = self._build_validation_result(file_path, current_content)

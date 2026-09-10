@@ -46,8 +46,20 @@ _FILE_UPDATE_INPUT_SCHEMA = {
                     "search_pattern": {"type": "string"},
                     "replacement": {"type": "string"},
                     "replace_all": {"type": "boolean", "default": False},
-                    "start_line": {"type": "integer", "minimum": 0},
-                    "end_line": {"type": "integer", "minimum": 0},
+                    "start_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Inclusive 1-based start line; same numbers as file_read"
+                        ),
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Inclusive 1-based end line; same numbers as file_read"
+                        ),
+                    },
                 },
                 "required": ["update_mode", "replacement"],
                 "additionalProperties": False,
@@ -60,68 +72,112 @@ _FILE_UPDATE_INPUT_SCHEMA = {
 }
 
 
+def _apply_one_line_range(
+    content: str, operation: dict[str, Any], index: int
+) -> tuple[str, int]:
+    start = operation.get("start_line")
+    end = operation.get("end_line")
+    replacement = operation.get("replacement")
+    if (
+        not isinstance(start, int)
+        or not isinstance(end, int)
+        or start < 1
+        or end < start
+    ):
+        raise ValueError(f"operation {index}: invalid 1-based inclusive line range")
+    lines = content.splitlines(keepends=True)
+    if end > len(lines):
+        raise ValueError(f"operation {index}: line range is outside file")
+    start_index = start - 1
+    suffix = "\n" if lines[end - 1].endswith("\n") and replacement else ""
+    lines[start_index:end] = [replacement + suffix]
+    return "".join(lines), end - start + 1
+
+
+def _apply_one_search_replace(
+    content: str, operation: dict[str, Any], index: int
+) -> tuple[str, int]:
+    pattern = operation.get("search_pattern")
+    replacement = operation.get("replacement")
+    if not isinstance(pattern, str) or not pattern:
+        raise ValueError(f"operation {index}: search_pattern is required")
+    replace_all = bool(operation.get("replace_all", False))
+    literal_count = content.count(pattern)
+    if literal_count:
+        if literal_count > 1 and not replace_all:
+            raise ValueError(
+                f"operation {index}: search_pattern matched multiple times"
+            )
+        count = literal_count if replace_all else 1
+        return content.replace(pattern, replacement, 0 if replace_all else 1), count
+    regex = re.compile(pattern, re.MULTILINE)
+    matches = list(regex.finditer(content))
+    if not matches:
+        raise ValueError(f"operation {index}: search_pattern was not found")
+    if len(matches) > 1 and not replace_all:
+        raise ValueError(
+            f"operation {index}: search_pattern matched multiple times"
+        )
+    updated, count = regex.subn(
+        replacement, content, count=0 if replace_all else 1
+    )
+    return updated, count
+
+
 def _apply_update_operations(
     content: str, operations: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]], int]:
-    summaries: list[dict[str, Any]] = []
-    replacements = 0
+    """Apply updates like v1: all line_range ops use original-file line
+    numbers and run from the bottom of the file upward, then search_replace
+    ops run in list order.
+    """
+    line_range_ops: list[tuple[int, dict[str, Any]]] = []
+    search_ops: list[tuple[int, dict[str, Any]]] = []
     for index, operation in enumerate(operations):
-        mode = operation.get("update_mode")
         replacement = operation.get("replacement")
         if not isinstance(replacement, str):
             raise ValueError(f"operation {index}: replacement must be a string")
+        mode = operation.get("update_mode")
         if mode == "line_range":
-            start = operation.get("start_line")
-            end = operation.get("end_line")
-            if (
-                not isinstance(start, int)
-                or not isinstance(end, int)
-                or end < start
-            ):
-                raise ValueError(f"operation {index}: invalid inclusive line range")
-            lines = content.splitlines(keepends=True)
-            if start < 0 or end >= len(lines):
-                raise ValueError(f"operation {index}: line range is outside file")
-            suffix = "\n" if lines[end].endswith("\n") and replacement else ""
-            lines[start : end + 1] = [replacement + suffix]
-            content = "".join(lines)
-            count = end - start + 1
+            line_range_ops.append((index, operation))
         elif mode == "search_replace":
-            pattern = operation.get("search_pattern")
-            if not isinstance(pattern, str) or not pattern:
-                raise ValueError(f"operation {index}: search_pattern is required")
-            literal_count = content.count(pattern)
-            replace_all = bool(operation.get("replace_all", False))
-            if literal_count:
-                if literal_count > 1 and not replace_all:
-                    raise ValueError(
-                        f"operation {index}: search_pattern matched multiple times"
-                    )
-                count = literal_count if replace_all else 1
-                content = content.replace(pattern, replacement, 0 if replace_all else 1)
-            else:
-                regex = re.compile(pattern, re.MULTILINE)
-                matches = list(regex.finditer(content))
-                if not matches:
-                    raise ValueError(
-                        f"operation {index}: search_pattern was not found"
-                    )
-                if len(matches) > 1 and not replace_all:
-                    raise ValueError(
-                        f"operation {index}: search_pattern matched multiple times"
-                    )
-                content, count = regex.subn(
-                    replacement, content, count=0 if replace_all else 1
-                )
+            search_ops.append((index, operation))
         else:
             raise ValueError(
                 f"operation {index}: update_mode must be search_replace or line_range"
             )
-        replacements += count
-        summaries.append({"index": index, "mode": mode, "replacements": count})
+
+    summaries: dict[int, dict[str, Any]] = {}
+    for index, operation in sorted(
+        line_range_ops,
+        key=lambda item: (
+            -item[1]["start_line"]
+            if isinstance(item[1].get("start_line"), int)
+            else -1,
+            -item[1]["end_line"]
+            if isinstance(item[1].get("end_line"), int)
+            else -1,
+        ),
+    ):
+        content, count = _apply_one_line_range(content, operation, index)
+        summaries[index] = {
+            "index": index,
+            "mode": "line_range",
+            "replacements": count,
+        }
+
+    for index, operation in search_ops:
+        content, count = _apply_one_search_replace(content, operation, index)
+        summaries[index] = {
+            "index": index,
+            "mode": "search_replace",
+            "replacements": count,
+        }
+
     if not summaries:
         raise ValueError("operations must contain at least one update")
-    return content, summaries, replacements
+    ordered = [summaries[index] for index in sorted(summaries)]
+    return content, ordered, sum(item["replacements"] for item in ordered)
 
 
 def _known_not_applied(exc: Exception) -> SageV2Error:
@@ -181,12 +237,16 @@ def _update_operations_are_applied(
                     return False
         elif mode == "line_range":
             start = operation.get("start_line")
-            if not isinstance(start, int) or start < 0:
+            if not isinstance(start, int) or start < 1:
                 return False
             replacement_lines = replacement.splitlines()
             if not replacement_lines:
                 return False
-            if lines[start : start + len(replacement_lines)] != replacement_lines:
+            start_index = start - 1
+            if (
+                lines[start_index : start_index + len(replacement_lines)]
+                != replacement_lines
+            ):
                 return False
         else:
             return False
@@ -226,28 +286,39 @@ class FileSystemTools:
         self._patch_lock = asyncio.Lock()
 
     @tool(
-        description="Read text file within a line range.",
+        description=(
+            "Read text file within a 1-based inclusive line range. "
+            "Displayed line numbers match start_line/end_line and file_update."
+        ),
         side_effect_level=SideEffectLevel.READ,
     )
     async def file_read(
         self,
         file_path: str,
         invocation: ToolInvocation,
-        start_line: int = 0,
+        start_line: int = 1,
         end_line: int | None = 400,
         include_line_numbers: bool = True,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         del session_id
+        if start_line < 1 or (end_line is not None and end_line < 1):
+            raise ValueError(
+                "start_line and end_line are 1-based inclusive; the first line is 1"
+            )
+        if end_line is not None and end_line < start_line:
+            raise ValueError("start_line cannot be greater than end_line")
         content = await self.runtime.read_text(file_path, invocation)
         lines = content.splitlines()
-        start = max(0, start_line)
-        end = len(lines) if end_line is None else min(len(lines), max(start, end_line))
-        selected = lines[start:end]
+        start_index = start_line - 1
+        end_exclusive = (
+            len(lines) if end_line is None else min(len(lines), end_line)
+        )
+        selected = lines[start_index:end_exclusive]
         if include_line_numbers:
             rendered = "\n".join(
-                f"{index + 1:>6}\t{line}"
-                for index, line in enumerate(selected, start=start)
+                f"{index:>6}\t{line}"
+                for index, line in enumerate(selected, start=start_line)
             )
         else:
             rendered = "\n".join(selected)
@@ -255,8 +326,8 @@ class FileSystemTools:
             "status": "success",
             "file_path": file_path,
             "content": rendered,
-            "start_line": start,
-            "end_line": end,
+            "start_line": start_line,
+            "end_line": end_exclusive,
             "total_lines": len(lines),
         }
 
@@ -286,8 +357,10 @@ class FileSystemTools:
 
     @tool(
         description=(
-            "Update one text file with search_replace or inclusive line_range "
-            "operations."
+            "Update one text file with search_replace or 1-based inclusive "
+            "line_range operations. Line numbers match file_read. Multiple "
+            "line_range ops use original-file line numbers and are applied "
+            "from the bottom of the file upward."
         ),
         input_schema=_FILE_UPDATE_INPUT_SCHEMA,
         side_effect_level=SideEffectLevel.WRITE,

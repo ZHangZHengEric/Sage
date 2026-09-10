@@ -58,8 +58,16 @@ FIELD_I18N: Dict[str, Dict[str, str]] = {
         "文件虚拟路径", "File virtual path", "Caminho virtual do arquivo"
     ),
     "path": _field("搜索根目录路径", "Search root path", "Caminho raiz da busca"),
-    "start_line": _field("起始行号", "Start line number", "Número da linha inicial"),
-    "end_line": _field("结束行号", "End line number", "Número da linha final"),
+    "start_line": _field(
+        "起始行号（从 1 开始，含该行）",
+        "Start line number (1-based, inclusive)",
+        "Número da linha inicial (1-based, inclusive)",
+    ),
+    "end_line": _field(
+        "结束行号（从 1 开始，含该行）",
+        "End line number (1-based, inclusive)",
+        "Número da linha final (1-based, inclusive)",
+    ),
     "include_line_numbers": _field(
         "是否包含行号",
         "Whether to include line numbers",

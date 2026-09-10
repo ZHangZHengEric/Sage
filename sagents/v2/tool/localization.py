@@ -22,19 +22,19 @@ def _text(zh: str, en: str, pt: str) -> ToolText:
 
 _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
     "file_read": _text(
-        "读取文本文件指定行范围内容。",
-        "Read text from a selected line range in a file.",
-        "Ler um intervalo de linhas de um arquivo de texto.",
+        "读取文本文件指定行范围内容。行号从 1 开始、两端都包含，与左侧展示和 file_update 一致。",
+        "Read text from a 1-based inclusive line range; displayed numbers match file_update.",
+        "Ler um intervalo de linhas 1-based inclusive; os números coincidem com file_update.",
     ),
     "file_write": _text(
-        "写入文本到文件。适合短内容；较长代码或文档请拆成多次追加写入。",
-        "Write text to a file. Use multiple append calls for longer code or documents.",
-        "Gravar texto em um arquivo; use várias chamadas de anexação para conteúdo longo.",
+        "写入文本到文件。mode=overwrite 覆盖整个文件，append 追加到末尾。",
+        "Write text to a file. mode=overwrite replaces the whole file; append adds to the end.",
+        "Gravar texto em um arquivo. overwrite substitui o arquivo; append acrescenta ao final.",
     ),
     "file_update": _text(
-        "更新单个文件的局部内容。优先使用局部替换或按行区间替换，不要整文件重写。",
-        "Update targeted parts of one file. Prefer local or line-range replacement over rewriting the whole file.",
-        "Atualizar partes específicas de um arquivo sem reescrevê-lo por completo.",
+        "更新单个文件的局部内容。优先使用局部替换或按行区间替换，不要整文件重写。line_range 行号从 1 开始、两端都包含，与 file_read 左侧行号相同。同一调用内多个 line_range 都按原文件行号、从文件底部往上应用。",
+        "Update targeted parts of one file. Prefer local or line-range replacement over rewriting the whole file. line_range uses 1-based inclusive numbers, same as file_read. Multiple line_range ops use original-file line numbers and are applied from the bottom upward.",
+        "Atualizar partes específicas de um arquivo sem reescrevê-lo por completo. line_range usa linhas 1-based inclusive, iguais ao file_read. Vários line_range usam as linhas do arquivo original e são aplicados de baixo para cima.",
     ),
     "apply_patch": _text(
         "一次性对工作区中的一个或多个文本文件应用结构化补丁；所有操作会先预检，失败时尽力回滚。",
@@ -159,12 +159,14 @@ _FIELD_DESCRIPTIONS: dict[str, ToolText] = {
         "Caminho virtual raiz para busca",
     ),
     "start_line": _text(
-        "起始行号，从 0 开始", "Zero-based start line", "Linha inicial baseada em zero"
+        "起始行号，从 1 开始，含该行",
+        "Start line (1-based, inclusive)",
+        "Linha inicial (1-based, inclusive)",
     ),
     "end_line": _text(
-        "结束行号；具体是否包含边界由该工具定义",
-        "End line; boundary behavior is defined by the tool",
-        "Linha final; o limite depende da ferramenta",
+        "结束行号，从 1 开始，含该行",
+        "End line (1-based, inclusive)",
+        "Linha final (1-based, inclusive)",
     ),
     "include_line_numbers": _text(
         "是否在结果中包含行号",
@@ -458,9 +460,9 @@ _TOOL_FIELD_OVERRIDES: dict[tuple[str, str], ToolText] = {
         "Modo: overwrite substitui; append acrescenta",
     ),
     ("file_update", "operations"): _text(
-        "更新操作列表；每项选择 search_replace 或 line_range，并只提交需要改变的范围",
-        "Update operations; each selects search_replace or line_range and targets only the content that must change",
-        "Operações search_replace ou line_range apenas para o conteúdo alterado",
+        "更新操作列表；每项选择 search_replace 或 line_range。line_range 的 start_line/end_line 为 1-based 闭区间，与 file_read 左侧行号相同；多个区间都按原文件行号、从下往上应用",
+        "Update operations; each selects search_replace or line_range. line_range start_line/end_line are 1-based inclusive, same as file_read; multiple ranges use original-file line numbers and apply bottom-up",
+        "Operações search_replace ou line_range; line_range usa linhas 1-based inclusive, iguais ao file_read; vários intervalos usam o arquivo original e aplicam de baixo para cima",
     ),
     ("grep", "pattern"): _text(
         "正则表达式；默认按 ripgrep/PCRE2 风格解析",

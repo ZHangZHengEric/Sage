@@ -18,6 +18,8 @@ try:
 except Exception:  # pragma: no cover - yaml should usually be available
     yaml = None
 
+from sagents.utils.strict_yaml import load_unique_yaml
+
 
 class FileContentValidator:
     """Validate common text file formats after write/update operations."""
@@ -141,7 +143,7 @@ class FileContentValidator:
                 "errors": [],
             }
         try:
-            yaml.safe_load(content)
+            load_unique_yaml(content)
             return FileContentValidator._success(extension, "yaml")
         except yaml.YAMLError as exc:  # type: ignore[attr-defined]
             message = f"YAML syntax error: {exc}"
