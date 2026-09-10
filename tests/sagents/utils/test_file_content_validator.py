@@ -94,3 +94,10 @@ def test_unsupported_extension_is_skipped():
     assert result["status"] == "skipped"
     assert result["skipped"] is True
     assert result["passed"] is True
+
+
+def test_yaml_validation_accepts_merge_keys_with_override():
+    result = FileContentValidator.validate(
+        "compose.yaml", "base: &base {image: alpine}\nservice: {<<: *base, image: ubuntu}"
+    )
+    assert result["passed"] is True

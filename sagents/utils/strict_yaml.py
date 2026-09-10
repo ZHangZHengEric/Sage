@@ -1,50 +1,51 @@
-"""YAML 1.2-style loader that rejects duplicate mapping keys.
+"""Safe YAML loading with duplicate explicit keys rejected.
 
-PyYAML ``safe_load`` silently keeps the last duplicate key. Compose-style
-strict parsers fail. Sage manifests already reject duplicates; file
-validation should use the same rule.
+Merge keys retain PyYAML semantics: explicit values override inherited values.
+Keep this implementation local to its package so v2 remains independently usable.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-try:
-    import yaml
-except Exception:  # pragma: no cover - yaml should usually be available
-    yaml = None
+import yaml
 
 
-if yaml is not None:
-
-    class UniqueKeyLoader(yaml.SafeLoader):
-        pass
-
-    def _construct_mapping(
-        loader: UniqueKeyLoader, node: Any, deep: bool = False
-    ) -> dict[Any, Any]:
-        mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
-            key = loader.construct_object(key_node, deep=deep)
-            if key in mapping:
+class UniqueKeyLoader(yaml.SafeLoader):
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        flattened = getattr(self, "_unique_flattened", None)
+        if flattened is None:
+            flattened = self._unique_flattened = set()
+        if id(node) in flattened:
+            return
+        # Check before flattening: inherited keys may legally be overridden.
+        seen: set[Any] = set()
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                key = "<<"
+            else:
+                key = self.construct_object(key_node, deep=True)
+            try:
+                duplicate = key in seen
+                seen.add(key)
+            except TypeError as exc:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found unhashable key",
+                    key_node.start_mark,
+                ) from exc
+            if duplicate:
                 raise yaml.constructor.ConstructorError(
                     "while constructing a mapping",
                     node.start_mark,
                     f"found duplicate key {key!r}",
                     key_node.start_mark,
                 )
-            mapping[key] = loader.construct_object(value_node, deep=deep)
-        return mapping
-
-    UniqueKeyLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
-    )
-else:  # pragma: no cover
-    UniqueKeyLoader = None  # type: ignore[misc,assignment]
+        flattened.add(id(node))
+        super().flatten_mapping(node)
 
 
 def load_unique_yaml(content: str) -> Any:
-    """Load YAML, rejecting duplicate keys in any mapping."""
-    if yaml is None:
-        raise RuntimeError("PyYAML is not installed")
+    """Load safe YAML, including anchors and merges, without duplicate keys."""
     return yaml.load(content, Loader=UniqueKeyLoader)

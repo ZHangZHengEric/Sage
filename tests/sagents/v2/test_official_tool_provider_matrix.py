@@ -468,7 +468,7 @@ async def test_file_update_reconciles_from_workspace_after_result_loss(
 
 
 @pytest.mark.asyncio
-async def test_file_update_reconciliation_reports_known_failure_when_absent(
+async def test_file_update_reconciliation_preserves_unknown_when_evidence_is_absent(
     tmp_path: Path,
 ):
     plugin = await plugin_for(tmp_path)
@@ -489,10 +489,11 @@ async def test_file_update_reconciliation_reports_known_failure_when_absent(
 
     result = await plugin.executor.reconcile_call(update, CONTEXT)
 
-    assert result.state == ReconcileState.FAILED
-    assert result.result is not None
-    assert result.result.error is not None
-    assert result.result.error.metadata["side_effect_state"] == "not_applied"
+    assert result.state == ReconcileState.UNKNOWN
+    assert result.result is None
+    assert result.error is not None
+    assert not result.error.safe_to_resume
+    assert result.error.metadata["side_effect_state"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -833,3 +834,48 @@ async def test_non_cooperative_tool_reports_cancel_as_unsupported(tmp_path: Path
     execution.cancel()
     with pytest.raises(asyncio.CancelledError):
         await execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replacement, expected_state",
+    [
+        ("B1\nB2", ReconcileState.SUCCEEDED),
+        ("", ReconcileState.UNKNOWN),
+    ],
+)
+async def test_line_batch_reconciles_after_worker_restart(
+    tmp_path, replacement, expected_state
+):
+    (tmp_path / "notes.txt").write_text("a\nb\nc\nd\ne\nf\n")
+    update = call(
+        "file_update",
+        {
+            "file_path": "notes.txt",
+            "operations": [
+                {
+                    "update_mode": "line_range",
+                    "start_line": 2,
+                    "end_line": 2,
+                    "replacement": replacement,
+                },
+                {
+                    "update_mode": "line_range",
+                    "start_line": 5,
+                    "end_line": 5,
+                    "replacement": "E",
+                },
+            ],
+        },
+    )
+    first = await plugin_for(tmp_path)
+    result = await first.executor.execute(update, CONTEXT)
+    assert result.error is None
+    expected = "a\n" + (replacement + "\n" if replacement else "") + "c\nd\nE\nf\n"
+    assert (tmp_path / "notes.txt").read_text() == expected
+    recovered = await plugin_for(tmp_path)
+    result = await recovered.executor.reconcile_call(update, CONTEXT)
+    assert result.state == expected_state
+    if expected_state == ReconcileState.UNKNOWN:
+        assert not result.error.safe_to_resume
+    assert (tmp_path / "notes.txt").read_text() == expected

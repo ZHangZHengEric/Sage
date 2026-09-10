@@ -188,9 +188,7 @@ async def test_file_update_skips_write_when_replacement_matches():
 
     assert result["status"] == "success"
     assert result["replacements"] == 0
-    assert (
-        "unchanged" in result["message"].lower() or "未发生变化" in result["message"]
-    )
+    assert "unchanged" in result["message"].lower() or "未发生变化" in result["message"]
     assert sandbox.writes == []
     assert result["original_length"] == result["new_length"]
     assert sandbox.content == original
@@ -295,3 +293,59 @@ def test_apply_search_update_invalid_regex_returns_error():
     )
     assert result["status"] == "error"
     assert result["error_code"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_overlapping_line_ranges_do_not_write():
+    sandbox = _FakeSandbox("a\nb\nc\nd\n")
+    tool = FileSystemTool()
+    tool._get_sandbox = lambda session_id: sandbox
+    result = await tool.file_update(
+        "notes.txt",
+        operations=[
+            {
+                "update_mode": "line_range",
+                "start_line": 2,
+                "end_line": 3,
+                "replacement": "B",
+            },
+            {
+                "update_mode": "line_range",
+                "start_line": 3,
+                "end_line": 4,
+                "replacement": "C",
+            },
+        ],
+        session_id="session-1",
+    )
+    assert result["status"] == "error"
+    assert sandbox.writes == []
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_last_line_replacement_preserves_terminator(newline):
+    original = "a" + newline + "b" + newline
+    result = FileSystemTool._apply_line_range_update(original, "b", 2, 2)
+    assert result["content"] == original
+    assert result["replacements"] == 0
+
+
+@pytest.mark.asyncio
+async def test_identical_search_replacement_is_success_without_write():
+    sandbox = _FakeSandbox("a\nb\n")
+    tool = FileSystemTool()
+    tool._get_sandbox = lambda session_id: sandbox
+    result = await tool.file_update(
+        "notes.txt",
+        operations=[
+            {
+                "update_mode": "search_replace",
+                "search_pattern": "b",
+                "replacement": "b",
+            },
+        ],
+        session_id="session-1",
+    )
+    assert result["status"] == "success"
+    assert result["replacements"] == 0
+    assert sandbox.writes == []

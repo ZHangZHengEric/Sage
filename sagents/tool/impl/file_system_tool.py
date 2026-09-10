@@ -76,7 +76,6 @@ class FileSystemTool:
             )
 
         normalized_start = start_line - 1
-        normalized_end = end_line - 1
         normalized_end_exclusive = end_line
 
         original_segment = "".join(lines[normalized_start:normalized_end_exclusive])
@@ -84,11 +83,15 @@ class FileSystemTool:
         has_suffix = normalized_end_exclusive < total_lines
 
         if (
-            has_suffix
-            and replacement_segment
+            replacement_segment
             and not replacement_segment.endswith(("\n", "\r"))
         ):
-            replacement_segment += "\n"
+            if original_segment.endswith("\r\n"):
+                replacement_segment += "\r\n"
+            elif original_segment.endswith(("\n", "\r")):
+                replacement_segment += original_segment[-1]
+            elif has_suffix:
+                replacement_segment += "\n"
 
         new_content = (
             "".join(lines[:normalized_start])
@@ -758,6 +761,17 @@ class FileSystemTool:
                     op_summary["search_pattern"] = op.get("search_pattern")  # pyright: ignore[reportArgumentType]
                     other_ops.append((index, op, op_summary))
 
+            previous_end = 0
+            for index, op, _ in sorted(line_range_ops, key=lambda item: item[1]["start_line"]):
+                if op["start_line"] <= previous_end:
+                    return make_tool_error(
+                        ToolErrorCode.INVALID_ARGUMENT,
+                        "Overlapping line ranges are ambiguous; use disjoint original-file ranges",
+                        file_path=file_path,
+                        failed_operation_index=index,
+                    )
+                previous_end = op["end_line"]
+
             for index, op, op_summary in sorted(
                 line_range_ops,
                 key=lambda item: (
@@ -848,13 +862,6 @@ class FileSystemTool:
                 operation_summaries.append(op_summary)
 
             if current_content == content:
-                if not line_range_ops:
-                    return make_tool_error(
-                        ToolErrorCode.NO_MATCH,
-                        "No matches were found, so no replacements were made",
-                        file_path=file_path,
-                        replacements=0,
-                    )
                 validation = self._build_validation_result(file_path, current_content)
                 return {
                     "status": "success",

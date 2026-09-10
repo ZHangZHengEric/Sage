@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from sagents.utils.strict_yaml import load_unique_yaml
+from sagents.v2.package.strict_yaml import load_unique_yaml
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.root import SageManifest
 
