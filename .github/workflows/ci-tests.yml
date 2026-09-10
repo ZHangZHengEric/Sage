@@ -39,6 +39,12 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirements.txt
 
+      - name: Install Linux Sandbox Dependency
+        if: matrix.suite != 'common'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip

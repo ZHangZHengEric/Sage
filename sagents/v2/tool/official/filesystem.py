@@ -15,7 +15,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.items import JsonBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.tool import (
     ReconcileResult,
@@ -27,6 +27,7 @@ from sagents.v2.tool import (
     tool,
 )
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
+from sagents.v2.package.strict_yaml import load_unique_yaml
 
 
 _FILE_UPDATE_INPUT_SCHEMA = {
@@ -46,8 +47,20 @@ _FILE_UPDATE_INPUT_SCHEMA = {
                     "search_pattern": {"type": "string"},
                     "replacement": {"type": "string"},
                     "replace_all": {"type": "boolean", "default": False},
-                    "start_line": {"type": "integer", "minimum": 0},
-                    "end_line": {"type": "integer", "minimum": 0},
+                    "start_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Inclusive 1-based start line; same numbers as file_read"
+                        ),
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Inclusive 1-based end line; same numbers as file_read"
+                        ),
+                    },
                 },
                 "required": ["update_mode", "replacement"],
                 "additionalProperties": False,
@@ -60,68 +73,127 @@ _FILE_UPDATE_INPUT_SCHEMA = {
 }
 
 
+def _apply_one_line_range(
+    content: str, operation: dict[str, Any], index: int
+) -> tuple[str, int]:
+    start = operation.get("start_line")
+    end = operation.get("end_line")
+    replacement = operation.get("replacement")
+    if (
+        not isinstance(start, int)
+        or not isinstance(end, int)
+        or start < 1
+        or end < start
+    ):
+        raise ValueError(f"operation {index}: invalid 1-based inclusive line range")
+    lines = content.splitlines(keepends=True)
+    if end > len(lines):
+        raise ValueError(f"operation {index}: line range is outside file")
+    start_index = start - 1
+    segment = "".join(lines[start_index:end])
+    if replacement and not replacement.endswith(("\n", "\r")):
+        if segment.endswith("\r\n"):
+            replacement += "\r\n"
+        elif segment.endswith(("\n", "\r")):
+            replacement += segment[-1]
+    lines[start_index:end] = [replacement]
+    return "".join(lines), int(segment != replacement)
+
+
+def _apply_one_search_replace(
+    content: str, operation: dict[str, Any], index: int
+) -> tuple[str, int]:
+    pattern = operation.get("search_pattern")
+    replacement = operation.get("replacement")
+    if not isinstance(pattern, str) or not pattern:
+        raise ValueError(f"operation {index}: search_pattern is required")
+    replace_all = bool(operation.get("replace_all", False))
+    literal_count = content.count(pattern)
+    if literal_count:
+        if literal_count > 1 and not replace_all:
+            raise ValueError(
+                f"operation {index}: search_pattern matched multiple times"
+            )
+        count = literal_count if replace_all else 1
+        return content.replace(pattern, replacement, -1 if replace_all else 1), count
+    regex = re.compile(pattern, re.MULTILINE)
+    matches = list(regex.finditer(content))
+    if not matches:
+        raise ValueError(f"operation {index}: search_pattern was not found")
+    if len(matches) > 1 and not replace_all:
+        raise ValueError(f"operation {index}: search_pattern matched multiple times")
+    updated, count = regex.subn(replacement, content, count=0 if replace_all else 1)
+    return updated, count
+
+
 def _apply_update_operations(
     content: str, operations: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]], int]:
-    summaries: list[dict[str, Any]] = []
-    replacements = 0
+    """Apply updates like v1: all line_range ops use original-file line
+    numbers and run from the bottom of the file upward, then search_replace
+    ops run in list order.
+    """
+    line_range_ops: list[tuple[int, dict[str, Any]]] = []
+    search_ops: list[tuple[int, dict[str, Any]]] = []
     for index, operation in enumerate(operations):
-        mode = operation.get("update_mode")
         replacement = operation.get("replacement")
         if not isinstance(replacement, str):
             raise ValueError(f"operation {index}: replacement must be a string")
+        mode = operation.get("update_mode")
         if mode == "line_range":
-            start = operation.get("start_line")
-            end = operation.get("end_line")
-            if (
-                not isinstance(start, int)
-                or not isinstance(end, int)
-                or end < start
-            ):
-                raise ValueError(f"operation {index}: invalid inclusive line range")
-            lines = content.splitlines(keepends=True)
-            if start < 0 or end >= len(lines):
-                raise ValueError(f"operation {index}: line range is outside file")
-            suffix = "\n" if lines[end].endswith("\n") and replacement else ""
-            lines[start : end + 1] = [replacement + suffix]
-            content = "".join(lines)
-            count = end - start + 1
+            line_range_ops.append((index, operation))
         elif mode == "search_replace":
-            pattern = operation.get("search_pattern")
-            if not isinstance(pattern, str) or not pattern:
-                raise ValueError(f"operation {index}: search_pattern is required")
-            literal_count = content.count(pattern)
-            replace_all = bool(operation.get("replace_all", False))
-            if literal_count:
-                if literal_count > 1 and not replace_all:
-                    raise ValueError(
-                        f"operation {index}: search_pattern matched multiple times"
-                    )
-                count = literal_count if replace_all else 1
-                content = content.replace(pattern, replacement, 0 if replace_all else 1)
-            else:
-                regex = re.compile(pattern, re.MULTILINE)
-                matches = list(regex.finditer(content))
-                if not matches:
-                    raise ValueError(
-                        f"operation {index}: search_pattern was not found"
-                    )
-                if len(matches) > 1 and not replace_all:
-                    raise ValueError(
-                        f"operation {index}: search_pattern matched multiple times"
-                    )
-                content, count = regex.subn(
-                    replacement, content, count=0 if replace_all else 1
-                )
+            search_ops.append((index, operation))
         else:
             raise ValueError(
                 f"operation {index}: update_mode must be search_replace or line_range"
             )
-        replacements += count
-        summaries.append({"index": index, "mode": mode, "replacements": count})
+
+    previous_end = 0
+    for index, operation in sorted(
+        line_range_ops,
+        key=lambda item: (
+            item[1].get("start_line") if type(item[1].get("start_line")) is int else 0
+        ),
+    ):
+        start, end = operation.get("start_line"), operation.get("end_line")
+        if type(start) is not int or type(end) is not int or start < 1 or end < start:
+            raise ValueError(f"operation {index}: invalid 1-based inclusive line range")
+        if start <= previous_end:
+            raise ValueError(
+                f"operation {index}: overlapping line ranges are ambiguous"
+            )
+        previous_end = end
+
+    summaries: dict[int, dict[str, Any]] = {}
+    for index, operation in sorted(
+        line_range_ops,
+        key=lambda item: (
+            -item[1]["start_line"]
+            if isinstance(item[1].get("start_line"), int)
+            else -1,
+            -item[1]["end_line"] if isinstance(item[1].get("end_line"), int) else -1,
+        ),
+    ):
+        content, count = _apply_one_line_range(content, operation, index)
+        summaries[index] = {
+            "index": index,
+            "mode": "line_range",
+            "replacements": count,
+        }
+
+    for index, operation in search_ops:
+        content, count = _apply_one_search_replace(content, operation, index)
+        summaries[index] = {
+            "index": index,
+            "mode": "search_replace",
+            "replacements": count,
+        }
+
     if not summaries:
         raise ValueError("operations must contain at least one update")
-    return content, summaries, replacements
+    ordered = [summaries[index] for index in sorted(summaries)]
+    return content, ordered, sum(item["replacements"] for item in ordered)
 
 
 def _known_not_applied(exc: Exception) -> SageV2Error:
@@ -154,6 +226,40 @@ def _update_operations_are_applied(
     if not operations:
         return False
     lines = content.splitlines()
+    line_ops = [
+        op
+        for op in operations
+        if isinstance(op, dict) and op.get("update_mode") == "line_range"
+    ]
+    offsets: dict[int, int] = {}
+    if line_ops:
+        if len(line_ops) != len(operations):
+            return False
+        shift = 0
+        previous_end = 0
+        for op in sorted(
+            line_ops,
+            key=lambda op: (
+                op.get("start_line") if type(op.get("start_line")) is int else 0
+            ),
+        ):
+            start, end, replacement = (
+                op.get("start_line"),
+                op.get("end_line"),
+                op.get("replacement"),
+            )
+            if (
+                type(start) is not int
+                or type(end) is not int
+                or start <= previous_end
+                or end < start
+                or not isinstance(replacement, str)
+                or not replacement
+            ):
+                return False
+            offsets[start] = start - 1 + shift
+            shift += len(replacement.splitlines()) - (end - start + 1)
+            previous_end = end
     for operation in operations:
         if not isinstance(operation, dict):
             return False
@@ -181,40 +287,35 @@ def _update_operations_are_applied(
                     return False
         elif mode == "line_range":
             start = operation.get("start_line")
-            if not isinstance(start, int) or start < 0:
+            if not isinstance(start, int) or start < 1:
                 return False
             replacement_lines = replacement.splitlines()
             if not replacement_lines:
                 return False
-            if lines[start : start + len(replacement_lines)] != replacement_lines:
+            start_index = offsets[start]
+            if (
+                lines[start_index : start_index + len(replacement_lines)]
+                != replacement_lines
+            ):
                 return False
         else:
             return False
     return True
 
 
-def _reconciled_file_update_failure(
-    call: ToolCall, message: str
-) -> ReconcileResult:
-    error = RuntimeErrorInfo(
-        code="tool.file_update_not_applied",
-        category=ErrorCategory.VALIDATION,
-        message=message,
-        safe_to_resume=True,
-        metadata={"side_effect_state": "not_applied", "reconciled": True},
-    )
-    result = ToolExecutionResult(
-        tool_call_id=call.tool_call_id,
-        operation_id=call.operation_id,
-        content=(TextBlock(text=message),),
-        error=error,
-        metadata={"reconciled_from_workspace": True},
-    )
+def _unresolved_file_update(call: ToolCall, message: str) -> ReconcileResult:
+    # Missing evidence is not proof that a write never happened (deletions,
+    # intervening edits, unavailable workspace, or mixed update operations).
     return ReconcileResult(
         operation_id=call.operation_id,
-        state=ReconcileState.FAILED,
-        result=result,
-        error=error,
+        state=ReconcileState.UNKNOWN,
+        error=RuntimeErrorInfo(
+            code="tool.file_update_unknown",
+            category=ErrorCategory.VALIDATION,
+            message=message,
+            safe_to_resume=False,
+            metadata={"side_effect_state": "unknown", "reconciled": True},
+        ),
     )
 
 
@@ -225,29 +326,58 @@ class FileSystemTools:
         self.runtime = runtime
         self._patch_lock = asyncio.Lock()
 
+    async def _yaml_validation(
+        self, file_path: str, invocation: ToolInvocation, content: str | None = None
+    ) -> dict[str, Any]:
+        if PurePosixPath(file_path).suffix.lower() not in {".yaml", ".yml"}:
+            return {"status": "skipped", "passed": True, "validator": None}
+        try:
+            if content is None:
+                content = await self.runtime.read_text(file_path, invocation)
+            load_unique_yaml(content)
+        except Exception as exc:
+            # The write has already succeeded. A diagnostic failure must never
+            # masquerade as a failed write or encourage replay of an append.
+            return {
+                "status": "error",
+                "passed": False,
+                "validator": "yaml",
+                "message": str(exc),
+            }
+        return {"status": "passed", "passed": True, "validator": "yaml"}
+
     @tool(
-        description="Read text file within a line range.",
+        description=(
+            "Read text file within a 1-based inclusive line range. "
+            "Displayed line numbers match start_line/end_line and file_update."
+        ),
         side_effect_level=SideEffectLevel.READ,
     )
     async def file_read(
         self,
         file_path: str,
         invocation: ToolInvocation,
-        start_line: int = 0,
+        start_line: int = 1,
         end_line: int | None = 400,
         include_line_numbers: bool = True,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         del session_id
+        if start_line < 1 or (end_line is not None and end_line < 1):
+            raise ValueError(
+                "start_line and end_line are 1-based inclusive; the first line is 1"
+            )
+        if end_line is not None and end_line < start_line:
+            raise ValueError("start_line cannot be greater than end_line")
         content = await self.runtime.read_text(file_path, invocation)
         lines = content.splitlines()
-        start = max(0, start_line)
-        end = len(lines) if end_line is None else min(len(lines), max(start, end_line))
-        selected = lines[start:end]
+        start_index = start_line - 1
+        end_exclusive = len(lines) if end_line is None else min(len(lines), end_line)
+        selected = lines[start_index:end_exclusive]
         if include_line_numbers:
             rendered = "\n".join(
-                f"{index + 1:>6}\t{line}"
-                for index, line in enumerate(selected, start=start)
+                f"{index:>6}\t{line}"
+                for index, line in enumerate(selected, start=start_line)
             )
         else:
             rendered = "\n".join(selected)
@@ -255,8 +385,8 @@ class FileSystemTools:
             "status": "success",
             "file_path": file_path,
             "content": rendered,
-            "start_line": start,
-            "end_line": end,
+            "start_line": start_line,
+            "end_line": end_exclusive,
             "total_lines": len(lines),
         }
 
@@ -282,12 +412,17 @@ class FileSystemTools:
             "message": f"Wrote {len(content)} characters",
             "file_path": file_path,
             "mode": mode,
+            "validation": await self._yaml_validation(
+                file_path, invocation, content if mode == "overwrite" else None
+            ),
         }
 
     @tool(
         description=(
-            "Update one text file with search_replace or inclusive line_range "
-            "operations."
+            "Update one text file with search_replace or 1-based inclusive "
+            "line_range operations. Line numbers match file_read. Multiple "
+            "line_range ops use original-file line numbers and are applied "
+            "from the bottom of the file upward."
         ),
         input_schema=_FILE_UPDATE_INPUT_SCHEMA,
         side_effect_level=SideEffectLevel.WRITE,
@@ -303,20 +438,24 @@ class FileSystemTools:
     ) -> dict[str, Any]:
         del session_id
         try:
-            content = await self.runtime.read_text(file_path, invocation)
+            original = await self.runtime.read_text(file_path, invocation)
             content, summaries, replacements = _apply_update_operations(
-                content, operations or []
+                original, operations or []
             )
         except SageV2Error as exc:
             raise _known_not_applied(exc) from exc
         except Exception as exc:
             raise _known_not_applied(exc) from exc
-        await self.runtime.write_text(file_path, content, invocation)
+        if content != original:
+            await self.runtime.write_text(file_path, content, invocation)
+        else:
+            replacements = 0
         return {
             "status": "success",
             "file_path": file_path,
             "operations": summaries,
             "replacements": replacements,
+            "validation": await self._yaml_validation(file_path, invocation, content),
         }
 
     async def reconcile_file_update(
@@ -328,17 +467,18 @@ class FileSystemTools:
         file_path = call.arguments.get("file_path")
         operations = call.arguments.get("operations")
         if not isinstance(file_path, str) or not isinstance(operations, list):
-            return _reconciled_file_update_failure(
+            return _unresolved_file_update(
                 call, "file update arguments are unavailable"
             )
         try:
             content = await self.runtime.read_text(file_path, invocation)
             applied = _update_operations_are_applied(content, operations)
         except Exception as exc:
-            return _reconciled_file_update_failure(call, str(exc))
+            return _unresolved_file_update(call, str(exc))
         if not applied:
-            return _reconciled_file_update_failure(
-                call, "the requested changes are not present in the file"
+            return _unresolved_file_update(
+                call,
+                "current file contents cannot establish whether the update was applied",
             )
         result = ToolExecutionResult(
             tool_call_id=call.tool_call_id,

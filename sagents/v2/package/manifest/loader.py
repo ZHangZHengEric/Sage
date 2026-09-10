@@ -9,32 +9,9 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from sagents.v2.package.strict_yaml import load_unique_yaml
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.root import SageManifest
-
-
-class _UniqueKeyLoader(yaml.SafeLoader):
-    pass
-
-
-def _construct_mapping(loader: _UniqueKeyLoader, node, deep: bool = False):
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found duplicate key {key!r}",
-                key_node.start_mark,
-            )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
-)
 
 
 class SageManifestLoader:
@@ -75,7 +52,7 @@ class SageManifestLoader:
 
     def loads(self, content: str, *, environment: str | None = None) -> SageManifest:
         try:
-            raw = yaml.load(content, Loader=_UniqueKeyLoader)
+            raw = load_unique_yaml(content)
         except yaml.YAMLError as exc:
             raise _error("manifest.yaml_invalid", str(exc)) from exc
         if not isinstance(raw, dict):
