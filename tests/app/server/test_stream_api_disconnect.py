@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -117,6 +118,24 @@ async def test_disconnect_yields_chunks_before_break(_patch_chat_module):
 
     assert chunks == ["chunk-0\n", "chunk-1\n"]
     _patch_chat_module.interrupt.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_after_terminal_batch_does_not_interrupt_completed_run(
+    _patch_chat_module,
+):
+    async def source():
+        yield json.dumps({"type": "assistant_text", "content": "done"}) + "\n" + json.dumps(
+            {"type": "stream_end", "session_id": "completed"}
+        ) + "\n"
+        yield "late transport data\n"
+
+    chunks = [chunk async for chunk in chat_module.stream_api_with_disconnect_check(
+        source(), _FakeRequest(disconnect_at=1), asyncio.Lock(), "completed",
+    )]
+    assert len(chunks) == 1
+    _patch_chat_module.interrupt.assert_not_awaited()
+    _patch_chat_module.safe_release.assert_awaited_once()
 
 
 @pytest.mark.asyncio

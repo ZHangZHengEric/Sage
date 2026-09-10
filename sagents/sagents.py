@@ -492,7 +492,12 @@ class SAgent:
         finally:
             total_ms = int((time.time() - start_time) * 1000)
             logger.info(f"SAgent: 会话完整执行耗时 {total_ms} ms", session_id)
+            close_started = time.monotonic()
             await self.session_manager.aclose_session(session_id)
+            logger.info(
+                f"SAgent: session resources closed elapsed_ms="
+                f"{(time.monotonic() - close_started) * 1000:.1f}", session_id
+            )
 
     def _build_default_flow(
         self, agent_mode: Optional[str], max_loop_count: int

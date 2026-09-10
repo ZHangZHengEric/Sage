@@ -21,6 +21,7 @@ from common.core.i18n import t
 from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
+from common.utils.stream_batch import batch_stream_chunks
 from common.schemas.chat import (
     ChatRequest,
     SandboxApprovalDecisionRequest,
@@ -377,18 +378,32 @@ async def stream_api_with_disconnect_check(
     导致 sage-server 主线程 100% CPU 空转）。改为 ``break`` 后统一在 ``finally`` 里收尾。
     """
     client_disconnected = False
+    terminal_sent = False
     status = "completed"
     try:
         async for chunk in generator:
             if await request.is_disconnected():
                 logger.bind(session_id=session_id).info("Client disconnection detected")
-                client_disconnected = True
-                status = "disconnected"
+                client_disconnected = not terminal_sent
+                status = "completed" if terminal_sent else "disconnected"
                 break
+            for line in chunk.splitlines():
+                if '"stream_end"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if (
+                    isinstance(event, dict)
+                    and event.get("type") == "stream_end"
+                    and event.get("session_id") == session_id
+                ):
+                    terminal_sent = True
             yield chunk
     except asyncio.CancelledError:
-        client_disconnected = True
-        status = "cancelled"
+        client_disconnected = not terminal_sent
+        status = "completed" if terminal_sent else "cancelled"
         raise
     except Exception as e:
         status = "error"
@@ -507,10 +522,13 @@ async def chat(request: ChatRequest, http_request: Request):
     session_id = inner_request.session_id
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            _filter_stream_chunks(
-                chat_service.execute_chat_session(
-                    stream_service=stream_service,
+            batch_stream_chunks(
+                _filter_stream_chunks(
+                    chat_service.execute_chat_session(
+                        stream_service=stream_service,
+                    ),
                 ),
+                session_id=session_id,
             ),
             http_request,
             lock,
@@ -536,8 +554,9 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            chat_service.execute_chat_session(
-                stream_service=stream_service,
+            batch_stream_chunks(
+                chat_service.execute_chat_session(stream_service=stream_service),
+                session_id=session_id,
             ),
             http_request,
             lock,
