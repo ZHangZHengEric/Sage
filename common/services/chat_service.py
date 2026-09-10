@@ -47,6 +47,29 @@ from common.services.chat_utils import (
 from common.schemas.chat import CustomSubAgentConfig, StreamRequest
 
 TOKEN_USAGE_PERSIST_TIMEOUT_SECONDS = 30.0
+_FINALIZATION_TASKS: set[asyncio.Task] = set()
+
+
+async def _finish_chat_execution(stream_service, token_usage_payload) -> None:
+    started = time.monotonic()
+    try:
+        await _persist_token_usage_if_available(
+            stream_service, token_usage_payload=token_usage_payload,
+        )
+    finally:
+        logger.bind(session_id=stream_service.request.session_id).info(
+            "chat_token_persistence elapsed_ms={:.1f}",
+            (time.monotonic() - started) * 1000,
+        )
+        await _finalize_session_end(stream_service.request)
+
+
+def _finalization_done(task: asyncio.Task) -> None:
+    _FINALIZATION_TASKS.discard(task)
+    if not task.cancelled():
+        error = task.exception()
+        if error is not None:
+            logger.error("Chat finalization failed: {}", error)
 
 
 def _get_cfg() -> config.StartupConfig:
@@ -1432,6 +1455,9 @@ async def execute_chat_session(
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
             if current_token_usage is not None and not stream_end_emitted:
                 stream_end_emitted = True
+                logger.bind(session_id=session_id).info(
+                    "chat_stream_end_ready chunks={}", stream_counter,
+                )
                 yield build_stream_end()
 
         if not stream_end_emitted:
@@ -1439,11 +1465,15 @@ async def execute_chat_session(
             yield build_stream_end()
     finally:
         unregister_progress_queue(session_id)  # pyright: ignore[reportArgumentType]
-        await _persist_token_usage_if_available(
-            stream_service,
-            token_usage_payload=token_usage_payload,
+        # Clients may close HTTP after stream_end. Keep billing/state persistence
+        # owned by the server even if that cancellation reaches this generator.
+        finalization = asyncio.create_task(
+            _finish_chat_execution(stream_service, token_usage_payload),
+            name=f"chat-finalization-{session_id}",
         )
-        await _finalize_session_end(request)
+        _FINALIZATION_TASKS.add(finalization)
+        finalization.add_done_callback(_finalization_done)
+        await asyncio.shield(finalization)
 
 
 async def _finalize_session_end(

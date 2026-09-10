@@ -237,6 +237,43 @@ def test_persist_token_usage_times_out_instead_of_hanging(monkeypatch):
     assert elapsed < 0.5
 
 
+def test_client_cancel_after_stream_end_keeps_finalization_alive(monkeypatch):
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        finalized = asyncio.Event()
+        payloads = []
+
+        async def persist(service, *, token_usage_payload=None):
+            payloads.append(token_usage_payload)
+            started.set()
+            await release.wait()
+
+        async def finalize(request):
+            finalized.set()
+
+        monkeypatch.setattr(chat_service, "_persist_token_usage_if_available", persist)
+        monkeypatch.setattr(chat_service, "_finalize_session_end", finalize)
+        stream = chat_service.execute_chat_session(_FakeStreamService())
+        while '"type": "stream_end"' not in await anext(stream):
+            pass
+        closing = asyncio.create_task(stream.aclose())
+        await started.wait()
+        closing.cancel()
+        try:
+            await closing
+        except asyncio.CancelledError:
+            pass
+        release.set()
+        await asyncio.wait_for(finalized.wait(), 0.5)
+        await asyncio.sleep(0)
+        assert len(payloads) == 1
+        assert payloads[0]["total_info"]["total_tokens"] == 15
+        assert not chat_service._FINALIZATION_TASKS
+
+    asyncio.run(run())
+
+
 def test_stream_manager_stop_session_closes_background_generator():
     manager = StreamManager.get_instance()
     closed = False
