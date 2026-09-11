@@ -207,8 +207,15 @@ class MessageManager:
 
     def _refresh_history_anchor_index(self) -> None:
         """根据最新成功 compression anchor 位置刷新 active_start_index（仅供 memory 使用）。"""
-        self.refresh_compact_manifest()
-        self.set_active_start_index(self.compute_history_anchor_index())
+        manifest = self.refresh_compact_manifest()
+        # The manifest already contains the expanded coverage graph. Reusing it
+        # avoids parsing every compression result a second time on each update.
+        self.set_active_start_index(
+            max(
+                (pair["assistant_index"] for pair in manifest["pairs"] if pair["visible"]),
+                default=None,
+            )
+        )
 
     def refresh_compact_manifest(self) -> Dict[str, Any]:
         """刷新 compact manifest；manifest 只从 self.messages 派生。"""
@@ -270,6 +277,7 @@ class MessageManager:
         if isinstance(messages, MessageChunk):
             messages = [messages]
 
+        refresh_history = False
         for message in messages:
             try:
                 # 过滤system消息
@@ -288,16 +296,32 @@ class MessageManager:
                 logger.error(f"MessageManager: 添加消息失败，消息内容: {message}")
                 continue
 
-            self.messages = MessageManager.merge_new_message_old_messages(
-                message, self.messages
+            previous = self.messages[-1] if self.messages else None
+            is_text_delta = (
+                previous is not None
+                and previous.message_id == message.message_id
+                and previous.role == message.role == MessageRole.ASSISTANT.value
+                and not previous.tool_calls
+                and not message.tool_calls
             )
+            refresh_history = refresh_history or not is_text_delta
+            # The ledger owns its messages. Keep prior list/tail views stable,
+            # but do not recursively copy unchanged history for every token.
+            merged = list(self.messages)
+            if previous is not None and previous.message_id == message.message_id:
+                merged[-1] = deepcopy(previous)
+            MessageManager._merge_into_owned_messages(message, merged)
+            self.messages = merged
 
         self.stats["total_messages"] = len(self.messages)
         self.stats["total_chunks"] += len(messages)
         self.stats["last_updated"] = datetime.datetime.now().isoformat()
 
-        # 新消息可能包含 compress_conversation_history 工具调用，刷新锚点
-        self._refresh_history_anchor_index()
+        # A text/reasoning delta on an existing plain assistant message cannot
+        # change compression coverage. New messages and all tool deltas still
+        # refresh, including partial compression results becoming valid JSON.
+        if refresh_history:
+            self._refresh_history_anchor_index()
         return True
 
     @staticmethod
@@ -316,14 +340,14 @@ class MessageManager:
             MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg
             for msg in new_messages
         ]
-        old_messages_chunks = [
+        old_messages_chunks = deepcopy([
             MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg
             for msg in old_messages
-        ]
+        ])
         for new_message in new_messages_chunks:
-            old_messages_chunks = MessageManager.merge_new_message_old_messages(
-                new_message, old_messages_chunks
-            )
+            # This batch owns its working copy. Replaying N stream chunks must
+            # not deep-copy the full input history N times without yielding.
+            MessageManager._merge_into_owned_messages(new_message, old_messages_chunks)
 
         # Auto-generated compression messages are emitted during a running
         # SimpleAgent loop. A normal streaming merge appends them to the current
@@ -369,9 +393,15 @@ class MessageManager:
             )
             if source_index is None:
                 continue
+            # Use the owned, merged result rather than aliasing a caller's
+            # input chunk (which may be only the last part of the result).
+            merged_result = next(
+                message for message in old_messages_chunks
+                if message.message_id == result.message_id
+            )
             old_messages_chunks = (
                 without_pair[: source_index + 1]
-                + [assistant, result]
+                + [assistant, merged_result]
                 + without_pair[source_index + 1 :]
             )
         return old_messages_chunks
@@ -809,6 +839,19 @@ class MessageManager:
             合并后的消息列表
         """
         old_messages = deepcopy(old_messages)
+        MessageManager._merge_into_owned_messages(new_message, old_messages)
+        return old_messages
+
+    @staticmethod
+    def _merge_into_owned_messages(
+        new_message: MessageChunk, old_messages: List[MessageChunk]
+    ) -> None:
+        """Merge into an owned list/tail, detaching any incoming mutable data.
+
+        Callers must own the last message before updating it. Public snapshot
+        merges copy history once; the live ledger uses copy-on-write for its
+        tail. Both paths use the same content/tool-delta semantics.
+        """
         new_message_id = new_message.message_id
         # 有new_message_id，查找是否已存在相同message_id的消息，如果old最后一个相同则认为找到，否则认为没有找到
         existing_message = (
@@ -839,7 +882,7 @@ class MessageManager:
                     new_message.content, list
                 ):
                     # 多模态消息不合并，直接替换
-                    existing_message.content = new_message.content
+                    existing_message.content = deepcopy(new_message.content)
                 else:
                     existing_message.content = (
                         existing_message.content or ""
@@ -948,9 +991,8 @@ class MessageManager:
                         # 添加新的 tool_call
                         existing_message.tool_calls.append(new_tc)
         else:
-            old_messages.append(new_message)
+            old_messages.append(deepcopy(new_message))
             # logger.debug(f"MessageManager: 创建新消息 {new_message.message_id[:8]}... ")
-        return old_messages
 
     @staticmethod
     def convert_messages_to_str(messages: List[MessageChunk]) -> str:
