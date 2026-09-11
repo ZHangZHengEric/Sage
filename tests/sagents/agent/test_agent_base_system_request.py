@@ -1059,6 +1059,7 @@ def test_prompt_cache_observation_hashes_system_segments_and_tools():
 
 @pytest.mark.parametrize("filename,tag,limit", [
     ("USER.md", "user", 6000), ("MEMORY.md", "memory", 10000),
+    ("AGENT.md", "agent_md", 12000),
 ])
 @pytest.mark.parametrize("extra", [-1, 0, 1, 50000])
 @pytest.mark.asyncio
@@ -1080,3 +1081,50 @@ async def test_workspace_memory_prompt_is_bounded(monkeypatch, filename, tag, li
         assert f"Truncated {filename}" in injected
         assert "read the file on demand" in injected
     assert await context.sandbox.read_file("/workspace/" + filename) == original
+
+
+@pytest.mark.asyncio
+async def test_identity_role_prompt_is_bounded(monkeypatch):
+    agent = CommonAgent(model=object(), model_config={})
+
+    class Sandbox:
+        async def file_exists(self, path):
+            return True
+
+        async def read_file(self, path):
+            return "中" * 50000
+
+    context = SimpleNamespace(sandbox=Sandbox(), sandbox_agent_workspace="/workspace",
+                              system_context={})
+    monkeypatch.setattr(agent, "_get_live_session_context", lambda _: context)
+    result = await agent._build_system_segments(session_id="s", include_sections=["role_definition"])
+    role = result["stable"].split("<role_definition>\n")[1].split("\n</role_definition>")[0]
+    assert len(role) <= 6000
+    assert "Truncated IDENTITY.md" in role
+
+
+@pytest.mark.parametrize("count,content", [(1, "中" * 100000), (20, "中" * 5000), (20, "<&>" * 5000)])
+@pytest.mark.asyncio
+async def test_skill_prompt_budgets_preserve_source(monkeypatch, count, content):
+    agent = CommonAgent(model=object(), model_config={})
+    skills = [{"skill_name": f"skill{i:02}", "skill_content": content} for i in range(count)]
+    context = SimpleNamespace(
+        sandbox=None,
+        system_context={"active_skills": skills},
+        effective_skill_manager=SimpleNamespace(list_skill_info=lambda: [
+            SimpleNamespace(name=f"skill{i:02}", description=content) for i in range(100)
+        ]),
+    )
+    monkeypatch.setattr(agent, "_get_live_session_context", lambda _: context)
+    result = await agent._build_system_segments(
+        session_id="s", include_sections=["active_skill", "available_skills"]
+    )
+    semi = result["semi_stable"]
+    active = semi.split("<active_skills>\n")[1].split("</active_skills>")[0]
+    available = semi.split("<available_skills>\n")[1].split("</available_skills>")[0]
+    assert len(active) <= 24000
+    assert len(available) <= 16000
+    assert "Truncated" in active or "omitted" in active
+    assert "omitted" in available
+    assert context.system_context["active_skills"] == skills
+    assert all(skill["skill_content"] == content for skill in skills)
