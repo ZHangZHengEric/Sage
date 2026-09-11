@@ -14,6 +14,11 @@ app/desktop/tauri/resources/node/bin/node
 __pycache__/
 logs/
 /outputs/
+# Local diagnostic records and profiling captures (may contain user data)
+/diagnostics/
+/profiling/
+*.speedscope.json
+*.pstats
 workspace/
 !sagents/v2/workspace/
 !sagents/v2/workspace/**
