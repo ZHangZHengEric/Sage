@@ -94,9 +94,9 @@ class CommonAgent(AgentBase):
                 return
             except ProviderContextWindowExceededError:
                 recovery_attempts += 1
-                if recovery_attempts > 20:
+                if recovery_attempts > 1:
                     logger.error(
-                        "CommonAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                        "CommonAgent: 历史已尝试压缩一次，provider 仍超限，保留原始错误"
                     )
                     raise
                 recovered_history = None

@@ -81,6 +81,9 @@ from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
 
 TOOL_CALL_CONCURRENCY_LIMIT = 10
+USER_CONTEXT_MAX_CHARACTERS = 6000
+MEMORY_CONTEXT_MAX_CHARACTERS = 10000
+MIN_COMPRESSION_CHARACTER_REDUCTION = 128
 
 
 class PartialStreamConsumedError(RuntimeError):
@@ -1212,7 +1215,6 @@ class AgentBase(ABC):
             self._resolve_raw_context_limit(session_context),
         )
         working_messages = list(messages_input)
-        provider_compression_failures = 0
 
         async def measure_request(
             history: List[MessageChunk],
@@ -1294,169 +1296,151 @@ class AgentBase(ABC):
             yield (view, True)
             return
 
-        for compression_pass in range(1, 21):
+        view = MessageManager.build_inference_view(working_messages)
+        if message_manager is not None:
+            message_manager.store_inference_messages(view)
+        current_tokens, current_characters, current_projection = (
+            await measure_request(view)
+        )
+        if current_tokens <= trigger_limit and not provider_overflow_recovery:
+            yield (view, True)
+            return
+
+        segment = MessageManager.select_llm_compression_segment(
+            working_messages,
+            active_protection_count=(2 if provider_overflow_recovery else 12),
+        )
+        # A soft budget must not repeatedly summarize an existing summary.
+        # Real provider overflow may try it once, then propagate the error.
+        if segment and not provider_overflow_recovery and all(
+            (msg.metadata or {}).get("compression_anchor") is True
+            for msg in segment
+        ):
+            logger.info(f"{self.agent_name}: 没有新增可压缩历史，跳过摘要重复压缩")
+            yield (view, True)
+            return
+        if not segment:
+            logger.warning(
+                f"{self.agent_name}: 无可压缩历史段，当前上下文仍为 {current_tokens} tokens"
+            )
+            if provider_overflow_recovery:
+                # Let the caller preserve the provider's original overflow
+                # error. A synthetic budget message here would look like a
+                # successful compression event even though no space changed.
+                return
+            # A tokenizer-agnostic estimate is only a soft trigger. If the
+            # protected/current turn leaves no safe history segment to
+            # compress, send the request unchanged and let the provider be
+            # the authoritative context-window check.
+            yield (view, True)
+            return
+
+        source_ids = [msg.message_id for msg in segment if msg.message_id]
+        if len(source_ids) != len(segment):
+            logger.warning(
+                f"{self.agent_name}: 压缩段包含缺失 message_id 的消息，放弃持久化压缩"
+            )
+            if provider_overflow_recovery:
+                return
+            yield (view, True)
+            return
+        source_start = source_ids[0] if source_ids else None
+        source_end = source_ids[-1] if source_ids else None
+        emitted_chunks: List[MessageChunk] = []
+        emitted_batches: List[List[MessageChunk]] = []
+        async for messages_chunk in self._compress_messages_with_tool(
+            segment,
+            session_id,
+            source_message_ids=source_ids,
+            source_start_message_id=source_start,
+            source_end_message_id=source_end,
+        ):
+            emitted_batches.append(messages_chunk)
+            emitted_chunks.extend(messages_chunk)
+
+        if not self._compression_chunks_succeeded(emitted_chunks):
+            exclude_failed_compression(emitted_chunks, "error")
+            for messages_chunk in emitted_batches:
+                yield (messages_chunk, False)
+            logger.warning(f"{self.agent_name}: 大模型压缩失败")
+            if provider_overflow_recovery:
+                return
             view = MessageManager.build_inference_view(working_messages)
             if message_manager is not None:
                 message_manager.store_inference_messages(view)
-            current_tokens, current_characters, current_projection = (
-                await measure_request(view)
-            )
-            if current_tokens <= trigger_limit and not provider_overflow_recovery:
-                yield (view, True)
-                return
+            yield (view, True)
+            return
 
-            segment = MessageManager.select_llm_compression_segment(
-                working_messages,
-                active_protection_count=(2 if provider_overflow_recovery else 12),
-            )
-            if not segment:
-                logger.warning(
-                    f"{self.agent_name}: 无可压缩历史段，当前上下文仍为 {current_tokens} tokens"
-                )
-                if provider_overflow_recovery:
-                    # Let the caller preserve the provider's original overflow
-                    # error. A synthetic budget message here would look like a
-                    # successful compression event even though no space changed.
-                    return
-                # A tokenizer-agnostic estimate is only a soft trigger. If the
-                # protected/current turn leaves no safe history segment to
-                # compress, send the request unchanged and let the provider be
-                # the authoritative context-window check.
-                yield (view, True)
-                return
-
-            source_ids = [msg.message_id for msg in segment if msg.message_id]
-            if len(source_ids) != len(segment):
-                logger.warning(
-                    f"{self.agent_name}: 压缩段包含缺失 message_id 的消息，放弃持久化压缩"
-                )
-                if provider_overflow_recovery:
-                    return
-                yield (view, True)
-                return
-            source_start = source_ids[0] if source_ids else None
-            source_end = source_ids[-1] if source_ids else None
-            emitted_chunks: List[MessageChunk] = []
-            emitted_batches: List[List[MessageChunk]] = []
-            async for messages_chunk in self._compress_messages_with_tool(
-                segment,
-                session_id,
-                source_message_ids=source_ids,
-                source_start_message_id=source_start,
-                source_end_message_id=source_end,
-            ):
-                emitted_batches.append(messages_chunk)
-                emitted_chunks.extend(messages_chunk)
-
-            if not self._compression_chunks_succeeded(emitted_chunks):
-                exclude_failed_compression(emitted_chunks, "error")
-                for messages_chunk in emitted_batches:
-                    yield (messages_chunk, False)
-                logger.warning(f"{self.agent_name}: 大模型压缩失败")
-                if provider_overflow_recovery and provider_compression_failures < 2:
-                    provider_compression_failures += 1
-                    logger.warning(
-                        f"{self.agent_name}: 重试大模型历史压缩 "
-                        f"({provider_compression_failures + 1}/3)"
-                    )
-                    continue
-                if provider_overflow_recovery:
-                    return
-                view = MessageManager.build_inference_view(working_messages)
-                if message_manager is not None:
-                    message_manager.store_inference_messages(view)
-                yield (view, True)
-                return
-
-            candidate_working_messages = self._insert_chunks_after_message_id(
-                working_messages, source_end, emitted_chunks
-            )
-            candidate_view = MessageManager.build_inference_view(
-                candidate_working_messages
-            )
-            after_tokens, after_characters, after_projection = await measure_request(
-                candidate_view
-            )
-            if after_characters >= current_characters:
-                exclude_failed_compression(emitted_chunks, "ineffective")
-                for messages_chunk in emitted_batches:
-                    yield (messages_chunk, False)
-                logger.warning(
-                    f"{self.agent_name}: 大模型历史压缩未减少请求字符，"
-                    f"chars={current_characters}->{after_characters}"
-                )
-                if provider_overflow_recovery and provider_compression_failures < 2:
-                    provider_compression_failures += 1
-                    continue
-                if provider_overflow_recovery:
-                    return
-                yield (view, True)
-                return
-
-            for chunk in emitted_chunks:
-                metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
-                metadata.update(
-                    {
-                        "compression_validation": "accepted",
-                        "request_characters_before": current_characters,
-                        "request_characters_after": after_characters,
-                        "projected_tokens_before": current_tokens,
-                        "projected_tokens_after": after_tokens,
-                        "local_estimated_tokens_before": getattr(
-                            current_projection, "full_estimate", current_tokens
-                        ),
-                        "local_estimated_tokens_after": getattr(
-                            after_projection, "full_estimate", after_tokens
-                        ),
-                        "provider_prompt_tokens_checkpoint_before": getattr(
-                            current_projection, "actual_prompt_tokens", None
-                        ),
-                        "provider_prompt_tokens_checkpoint_after": getattr(
-                            after_projection, "actual_prompt_tokens", None
-                        ),
-                    }
-                )
-                chunk.metadata = metadata
+        candidate_working_messages = self._insert_chunks_after_message_id(
+            working_messages, source_end, emitted_chunks
+        )
+        candidate_view = MessageManager.build_inference_view(
+            candidate_working_messages
+        )
+        after_tokens, after_characters, after_projection = await measure_request(
+            candidate_view
+        )
+        if current_characters - after_characters < MIN_COMPRESSION_CHARACTER_REDUCTION:
+            exclude_failed_compression(emitted_chunks, "ineffective")
             for messages_chunk in emitted_batches:
                 yield (messages_chunk, False)
-
-            logger.info(
-                f"{self.agent_name}: 大模型历史压缩已验收 "
-                f"pass={compression_pass} chars={current_characters}->{after_characters} "
-                f"local_estimated_tokens="
-                f"{getattr(current_projection, 'full_estimate', current_tokens)}->"
-                f"{getattr(after_projection, 'full_estimate', after_tokens)} "
-                f"projected_tokens={current_tokens}->{after_tokens} "
-                f"provider_prompt_tokens_checkpoint="
-                f"{getattr(current_projection, 'actual_prompt_tokens', None)}->"
-                f"{getattr(after_projection, 'actual_prompt_tokens', None)} "
-                f"projection_source_before={getattr(current_projection, 'source', 'local')} "
-                f"projection_source_after={getattr(after_projection, 'source', 'local')}"
+            logger.warning(
+                f"{self.agent_name}: 大模型历史压缩收益不足，"
+                f"chars={current_characters}->{after_characters}"
             )
-            working_messages = candidate_working_messages
-            if message_manager is not None and source_end:
-                message_manager.insert_messages_after(source_end, emitted_chunks)
-                message_manager.store_inference_messages(candidate_view)
             if provider_overflow_recovery:
-                # A real provider overflow is retried after any observable
-                # provider-facing character reduction. The provider remains the
-                # authority if the request is still too large.
-                yield (candidate_view, True)
                 return
-
-        logger.warning(f"{self.agent_name}: 大模型压缩达到最大轮数")
-        if provider_overflow_recovery:
-            # Provider recovery is driven solely by an observable character
-            # reduction. Never report recovery based on a token estimate after
-            # repeated summaries failed to make the request smaller.
+            yield (view, True)
             return
-        final_view = MessageManager.build_inference_view(working_messages)
-        if message_manager is not None:
-            message_manager.store_inference_messages(final_view)
-        # Reaching the local compression cap must not turn an estimate into a
-        # request rejection. Provider overflow, if any, re-enters the hard
-        # character-reduction/LLM-summary recovery path.
-        yield (final_view, True)
+
+        for chunk in emitted_chunks:
+            metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+            metadata.update(
+                {
+                    "compression_validation": "accepted",
+                    "request_characters_before": current_characters,
+                    "request_characters_after": after_characters,
+                    "projected_tokens_before": current_tokens,
+                    "projected_tokens_after": after_tokens,
+                    "local_estimated_tokens_before": getattr(
+                        current_projection, "full_estimate", current_tokens
+                    ),
+                    "local_estimated_tokens_after": getattr(
+                        after_projection, "full_estimate", after_tokens
+                    ),
+                    "provider_prompt_tokens_checkpoint_before": getattr(
+                        current_projection, "actual_prompt_tokens", None
+                    ),
+                    "provider_prompt_tokens_checkpoint_after": getattr(
+                        after_projection, "actual_prompt_tokens", None
+                    ),
+                }
+            )
+            chunk.metadata = metadata
+        for messages_chunk in emitted_batches:
+            yield (messages_chunk, False)
+
+        logger.info(
+            f"{self.agent_name}: 大模型历史压缩已验收 "
+            f"chars={current_characters}->{after_characters} "
+            f"local_estimated_tokens="
+            f"{getattr(current_projection, 'full_estimate', current_tokens)}->"
+            f"{getattr(after_projection, 'full_estimate', after_tokens)} "
+            f"projected_tokens={current_tokens}->{after_tokens} "
+            f"provider_prompt_tokens_checkpoint="
+            f"{getattr(current_projection, 'actual_prompt_tokens', None)}->"
+            f"{getattr(after_projection, 'actual_prompt_tokens', None)} "
+            f"projection_source_before={getattr(current_projection, 'source', 'local')} "
+            f"projection_source_after={getattr(after_projection, 'source', 'local')}"
+        )
+        working_messages = candidate_working_messages
+        if message_manager is not None and source_end:
+            message_manager.insert_messages_after(source_end, emitted_chunks)
+            message_manager.store_inference_messages(candidate_view)
+        # One compression per preparation, even if the fixed prompt / protected
+        # tail still exceeds the soft budget. Rewriting the summary cannot fix it.
+        yield (candidate_view, True)
+        return
 
     @staticmethod
     def _chunks_contain_tool_calls(chunks: List[Any]) -> bool:
@@ -2409,6 +2393,16 @@ class AgentBase(ABC):
                 f"stage and continue the main flow: {exc}"
             )
 
+    @staticmethod
+    def _bounded_workspace_context(content: str, filename: str, limit: int) -> str:
+        """Bound automatic prompt injection without modifying the source file."""
+        if len(content) <= limit:
+            return content
+        notice = (
+            f"\n[Truncated {filename}; read the file on demand for omitted details.]"
+        )
+        return content[: max(0, limit - len(notice))] + notice
+
     async def _build_system_segments(
         self,
         session_id: Optional[str] = None,
@@ -2608,6 +2602,9 @@ class AgentBase(ABC):
                         os.path.join(workspace, "USER.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if user_content:
+                        user_content = self._bounded_workspace_context(
+                            user_content, "USER.md", USER_CONTEXT_MAX_CHARACTERS
+                        )
                         stable_buf += f"<user>\n{user_content}\n</user>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
@@ -2617,6 +2614,9 @@ class AgentBase(ABC):
                         os.path.join(workspace, "MEMORY.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if memory_content:
+                        memory_content = self._bounded_workspace_context(
+                            memory_content, "MEMORY.md", MEMORY_CONTEXT_MAX_CHARACTERS
+                        )
                         stable_buf += f"<memory>\n{memory_content}\n</memory>\n"
                 except Exception as e:
                     logger.debug(

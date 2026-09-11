@@ -1846,6 +1846,7 @@ class SimpleAgent(AgentBase):
         # 准备消息：提取可用消息 -> 检查压缩 -> 执行压缩
         # 通过生成器获取中间结果（tool_calls/tool result）和最终结果。
         prepared_messages = None
+        compression_attempted = False
         try:
             prepared_iterator = self._prepare_messages_for_llm(
                 messages_input,
@@ -1869,6 +1870,11 @@ class SimpleAgent(AgentBase):
                 prepared_messages = messages_chunk
                 break
             else:
+                compression_attempted = compression_attempted or any(
+                    (chunk.metadata or {}).get("tool_name")
+                    == "compress_conversation_history"
+                    for chunk in messages_chunk
+                )
                 # 中间结果（tool_calls 或 tool result），yield 出去让上层处理
                 yield (messages_chunk, False)
 
@@ -1908,7 +1914,7 @@ class SimpleAgent(AgentBase):
         async def stream_with_context_recovery():
             nonlocal prepared_history_messages, prepared_messages
             recovery_source = prepared_history_messages
-            llm_compression_attempts = 0
+            llm_compression_attempts = int(compression_attempted)
 
             while True:
                 response = self._call_llm_streaming(
@@ -1925,9 +1931,9 @@ class SimpleAgent(AgentBase):
                     return
                 except ProviderContextWindowExceededError:
                     llm_compression_attempts += 1
-                    if llm_compression_attempts > 20:
+                    if llm_compression_attempts > 1:
                         logger.error(
-                            "SimpleAgent: provider 上下文超限恢复超过 20 次，保留原始错误"
+                            "SimpleAgent: 历史已尝试压缩一次，provider 仍超限，保留原始错误"
                         )
                         raise
                     logger.warning(

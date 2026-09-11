@@ -855,9 +855,10 @@ def test_select_llm_compression_segment_never_includes_system_message():
     assert "sys-old" not in [msg.message_id for msg in segment]
 
 
+@pytest.mark.parametrize("tokens_after", [100, 2000])
 @pytest.mark.asyncio
 async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tail(
-    monkeypatch,
+    monkeypatch, tokens_after,
 ):
     agent = SimpleAgent(model=None, model_config={"max_model_len": 1000})
     manager = MessageManager(session_id="sess-prepare")
@@ -904,7 +905,7 @@ async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tai
         lambda messages: (
             2000
             if not any(msg.message_id == "compress-result" for msg in messages)
-            else 100
+            else tokens_after
         ),
     )
 
@@ -928,6 +929,18 @@ async def test_prepare_messages_for_llm_inserts_successful_pair_after_source_tai
         item
         async for item in agent._prepare_messages_for_llm(raw_messages, "sess-prepare")
     ]
+
+    # Even when the fixed prompt remains over budget, a subsequent preparation
+    # must not compress the just-created summary without new eligible history.
+    again = [
+        item
+        async for item in agent._prepare_messages_for_llm(
+            manager.messages, "sess-prepare"
+        )
+    ]
+    assert len(again) == 1
+    assert again[0][1] is True
+
 
     assert chunks[0] == ([tool_call], False)
     assert chunks[1] == ([tool_result], False)
@@ -1439,3 +1452,45 @@ async def test_simple_agent_prepares_fresh_system_after_compressed_history_view(
         MessageRole.TOOL.value,
     ]
     assert captured["messages"][0].content == "fresh system"
+
+
+@pytest.mark.parametrize("provider_overflow", [False, True])
+@pytest.mark.asyncio
+async def test_one_character_reduction_is_not_accepted(monkeypatch, provider_overflow):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 100})
+    old = _msg("assistant", "x" * 4000, MessageType.ASSISTANT_TEXT.value,
+               message_id="old")
+    current = _msg("user", "request", MessageType.USER_INPUT.value,
+                   message_id="current")
+    pair = _compression_pair(call_message_id="call", result_message_id="result",
+                             call_id="compact", source_ids=["old"], summary="x")
+    monkeypatch.setattr(agent, "_get_live_session_context", lambda _: None)
+    monkeypatch.setattr(MessageManager, "select_llm_compression_segment",
+                        lambda *args, **kwargs: [old])
+    monkeypatch.setattr(MessageManager, "calculate_messages_token_length",
+                        lambda _: 1000)
+    def request_chars(messages):
+        return len(json.dumps({"messages": [
+            MessageManager.convert_message_to_dict_for_request(m) for m in messages
+        ], "tools": []}, ensure_ascii=False))
+    before = request_chars([old, current])
+    payload = json.loads(pair[1].content)
+    payload["summary"] = "x" * (before - request_chars([*pair, current]))
+    pair[1].content = json.dumps(payload)
+    assert before - request_chars([*pair, current]) == 1
+    calls = 0
+    async def compress(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        yield list(pair)
+    monkeypatch.setattr(agent, "_compress_messages_with_tool", compress)
+    chunks = [item async for item in agent._prepare_messages_for_llm(
+        [old, current], "tiny", provider_overflow_recovery=provider_overflow
+    )]
+    assert calls == 1
+    assert pair[1].metadata["compression_validation"] == "ineffective"
+    assert pair[1].metadata["compression_anchor"] is False
+    if provider_overflow:
+        assert not any(is_final for _, is_final in chunks)
+    else:
+        assert chunks[-1] == ([old, current], True)
