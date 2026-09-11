@@ -81,6 +81,12 @@ from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 import httpx
 
 TOOL_CALL_CONCURRENCY_LIMIT = 10
+AGENT_CONTEXT_MAX_CHARACTERS = 12000
+IDENTITY_CONTEXT_MAX_CHARACTERS = 6000
+ACTIVE_SKILL_MAX_CHARACTERS = 12000
+ACTIVE_SKILLS_MAX_CHARACTERS = 24000
+SKILL_DESCRIPTION_MAX_CHARACTERS = 2000
+AVAILABLE_SKILLS_MAX_CHARACTERS = 16000
 USER_CONTEXT_MAX_CHARACTERS = 6000
 MEMORY_CONTEXT_MAX_CHARACTERS = 10000
 MIN_COMPRESSION_CHARACTER_REDUCTION = 128
@@ -2403,6 +2409,20 @@ class AgentBase(ABC):
         )
         return content[: max(0, limit - len(notice))] + notice
 
+    @staticmethod
+    def _bounded_context_entries(entries, limit: int) -> str:
+        """Keep complete entries and reserve room for an explicit omission notice."""
+        notice = "[Additional entries omitted due to context budget; load skills on demand.]\n"
+        parts = []
+        used = 0
+        for entry in entries:
+            if used + len(entry) > limit - len(notice):
+                parts.append(notice)
+                break
+            parts.append(entry)
+            used += len(entry)
+        return "".join(parts)
+
     async def _build_system_segments(
         self,
         session_id: Optional[str] = None,
@@ -2508,6 +2528,9 @@ class AgentBase(ABC):
                             role_content = await session_context.sandbox.read_file(
                                 identity_path
                             )
+                            role_content = self._bounded_workspace_context(
+                                role_content, "IDENTITY.md", IDENTITY_CONTEXT_MAX_CHARACTERS
+                            )
                             use_identity = True
                     except Exception as e:
                         logger.warning(f"AgentBase: Failed to read IDENTITY.md: {e}")
@@ -2582,6 +2605,9 @@ class AgentBase(ABC):
                         os.path.join(workspace, "AGENT.md")  # pyright: ignore[reportArgumentType,reportCallIssue]
                     )
                     if agent_md_content:
+                        agent_md_content = self._bounded_workspace_context(
+                            agent_md_content, "AGENT.md", AGENT_CONTEXT_MAX_CHARACTERS
+                        )
                         stable_buf += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
                 except Exception as e:
                     logger.debug(f"AgentBase: AGENT.md not found or error reading: {e}")
@@ -2680,19 +2706,25 @@ class AgentBase(ABC):
             # 3. Active Skills  → semi_stable
             if "active_skill" in include_sections and active_skills:
                 semi_buf += "<active_skills>\n"
-                for skill in sorted(
-                    active_skills,
-                    key=lambda item: str(item.get("skill_name", "unknown")),
-                ):
-                    skill_name = skill.get("skill_name", "unknown")
-                    skill_content = skill.get("skill_content", "")
-                    skill_content_escaped = (
-                        str(skill_content)
-                        .replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                    )
-                    semi_buf += f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
+                def active_entries():
+                    for skill in sorted(
+                        active_skills,
+                        key=lambda item: str(item.get("skill_name", "unknown")),
+                    ):
+                        skill_name = str(skill.get("skill_name", "unknown"))[:200]
+                        skill_content = self._bounded_workspace_context(
+                            str(skill.get("skill_content", "")),
+                            f"skill {skill_name}", ACTIVE_SKILL_MAX_CHARACTERS,
+                        )
+                        skill_content_escaped = (
+                            skill_content.replace("&", "&amp;")
+                            .replace("<", "&lt;").replace(">", "&gt;")
+                        )
+                        yield f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
+
+                semi_buf += self._bounded_context_entries(
+                    active_entries(), ACTIVE_SKILLS_MAX_CHARACTERS
+                )
                 semi_buf += "</active_skills>\n"
 
             # 4. Workspace Files  → volatile
@@ -2782,8 +2814,18 @@ class AgentBase(ABC):
                     )
                     if skill_infos:
                         semi_buf += "<available_skills>\n"
-                        for skill in skill_infos:
-                            semi_buf += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description}</skill_description>\n</skill>\n"
+                        def available_entries():
+                            for skill in skill_infos:
+                                name = str(skill.name)[:200]
+                                description = self._bounded_workspace_context(
+                                    str(skill.description), f"skill description {name}",
+                                    SKILL_DESCRIPTION_MAX_CHARACTERS,
+                                )
+                                yield f"<skill>\n<skill_name>{name}</skill_name>\n<skill_description>{description}</skill_description>\n</skill>\n"
+
+                        semi_buf += self._bounded_context_entries(
+                            available_entries(), AVAILABLE_SKILLS_MAX_CHARACTERS
+                        )
                         semi_buf += "</available_skills>\n"
 
                         skills_hint = prompt_manager.get_prompt(
