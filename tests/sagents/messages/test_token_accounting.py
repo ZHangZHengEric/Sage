@@ -241,3 +241,19 @@ def test_checkpoint_store_is_bounded_by_lru_limit():
     assert len(payload) == MAX_CHECKPOINTS_PER_SESSION
     assert "profile-0" not in payload
     assert f"profile-{MAX_CHECKPOINTS_PER_SESSION + 2}" in payload
+
+
+def test_projection_subtracts_history_replaced_by_summary():
+    manager = PromptBudgetManager()
+    system = _provider_message("system", "fixed system " * 1000)
+    old = _provider_message("assistant", "long history " * 200)
+    baseline = PromptTokenEstimator.manifest([system, old])
+    manager.update_checkpoint("compress", baseline.estimated_tokens, baseline)
+    compressed = PromptTokenEstimator.manifest([
+        system, _provider_message("assistant", "short summary")
+    ])
+    projection = manager.project("compress", compressed)
+    assert projection.source == "actual_delta"
+    assert projection.removed_estimated_tokens > projection.added_estimated_tokens
+    assert projection.projected_tokens == compressed.estimated_tokens
+    assert projection.projected_tokens < baseline.estimated_tokens

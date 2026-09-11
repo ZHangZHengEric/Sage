@@ -1808,3 +1808,33 @@ async def test_simple_agent_does_not_add_synthetic_tool_result_when_tool_call_wa
     assert [chunk.role for chunk in non_empty] == ["assistant"]
     assert non_empty[0].message_type == MessageType.AGENT_EXECUTION_ERROR.value
     assert "incomplete tool call was discarded" in non_empty[0].content
+
+
+@pytest.mark.parametrize("precompressed", [False, True])
+@pytest.mark.asyncio
+async def test_simple_agent_stops_after_one_compression_on_provider_overflow(precompressed):
+    error = APIError("maximum context length exceeded",
+                     request=httpx.Request("POST", "https://provider.example/chat"), body=None)
+    client = FakeClient(attempts=[_attempt_raises_before_yield(error) for _ in range(3)])
+    agent = SimpleAgent(model=client, model_config={"model": "gpt-test", "max_model_len": 4000})
+    agent._get_live_session = lambda _: None
+    agent._get_live_session_context = lambda _: None
+    compressions = []
+    async def prepare(messages_input, session_id, *, provider_overflow_recovery=False, **kwargs):
+        if precompressed or provider_overflow_recovery:
+            compressions.append(provider_overflow_recovery)
+            yield ([MessageChunk(role="tool", content="summary", tool_call_id="compress",
+                                 metadata={"tool_name": "compress_conversation_history"})], False)
+        yield (list(messages_input), True)
+    async def build(*, history_messages=None, **kwargs):
+        return list(history_messages or [])
+    agent._prepare_context_messages_for_llm = prepare
+    agent.prepare_llm_request_messages = build
+    with pytest.raises(ProviderContextWindowExceededError):
+        async for _ in agent._call_llm_and_process_response(
+            messages_input=[MessageChunk(role="user", content="request")],
+            tools_json=[], tool_manager=None, session_id="one-compression",
+        ):
+            pass
+    assert compressions == [not precompressed]
+    assert client.chat.completions.calls == (1 if precompressed else 2)

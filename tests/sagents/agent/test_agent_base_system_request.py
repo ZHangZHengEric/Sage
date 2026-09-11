@@ -1055,3 +1055,28 @@ def test_prompt_cache_observation_hashes_system_segments_and_tools():
         ],
         tools,
     )
+
+
+@pytest.mark.parametrize("filename,tag,limit", [
+    ("USER.md", "user", 6000), ("MEMORY.md", "memory", 10000),
+])
+@pytest.mark.parametrize("extra", [-1, 0, 1, 50000])
+@pytest.mark.asyncio
+async def test_workspace_memory_prompt_is_bounded(monkeypatch, filename, tag, limit, extra):
+    agent = CommonAgent(model=object(), model_config={})
+    original = "中" * (limit + extra)
+    class Sandbox:
+        async def read_file(self, path):
+            return original if path.endswith(filename) else ""
+    context = SimpleNamespace(sandbox=Sandbox(), sandbox_agent_workspace="/workspace",
+                              system_context={})
+    monkeypatch.setattr(agent, "_get_live_session_context", lambda _: context)
+    result = await agent._build_system_segments(session_id="s", include_sections=["AGENT.MD"])
+    injected = result["stable"].split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
+    assert len(injected) <= limit
+    if extra <= 0:
+        assert injected == original
+    else:
+        assert f"Truncated {filename}" in injected
+        assert "read the file on demand" in injected
+    assert await context.sandbox.read_file("/workspace/" + filename) == original
