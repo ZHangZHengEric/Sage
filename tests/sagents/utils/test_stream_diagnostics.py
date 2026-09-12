@@ -92,3 +92,35 @@ async def test_queue_error_propagates_and_diagnostics_disabled(monkeypatch):
             pass
     assert records == []
     assert budget.stream_stages == {}
+
+
+def test_message_timing_does_not_serialize_payload_and_preserves_fields(monkeypatch):
+    from sagents.context.session_context import SessionContext
+    from sagents.context.messages.message import MessageChunk, MessageType
+    ctx = SessionContext.__new__(SessionContext)
+    ctx._message_timing = {}
+    ctx._now_perf_ms = lambda: 100.0
+    events = []
+    ctx.record_timing_event = lambda *args, **kwargs: events.append((args, kwargs))
+    msg = MessageChunk(role='assistant', content='text', message_id='m', metadata={'large': ['payload']})
+    # to_dict normalizes enum fields, even if assigned after construction.
+    msg.message_type = MessageType.DO_SUBTASK_RESULT
+    msg.type = MessageType.DO_SUBTASK_RESULT
+    expected = msg.to_dict()
+    def forbidden():
+        raise AssertionError('full payload serialization is unnecessary')
+    monkeypatch.setattr(msg, 'to_dict', forbidden)
+    ctx._record_message_timing(msg)
+    stat = dict(ctx._message_timing['m'])
+    assert stat['role'] == expected['role']
+    assert stat['message_type'] == expected['message_type']
+    assert stat['tool_call_id'] == expected.get('tool_call_id')
+    assert len(events) == 1
+    ctx._now_perf_ms = lambda: 200.0
+    ctx._record_message_timing(msg)
+    assert ctx._message_timing['m']['start_perf_ms'] == 100
+    assert ctx._message_timing['m']['end_perf_ms'] == 200
+    assert len(events) == 1
+    assert msg.metadata == {'large': ['payload']}
+    ctx._record_message_timing({'message_id': 'dict', 'role': 'tool', 'type': 'tool_call_result', 'tool_call_id': 'call'})
+    assert ctx._message_timing['dict']['tool_call_id'] == 'call'
