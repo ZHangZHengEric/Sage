@@ -1,3 +1,4 @@
+from sagents.utils.request_latency import timed_stream_sync
 import uuid
 import time
 from typing import Dict, Any, Optional, List, Union
@@ -191,6 +192,7 @@ class MessageChunk:
         if self.metadata is None:
             self.metadata = {}
 
+    @timed_stream_sync("message.serialize")
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式（保持向后兼容性）
 

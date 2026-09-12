@@ -1,3 +1,4 @@
+from sagents.utils.request_latency import timed_stream_sync
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 from sagents.utils.latency_diagnostics import (
     diagnose,
@@ -336,6 +337,7 @@ class SessionContext:
     def status(self, value: SessionStatus) -> None:
         self._status = value
 
+    @timed_stream_sync("ledger.message_timing")
     def _record_message_timing(
         self, message: Union[MessageChunk, Dict[str, Any]]
     ) -> None:
@@ -513,6 +515,7 @@ class SessionContext:
                 return message
         return None
 
+    @timed_stream_sync("ledger.journal")
     def _append_message_to_journal(
         self,
         message_id: Optional[str],
@@ -630,6 +633,7 @@ class SessionContext:
         if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
             msg["content"] = json.dumps(msg["content"], ensure_ascii=False, default=str)
 
+    @timed_stream_sync("ledger.add")
     def add_messages(
         self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
     ) -> None:

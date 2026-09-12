@@ -37,6 +37,9 @@ class RequestLatency:
         self.first_recorded = False
         self.finished = False
         self.stages = {}
+        self.stream_stages = {}
+        self.stream_gauges = {}
+        self.stream_diagnostics = os.environ.get("SAGE_LATENCY_DIAGNOSTICS", "1") != "0"
 
     @contextmanager
     def activate(self):
@@ -50,6 +53,40 @@ class RequestLatency:
         if len(self.stages) < 16 or name in self.stages:
             count, total = self.stages.get(name, (0, 0.0))
             self.stages[name] = (count + 1, total + max(0.0, seconds))
+
+    def add_stream_timing(self, name, seconds, cpu_seconds=None):
+        # Fixed-size numeric aggregates; never retain a chunk or per-token log.
+        if not self.stream_diagnostics or (name not in self.stream_stages and len(self.stream_stages) >= 24):
+            return
+        stat = self.stream_stages.setdefault(name, [0, 0.0, 0.0, 0.0, 0])
+        elapsed = max(0.0, seconds)
+        stat[0] += 1
+        stat[1] += elapsed
+        stat[2] = max(stat[2], elapsed)
+        if cpu_seconds is not None:
+            stat[3] += max(0.0, cpu_seconds)
+            stat[4] += 1
+
+    def stream_snapshot(self, prefix=""):
+        return {
+            name: {"count": value[0], "total_ms": round(value[1] * 1000, 3),
+                   "max_ms": round(value[2] * 1000, 3),
+                   "cpu_ms": round(value[3] * 1000, 3) if value[4] else None,
+                   "cpu_count": value[4]}
+            for name, value in self.stream_stages.items() if name.startswith(prefix)
+        }
+
+    def record_queue_depth(self, depth):
+        if self.stream_diagnostics:
+            self.stream_gauges["merge_queue_peak"] = max(depth, self.stream_gauges.get("merge_queue_peak", 0))
+
+    def emit_delivery_summary(self):
+        if self.stream_diagnostics:
+            _emit({"version": 1, "operation": "request.stream_delivery",
+                   "timestamp": time.time(), "operation_id": self.operation_id,
+                   "session_id": str(self.session_id)[:128],
+                   "stream_stages": self.stream_snapshot("delivery."),
+                   "stream_gauges": dict(self.stream_gauges)})
 
     def external_enter(self):
         if self.external_active == 0:
@@ -99,6 +136,8 @@ class RequestLatency:
             },
             "counts": {"model_calls": self.model_calls, "tool_calls": self.tool_calls},
             "slow_files": [],
+            "stream_stages": self.stream_snapshot(),
+            "stream_gauges": dict(self.stream_gauges),
         }
 
     def first_output(self):
@@ -229,3 +268,43 @@ def request_stage(name):
         yield
     finally:
         budget.add_stage(name, time.perf_counter() - started)
+
+
+def current_stream_budget():
+    budget = _current.get()
+    return budget if budget is not None and budget.stream_diagnostics and not budget.finished else None
+
+
+def timed_stream_sync(name):
+    """Measure only synchronous code: never apply to an async function/generator.
+
+    Thread CPU excludes other event-loop tasks because this scope cannot await.
+    Wall minus CPU may include GIL/OS scheduling or synchronous I/O, not just I/O.
+    Nested scopes are inclusive and must not be summed.
+    """
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            budget = current_stream_budget()
+            if budget is None:
+                return fn(*args, **kwargs)
+            started, cpu = time.perf_counter(), time.thread_time()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                budget.add_stream_timing(name, time.perf_counter() - started, time.thread_time() - cpu)
+        return wrapped
+    return decorate
+
+
+@contextmanager
+def stream_sync_stage(name, budget=None):
+    budget = budget or current_stream_budget()
+    if budget is None or not budget.stream_diagnostics:
+        yield
+        return
+    started, cpu = time.perf_counter(), time.thread_time()
+    try:
+        yield
+    finally:
+        budget.add_stream_timing(name, time.perf_counter() - started, time.thread_time() - cpu)

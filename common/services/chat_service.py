@@ -1,5 +1,5 @@
 import asyncio
-from sagents.utils.request_latency import RequestLatency
+from sagents.utils.request_latency import RequestLatency, stream_sync_stage
 from sagents.utils.latency_diagnostics import to_thread as diagnostic_to_thread, diagnose
 import json
 import os
@@ -1532,13 +1532,16 @@ async def execute_chat_session(
 
     try:
         async for kind, payload in interleave_message_and_progress(
-            stream_service.process_stream(), progress_queue
+            stream_service.process_stream(), progress_queue,
+            latency_budget=getattr(stream_service, "latency_budget", None)
         ):
             stream_counter += 1
 
             if kind == "tool_progress":
                 # progress 事件不进 token usage、不进 MessageManager；直接下发
-                yield json.dumps(payload, ensure_ascii=False) + "\n"
+                with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
+                    encoded = json.dumps(payload, ensure_ascii=False) + "\n"
+                yield encoded
                 continue
 
             result = payload
@@ -1552,7 +1555,9 @@ async def execute_chat_session(
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
             yield_result.pop("chunk_id", None)
-            yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+            with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
+                encoded = json.dumps(yield_result, ensure_ascii=False) + "\n"
+            yield encoded
             if current_token_usage is not None and not stream_end_emitted:
                 stream_end_emitted = True
                 logger.bind(session_id=session_id).info(
