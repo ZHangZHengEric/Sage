@@ -245,3 +245,12 @@ tool argument deltas no longer rebuild the entire compression coverage graph;
 new messages, late-arriving compression tool names, compression argument deltas
 and partial compression results still refresh it. The actual inference view
 continues to derive coverage from messages.
+
+A subsequent ordinary request consumed 1549 SDK chunks with 1314 ms of consumer
+wall time, while result recording and state saving took 1 ms and 21 ms. Buffered
+SDK streams now use a 5 ms cooperative yield checkpoint instead of forcing an
+event-loop scheduling round trip for every chunk. Network reads still await
+normally; content, ordering and chunk boundaries are unchanged. This is a
+cooperative scheduling budget, not a hard real-time guarantee: a single chunk's
+work or other tasks can delay resumption. Consumer wall time includes scheduling
+and competing task work, so it must not be interpreted as exclusive CPU time.

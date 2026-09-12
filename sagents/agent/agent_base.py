@@ -1,3 +1,4 @@
+from sagents.utils.stream_yield import StreamYieldBudget
 from sagents.utils.request_latency import request_stage, record_stage
 from abc import ABC, abstractmethod
 from typing import (
@@ -2023,6 +2024,7 @@ class AgentBase(ABC):
                     extra_body=extra_body,
                     **final_config,
                 )
+                stream_yield_budget = StreamYieldBudget()
                 async for chunk in stream:
                     # print(chunk)
                     # 记录首token时间
@@ -2030,8 +2032,9 @@ class AgentBase(ABC):
                         first_token_time = time.time()
                     attempt_chunks.append(chunk)
 
-                    # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
-                    await asyncio.sleep(0)
+                    # Bound buffered-stream CPU bursts without a scheduler
+                    # round trip for every token. Network awaits remain intact.
+                    await stream_yield_budget.checkpoint()
 
                     attempt_yielded_chunks = True
                     yield chunk
