@@ -470,13 +470,29 @@ class CompressHistoryTool:
 
         content_token_limit = max(1, token_limit - min(32, token_limit // 4))
         raw_parts: List[str] = []
-        remaining = text
-        while remaining:
-            low, high = 1, len(remaining)
+        offset = 0
+        previous_length = 1024
+        while offset < len(text):
+            remaining_length = len(text) - offset
+            low, high = 1, min(previous_length, remaining_length)
             best = 0
+            # Bracket the same monotonic token boundary locally. Searching the
+            # entire remaining history for every part repeatedly scans large
+            # suffixes that cannot fit. Never retain copies of those suffixes.
+            while (
+                CompressHistoryTool._estimated_text_tokens(text[offset : offset + high])
+                <= content_token_limit
+            ):
+                best = high
+                low = high + 1
+                if high == remaining_length:
+                    break
+                high = min(high * 2, remaining_length)
+            else:
+                high -= 1  # The failed probe is already known not to fit.
             while low <= high:
                 middle = (low + high) // 2
-                candidate = remaining[:middle]
+                candidate = text[offset : offset + middle]
                 if (
                     CompressHistoryTool._estimated_text_tokens(candidate)
                     <= content_token_limit
@@ -489,8 +505,9 @@ class CompressHistoryTool:
                 raise CompressHistoryError(
                     "Unable to split oversized compression input safely"
                 )
-            raw_parts.append(remaining[:best])
-            remaining = remaining[best:]
+            raw_parts.append(text[offset : offset + best])
+            offset += best
+            previous_length = best
         return raw_parts
 
     @staticmethod

@@ -1,10 +1,10 @@
+# Frozen pre-optimization implementation for differential tests and CPU benchmarks.
 """
 将 OpenAI ChatCompletionChunk 流合并为完整的 ChatCompletion 对象。
 
 从 AgentBase 抽取，便于复用与单测。
 """
 
-from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any, Iterable
@@ -13,11 +13,6 @@ from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
-)
-from openai.types.chat.chat_completion_chunk import (
-    ChatCompletionChunk,
-    Choice as ChunkChoice,
-    ChoiceDelta,
 )
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
@@ -75,16 +70,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         delta = choice.delta
         if choice.finish_reason is not None:
             finish_reason = choice.finish_reason
-        plain_sdk = (
-            type(chk) is ChatCompletionChunk
-            and type(choice) is ChunkChoice
-            and type(delta) is ChoiceDelta
-        )
-        choice_dump = (
-            chunk_dump["choices"][0]
-            if plain_sdk
-            else choice.model_dump(exclude_none=True)
-        )
+        choice_dump = choice.model_dump(exclude_none=True)
         for key, value in choice_dump.items():
             if key not in {"index", "delta", "finish_reason"}:
                 choice_extras[key] = deepcopy(value)
@@ -97,9 +83,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         if delta.refusal:
             refusal += delta.refusal
 
-        delta_dump = (
-            choice_dump["delta"] if plain_sdk else delta.model_dump(exclude_none=True)
-        )
+        delta_dump = delta.model_dump(exclude_none=True)
         for key, value in delta_dump.items():
             if key not in {
                 "content",
@@ -108,7 +92,9 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                 "role",
                 "tool_calls",
             }:
-                message_extras[key] = merge_stream_value(message_extras.get(key), value)
+                message_extras[key] = merge_stream_value(
+                    message_extras.get(key), value
+                )
 
         for tc in delta.tool_calls or []:
             idx = tc.index
@@ -118,7 +104,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                 tool_calls[idx] = {
                     "id": tc.id or "",
                     "type": tc.type or "function",
-                    "function": {"name": "", "arguments": []},
+                    "function": {"name": "", "arguments": ""},
                 }
             entry = tool_calls[idx]
             if tc.id and not entry["id"]:
@@ -126,7 +112,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
             if tc.function.name and not entry["function"]["name"]:
                 entry["function"]["name"] = tc.function.name
             if tc.function.arguments:
-                entry["function"]["arguments"].append(tc.function.arguments)
+                entry["function"]["arguments"] += tc.function.arguments
 
     if finish_reason is None:
         finish_reason = "stop"
@@ -157,7 +143,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                                 type="function",
                                 function=Function(
                                     name=tc["function"]["name"],
-                                    arguments="".join(tc["function"]["arguments"]),
+                                    arguments=tc["function"]["arguments"],
                                 ),
                             )
                             for tc in tool_calls.values()
@@ -174,3 +160,40 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         usage=usage,
         **response_extras,
     )
+
+from sagents.tool.impl.compress_history_tool import CompressHistoryTool, CompressHistoryError
+from typing import List
+
+def split_before(
+        text: str, token_limit: int
+    ) -> List[str]:
+        """Split raw ephemeral text without embedding mutable part markers."""
+        if token_limit <= 0:
+            raise CompressHistoryError("Compression input budget is exhausted")
+        if CompressHistoryTool._estimated_text_tokens(text) <= token_limit:
+            return [text]
+
+        content_token_limit = max(1, token_limit - min(32, token_limit // 4))
+        raw_parts: List[str] = []
+        remaining = text
+        while remaining:
+            low, high = 1, len(remaining)
+            best = 0
+            while low <= high:
+                middle = (low + high) // 2
+                candidate = remaining[:middle]
+                if (
+                    CompressHistoryTool._estimated_text_tokens(candidate)
+                    <= content_token_limit
+                ):
+                    best = middle
+                    low = middle + 1
+                else:
+                    high = middle - 1
+            if best <= 0:
+                raise CompressHistoryError(
+                    "Unable to split oversized compression input safely"
+                )
+            raw_parts.append(remaining[:best])
+            remaining = remaining[best:]
+        return raw_parts
