@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from sagents.utils.request_latency import current_stream_budget
 
 
 class StreamYieldBudget:
@@ -19,5 +20,11 @@ class StreamYieldBudget:
         # separate loop round trip for each tiny delta. Message order/content
         # and SDK chunk boundaries are unchanged.
         if self.clock() >= self.deadline:
-            await asyncio.sleep(0)
+            budget = current_stream_budget()
+            started = time.perf_counter() if budget is not None else None
+            try:
+                await asyncio.sleep(0)
+            finally:
+                if budget is not None:
+                    budget.add_stream_timing("stream.scheduler_yield", time.perf_counter() - started)
             self.deadline = self.clock() + self.interval

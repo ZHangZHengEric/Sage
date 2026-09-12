@@ -254,3 +254,58 @@ normally; content, ordering and chunk boundaries are unchanged. This is a
 cooperative scheduling budget, not a hard real-time guarantee: a single chunk's
 work or other tasks can delay resumption. Consumer wall time includes scheduling
 and competing task work, so it must not be interpreted as exclusive CPU time.
+
+## Stream-path attribution (diagnostics only)
+
+`stream_stages` now separates synchronous work from asynchronous waiting:
+
+- `ledger.add` contains message timing, merge and journal work. `ledger.merge`
+  contains snapshot copying, delta merge, statistics/timestamp updates and
+  compression coverage refresh. These are nested inclusive scopes, not additive.
+- `message.serialize` measures MessageChunk.to_dict, including conversion done by
+  timing records and client serialization. `display.clean` measures display-copy
+  and tool-result cleanup. `delivery.json_encode` measures final JSON encoding.
+- Synchronous stages include `count`, `total_ms`, `max_ms`, `cpu_ms`, `cpu_count`.
+  Thread CPU is measured only around synchronous functions/blocks that cannot
+  await. Wall minus CPU may reflect GIL/OS scheduling or synchronous I/O; it does
+  not by itself identify which. CPU is never measured across await as if it were
+  the current request's exclusive CPU.
+- `stream.scheduler_yield` measures the existing cooperative sleep(0) until
+  resumption. It is scheduling wait, not this request's CPU.
+- `delivery.queue_residence` measures each event's time in the merge queue;
+  `merge_queue_peak` is queue depth at insertion. Per-event residence times
+  overlap, so their sum is NOT extra request latency. Inspect mean and max.
+- `delivery.downstream_resume` measures the interval from yielding an event until
+  the consumer resumes the generator. It includes encoding, downstream work,
+  transport backpressure and other scheduling; it is NOT pure network latency.
+
+Request summaries include producer-side counters. One additional
+`request.stream_delivery` record, correlated by operation_id, contains delivery
+counters after draining (or closing) the stream because request.completed can
+precede the last queued delivery. It is emitted before bounded worker cleanup;
+late detached worker activity is outside this snapshot. No per-token log, stack,
+payload, history list, extra thread or polling loop is added. At most 24 numeric
+stream stage entries and one queue gauge are retained per request; timestamps
+only travel with existing queue items. Existing three-day / 10 MiB-per-day log
+caps still apply. SAGE_LATENCY_DIAGNOSTICS=0 disables these measurements.
+Concurrency, queue capacity, scheduling interval, model/tool behavior, content,
+chunk order and snapshot isolation are unchanged.
+
+### Offline reproduction
+
+Run `PYTHONPATH=. python scripts/diagnostics/mock_stream_latency.py --requests 4
+--chunks 1000` from the repository root (on one command line). Options include
+`--tool-deltas`, `--slow-consumer-ms 5`, `--history 500` and
+`--disable-diagnostics`. Limits bound work to eight requests and 5000 chunks each.
+It uses real ledger/display/merge code and a synthetic model iterator, with no
+model/tool/network calls. It verifies all output pieces and merged content.
+Injected competing CPU and slow-consumer tests verify that CPU, scheduling wait
+and delivery wait land in distinct counters without crossing request contexts.
+
+Local macOS/Python 3.13 reproduction found 1000 deltas trigger 2000 to_dict calls
+and 1000 stats/timestamp updates, while compression coverage refresh happens
+only once. One run attributed ~89 ms to stats updates versus ~8 ms to snapshot
+copying. This is a lead, not proof of production Linux/Python 3.11 cost. Slow
+consumer injection increased downstream-resume time without corresponding CPU
+increases. On/off end-to-end runs are noisy and cannot establish instrumentation
+cost or a production speedup; compare direct overhead and production stages.

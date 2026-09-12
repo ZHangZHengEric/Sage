@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, AsyncIterator, Tuple
 
 from loguru import logger
@@ -35,6 +36,8 @@ def _consume_task_exception(task: asyncio.Task) -> None:
 async def interleave_message_and_progress(
     message_iter: AsyncIterator[Any],
     progress_queue: asyncio.Queue,
+    *,
+    latency_budget=None,
 ) -> AsyncIterator[Tuple[str, Any]]:
     """把 message 异步迭代器与 progress 队列交错输出。
 
@@ -49,32 +52,52 @@ async def interleave_message_and_progress(
     """
     out_queue: asyncio.Queue = asyncio.Queue()
 
+    budget = latency_budget if getattr(latency_budget, "stream_diagnostics", False) else None
+
+    async def enqueue(kind, value):
+        queued_at = time.perf_counter() if budget is not None else None
+        await out_queue.put((kind, value, queued_at))
+        if budget is not None:
+            budget.record_queue_depth(out_queue.qsize())
+
     async def _drain_messages():
         try:
             async for msg in message_iter:
-                await out_queue.put(("msg", msg))
+                await enqueue("msg", msg)
         except Exception as exc:
-            await out_queue.put(("error", exc))
+            await enqueue("error", exc)
         finally:
-            await out_queue.put(("msg_end", None))
+            await enqueue("msg_end", None)
 
     async def _drain_progress():
         while True:
             ev = await progress_queue.get()
             if ev is _MERGE_SENTINEL:
                 break
-            await out_queue.put(("prog", ev))
+            await enqueue("prog", ev)
 
     msg_task = asyncio.create_task(_drain_messages())
     prog_task = asyncio.create_task(_drain_progress())
 
     try:
         while True:
-            kind, payload = await out_queue.get()
+            kind, payload, queued_at = await out_queue.get()
+            if budget is not None:
+                budget.add_stream_timing("delivery.queue_residence", time.perf_counter() - queued_at)
             if kind == "msg":
-                yield ("message", payload)
+                sent_at = time.perf_counter() if budget is not None else None
+                try:
+                    yield ("message", payload)
+                finally:
+                    if budget is not None:
+                        budget.add_stream_timing("delivery.downstream_resume", time.perf_counter() - sent_at)
             elif kind == "prog":
-                yield ("tool_progress", payload)
+                sent_at = time.perf_counter() if budget is not None else None
+                try:
+                    yield ("tool_progress", payload)
+                finally:
+                    if budget is not None:
+                        budget.add_stream_timing("delivery.downstream_resume", time.perf_counter() - sent_at)
             elif kind == "error":
                 raise payload
             elif kind == "msg_end":
@@ -87,11 +110,20 @@ async def interleave_message_and_progress(
                     pass
                 # 把 out_queue 中残留的 progress 事件 flush 出去
                 while not out_queue.empty():
-                    k2, p2 = out_queue.get_nowait()
+                    k2, p2, queued_at = out_queue.get_nowait()
+                    if budget is not None:
+                        budget.add_stream_timing("delivery.queue_residence", time.perf_counter() - queued_at)
                     if k2 == "prog":
-                        yield ("tool_progress", p2)
+                        sent_at = time.perf_counter() if budget is not None else None
+                        try:
+                            yield ("tool_progress", p2)
+                        finally:
+                            if budget is not None:
+                                budget.add_stream_timing("delivery.downstream_resume", time.perf_counter() - sent_at)
                 break
     finally:
+        if budget is not None:
+            budget.emit_delivery_summary()
         workers = (msg_task, prog_task)
         for task in workers:
             if not task.done():

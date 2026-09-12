@@ -14,6 +14,7 @@ MessageManager 优化版消息管理器
 版本: 2.0 (优化版)
 """
 
+from sagents.utils.request_latency import timed_stream_sync, stream_sync_stage
 import datetime
 import json
 import time
@@ -205,6 +206,7 @@ class MessageManager:
         return max(pair["assistant_idx"] for pair in visible_pairs)
         return None
 
+    @timed_stream_sync("ledger.coverage")
     def _refresh_history_anchor_index(self) -> None:
         """根据最新成功 compression anchor 位置刷新 active_start_index（仅供 memory 使用）。"""
         manifest = self.refresh_compact_manifest()
@@ -262,6 +264,7 @@ class MessageManager:
         """
         self._recent_loop_signatures.clear()
 
+    @timed_stream_sync("ledger.merge")
     def add_messages(
         self,
         messages: Union[MessageChunk, List[MessageChunk]],
@@ -304,10 +307,12 @@ class MessageManager:
             )
             # The ledger owns its messages. Keep prior list/tail views stable,
             # but do not recursively copy unchanged history for every token.
-            merged = list(self.messages)
-            if previous is not None and previous.message_id == message.message_id:
-                merged[-1] = deepcopy(previous)
-            MessageManager._merge_into_owned_messages(message, merged)
+            with stream_sync_stage("ledger.snapshot_copy"):
+                merged = list(self.messages)
+                if previous is not None and previous.message_id == message.message_id:
+                    merged[-1] = deepcopy(previous)
+            with stream_sync_stage("ledger.merge_delta"):
+                MessageManager._merge_into_owned_messages(message, merged)
             self.messages = merged
             # Ordinary tool argument deltas cannot change compression coverage.
             # Check the merged name as a function name can arrive in
@@ -319,9 +324,10 @@ class MessageManager:
             )
             refresh_history = refresh_history or not unchanged_coverage
 
-        self.stats["total_messages"] = len(self.messages)
-        self.stats["total_chunks"] += len(messages)
-        self.stats["last_updated"] = datetime.datetime.now().isoformat()
+        with stream_sync_stage("ledger.stats_update"):
+            self.stats["total_messages"] = len(self.messages)
+            self.stats["total_chunks"] += len(messages)
+            self.stats["last_updated"] = datetime.datetime.now().isoformat()
 
         # New messages and compression deltas still refresh, including partial
         # compression results becoming valid JSON.

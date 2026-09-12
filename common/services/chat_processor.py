@@ -1,3 +1,4 @@
+from sagents.utils.request_latency import timed_stream_sync
 import copy
 import json
 import re
@@ -10,6 +11,7 @@ class ContentProcessor:
     BASE64_PATTERN = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
 
     @classmethod
+    @timed_stream_sync("display.clean")
     def clean_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
         """Return a display-safe copy. Never mutate the caller's message dict.
 
