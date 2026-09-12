@@ -229,3 +229,10 @@ the worker. Server lifespan now constructs and closes one dummy client before
 accepting traffic to move this cold cost out of user requests. It uses a reserved
 `.invalid` endpoint and makes no model/network call; subsequent request clients
 remain independently owned and use their current configured credentials.
+
+A concurrent batch also sampled host SkillManager recursive file-tree scanning
+on the event loop. Request skill-proxy construction now uses the same existing
+instrumented executor; metadata, instructions, file trees, caller workspace and
+Agent-owner skill precedence are preserved. Its elapsed/queue/run/resume times
+are separate from model-client creation. This does not alter tool execution or
+cache mutable skill contents across requests.

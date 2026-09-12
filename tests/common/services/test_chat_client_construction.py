@@ -97,13 +97,14 @@ async def test_cancelled_prepare_releases_session_lock(monkeypatch):
     lock = asyncio.Lock()
     monkeypatch.setattr(chat_service, "get_session_run_lock", lambda sid: lock)
     monkeypatch.setattr(
-        chat_service, "SageStreamService", lambda request, **kw: SimpleNamespace()
+        chat_service, "SageStreamService", lambda request, **kw: SimpleNamespace(skill_owner_user_id="owner", agent_workspace="/tmp")
     )
     monkeypatch.setattr(
         chat_service,
         "_create_model_client_off_loop",
         AsyncMock(side_effect=asyncio.CancelledError),
     )
+    monkeypatch.setattr(chat_service, "create_skill_proxy", lambda *a, **kw: (None, None))
     with pytest.raises(asyncio.CancelledError):
         await chat_service.prepare_session(request)
     assert not lock.locked()
@@ -144,3 +145,29 @@ async def test_startup_warmup_constructs_and_closes_without_model_call(monkeypat
     factory.assert_awaited_once()
     assert factory.call_args.args[0]['base_url'] == 'https://sdk-warmup.invalid/v1'
     client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_prepare_offloads_skill_scan_and_preserves_owner_and_workspace(monkeypatch):
+    request = StreamRequest(messages=[], session_id='skill-preparation', available_skills=['wanted'], llm_model_config={})
+    lock = asyncio.Lock()
+    main_thread = threading.get_ident()
+    proxy, owner_manager, model = object(), object(), object()
+    service = SimpleNamespace(skill_owner_user_id='owner', agent_workspace='/tmp/synthetic-workspace', initialize_workspace_assets=AsyncMock())
+    def construct(req, *, defer_runtime_setup):
+        assert defer_runtime_setup
+        return service
+    def skills(names, *, user_id, agent_workspace):
+        assert threading.get_ident() != main_thread
+        assert (names, user_id, agent_workspace) == (['wanted'], 'owner', '/tmp/synthetic-workspace')
+        return proxy, owner_manager
+    monkeypatch.setattr(chat_service, 'get_session_run_lock', lambda sid: lock)
+    monkeypatch.setattr(chat_service, 'SageStreamService', construct)
+    monkeypatch.setattr(chat_service, 'create_skill_proxy', skills)
+    monkeypatch.setattr(chat_service, '_create_model_client_off_loop', AsyncMock(return_value=model))
+    actual, actual_lock = await chat_service.prepare_session(request)
+    assert actual is service and actual_lock is lock
+    assert service.skill_manager is proxy and service.agent_skill_manager is owner_manager
+    assert service.model_client is model
+    assert lock.locked()
+    lock.release()

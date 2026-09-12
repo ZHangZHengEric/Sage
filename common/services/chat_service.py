@@ -1180,7 +1180,7 @@ async def warmup_model_client() -> None:
 
 
 class SageStreamService:
-    def __init__(self, request: StreamRequest, *, defer_model_client=False):
+    def __init__(self, request: StreamRequest, *, defer_runtime_setup=False):
         self.request = request
         self.latency_budget = request._latency_budget or RequestLatency()
         self.latency_budget.session_id = request.session_id or ""
@@ -1237,13 +1237,16 @@ class SageStreamService:
                 [team_tool_manager] + existing_managers,
                 list(set((request.available_tools or []) + team_tools)),
             )
-        self.skill_manager, self.agent_skill_manager = create_skill_proxy(
-            request.available_skills,  # pyright: ignore[reportArgumentType]
-            user_id=self.skill_owner_user_id,
-            agent_workspace=self.agent_workspace,
-        )
+        if defer_runtime_setup:
+            self.skill_manager, self.agent_skill_manager = None, None
+        else:
+            self.skill_manager, self.agent_skill_manager = create_skill_proxy(
+                request.available_skills,
+                user_id=self.skill_owner_user_id,
+                agent_workspace=self.agent_workspace,
+            )
         self.model_client = (
-            None if defer_model_client else create_model_client(request.llm_model_config)
+            None if defer_runtime_setup else create_model_client(request.llm_model_config)
         )
         if _is_desktop_mode():
             self.sage_engine = SAgent(
@@ -1458,8 +1461,15 @@ async def prepare_session(
     try:
         budget.add_stage("request.lock_and_validation", time.perf_counter() - preparation_started)
         constructed = time.perf_counter()
-        stream_service = SageStreamService(request, defer_model_client=True)
+        stream_service = SageStreamService(request, defer_runtime_setup=True)
         budget.add_stage("request.construct_service", time.perf_counter() - constructed)
+        skill_started = time.perf_counter()
+        stream_service.skill_manager, stream_service.agent_skill_manager = await diagnostic_to_thread(
+            "request.create_skill_proxy", create_skill_proxy,
+            request.available_skills, user_id=stream_service.skill_owner_user_id,
+            agent_workspace=stream_service.agent_workspace,
+        )
+        budget.add_stage("request.create_skill_proxy", time.perf_counter() - skill_started)
         client_started = time.perf_counter()
         stream_service.model_client = await _create_model_client_off_loop(request.llm_model_config)
         budget.add_stage("request.create_model_client", time.perf_counter() - client_started)
