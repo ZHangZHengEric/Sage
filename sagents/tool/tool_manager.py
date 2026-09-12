@@ -1104,7 +1104,7 @@ class ToolManager:
         simplified = []
         for tool in self.tools.values():
             spec = convert_spec_to_openai_format(
-                tool, lang=lang, fallback_chain=fallback_chain
+                tool, lang=lang, fallback_chain=fallback_chain, metadata_only=True
             )
             fn = spec.get("function", {})
             simplified.append(

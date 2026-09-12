@@ -295,3 +295,28 @@ async def test_localized_summary_preserves_raw_builtin_payload(monkeypatch):
     assert "falhou" in model_payload["localized_summary"]
     assert model_payload["error"] == "RAW_EXTENSION_ERROR"
     assert model_payload["result"]["page_text"] == "RAW PAGE CONTENT"
+
+
+@pytest.mark.parametrize("lang, fallback", [(None, None), ("en", None), ("pt", None), ("fr", ["en", "zh"]), ("", ["pt"])])
+def test_simplified_metadata_matches_full_schema_without_traversing_parameters(lang, fallback):
+    tm = ToolManager(is_auto_discover=False, isolated=True)
+    specs = list(_specs())
+    tm.tools = {spec.name: spec for spec in specs}
+    expected = []
+    for spec in tm.tools.values():
+        fn = convert_spec_to_openai_format(spec, lang=lang, fallback_chain=fallback)["function"]
+        expected.append({"name": fn["name"], "description": fn["description"]})
+    assert tm.list_tools_simplified(lang=lang, fallback_chain=fallback) == expected
+
+    class MetadataOnly:
+        name = "metadata_only"
+        description = "base"
+        description_i18n = {"en": "English", "zh": "中文"}
+        @property
+        def parameters(self):
+            raise AssertionError("Simplified discovery must not inspect parameters")
+        @property
+        def return_data(self):
+            raise AssertionError("Simplified discovery must not inspect return schemas")
+    tm.tools = {"metadata_only": MetadataOnly()}
+    assert tm.list_tools_simplified(lang="en") == [{"name": "metadata_only", "description": "English"}]

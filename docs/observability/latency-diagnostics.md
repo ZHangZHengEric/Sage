@@ -174,3 +174,12 @@ investigation target, not a timeout or a context truncation rule. Sage-side
 latency excludes the additional Ling boundary overhead; use the hourly Ling
 metric for end-to-end assessment. Thread offloading does not eliminate the
 Python GIL or upstream model latency, so production samples remain necessary.
+
+A post-deployment sample showed budget worker execution at 0.4–11 ms but
+resumption delayed by 220–429 ms. A concurrent event-loop sample pointed to
+full parameter JSON conversion inside `list_tools_simplified`. That discovery
+path now requests name/description metadata only, using the same localization
+and fallback logic without visiting parameters or return schemas. Full provider
+schema generation remains unchanged. Tests compare metadata against full
+schemas across built-in tools and languages, and reject any parameter/return
+access during simplified discovery.

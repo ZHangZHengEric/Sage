@@ -75,6 +75,8 @@ def convert_spec_to_openai_format(
     tool_spec: Union[McpToolSpec, ToolSpec],
     lang: Optional[str] = None,
     fallback_chain: Optional[List[str]] = None,
+    *,
+    metadata_only: bool = False,
 ) -> Dict[str, Any]:
     """将工具规格转换为 OpenAI 兼容格式，并按需本地化描述与参数说明。
 
@@ -146,6 +148,14 @@ def convert_spec_to_openai_format(
         getattr(tool_spec, "description", ""),
         getattr(tool_spec, "description_i18n", None),
     )
+
+    # Tool discovery only consumes name/description. Avoid traversing or
+    # serializing parameter and return schemas for this metadata-only path.
+    if metadata_only:
+        return {
+            "type": "function",
+            "function": {"name": tool_spec.name, "description": localized_desc},
+        }
 
     # 参数本地化
     param_i18n_map: Optional[Dict[str, Dict[str, str]]] = getattr(
