@@ -87,8 +87,8 @@ ACTIVE_SKILL_MAX_CHARACTERS = 12000
 ACTIVE_SKILLS_MAX_CHARACTERS = 24000
 SKILL_DESCRIPTION_MAX_CHARACTERS = 2000
 AVAILABLE_SKILLS_MAX_CHARACTERS = 16000
-USER_CONTEXT_MAX_CHARACTERS = 6000
-MEMORY_CONTEXT_MAX_CHARACTERS = 10000
+USER_CONTEXT_MAX_CHARACTERS = 4000
+MEMORY_CONTEXT_MAX_CHARACTERS = 6000
 MIN_COMPRESSION_CHARACTER_REDUCTION = 128
 
 
@@ -1312,9 +1312,12 @@ class AgentBase(ABC):
             yield (view, True)
             return
 
+        # Protect 15% of the model window, expressed in estimator units.
+        scale = max(1.0, float(getattr(current_projection, "scale", 1.0)))
+        tail_token_budget = max(0, int(max_model_len * 0.15 / scale))
         segment = MessageManager.select_llm_compression_segment(
             working_messages,
-            active_protection_count=(2 if provider_overflow_recovery else 12),
+            active_protection_tokens=tail_token_budget,
         )
         # A soft budget must not repeatedly summarize an existing summary.
         # Real provider overflow may try it once, then propagate the error.

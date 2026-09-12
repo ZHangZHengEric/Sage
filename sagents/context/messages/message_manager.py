@@ -1395,6 +1395,57 @@ class MessageManager:
         return protected
 
     @staticmethod
+    def _token_budget_protected_indices(
+        messages: List[MessageChunk], token_budget: int
+    ) -> set[int]:
+        """Keep a contiguous, pair-safe tail within an estimated token budget.
+
+        The newest atomic group is retained even if it alone exceeds the budget.
+        Stop at the latest user request: it is protected separately by selection.
+        Count the provider payload, including tool arguments, rather than content
+        alone. Never skip an expensive group to retain older, cheaper messages.
+        """
+        last_user = max(
+            (i for i, msg in enumerate(messages) if msg.role == MessageRole.USER.value),
+            default=-1,
+        )
+        costs = [
+            PromptTokenEstimator.component(
+                "message", MessageManager.convert_message_to_dict_for_request(msg) or {}
+            ).estimated_tokens
+            for msg in messages
+        ]
+        protected: set[int] = set()
+        used = 0
+        cursor = len(messages) - 1
+        while cursor > last_user:
+            candidate = MessageManager._pair_safe_protected_indices(
+                messages, len(messages) - cursor
+            )
+            # Pair closure may reach backwards; protect the intervening messages
+            # too so the compression boundary remains a contiguous prefix.
+            start = min(candidate)
+            while True:
+                closed = MessageManager._pair_safe_protected_indices(
+                    messages, len(messages) - start
+                )
+                closed_start = min(closed)
+                if closed_start == start:
+                    break
+                start = closed_start
+            candidate = set(range(start, len(messages)))
+            added = candidate - protected
+            cost = sum(costs[i] for i in added)
+            if protected and used + cost > max(0, token_budget):
+                break
+            protected = candidate
+            used += cost
+            cursor = start - 1
+            if used >= max(0, token_budget):
+                break
+        return protected
+
+    @staticmethod
     def _last_tool_call_result_index(
         messages: List[MessageChunk],
         tool_name: str,
@@ -1758,6 +1809,8 @@ class MessageManager:
     def select_llm_compression_segment(
         messages: List[MessageChunk],
         active_protection_count: int = DEFAULT_LLM_PROTECTION_COUNT,
+        *,
+        active_protection_tokens: Optional[int] = None,
     ) -> Optional[List[MessageChunk]]:
         """Select history for one persistent LLM summary.
 
@@ -1770,8 +1823,10 @@ class MessageManager:
         effective = MessageManager._base_inference_view(messages)
         if not effective:
             return None
-        protected = MessageManager._pair_safe_protected_indices(
-            effective, active_protection_count
+        protected = (
+            MessageManager._token_budget_protected_indices(effective, active_protection_tokens)
+            if active_protection_tokens is not None
+            else MessageManager._pair_safe_protected_indices(effective, active_protection_count)
         )
         user_indices = [
             idx for idx, msg in enumerate(effective) if msg.role == MessageRole.USER.value
