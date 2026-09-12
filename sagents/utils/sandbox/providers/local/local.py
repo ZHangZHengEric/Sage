@@ -1218,10 +1218,6 @@ class LocalSandboxProvider(ISandboxHandle):
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         try:
-            if not await diagnostic_to_thread(
-                "local.get_mtime", os.path.exists, actual_path
-            ):
-                return 0
             return float(
                 await diagnostic_to_thread(
                     "local.get_mtime", os.path.getmtime, actual_path

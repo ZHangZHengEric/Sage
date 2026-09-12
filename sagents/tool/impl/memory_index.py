@@ -211,6 +211,7 @@ class MemoryIndex:
             self.blacklist.update(blacklist)
 
         # Load existing index
+        self._fts_schema_ready = False
         self._load_index()
         self._ensure_fts_schema()
         fts_has_documents = self._fts_has_documents()
@@ -361,24 +362,30 @@ class MemoryIndex:
 
     @timed("index.read_file_content")
     async def _read_file_content(
-        self, filepath: str, max_size: int = 10 * 1024 * 1024
+        self,
+        filepath: str,
+        max_size: int = 10 * 1024 * 1024,
+        *,
+        known_size: Optional[int] = None,
     ) -> str:
         """Read file content with size limit through sandbox"""
         try:
-            # Get file info
-            entries = await self.sandbox.list_directory(os.path.dirname(filepath))
-            file_info = None
-            for entry in entries:
-                if entry.path == filepath or entry.path.endswith(
-                    os.path.basename(filepath)
-                ):
-                    file_info = entry
-                    break
+            if known_size is None:
+                # Get file info
+                entries = await self.sandbox.list_directory(os.path.dirname(filepath))
+                file_info = None
+                for entry in entries:
+                    if entry.path == filepath or entry.path.endswith(
+                        os.path.basename(filepath)
+                    ):
+                        file_info = entry
+                        break
 
-            if not file_info:
-                return ""
+                if not file_info:
+                    return ""
 
-            if file_info.size > max_size:
+                known_size = file_info.size
+            if known_size is not None and known_size > max_size:
                 # For large files, read first max_size bytes
                 # Use head command through sandbox
                 result = await self.sandbox.execute_command(
@@ -518,6 +525,8 @@ class MemoryIndex:
 
     @timed("index.ensure_fts_schema")
     def _ensure_fts_schema(self) -> None:
+        if self._fts_schema_ready:
+            return
         with self._fts_connection() as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
@@ -559,6 +568,7 @@ class MemoryIndex:
                 (str(self.FTS_SCHEMA_VERSION),),
             )
             conn.commit()
+        self._fts_schema_ready = True
 
     @timed("index.fts_has_documents")
     def _fts_has_documents(self) -> bool:
@@ -566,18 +576,11 @@ class MemoryIndex:
             return False
         try:
             with self._fts_connection() as conn:
-                chunk_row = conn.execute(
-                    "SELECT COUNT(*) AS count FROM memory_fts"
-                ).fetchone()
+                chunk_row = conn.execute("SELECT 1 FROM memory_fts LIMIT 1").fetchone()
                 file_row = conn.execute(
-                    "SELECT COUNT(*) AS count FROM memory_file_fts"
+                    "SELECT 1 FROM memory_file_fts LIMIT 1"
                 ).fetchone()
-                return bool(
-                    chunk_row
-                    and file_row
-                    and chunk_row["count"] > 0
-                    and file_row["count"] > 0
-                )
+                return chunk_row is not None and file_row is not None
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to inspect FTS index: {e}")
             return False
@@ -858,7 +861,9 @@ class MemoryIndex:
                         return
 
                     # mtime or size changed, treat as content changed and refresh directly.
-                    content = await self._read_file_content(filepath)
+                    content = await self._read_file_content(
+                        filepath, known_size=entry.size
+                    )
                     self._replace_file_documents(filepath, content, mtime, size)
                     async with timed_lock("index.fts_write_lock", self._fts_write_lock):
                         await diagnostic_to_thread(
@@ -868,7 +873,9 @@ class MemoryIndex:
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
                     # New file, add to index
-                    content = await self._read_file_content(filepath)
+                    content = await self._read_file_content(
+                        filepath, known_size=entry.size
+                    )
                     self._replace_file_documents(filepath, content, mtime, size)
                     async with timed_lock("index.fts_write_lock", self._fts_write_lock):
                         await diagnostic_to_thread(
@@ -1808,6 +1815,7 @@ class MemoryIndex:
         """Clear index"""
         start_time = time.time()
 
+        self._fts_schema_ready = False
         self.bm25 = None
         self._file_metadata = {}
         self._pending_documents = {}

@@ -48,12 +48,20 @@ async def app_lifespan(app: FastAPI):
     # 1) 核心系统初始化（必须先完成）
     await initialize_system(cfg)
 
+    from sagents.utils.loop_diagnostics import (
+        start_loop_diagnostics,
+        stop_loop_diagnostics,
+    )
+
+    start_loop_diagnostics()
+
     # 2) 异步后置初始化任务（可选）
     post_init_task = post_initialize_task()
     try:
         # 3) 启动 HTTP 服务
         yield
     finally:
+        stop_loop_diagnostics()
         # 5) 等待后置任务完成（避免 shutdown 竞态）
         await post_init_task
 

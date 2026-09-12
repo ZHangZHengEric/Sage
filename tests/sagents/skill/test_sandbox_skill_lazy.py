@@ -42,13 +42,14 @@ class FakeSandbox:
         for f in list(self.files) + list(self.dirs):
             if f == base or not f.startswith(base + "/"):
                 continue
-            child = f[len(base) + 1:].split("/")[0]
+            child = f[len(base) + 1 :].split("/")[0]
             child_path = base + "/" + child
             if child_path in seen:
                 continue
             seen.add(child_path)
             is_dir = child_path in self.dirs or any(
-                x.startswith(child_path + "/") for x in list(self.files) + list(self.dirs)
+                x.startswith(child_path + "/")
+                for x in list(self.files) + list(self.dirs)
             )
             entries.append(
                 SimpleNamespace(
@@ -206,3 +207,39 @@ async def test_preexisting_sandbox_skill_loaded_without_copy(tmp_path):
     # 再 ensure 也不会重新拷贝
     await mgr.ensure_materialized("alpha")
     assert sandbox.copy_calls == []
+
+
+async def test_existing_skill_metadata_stays_live_but_tree_is_deferred(tmp_path):
+    host = _host_with(tmp_path, ("alpha", "Host description"))
+    sandbox = FakeSandbox()
+    sandbox.dirs.update(
+        {SKILLS_DIR, SKILLS_DIR + "/alpha", SKILLS_DIR + "/alpha/nested"}
+    )
+    sandbox.files[SKILLS_DIR + "/alpha/SKILL.md"] = (
+        "---\nname: alpha\ndescription: Edited description\n---\nEdited instructions"
+    )
+    sandbox.files[SKILLS_DIR + "/alpha/nested/example.txt"] = "example"
+    lists = []
+    original_list = sandbox.list_directory
+
+    async def recording_list(path, **kwargs):
+        lists.append(path)
+        return await original_list(path, **kwargs)
+
+    sandbox.list_directory = recording_list
+    mgr = SandboxSkillManager(sandbox, SKILLS_DIR)
+    await mgr.sync_from_host(host)
+    skill = mgr.get_skill("alpha")
+    assert skill.description == "Edited description"
+    assert "Edited instructions" in skill.instructions
+    assert lists == []
+    assert skill.file_list == ""
+    results = await asyncio.gather(
+        mgr.ensure_materialized("alpha"), mgr.ensure_materialized("alpha")
+    )
+    assert results[0] is results[1]
+    assert "example.txt" in results[0].file_list
+    assert lists == [SKILLS_DIR + "/alpha", SKILLS_DIR + "/alpha/nested"]
+    assert sandbox.copy_calls == []
+    await mgr.sync_from_host(host)
+    assert mgr.get_skill("alpha").file_list == ""

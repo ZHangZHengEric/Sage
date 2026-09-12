@@ -94,3 +94,34 @@ def test_local_provider_rejects_write_to_read_only_mount(tmp_path):
 
     with pytest.raises(PermissionError, match="read-only"):
         asyncio.run(provider.write_file(str(readonly / "blocked.md"), "blocked"))
+
+
+def test_local_get_mtime_uses_one_worker_call_and_preserves_permissions(
+    tmp_path, monkeypatch
+):
+    from sagents.utils.sandbox.providers.local import local as local_module
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    provider = LocalSandboxProvider(
+        sandbox_id="mtime-test",
+        sandbox_agent_workspace=str(workspace),
+        volume_mounts=[VolumeMount(str(workspace), str(workspace))],
+        macos_isolation_mode="subprocess",
+        linux_isolation_mode="subprocess",
+    )
+    calls = []
+    original = local_module.diagnostic_to_thread
+
+    async def record(name, function, *args, **kwargs):
+        calls.append(function)
+        return await original(name, function, *args, **kwargs)
+
+    monkeypatch.setattr(local_module, "diagnostic_to_thread", record)
+    assert asyncio.run(provider.get_mtime(str(workspace))) == workspace.stat().st_mtime
+    assert len(calls) == 1
+    assert asyncio.run(provider.get_mtime(str(workspace / "absent"))) == 0
+    assert len(calls) == 2
+    with pytest.raises(PermissionError):
+        asyncio.run(provider.get_mtime(str(tmp_path / "outside")))
+    assert len(calls) == 2
