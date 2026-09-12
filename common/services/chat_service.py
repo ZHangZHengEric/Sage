@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 from sagents.context.session_context import get_session_run_lock
-from sagents.context.messages.message import is_message_client_visible
+from sagents.context.messages.message import MessageChunk, is_message_client_visible
 from sagents.sagents import SAgent
 from sagents.session_runtime import get_global_session_manager
 from sagents.tool import get_tool_manager
@@ -1394,7 +1394,14 @@ class SageStreamService:
                         result = message.to_dict()
                     if not is_message_client_visible(result):
                         continue
-                    result = ContentProcessor.clean_content(result)
+                    # to_dict owns all nested data. Dictionary chunks only
+                    # had a shallow copy and still require defensive cleanup.
+                    result = (
+                        ContentProcessor.clean_owned_content(result)
+                        if type(message) is MessageChunk
+                        and getattr(message.to_dict, "__func__", None) is MessageChunk.to_dict
+                        else ContentProcessor.clean_content(result)
+                    )
                     approval_event = _sandbox_approval_event_from_tool_result(
                         result,
                         session_id=session_id,

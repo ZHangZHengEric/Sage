@@ -1,4 +1,5 @@
 from sagents.utils.request_latency import timed_stream_sync
+from sagents.utils.dataclass_snapshot import is_plain_snapshot
 import copy
 import json
 import re
@@ -19,7 +20,18 @@ class ContentProcessor:
         dicts previously polluted parent ledgers when cleaned SSE/API payloads
         were persisted, which later caused OpenAI 400 on resume.
         """
-        result = copy.deepcopy(result)
+        return cls._clean_content_in_place(copy.deepcopy(result))
+
+    @classmethod
+    @timed_stream_sync("display.clean")
+    def clean_owned_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Consume an owned plain snapshot; preserve custom deepcopy hooks."""
+        if not is_plain_snapshot(result):
+            result = copy.deepcopy(result)
+        return cls._clean_content_in_place(result)
+
+    @classmethod
+    def _clean_content_in_place(cls, result: Dict[str, Any]) -> Dict[str, Any]:
         if result.get("role") == "tool":
             content = result.get("content")
             if isinstance(content, dict):

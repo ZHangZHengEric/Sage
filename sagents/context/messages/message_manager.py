@@ -27,7 +27,7 @@ from copy import deepcopy
 from dataclasses import replace
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
-from .message import MessageRole, MessageType, MessageChunk
+from .message import MessageRole, MessageType, MessageChunk, copy_message_snapshot
 from .token_accounting import (
     ContextViewSpec,
     DEFAULT_COMPRESSION_THRESHOLD,
@@ -310,7 +310,7 @@ class MessageManager:
             with stream_sync_stage("ledger.snapshot_copy"):
                 merged = list(self.messages)
                 if previous is not None and previous.message_id == message.message_id:
-                    merged[-1] = deepcopy(previous)
+                    merged[-1] = copy_message_snapshot(previous)
             with stream_sync_stage("ledger.merge_delta"):
                 MessageManager._merge_into_owned_messages(message, merged)
             self.messages = merged

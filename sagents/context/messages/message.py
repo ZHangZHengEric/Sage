@@ -2,7 +2,9 @@ from sagents.utils.request_latency import timed_stream_sync
 import uuid
 import time
 from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+from copy import deepcopy
+from sagents.utils.dataclass_snapshot import dataclass_snapshot, _ATOMIC_TYPES
 from enum import Enum
 import json
 import re
@@ -199,7 +201,7 @@ class MessageChunk:
         Returns:
             Dict[str, Any]: 字典格式的消息块
         """
-        result = asdict(self)
+        result = dataclass_snapshot(self)
 
         # 确保role字段是字符串 - 处理asdict后的枚举对象
         if "role" in result and hasattr(result["role"], "value"):
@@ -373,6 +375,26 @@ class MessageChunk:
                 pass
         logger.debug("未找到有效JSON，返回原始内容")
         return content
+
+
+def copy_message_snapshot(message):
+    """Clone the known plain record without deepcopy's object reconstruction.
+
+    Mutable values still use one shared memo, preserving aliases and cycles.
+    Subclasses and instance copy/state hooks retain generic deepcopy behavior.
+    """
+    if type(message) is not MessageChunk or type(message.__dict__) is not dict or any(
+        key in message.__dict__ for key in ("__deepcopy__", "__reduce__", "__reduce_ex__", "__getstate__", "__setstate__")
+    ):
+        return deepcopy(message)
+    result = object.__new__(MessageChunk)
+    state = result.__dict__
+    memo = {id(message): result, id(message.__dict__): state}
+    for key, value in message.__dict__.items():
+        copied_value = value if type(value) in _ATOMIC_TYPES else deepcopy(value, memo)
+        copied_key = key if type(key) in _ATOMIC_TYPES else deepcopy(key, memo)
+        state[copied_key] = copied_value
+    return result
 
 
 def is_message_client_visible(message: Any) -> bool:
