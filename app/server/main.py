@@ -48,6 +48,10 @@ async def app_lifespan(app: FastAPI):
     # 1) 核心系统初始化（必须先完成）
     await initialize_system(cfg)
 
+    from common.services.chat_service import warmup_model_client
+
+    await warmup_model_client()
+
     from sagents.utils.loop_diagnostics import (
         start_loop_diagnostics,
         stop_loop_diagnostics,

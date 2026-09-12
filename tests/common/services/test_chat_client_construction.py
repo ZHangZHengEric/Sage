@@ -133,3 +133,14 @@ async def test_service_latency_scope_can_close_in_another_task(monkeypatch):
     await asyncio.create_task(stream.aclose())
     assert closed.is_set()
     assert service.latency_budget.finished
+
+
+@pytest.mark.asyncio
+async def test_startup_warmup_constructs_and_closes_without_model_call(monkeypatch):
+    client = SimpleNamespace(close=AsyncMock())
+    factory = AsyncMock(return_value=client)
+    monkeypatch.setattr(chat_service, '_create_model_client_off_loop', factory)
+    await chat_service.warmup_model_client()
+    factory.assert_awaited_once()
+    assert factory.call_args.args[0]['base_url'] == 'https://sdk-warmup.invalid/v1'
+    client.close.assert_awaited_once()

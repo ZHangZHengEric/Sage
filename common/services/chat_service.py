@@ -1169,6 +1169,16 @@ async def _create_model_client_off_loop(params):
         raise
 
 
+async def warmup_model_client() -> None:
+    """Load lazy SDK resources once before serving traffic, without network I/O."""
+    client = await _create_model_client_off_loop({
+        "api_key": "sdk-warmup-no-network",
+        "base_url": "https://sdk-warmup.invalid/v1",
+        "model": "sdk-warmup",
+    })
+    await client.close()
+
+
 class SageStreamService:
     def __init__(self, request: StreamRequest, *, defer_model_client=False):
         self.request = request

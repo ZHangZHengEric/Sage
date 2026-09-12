@@ -223,3 +223,9 @@ isolated. Shared clients are closed once. Cancelled construction disposes of an
 unclaimed client when its worker completes and releases the session run lock.
 The stream accounting scope resets before yielding, allowing disconnect cleanup
 from another task without crossing ContextVar token boundaries.
+
+The first production sample exposed 575 ms of one-time SDK resource loading in
+the worker. Server lifespan now constructs and closes one dummy client before
+accepting traffic to move this cold cost out of user requests. It uses a reserved
+`.invalid` endpoint and makes no model/network call; subsequent request clients
+remain independently owned and use their current configured credentials.
