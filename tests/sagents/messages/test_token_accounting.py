@@ -102,9 +102,7 @@ def test_unknown_tokenizer_estimate_accounts_for_high_risk_text_shapes():
     cjk = PromptTokenEstimator.manifest(
         [_provider_message("user", "上下文压缩很容易低估中文分词" * 100)]
     )
-    emoji = PromptTokenEstimator.manifest(
-        [_provider_message("user", "🧑🏽‍💻🚀" * 100)]
-    )
+    emoji = PromptTokenEstimator.manifest([_provider_message("user", "🧑🏽‍💻🚀" * 100)])
     opaque = PromptTokenEstimator.manifest(
         [_provider_message("user", "aB9_7KpQ2xYz0LmN4RtV8WcD6EfG1HiJ" * 100)]
     )
@@ -249,11 +247,132 @@ def test_projection_subtracts_history_replaced_by_summary():
     old = _provider_message("assistant", "long history " * 200)
     baseline = PromptTokenEstimator.manifest([system, old])
     manager.update_checkpoint("compress", baseline.estimated_tokens, baseline)
-    compressed = PromptTokenEstimator.manifest([
-        system, _provider_message("assistant", "short summary")
-    ])
+    compressed = PromptTokenEstimator.manifest(
+        [system, _provider_message("assistant", "short summary")]
+    )
     projection = manager.project("compress", compressed)
     assert projection.source == "actual_delta"
     assert projection.removed_estimated_tokens > projection.added_estimated_tokens
     assert projection.projected_tokens == compressed.estimated_tokens
     assert projection.projected_tokens < baseline.estimated_tokens
+
+
+def test_component_cache_preserves_original_estimates_and_detects_mutations():
+    from sagents.context.messages import token_accounting as module
+    import random
+
+    rng = random.Random(412)
+    alphabet = "abcXYZ012_+/=- \t\n中文🙂é\u0301"
+    values = [
+        {"role": "user", "content": ""},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "call", "function": {"name": "test", "arguments": '{"x":1}'}}
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64," + "a" * 4096},
+                }
+            ],
+        },
+    ] + [
+        {"role": "user", "content": "".join(rng.choices(alphabet, k=n))}
+        for n in range(1, 500, 7)
+    ]
+    for value in values:
+        safe, image_tokens = module._accounting_value(value)
+        serialized = module._canonical_json(safe)
+        estimated = module._static_text_tokens(serialized) + image_tokens + 2
+        conservative = max(
+            estimated, module._conservative_text_tokens(serialized) + image_tokens + 2
+        )
+        for kind, message_id in [("message", "first"), ("system", "second")]:
+            actual = PromptTokenEstimator.component(kind, value, message_id)
+            assert actual.estimated_tokens == estimated
+            assert actual.conservative_tokens == conservative
+            assert actual.fingerprint == module._fingerprint(safe)
+            assert actual.kind == kind and actual.message_id == message_id
+    message = {"content": [{"type": "text", "text": "before"}]}
+    first = PromptTokenEstimator.component("message", message)
+    message["content"][0]["text"] = "changed " * 100
+    second = PromptTokenEstimator.component("message", message)
+    assert first.fingerprint != second.fingerprint
+    assert first.estimated_tokens != second.estimated_tokens
+
+
+def test_component_serializes_once_and_reuses_bounded_numeric_estimates(monkeypatch):
+    from sagents.context.messages import token_accounting as module
+    from collections import OrderedDict
+
+    monkeypatch.setattr(module, "_text_estimate_cache", OrderedDict())
+    monkeypatch.setattr(module, "_MAX_TEXT_ESTIMATE_CACHE", 8)
+    calls = {"json": 0, "estimate": 0}
+    original_json, original_estimate = (
+        module._canonical_json,
+        module._conservative_text_tokens,
+    )
+
+    def serialize(value):
+        calls["json"] += 1
+        return original_json(value)
+
+    def estimate(value):
+        calls["estimate"] += 1
+        return original_estimate(value)
+
+    monkeypatch.setattr(module, "_canonical_json", serialize)
+    monkeypatch.setattr(module, "_conservative_text_tokens", estimate)
+    for _ in range(4):
+        PromptTokenEstimator.component("tools", {"description": "private-tool-body"})
+    assert calls == {"json": 4, "estimate": 1}
+    for i in range(20):
+        PromptTokenEstimator.component("message", {"content": str(i)})
+    assert len(module._text_estimate_cache) == 8
+    assert all(
+        len(key) == 64
+        and isinstance(value, tuple)
+        and all(isinstance(n, int) for n in value)
+        for key, value in module._text_estimate_cache.items()
+    )
+    assert "private-tool-body" not in repr(module._text_estimate_cache)
+
+
+def test_async_manifest_freezes_input_and_does_not_block_event_loop(monkeypatch):
+    import asyncio
+    import threading
+
+    original = PromptTokenEstimator.manifest
+    messages = [{"role": "user", "content": [{"type": "text", "text": "original"}]}]
+    expected = original(messages)
+    started, release = threading.Event(), threading.Event()
+    loop_thread = threading.get_ident()
+
+    def delayed(cls, snapshot, **kwargs):
+        assert threading.get_ident() != loop_thread
+        started.set()
+        assert release.wait(2)
+        return original(snapshot, **kwargs)
+
+    monkeypatch.setattr(PromptTokenEstimator, "manifest", classmethod(delayed))
+
+    async def run():
+        task = asyncio.create_task(PromptTokenEstimator.manifest_async(messages))
+        try:
+            for _ in range(500):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.001)
+            assert started.is_set()
+            messages[0]["content"][0]["text"] = "mutated after submission"
+            release.set()
+            actual = await task
+            assert actual == expected
+        finally:
+            release.set()
+
+    asyncio.run(run())

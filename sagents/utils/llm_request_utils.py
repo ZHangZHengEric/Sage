@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import inspect
 from copy import deepcopy
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
 from openai import APIError
@@ -352,9 +353,7 @@ def _drop_reasoning_effort_for_incompatible_tool_requests(
     extra_body = sanitized.get("extra_body")
     if isinstance(extra_body, dict) and "reasoning_effort" in extra_body:
         remaining = {
-            key: value
-            for key, value in extra_body.items()
-            if key != "reasoning_effort"
+            key: value for key, value in extra_body.items() if key != "reasoning_effort"
         }
         if remaining:
             sanitized["extra_body"] = remaining
@@ -378,9 +377,12 @@ def _drop_tool_choice_for_deepseek_thinking(
     model_config: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """DeepSeek V4 thinking supports tools but rejects ``tool_choice``."""
-    if not _uses_deepseek_native_protocol(
-        model, client=client, model_config=model_config
-    ) or "tool_choice" not in sanitized:
+    if (
+        not _uses_deepseek_native_protocol(
+            model, client=client, model_config=model_config
+        )
+        or "tool_choice" not in sanitized
+    ):
         return
     tools = sanitized.get("tools")
     if not isinstance(tools, (list, tuple)) or not tools:
@@ -395,9 +397,9 @@ def _drop_tool_choice_for_deepseek_thinking(
         else ""
     )
     explicitly_disabled = thinking_type == "disabled"
-    explicitly_disabled = explicitly_disabled or extra_body.get(
-        "enable_thinking"
-    ) is False
+    explicitly_disabled = (
+        explicitly_disabled or extra_body.get("enable_thinking") is False
+    )
     template_kwargs = extra_body.get("chat_template_kwargs")
     explicitly_disabled = explicitly_disabled or (
         isinstance(template_kwargs, Mapping)
@@ -526,9 +528,7 @@ def coalesce_reasoning_content_messages(
         if preserve_reasoning and pending_reasoning and pending_assistant_messages:
             primary = pending_assistant_messages[0]
             contents = [item.get("content") for item in pending_assistant_messages]
-            if all(
-                content is None or isinstance(content, str) for content in contents
-            ):
+            if all(content is None or isinstance(content, str) for content in contents):
                 primary["content"] = "".join(
                     content for content in contents if isinstance(content, str)
                 )
@@ -576,9 +576,8 @@ def coalesce_reasoning_content_messages(
         )
         if is_reasoning_only:
             if (
-                (pending_reasoning or pending_assistant_messages)
-                and not belongs_to_pending_response(message)
-            ):
+                pending_reasoning or pending_assistant_messages
+            ) and not belongs_to_pending_response(message):
                 flush_pending_assistant_messages()
             pending_response_id = response_id(message)
             pending_agent_name = agent_name(message)
@@ -587,9 +586,8 @@ def coalesce_reasoning_content_messages(
 
         if message.get("role") == "assistant":
             if (
-                (pending_reasoning or pending_assistant_messages)
-                and not belongs_to_pending_response(message)
-            ):
+                pending_reasoning or pending_assistant_messages
+            ) and not belongs_to_pending_response(message):
                 flush_pending_assistant_messages()
             has_tool_calls = bool(message.get("tool_calls"))
             if pending_reasoning and not has_tool_calls:
@@ -762,9 +760,7 @@ def sanitize_model_request_kwargs(
     if structured_support is False:
         sanitized.pop("response_format", None)
     _promote_reasoning_effort_for_openai_models(sanitized, resolved_model)
-    _drop_reasoning_effort_for_incompatible_tool_requests(
-        sanitized, resolved_model
-    )
+    _drop_reasoning_effort_for_incompatible_tool_requests(sanitized, resolved_model)
     _drop_tool_choice_for_deepseek_thinking(
         sanitized,
         resolved_model,
@@ -986,7 +982,9 @@ async def create_chat_completion_with_fallback(
     messages: Any,
     model_config: Optional[Dict[str, Any]] = None,
     response_format: Optional[Dict[str, Any]] = None,
-    request_observer: Optional[Callable[[Dict[str, Any]], None]] = None,
+    request_observer: Optional[
+        Callable[[Dict[str, Any]], Optional[Awaitable[None]]]
+    ] = None,
     protected_request_parameters: Optional[Sequence[str]] = None,
     **kwargs: Any,
 ) -> Any:
@@ -1041,7 +1039,9 @@ async def create_chat_completion_with_fallback(
                         "messages": deepcopy(messages),
                         **deepcopy(request_kwargs),
                     }
-                    request_observer(provider_request)
+                    observed = request_observer(provider_request)
+                    if inspect.isawaitable(observed):
+                        await observed
                 except Exception as exc:
                     logger.warning(
                         "记录 provider-facing LLM 请求失败，不影响实际调用: "

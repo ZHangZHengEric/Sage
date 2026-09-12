@@ -151,3 +151,26 @@ The same change removes independently confirmed repeated work:
   are removed from initialization; trees are built on actual `load_skill`,
   with serialized completion for concurrent loads. No cross-session stale
   metadata cache is introduced.
+
+## Prompt budget efficiency and three-second target
+
+Prompt components reuse their canonical JSON for hashing and estimation. A
+process-local LRU retains at most 2,048 SHA-256 keys and pairs of numeric text
+estimates; it never retains message bodies. Image cost and message identity
+are applied per call. Both original estimation formulas and fingerprints are
+unchanged, and mutable inputs are hashed again on every call.
+
+The four asynchronous AgentBase accounting paths snapshot input containers
+before yielding and run manifests in the existing instrumented thread executor.
+Provider request observers support both synchronous and awaited asynchronous
+callbacks, so accounting still finishes before the actual provider call.
+`prompt_budget.manifest` records operations taking at least 100 ms, including
+component count, serialized character count, cache hits/misses, and instrumented
+worker queue/run/resume timing. No additional worker pool is created.
+
+Sage first visible output above 3,000 ms produces a `first_output.slow` record
+in the existing size-capped, three-calendar-day diagnostic log. This is an
+investigation target, not a timeout or a context truncation rule. Sage-side
+latency excludes the additional Ling boundary overhead; use the hourly Ling
+metric for end-to-end assessment. Thread offloading does not eliminate the
+Python GIL or upstream model latency, so production samples remain necessary.
