@@ -14,6 +14,11 @@ from openai.types.chat import (
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
 )
+from openai.types.chat.chat_completion_chunk import (
+    ChatCompletionChunk,
+    Choice as ChunkChoice,
+    ChoiceDelta,
+)
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
 
@@ -70,7 +75,16 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         delta = choice.delta
         if choice.finish_reason is not None:
             finish_reason = choice.finish_reason
-        choice_dump = choice.model_dump(exclude_none=True)
+        plain_sdk = (
+            type(chk) is ChatCompletionChunk
+            and type(choice) is ChunkChoice
+            and type(delta) is ChoiceDelta
+        )
+        choice_dump = (
+            chunk_dump["choices"][0]
+            if plain_sdk
+            else choice.model_dump(exclude_none=True)
+        )
         for key, value in choice_dump.items():
             if key not in {"index", "delta", "finish_reason"}:
                 choice_extras[key] = deepcopy(value)
@@ -83,7 +97,9 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         if delta.refusal:
             refusal += delta.refusal
 
-        delta_dump = delta.model_dump(exclude_none=True)
+        delta_dump = (
+            choice_dump["delta"] if plain_sdk else delta.model_dump(exclude_none=True)
+        )
         for key, value in delta_dump.items():
             if key not in {
                 "content",
@@ -92,9 +108,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                 "role",
                 "tool_calls",
             }:
-                message_extras[key] = merge_stream_value(
-                    message_extras.get(key), value
-                )
+                message_extras[key] = merge_stream_value(message_extras.get(key), value)
 
         for tc in delta.tool_calls or []:
             idx = tc.index
@@ -104,7 +118,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                 tool_calls[idx] = {
                     "id": tc.id or "",
                     "type": tc.type or "function",
-                    "function": {"name": "", "arguments": ""},
+                    "function": {"name": "", "arguments": []},
                 }
             entry = tool_calls[idx]
             if tc.id and not entry["id"]:
@@ -112,7 +126,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
             if tc.function.name and not entry["function"]["name"]:
                 entry["function"]["name"] = tc.function.name
             if tc.function.arguments:
-                entry["function"]["arguments"] += tc.function.arguments
+                entry["function"]["arguments"].append(tc.function.arguments)
 
     if finish_reason is None:
         finish_reason = "stop"
@@ -143,7 +157,7 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
                                 type="function",
                                 function=Function(
                                     name=tc["function"]["name"],
-                                    arguments=tc["function"]["arguments"],
+                                    arguments="".join(tc["function"]["arguments"]),
                                 ),
                             )
                             for tc in tool_calls.values()
