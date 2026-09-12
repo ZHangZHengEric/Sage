@@ -26,7 +26,9 @@ class ContentProcessor:
     @timed_stream_sync("display.clean")
     def clean_owned_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
         """Consume an owned plain snapshot; preserve custom deepcopy hooks."""
-        if not is_plain_snapshot(result):
+        # Nested tool-call envelopes did not benefit from the validation walk
+        # in production-CPython benchmarks; keep their existing copy path.
+        if result.get("tool_calls") or not is_plain_snapshot(result):
             result = copy.deepcopy(result)
         return cls._clean_content_in_place(result)
 

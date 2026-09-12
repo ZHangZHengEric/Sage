@@ -384,3 +384,10 @@ models or tools. Differential tests also cover200 seeded nested payloads, SDK
 objects, dataclasses, enums, custom string/container types, copy hooks, cycles,
 shared mutable values and original-message isolation. Live stages distinguish
 snapshot_copy, message.serialize and display.clean for post-release checks.
+
+Production Python3.11 benchmark: per1000text records native asdict34.088msCPU
+versus6.211ms for snapshot conversion;generic deepcopy24.851ms versus11.014ms
+for tail cloning. Tool-delta conversion45.445→21.221ms,tail cloning25.888→15.737ms.
+The owned-display guard did not show stable benefit for nested tool-call
+envelopes, so nonempty tool_calls conservatively retain the existing copy path.
+These are isolated CPU benchmarks,not end-to-end production latency claims.
