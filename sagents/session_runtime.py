@@ -1,3 +1,4 @@
+from sagents.utils.latency_diagnostics import diagnose, timed
 import asyncio
 import concurrent.futures
 import json
@@ -375,6 +376,7 @@ class Session:
             )
         return None
 
+    @timed("prepare.restore_runtime_messages")
     def _load_persisted_messages(self) -> List[MessageChunk]:
         if self._persisted_messages is not None:
             return self._persisted_messages
@@ -627,6 +629,7 @@ class Session:
 
         return None
 
+    @diagnose("session.prepare", 500)
     async def _ensure_session_context(
         self,
         session_id: str,
@@ -1300,6 +1303,7 @@ class Session:
             )
         ]
 
+    @timed("prepare.cache_session_workspace")
     def _cache_session_workspace(
         self, session_id: Optional[str], session_context: Optional[SessionContext]
     ):

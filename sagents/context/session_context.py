@@ -1,4 +1,10 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
+from sagents.utils.latency_diagnostics import (
+    diagnose,
+    timed,
+    stage,
+    to_thread as diagnostic_to_thread,
+)
 import asyncio
 import time
 import threading
@@ -93,9 +99,7 @@ class SessionContext:
         self.skill_manager = skill_manager
         self.sandbox_skill_manager: Optional[SandboxSkillManager] = None
         self.parent_session_id = parent_session_id
-        self.storage = storage or create_session_store(
-            session_root=session_root_space
-        )
+        self.storage = storage or create_session_store(session_root=session_root_space)
         self._init_runtime_state(context_budget_config=context_budget_config)
         # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
         self._session_root_space = session_root_space
@@ -114,6 +118,7 @@ class SessionContext:
             return self.sandbox_skill_manager
         return self.skill_manager
 
+    @diagnose("session.prepare", 500)
     async def init_more(self, session_root_space: Optional[str] = None):
         """
         初始化 SessionContext（异步方法，需要显式调用）
@@ -171,7 +176,9 @@ class SessionContext:
         await self._finalize_system_context()
 
         # 加载已持久化的消息
-        await asyncio.to_thread(self._load_persisted_messages)
+        await diagnostic_to_thread(
+            "prepare.load_messages", self._load_persisted_messages
+        )
 
         # 清理过期的待办任务（异步执行，确保 system_context 正确加载）
         try:
@@ -1304,6 +1311,7 @@ class SessionContext:
                 f"SessionContext: Failed to submit {file_label} creation: {e}"
             )
 
+    @timed("prepare.resolve_workspace_paths")
     def _resolve_workspace_paths(self, session_root_space: str) -> None:
         """
         解析会话空间与工作空间路径。
@@ -1361,12 +1369,14 @@ class SessionContext:
             )
 
         self.storage.bind_session_workspace(self.session_id, self.session_workspace)
-        self.storage.register_session(
-            self.session_id,
-            self.session_workspace,
-            parent_session_id=parent_session_id,
-        )
+        with stage("prepare.register_session"):
+            self.storage.register_session(
+                self.session_id,
+                self.session_workspace,
+                parent_session_id=parent_session_id,
+            )
 
+    @timed("prepare.prepare_workspace_bootstrap_files")
     async def _prepare_workspace_bootstrap_files(self):
         """
         准备工作区引导文件（通过沙箱接口）
@@ -1420,6 +1430,7 @@ class SessionContext:
             logger.warning(f"获取默认内容失败 {content_key}: {e}")
             return ""
 
+    @timed("prepare.init_external_paths_and_context")
     def _init_external_paths_and_context(self):
         """
         初始化外部路径和运行变量
@@ -1439,6 +1450,7 @@ class SessionContext:
         if self.system_context.get("current_time") is None:
             self.system_context["current_time"] = current_time_str
 
+    @timed("prepare.init_sandbox_and_file_system")
     async def _init_sandbox_and_file_system(self, sandbox_mode: SandboxType):
         """
         初始化沙箱环境和文件系统
@@ -1516,6 +1528,7 @@ class SessionContext:
             f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s"
         )
 
+    @timed("prepare.register_and_prepare_skills")
     async def _register_and_prepare_skills(self):
         """
         注册并准备技能，主要是同步技能到沙箱
@@ -1560,6 +1573,7 @@ class SessionContext:
         """
         self.sandbox_skill_manager = await self.sandbox.sync_skills(self.skill_manager)
 
+    @timed("prepare.finalize_system_context")
     async def _finalize_system_context(self):
         """
         最终化运行变量，设置私有工作区、用户ID和会话ID
@@ -1689,9 +1703,7 @@ class SessionContext:
                 "call_count": len(calls),
                 "calls": calls,
             }
-            return self.storage.save_mcp_calls(
-                self.session_id, request_id, payload
-            )
+            return self.storage.save_mcp_calls(self.session_id, request_id, payload)
 
     def _has_mcp_calls_for_request(self, request_id: str) -> bool:
         with self._mcp_calls_lock:
@@ -1699,6 +1711,7 @@ class SessionContext:
                 call.get("request_id") == request_id for call in self.mcp_calls_logs
             )
 
+    @timed("prepare.cleanup_expired_todo_tasks")
     async def _cleanup_expired_todo_tasks(self):
         try:
             from sagents.tool.impl.todo_tool import ToDoTool
@@ -2425,14 +2438,22 @@ class SessionContext:
     async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
         """异步保存单个LLM请求到文件"""
         try:
-            await asyncio.to_thread(self._save_llm_request_sync, llm_request)
+            await diagnostic_to_thread(
+                "session_context._async_save_llm_request",
+                self._save_llm_request_sync,
+                llm_request,
+            )
         except Exception as e:
             logger.error(f"SessionContext: Failed to async save LLM request: {e}")
 
     async def _async_save_mcp_calls(self, request_id: str):
         """异步保存当前 request 的 MCP 调用日志到同一个文件。"""
         try:
-            await asyncio.to_thread(self._save_mcp_calls_sync, request_id)
+            await diagnostic_to_thread(
+                "session_context._async_save_mcp_calls",
+                self._save_mcp_calls_sync,
+                request_id,
+            )
         except Exception as e:
             logger.error(f"SessionContext: Failed to async save MCP calls: {e}")
 
