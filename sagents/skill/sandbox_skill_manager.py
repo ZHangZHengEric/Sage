@@ -95,6 +95,7 @@ class SandboxSkillManager:
         *,
         include_file_list: bool = True,
         check_exists: bool = True,
+        content: Optional[str] = None,
     ) -> Optional[SkillSchema]:
         """
         从沙箱内的目录加载技能
@@ -109,7 +110,8 @@ class SandboxSkillManager:
                 return None
 
             # 读取 SKILL.md
-            content = await self._read_file(skill_md_path)
+            if content is None:
+                content = await self._read_file(skill_md_path)
 
             # 解析 frontmatter
             metadata = {}
@@ -265,12 +267,36 @@ class SandboxSkillManager:
 
         # 2) 加载沙箱内已存在的技能（用户手改优先，不覆盖）
         if await self._file_exists(self.skills_dir):
-            for skill_name in allowed_names:
+            # Only the concrete local implementation opts in; remote/custom
+            # handles keep their existing async file semantics.
+            from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
+
+            batch_contents = None
+            if type(self.sandbox) is LocalSandboxProvider:
+                batch_contents = await self.sandbox.read_existing_files(
+                    [
+                        os.path.join(self.skills_dir, name, "SKILL.md")
+                        for name in allowed_names
+                    ]
+                )
+            for index, skill_name in enumerate(allowed_names):
                 skill_path = os.path.join(self.skills_dir, skill_name)
                 skill_md_path = os.path.join(skill_path, "SKILL.md")
-                if await self._file_exists(skill_md_path):
+                content = batch_contents[index] if batch_contents is not None else None
+                if isinstance(content, Exception):
+                    logger.error(f"从沙箱加载技能失败 {skill_path}: {content}")
+                    continue
+                exists = (
+                    (content is not None)
+                    if batch_contents is not None
+                    else await self._file_exists(skill_md_path)
+                )
+                if exists:
                     skill = await self._load_skill_from_dir(
-                        skill_path, include_file_list=False, check_exists=False
+                        skill_path,
+                        include_file_list=False,
+                        check_exists=False,
+                        content=content,
                     )
                     if skill:
                         self._skills_cache[skill_name] = skill

@@ -299,6 +299,15 @@ def diagnose(operation, threshold_ms):
     return decorate
 
 
+@diagnose("background.compute", 100)
+async def measured_to_thread(name, fn, /, *args, session_id=None, **kwargs):
+    """Keep queue/run/CPU/resume attribution for work outside a prepare scope.
+
+    Only slow or failed jobs emit a bounded summary, using existing retention.
+    """
+    return await to_thread(name, fn, *args, **kwargs)
+
+
 def timed_file(fn):
     @functools.wraps(fn)
     async def wrapped(self, entry, *args, **kwargs):

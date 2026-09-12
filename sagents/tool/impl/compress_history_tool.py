@@ -13,6 +13,7 @@ import math
 import os
 import re
 
+from sagents.utils.latency_diagnostics import measured_to_thread as diagnostic_to_thread
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
@@ -654,14 +655,21 @@ class CompressHistoryTool:
     ]:
         budget = self._get_compression_budget(session_id)
         language = self._get_compression_language(session_id)
-        batches = self._compression_batches(messages, session_id)
+        batches = await diagnostic_to_thread(
+            "compression.batch_history",
+            self._compression_batches,
+            messages,
+            session_id,
+            session_id=session_id,
+        )
         nominal_batch_limit = max(
             1024, int(budget.max_model_len * COMPRESSION_BATCH_RATIO)
         )
         output_reserve = budget.configured_output_limit or budget.target_tokens
-        safe_prompt_limit = math.floor(
-            budget.max_model_len * COMPRESSION_REQUEST_SAFETY_RATIO
-        ) - output_reserve
+        safe_prompt_limit = (
+            math.floor(budget.max_model_len * COMPRESSION_REQUEST_SAFETY_RATIO)
+            - output_reserve
+        )
         if safe_prompt_limit <= 0:
             raise CompressHistoryError(
                 "Configured model output limit leaves no safe compression input budget"
@@ -669,9 +677,18 @@ class CompressHistoryTool:
 
         text_queue: List[CompressionTextPart] = []
         for batch in batches:
-            batch_text = self._format_messages_for_compression(batch)
-            raw_parts = self._split_compression_text_payload(
-                batch_text, nominal_batch_limit
+            batch_text = await diagnostic_to_thread(
+                "compression.format_history",
+                self._format_messages_for_compression,
+                batch,
+                session_id=session_id,
+            )
+            raw_parts = await diagnostic_to_thread(
+                "compression.split_text",
+                self._split_compression_text_payload,
+                batch_text,
+                nominal_batch_limit,
+                session_id=session_id,
             )
             total = len(raw_parts)
             text_queue.extend(
@@ -706,17 +723,23 @@ class CompressHistoryTool:
                 MIN_USABLE_SUMMARY_TARGET_TOKENS,
                 math.floor(budget.target_tokens * RETRY_TARGET_RATIO),
             )
-            normal_prompt_tokens = self._compression_prompt_tokens(
+            normal_prompt_tokens = await diagnostic_to_thread(
+                "compression.normal_budget",
+                self._compression_prompt_tokens,
                 messages_text,
                 budget.target_tokens,
                 retry_after_truncation=False,
                 language=language,
+                session_id=session_id,
             )
-            retry_prompt_tokens = self._compression_prompt_tokens(
+            retry_prompt_tokens = await diagnostic_to_thread(
+                "compression.retry_budget",
+                self._compression_prompt_tokens,
                 messages_text,
                 retry_target,
                 retry_after_truncation=True,
                 language=language,
+                session_id=session_id,
             )
             logger.info(
                 "压缩批次预算检查: "
@@ -1750,15 +1773,29 @@ If the history contains a compress_conversation_history tool call or result, it 
             logger.info(f"压缩调用方指定的 raw 消息段，共 {len(to_compress)} 条消息")
 
             # 3. 计算原始 token 数
-            compression_input_messages = self._messages_for_compression_input(
-                to_compress
-            )
-            original_tokens = sum(
-                MessageManager.calculate_message_token_length(msg)
-                for msg in compression_input_messages
-            )
-            source_characters = len(
-                self._format_messages_for_compression(to_compress)
+            def input_statistics():
+                compression_input_messages = self._messages_for_compression_input(
+                    to_compress
+                )
+                original_tokens = sum(
+                    MessageManager.calculate_message_token_length(msg)
+                    for msg in compression_input_messages
+                )
+                source_characters = len(
+                    self._format_messages_for_compression(to_compress)
+                )
+                return (
+                    original_tokens,
+                    source_characters,
+                    len(compression_input_messages),
+                )
+
+            (
+                original_tokens,
+                source_characters,
+                compression_input_count,
+            ) = await diagnostic_to_thread(
+                "compression.input_statistics", input_statistics, session_id=session_id
             )
 
             # 4. 按完整 turn / 闭合工具组分批，只保留最终层级摘要。
@@ -1768,9 +1805,7 @@ If the history contains a compress_conversation_history tool call or result, it 
                 omission_stats,
                 batch_count,
                 llm_stats,
-            ) = (
-                await self._summarize_batches(to_compress, session_id)
-            )
+            ) = await self._summarize_batches(to_compress, session_id)
             compression_language = self._get_compression_language(session_id)
 
             compression_payload = {
@@ -1798,7 +1833,7 @@ If the history contains a compress_conversation_history tool call or result, it 
                 "source_characters": source_characters,
                 "summary_characters": 0,
                 "source_message_count": len(to_compress),
-                "compression_input_message_count": len(compression_input_messages),
+                "compression_input_message_count": compression_input_count,
                 "summary_parse_status": parse_status,
                 "compression_batch_count": batch_count,
                 "output_omission": omission_stats,

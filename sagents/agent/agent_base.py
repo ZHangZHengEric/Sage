@@ -1,3 +1,4 @@
+from sagents.utils.latency_diagnostics import measured_to_thread as diagnostic_to_thread
 from sagents.utils.stream_yield import StreamYieldBudget
 from sagents.utils.request_latency import request_stage, record_stage
 from abc import ABC, abstractmethod
@@ -2334,8 +2335,11 @@ class AgentBase(ABC):
                         # 将流式 chunk 聚合为完整的非流式 response 后保存。
                         try:
                             llm_response = (
-                                self.merge_stream_response_to_non_stream_response(
-                                    chunks_for_record
+                                await diagnostic_to_thread(
+                                    "model.merge_recorded_chunks",
+                                    self.merge_stream_response_to_non_stream_response,
+                                    chunks_for_record,
+                                    session_id=session_id,
                                 )
                             )
                         except Exception:

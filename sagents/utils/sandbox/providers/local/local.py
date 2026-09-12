@@ -1178,6 +1178,34 @@ class LocalSandboxProvider(ISandboxHandle):
             "local.read_file", self._read_file_sync, actual_path, encoding
         )
 
+    async def read_existing_files(self, paths: List[str]):
+        """Read a local batch sequentially with the same mapping/access checks.
+
+        Existence/access failures propagate; individual read failures are returned
+        so skill loading can retain its existing per-file error handling.
+        """
+        await self._ensure_initialized_async()
+
+        def read_batch():
+            result = []
+            for path in paths:
+                actual = self._validate_host_path_allowed(
+                    self.to_host_path(path), operation="read"
+                )
+                if not os.path.exists(actual):
+                    result.append(None)
+                    continue
+                try:
+                    actual = self._validate_host_path_allowed(
+                        self.to_host_path(path), operation="read"
+                    )
+                    result.append(self._read_file_sync(actual, "utf-8"))
+                except Exception as exc:
+                    result.append(exc)
+            return result
+
+        return await diagnostic_to_thread("local.read_existing_files", read_batch)
+
     async def write_file(
         self,
         path: str,

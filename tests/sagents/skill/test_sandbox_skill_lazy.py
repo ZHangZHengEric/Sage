@@ -243,3 +243,53 @@ async def test_existing_skill_metadata_stays_live_but_tree_is_deferred(tmp_path)
     assert sandbox.copy_calls == []
     await mgr.sync_from_host(host)
     assert mgr.get_skill("alpha").file_list == ""
+
+
+async def test_local_batch_matches_sequential_live_skill_view(tmp_path, monkeypatch):
+    from sagents.utils.sandbox.config import VolumeMount
+    from sagents.utils.sandbox.providers.local import local as local_module
+    from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
+
+    class SequentialProvider(LocalSandboxProvider):
+        pass
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    names = [f'skill{i}' for i in range(24)] + ['missing', 'invalid', 'empty']
+    host = _host_with(tmp_path, *((name, 'host description') for name in names))
+    for name in names:
+        if name == 'missing':
+            continue
+        directory = workspace / 'skills' / name
+        directory.mkdir(parents=True)
+        (directory / 'SKILL.md').write_text(
+            '' if name == 'empty' else '---\nname: [\n---' if name == 'invalid'
+            else f'---\nname: {name}\ndescription: user edited\n---\nLive content'
+        )
+    def manager(cls):
+        return SandboxSkillManager(cls(
+            sandbox_id='batch-skills', sandbox_agent_workspace=str(workspace),
+            volume_mounts=[VolumeMount(str(workspace), str(workspace))],
+            macos_isolation_mode='subprocess', linux_isolation_mode='subprocess',
+        ), skills_dir=str(workspace / 'skills'))
+
+    calls = []
+    original = local_module.diagnostic_to_thread
+    async def tracked(name, fn, *args, **kwargs):
+        calls.append(name)
+        return await original(name, fn, *args, **kwargs)
+    monkeypatch.setattr(local_module, 'diagnostic_to_thread', tracked)
+    batched, sequential = manager(LocalSandboxProvider), manager(SequentialProvider)
+    await batched.sync_from_host(host)
+    batch_reads = [name for name in calls if name in {'local.read_existing_files', 'local.read_file', 'local.file_exists'}]
+    assert batch_reads == ['local.file_exists', 'local.read_existing_files']
+    await sequential.sync_from_host(host)
+    assert batched._skills_cache == sequential._skills_cache
+    assert batched._known_skills == sequential._known_skills
+    assert len(batched._skills_cache) == 24
+    assert not batched._file_lists_loaded
+    # No stale cross-request metadata cache: live edits are visible on resync.
+    changed = workspace / 'skills' / 'skill0' / 'SKILL.md'
+    changed.write_text('---\nname: skill0\ndescription: newer edit\n---\nNew body')
+    await batched.sync_from_host(host)
+    assert batched._skills_cache['skill0'].description == 'newer edit'
