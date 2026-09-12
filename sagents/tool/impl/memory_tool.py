@@ -6,8 +6,13 @@ File memory currently uses a scoped chunk index; session history keeps the
 existing BM25-based retrieval path.
 """
 
+from sagents.utils.latency_diagnostics import (
+    diagnose,
+    timed,
+    to_thread as diagnostic_to_thread,
+    count as diagnostic_count,
+)
 import json
-import asyncio
 import hashlib
 import os
 import re
@@ -139,9 +144,7 @@ class SessionHistoryRetriever:
             return state
 
     @classmethod
-    def _end_cache_use(
-        cls, session_id: str, state: _SessionHistoryCacheState
-    ) -> None:
+    def _end_cache_use(cls, session_id: str, state: _SessionHistoryCacheState) -> None:
         with cls._history_cache_lock:
             state.active_searches = max(0, state.active_searches - 1)
             if (
@@ -199,14 +202,10 @@ class SessionHistoryRetriever:
             agent_config = getattr(session_context, "agent_config", {}) or {}
 
             with self._history_cache_lock:
-                if getattr(
-                    session_context, "_session_history_cache_closed", False
-                ):
+                if getattr(session_context, "_session_history_cache_closed", False):
                     cache_state.closed = True
 
-            messages_fingerprint = self._fingerprint_messages(
-                message_manager.messages
-            )
+            messages_fingerprint = self._fingerprint_messages(message_manager.messages)
             agent_config_fingerprint = self._fingerprint_agent_config(agent_config)
 
             with self._history_cache_lock:
@@ -221,8 +220,7 @@ class SessionHistoryRetriever:
             if (
                 cache_entry
                 and cache_entry.messages_fingerprint == messages_fingerprint
-                and cache_entry.agent_config_fingerprint
-                == agent_config_fingerprint
+                and cache_entry.agent_config_fingerprint == agent_config_fingerprint
             ):
                 return cache_entry.history_messages
 
@@ -234,13 +232,9 @@ class SessionHistoryRetriever:
             else:
                 history_messages = list(message_manager.messages[:anchor_index])
 
-            compact_history_messages = self._compact_history_messages(
-                history_messages
-            )
+            compact_history_messages = self._compact_history_messages(history_messages)
             with self._history_cache_lock:
-                if getattr(
-                    session_context, "_session_history_cache_closed", False
-                ):
+                if getattr(session_context, "_session_history_cache_closed", False):
                     cache_state.closed = True
                 if (
                     not cache_state.closed
@@ -386,6 +380,7 @@ class SessionHistoryRetriever:
             return formatted_results
 
         except Exception as e:
+            diagnostic_count("memory.history_errors")
             logger.error(f"MemoryTool: Session history search failed: {e}")
             import traceback
 
@@ -533,6 +528,7 @@ class MemoryTool:
             },
         },
     )
+    @diagnose("memory.search", 1000)
     async def search_memory(
         self,
         query: str,
@@ -580,6 +576,7 @@ class MemoryTool:
             )
 
         except Exception as e:
+            diagnostic_count("memory.search_errors")
             logger.error(f"MemoryTool: Search failed: {e}")
             return self._build_search_response(
                 status="error",
@@ -587,6 +584,7 @@ class MemoryTool:
                 query=query,
             )
 
+    @timed("memory.file_search")
     async def _search_file_memory(
         self, query: str, top_k: int, session_id: str
     ) -> List[Dict[str, Any]]:
@@ -606,9 +604,11 @@ class MemoryTool:
             )
 
         except Exception as e:
+            diagnostic_count("memory.file_errors")
             logger.error(f"MemoryTool: File memory search failed: {e}")
             return []
 
+    @timed("memory.history_search")
     async def _search_session_history(
         self, query: str, top_k: int, session_id: str
     ) -> List[Dict[str, Any]]:
@@ -627,7 +627,8 @@ class MemoryTool:
                 return []
 
             session_context = session.session_context
-            return await asyncio.to_thread(
+            return await diagnostic_to_thread(
+                "memory_tool._search_session_history",
                 self.session_history_retriever.search,
                 query,
                 top_k,
@@ -636,6 +637,7 @@ class MemoryTool:
             )
 
         except Exception as e:
+            diagnostic_count("memory.history_errors")
             logger.error(f"MemoryTool: Session history search failed: {e}")
             import traceback
 

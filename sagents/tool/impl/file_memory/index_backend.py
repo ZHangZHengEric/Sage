@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from sagents.utils.latency_diagnostics import (
+    timed_lock,
+    to_thread as diagnostic_to_thread,
+    count as diagnostic_count,
+)
 import asyncio
 import hashlib
 import re
@@ -50,9 +55,7 @@ class ScopedIndexFileMemoryBackend:
         return cache_entry
 
     @classmethod
-    def _release_scope(
-        cls, scope_key: str, cache_entry: _FileIndexCacheEntry
-    ) -> None:
+    def _release_scope(cls, scope_key: str, cache_entry: _FileIndexCacheEntry) -> None:
         """Drop the scoped index as soon as its last active search finishes."""
         cache_entry.active_searches -= 1
         if cache_entry.active_searches < 0:
@@ -98,9 +101,12 @@ class ScopedIndexFileMemoryBackend:
         query: str,
         top_k: int,
     ):
-        async with cache_entry.lock:
+        async with timed_lock("index.scope_lock", cache_entry.lock):
+            diagnostic_count("index.active_searches", cache_entry.active_searches)
             if cache_entry.index is None:
-                cache_entry.index = await asyncio.to_thread(
+                diagnostic_count("index.cache_miss")
+                cache_entry.index = await diagnostic_to_thread(
+                    "index.initialize",
                     memory_index_type,
                     sandbox,
                     workspace_path,
@@ -111,8 +117,8 @@ class ScopedIndexFileMemoryBackend:
                 cache_entry.index.workspace_path = workspace_path.rstrip("/")
 
             now = time.time()
-            has_search_index = await asyncio.to_thread(
-                cache_entry.index.has_search_index
+            has_search_index = await diagnostic_to_thread(
+                "index.has_documents", cache_entry.index.has_search_index
             )
             should_refresh = (
                 not has_search_index
@@ -124,7 +130,9 @@ class ScopedIndexFileMemoryBackend:
                 cache_entry.last_refresh_at = now
                 logger.debug(f"MemoryTool: File memory index update stats: {stats}")
 
-            return await asyncio.to_thread(cache_entry.index.search, query, top_k)
+            return await diagnostic_to_thread(
+                "index.query", cache_entry.index.search, query, top_k
+            )
 
     async def search(
         self, query: str, top_k: int, session_context

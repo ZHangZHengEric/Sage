@@ -18,6 +18,11 @@
   适用场景：开发调试、单用户本地运行、性能敏感场景
 """
 
+from sagents.utils.latency_diagnostics import (
+    timed,
+    stage,
+    to_thread as diagnostic_to_thread,
+)
 import os
 import re
 import shlex
@@ -139,6 +144,7 @@ class LocalSandboxProvider(ISandboxHandle):
         except PermissionError:
             return False
 
+    @timed("sandbox.initialize")
     async def _ensure_initialized(self):
         """确保沙箱已初始化"""
         if self._file_system is None:
@@ -160,7 +166,8 @@ class LocalSandboxProvider(ISandboxHandle):
                 ]
 
             # 使用 volume_mounts 创建文件系统
-            self._file_system = SandboxFileSystem(volume_mounts)
+            with stage("sandbox.filesystem_construct"):
+                self._file_system = SandboxFileSystem(volume_mounts)
 
             # venv / 运行时目录必须落在宿主机路径上（虚拟路径如 /sage-workspace 不可直接 mkdir）
             host_workspace = self._file_system.to_host_path(
@@ -184,6 +191,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """异步确保沙箱已初始化，避免阻塞事件循环。"""
         await self._ensure_initialized()
 
+    @timed("sandbox.init_isolation")
     def _init_isolation(self):
         """初始化隔离层"""
         from .isolation import SeatbeltIsolation, BwrapIsolation
@@ -296,7 +304,7 @@ class LocalSandboxProvider(ISandboxHandle):
         # Acquiring a process file lock is blocking. Keep the entire critical
         # section in one worker thread so concurrent sandbox initialization
         # cannot block the asyncio event loop while another task owns the lock.
-        await asyncio.to_thread(self._ensure_venv_sync)
+        await diagnostic_to_thread("local._ensure_venv", self._ensure_venv_sync)
 
     def _ensure_venv_sync(self):
         """Create and prepare the venv while holding the cross-process lock."""
@@ -342,7 +350,9 @@ class LocalSandboxProvider(ISandboxHandle):
 
     async def _ensure_uv_in_venv(self):
         """在 venv 中安装 uv，便于后续按需使用。"""
-        await asyncio.to_thread(self._ensure_uv_in_venv_sync)
+        await diagnostic_to_thread(
+            "local._ensure_uv_in_venv", self._ensure_uv_in_venv_sync
+        )
 
     def _ensure_uv_in_venv_sync(self):
         """Synchronously install uv; callers must keep this off the event loop."""
@@ -357,7 +367,9 @@ class LocalSandboxProvider(ISandboxHandle):
             "true",
             "yes",
         }:
-            logger.info("[LocalSandboxProvider] SAGE_SANDBOX_SKIP_UV_INSTALL 已设置，跳过 uv 预装")
+            logger.info(
+                "[LocalSandboxProvider] SAGE_SANDBOX_SKIP_UV_INSTALL 已设置，跳过 uv 预装"
+            )
             return
 
         venv_python = self._get_venv_python()
@@ -442,6 +454,7 @@ class LocalSandboxProvider(ISandboxHandle):
         """
         await self._ensure_initialized_async()
 
+    @timed("sandbox.sync_skills")
     async def sync_skills(self, host_skill_manager):
         """同步宿主技能到本地沙箱工作区。"""
         from sagents.skill.sandbox_skill_manager import SandboxSkillManager
@@ -540,7 +553,9 @@ class LocalSandboxProvider(ISandboxHandle):
         return self._bg_runner.kill(task_id, force=force)
 
     async def cleanup_background(self, task_id: str) -> None:
-        await asyncio.to_thread(self._bg_runner.cleanup, task_id)
+        await diagnostic_to_thread(
+            "local.cleanup_background", self._bg_runner.cleanup, task_id
+        )
 
     def add_allowed_paths(self, paths: List[str]) -> None:
         """添加允许访问的路径列表"""
@@ -1159,7 +1174,9 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
-        return await asyncio.to_thread(self._read_file_sync, actual_path, encoding)
+        return await diagnostic_to_thread(
+            "local.read_file", self._read_file_sync, actual_path, encoding
+        )
 
     async def write_file(
         self,
@@ -1172,8 +1189,13 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="write")
-        await asyncio.to_thread(
-            self._write_file_sync, actual_path, content, encoding, mode
+        await diagnostic_to_thread(
+            "local.write_file",
+            self._write_file_sync,
+            actual_path,
+            content,
+            encoding,
+            mode,
         )
 
     async def file_exists(self, path: str) -> bool:
@@ -1181,7 +1203,9 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
-        return await asyncio.to_thread(os.path.exists, actual_path)
+        return await diagnostic_to_thread(
+            "local.file_exists", os.path.exists, actual_path
+        )
 
     async def get_mtime(self, path: str) -> float:
         """直接 ``os.path.getmtime``，避免每次 stat 都启 sandbox-exec 子进程。
@@ -1194,9 +1218,15 @@ class LocalSandboxProvider(ISandboxHandle):
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         try:
-            if not await asyncio.to_thread(os.path.exists, actual_path):
+            if not await diagnostic_to_thread(
+                "local.get_mtime", os.path.exists, actual_path
+            ):
                 return 0
-            return float(await asyncio.to_thread(os.path.getmtime, actual_path))
+            return float(
+                await diagnostic_to_thread(
+                    "local.get_mtime", os.path.getmtime, actual_path
+                )
+            )
         except Exception as e:
             logger.debug(f"LocalSandboxProvider.get_mtime 失败 {path}: {e}")
             return 0
@@ -1210,8 +1240,11 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="read")
-        return await asyncio.to_thread(
-            self._list_directory_sync, actual_path, include_hidden
+        return await diagnostic_to_thread(
+            "local.list_directory",
+            self._list_directory_sync,
+            actual_path,
+            include_hidden,
         )
 
     async def ensure_directory(self, path: str) -> None:
@@ -1219,14 +1252,18 @@ class LocalSandboxProvider(ISandboxHandle):
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="mkdir")
-        await asyncio.to_thread(os.makedirs, actual_path, exist_ok=True)
+        await diagnostic_to_thread(
+            "local.ensure_directory", os.makedirs, actual_path, exist_ok=True
+        )
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         await self._ensure_initialized_async()
         actual_path = self.to_host_path(path)
         actual_path = self._validate_host_path_allowed(actual_path, operation="delete")
-        await asyncio.to_thread(self._delete_path_sync, actual_path)
+        await diagnostic_to_thread(
+            "local.delete_file", self._delete_path_sync, actual_path
+        )
 
     async def get_file_tree(
         self,
@@ -1257,7 +1294,8 @@ class LocalSandboxProvider(ISandboxHandle):
             )
 
         # Fallback: 使用基本实现
-        return await asyncio.to_thread(
+        return await diagnostic_to_thread(
+            "local.get_file_tree",
             self._basic_get_file_tree,
             root_path,
             include_hidden,
@@ -1372,7 +1410,8 @@ class LocalSandboxProvider(ISandboxHandle):
         )
 
         try:
-            copied = await asyncio.to_thread(
+            copied = await diagnostic_to_thread(
+                "local.copy_from_host",
                 self._copy_from_host_path_sync,
                 host_source_path,
                 host_dest_path,

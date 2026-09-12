@@ -8,6 +8,7 @@
 - custom: 自定义提供者
 """
 
+from sagents.utils.latency_diagnostics import timed
 from datetime import timedelta
 from typing import Dict, Optional, Type
 
@@ -72,6 +73,7 @@ class SandboxProviderFactory:
         return cls._providers[SandboxType.PASSTHROUGH]
 
     @classmethod
+    @timed("sandbox.factory_create")
     async def create(cls, config: Optional[SandboxConfig] = None) -> ISandboxHandle:
         """
         创建沙箱实例

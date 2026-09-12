@@ -1439,3 +1439,54 @@ class TestMemoryIndexFTS(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_diagnostics_distinguish_net_five_from_added_updated_and_removed(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+    from sagents.utils import latency_diagnostics as diagnostic
+
+    module = _load_memory_index_module()
+    idx = module.MemoryIndex(None, "/workspace", str(tmp_path / "index.pkl"))
+    for name in ("updated.txt", "removed.txt"):
+        idx._replace_file_documents("/workspace/" + name, "old", 1, 3)
+        idx._sync_file_to_fts("/workspace/" + name)
+
+    paths = ["updated.txt"] + [f"added{i}.txt" for i in range(6)]
+
+    class Sandbox:
+        async def get_mtime(self, path):
+            return 2
+
+        async def list_directory(self, path):
+            return [
+                SimpleNamespace(
+                    path="/workspace/" + name,
+                    is_file=True,
+                    is_dir=False,
+                    modified_time=2,
+                    size=7,
+                )
+                for name in paths
+            ]
+
+        async def read_file(self, path):
+            return "updated"
+
+    idx.sandbox = Sandbox()
+    record = diagnostic.Diagnostic("test")
+    token = diagnostic._current.set(record)
+    try:
+        stats = asyncio.run(idx.update_index())
+    finally:
+        diagnostic._current.reset(token)
+    counts = record.snapshot("ok")["counts"]
+    assert counts["index.files_after"] - counts["index.files_before"] == 5
+    assert counts["index.added"] == stats["added"] == 6
+    assert counts["index.updated"] == stats["updated"] == 1
+    assert counts["index.removed"] == stats["removed"] == 1
+    assert counts["index.chunks_built"] == counts["index.fts_commits"] == 7
+    assert counts["index.files_checked"] == 7
+    assert counts["index.source_bytes"] == 49
+    assert "fts.commit" in record.stages
+    assert "index.fts_sync.queue" in record.stages

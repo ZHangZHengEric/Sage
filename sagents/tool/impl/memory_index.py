@@ -8,6 +8,14 @@ Current design:
 - lightweight metadata is still persisted in a pickle sidecar for incremental updates
 """
 
+from sagents.utils.latency_diagnostics import (
+    timed,
+    timed_file,
+    stage,
+    timed_lock,
+    to_thread as diagnostic_to_thread,
+    count as diagnostic_count,
+)
 import asyncio
 import os
 import pickle
@@ -226,6 +234,7 @@ class MemoryIndex:
         elapsed = time.time() - start_time
         logger.info(f"MemoryIndex: Initialized in {elapsed:.3f}s")
 
+    @timed("index.load_index")
     def _load_index(self) -> bool:
         """Load lightweight metadata, migrating legacy content sidecars once."""
         start_time = time.time()
@@ -331,6 +340,7 @@ class MemoryIndex:
             logger.error(f"MemoryIndex: Failed to save index: {e}")
             return False
 
+    @timed("index.get_dir_mtime")
     async def _get_dir_mtime(self, dir_path: str) -> float:
         """通过沙箱接口拿目录 mtime。
 
@@ -349,6 +359,7 @@ class MemoryIndex:
             logger.warning(f"MemoryIndex: Error getting mtime for {dir_path}: {e}")
             return 0
 
+    @timed("index.read_file_content")
     async def _read_file_content(
         self, filepath: str, max_size: int = 10 * 1024 * 1024
     ) -> str:
@@ -382,6 +393,7 @@ class MemoryIndex:
                     return content.decode("utf-8", errors="ignore")
                 return content
         except Exception as e:
+            diagnostic_count("index.read_errors")
             logger.warning(f"MemoryIndex: Failed to read file {filepath}: {e}")
             return ""
 
@@ -504,6 +516,7 @@ class MemoryIndex:
         finally:
             conn.close()
 
+    @timed("index.ensure_fts_schema")
     def _ensure_fts_schema(self) -> None:
         with self._fts_connection() as conn:
             conn.execute(
@@ -547,6 +560,7 @@ class MemoryIndex:
             )
             conn.commit()
 
+    @timed("index.fts_has_documents")
     def _fts_has_documents(self) -> bool:
         if not self.fts_index_path.exists():
             return False
@@ -571,11 +585,13 @@ class MemoryIndex:
     def has_search_index(self) -> bool:
         return bool(self._file_metadata) and self._fts_has_documents()
 
+    @timed("index.build_chunk_search_text")
     def _build_chunk_search_text(self, doc: FileDocument) -> str:
         filename = os.path.basename(doc.path)
         text = f"{doc.path} {filename} {doc.content}"
         return " ".join(self._tokenize(text))
 
+    @timed("index.build_file_search_text")
     def _build_file_search_text(self, path: str, content: str) -> str:
         filename = os.path.basename(path)
         text = f"{path} {filename} {content}"
@@ -606,8 +622,10 @@ class MemoryIndex:
         docs = self._pending_documents.get(filepath, [])
         self._invalidate_path_caches(filepath)
         with self._fts_connection() as conn:
-            conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
-            conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
+            with stage("fts.delete"):
+                conn.execute("DELETE FROM memory_fts WHERE path = ?", (filepath,))
+            with stage("fts.delete"):
+                conn.execute("DELETE FROM memory_file_fts WHERE path = ?", (filepath,))
             rows = []
             file_content_parts: List[str] = []
             for doc in docs:
@@ -623,26 +641,31 @@ class MemoryIndex:
                     )
                 )
             if rows:
-                conn.executemany(
-                    """
-                    INSERT INTO memory_fts(path, search_text, content, line_start, line_end, chunk_index)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
-                )
+                with stage("fts.insert"):
+                    conn.executemany(
+                        """
+                        INSERT INTO memory_fts(path, search_text, content, line_start, line_end, chunk_index)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
             if file_content_parts:
                 full_content = "\n".join(file_content_parts)
-                conn.execute(
-                    """
-                    INSERT INTO memory_file_fts(path, search_text)
-                    VALUES (?, ?)
-                    """,
-                    (
-                        filepath,
-                        self._build_file_search_text(filepath, full_content),
-                    ),
-                )
-            conn.commit()
+                full_search_text = self._build_file_search_text(filepath, full_content)
+                with stage("fts.insert"):
+                    conn.execute(
+                        """
+                        INSERT INTO memory_file_fts(path, search_text)
+                        VALUES (?, ?)
+                        """,
+                        (
+                            filepath,
+                            full_search_text,
+                        ),
+                    )
+            diagnostic_count("index.fts_commits")
+            with stage("fts.commit"):
+                conn.commit()
         if docs:
             self._file_metadata[filepath] = {
                 "mtime": float(docs[0].mtime),
@@ -746,8 +769,10 @@ class MemoryIndex:
             stats: Statistics dictionary to update
             current_files: Set to collect current file paths
         """
+        diagnostic_count("index.directories_visited")
         # Check if directory is blacklisted
         if self._is_path_blacklisted(dir_path):
+            diagnostic_count("index.directories_blacklisted")
             return
 
         # Get current directory mtime
@@ -759,6 +784,7 @@ class MemoryIndex:
         last_mtime = self._dir_mtime_cache.get(dir_path, 0)
         # logger.debug(f"MemoryIndex: Dir {dir_path} last_mtime: {last_mtime}, current_mtime: {current_mtime}")
         if current_mtime <= last_mtime:
+            diagnostic_count("index.directories_unchanged")
             # Directory unchanged, skip scanning
             # But we still need to collect files from this directory from existing index
             # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
@@ -773,7 +799,9 @@ class MemoryIndex:
 
         try:
             # List directory entries
-            entries = await self.sandbox.list_directory(dir_path)
+            with stage("index.list_directory"):
+                entries = await self.sandbox.list_directory(dir_path)
+            diagnostic_count("index.entries_listed", len(entries))
 
             ext_set = set(ext.lower() for ext in file_extensions)
             file_tasks = []
@@ -805,13 +833,16 @@ class MemoryIndex:
                 await asyncio.gather(*file_tasks)
 
         except Exception as e:
+            diagnostic_count("index.scan_errors")
             logger.warning(
                 f"MemoryIndex: Error scanning directory {dir_path}: {e}", exc_info=True
             )
 
+    @timed_file
     async def _process_file(self, entry, stats: Dict[str, Any]) -> None:
         """Process a single file - add, update, or skip"""
-        async with self._file_process_semaphore:
+        async with timed_lock("index.file_semaphore", self._file_process_semaphore):
+            diagnostic_count("index.files_checked")
             filepath = entry.path
             mtime = entry.modified_time or 0
             size = entry.size or 0
@@ -829,16 +860,20 @@ class MemoryIndex:
                     # mtime or size changed, treat as content changed and refresh directly.
                     content = await self._read_file_content(filepath)
                     self._replace_file_documents(filepath, content, mtime, size)
-                    async with self._fts_write_lock:
-                        await asyncio.to_thread(self._sync_file_to_fts, filepath)
+                    async with timed_lock("index.fts_write_lock", self._fts_write_lock):
+                        await diagnostic_to_thread(
+                            "index.fts_sync", self._sync_file_to_fts, filepath
+                        )
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
                 else:
                     # New file, add to index
                     content = await self._read_file_content(filepath)
                     self._replace_file_documents(filepath, content, mtime, size)
-                    async with self._fts_write_lock:
-                        await asyncio.to_thread(self._sync_file_to_fts, filepath)
+                    async with timed_lock("index.fts_write_lock", self._fts_write_lock):
+                        await diagnostic_to_thread(
+                            "index.fts_sync", self._sync_file_to_fts, filepath
+                        )
                     stats["added"] += 1
                     logger.debug(f"MemoryIndex: Added file {filepath}")
 
@@ -846,9 +881,12 @@ class MemoryIndex:
                 logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
                 stats["errors"] += 1
 
+    @timed("index.replace_file_documents")
     def _replace_file_documents(
         self, filepath: str, content: str, mtime: float, size: int
     ) -> None:
+        diagnostic_count("index.source_bytes", size)
+        diagnostic_count("index.content_characters", len(content))
         chunks = self._split_into_chunks(content)
         if not chunks:
             chunks = [
@@ -874,8 +912,10 @@ class MemoryIndex:
                     line_end=chunk["line_end"],
                 )
             )
+        diagnostic_count("index.chunks_built", len(documents))
         self._pending_documents[filepath] = documents
 
+    @timed("index.update_index")
     async def update_index(
         self, file_extensions: Optional[List[str]] = None, force: bool = False
     ) -> Dict[str, Any]:
@@ -890,6 +930,8 @@ class MemoryIndex:
             Update statistics with timing info
         """
         total_start_time = time.time()
+        diagnostic_count("index.files_before", len(self._file_metadata))
+        diagnostic_count("index.force", int(force))
 
         if file_extensions is None:
             file_extensions = self.DEFAULT_EXTENSIONS
@@ -917,8 +959,8 @@ class MemoryIndex:
             self._dir_mtime_cache = {}
             self._file_metadata = {}
             self._pending_documents = {}
-            async with self._fts_write_lock:
-                await asyncio.to_thread(self._clear_fts_rows)
+            async with timed_lock("index.fts_write_lock", self._fts_write_lock):
+                await diagnostic_to_thread("index.clear_fts", self._clear_fts_rows)
 
         # Start recursive scan from workspace root
         logger.debug(
@@ -939,11 +981,14 @@ class MemoryIndex:
                 self._file_metadata.pop(filepath, None)
                 self._pending_documents.pop(filepath, None)
                 self._invalidate_path_caches(filepath)
-                async with self._fts_write_lock:
-                    await asyncio.to_thread(self._delete_file_from_fts, filepath)
+                async with timed_lock("index.fts_write_lock", self._fts_write_lock):
+                    await diagnostic_to_thread(
+                        "index.delete_file", self._delete_file_from_fts, filepath
+                    )
                 stats["removed"] += 1
                 logger.debug(f"MemoryIndex: Removed file {filepath}")
             except Exception as e:
+                diagnostic_count("index.delete_errors")
                 logger.warning(f"MemoryIndex: Failed to remove file {filepath}: {e}")
 
         stats["scan_time"] = time.time() - scan_start
@@ -956,7 +1001,7 @@ class MemoryIndex:
             stats["build_time"] = time.time() - build_start
 
             save_start = time.time()
-            await asyncio.to_thread(self._save_index)
+            await diagnostic_to_thread("index.save_metadata", self._save_index)
             stats["save_time"] = time.time() - save_start
 
             stats["total_time"] = time.time() - total_start_time
@@ -969,6 +1014,9 @@ class MemoryIndex:
                 f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s"
             )
 
+        diagnostic_count("index.files_after", len(self._file_metadata))
+        for key in ("added", "updated", "removed", "unchanged", "errors"):
+            diagnostic_count("index." + key, stats[key])
         return stats
 
     def _extract_snippets(
@@ -1603,6 +1651,7 @@ class MemoryIndex:
         )
         return primary_rows + fallback_rows
 
+    @timed("index.search")
     def search(self, query: str, top_k: int = 5) -> List[SearchResult]:
         """
         Search memory

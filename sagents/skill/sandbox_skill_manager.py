@@ -8,6 +8,7 @@
 保证 Agent 工作区里手动改过的 SKILL.md 不会被无脑覆盖。
 """
 
+from sagents.utils.latency_diagnostics import timed
 import asyncio
 import os
 from typing import Any, Dict, List, Optional
@@ -57,6 +58,7 @@ class SandboxSkillManager:
         """通过沙箱接口列出目录"""
         return await self.sandbox.list_directory(path)
 
+    @timed("skills.load_skills")
     async def load_skills(self) -> None:
         """
         扫描沙箱 skills 目录下的全部子目录并加载（不筛选名称）。
@@ -84,6 +86,7 @@ class SandboxSkillManager:
         except Exception as e:
             logger.error(f"从沙箱加载技能失败: {e}")
 
+    @timed("skills.load_skill_from_dir")
     async def _load_skill_from_dir(self, skill_path: str) -> Optional[SkillSchema]:
         """
         从沙箱内的目录加载技能
@@ -131,6 +134,7 @@ class SandboxSkillManager:
             logger.error(f"从沙箱加载技能失败 {skill_path}: {e}")
             return None
 
+    @timed("skills.generate_file_list")
     async def _generate_file_list(self, path: str, indent: str = "") -> str:
         """生成文件树列表"""
         lines = []
@@ -211,6 +215,7 @@ class SandboxSkillManager:
         返回已知 ∪ 已落地（已落地优先），保证广告到全部可用技能。"""
         return list(self._merged_skills().values())
 
+    @timed("skills.sync_from_host")
     async def sync_from_host(self, host_skill_manager) -> None:
         """
         按宿主 SkillProxy / SkillManager 给出的可用技能对齐沙箱技能视图（懒加载）。
@@ -329,9 +334,7 @@ class SandboxSkillManager:
             skill = await self._load_skill_from_dir(skill_path)
             if skill:
                 self._skills_cache[skill_name] = skill
-                logger.info(
-                    f"技能按需落地: {skill_name} ({host_path} -> {skill_path})"
-                )
+                logger.info(f"技能按需落地: {skill_name} ({host_path} -> {skill_path})")
             else:
                 logger.warning(f"技能落地后仍无法加载 SKILL.md: {skill_path}")
             return skill
