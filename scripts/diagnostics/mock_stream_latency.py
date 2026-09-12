@@ -40,7 +40,7 @@ async def run(args):
         async def messages():
             with budget.activate():
                 checkpoint = StreamYieldBudget()
-                async for i in metrics.observe_stream(tokens(), True):
+                async for i in checkpoint.iterate(metrics.observe_stream(tokens(), True)):
                     await checkpoint.checkpoint()
                     fields = {'content': 'x'}
                     if args.tool_deltas:

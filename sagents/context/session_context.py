@@ -343,7 +343,15 @@ class SessionContext:
     ) -> None:
         try:
             if isinstance(message, MessageChunk):
-                msg = message.to_dict()
+                # Timing needs only scalar identity fields. Avoid recursively
+                # copying content, tool arguments and metadata for every token.
+                msg = {
+                    "message_id": message.message_id,
+                    "role": getattr(message.role, "value", message.role),
+                    "message_type": getattr(message.message_type, "value", message.message_type),
+                    "type": getattr(message.type, "value", message.type),
+                    "tool_call_id": message.tool_call_id,
+                }
             elif isinstance(message, dict):
                 msg = message
             else:

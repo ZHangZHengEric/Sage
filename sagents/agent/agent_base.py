@@ -2025,7 +2025,7 @@ class AgentBase(ABC):
                     **final_config,
                 )
                 stream_yield_budget = StreamYieldBudget()
-                async for chunk in stream:
+                async for chunk in stream_yield_budget.iterate(stream):
                     # print(chunk)
                     # 记录首token时间
                     if first_token_time is None:

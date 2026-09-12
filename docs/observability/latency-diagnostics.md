@@ -310,11 +310,11 @@ consumer injection increased downstream-resume time without corresponding CPU
 increases. On/off end-to-end runs are noisy and cannot establish instrumentation
 cost or a production speedup; compare direct overhead and production stages.
 
-To isolate the current yield checkpoint's wall-clock behavior, use one request,
+To reproduce the pre-optimization checkpoint's wall-clock behavior, use one request,
 20 chunks, no history, `--network-every 1 --network-delay-ms 6`. In a local run,
 20 synthetic network awaits were followed by 20 additional scheduler yields,
-even though total ledger CPU across all20chunks was only3.85ms. The current
-checkpoint's deadline includes time spent in SDK/network awaits. This confirms
+even though total ledger CPU across all20chunks was only3.85ms. The pre-optimization
+checkpoint's deadline included time spent in SDK/network awaits. This confirms
 redundant yields can happen after the SDK already suspended; it does not prove
 that removing every such yield is safe or that it explains all production delay.
 
@@ -327,3 +327,27 @@ Prioritize distinguishing actual uninterrupted chunk processing from elapsed
 network time in cooperative yielding, then remove avoidable full serialization
 from metadata-only message timing. Keep fairness, cancellation and snapshot
 isolation tests; do not change concurrency based solely on these counters.
+
+
+### Suspension-aware scheduling optimization
+
+StreamYieldBudget.iterate now delegates the SDK await protocol unchanged and
+resets the processing deadline only after a real suspension, immediately before
+SDK continuation runs. Buffered reads that return without suspending retain the
+same deadline. Synchronous SDK decoding after resumption still counts. This adds
+no task, callback, timer, polling, concurrency change or additional buffer. The
+5 ms cooperative processing interval remains; it cannot preempt a single long
+synchronous operation. Cancellation, exceptions, Future objects and cleanup are
+forwarded through the await protocol.
+
+Message timing reads scalar identity/role/type/tool-call-ID fields directly,
+including enum normalization, preserving start/end timestamps and single-start
+events. It no longer recursively copies payloads via to_dict. Client serialization
+and ledger snapshot ownership are unchanged.
+
+The same 20-chunk/6-ms-network mock now produces zero redundant scheduler yields
+(previously20). Text/tool1000-chunk cases reduce full serialization calls from
+2000 to1000. Tests also verify buffered-reader fairness, CPU decoding after a
+real suspension, actual Future results, provider exceptions and cancellation
+with async cleanup. These controlled checks establish behavior, not a promised
+end-to-end production improvement.
