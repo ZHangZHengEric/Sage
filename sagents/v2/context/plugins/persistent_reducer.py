@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -23,26 +22,16 @@ from sagents.v2.context.summary import (
     ConversationSummaryStore,
     SummarizationRequest,
     create_summary,
-    message_digest,
+    message_digests_async,
 )
-from sagents.v2.context.token_estimator import TokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator, MessageTokenCounter
+from sagents.v2.context.estimation import WireSizeTokenEstimator
+from sagents.v2.context.partition import (
+    conversation_units,
+    current_turn_boundary,
+    protected_boundary,
+)
 from sagents.v2.model.contracts import ModelMessage
-
-
-class _JsonHeuristicTokenEstimator:
-    estimator_id = "persistent-summary-json-heuristic"
-
-    def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
-        total = 0
-        for message in messages:
-            encoded = json.dumps(
-                message.model_dump(mode="json"),
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-            ).encode("utf-8")
-            total += 6 + math.ceil(len(encoded) / 4.0)
-        return total
 
 
 class _ExtractiveConversationSummarizer:
@@ -160,6 +149,7 @@ class PersistentSummaryContextReducer:
         protected_recent_units: int = 4,
         max_summary_source_tokens: int = 24_000,
         unit_compactor: ContextUnitCompactor | None = None,
+        max_summary_calls: int = 4,
     ) -> None:
         if summary_target_tokens <= 0:
             raise ValueError("summary_target_tokens must be positive")
@@ -167,9 +157,12 @@ class PersistentSummaryContextReducer:
             raise ValueError("protected_recent_units must be at least one")
         if max_summary_source_tokens <= 0:
             raise ValueError("max_summary_source_tokens must be positive")
+        if max_summary_calls < 1:
+            raise ValueError("max_summary_calls must be positive")
+        self.max_summary_calls = max_summary_calls
         self.store = store
         self.summarizer = summarizer or _ExtractiveConversationSummarizer()
-        self.estimator = estimator or _JsonHeuristicTokenEstimator()
+        self.estimator = estimator or WireSizeTokenEstimator()
         self.summary_target_tokens = summary_target_tokens
         self.protected_recent_units = protected_recent_units
         self.max_summary_source_tokens = max_summary_source_tokens
@@ -199,91 +192,150 @@ class PersistentSummaryContextReducer:
                 "context.invalid_budget",
                 "output and final-request reserves consume the input budget",
             )
-        systems = tuple(message for message in messages if message.role == "system")
-        payload = tuple(message for message in messages if message.role != "system")
+        systems = tuple(
+            message for message in messages if message.role in {"system", "developer"}
+        )
+        payload = tuple(
+            message
+            for message in messages
+            if message.role not in {"system", "developer"}
+        )
+        counter = await MessageTokenCounter.create(self.estimator, messages)
+        system_tokens = counter.estimate(systems)
+        if system_tokens > budget.max_system_tokens:
+            raise self._error(
+                "context.system_budget_exhausted",
+                "system instructions exceed their token budget",
+            )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
-        previous, remaining = self._validated_previous(stored, payload)
+        previous, remaining = await self._validated_previous(stored, payload)
         if stored is not None and previous is None:
-            # The context key was reused with a rewritten prefix.  Stale derived
-            # state must not block creating a summary for the new canonical view.
             await self.store.delete(
                 scope.context_key,
                 expected_revision=stored.revision,
                 session_id=scope.session_id,
             )
-        summary_message = self._summary_message(previous) if previous else None
-        current = (
-            *systems,
-            *((summary_message,) if summary_message else ()),
-            *remaining,
-        )
-        if not self._over(current, maximum, budget.max_messages):
-            if previous is None:
-                return ContextProjection(
-                    messages=messages,
-                    estimated_tokens=self.estimator.estimate(messages),
-                    source_message_count=len(messages),
-                )
-            return self._projection(
-                messages,
-                current,
-                previous,
-                historical_messages=payload[: len(previous.covered_message_digests)],
+        summary_prefix = (self._summary_message(previous),) if previous else ()
+        current = (*systems, *summary_prefix, *remaining)
+
+        def over(values):
+            return counter.estimate(values) > maximum or (
+                budget.max_messages is not None and len(values) > budget.max_messages
+            )
+
+        if not over(current):
+            return ContextProjection(
+                messages=current,
+                historical_messages=payload[: len(payload) - len(remaining)],
+                estimated_tokens=counter.estimate(current),
+                source_message_count=len(messages),
+                dropped_message_count=len(payload) - len(remaining),
+                dropped_digest=previous.source_digest if previous else None,
+                strategy="persistent_summary" if previous else "none",
             )
 
         units = self._units(remaining)
-        removable_count = self._removable_prefix_count(units)
-        if removable_count == 0:
-            compacted = await self._compact_units(units)
-            if compacted is not None:
-                compacted_messages = tuple(
-                    message for unit in compacted for message in unit
-                )
-                result = (*systems, *compacted_messages)
-                if not self._over(result, maximum, budget.max_messages):
-                    changed = tuple(
+        costs = [counter.estimate(unit) for unit in units]
+        mandatory = current_turn_boundary(units)
+        changed = []
+        # Before any model call, compact oversized mandatory tool results using
+        # their durable references. Never lose an existing summary on this path.
+        mandatory_messages = tuple(
+            message for unit in units[mandatory:] for message in unit
+        )
+        if over((*systems, *summary_prefix, *mandatory_messages)):
+            for index in range(mandatory, len(units)):
+                replacement = await self.unit_compactor.compact(units[index])
+                if replacement is not None:
+                    changed.extend(
                         original
-                        for original, replacement in zip(
-                            remaining, compacted_messages, strict=True
-                        )
-                        if original != replacement
+                        for original, new in zip(units[index], replacement, strict=True)
+                        if original != new
                     )
-                    return ContextProjection(
-                        messages=result,
-                        historical_messages=changed,
-                        estimated_tokens=self.estimator.estimate(result),
-                        source_message_count=len(messages),
-                        dropped_message_count=len(changed),
-                        strategy="reference_compaction",
-                    )
-            raise self._error(
-                "context.budget_exhausted",
-                "protected system, summary, and recent conversation exceed the model budget",
+                    units[index] = replacement
+                    costs[index] = counter.estimate(replacement)
+            mandatory_messages = tuple(
+                message for unit in units[mandatory:] for message in unit
+            )
+            if over((*systems, *mandatory_messages)) or (
+                mandatory == 0
+                and over((*systems, *summary_prefix, *mandatory_messages))
+            ):
+                raise self._error(
+                    "context.budget_exhausted",
+                    "system, summary and current user turn exceed the model budget",
+                )
+        if mandatory == 0:
+            result = (*systems, *summary_prefix, *mandatory_messages)
+            historical = (*payload[: len(payload) - len(remaining)], *changed)
+            return ContextProjection(
+                messages=result,
+                historical_messages=historical,
+                estimated_tokens=counter.estimate(result),
+                source_message_count=len(messages),
+                dropped_message_count=len(historical),
+                dropped_digest=previous.source_digest if previous else None,
+                strategy="reference_compaction",
             )
 
-        selected = []
-        while removable_count > 0 and self._over(
-            (*systems, *remaining), maximum, budget.max_messages
-        ):
-            selected.extend(units.pop(0))
-            removable_count -= 1
-            remaining = tuple(message for unit in units for message in unit)
-            placeholder = self._placeholder_message(previous)
-            if not self._over(
-                (*systems, placeholder, *remaining), maximum, budget.max_messages
-            ):
-                break
-        if not selected:
-            selected.extend(units.pop(0))
-            remaining = tuple(message for unit in units for message in unit)
+        soft_tokens = min(
+            budget.protected_recent_tokens, max(0, maximum - system_tokens) // 3
+        )
+        boundary = protected_boundary(
+            units,
+            costs,
+            recent_units=self.protected_recent_units,
+            recent_tokens=soft_tokens,
+        )
+        placeholder = self._placeholder_message(previous)
+        placeholder_tokens = counter.estimate((placeholder,))
+        # Linear accounting for additive built-ins; arbitrary custom estimators
+        # retain complete-request semantics instead of unsafe token subtraction.
+        suffix_tokens = [0] * (len(units) + 1)
+        suffix_counts = [0] * (len(units) + 1)
+        for index in range(len(units) - 1, -1, -1):
+            suffix_tokens[index] = suffix_tokens[index + 1] + costs[index]
+            suffix_counts[index] = suffix_counts[index + 1] + len(units[index])
 
-        prior_covered_count = len(previous.covered_message_digests) if previous else 0
-        all_covered = payload[: prior_covered_count + len(selected)]
-        covered_digests = tuple(message_digest(message) for message in all_covered)
+        def candidate_over(index):
+            if counter.costs is None:
+                return over(
+                    (
+                        *systems,
+                        placeholder,
+                        *(m for unit in units[index:] for m in unit),
+                    )
+                )
+            return system_tokens + placeholder_tokens + suffix_tokens[
+                index
+            ] > maximum or (
+                budget.max_messages is not None
+                and len(systems) + 1 + suffix_counts[index] > budget.max_messages
+            )
+
+        # Summarize the eligible prefix once, leaving a bounded recent suffix.
+        # This creates headroom instead of re-triggering on every new message.
+        selected_count = boundary
+        # Recent historical protection is soft. Relax it before failing a Run.
+        while selected_count < mandatory and candidate_over(selected_count):
+            selected_count += 1
+        selected_count = max(1, selected_count)
+        selected = tuple(message for unit in units[:selected_count] for message in unit)
+        retained = tuple(message for unit in units[selected_count:] for message in unit)
+        available = maximum - counter.estimate((*systems, *retained))
+        if available <= 0 or (
+            budget.max_messages is not None
+            and len(systems) + 1 + len(retained) > budget.max_messages
+        ):
+            raise self._error(
+                "context.budget_exhausted", "no space remains for a history summary"
+            )
+        target = max(1, min(self.summary_target_tokens, available - 128))
+        prior_count = len(previous.covered_message_digests) if previous else 0
+        all_covered = payload[: prior_count + len(selected)]
+        covered_digests = await message_digests_async(all_covered)
         text = await self._hierarchical_summary(
-            scope,
-            previous,
-            tuple(selected),
+            scope, previous, selected, target_tokens=target
         )
         summary = create_summary(
             scope=scope,
@@ -293,84 +345,100 @@ class PersistentSummaryContextReducer:
             text=text,
             estimator=self.estimator,
         )
-        self._require_compression_gain(previous, tuple(selected), summary)
-        result = (*systems, self._summary_message(summary), *remaining)
-        while self._over(result, maximum, budget.max_messages):
-            if len(units) <= self.protected_recent_units:
-                raise self._error(
-                    "context.budget_exhausted",
-                    "summary and protected recent conversation exceed the model budget",
-                )
-            more = units.pop(0)
-            selected.extend(more)
-            remaining = tuple(message for unit in units for message in unit)
-            all_covered = payload[: prior_covered_count + len(selected)]
-            covered_digests = tuple(message_digest(message) for message in all_covered)
-            text = await self._hierarchical_summary(scope, previous, tuple(selected))
-            summary = create_summary(
-                scope=scope,
-                previous=previous,
-                covered_messages=all_covered,
-                covered_digests=covered_digests,
-                text=text,
-                estimator=self.estimator,
+        self._require_compression_gain(previous, selected, summary)
+        result = (*systems, self._summary_message(summary), *retained)
+        # Do not retry progressively larger overlapping sources. A plugin that
+        # ignores its requested target must fail without committing derived state.
+        if over(result):
+            raise self._error(
+                "context.budget_exhausted",
+                "summary exceeds its reserved request budget",
             )
-            self._require_compression_gain(previous, tuple(selected), summary)
-            result = (*systems, self._summary_message(summary), *remaining)
-
         saved = await self.store.save(
-            summary,
-            expected_revision=previous.revision if previous else None,
+            summary, expected_revision=previous.revision if previous else None
         )
         return self._projection(
-            messages,
-            result,
-            saved,
-            historical_messages=all_covered,
+            messages, result, saved, historical_messages=(*all_covered, *changed)
         )
 
     async def _hierarchical_summary(
-        self,
-        scope: ContextReductionScope,
-        previous: ConversationSummary | None,
-        messages: tuple[ModelMessage, ...],
-    ) -> str:
-        rolling = previous.text if previous else None
-        batch: list[ModelMessage] = []
-        for message in messages:
-            candidate = (*batch, message)
-            if (
-                batch
-                and self.estimator.estimate(candidate) > self.max_summary_source_tokens
-            ):
-                rolling = await self.summarizer.summarize(
-                    SummarizationRequest(
-                        scope=scope,
-                        messages=tuple(batch),
-                        previous_summary=rolling,
-                        target_tokens=self.summary_target_tokens,
+        self, scope, previous, messages, *, target_tokens=None
+    ):
+        target = target_tokens or self.summary_target_tokens
+        counter = await MessageTokenCounter.create(self.estimator, messages)
+        batches = []
+        batch = []
+        batch_tokens = 0
+        # Reserve room for the rolling summary as well as framing on every call.
+        previous_tokens = (
+            counter.estimate((self._summary_message(previous),)) if previous else 0
+        )
+        reserve = max(target + 256, previous_tokens)
+        limit = self.max_summary_source_tokens - reserve
+        if limit <= 0:
+            raise self._error(
+                "context.summary_source_too_large",
+                "rolling summary consumes the source budget",
+            )
+        for unit in self._units(messages):
+            cost = counter.estimate(unit)
+            if cost > limit:
+                replacement = await self.unit_compactor.compact(unit)
+                if replacement is not None:
+                    unit = replacement
+                    cost = counter.estimate(unit)
+                if cost > limit:
+                    raise self._error(
+                        "context.summary_source_too_large",
+                        "indivisible history unit exceeds the summary source budget",
                     )
-                )
-                batch = [message]
-            else:
-                batch.append(message)
+            candidate_tokens = (
+                batch_tokens + cost
+                if counter.costs is not None
+                else counter.estimate((*batch, *unit))
+            )
+            if batch and candidate_tokens > limit:
+                batches.append(tuple(batch))
+                batch, batch_tokens = [], 0
+            batch.extend(unit)
+            batch_tokens += cost
         if batch:
+            batches.append(tuple(batch))
+        if len(batches) > self.max_summary_calls:
+            raise self._error(
+                "context.summary_work_limit",
+                "history exceeds the bounded summary work per projection",
+            )
+        rolling = previous.text if previous else None
+        for batch in batches:
+            # Intermediate output can be larger than the requested target. Check
+            # its actual size before sending it to the next summary request.
+            prefix = (
+                (ModelMessage(role="system", content=(TextBlock(text=rolling),)),)
+                if rolling
+                else ()
+            )
+            if counter.estimate((*prefix, *batch)) > self.max_summary_source_tokens:
+                raise self._error(
+                    "context.summary_source_too_large",
+                    "rolling summary exceeds the source budget",
+                )
             rolling = await self.summarizer.summarize(
                 SummarizationRequest(
                     scope=scope,
-                    messages=tuple(batch),
+                    messages=batch,
                     previous_summary=rolling,
-                    target_tokens=self.summary_target_tokens,
+                    target_tokens=target,
                 )
             )
-        if not rolling or not rolling.strip():
-            raise self._error(
-                "context.summary_empty", "summarizer returned an empty summary"
-            )
+            if not rolling or not rolling.strip():
+                raise self._error(
+                    "context.summary_empty", "summarizer returned an empty summary"
+                )
         return rolling.strip()
 
     @staticmethod
-    def _validated_previous(
+    async def _validated_previous(
         summary: ConversationSummary | None,
         payload: tuple[ModelMessage, ...],
     ) -> tuple[ConversationSummary | None, tuple[ModelMessage, ...]]:
@@ -379,7 +447,7 @@ class PersistentSummaryContextReducer:
         count = len(summary.covered_message_digests)
         if count > len(payload):
             return None, payload
-        actual = tuple(message_digest(message) for message in payload[:count])
+        actual = await message_digests_async(payload[:count])
         if actual != summary.covered_message_digests:
             # Never apply a summary to a rewritten or fork-incompatible prefix.
             return None, payload
@@ -435,41 +503,6 @@ class PersistentSummaryContextReducer:
             strategy="persistent_summary",
         )
 
-    def _over(
-        self,
-        messages: tuple[ModelMessage, ...],
-        maximum: int,
-        max_messages: int | None,
-    ) -> bool:
-        return self.estimator.estimate(messages) > maximum or (
-            max_messages is not None and len(messages) > max_messages
-        )
-
-    def _removable_prefix_count(self, units: list[tuple[ModelMessage, ...]]) -> int:
-        """Protect recent units and the latest real user request as one suffix."""
-
-        recent_boundary = max(0, len(units) - self.protected_recent_units)
-        latest_user_unit = next(
-            (
-                index
-                for index in range(len(units) - 1, -1, -1)
-                if any(message.role == "user" for message in units[index])
-            ),
-            len(units),
-        )
-        return min(recent_boundary, latest_user_unit)
-
-    async def _compact_units(
-        self, units: list[tuple[ModelMessage, ...]]
-    ) -> list[tuple[ModelMessage, ...]] | None:
-        compacted = []
-        changed = False
-        for unit in units:
-            replacement = await self.unit_compactor.compact(unit)
-            compacted.append(replacement or unit)
-            changed = changed or replacement is not None
-        return compacted if changed else None
-
     def _require_compression_gain(
         self,
         previous: ConversationSummary | None,
@@ -490,26 +523,7 @@ class PersistentSummaryContextReducer:
                 "summary did not reduce the compressible conversation content",
             )
 
-    @staticmethod
-    def _units(messages: tuple[ModelMessage, ...]):
-        units = []
-        index = 0
-        while index < len(messages):
-            message = messages[index]
-            if message.role == "assistant" and message.tool_calls:
-                expected = {call.tool_call_id for call in message.tool_calls}
-                unit = [message]
-                index += 1
-                while index < len(messages) and messages[index].role == "tool":
-                    if messages[index].tool_call_id not in expected:
-                        break
-                    unit.append(messages[index])
-                    index += 1
-                units.append(tuple(unit))
-                continue
-            units.append((message,))
-            index += 1
-        return units
+    _units = staticmethod(conversation_units)
 
     @staticmethod
     def _error(code: str, message: str) -> SageV2Error:

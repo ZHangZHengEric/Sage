@@ -127,3 +127,46 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
         assert sink.format == "json"
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
+    from app.server_v2.core.settings import ServerV2Settings
+
+    monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/test")
+    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://localhost")
+    monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS", "24")
+    monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "6")
+    monkeypatch.setenv("SAGE_SERVER_MAX_PENDING_RUNS", "128")
+    monkeypatch.setenv("SAGE_SERVER_MAX_MODEL_CLIENTS", "16")
+    parsed = ServerV2Settings.from_env(data_root=tmp_path)
+    service = make_test_service(
+        tmp_path,
+        max_concurrent_runs=parsed.max_concurrent_runs,
+        max_concurrent_runs_per_user=parsed.max_concurrent_runs_per_user,
+        max_pending_runs=parsed.max_pending_runs,
+        max_model_clients=parsed.max_model_clients,
+    )
+    await service.start()
+    try:
+        dispatcher = service.application.service("execution.dispatcher")
+        assert (await service._host_models._pool.snapshot())["max_clients"] == 16
+        assert dispatcher.max_concurrent_runs == 24
+        assert dispatcher.max_concurrent_runs_per_tenant == 6
+        assert (await dispatcher.scheduler.capabilities()).max_pending_items == 128
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "max_concurrent_runs",
+        "max_concurrent_runs_per_user",
+        "max_pending_runs",
+        "max_model_clients",
+    ],
+)
+def test_server_rejects_nonpositive_concurrency(tmp_path, field):
+    with pytest.raises(ValueError, match="positive"):
+        make_settings(tmp_path, **{field: 0})

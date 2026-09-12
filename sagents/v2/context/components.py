@@ -36,6 +36,7 @@ class ContextComponentBundle:
     summary_target_tokens: int = 1_024
     protected_recent_units: int = 4
     max_summary_source_tokens: int = 24_000
+    max_summary_calls: int = 4
     reducer_id: str = "persistent-summary"
     reducer: ContextReducer | None = None
 
@@ -57,4 +58,5 @@ class ContextComponentBundle:
             summary_target_tokens=self.summary_target_tokens,
             protected_recent_units=self.protected_recent_units,
             max_summary_source_tokens=self.max_summary_source_tokens,
+            max_summary_calls=self.max_summary_calls,
         )

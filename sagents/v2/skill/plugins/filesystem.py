@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
+from collections import OrderedDict
+from sagents.v2._concurrency import bounded_to_thread
 from pathlib import Path
 
 from sagents.v2.contracts.errors import (
@@ -37,6 +40,8 @@ class FilesystemSkillProvider:
         self.source_id = source_id
         self.max_files = max_files
         self.max_total_bytes = max_total_bytes
+        self._description_cache = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def descriptors(self) -> dict[str, SkillDescriptor]:
         values: dict[str, SkillDescriptor] = {}
@@ -52,7 +57,7 @@ class FilesystemSkillProvider:
                     or skill_file.is_symlink()
                 ):
                     continue
-                description = self._description(skill_file)
+                description = self._cached_description(skill_file)
                 # Roots are an ordered precedence list. Keep discovery and
                 # `_skill_root()` aligned so metadata and fetched bytes always
                 # come from the same first matching bundle.
@@ -67,19 +72,25 @@ class FilesystemSkillProvider:
         return values
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
-        values = self.descriptors()
+        values = await bounded_to_thread("skill-io", self.descriptors)
         return tuple(values[name] for name in sorted(values))
 
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
-        try:
-            return self.descriptors()[name]
-        except KeyError as exc:
-            raise self._error(
-                "skill.not_found", f"skill {name!r} is not registered"
-            ) from exc
+        return await bounded_to_thread("skill-io", lambda: self._descriptor(name))
+
+    def _descriptor(self, name: str) -> SkillDescriptor:
+        root = self._skill_root(name)
+        return SkillDescriptor(
+            name=name,
+            description=self._cached_description(root / "SKILL.md"),
+            source_id=self.source_id,
+        )
 
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle:
-        descriptor = await self.get_skill(name, run_id=run_id)
+        return await bounded_to_thread("skill-io", lambda: self._fetch(name))
+
+    def _fetch(self, name: str) -> SkillBundle:
+        descriptor = self._descriptor(name)
         root = self._skill_root(name)
         files: dict[str, bytes] = {}
         total = 0
@@ -124,10 +135,31 @@ class FilesystemSkillProvider:
 
     def _skill_root(self, name: str) -> Path:
         for root in self.roots:
-            candidate = (root / name).resolve()
+            lexical = root / name
+            if lexical.is_symlink() or (lexical / "SKILL.md").is_symlink():
+                continue
+            candidate = lexical.resolve()
             if candidate.parent == root and (candidate / "SKILL.md").is_file():
                 return candidate
         raise self._error("skill.not_found", f"skill {name!r} is not registered")
+
+    def _cached_description(self, path):
+        try:
+            stat = path.stat()
+        except OSError:
+            return self._description(path)
+        key = (str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
+        with self._cache_lock:
+            if key in self._description_cache:
+                self._description_cache.move_to_end(key)
+                return self._description_cache[key]
+        value = self._description(path)
+        with self._cache_lock:
+            self._description_cache[key] = value
+            self._description_cache.move_to_end(key)
+            while len(self._description_cache) > 2048:
+                self._description_cache.popitem(last=False)
+        return value
 
     @staticmethod
     def _description(skill_file: Path) -> str:

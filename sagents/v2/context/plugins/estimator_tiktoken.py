@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from sagents.v2.model.contracts import ModelMessage
+from sagents.v2.context.estimation import CachedMessageEstimator
 
 
-class TiktokenTokenEstimator:
+class TiktokenTokenEstimator(CachedMessageEstimator):
     """Optional OpenAI tokenizer plugin with lazy dependency loading."""
 
     plugin_id = "sage.context.token-estimator.tiktoken"
@@ -42,29 +41,10 @@ class TiktokenTokenEstimator:
                 encoder = tiktoken.get_encoding(encoding_name)
         self.encoder = encoder
         self.tokens_per_message = tokens_per_message
+        self._init_cache()
 
-    def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
-        total = 0
-        for message in messages:
-            payload = message.model_dump(mode="json")
-            media_tokens = 0
-            for block in payload.get("content", ()):
-                if not isinstance(block, dict) or block.get("kind") != "image":
-                    continue
-                media_tokens += 256 if block.get("detail") == "low" else 4_096
-                uri = str(block.get("uri") or "")
-                if uri.startswith("data:"):
-                    header = uri.partition(",")[0]
-                    block["uri"] = f"{header},<opaque-image-data>"
-            total += self.tokens_per_message + media_tokens
-            total += len(
-                self.encoder.encode(
-                    json.dumps(
-                        payload,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    )
-                )
-            )
-        return total
+    def _cache_identity(self):
+        return (id(self.encoder), self.tokens_per_message)
+
+    def _text_tokens(self, value):
+        return self.tokens_per_message + len(self.encoder.encode(value))

@@ -28,7 +28,12 @@ class AvailableSkillsContextProvider:
         if not values:
             return ()
         lines = ["<available_skills>"]
-        for value in sorted(values, key=lambda item: item.name):
+        used = 0
+        for index, value in enumerate(sorted(values, key=lambda item: item.name)):
+            used += len(value.name) + min(53, len(value.description)) + 100
+            if index >= 128 or used > 12_000:
+                lines.append("[More skills omitted from this catalog excerpt.]")
+                break
             description = (
                 value.description[:50] + "..."
                 if len(value.description) > 50
@@ -73,13 +78,7 @@ class ActiveSkillsContextProvider:
         return tuple(
             ContextSegment(
                 segment_id=f"active_skill:{value.descriptor.name}",
-                content=(
-                    "<active_skill>\n"
-                    f"<skill_name>{escape(value.descriptor.name)}</skill_name>\n"
-                    f"<workspace>{escape(value.workspace_path)}</workspace>\n"
-                    f"<skill_content>{escape(value.instructions)}</skill_content>\n"
-                    "</active_skill>"
-                ),
+                content=self.loader._context_content(value),
                 stability=ContextStability.SEMI_STABLE,
                 priority=index,
             )

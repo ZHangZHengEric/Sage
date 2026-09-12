@@ -21,7 +21,7 @@ from sagents.v2.context.contracts import (
 )
 from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.plugins.window import WindowContextReducer
-from sagents.v2.context.token_estimator import TokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator, estimate_tokens_async
 from sagents.v2.model import ModelMessage
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.commands import StartRun
@@ -76,6 +76,7 @@ class DefaultContextAssembler:
         self,
         *,
         system_instructions: str | None = None,
+        max_system_tokens: int = 16_384,
         developer_instructions: str | None = None,
         providers: tuple[ContextSegmentProvider, ...] = (),
         runtime_context_in_user: bool = True,
@@ -113,6 +114,9 @@ class DefaultContextAssembler:
             *providers,
         )
         self.runtime_context_in_user = runtime_context_in_user
+        if max_system_tokens <= 0:
+            raise ValueError("max_system_tokens must be positive")
+        self.max_system_tokens = max_system_tokens
         self.budget = budget
         self.estimator = estimator or JsonHeuristicTokenEstimator()
         self.reducer = reducer or WindowContextReducer(self.estimator)
@@ -220,6 +224,29 @@ class DefaultContextAssembler:
                 )
             )
         system = tuple(system_messages)
+        system_tokens = await estimate_tokens_async(self.estimator, system)
+        system_limit = (
+            self.budget.max_system_tokens if self.budget else self.max_system_tokens
+        )
+        if system_tokens > system_limit:
+            from sagents.v2.contracts.errors import (
+                ErrorCategory,
+                RuntimeErrorInfo,
+                SageV2Error,
+            )
+
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="context.system_budget_exhausted",
+                    category=ErrorCategory.VALIDATION,
+                    message="system instructions exceed their token budget",
+                    safe_to_resume=True,
+                    metadata={
+                        "system_tokens": system_tokens,
+                        "max_system_tokens": system_limit,
+                    },
+                )
+            )
         payload = self._sanitize_tool_pairs(
             self._strip_historical_search_memory(
                 tuple(message for message in ledger if message.role != "system")
@@ -276,7 +303,7 @@ class DefaultContextAssembler:
         else:
             projection = ContextProjection(
                 messages=messages,
-                estimated_tokens=self.estimator.estimate(messages),
+                estimated_tokens=await estimate_tokens_async(self.estimator, messages),
                 source_message_count=len(messages),
             )
         if self.projection_observer is not None and run_id is not None:

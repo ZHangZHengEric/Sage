@@ -418,7 +418,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     async def _commit_storage_locked(self, session_id: str) -> None:
         await self._ensure_ready()
-        state = self._dump_session_state_locked(session_id)
+        state = self._dump_session_state_locked(
+            session_id, event_offsets=self._persisted_run_sequences
+        )
+        event_totals = {
+            run_id: len(self._run_events[run_id]) for run_id in state["run_events"]
+        }
         compact = self._compact_state(state)
         session_row = compact["sessions"][0]
         events = {
@@ -454,7 +459,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                         ),
                     )
                     next_run_sequences = await self._persist_events(
-                        cursor, session_id, events
+                        cursor, session_id, events, event_totals=event_totals
                     )
                     await self._replace_locations(cursor, session_id, compact)
                     await self._replace_start_idempotency(cursor, session_id, compact)
@@ -468,7 +473,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 raise
         self._remember_persisted_session(session_id, next_run_sequences)
 
-    async def _persist_events(self, cursor, session_id, events) -> dict[str, int]:
+    async def _persist_events(
+        self, cursor, session_id, events, *, event_totals=None
+    ) -> dict[str, int]:
         next_sequences = {
             run_id: self._persisted_run_sequences[run_id]
             for run_id in events
@@ -482,13 +489,14 @@ class _MysqlSessionState(SessionStoreCoordinator):
             )
         for run_id, rows in events.items():
             persisted = next_sequences.get(run_id, 0)
-            if persisted > len(rows):
+            total = len(rows) if event_totals is None else event_totals[run_id]
+            if persisted > total:
                 await cursor.execute(
                     f"DELETE FROM {self._table('run_events')} WHERE run_id = %s",
                     (run_id,),
                 )
                 persisted = 0
-            appended = rows[persisted:]
+            appended = rows[persisted:] if event_totals is None else rows
             if appended:
                 await cursor.executemany(
                     f"""
@@ -508,7 +516,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                         for event in appended
                     ],
                 )
-            next_sequences[run_id] = len(rows)
+            next_sequences[run_id] = total
         return next_sequences
 
     async def _replace_locations(self, cursor, session_id, compact) -> None:

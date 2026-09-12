@@ -168,10 +168,16 @@ async def test_replacement_cannot_cross_an_inflight_fenced_commit():
     committing = asyncio.create_task(commit_old_worker())
     await base.commit_entered.wait()
     clock.now += timedelta(seconds=6)
-    replacement = asyncio.create_task(
-        scheduler.claim(
-            "new", lease_duration=timedelta(seconds=5), wait_timeout=0
+    # A nonblocking claim can now observe the protected Run without waiting
+    # for unrelated SessionStore I/O. It still cannot replace the old owner.
+    assert (
+        await scheduler.claim(
+            "probe", lease_duration=timedelta(seconds=5), wait_timeout=0
         )
+        is None
+    )
+    replacement = asyncio.create_task(
+        scheduler.claim("new", lease_duration=timedelta(seconds=5), wait_timeout=None)
     )
     await asyncio.sleep(0)
 
@@ -222,9 +228,7 @@ async def test_root_lease_can_create_and_execute_descendant_runs_only():
             StartRun(
                 session_id=handle.session_id,
                 agent_id="agent_child",
-                input=(
-                    InputItem(role="user", content=(TextBlock(text="child"),)),
-                ),
+                input=(InputItem(role="user", content=(TextBlock(text="child"),)),),
                 resolved_spec_hash="sha256:child",
                 idempotency_key="child",
                 parent_run_id=handle.run_id,
@@ -243,9 +247,7 @@ async def test_root_lease_can_create_and_execute_descendant_runs_only():
                 session_id=child.session_id,
                 agent_id="agent_grandchild",
                 input=(
-                    InputItem(
-                        role="user", content=(TextBlock(text="grandchild"),)
-                    ),
+                    InputItem(role="user", content=(TextBlock(text="grandchild"),)),
                 ),
                 resolved_spec_hash="sha256:grandchild",
                 idempotency_key="grandchild",

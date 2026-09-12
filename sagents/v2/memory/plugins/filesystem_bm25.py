@@ -9,12 +9,15 @@ BM25 corpus on every recall.
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 import hashlib
 import json
 import os
 import re
 import sqlite3
 from pathlib import Path
+
+from sagents.v2._concurrency import bounded_to_thread
 
 from sagents.v2.memory.contracts import (
     MemoryCapabilities,
@@ -32,7 +35,9 @@ class FilesystemBm25MemoryProvider:
 
     plugin_id = "sage.memory.filesystem-bm25"
     name = "Filesystem BM25 Memory"
-    description = "Durable scoped Memory records with incremental SQLite FTS5 BM25 recall."
+    description = (
+        "Durable scoped Memory records with incremental SQLite FTS5 BM25 recall."
+    )
     api_version = "2"
     _SCHEMA_VERSION = "1"
     _LEGACY_MIGRATION_KEY = "legacy_json_migration_v1"
@@ -55,8 +60,9 @@ class FilesystemBm25MemoryProvider:
         query_tokens = self._tokenize(query.text)
         if not query_tokens:
             return ()
-        async with self._lock:
-            rows = await asyncio.to_thread(self._search, query, query_tokens)
+        rows = await bounded_to_thread(
+            "memory-io", lambda: self._search(query, query_tokens), lock=self._lock
+        )
         if not rows:
             return ()
 
@@ -71,22 +77,26 @@ class FilesystemBm25MemoryProvider:
         )
 
     async def remember(self, record: MemoryRecord) -> MemoryWriteResult:
-        async with self._lock:
-            created = await asyncio.to_thread(self._upsert, record)
+        created = await bounded_to_thread(
+            "memory-io", lambda: self._upsert(record), lock=self._lock
+        )
         return MemoryWriteResult(memory_id=record.memory_id, created=created)
 
     async def forget(self, memory_id: str, *, scope: MemoryScope) -> MemoryDeleteResult:
-        async with self._lock:
-            deleted = await asyncio.to_thread(self._delete, memory_id, scope)
+        deleted = await bounded_to_thread(
+            "memory-io", lambda: self._delete(memory_id, scope), lock=self._lock
+        )
         return MemoryDeleteResult(memory_id=memory_id, deleted=deleted)
 
     async def get(self, memory_id: str, *, scope: MemoryScope) -> MemoryRecord | None:
-        async with self._lock:
-            return await asyncio.to_thread(self._get, memory_id, scope)
+        return await bounded_to_thread(
+            "memory-io", lambda: self._get(memory_id, scope), lock=self._lock
+        )
 
     async def health(self) -> dict[str, object]:
-        async with self._lock:
-            record_count = await asyncio.to_thread(self._record_count)
+        record_count = await bounded_to_thread(
+            "memory-io", self._record_count, lock=self._lock
+        )
         return {
             "status": "ok",
             "provider": "filesystem-bm25",
@@ -105,7 +115,7 @@ class FilesystemBm25MemoryProvider:
         return connection
 
     def _initialize_database(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS memory_meta "
@@ -180,7 +190,7 @@ class FilesystemBm25MemoryProvider:
         )
 
     def _upsert(self, record: MemoryRecord) -> bool:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             return self._upsert_with_connection(connection, record)
 
     def _upsert_with_connection(
@@ -237,7 +247,7 @@ class FilesystemBm25MemoryProvider:
 
     def _delete(self, memory_id: str, scope: MemoryScope) -> bool:
         scope_key = self._scope_key(scope)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 "DELETE FROM memory_records WHERE scope_key = ? AND memory_id = ?",
                 (scope_key, memory_id),
@@ -249,7 +259,7 @@ class FilesystemBm25MemoryProvider:
             return cursor.rowcount > 0
 
     def _get(self, memory_id: str, scope: MemoryScope) -> MemoryRecord | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT payload_json FROM memory_records "
                 "WHERE scope_key = ? AND memory_id = ?",
@@ -267,7 +277,7 @@ class FilesystemBm25MemoryProvider:
         match_query = " OR ".join(
             f'"{token.replace(chr(34), chr(34) * 2)}"' for token in query_tokens
         )
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 """
                 SELECT records.payload_json, bm25(memory_fts) AS raw_score
@@ -279,27 +289,27 @@ class FilesystemBm25MemoryProvider:
                 ORDER BY raw_score ASC, records.updated_at DESC
                 """,
                 (match_query, self._scope_key(query.scope)),
-            ).fetchall()
+            )
 
-        matches: list[tuple[MemoryRecord, float]] = []
-        allowed_kinds = set(query.kinds)
-        for row in rows:
-            record = MemoryRecord.model_validate_json(row["payload_json"])
-            if allowed_kinds and record.kind not in allowed_kinds:
-                continue
-            if query.metadata and not all(
-                record.metadata.get(key) == value
-                for key, value in query.metadata.items()
-            ):
-                continue
-            # SQLite FTS5 returns better BM25 matches as more-negative values.
-            matches.append((record, max(0.0, -float(row["raw_score"]))))
-            if len(matches) >= query.limit:
-                break
+            matches: list[tuple[MemoryRecord, float]] = []
+            allowed_kinds = set(query.kinds)
+            for row in rows:
+                record = MemoryRecord.model_validate_json(row["payload_json"])
+                if allowed_kinds and record.kind not in allowed_kinds:
+                    continue
+                if query.metadata and not all(
+                    record.metadata.get(key) == value
+                    for key, value in query.metadata.items()
+                ):
+                    continue
+                # SQLite FTS5 returns better BM25 matches as more-negative values.
+                matches.append((record, max(0.0, -float(row["raw_score"]))))
+                if len(matches) >= query.limit:
+                    break
         return matches
 
     def _record_count(self) -> int:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT COUNT(*) AS count FROM memory_records"
             ).fetchone()

@@ -196,6 +196,19 @@ Oversized indivisible Tool units use the `context.unit-compactor` port. The
 built-in implementation accepts only a durable `context_reference` supplied by
 the Tool and persisted in Session history; no reference means no truncation.
 
+The standard Builder uses a finite 32,768-token fallback when no model window
+is declared. System instructions, current-turn protection, historical summary
+work, and auxiliary concurrency have separate bounds. See the
+[context budget and concurrency guide](../../docs/zh/architecture/sagents-v2-context-budget.md)
+for configuration, overflow behavior, and reproducible benchmarks.
+The [efficiency and quality audit](../../docs/zh/architecture/sagents-v2-efficiency-quality-audit.md)
+records runtime and storage fixes, regression coverage, and deployment limits.
+The [single-host concurrency guide](../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)
+describes per-Run mutation fencing, Server concurrency settings, and benchmarks.
+The [answer quality audit](../../docs/zh/architecture/sagents-v2-answer-quality-audit.md)
+covers bounded continuation after output limits, model initialization and cleanup,
+and truthful failure reporting.
+
 ### Memory
 
 Long-term Memory is separate from Session storage. It is enabled for an Agent
@@ -332,6 +345,15 @@ In-memory and local-workspace sandbox providers retain at most 1024 detached
 terminal metadata records for 24 hours. Suspended or attached resources are not
 swept. Explicit `purge_terminal`/`purge_terminated` methods remain available;
 local-workspace retention never deletes host workspace contents.
+
+The in-memory JobRuntime also bounds admitted tasks (running plus queued;
+default 1024), output per Job (8 MiB / 8192 chunks), and all buffered output
+(256 MiB / 65536 chunks). A full admission or protected-retention budget returns
+retryable `job.queue_full`; output overflow sets `JobSnapshot.output_truncated`.
+These limits are configurable on `sage.job.ephemeral` and exposed by its
+capabilities. They do not bound arbitrary runner allocations or Session history.
+SQLite memory I/O retains its lock until cancelled thread work actually ends,
+with eight shared thread slots per event loop.
 
 Distributed plugins report `multi_process_writes`, `cross_process_subscribe`,
 `transactional_outbox`, and `atomic_session_cas` independently. The built-in

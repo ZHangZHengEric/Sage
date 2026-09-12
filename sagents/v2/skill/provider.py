@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from weakref import WeakValueDictionary
+from xml.sax.saxutils import escape
 from collections.abc import Awaitable, Callable, Iterable
 
 from sagents.v2.skill.contracts import (
@@ -58,9 +60,7 @@ class InvocationGrantSkillCatalog:
 
     async def _allowed(self, run_id: str) -> frozenset[str] | None:
         command = await self.command_reader(run_id)
-        configured = getattr(
-            getattr(command, "config", None), "enabled_skills", None
-        )
+        configured = getattr(getattr(command, "config", None), "enabled_skills", None)
         return None if configured is None else frozenset(configured)
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
@@ -100,9 +100,11 @@ class SkillLoader:
         workspace: SkillWorkspace,
         activations: SkillActivationRepository,
         workspace_root: str = "/workspace",
-        max_active_tokens: int = 18_000,
+        max_active_tokens: int = 6_000,
         token_estimator: Callable[[str], int] | None = None,
     ) -> None:
+        if max_active_tokens < 1:
+            raise ValueError("max_active_tokens must be positive")
         self.catalog = catalog
         self.source = source
         self.workspace = workspace
@@ -111,7 +113,7 @@ class SkillLoader:
         self.max_active_tokens = max_active_tokens
         self.token_estimator = token_estimator or self._default_token_estimate
         self._locks_guard = asyncio.Lock()
-        self._load_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._load_locks: WeakValueDictionary = WeakValueDictionary()
 
     async def load(self, name: str, *, run_id: str) -> LoadedSkill:
         lock = await self._load_lock(run_id, name)
@@ -136,9 +138,6 @@ class SkillLoader:
                 "skill.identity_mismatch", "skill source identity changed"
             )
         destination = f"{self.workspace_root}/skills/{name}"
-        workspace_path = await self.workspace.materialize(
-            bundle, run_id=run_id, destination=destination
-        )
         try:
             instructions = bundle.files["SKILL.md"].decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -146,12 +145,26 @@ class SkillLoader:
         loaded = LoadedSkill(
             run_id=run_id,
             descriptor=descriptor,
-            workspace_path=workspace_path,
+            workspace_path=destination,
             content_hash=bundle.content_hash,
             instructions=instructions,
             file_list=tuple(sorted(bundle.files)),
             loaded_at=utc_now(),
         )
+        if self.token_estimator(self._context_content(loaded)) > self.max_active_tokens:
+            raise self._error(
+                "skill.active_budget_exceeded",
+                "skill instructions exceed the active context budget",
+            )
+        workspace_path = await self.workspace.materialize(
+            bundle, run_id=run_id, destination=destination
+        )
+        loaded = loaded.model_copy(update={"workspace_path": workspace_path})
+        if self.token_estimator(self._context_content(loaded)) > self.max_active_tokens:
+            raise self._error(
+                "skill.active_budget_exceeded",
+                "materialized skill context exceeds the active budget",
+            )
         await self.activations.put_loaded(loaded)
         await self._enforce_active_budget(run_id)
         return loaded
@@ -168,20 +181,25 @@ class SkillLoader:
 
     async def _enforce_active_budget(self, run_id: str) -> None:
         values = list(await self.activations.list_loaded(run_id=run_id))
-        total = sum(
-            self.token_estimator(self._context_content(value)) for value in values
+        costs = [self.token_estimator(self._context_content(value)) for value in values]
+        total = sum(costs)
+        start = 0
+        while total > self.max_active_tokens and start < len(values):
+            total -= costs[start]
+            start += 1
+        await self.activations.replace_loaded(
+            run_id=run_id, values=tuple(values[start:])
         )
-        while total > self.max_active_tokens and len(values) > 1:
-            removed = values.pop(0)
-            total -= self.token_estimator(self._context_content(removed))
-        await self.activations.replace_loaded(run_id=run_id, values=tuple(values))
 
     @staticmethod
     def _context_content(value: LoadedSkill) -> str:
+        # Budget exactly the XML-escaped text that ActiveSkillsContextProvider sends.
         return (
-            f"## Skill: {value.descriptor.name}\n"
-            f"Workspace: {value.workspace_path}\n"
-            f"Files:\n" + "\n".join(value.file_list) + "\n\n" + value.instructions
+            "<active_skill>\n"
+            f"<skill_name>{escape(value.descriptor.name)}</skill_name>\n"
+            f"<workspace>{escape(value.workspace_path)}</workspace>\n"
+            f"<skill_content>{escape(value.instructions)}</skill_content>\n"
+            "</active_skill>"
         )
 
     @staticmethod

@@ -101,6 +101,7 @@ class ServerV2Service:
             self.catalog,
             fallback=self._fallback_model,
             session_for_run=self._session_id_for_run,
+            max_clients=self.settings.max_model_clients,
         )
         self._application = await (
             SAgentBuilder()
@@ -117,9 +118,14 @@ class ServerV2Service:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
-        if self._application is not None:
-            await self._application.close()
+        try:
+            if self._application is not None:
+                await self._application.close()
+        finally:
             self._application = None
+            if self._host_models is not None:
+                await self._host_models.close()
+                self._host_models = None
 
     def backends(self) -> dict[str, str]:
         report = {
@@ -195,7 +201,9 @@ class ServerV2Service:
         user_id: str,
         last_event_id: str | None,
     ):
-        props = request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
+        props = (
+            request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
+        )
         requested_agent = str(props.get("agentId") or "").strip()
         thread_id = validate_agui_id(request.thread_id, field="threadId")
         existing = await self.threads.find(thread_id)
@@ -262,12 +270,12 @@ class ServerV2Service:
         correlation_id: str,
     ) -> None:
         token = bind_model_user(user_id)
-        if self._host_models is not None:
-            self._host_models.bind_session_user(run.thread_id, user_id)
+        session_bound = False
         context = self.request_context(user_id, correlation_id=correlation_id)
         stream = None
         gate = RunStartedGate()
         owned_user_text = ClientOwnedUserTextFilter()
+        terminal_status = "completed"
         logger = self._sagents_logger().bind(
             thread_id=run.thread_id,
             run_id=run.run_id,
@@ -278,6 +286,9 @@ class ServerV2Service:
             attributes={"agent_id": agent_id, "user_id": user_id},
         )
         try:
+            if self._host_models is not None:
+                self._host_models.bind_session_user(run.thread_id, user_id)
+                session_bound = True
             if not await self._has_configured_model(user_id):
                 await self._fail_agui_run(
                     run,
@@ -302,6 +313,8 @@ class ServerV2Service:
                     event = frame_to_agui_event(
                         frame, thread_id=run.thread_id, run_id=run.run_id
                     )
+                    if event.get("type") == "RUN_ERROR":
+                        terminal_status = "failed"
                     if not owned_user_text.allow(event):
                         continue
                     for payload in gate.release(event):
@@ -313,8 +326,11 @@ class ServerV2Service:
             await self.threads.upsert(
                 run.thread_id, user_id, title=title, agent_id=agent_id
             )
-            await self.replay.finish(run, "completed")
-            logger.info("agui.run.completed", "AG-UI run completed")
+            await self.replay.finish(run, terminal_status)
+            log_terminal = (
+                logger.warning if terminal_status == "failed" else logger.info
+            )
+            log_terminal(f"agui.run.{terminal_status}", f"AG-UI run {terminal_status}")
         except SageV2Error as exc:
             logger.warning(
                 "agui.run.failed",
@@ -335,7 +351,7 @@ class ServerV2Service:
                 await self.replay.publish(run, payload)
             await self.replay.finish(run, "failed")
         finally:
-            if self._host_models is not None:
+            if session_bound and self._host_models is not None:
                 self._host_models.unbind_session_user(run.thread_id)
             reset_model_user(token)
             if stream is not None:

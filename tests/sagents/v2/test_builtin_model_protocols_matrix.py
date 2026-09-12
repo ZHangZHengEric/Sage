@@ -429,9 +429,7 @@ async def test_openai_responses_reads_tool_call_from_terminal_response_snapshot(
     completed = events[-1].response
     assert completed is not None
     assert completed.tool_calls == (
-        ModelToolCall(
-            tool_call_id="call_1", name="lookup", arguments={"q": "final"}
-        ),
+        ModelToolCall(tool_call_id="call_1", name="lookup", arguments={"q": "final"}),
     )
 
 
@@ -648,9 +646,7 @@ async def test_anthropic_messages_rejects_stream_without_message_stop():
 async def test_anthropic_messages_surfaces_sse_error_event():
     provider = AnthropicMessagesModelProvider(
         AnthropicMessagesConfig(model="claude-test", capabilities=CAPABILITIES),
-        client=FakeHTTPClient(
-            ({"type": "error", "error": {"message": "overloaded"}},)
-        ),
+        client=FakeHTTPClient(({"type": "error", "error": {"message": "overloaded"}},)),
     )
 
     with pytest.raises(SageV2Error) as caught:
@@ -781,3 +777,28 @@ def test_chat_completions_factory_auto_selects_initial_token_field(
     assert provider.config.max_output_tokens_field == "auto"
     outgoing = provider.diagnostic_request(request(max_output_tokens=128))
     assert outgoing[expected_field] == 128
+
+
+@pytest.mark.parametrize(
+    "protocol,default",
+    [
+        ("openai-chat-completions", None),
+        ("openai-responses", None),
+        ("anthropic-messages", 4096),
+    ],
+)
+@pytest.mark.parametrize("maximum", [None, 512])
+def test_model_factory_preserves_protocol_output_defaults(protocol, default, maximum):
+    from sagents.v2.model.protocols import create_registered_model_provider
+
+    provider = create_registered_model_provider(
+        ModelRoute(
+            provider=protocol,
+            model="test-model",
+            request=ModelRequestDefaults(max_output_tokens=maximum),
+        ),
+        client=SimpleNamespace(),
+    )
+    assert provider.config.default_max_output_tokens == (
+        maximum if maximum is not None else default
+    )

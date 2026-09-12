@@ -8,6 +8,7 @@ reuse these rules without depending on one another.
 from __future__ import annotations
 
 import asyncio
+from weakref import WeakValueDictionary
 import hashlib
 import json
 from contextlib import asynccontextmanager, nullcontext
@@ -230,9 +231,11 @@ class SessionStoreCoordinator:
         self._persistence_can_fail = persistence_can_fail
         self._lock = asyncio.Lock()
         self._session_locks: dict[str, asyncio.Lock] = {}
-        self._start_locks: dict[
+        # Waiters hold strong references; idle admission locks do not retain
+        # every idempotency key ever used by a long-lived server.
+        self._start_locks: WeakValueDictionary[
             tuple[str | None, PrincipalType, str, str], asyncio.Lock
-        ] = {}
+        ] = WeakValueDictionary()
         self._topology_revision = 0
         self._sessions: dict[str, _SessionRow] = {}
         self._runs: dict[str, _RunRow] = {}
@@ -379,23 +382,17 @@ class SessionStoreCoordinator:
         async with self._lock:
             proposal = self._session_commit_proposals.get(proposal_id)
             if proposal is None:
-                raise self._not_found(
-                    "session.commit_proposal_not_found", proposal_id
-                )
+                raise self._not_found("session.commit_proposal_not_found", proposal_id)
             session_id = proposal.session_id
         async with self._session_operation(session_id):
             current = self._session_commit_proposals.get(proposal_id)
             if current is None or current.session_id != session_id:
-                raise self._not_found(
-                    "session.commit_proposal_not_found", proposal_id
-                )
+                raise self._not_found("session.commit_proposal_not_found", proposal_id)
             yield
 
     def _session_run_ids_locked(self, session_id: str) -> set[str]:
         return {
-            row.run_id
-            for row in self._runs.values()
-            if row.session_id == session_id
+            row.run_id for row in self._runs.values() if row.session_id == session_id
         }
 
     def _capture_session_undo_locked(self, session_id: str) -> _SessionUndo:
@@ -446,9 +443,7 @@ class SessionStoreCoordinator:
         }
         command_keys = {key for key in self._command_results if key[0] in run_ids}
         resource_keys = {
-            key
-            for key in self._execution_resource_command_results
-            if key[0] in run_ids
+            key for key in self._execution_resource_command_results if key[0] in run_ids
         }
         proposal_keys = {
             key
@@ -481,12 +476,8 @@ class SessionStoreCoordinator:
             start_idempotency_digests={
                 scope: self._start_idempotency_digests[scope] for scope in start_scopes
             },
-            command_results={
-                key: self._command_results[key] for key in command_keys
-            },
-            command_digests={
-                key: self._command_digests[key] for key in command_keys
-            },
+            command_results={key: self._command_results[key] for key in command_keys},
+            command_digests={key: self._command_digests[key] for key in command_keys},
             execution_resources={
                 run_id: self._execution_resources[run_id]
                 for run_id in run_ids
@@ -717,11 +708,7 @@ class SessionStoreCoordinator:
         replacements: dict[str, dict[str, list[dict[str, Any]]]] = {}
         map_deletes: dict[str, list[str]] = {}
         session = self._sessions[session_id]
-        if (
-            not undo.existed
-            or undo.session is None
-            or undo.session != session
-        ):
+        if not undo.existed or undo.session is None or undo.session != session:
             upserts["sessions"] = [self._session_row_payload(session)]
         changed_runs = [
             self._run_row_payload(self._runs[run_id])
@@ -750,16 +737,13 @@ class SessionStoreCoordinator:
             appends["run_events"] = event_appends
         if event_replacements:
             replacements["run_events"] = event_replacements
-        removed_event_runs = sorted(
-            set(undo.run_event_lens) - current_run_ids
-        )
+        removed_event_runs = sorted(set(undo.run_event_lens) - current_run_ids)
         if removed_event_runs:
             map_deletes["run_events"] = removed_event_runs
         fork_changed = {
             run_id: [event.model_dump(mode="json") for event in events]
             for run_id, events in self._fork_base_events.items()
-            if run_id in current_run_ids
-            and undo.fork_base_events.get(run_id) != events
+            if run_id in current_run_ids and undo.fork_base_events.get(run_id) != events
         }
         if fork_changed:
             replacements["fork_base_events"] = fork_changed
@@ -819,9 +803,7 @@ class SessionStoreCoordinator:
                 "result": {
                     "run": value.run.model_dump(mode="json"),
                     "session": value.session.model_dump(mode="json"),
-                    "events": [
-                        event.model_dump(mode="json") for event in value.events
-                    ],
+                    "events": [event.model_dump(mode="json") for event in value.events],
                 },
             }
             for key, value in current_commands.items()
@@ -895,9 +877,7 @@ class SessionStoreCoordinator:
         if checkpoint_changed:
             upserts["checkpoints"] = checkpoint_changed
         checkpoint_removed = [
-            [key]
-            for key in undo.checkpoints
-            if key not in current_checkpoints
+            [key] for key in undo.checkpoints if key not in current_checkpoints
         ]
         if checkpoint_removed:
             deletes["checkpoints"] = checkpoint_removed
@@ -980,8 +960,7 @@ class SessionStoreCoordinator:
         current_proposal_results = {
             key: value
             for key, value in self._session_commit_command_results.items()
-            if value.proposal_id in current_proposals
-            or key in undo.proposal_results
+            if value.proposal_id in current_proposals or key in undo.proposal_results
         }
         proposal_result_changed = [
             {
@@ -1099,9 +1078,7 @@ class SessionStoreCoordinator:
             for row in snapshot.get("session_commit_proposals", ())
         }
         combined["sessions"] = [
-            row
-            for row in combined["sessions"]
-            if row["session_id"] not in session_ids
+            row for row in combined["sessions"] if row["session_id"] not in session_ids
         ]
         combined["runs"] = [
             row for row in combined["runs"] if row["run_id"] not in run_ids
@@ -1113,9 +1090,7 @@ class SessionStoreCoordinator:
                 if run_id not in run_ids
             }
         combined["start_idempotency"] = [
-            row
-            for row in combined["start_idempotency"]
-            if row["run_id"] not in run_ids
+            row for row in combined["start_idempotency"] if row["run_id"] not in run_ids
         ]
         combined["command_results"] = [
             row for row in combined["command_results"] if row["run_id"] not in run_ids
@@ -1179,9 +1154,7 @@ class SessionStoreCoordinator:
             command.idempotency_key,
         )
         async with self._lock:
-            start_lock = self._start_locks.setdefault(
-                idempotency_scope, asyncio.Lock()
-            )
+            start_lock = self._start_locks.setdefault(idempotency_scope, asyncio.Lock())
         async with start_lock:
             async with self._lock:
                 existing_run_id = self._start_idempotency.get(idempotency_scope)
@@ -1969,7 +1942,9 @@ class SessionStoreCoordinator:
                     f"expected run revision {expected_run_revision}, current {run.revision}",
                 )
             previous = self._execution_resources.get(run_id)
-            current_resource_revision = previous.revision if previous is not None else None
+            current_resource_revision = (
+                previous.revision if previous is not None else None
+            )
             if current_resource_revision != expected_resource_revision:
                 raise self._conflict(
                     "sandbox.resource_revision_conflict",
@@ -3131,13 +3106,18 @@ class SessionStoreCoordinator:
             ],
         }
 
-    def _dump_session_state_locked(self, session_id: str) -> dict[str, Any]:
+    def _dump_session_state_locked(
+        self, session_id: str, *, event_offsets: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         """Serialize exactly one authoritative Session aggregate.
 
         Durable per-Session repositories must not serialize every loaded
         aggregate and then discard unrelated rows. Keeping this projection in
         the coordinator also prevents storage adapters from reimplementing the
         canonical ownership rules for Runs, checkpoints, and idempotency data.
+        SQL adapters may supply persisted event counts to export only appended
+        events. Omit offsets for a complete snapshot. Truncated ledgers export
+        their full contents so adapters can replace the persisted prefix.
         """
 
         session = self._sessions.get(session_id)
@@ -3210,7 +3190,17 @@ class SessionStoreCoordinator:
                 if row.run_id in run_ids
             ],
             "run_events": {
-                run_id: [event.model_dump(mode="json") for event in events]
+                run_id: [
+                    event.model_dump(mode="json")
+                    for event in events[
+                        (
+                            event_offsets.get(run_id, 0)
+                            if event_offsets is not None
+                            and 0 <= event_offsets.get(run_id, 0) <= len(events)
+                            else 0
+                        ) :
+                    ]
+                ]
                 for run_id, events in self._run_events.items()
                 if run_id in run_ids
             },

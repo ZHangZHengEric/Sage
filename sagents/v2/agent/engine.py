@@ -710,7 +710,10 @@ class AgentLoopEngine:
         state = state.model_copy(
             update={"messages": rebuilt_messages, "ledger_digest": rebuilt_digest}
         )
-        if state.pending_tool_call is not None and state.pending_response_step_id is None:
+        if (
+            state.pending_tool_call is not None
+            and state.pending_response_step_id is None
+        ):
             # Older checkpoints saved only the current barrier, but all calls
             # in its model response are already present in the Item ledger.
             state = state.model_copy(
@@ -819,13 +822,18 @@ class AgentLoopEngine:
                     )
                     declined_error = localize_error(
                         RuntimeErrorInfo(
-                            code="tool.policy_denied" if policy_denied else "tool.declined",
+                            code="tool.policy_denied"
+                            if policy_denied
+                            else "tool.declined",
                             category=ErrorCategory.POLICY_DENIED,
                             message=(
-                                current_policy.reason if policy_denied
+                                current_policy.reason
+                                if policy_denied
                                 else f"tool call declined with {resolution.decision}"
                             ),
-                            message_key=None if policy_denied else "error.tool.declined",
+                            message_key=None
+                            if policy_denied
+                            else "error.tool.declined",
                             safe_to_resume=True,
                         ),
                         context.language,
@@ -834,7 +842,11 @@ class AgentLoopEngine:
                     declined_content = [TextBlock(text=declined_error.message)]
                     if feedback and resolution.decision == "deny":
                         declined_content.append(
-                            TextBlock(text=json.dumps({"user_feedback": feedback}, ensure_ascii=False))
+                            TextBlock(
+                                text=json.dumps(
+                                    {"user_feedback": feedback}, ensure_ascii=False
+                                )
+                            )
                         )
                     result = ToolExecutionResult(
                         tool_call_id=state.pending_tool_call.tool_call_id,
@@ -1476,6 +1488,7 @@ class AgentLoopEngine:
                 and decision.reason
                 and decision.reason_code
                 in {
+                    "response.output_limit",
                     "plan.explanation_required",
                     "plan.required",
                     "goal.explanation_required",
@@ -2021,7 +2034,9 @@ class AgentLoopEngine:
             remembered_at=self.clock(),
             remembered_by=context.actor.principal_id,
         )
-        await self.approval_memory.remember(session_id=run.session_id, approval=approval)
+        await self.approval_memory.remember(
+            session_id=run.session_id, approval=approval
+        )
         return await self._commit_running(
             run,
             context,
@@ -2053,8 +2068,8 @@ class AgentLoopEngine:
         """Interrupt only when both Tool metadata and Executor permit it."""
 
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
-        execution = asyncio.create_task(self.tool_executor.execute(call, context))
         command = await self.runtime.session_store.get_start_command(run.run_id)
+        execution = asyncio.create_task(self.tool_executor.execute(call, context))
         cancellable = definition.cancel_semantics in {
             CancelSemantics.COOPERATIVE,
             CancelSemantics.FORCEABLE,

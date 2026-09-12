@@ -18,6 +18,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
+from sagents.v2.runtime.execution.scheduler._fencing import finish_fence
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
     SchedulerClaimPolicy,
@@ -64,6 +65,7 @@ class _FilesystemSchedulerStateMachine:
         self._max_retained_terminal = max_retained_terminal_items
         self._clock = clock
         self._condition = asyncio.Condition()
+        self._fenced_runs: set[str] = set()
         self._pending: list[tuple[float, int, int, str]] = []
         self._items: dict[str, WorkItem] = {}
         self._idempotency: dict[str, str] = {}
@@ -215,7 +217,10 @@ class _FilesystemSchedulerStateMachine:
         async with self._condition:
             current = self._assert_fence_locked(lease)
             now = self._clock()
-            if current.expires_at <= now:
+            if (
+                current.expires_at <= now
+                and current.work.run_id not in self._fenced_runs
+            ):
                 self._expire_lease_locked(current)
                 raise self._error(
                     "scheduler.lease_expired",
@@ -235,6 +240,9 @@ class _FilesystemSchedulerStateMachine:
         requeue: bool = False,
     ) -> None:
         async with self._condition:
+            await self._condition.wait_for(
+                lambda: lease.work.run_id not in self._fenced_runs or self._closed
+            )
             self._assert_fence_locked(lease)
             self._leases.pop(lease.lease_id, None)
             self._work_lease.pop(lease.work.work_id, None)
@@ -264,18 +272,32 @@ class _FilesystemSchedulerStateMachine:
         """Keep the lease linearizable across one authoritative mutation."""
 
         async with self._condition:
+            await self._condition.wait_for(
+                lambda: lease.work.run_id not in self._fenced_runs or self._closed
+            )
             reaped = self._reap_expired_locked()
             if reaped:
                 await self._persist_locked()
             self._assert_fence_locked(lease)
+            self._fenced_runs.add(lease.work.run_id)
+        try:
+            # A pin protects only this Run. Unrelated commits and lease
+            # heartbeats must not wait for its SessionStore I/O.
             return await operation()
+        finally:
+            await finish_fence(self._condition, self._fenced_runs, lease.work.run_id)
 
     async def cancel(self, work_id: str) -> bool:
         async with self._condition:
             self._ensure_open()
-            work = self._items.get(work_id)
-            if work is None:
-                return False
+            while True:
+                self._ensure_open()
+                work = self._items.get(work_id)
+                if work is None:
+                    return False
+                if work.run_id not in self._fenced_runs:
+                    break
+                await self._condition.wait()
             self._cancelled.add(work_id)
             lease_id = self._work_lease.pop(work_id, None)
             if lease_id is not None:
@@ -312,6 +334,7 @@ class _FilesystemSchedulerStateMachine:
         async with self._condition:
             self._closed = True
             self._condition.notify_all()
+            await self._condition.wait_for(lambda: not self._fenced_runs)
 
     async def _persist_locked(self) -> None:
         if self._state_store is not None:
@@ -486,13 +509,24 @@ class _FilesystemSchedulerStateMachine:
                 < policy.max_active_per_tenant
             )
         ]
+        # Claims blocked by a Run/tenant lease must wake when it expires,
+        # even if no new submit/release notification arrives.
+        candidates.extend(
+            lease.expires_at.timestamp()
+            for lease in self._leases.values()
+            if lease.work.run_id not in self._fenced_runs
+        )
         if not candidates:
             return None
         return max(0.0, min(candidates) - self._clock().timestamp())
 
     def _reap_expired_locked(self) -> int:
         now = self._clock()
-        expired = [lease for lease in self._leases.values() if lease.expires_at <= now]
+        expired = [
+            lease
+            for lease in self._leases.values()
+            if lease.expires_at <= now and lease.work.run_id not in self._fenced_runs
+        ]
         for lease in expired:
             self._expire_lease_locked(lease)
         return len(expired)
@@ -586,7 +620,18 @@ class FilesystemSchedulerStateStore:
 
     async def save(self, state: dict[str, Any]) -> None:
         async with self._lock:
-            await asyncio.to_thread(self._write, state)
+            # Cancellation cannot stop fsync/replace in the thread. Keep both
+            # the state-machine lock and writer ownership until it settles.
+            write = asyncio.create_task(asyncio.to_thread(self._write, state))
+            cancelled = False
+            while not write.done():
+                try:
+                    await asyncio.shield(write)
+                except asyncio.CancelledError:
+                    cancelled = True
+            write.result()
+            if cancelled:
+                raise asyncio.CancelledError
 
     def _write(self, state: dict[str, Any]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

@@ -1443,7 +1443,9 @@ async def test_write_tool_suspends_before_dispatch_and_approval_resumes_once():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("feedback", ["", "请先补充测试方案，再提交计划。"])
-async def test_declined_write_never_dispatches_and_model_receives_decline_result(feedback):
+async def test_declined_write_never_dispatches_and_model_receives_decline_result(
+    feedback,
+):
     def assert_decline(request):
         tool_result = request.messages[-1]
         assert tool_result.role == "tool"
@@ -1499,8 +1501,12 @@ async def test_declined_write_never_dispatches_and_model_receives_decline_result
             and event.data.item is not None
             and isinstance(event.data.item.data, ToolResultItemData)
         ]
-        assert any(feedback in block.text for item in results for block in item.content if isinstance(block, TextBlock))
-
+        assert any(
+            feedback in block.text
+            for item in results
+            for block in item.content
+            if isinstance(block, TextBlock)
+        )
 
 
 @pytest.mark.asyncio
@@ -2544,47 +2550,67 @@ def _session_memory(runtime):
 @pytest.mark.parametrize("updated_policy", ["deny", "always", "changed-matcher"])
 async def test_pending_approval_cannot_override_tightened_host_policy(updated_policy):
     from sagents.v2.agent.policy.tool_policy import (
-        ToolOperationAssessment, ToolPolicyAction, exact_arguments_matcher,
+        ToolOperationAssessment,
+        ToolPolicyAction,
+        exact_arguments_matcher,
     )
 
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
-        ScriptedModelStep(events=(completed("done"),)),
-    ))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(_write_call("call_1"),)),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
     runtime, handle, loop, executor = await setup_loop(
-        model, tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
+        model,
+        tool_policy=DefaultToolPolicy(allow_persistent_approval=True),
         approval_memory=_session_memory,
     )
     suspended = await loop.execute(handle.run_id, CONTEXT)
     suspension, interaction = await _pending_interaction(runtime, suspended)
-    await runtime.reply_interaction(_approval_reply(
-        handle.run_id, suspended, suspension, interaction,
-        "approve_and_remember", "remember_before_policy_change",
-    ), CONTEXT)
+    await runtime.reply_interaction(
+        _approval_reply(
+            handle.run_id,
+            suspended,
+            suspension,
+            interaction,
+            "approve_and_remember",
+            "remember_before_policy_change",
+        ),
+        CONTEXT,
+    )
     if updated_policy == "deny":
         loop.tool_policy = DefaultToolPolicy(
             operation_assessor=lambda _: ToolOperationAssessment(
                 action=ToolPolicyAction.DENY, reason="host now forbids this operation"
-            ), operation_assessor_id="deny/v1",
+            ),
+            operation_assessor_id="deny/v1",
         )
     elif updated_policy == "always":
-        loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK)
+        loop.tool_policy = DefaultToolPolicy(
+            approval_strategy=ApprovalStrategy.ALWAYS_ASK
+        )
     else:
         loop.tool_policy = DefaultToolPolicy(
             allow_persistent_approval=True,
             approval_matcher=lambda ctx: exact_arguments_matcher(ctx).model_copy(
                 update={"fingerprint": "new-matcher"}
-            ), approval_matcher_id="new/v1",
+            ),
+            approval_matcher_id="new/v1",
         )
     result = await loop.resume(handle.run_id, CONTEXT)
     assert result.state == RunState.COMPLETED
     assert len(executor.calls) == (0 if updated_policy == "deny" else 1)
-    assert await loop.approval_memory.list_remembered(session_id=result.session_id) == ()
+    assert (
+        await loop.approval_memory.list_remembered(session_id=result.session_id) == ()
+    )
     events = await runtime.session_store.read_events(handle.run_id)
     assert "policy.approval.remembered" not in [event.type for event in events]
     if updated_policy == "deny":
-        assert any(event.type == "policy.decision.recorded" and event.data.decision == "deny"
-                   for event in events)
+        assert any(
+            event.type == "policy.decision.recorded" and event.data.decision == "deny"
+            for event in events
+        )
 
 
 def _write_call(call_id: str, key: str = "a", value: str = "1") -> ModelToolCall:
@@ -2599,7 +2625,9 @@ async def _pending_interaction(runtime, suspended):
     return suspension, interaction
 
 
-def _approval_reply(run_id, suspended, suspension, interaction, decision, key, **payload):
+def _approval_reply(
+    run_id, suspended, suspension, interaction, decision, key, **payload
+):
     return ReplyInteraction(
         run_id=run_id,
         suspension_id=suspension.suspension_id,
@@ -2672,7 +2700,9 @@ async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_sess
     assert types.index("policy.approval.remembered") < types.index(
         "tool.call.dispatching"
     )
-    audit = next(event for event in events if event.type == "policy.approval.remembered")
+    audit = next(
+        event for event in events if event.type == "policy.approval.remembered"
+    )
     assert audit.data.remembered_by == "user_1"
     assert audit.data.remembered_scope == "session"
     assert audit.data.decision == "approve_and_remember"
@@ -3292,7 +3322,9 @@ def two_write_steps_model():
 
     return ScriptedModelProvider(
         (
-            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("write_value"),)),)
+            ),
             ScriptedModelStep(
                 events=(
                     completed(
@@ -3341,7 +3373,10 @@ async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumab
     model = two_write_steps_model()
     runtime, handle, loop, _ = await setup_loop(
         model,
-        handlers={"read_value": tool_handler, "write_value": first_call_outcome_unknown},
+        handlers={
+            "read_value": tool_handler,
+            "write_value": first_call_outcome_unknown,
+        },
     )
 
     awaiting_first = await loop.execute(handle.run_id, CONTEXT)
@@ -3355,7 +3390,11 @@ async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumab
     awaiting_second = await loop.resume(handle.run_id, CONTEXT)
 
     assert unknown.state == RunState.SUSPENDED
-    assert interaction.allowed_decisions == ("confirm_succeeded", "mark_failed", "cancel")
+    assert interaction.allowed_decisions == (
+        "confirm_succeeded",
+        "mark_failed",
+        "cancel",
+    )
     assert awaiting_second.state == RunState.SUSPENDED
 
     await reply_pending_interaction(
@@ -3374,7 +3413,9 @@ async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumab
     assert result.state == RunState.COMPLETED
     assert dispatches == ["call_1", "call_2"]
     assert types.count("tool.call.unknown") == 1
-    assert ("tool.call.cancelled" if decision == "cancel" else "tool.call.reconciled") in types
+    assert (
+        "tool.call.cancelled" if decision == "cancel" else "tool.call.reconciled"
+    ) in types
     assert persisted.status == (
         ItemStatus.DECLINED if decision == "cancel" else ItemStatus.FAILED
     )
@@ -3456,14 +3497,18 @@ async def test_write_failure_marked_not_applied_is_a_known_failure():
 
     model = ScriptedModelProvider(
         (
-            ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("write_value"),)),)
+            ),
             ScriptedModelStep(events=(completed("handled"),)),
         )
     )
     runtime, handle, loop, _ = await setup_loop(
         model, handlers={"read_value": tool_handler, "write_value": denied_before_write}
     )
-    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+    loop.tool_policy = DefaultToolPolicy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE
+    )
 
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
@@ -3527,3 +3572,38 @@ async def test_cancel_during_a_cooperative_tool_releases_run_resources():
     assert result.state == RunState.CANCELLED
     assert released == [handle.run_id]
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_steps", [1, 3])
+async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
+    max_steps,
+):
+    partial = completed("First, verify the input. Next,")
+    partial = partial.model_copy(
+        update={
+            "response": partial.response.model_copy(update={"finish_reason": "length"})
+        }
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(partial,)),
+            ScriptedModelStep(events=(completed("validate the result and finish."),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model, tools=(), max_steps=max_steps)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    if max_steps == 1:
+        assert result.state == RunState.SUSPENDED
+        assert len(model.requests) == 1
+    else:
+        assert result.state == RunState.COMPLETED
+        assert len(model.requests) == 2
+        text = "\n".join(
+            getattr(block, "text", "")
+            for message in model.requests[1].messages
+            for block in message.content
+        )
+        assert "First, verify the input. Next," in text
+        assert "without repeating earlier text" in text
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert sum(event.type == "run.completed" for event in events) == (max_steps > 1)

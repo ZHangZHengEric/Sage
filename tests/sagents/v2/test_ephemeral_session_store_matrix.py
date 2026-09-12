@@ -816,3 +816,13 @@ async def test_slow_subscriber_gets_resumable_overflow_not_silent_loss():
     assert overflow.value.info.retryable is True
     assert overflow.value.info.safe_to_resume is True
     await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_start_locks_are_reclaimed_without_losing_idempotency():
+    store = EphemeralSessionStore()
+    created = await asyncio.gather(*(store.create_run(start_command("shared-key"), CONTEXT) for _ in range(50)))
+    assert len({value.handle.run_id for value in created}) == 1
+    assert len(store._start_locks) == 0
+    replay = await store.create_run(start_command("shared-key"), CONTEXT)
+    assert replay.handle.run_id == created[0].handle.run_id

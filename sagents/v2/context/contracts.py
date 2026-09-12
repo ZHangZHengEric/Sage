@@ -43,6 +43,10 @@ class ContextBudget(StrictModel):
     reserve_output_tokens: int = Field(default=0, ge=0)
     reserve_input_tokens: int = Field(default=0, ge=0)
     max_messages: int | None = Field(default=None, gt=0)
+    # Hard ceiling for instructions, separate from tools/output reservations.
+    max_system_tokens: int = Field(default=16_384, gt=0)
+    # Recent historical units are soft protection, bounded by this token cap.
+    protected_recent_tokens: int = Field(default=8_192, ge=0)
 
 
 class ContextRequestReservation(StrictModel):
