@@ -34,8 +34,8 @@ async def run(args):
         budgets.append(budget)
         async def tokens():
             for i in range(args.chunks):
-                if i % 64 == 0:
-                    await asyncio.sleep(.001)
+                if i % args.network_every == 0:
+                    await asyncio.sleep(args.network_delay_ms / 1000)
                 yield i
         async def messages():
             with budget.activate():
@@ -75,11 +75,15 @@ if __name__ == '__main__':
     parser.add_argument('--chunks', type=int, default=1000)
     parser.add_argument('--history', type=int, default=100)
     parser.add_argument('--slow-consumer-ms', type=float, default=0)
+    parser.add_argument('--network-delay-ms', type=float, default=1)
+    parser.add_argument('--network-every', type=int, default=64)
     parser.add_argument('--tool-deltas', action='store_true')
     parser.add_argument('--disable-diagnostics', action='store_true')
     args = parser.parse_args()
     if not 1 <= args.chunks <= 5000 or not 0 <= args.history <= 500 or not 0 <= args.slow_consumer_ms <= 10:
         parser.error('chunks 1..5000, history 0..500, slow-consumer-ms 0..10 required')
+    if not 0 <= args.network_delay_ms <= 10 or not 1 <= args.network_every <= 5000:
+        parser.error('network-delay-ms 0..10, network-every 1..5000 required')
     if args.disable_diagnostics:
         os.environ['SAGE_LATENCY_DIAGNOSTICS'] = '0'
     asyncio.run(run(args))

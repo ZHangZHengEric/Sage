@@ -309,3 +309,21 @@ copying. This is a lead, not proof of production Linux/Python 3.11 cost. Slow
 consumer injection increased downstream-resume time without corresponding CPU
 increases. On/off end-to-end runs are noisy and cannot establish instrumentation
 cost or a production speedup; compare direct overhead and production stages.
+
+To isolate the current yield checkpoint's wall-clock behavior, use one request,
+20 chunks, no history, `--network-every 1 --network-delay-ms 6`. In a local run,
+20 synthetic network awaits were followed by 20 additional scheduler yields,
+even though total ledger CPU across all20chunks was only3.85ms. The current
+checkpoint's deadline includes time spent in SDK/network awaits. This confirms
+redundant yields can happen after the SDK already suspended; it does not prove
+that removing every such yield is safe or that it explains all production delay.
+
+First live batch with attribution: one3692-ledger-chunk request recorded1302
+scheduler yields and1889.816ms waiting for resumption, versus608.087ms ledger
+CPU. Coverage refresh was0.296ms;message serialization325.462msCPU is partly
+nested in ledger timing and must not be added wholesale. Queue peak10 and
+max per-item residence28.672ms did not show a large growing output backlog.
+Prioritize distinguishing actual uninterrupted chunk processing from elapsed
+network time in cooperative yielding, then remove avoidable full serialization
+from metadata-only message timing. Keep fairness, cancellation and snapshot
+isolation tests; do not change concurrency based solely on these counters.
