@@ -86,7 +86,7 @@ class SageAsyncOpenAI:
         except Exception as e:
             logger.error(f"Failed to close standard client: {e}")
 
-        if self._fast:
+        if self._fast is not None and self._fast is not self._standard:
             try:
                 await self._fast.close()
             except Exception as e:

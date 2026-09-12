@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 class Message(BaseModel):
@@ -85,6 +85,7 @@ class StreamRequest(BaseChatRequest):
     # a built-in default preset only as a fallback.
     command_policy: Optional[Dict[str, Any]] = None
     # 内部使用：标记本次执行来源与开始时间，不参与外部序列化
+    _latency_budget: Any = PrivateAttr(default=None)
     request_source: Optional[str] = Field(default=None, exclude=True)
     execution_started_at: Optional[datetime] = Field(default=None, exclude=True)
     agent_owner_user_id: Optional[str] = Field(default=None, exclude=True)

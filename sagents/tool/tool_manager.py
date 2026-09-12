@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 from typing import Dict, Any, List, Optional, Union
+from sagents.utils.request_latency import timed_tool_execution
 from .tool_base import _DISCOVERED_TOOLS
 from .mcp_tool_base import _DISCOVERED_MCP_TOOLS
 from .tool_schema import (
@@ -1450,6 +1451,7 @@ class ToolManager:
         if callable(record_timing_event):
             record_timing_event("tool_request_end", **fields)
 
+    @timed_tool_execution
     async def run_tool_async(
         self,
         tool_name: str,

@@ -1,4 +1,5 @@
 from sagents.utils.latency_diagnostics import record_first_output_latency
+from sagents.utils.request_latency import record_first_output
 import os
 import time
 import traceback
@@ -477,6 +478,7 @@ class SAgent:
                                 logger.info(
                                     f"SAgent: 会话首个可显示内容耗时 {delta_ms} ms"
                                 )
+                                record_first_output()
                                 record_first_output_latency(session_id, delta_ms)
                         except Exception as e:
                             logger.error(

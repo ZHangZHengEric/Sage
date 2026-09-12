@@ -92,15 +92,15 @@ class TestSageAsyncOpenAI(unittest.TestCase):
             )
 
         try:
-            self.assertEqual(len(constructed_clients), 2)
+            self.assertEqual(len(constructed_clients), 1)
             standard_http_client = constructed_clients[0].kwargs["http_client"]
-            fast_http_client = constructed_clients[1].kwargs["http_client"]
+            fast_http_client = client._fast_client.kwargs["http_client"]
 
             self.assertEqual(
                 standard_http_client.headers["Accept-Encoding"], "identity"
             )
             self.assertEqual(fast_http_client.headers["Accept-Encoding"], "identity")
-            self.assertIsNot(standard_http_client, fast_http_client)
+            self.assertIs(standard_http_client, fast_http_client)
         finally:
             import asyncio
 

@@ -1,4 +1,6 @@
 import asyncio
+from sagents.utils.request_latency import RequestLatency
+from sagents.utils.latency_diagnostics import to_thread as diagnostic_to_thread, diagnose
 import json
 import os
 import random
@@ -387,6 +389,8 @@ def mark_request_execution(
     *,
     request_source: str,
 ) -> None:
+    if request._latency_budget is None:
+        request._latency_budget = RequestLatency()
     request.request_source = request_source
     if request.execution_started_at is None:
         request.execution_started_at = get_local_now()
@@ -1139,9 +1143,37 @@ async def populate_request_from_agent_config(
     await _register_extra_mcp_tools(request)
 
 
+_CLIENT_CLEANUP_TASKS: set[asyncio.Task] = set()
+
+
+def _close_unclaimed_model_client(task):
+    if task.cancelled() or task.exception() is not None:
+        return
+    cleanup = asyncio.create_task(task.result().close())
+    _CLIENT_CLEANUP_TASKS.add(cleanup)
+    def done(finished):
+        _CLIENT_CLEANUP_TASKS.discard(finished)
+        if not finished.cancelled():
+            finished.exception()
+    cleanup.add_done_callback(done)
+
+
+async def _create_model_client_off_loop(params):
+    # Client construction loads SSL certificates and lazy SDK modules but makes
+    # no requests. Connections are opened later on the caller's event loop.
+    task = asyncio.create_task(diagnostic_to_thread("request.create_model_client", create_model_client, params))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        task.add_done_callback(_close_unclaimed_model_client)
+        raise
+
+
 class SageStreamService:
-    def __init__(self, request: StreamRequest):
+    def __init__(self, request: StreamRequest, *, defer_model_client=False):
         self.request = request
+        self.latency_budget = request._latency_budget or RequestLatency()
+        self.latency_budget.session_id = request.session_id or ""
         self.cfg = _get_cfg()
 
         self.runtime_user_id = self.request.user_id or "default_user"
@@ -1200,7 +1232,9 @@ class SageStreamService:
             user_id=self.skill_owner_user_id,
             agent_workspace=self.agent_workspace,
         )
-        self.model_client = create_model_client(request.llm_model_config)  # pyright: ignore[reportArgumentType]
+        self.model_client = (
+            None if defer_model_client else create_model_client(request.llm_model_config)
+        )
         if _is_desktop_mode():
             self.sage_engine = SAgent(
                 session_root_space=str(self.sessions_root),
@@ -1225,6 +1259,25 @@ class SageStreamService:
         )
 
     async def process_stream(self):
+        iterator = self._process_stream()
+        try:
+            while True:
+                # Do not keep a ContextVar token across a yield: disconnect
+                # cleanup can close this generator from a different task.
+                with self.latency_budget.activate():
+                    try:
+                        chunk = await anext(iterator)
+                    except StopAsyncIteration:
+                        return
+                yield chunk
+        finally:
+            try:
+                with self.latency_budget.activate():
+                    await iterator.aclose()
+            finally:
+                self.latency_budget.finish()
+
+    async def _process_stream(self):
         session_id = self.request.session_id
         messages = []
         for msg in self.request.messages:
@@ -1233,7 +1286,9 @@ class SageStreamService:
                 message_dict["message_id"] = str(uuid.uuid4())
             messages.append(message_dict)
 
+        conversation_started = time.perf_counter()
         await _ensure_conversation(self.request)
+        self.latency_budget.add_stage("request.ensure_conversation", time.perf_counter() - conversation_started)
         try:
             from sagents.utils.sandbox.config import VolumeMount
 
@@ -1347,11 +1402,18 @@ class SageStreamService:
             }
 
 
+@diagnose("request.prepare", 100)
 async def prepare_session(
     request: StreamRequest,
 ) -> Tuple[SageStreamService, asyncio.Lock]:
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
+    if request._latency_budget is None:
+        request._latency_budget = RequestLatency()
+    budget = request._latency_budget
+    budget.session_id = session_id
+    preparation_started = time.perf_counter()
+    budget.add_stage("request.config_and_dispatch", preparation_started - budget.started)
     _sync_sandbox_approval_mode_to_context(request)
     _sync_command_policy_to_context(request)
     downgraded_images = enforce_multimodal_capability_guard(request)
@@ -1382,11 +1444,29 @@ async def prepare_session(
     except asyncio.TimeoutError:
         raise _chat_exception("chat.session_cleanup")
 
+    stream_service = None
     try:
-        stream_service = SageStreamService(request)
+        budget.add_stage("request.lock_and_validation", time.perf_counter() - preparation_started)
+        constructed = time.perf_counter()
+        stream_service = SageStreamService(request, defer_model_client=True)
+        budget.add_stage("request.construct_service", time.perf_counter() - constructed)
+        client_started = time.perf_counter()
+        stream_service.model_client = await _create_model_client_off_loop(request.llm_model_config)
+        budget.add_stage("request.create_model_client", time.perf_counter() - client_started)
+        assets_started = time.perf_counter()
         await stream_service.initialize_workspace_assets()
+        budget.add_stage("request.workspace_assets", time.perf_counter() - assets_started)
         return stream_service, lock  # pyright: ignore[reportReturnType]
-    except Exception as e:
+    except BaseException as e:
+        model_client = getattr(stream_service, "model_client", None)
+        if model_client is not None:
+            cleanup = asyncio.create_task(model_client.close())
+            _CLIENT_CLEANUP_TASKS.add(cleanup)
+            def cleanup_done(task):
+                _CLIENT_CLEANUP_TASKS.discard(task)
+                if not task.cancelled():
+                    task.exception()
+            cleanup.add_done_callback(cleanup_done)
         if acquired:
             await safe_release(
                 lock,

@@ -10,11 +10,15 @@ from sagents.llm.sage_openai import SageAsyncOpenAI
 
 def _create_openai_client(api_key: str, base_url: Optional[str]) -> AsyncOpenAI:
     http_client = httpx.AsyncClient(headers={"Accept-Encoding": "identity"})
-    return AsyncOpenAI(
+    client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
         http_client=http_client,
     )
+    # Resolve lazy SDK chat resources during construction, which the server
+    # performs in a worker, rather than on the first event-loop request.
+    getattr(getattr(client, "chat", None), "completions", None)
+    return client
 
 
 class OpenAIChat:
@@ -48,10 +52,14 @@ class OpenAIChat:
         if fast_model_name:
             fast_key = fast_api_key or api_key
             fast_url = fast_base_url or base_url
-            self._fast_client = _create_openai_client(
-                api_key=fast_key,
-                base_url=fast_url,
-            )
+            if fast_key == api_key and fast_url == base_url:
+                # Model names are request parameters; one same-credential client
+                # can safely serve both without a second SSL context and pool.
+                self._fast_client = self._standard_client
+            else:
+                self._fast_client = _create_openai_client(
+                    api_key=fast_key, base_url=fast_url,
+                )
 
         # 创建 SageAsyncOpenAI 实例
         self._sage_client = SageAsyncOpenAI(

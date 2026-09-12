@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import inspect
+from sagents.utils.request_latency import model_wait, observe_stream
 from copy import deepcopy
 from collections.abc import Sequence
 from pathlib import Path
@@ -1048,11 +1049,11 @@ async def create_chat_completion_with_fallback(
                         f"model={model}, error={exc}",
                         session_id="NO_SESSION",
                     )
-            return await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                **request_kwargs,
-            )
+            with model_wait(new_call=True):
+                response = await client.chat.completions.create(
+                    model=model, messages=messages, **request_kwargs
+                )
+            return observe_stream(response, request_kwargs.get("stream", False))
         except APIError as exc:
             if (
                 response_format is not None
