@@ -48,7 +48,7 @@ async def run(args):
                                    'function': {'name': 'mock' if i == 0 else '', 'arguments': 'x'}}]}
                     msg = MessageChunk(role='assistant', message_id='answer', **fields)
                     ctx.add_messages(msg)
-                    yield ContentProcessor.clean_content(msg.to_dict())
+                    yield ContentProcessor.clean_owned_content(msg.to_dict())
         count = 0
         async for kind, payload in interleave_message_and_progress(messages(), asyncio.Queue(), latency_budget=budget):
             with metrics.stream_sync_stage('delivery.json_encode', budget):

@@ -351,3 +351,36 @@ The same 20-chunk/6-ms-network mock now produces zero redundant scheduler yields
 real suspension, actual Future results, provider exceptions and cancellation
 with async cleanup. These controlled checks establish behavior, not a promised
 end-to-end production improvement.
+
+### Message snapshot fast paths
+
+MessageChunk.to_dict now bypasses generic deepcopy dispatch for exact built-in
+immutable scalar types and recursively handles exact dict/list/tuple containers.
+Nested dataclasses, named tuples, SDK objects, enums and container/scalar
+subclasses use native dataclasses.asdict through a field wrapper, preserving
+conversion and custom-copy semantics. Each mutable plain container is still a
+new independent snapshot. Dataclass fields, enum normalization, tool indices and
+None-field filtering are unchanged.
+
+The live ledger's last-message clone bypasses generic object reconstruction only
+for the exact plain MessageChunk type with a plain __dict__ and no instance copy
+or state hooks. All mutable attributes share one deepcopy memo, preserving
+cycles, repeated references, references back to the cloned message/state, and
+dynamic attributes. Subclasses/hooks retain standard deepcopy. Public history
+snapshot APIs are unchanged.
+
+The chat service can consume the fresh output of the known MessageChunk.to_dict
+without a second full deepcopy. Unknown message serializers and dictionary
+chunks retain defensive copying. The owned-cleanup entry additionally checks
+for plain containers/scalars; custom types, aliases and cycles fall back to the
+old copy path so custom copy transformations are preserved. Tool cleanup and
+base64/truncation behavior are unchanged. No concurrency, scheduling, history
+retention or model/tool behavior changes.
+
+`PYTHONPATH=. python scripts/diagnostics/benchmark_message_snapshots.py` performs
+bounded offline comparisons against native asdict/deepcopy using thread CPU
+(three repeats of1000 operations), with equivalence assertions. It does not call
+models or tools. Differential tests also cover200 seeded nested payloads, SDK
+objects, dataclasses, enums, custom string/container types, copy hooks, cycles,
+shared mutable values and original-message isolation. Live stages distinguish
+snapshot_copy, message.serialize and display.clean for post-release checks.
