@@ -1058,7 +1058,7 @@ def test_prompt_cache_observation_hashes_system_segments_and_tools():
 
 
 @pytest.mark.parametrize("filename,tag,limit", [
-    ("USER.md", "user", 6000), ("MEMORY.md", "memory", 10000),
+    ("USER.md", "user", 4000), ("MEMORY.md", "memory", 6000),
     ("AGENT.md", "agent_md", 12000),
 ])
 @pytest.mark.parametrize("extra", [-1, 0, 1, 50000])

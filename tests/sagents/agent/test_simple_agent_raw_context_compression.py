@@ -1494,3 +1494,70 @@ async def test_one_character_reduction_is_not_accepted(monkeypatch, provider_ove
         assert not any(is_final for _, is_final in chunks)
     else:
         assert chunks[-1] == ([old, current], True)
+
+
+@pytest.mark.parametrize("payload", ["中文内容" * 4000, "file contents " * 4000])
+def test_token_tail_compresses_large_tool_results_in_short_turn(payload):
+    user = _msg("user", "request", MessageType.USER_INPUT.value, message_id="user")
+    old = [_tool_call("old-call", "old"), _tool_result("old-result", "old", payload)]
+    latest = [_tool_call("last-call", "last"), _tool_result("last-result", "last", "done")]
+    segment = MessageManager.select_llm_compression_segment(
+        [user, *old, *latest], active_protection_tokens=1000
+    )
+    assert [m.message_id for m in segment] == ["old-call", "old-result"]
+
+
+def test_token_tail_can_protect_more_than_twelve_small_messages():
+    messages = [_msg("assistant", "ok", MessageType.ASSISTANT_TEXT.value,
+                     message_id=str(i)) for i in range(20)]
+    assert MessageManager.select_llm_compression_segment(
+        messages, active_protection_tokens=10000
+    ) is None
+
+
+@pytest.mark.parametrize("budget", [0, 100, 1000])
+def test_token_tail_keeps_oversized_latest_parallel_tool_group_atomic(budget):
+    user = _msg("user", "request", MessageType.USER_INPUT.value, message_id="user")
+    old = [_tool_call("old-call", "old"), _tool_result("old-result", "old", "old")]
+    call = _tool_call("parallel", "a")
+    call.tool_calls.append({"id": "b", "type": "function",
+                            "function": {"name": "demo_tool", "arguments": "{}"}})
+    tail = [call, _tool_result("ra", "a", "large " * 10000),
+            _tool_result("rb", "b", "done")]
+    segment = MessageManager.select_llm_compression_segment(
+        [user, *old, *tail], active_protection_tokens=budget
+    )
+    assert [m.message_id for m in segment] == ["old-call", "old-result"]
+
+
+def test_token_tail_counts_tool_arguments_and_preserves_pending_call():
+    user = _msg("user", "request", MessageType.USER_INPUT.value, message_id="user")
+    call = _tool_call("old-call", "old")
+    call.tool_calls[0]["function"]["arguments"] = json.dumps({"data": "x" * 20000})
+    result = _tool_result("old-result", "old", "ok")
+    pending = _tool_call("pending", "pending")
+    segment = MessageManager.select_llm_compression_segment(
+        [user, call, result, pending], active_protection_tokens=1000
+    )
+    assert [m.message_id for m in segment] == ["old-call", "old-result"]
+
+
+@pytest.mark.parametrize("provider_overflow", [False, True])
+@pytest.mark.asyncio
+async def test_runtime_tail_budget_is_fifteen_percent_of_model_window(monkeypatch, provider_overflow):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": 64000})
+    message = _msg("assistant", "large " * 100000, MessageType.ASSISTANT_TEXT.value,
+                   message_id="large")
+    monkeypatch.setattr(agent, "_get_live_session_context", lambda _: None)
+    captured = {}
+
+    def select(messages, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(MessageManager, "select_llm_compression_segment", select)
+    async for _ in agent._prepare_context_messages_for_llm(
+        [message], "test", provider_overflow_recovery=provider_overflow
+    ):
+        pass
+    assert captured == {"active_protection_tokens": 9600}
