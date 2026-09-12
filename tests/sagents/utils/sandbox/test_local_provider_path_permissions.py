@@ -125,3 +125,25 @@ def test_local_get_mtime_uses_one_worker_call_and_preserves_permissions(
     with pytest.raises(PermissionError):
         asyncio.run(provider.get_mtime(str(tmp_path / "outside")))
     assert len(calls) == 2
+
+
+def test_local_batch_reads_preserve_mapping_errors_and_permissions(tmp_path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    provider = LocalSandboxProvider(
+        sandbox_id='batch', sandbox_agent_workspace=str(workspace),
+        volume_mounts=[VolumeMount(str(workspace), '/virtual')],
+        macos_isolation_mode='subprocess', linux_isolation_mode='subprocess',
+    )
+    (workspace / 'ok').write_text('用户修改')
+    (workspace / 'empty').write_text('')
+    (workspace / 'invalid').write_bytes(b'\xff')
+    result = asyncio.run(provider.read_existing_files([
+        '/virtual/ok', '/virtual/absent', '/virtual/invalid', '/virtual/empty',
+    ]))
+    assert result[0] == '用户修改'
+    assert result[1] is None
+    assert isinstance(result[2], UnicodeDecodeError)
+    assert result[3] == ''
+    with pytest.raises(PermissionError):
+        asyncio.run(provider.read_existing_files([str(tmp_path / 'outside')]))

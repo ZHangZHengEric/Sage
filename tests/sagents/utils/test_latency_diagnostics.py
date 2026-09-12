@@ -170,3 +170,29 @@ def test_first_output_above_three_seconds_is_recorded_without_timeout(monkeypatc
     assert records[0]["operation"] == "first_output.slow"
     assert records[0]["elapsed_ms"] == 3001
     assert records[0]["target_ms"] == 3000
+
+
+def test_measured_background_job_keeps_result_context_and_error(monkeypatch):
+    records = []
+    monkeypatch.setattr(d, '_emit', records.append)
+    monkeypatch.setenv('SAGE_LATENCY_DIAGNOSTICS', '1')
+    main_thread = threading.get_ident()
+    def work(fail=False):
+        assert threading.get_ident() != main_thread
+        assert d._current.get().session_id == 'background-session'
+        if fail:
+            raise ValueError('expected')
+        return {'result': ['unchanged']}
+    async def run():
+        assert await d.measured_to_thread('test.work', work, session_id='background-session') == {'result': ['unchanged']}
+        try:
+            await d.measured_to_thread('test.work', work, True, session_id='background-session')
+        except ValueError as exc:
+            assert str(exc) == 'expected'
+        else:
+            raise AssertionError('worker exception swallowed')
+    asyncio.run(run())
+    error = records[-1]
+    assert error['status'] == 'error'
+    assert error['session_id'] == 'background-session'
+    assert set(error['stages']) == {'test.work.' + suffix for suffix in ['queue', 'run', 'cpu', 'resume']}
