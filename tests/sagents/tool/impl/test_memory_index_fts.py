@@ -1490,3 +1490,65 @@ def test_diagnostics_distinguish_net_five_from_added_updated_and_removed(tmp_pat
     assert counts["index.source_bytes"] == 49
     assert "fts.commit" in record.stages
     assert "index.fts_sync.queue" in record.stages
+
+
+def test_index_exists_checks_short_circuit_and_schema_is_initialized_once(tmp_path):
+    from contextlib import contextmanager
+
+    module = _load_memory_index_module()
+    idx = module.MemoryIndex(None, "/workspace", str(tmp_path / "index.pkl"))
+    assert not idx.has_search_index()
+    statements = []
+    original_connection = idx._fts_connection
+
+    @contextmanager
+    def traced_connection():
+        with original_connection() as connection:
+            connection.set_trace_callback(statements.append)
+            yield connection
+
+    idx._fts_connection = traced_connection
+    idx._replace_file_documents("/workspace/test.txt", "hello", 1, 5)
+    idx._sync_file_to_fts("/workspace/test.txt")
+    assert idx.has_search_index()
+    assert not any("COUNT(" in sql.upper() for sql in statements)
+    assert sum("LIMIT 1" in sql.upper() for sql in statements) == 2
+    assert not any("CREATE" in sql.upper() for sql in statements)
+    idx.clear_index()
+    idx._replace_file_documents("/workspace/again.txt", "again", 2, 5)
+    idx._sync_file_to_fts("/workspace/again.txt")
+    assert idx.has_search_index()
+    assert any("CREATE" in sql.upper() for sql in statements)
+
+
+def test_known_file_size_avoids_repeated_parent_scan_and_keeps_size_limit(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    module = _load_memory_index_module()
+
+    class Sandbox:
+        reads = 0
+        commands = 0
+
+        async def list_directory(self, path):
+            raise AssertionError("known scan metadata must avoid parent re-listing")
+
+        async def read_file(self, path):
+            self.reads += 1
+            return "hello"
+
+        async def execute_command(self, **kwargs):
+            self.commands += 1
+            assert "head -c 10 " in kwargs["command"]
+            return SimpleNamespace(success=True, stdout="truncated")
+
+    sandbox = Sandbox()
+    idx = module.MemoryIndex(sandbox, "/workspace", str(tmp_path / "index.pkl"))
+    assert (
+        asyncio.run(idx._read_file_content("/workspace/file", known_size=5)) == "hello"
+    )
+    assert "truncated" in asyncio.run(
+        idx._read_file_content("/workspace/file", max_size=10, known_size=11)
+    )
+    assert sandbox.reads == sandbox.commands == 1

@@ -100,3 +100,54 @@ payloads, private file identifiers, log capacity/retention, and an actual SQLite
 update with net +5 but added 6 / updated 1 / removed 1. Existing scoped-cache,
 shielded cancellation, FTS retrieval, and sandbox lifecycle/permissions tests
 remain part of the targeted regression run.
+
+## Event-loop stall attribution and efficiency fixes
+
+Server lifespan now starts one daemon watchdog. It sleeps indefinitely when
+there are no observed preparation/memory operations or their instrumented
+thread jobs. During those operations it checks every 50 ms, with at most one
+outstanding `call_soon_threadsafe` heartbeat. A heartbeat delayed at least
+100 ms produces at most one `event_loop.stall` record per second in the same
+size-capped, three-calendar-day diagnostic file. No asyncio debug mode or
+callback monkey-patching is enabled.
+
+A stall record contains:
+
+- up to twelve event-loop stack frames (code filename, function, line only);
+- up to four worker stacks, eight frames each; tracked workers take priority;
+- up to eight active operation/session identifiers for correlation;
+- current tracked thread jobs pending/running, oldest pending age, lifetime
+  high-water marks, and the five most frequent queued operation names;
+- process CPU time and available Linux cgroup CPU throttling/pressure,
+  I/O pressure, memory usage/limits/events and PID usage/limits.
+
+Job counters cover **instrumented** `to_thread` work, not every job submitted
+by third-party libraries. Zero tracked workers does not prove the executor is
+idle. Worker samples marked `untracked_executor_worker` may expose such work.
+Maps are capped at 256 observed operations and 1,024 tracked thread jobs;
+overflow is recorded for jobs. No frame locals, arguments, source lines,
+queries, file bodies or full code paths are collected. Frames are released
+immediately after extracting bounded location metadata.
+
+The stack is a sample taken while a heartbeat is delayed, not proof that its
+leaf frame consumed the entire delay. `sampler_gap_ms` reveals when the sampler
+itself ran late: native code holding the GIL or OS starvation can prevent a
+Python watchdog from observing the original blocker. A Python stack may also
+stop at a native event-loop boundary. Compare repeated samples and resource
+counter deltas before attributing such cases.
+
+The same change removes independently confirmed repeated work:
+
+- FTS existence checks use `LIMIT 1`, not complete row counts. Schema setup is
+  performed once per index object and reset on `clear_index`.
+- Newly scanned file size is reused when reading content; the parent directory
+  is no longer enumerated again for each file. The existing large-file limit
+  remains in place.
+- Local directory mtime uses one worker call instead of an exists call followed
+  by a second stat call; missing paths still return zero and path permissions
+  are checked first.
+- Session initialization reads current sandbox SKILL.md metadata, retaining
+  user overrides. Recursive skill file trees and redundant existence checks
+  are removed from initialization; trees are built on actual `load_skill`,
+  with serialized completion for concurrent loads. No cross-session stale
+  metadata cache is introduced.

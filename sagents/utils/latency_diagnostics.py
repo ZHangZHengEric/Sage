@@ -1,4 +1,4 @@
-"""Bounded, request-local timings. No poller, payload capture, or database writes."""
+"""Bounded request timings with optional active-operation loop diagnostics."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from pathlib import Path
 import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
+from sagents.utils.loop_diagnostics import current_monitor
 
 _current = contextvars.ContextVar("latency_diagnostic", default=None)
 _log_lock = threading.Lock()
@@ -207,9 +208,15 @@ async def to_thread(name, fn, /, *args, **kwargs):
         return await asyncio.to_thread(fn, *args, **kwargs)
     submitted = time.perf_counter()
     completed = None
+    monitor = current_monitor()
+    job = monitor.submit(name) if monitor is not None else None
+    has_started = threading.Event()
 
     def run():
         nonlocal completed
+        has_started.set()
+        if monitor is not None:
+            monitor.started(job)
         started = time.perf_counter()
         cpu = time.thread_time()
         diagnostic.add(name + ".queue", started - submitted)
@@ -219,10 +226,14 @@ async def to_thread(name, fn, /, *args, **kwargs):
             completed = time.perf_counter()
             diagnostic.add(name + ".run", completed - started)
             diagnostic.add(name + ".cpu", time.thread_time() - cpu)
+            if monitor is not None:
+                monitor.finished(job)
 
     try:
         return await asyncio.to_thread(run)
     finally:
+        if monitor is not None and not has_started.is_set():
+            monitor.finished(job)
         if completed is not None:
             diagnostic.add(name + ".resume", time.perf_counter() - completed)
         else:
@@ -249,6 +260,9 @@ def diagnose(operation, threshold_ms):
                 session_id = getattr(bound.arguments.get("self"), "session_id", None)
             diagnostic = Diagnostic(operation, session_id)
             token = _current.set(diagnostic)
+            monitor = current_monitor()
+            if monitor is not None:
+                monitor.enter(diagnostic)
             status = "ok"
             try:
                 return await fn(*args, **kwargs)
@@ -259,6 +273,8 @@ def diagnose(operation, threshold_ms):
                 raise
             finally:
                 _current.reset(token)
+                if monitor is not None:
+                    monitor.leave(diagnostic)
                 elapsed = (time.perf_counter() - diagnostic.started) * 1000
                 with diagnostic.lock:
                     has_errors = any(
@@ -268,7 +284,10 @@ def diagnose(operation, threshold_ms):
                 if status == "ok" and has_errors:
                     status = "partial_error"
                 if elapsed >= threshold_ms or status != "ok":
-                    _emit(diagnostic.snapshot(status))
+                    payload = diagnostic.snapshot(status)
+                    if monitor is not None:
+                        payload["pool_at_completion"] = monitor.snapshot()
+                    _emit(payload)
 
         return wrapped
 

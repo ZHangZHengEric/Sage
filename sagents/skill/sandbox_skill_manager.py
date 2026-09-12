@@ -44,6 +44,8 @@ class SandboxSkillManager:
         self._known_skills: Dict[str, SkillSchema] = {}
         # 每技能落地锁：串行化"同一技能"的按需拷贝，避免并行 load_skill 竞态。
         self._materialize_locks: Dict[str, asyncio.Lock] = {}
+        self._file_lists_loaded = set()
+        self._file_list_lock = asyncio.Lock()
         self._cache_valid = False
 
     async def _read_file(self, path: str) -> str:
@@ -87,7 +89,13 @@ class SandboxSkillManager:
             logger.error(f"从沙箱加载技能失败: {e}")
 
     @timed("skills.load_skill_from_dir")
-    async def _load_skill_from_dir(self, skill_path: str) -> Optional[SkillSchema]:
+    async def _load_skill_from_dir(
+        self,
+        skill_path: str,
+        *,
+        include_file_list: bool = True,
+        check_exists: bool = True,
+    ) -> Optional[SkillSchema]:
         """
         从沙箱内的目录加载技能
 
@@ -97,7 +105,7 @@ class SandboxSkillManager:
         skill_md_path = os.path.join(skill_path, "SKILL.md")
 
         try:
-            if not await self._file_exists(skill_md_path):
+            if check_exists and not await self._file_exists(skill_md_path):
                 return None
 
             # 读取 SKILL.md
@@ -120,7 +128,10 @@ class SandboxSkillManager:
                 return None
 
             # 生成文件列表
-            file_list = await self._generate_file_list(skill_path)
+            file_list = ""
+            if include_file_list:
+                file_list = await self._generate_file_list(skill_path)
+                self._file_lists_loaded.add(name)
 
             return SkillSchema(
                 name=name,
@@ -235,6 +246,7 @@ class SandboxSkillManager:
             host_skill_manager: 宿主侧 SkillManager / SkillProxy
         """
         self._skills_cache.clear()
+        self._file_lists_loaded.clear()
         self._known_skills.clear()
         allowed_names = list(host_skill_manager.list_skills())
         if not allowed_names:
@@ -257,7 +269,9 @@ class SandboxSkillManager:
                 skill_path = os.path.join(self.skills_dir, skill_name)
                 skill_md_path = os.path.join(skill_path, "SKILL.md")
                 if await self._file_exists(skill_md_path):
-                    skill = await self._load_skill_from_dir(skill_path)
+                    skill = await self._load_skill_from_dir(
+                        skill_path, include_file_list=False, check_exists=False
+                    )
                     if skill:
                         self._skills_cache[skill_name] = skill
                     else:
@@ -269,6 +283,16 @@ class SandboxSkillManager:
             f"沙箱技能视图就绪：已知 {len(self._known_skills)} 个，"
             f"已落地 {list(self._skills_cache.keys())}"
         )
+
+    async def _complete_file_list(self, skill_name, skill):
+        # Initialization reads live SKILL.md metadata, but recursive trees are
+        # needed only when the skill is actually loaded. Serialize concurrent loads.
+        if skill_name not in self._file_lists_loaded:
+            async with self._file_list_lock:
+                if skill_name not in self._file_lists_loaded:
+                    skill.file_list = await self._generate_file_list(skill.path)
+                    self._file_lists_loaded.add(skill_name)
+        return skill
 
     async def ensure_materialized(self, skill_name: str) -> Optional[SkillSchema]:
         """确保技能已落地到沙箱，并返回其（沙箱内的）SkillSchema。
@@ -282,7 +306,7 @@ class SandboxSkillManager:
         """
         existing = self._skills_cache.get(skill_name)
         if existing is not None:
-            return existing
+            return await self._complete_file_list(skill_name, existing)
 
         known = self._known_skills.get(skill_name)
         if known is None:
@@ -303,7 +327,7 @@ class SandboxSkillManager:
             # 双检：等锁期间可能已被其它协程落地
             existing = self._skills_cache.get(skill_name)
             if existing is not None:
-                return existing
+                return await self._complete_file_list(skill_name, existing)
 
             # 沙箱根目录按需建一次
             if not await self._file_exists(self.skills_dir):
