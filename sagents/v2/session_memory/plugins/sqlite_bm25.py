@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 import os
 import re
 import sqlite3
 from pathlib import Path
+
+from sagents.v2._concurrency import bounded_to_thread
 
 from sagents.v2.session_memory.contracts import (
     SessionMemoryCapabilities,
@@ -35,17 +38,17 @@ class SqliteBm25SessionMemoryProvider:
     async def sync(self, records: tuple[SessionMemoryRecord, ...]) -> None:
         if not records:
             return
-        async with self._lock:
-            await asyncio.to_thread(self._sync, records)
+        await bounded_to_thread(
+            "memory-io", lambda: self._sync(records), lock=self._lock
+        )
 
-    async def recall(
-        self, query: SessionMemoryQuery
-    ) -> tuple[SessionMemoryHit, ...]:
+    async def recall(self, query: SessionMemoryQuery) -> tuple[SessionMemoryHit, ...]:
         tokens = self._tokenize(query.text)
         if not tokens:
             return ()
-        async with self._lock:
-            rows = await asyncio.to_thread(self._search, query, tokens)
+        rows = await bounded_to_thread(
+            "memory-io", lambda: self._search(query, tokens), lock=self._lock
+        )
         if not rows:
             return ()
         maximum = max(score for _, score in rows) or 1.0
@@ -58,8 +61,9 @@ class SqliteBm25SessionMemoryProvider:
         )
 
     async def forget_session(self, session_id: str) -> None:
-        async with self._lock:
-            await asyncio.to_thread(self._forget_session, session_id)
+        await bounded_to_thread(
+            "memory-io", lambda: self._forget_session(session_id), lock=self._lock
+        )
 
     async def health(self) -> dict[str, object]:
         return {
@@ -76,7 +80,7 @@ class SqliteBm25SessionMemoryProvider:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
@@ -103,23 +107,15 @@ class SqliteBm25SessionMemoryProvider:
             )
 
     def _sync(self, records: tuple[SessionMemoryRecord, ...]) -> None:
-        with self._connect() as connection:
-            existing: dict[tuple[str, str], sqlite3.Row] = {}
-            for session_id in {record.session_id for record in records}:
-                existing.update(
-                    {
-                        (session_id, row["record_id"]): row
-                        for row in connection.execute(
-                            "SELECT record_id, payload_json, search_text "
-                            "FROM session_memory_records WHERE session_id = ?",
-                            (session_id,),
-                        ).fetchall()
-                    }
-                )
+        with closing(self._connect()) as connection, connection:
             for record in records:
                 search_text = " ".join(self._tokenize(record.content))
                 payload = record.model_dump_json()
-                current = existing.get((record.session_id, record.record_id))
+                current = connection.execute(
+                    "SELECT payload_json, search_text FROM session_memory_records "
+                    "WHERE session_id = ? AND record_id = ?",
+                    (record.session_id, record.record_id),
+                ).fetchone()
                 if (
                     current is not None
                     and current["payload_json"] == payload
@@ -159,9 +155,27 @@ class SqliteBm25SessionMemoryProvider:
         self, query: SessionMemoryQuery, tokens: list[str]
     ) -> list[tuple[SessionMemoryRecord, float]]:
         match_query = " OR ".join(f'"{token}"' for token in tokens)
-        included = set(query.included_record_ids)
-        excluded = set(query.excluded_record_ids)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
+            # Temporary tables avoid SQLite's bind-parameter limit for long
+            # histories. Filter before LIMIT and before decoding record JSON.
+            predicates = []
+            for name, values, negate in (
+                ("included_records", query.included_record_ids, False),
+                ("excluded_records", query.excluded_record_ids, True),
+            ):
+                if not values:
+                    continue
+                connection.execute(
+                    f"CREATE TEMP TABLE {name}(record_id TEXT PRIMARY KEY)"
+                )
+                connection.executemany(
+                    f"INSERT OR IGNORE INTO {name} VALUES (?)",
+                    ((value,) for value in values),
+                )
+                operator = "NOT IN" if negate else "IN"
+                predicates.append(
+                    f"AND records.record_id {operator} (SELECT record_id FROM {name})"
+                )
             rows = connection.execute(
                 """
                 SELECT records.payload_json, bm25(session_memory_fts) AS raw_score
@@ -171,24 +185,24 @@ class SqliteBm25SessionMemoryProvider:
                  AND records.record_id = session_memory_fts.record_id
                 WHERE session_memory_fts MATCH ?
                   AND session_memory_fts.session_id = ?
+                """
+                + " ".join(predicates)
+                + """
                 ORDER BY raw_score ASC, records.position DESC
+                LIMIT ?
                 """,
-                (match_query, query.session_id),
+                (match_query, query.session_id, query.limit),
             ).fetchall()
-        matches = []
-        for row in rows:
-            record = SessionMemoryRecord.model_validate_json(row["payload_json"])
-            if included and record.record_id not in included:
-                continue
-            if record.record_id in excluded:
-                continue
-            matches.append((record, max(0.0, -float(row["raw_score"]))))
-            if len(matches) >= query.limit:
-                break
-        return matches
+        return [
+            (
+                SessionMemoryRecord.model_validate_json(row["payload_json"]),
+                max(0.0, -float(row["raw_score"])),
+            )
+            for row in rows
+        ]
 
     def _forget_session(self, session_id: str) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "DELETE FROM session_memory_records WHERE session_id = ?",
                 (session_id,),

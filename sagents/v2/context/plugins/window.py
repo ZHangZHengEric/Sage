@@ -4,35 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 
 from sagents.v2.context.contracts import ContextProjection
-from sagents.v2.context.token_estimator import TokenEstimator
+from sagents.v2.context.token_estimator import TokenEstimator, MessageTokenCounter
+from sagents.v2.context.estimation import WireSizeTokenEstimator
+from sagents.v2.context.partition import conversation_units, current_turn_boundary
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.model.contracts import ModelMessage
-
-
-class _JsonHeuristicTokenEstimator:
-    """Plugin-local fallback used when the host does not inject an estimator."""
-
-    estimator_id = "window-json-heuristic"
-
-    def estimate(self, messages: tuple[ModelMessage, ...]) -> int:
-        total = 0
-        for message in messages:
-            payload = message.model_dump(mode="json")
-            encoded = json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-            ).encode("utf-8")
-            total += 6 + math.ceil(len(encoded) / 4.0)
-        return total
 
 
 class WindowContextReducer:
@@ -43,7 +24,7 @@ class WindowContextReducer:
     description = "Drops oldest units to keep the prompt inside a token window."
 
     def __init__(self, estimator: TokenEstimator | None = None) -> None:
-        self.estimator = estimator or _JsonHeuristicTokenEstimator()
+        self.estimator = estimator or WireSizeTokenEstimator()
 
     async def reduce(self, messages, budget, *, scope=None):
         maximum = (
@@ -56,35 +37,48 @@ class WindowContextReducer:
                 "context.invalid_budget",
                 "output and final-request reserves consume the input budget",
             )
-        systems = tuple(value for value in messages if value.role == "system")
-        payload = tuple(value for value in messages if value.role != "system")
-        units = self._units(payload)
-        latest_user = next(
-            (
-                index
-                for index in range(len(units) - 1, -1, -1)
-                if any(message.role == "user" for message in units[index])
-            ),
-            None,
+        systems = tuple(
+            value for value in messages if value.role in {"system", "developer"}
         )
-        dropped = []
+        payload = tuple(
+            value for value in messages if value.role not in {"system", "developer"}
+        )
+        units = self._units(payload)
+        counter = await MessageTokenCounter.create(self.estimator, messages)
+        system_tokens = counter.estimate(systems)
+        if system_tokens > budget.max_system_tokens:
+            raise self._error(
+                "context.system_budget_exhausted",
+                "system instructions exceed their token budget",
+            )
+        boundary = current_turn_boundary(units)
+        costs = [counter.estimate(unit) for unit in units]
+        total = system_tokens + sum(costs)
+        count = len(systems) + sum(map(len, units))
+        start = 0
 
         def flattened():
-            return (*systems, *(message for unit in units for message in unit))
+            return (*systems, *(message for unit in units[start:] for message in unit))
 
-        while self._over(flattened(), maximum, budget.max_messages):
-            removable = next(
-                (index for index in range(len(units)) if index != latest_user), None
+        def over():
+            tokens = (
+                total if counter.costs is not None else counter.estimate(flattened())
             )
-            if removable is None:
+            return tokens > maximum or (
+                budget.max_messages is not None and count > budget.max_messages
+            )
+
+        while over():
+            if start >= boundary:
                 raise self._error(
                     "context.budget_exhausted",
-                    "protected system and latest-user context exceed the model budget",
+                    "system and current user turn exceed the model budget",
                 )
-            dropped.extend(units.pop(removable))
-            if latest_user is not None and removable < latest_user:
-                latest_user -= 1
+            total -= costs[start]
+            count -= len(units[start])
+            start += 1
         retained = tuple(flattened())
+        dropped = tuple(message for unit in units[:start] for message in unit)
         digest = None
         if dropped:
             encoded = json.dumps(
@@ -97,37 +91,14 @@ class WindowContextReducer:
         return ContextProjection(
             messages=retained,
             historical_messages=tuple(dropped),
-            estimated_tokens=self.estimator.estimate(retained),
+            estimated_tokens=counter.estimate(retained),
             source_message_count=len(messages),
             dropped_message_count=len(dropped),
             dropped_digest=digest,
             strategy="window" if dropped else "none",
         )
 
-    def _over(self, messages, maximum, max_messages):
-        return self.estimator.estimate(messages) > maximum or (
-            max_messages is not None and len(messages) > max_messages
-        )
-
-    @staticmethod
-    def _units(messages):
-        units = []
-        index = 0
-        while index < len(messages):
-            message = messages[index]
-            if message.role == "assistant" and message.tool_calls:
-                expected = {call.tool_call_id for call in message.tool_calls}
-                unit = [message]
-                index += 1
-                while index < len(messages) and messages[index].role == "tool":
-                    if messages[index].tool_call_id in expected:
-                        unit.append(messages[index])
-                    index += 1
-                units.append(tuple(unit))
-                continue
-            units.append((message,))
-            index += 1
-        return units
+    _units = staticmethod(conversation_units)
 
     @staticmethod
     def _error(code, message):

@@ -212,9 +212,16 @@ class AgentCompositionFactory:
             )
             if value is not None
         ]
+        candidates = candidates or [32_768]
         context_budget = None
         if candidates:
             context_budget = ContextBudget(
+                max_system_tokens=ceiling.max_system_tokens or 16_384,
+                protected_recent_tokens=(
+                    ceiling.protected_recent_tokens
+                    if ceiling.protected_recent_tokens is not None
+                    else 8_192
+                ),
                 max_input_tokens=min(int(value) for value in candidates),
                 reserve_output_tokens=int(
                     request_defaults.get("max_output_tokens")
@@ -271,6 +278,7 @@ class AgentCompositionFactory:
             step_request_builder=step_request_builder,
             automatic_memory_recall=automatic_memory_recall,
             context_assembler=DefaultContextAssembler(
+                max_system_tokens=ceiling.max_system_tokens or 16_384,
                 developer_instructions=agent.instructions,
                 providers=context_providers,
                 budget=context_budget,

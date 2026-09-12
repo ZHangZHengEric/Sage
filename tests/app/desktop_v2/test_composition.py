@@ -36,23 +36,29 @@ def test_desktop_manifest_encodes_product_defaults(tmp_path: Path):
     assert manifest.metadata.id == "com.sage.desktop-v2"
     assert manifest.credentials == {}
     assert manifest.models == {}
-    assert capabilities["session.store"].plugin == DESKTOP_COMPONENT_DEFAULTS[
-        "session.store"
-    ]
-    assert capabilities["memory.provider"].plugin == (
-        DESKTOP_COMPONENT_DEFAULTS["memory.provider"]
+    assert (
+        capabilities["session.store"].plugin
+        == DESKTOP_COMPONENT_DEFAULTS["session.store"]
     )
-    assert capabilities["session-memory.provider"].plugin == (
-        DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"]
+    assert (
+        capabilities["memory.provider"].plugin
+        == (DESKTOP_COMPONENT_DEFAULTS["memory.provider"])
     )
-    assert capabilities["workspace.initializer"].plugin == (
-        DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"]
+    assert (
+        capabilities["session-memory.provider"].plugin
+        == (DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"])
     )
-    assert capabilities["agent.continuation-policy"].plugin == (
-        DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"]
+    assert (
+        capabilities["workspace.initializer"].plugin
+        == (DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"])
     )
-    assert capabilities["memory.recall-query"].plugin == (
-        DESKTOP_COMPONENT_DEFAULTS["memory.recall-query"]
+    assert (
+        capabilities["agent.continuation-policy"].plugin
+        == (DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"])
+    )
+    assert (
+        capabilities["memory.recall-query"].plugin
+        == (DESKTOP_COMPONENT_DEFAULTS["memory.recall-query"])
     )
     assert "execution.sandbox" not in capabilities
     assert capabilities["memory.provider"].config["root"] == str(tmp_path / "memory")
@@ -237,17 +243,21 @@ async def test_desktop_builder_path_exposes_a_real_resolved_plan(tmp_path: Path)
         assert _provider(plan, "observability.log-sink").source == "host"
         assert _provider(plan, "observability.diagnostic-sink").source == "host"
         assert _provider(plan, "model.provider").source == "host"
-        assert _provider(plan, "memory.provider").plugin_id == (
-            DESKTOP_COMPONENT_DEFAULTS["memory.provider"]
+        assert (
+            _provider(plan, "memory.provider").plugin_id
+            == (DESKTOP_COMPONENT_DEFAULTS["memory.provider"])
         )
-        assert _provider(plan, "session-memory.provider").plugin_id == (
-            DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"]
+        assert (
+            _provider(plan, "session-memory.provider").plugin_id
+            == (DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"])
         )
-        assert _provider(plan, "workspace.initializer").plugin_id == (
-            DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"]
+        assert (
+            _provider(plan, "workspace.initializer").plugin_id
+            == (DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"])
         )
-        assert _provider(plan, "agent.continuation-policy").plugin_id == (
-            DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"]
+        assert (
+            _provider(plan, "agent.continuation-policy").plugin_id
+            == (DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"])
         )
         assert _provider(plan, "execution.dispatcher").source == "composition-root"
     finally:
@@ -262,12 +272,8 @@ async def test_desktop_service_process_root_uses_builder_application(tmp_path: P
     await service.start()
     try:
         plan = service.application.resolved_plan
-        assert service.dispatcher is service.application.service(
-            "execution.dispatcher"
-        )
-        assert service.memory_provider is service.application.service(
-            "memory.provider"
-        )
+        assert service.dispatcher is service.application.service("execution.dispatcher")
+        assert service.memory_provider is service.application.service("memory.provider")
         assert service.diagnostics is service.application.service(
             "observability.diagnostic-sink"
         )
@@ -280,3 +286,15 @@ async def test_desktop_service_process_root_uses_builder_application(tmp_path: P
         assert "desktop-host" not in {value.source for value in plan.providers}
     finally:
         await service.close()
+
+
+def test_core_document_read_limit_cannot_hide_instructions_after_whitespace(tmp_path):
+    from app.desktop_v2.backend.run_composition import DesktopRunCompositionMixin
+    from sagents.v2.contracts.errors import SageV2Error
+
+    (tmp_path / "AGENT.md").write_text(
+        "x" * 16000 + "\nMust preserve this constraint.", encoding="utf-8"
+    )
+    with pytest.raises(SageV2Error) as caught:
+        DesktopRunCompositionMixin()._identity_documents(tmp_path)
+    assert caught.value.info.code == "context.system_document_too_large"

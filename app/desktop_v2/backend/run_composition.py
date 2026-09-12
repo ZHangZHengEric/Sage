@@ -771,8 +771,15 @@ class DesktopRunCompositionMixin:
             )
             if value is not None
         ]
+        context_limits = context_limits or [32_768]
         context_budget = (
             ContextBudget(
+                max_system_tokens=ceiling.max_system_tokens or 16_384,
+                protected_recent_tokens=(
+                    ceiling.protected_recent_tokens
+                    if ceiling.protected_recent_tokens is not None
+                    else 8_192
+                ),
                 max_input_tokens=min(int(value) for value in context_limits),
                 reserve_output_tokens=int(
                     request_defaults.get("max_output_tokens")
@@ -897,6 +904,7 @@ class DesktopRunCompositionMixin:
                 memory_recall_limit=8,
                 memory_recall_query_generator=memory_query_generator,
                 context_assembler=DefaultContextAssembler(
+                    max_system_tokens=ceiling.max_system_tokens or 16_384,
                     developer_instructions=(
                         descriptor.instructions
                         + _continuation_agent_instructions(continuation_plugin_id)
@@ -1694,16 +1702,24 @@ class DesktopRunCompositionMixin:
     def _identity_documents(self, root: Path | None = None) -> dict[str, str]:
         values = {}
         workspace = (root or self.agent_workspace).resolve()
+        from sagents.v2.context.runtime_metadata import (
+            IDENTITY_DOCUMENT_LIMITS,
+            bounded_identity_document,
+        )
+
         for name in ("AGENT", "IDENTITY", "SOUL", "USER", "MEMORY"):
             path = workspace / f"{name}.md"
             if not path.is_file() or path.is_symlink():
                 continue
             try:
-                content = path.read_text(encoding="utf-8")
+                with path.open(encoding="utf-8") as stream:
+                    content = stream.read(IDENTITY_DOCUMENT_LIMITS[name] + 1)
             except (OSError, UnicodeDecodeError):
                 continue
+            if name == "AGENT":
+                bounded_identity_document(name, content)
             if content.strip():
-                values[name] = content[:200_000]
+                values[name] = content
         return values
 
     @staticmethod

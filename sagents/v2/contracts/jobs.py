@@ -52,6 +52,7 @@ class JobHandle(StrictModel):
 
 
 class JobSnapshot(JobHandle):
+    output_truncated: bool = False
     created_at: datetime
     updated_at: datetime
     exit_code: int | None = None
@@ -70,6 +71,11 @@ class JobRuntimeCapabilities(StrictModel):
     supports_terminal_purge: bool = False
     supports_automatic_terminal_retention: bool = False
     max_concurrent_jobs: int | None = Field(default=None, gt=0)
+    max_admitted_jobs: int | None = Field(default=None, gt=0)
+    max_job_output_bytes: int | None = Field(default=None, gt=0)
+    max_job_output_chunks: int | None = Field(default=None, gt=0)
+    max_buffered_output_bytes: int | None = Field(default=None, gt=0)
+    max_buffered_output_chunks: int | None = Field(default=None, gt=0)
     terminal_ttl_seconds: int | None = Field(default=None, gt=0)
     max_retained_terminal_jobs: int | None = Field(default=None, ge=0)
     max_retained_output_bytes: int | None = Field(default=None, ge=0)

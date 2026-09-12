@@ -41,7 +41,9 @@ def server_v2_run_manifest(
     composed = source.model_copy(
         update={
             "name": name or source.name,
-            "description": agent.description if agent is not None else source.description,
+            "description": agent.description
+            if agent is not None
+            else source.description,
             "skills": tuple(skills),
             "tools": tuple(selected_tools),
             "instructions": Instructions(
@@ -135,6 +137,15 @@ def _runtime_capabilities(
             },
         )
     }
+    if settings is not None:
+        capabilities["execution.scheduler"] = CapabilitySelection(
+            plugin="sage.scheduler.ephemeral",
+            config={
+                "max_concurrent_runs": settings.max_concurrent_runs,
+                "max_concurrent_runs_per_tenant": settings.max_concurrent_runs_per_user,
+                "max_pending_items": settings.max_pending_runs,
+            },
+        )
     if settings is not None and settings.mysql_url:
         capabilities["session.store"] = CapabilitySelection(
             plugin="sage.session.mysql",

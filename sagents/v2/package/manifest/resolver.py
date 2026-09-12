@@ -41,6 +41,8 @@ class PolicyCeiling(StrictModel):
     allowed_model_routes: frozenset[str] = frozenset()
     max_steps: int | None = None
     max_input_tokens: int | None = None
+    max_system_tokens: int | None = None
+    protected_recent_tokens: int | None = None
     max_output_tokens: int | None = None
     max_total_tokens: int | None = None
     deadline_seconds: float | None = None
@@ -141,6 +143,13 @@ class CompositionResolver:
                 max_steps=max_steps,
                 max_input_tokens=_minimum(
                     agent.budgets.input_tokens, global_budget.input_tokens
+                ),
+                max_system_tokens=_minimum(
+                    agent.budgets.system_tokens, global_budget.system_tokens
+                ),
+                protected_recent_tokens=_minimum(
+                    agent.budgets.protected_recent_tokens,
+                    global_budget.protected_recent_tokens,
                 ),
                 max_output_tokens=_minimum(
                     agent.budgets.output_tokens, global_budget.output_tokens

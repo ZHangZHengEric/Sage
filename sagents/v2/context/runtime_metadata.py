@@ -19,6 +19,40 @@ from sagents.v2.context.contracts import (
 )
 
 
+IDENTITY_DOCUMENT_LIMITS = {
+    "AGENT": 16_000,
+    "SOUL": 300,
+    "USER": 2_048,
+    "MEMORY": 4_096,
+    "IDENTITY": 300,
+}
+
+
+def bounded_identity_document(name, content):
+    limit = IDENTITY_DOCUMENT_LIMITS.get(name.upper(), 2_048)
+    if len(content) <= limit:
+        return content
+    if name.upper() == "AGENT":
+        from sagents.v2.contracts.errors import (
+            ErrorCategory,
+            RuntimeErrorInfo,
+            SageV2Error,
+        )
+
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="context.system_document_too_large",
+                category=ErrorCategory.VALIDATION,
+                message="AGENT.md exceeds the 16000-character instruction limit",
+                safe_to_resume=True,
+            )
+        )
+    return (
+        content[: max(0, limit - 64)]
+        + "\n[Excerpt only; read the workspace document for full content.]"
+    )
+
+
 class RunMetadataContextProvider:
     """Build stable identity/language and volatile execution-state segments."""
 
@@ -90,7 +124,9 @@ class RunMetadataContextProvider:
                 if isinstance(content, str) and content.strip():
                     safe_name = str(name).replace("<", "").replace(">", "")
                     rendered = self._identity_document(
-                        safe_name, content.strip(), language
+                        safe_name,
+                        bounded_identity_document(safe_name, content).strip(),
+                        language,
                     )
                     values.append(
                         ContextSegment(
@@ -246,6 +282,7 @@ class RunMetadataContextProvider:
 
     @staticmethod
     def _identity_document(name: str, content: str, language: str) -> str:
+        content = bounded_identity_document(name, content)
         if name == "AGENT":
             return f"<agent_md>\n{content}\n</agent_md>"
         if name == "SOUL":

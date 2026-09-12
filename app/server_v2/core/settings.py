@@ -63,6 +63,24 @@ class ServerV2Settings:
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
 
+    max_concurrent_runs: int = 8
+    max_concurrent_runs_per_user: int = 2
+    max_pending_runs: int = 1024
+    max_model_clients: int = 64
+
+    def __post_init__(self) -> None:
+        if self.max_model_clients < 1:
+            raise ValueError("max_model_clients must be positive")
+        if (
+            min(
+                self.max_concurrent_runs,
+                self.max_concurrent_runs_per_user,
+                self.max_pending_runs,
+            )
+            < 1
+        ):
+            raise ValueError("server run concurrency and queue limits must be positive")
+
     def database_url(self) -> str | None:
         if not self.mysql_url:
             return None
@@ -100,6 +118,12 @@ class ServerV2Settings:
                 frozenset({"json", "text"}),
             ),
             log_directory=_optional_env("SAGE_SERVER_LOG_DIRECTORY"),
+            max_concurrent_runs=int(_env("SAGE_SERVER_MAX_CONCURRENT_RUNS", "8")),
+            max_concurrent_runs_per_user=int(
+                _env("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "2")
+            ),
+            max_pending_runs=int(_env("SAGE_SERVER_MAX_PENDING_RUNS", "1024")),
+            max_model_clients=int(_env("SAGE_SERVER_MAX_MODEL_CLIENTS", "64")),
             mysql_url=mysql_url,
             redis_url=redis_url,
             jaeger_url=_optional_env("SAGE_SERVER_JAEGER_URL"),

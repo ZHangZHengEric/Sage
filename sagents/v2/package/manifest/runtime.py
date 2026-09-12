@@ -45,6 +45,8 @@ class RuntimeConfig(StrictModel):
 class BudgetConfig(StrictModel):
     max_steps: int | None = Field(default=None, gt=0)
     input_tokens: int | None = Field(default=None, gt=0)
+    system_tokens: int | None = Field(default=None, gt=0)
+    protected_recent_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, gt=0)
     total_tokens: int | None = Field(default=None, gt=0)
     wall_time_seconds: float | None = Field(default=None, gt=0)

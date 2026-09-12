@@ -20,6 +20,7 @@ from sagents.v2.session_memory.contracts import (
 
 _MAX_TRACKED_RUNS = 1_024
 _MAX_TRACKED_SESSIONS = 256
+_MAX_INDEXED_RECORDS_PER_SESSION = 4_096
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class SessionMemoryService:
         self._boundaries: OrderedDict[str, _RequestBoundary] = OrderedDict()
         # session_id -> record_id -> content digest already accepted by the
         # provider. Purely an optimisation: losing it re-syncs, never corrupts.
-        self._indexed: OrderedDict[str, dict[str, str]] = OrderedDict()
+        self._indexed: OrderedDict[str, OrderedDict[str, str]] = OrderedDict()
         self._lock = asyncio.Lock()
 
     async def observe_projection(
@@ -129,7 +130,11 @@ class SessionMemoryService:
         # the reducer exposed no searchable history for this request. The
         # reducer plugin owns this boundary: Session Memory deliberately does
         # not infer history as "canonical ledger minus visible request".
-        if boundary is None or not boundary.historical:
+        if (
+            boundary is None
+            or boundary.session_id != session_id
+            or not boundary.historical
+        ):
             return ()
         current_call_records = (
             frozenset(boundary.calls.get(tool_call_id, ()))
@@ -177,9 +182,12 @@ class SessionMemoryService:
     ) -> None:
         if session_id is None:
             return
-        known = self._indexed.setdefault(session_id, {})
+        known = self._indexed.setdefault(session_id, OrderedDict())
         for record in records:
             known[record.record_id] = self._digest(record)
+            known.move_to_end(record.record_id)
+            while len(known) > _MAX_INDEXED_RECORDS_PER_SESSION:
+                known.popitem(last=False)
         self._indexed.move_to_end(session_id)
         while len(self._indexed) > _MAX_TRACKED_SESSIONS:
             self._indexed.popitem(last=False)
@@ -202,7 +210,12 @@ class SessionMemoryService:
     @staticmethod
     def _digest(record: SessionMemoryRecord) -> str:
         return hashlib.sha256(
-            f"{record.position}\n{record.role}\n{record.content}".encode()
+            json.dumps(
+                record.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
         ).hexdigest()
 
     @classmethod
@@ -225,9 +238,7 @@ class SessionMemoryService:
                 if key in message.metadata
             }
             | {
-                "tool_call_ids": tuple(
-                    call.tool_call_id for call in message.tool_calls
-                )
+                "tool_call_ids": tuple(call.tool_call_id for call in message.tool_calls)
             },
         )
 

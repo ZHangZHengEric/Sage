@@ -132,7 +132,7 @@ async def test_concurrent_duplicate_load_is_single_copy_and_single_fetch():
 
 
 @pytest.mark.asyncio
-async def test_active_skill_budget_evicts_oldest_but_keeps_at_least_one():
+async def test_active_skill_budget_evicts_oldest_within_hard_budget():
     provider = InMemorySkillProvider(
         (bundle("alpha", "A" * 100), bundle("beta", "B" * 100))
     )
@@ -143,7 +143,7 @@ async def test_active_skill_budget_evicts_oldest_but_keeps_at_least_one():
         source=provider,
         workspace=workspace,
         activations=activations,
-        max_active_tokens=150,
+        max_active_tokens=300,
         token_estimator=len,
     )
 
@@ -322,3 +322,68 @@ async def test_filesystem_skill_duplicate_roots_use_one_consistent_precedence(tm
     assert descriptor.description == "First"
     assert bundle.descriptor == descriptor
     assert b"# First" in bundle.files["SKILL.md"]
+
+
+@pytest.mark.asyncio
+async def test_single_oversized_skill_is_rejected_before_copy_or_activation():
+    provider, workspace, activations, _ = loader_for(bundle("huge", "<" * 2000))
+    loader = SkillLoader(
+        catalog=provider,
+        source=provider,
+        workspace=workspace,
+        activations=activations,
+        max_active_tokens=100,
+    )
+    with pytest.raises(SageV2Error) as caught:
+        await loader.load("huge", run_id="run_1")
+    assert caught.value.info.code == "skill.active_budget_exceeded"
+    assert workspace.materializations == []
+    assert await loader.loaded(run_id="run_1") == ()
+
+
+@pytest.mark.asyncio
+async def test_skill_lookup_does_not_scan_unrelated_directories(tmp_path, monkeypatch):
+    from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "alpha" / "SKILL.md").write_text("# Alpha", encoding="utf-8")
+    provider = FilesystemSkillProvider((tmp_path,))
+
+    def fail():
+        raise AssertionError("a single lookup must not scan the full catalog")
+
+    monkeypatch.setattr(provider, "descriptors", fail)
+    assert (await provider.get_skill("alpha", run_id="run_1")).description == "Alpha"
+    assert (await provider.fetch("alpha", run_id="run_1")).files[
+        "SKILL.md"
+    ] == b"# Alpha"
+
+
+@pytest.mark.asyncio
+async def test_skill_metadata_reads_are_cached_and_run_off_the_event_loop(
+    tmp_path, monkeypatch
+):
+    import threading
+    from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+
+    (tmp_path / "alpha").mkdir()
+    skill = tmp_path / "alpha" / "SKILL.md"
+    skill.write_text("# Alpha", encoding="utf-8")
+    provider = FilesystemSkillProvider((tmp_path,))
+    original = provider._description
+    threads = []
+
+    def read(path):
+        threads.append(threading.get_ident())
+        return original(path)
+
+    monkeypatch.setattr(provider, "_description", read)
+    await provider.list_skills(run_id="run_1")
+    await provider.list_skills(run_id="run_2")
+    assert len(threads) == 1
+    assert threads[0] != threading.get_ident()
+    skill.write_text("# Changed description", encoding="utf-8")
+    assert (
+        await provider.get_skill("alpha", run_id="run_3")
+    ).description == "Changed description"
+    assert len(threads) == 2

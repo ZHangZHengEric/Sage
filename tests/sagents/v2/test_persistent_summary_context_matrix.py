@@ -448,3 +448,22 @@ async def test_model_summarizer_enforces_its_own_source_limit():
 
     assert caught.value.info.code == "context.summarizer.source_too_large"
     assert model.requests == []
+
+
+@pytest.mark.asyncio
+async def test_summary_timeout_includes_capability_discovery():
+    class SlowCapabilities:
+        async def capabilities(self, binding):
+            await asyncio.Event().wait()
+
+        def stream(self, request):
+            raise AssertionError("must time out before starting a stream")
+
+    summarizer = ModelConversationSummarizer(SlowCapabilities(), timeout_seconds=0.01)
+    with pytest.raises(SageV2Error) as caught:
+        await summarizer.summarize(
+            SummarizationRequest(
+                scope=scope(), messages=ledger()[1:4], target_tokens=512
+            )
+        )
+    assert caught.value.info.code == "context.summarizer.model_timeout"

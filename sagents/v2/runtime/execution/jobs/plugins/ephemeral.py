@@ -61,6 +61,11 @@ class InMemoryJobRuntime:
         runners: Mapping[str, JobRunner],
         *,
         max_concurrent_jobs: int = 32,
+        max_admitted_jobs: int = 1024,
+        max_job_output_bytes: int = 8 * 1024 * 1024,
+        max_job_output_chunks: int = 8192,
+        max_buffered_output_bytes: int = 256 * 1024 * 1024,
+        max_buffered_output_chunks: int = 65536,
         terminal_ttl_seconds: int = 86_400,
         max_retained_terminal_jobs: int = 4096,
         max_retained_output_bytes: int = 256 * 1024 * 1024,
@@ -69,6 +74,10 @@ class InMemoryJobRuntime:
     ) -> None:
         if max_concurrent_jobs < 1:
             raise ValueError("max_concurrent_jobs must be positive")
+        if min(max_admitted_jobs, max_job_output_bytes, max_job_output_chunks) < 1:
+            raise ValueError("job admission and output limits must be positive")
+        if min(max_buffered_output_bytes, max_buffered_output_chunks) < 1:
+            raise ValueError("buffered output limits must be positive")
         if terminal_ttl_seconds < 1:
             raise ValueError("terminal_ttl_seconds must be positive")
         if (
@@ -80,6 +89,14 @@ class InMemoryJobRuntime:
         self._runners = dict(runners)
         self._owner_runners: dict[tuple[str, str], JobRunner] = {}
         self._max_concurrent = max_concurrent_jobs
+        self._max_admitted = max_admitted_jobs
+        self._max_job_output_bytes = max_job_output_bytes
+        self._max_job_output_chunks = max_job_output_chunks
+        self._active_tasks: set[asyncio.Task] = set()
+        self._max_buffered_output_bytes = max_buffered_output_bytes
+        self._max_buffered_output_chunks = max_buffered_output_chunks
+        self._buffered_output_bytes = 0
+        self._buffered_output_chunks = 0
         self._clock = clock
         self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
         self._max_retained_terminal_jobs = max_retained_terminal_jobs
@@ -129,6 +146,11 @@ class InMemoryJobRuntime:
             supports_terminal_purge=True,
             supports_automatic_terminal_retention=True,
             max_concurrent_jobs=self._max_concurrent,
+            max_admitted_jobs=self._max_admitted,
+            max_job_output_bytes=self._max_job_output_bytes,
+            max_job_output_chunks=self._max_job_output_chunks,
+            max_buffered_output_bytes=self._max_buffered_output_bytes,
+            max_buffered_output_chunks=self._max_buffered_output_chunks,
             terminal_ttl_seconds=int(self._terminal_ttl.total_seconds()),
             max_retained_terminal_jobs=self._max_retained_terminal_jobs,
             max_retained_output_bytes=self._max_retained_output_bytes,
@@ -160,6 +182,23 @@ class InMemoryJobRuntime:
                     ErrorCategory.VALIDATION,
                     "in-memory jobs cannot be frozen and resumed",
                 )
+            self._active_tasks.difference_update(
+                task for task in tuple(self._active_tasks) if task.done()
+            )
+            if (
+                len(self._active_tasks) >= self._max_admitted
+                or len(self._rows)
+                >= self._max_retained_terminal_jobs + self._max_admitted
+            ):
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="job.queue_full",
+                        category=ErrorCategory.RATE_LIMITED,
+                        message="job admission capacity is full",
+                        retryable=True,
+                        safe_to_resume=True,
+                    )
+                )
             now = self._clock()
             job_id = new_id("job")
             handle = JobHandle(
@@ -183,6 +222,8 @@ class InMemoryJobRuntime:
             row.task = asyncio.create_task(
                 self._execute(job_id), name=f"sage-job:{job_id}"
             )
+            self._active_tasks.add(row.task)
+            row.task.add_done_callback(self._active_tasks.discard)
             return handle
 
     async def inspect(self, job_id: str) -> JobSnapshot:
@@ -194,7 +235,9 @@ class InMemoryJobRuntime:
             row = self._row(job_id)
             completed = row.completed
         await completed.wait()
-        return await self.inspect(job_id)
+        # A waiter owns this row even if automatic retention removes its ID.
+        async with self._lock:
+            return self._snapshot(row)
 
     async def cancel(self, job_id: str, *, force: bool = False) -> JobSnapshot:
         async with self._lock:
@@ -213,12 +256,11 @@ class InMemoryJobRuntime:
             except asyncio.CancelledError:
                 pass
         async with self._lock:
-            row = self._row(job_id)
             if row.state not in TERMINAL_JOB_STATES:
                 row.state = JobState.KILLED
                 row.updated_at = self._clock()
                 row.completed.set()
-        return await self.inspect(job_id)
+            return self._snapshot(row)
 
     async def read_output(
         self, cursor: JobCursor, *, max_bytes: int = 65536
@@ -322,7 +364,7 @@ class InMemoryJobRuntime:
                 and row.state in TERMINAL_JOB_STATES
             }
             for job_id in job_ids:
-                self._rows.pop(job_id, None)
+                self._drop_row_locked(job_id)
             for key, job_id in tuple(self._idempotency.items()):
                 if job_id in job_ids:
                     self._idempotency.pop(key, None)
@@ -357,13 +399,31 @@ class InMemoryJobRuntime:
                     async with self._lock:
                         if row.cancel_event.is_set():
                             raise asyncio.CancelledError
-                        maximum = row.spec.max_output_bytes
-                        accepted = data
-                        if maximum is not None:
-                            available = max(0, maximum - row.output_size)
-                            accepted = data[:available]
-                            if len(accepted) < len(data):
-                                row.output_truncated = True
+                        if row.state in TERMINAL_JOB_STATES:
+                            raise RuntimeError(
+                                "cannot emit output after job completion"
+                            )
+                        maximum = min(
+                            row.spec.max_output_bytes or self._max_job_output_bytes,
+                            self._max_job_output_bytes,
+                        )
+                        available = max(
+                            0,
+                            min(
+                                maximum - row.output_size,
+                                self._max_buffered_output_bytes
+                                - self._buffered_output_bytes,
+                            ),
+                        )
+                        if (
+                            len(row.output) >= self._max_job_output_chunks
+                            or self._buffered_output_chunks
+                            >= self._max_buffered_output_chunks
+                        ):
+                            available = 0
+                        accepted = data[:available]
+                        if len(accepted) < len(data):
+                            row.output_truncated = True
                         if accepted:
                             offset = row.output_size
                             row.output.append(
@@ -376,6 +436,8 @@ class InMemoryJobRuntime:
                                     occurred_at=self._clock(),
                                 )
                             )
+                            self._buffered_output_bytes += len(accepted)
+                            self._buffered_output_chunks += 1
                             row.output_size += len(accepted)
                             row.updated_at = self._clock()
 
@@ -407,11 +469,7 @@ class InMemoryJobRuntime:
 
     def _sweep_terminal_locked(self) -> int:
         terminal = sorted(
-            (
-                row
-                for row in self._rows.values()
-                if row.state in TERMINAL_JOB_STATES
-            ),
+            (row for row in self._rows.values() if row.state in TERMINAL_JOB_STATES),
             key=lambda row: (row.updated_at, row.handle.job_id),
         )
         now = self._clock()
@@ -427,25 +485,31 @@ class InMemoryJobRuntime:
             for row in retained
             if now - row.updated_at >= self._output_reconnect_window
         ]
-        while len(retained) > self._max_retained_terminal_jobs and eligible:
-            removed = eligible.pop(0)
-            retained.remove(removed)
-            purge_ids.add(removed.handle.job_id)
+        retained_count = len(retained)
         retained_output = sum(row.output_size for row in retained)
-        eligible = [row for row in eligible if row in retained]
-        while eligible and retained_output > self._max_retained_output_bytes:
-            removed = eligible.pop(0)
-            retained.remove(removed)
+        for removed in eligible:
+            if (
+                retained_count <= self._max_retained_terminal_jobs
+                and retained_output <= self._max_retained_output_bytes
+            ):
+                break
             purge_ids.add(removed.handle.job_id)
+            retained_count -= 1
             retained_output -= removed.output_size
         if not purge_ids:
             return 0
         for job_id in purge_ids:
-            self._rows.pop(job_id, None)
+            self._drop_row_locked(job_id)
         for key, job_id in tuple(self._idempotency.items()):
             if job_id in purge_ids:
                 self._idempotency.pop(key, None)
         return len(purge_ids)
+
+    def _drop_row_locked(self, job_id: str) -> None:
+        row = self._rows.pop(job_id, None)
+        if row is not None:
+            self._buffered_output_bytes -= row.output_size
+            self._buffered_output_chunks -= len(row.output)
 
     def _snapshot_handle(self, row: _JobRow) -> JobHandle:
         return row.handle.model_copy(
@@ -466,6 +530,7 @@ class InMemoryJobRuntime:
             created_at=row.created_at,
             updated_at=row.updated_at,
             exit_code=row.exit_code,
+            output_truncated=row.output_truncated,
             usage=row.usage if row.usage is not None else UsageSummary(),
             error=row.error,
         )

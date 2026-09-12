@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
+from contextlib import asynccontextmanager
+
+from sagents.v2._concurrency import auxiliary_capacity
+
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 
@@ -8,6 +14,7 @@ from sagents.v2.model.contracts import ModelCapabilities, ModelRequest
 from sagents.v2.model.provider import ModelProvider
 
 from app.server_v2.repositories.catalog import CatalogStore
+from app.server_v2.services.model_pool import ModelClientPool
 
 _current_user_id: ContextVar[str | None] = ContextVar(
     "server_v2_model_user", default=None
@@ -31,60 +38,85 @@ class HostModelProvider:
         *,
         fallback: ModelProvider | None = None,
         session_for_run: Callable[[str], Awaitable[str | None]] | None = None,
+        max_clients: int = 64,
     ) -> None:
         self._catalog = catalog
         self._fallback = fallback
         self._session_for_run = session_for_run
         self._session_users: dict[str, str] = {}
-        self._cache: dict[str, ModelProvider] = {}
+        self._pool = ModelClientPool(
+            create_catalog_provider, close_model_provider, max_clients=max_clients
+        )
+        self._session_bindings: dict[str, int] = {}
 
     def bind_session_user(self, session_id: str, user_id: str) -> None:
+        current = self._session_users.get(session_id)
+        if current is not None and current != user_id:
+            raise ValueError("session model binding belongs to another user")
         self._session_users[session_id] = user_id
+        self._session_bindings[session_id] = (
+            self._session_bindings.get(session_id, 0) + 1
+        )
 
     def unbind_session_user(self, session_id: str) -> None:
-        self._session_users.pop(session_id, None)
+        remaining = self._session_bindings.get(session_id, 0) - 1
+        if remaining > 0:
+            self._session_bindings[session_id] = remaining
+        else:
+            self._session_bindings.pop(session_id, None)
+            self._session_users.pop(session_id, None)
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return await (await self._resolve()).capabilities(model_binding)
+        async with self._borrow() as provider:
+            return await provider.capabilities(model_binding)
 
     async def probe_capabilities(self, request):
-        return await (await self._resolve()).probe_capabilities(request)
+        async with self._borrow() as provider:
+            return await provider.probe_capabilities(request)
 
     async def stream(self, request: ModelRequest):
-        provider = await self._resolve(run_id=request.run_id)
-        async for event in provider.stream(request):
-            yield event
+        async with self._borrow(run_id=request.run_id) as provider:
+            stream = provider.stream(request)
+            try:
+                async for event in stream:
+                    yield event
+            finally:
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
 
     async def _user_id(self, run_id: str | None = None) -> str | None:
-        user_id = _current_user_id.get()
-        if user_id:
-            return user_id
         if run_id and self._session_for_run is not None:
-            try:
-                session_id = await self._session_for_run(run_id)
-            except Exception:
-                session_id = None
-            if session_id:
-                user_id = self._session_users.get(session_id)
-                if user_id:
-                    return user_id
-        if len(self._session_users) == 1:
-            return next(iter(self._session_users.values()))
-        return None
+            # A long-lived worker may inherit an earlier caller's ContextVar.
+            # An explicit Run identity is authoritative; never guess another
+            # user's model if its Session cannot be resolved.
+            session_id = await self._session_for_run(run_id)
+            return self._session_users.get(session_id) if session_id else None
+        return _current_user_id.get()
 
-    async def _resolve(self, run_id: str | None = None) -> ModelProvider:
+    async def acquire_model(self, user_id, record):
+        return await self._pool.acquire(user_id, record)
+
+    async def close(self) -> None:
+        await self._pool.close()
+        self._session_users.clear()
+        self._session_bindings.clear()
+
+    @asynccontextmanager
+    async def _borrow(self, run_id: str | None = None):
         user_id = await self._user_id(run_id)
         if user_id:
             record = await self._catalog.default_model(user_id)
             if record is not None:
-                key = record.cache_key()
-                cached = self._cache.get(key)
-                if cached is None:
-                    cached = record.to_provider()
-                    self._cache[key] = cached
-                return cached
+                lease = await self.acquire_model(user_id, record)
+                try:
+                    yield lease.provider
+                finally:
+                    await lease.close()
+                return
         if self._fallback is not None:
-            return self._fallback
+            yield self._fallback
+            return
         raise SageV2Error(
             RuntimeErrorInfo(
                 code="server.model_not_configured",
@@ -92,3 +124,29 @@ class HostModelProvider:
                 message="configure a model before starting a run",
             )
         )
+
+
+async def close_model_provider(provider) -> None:
+    closer = getattr(provider, "close", None) or getattr(provider, "aclose", None)
+    if closer is not None:
+        result = closer()
+        if inspect.isawaitable(result):
+            await result
+
+
+async def create_catalog_provider(record):
+    """Bound synchronous SDK setup and settle ownership if its caller cancels."""
+    async with auxiliary_capacity("model-init"):
+        building = asyncio.create_task(asyncio.to_thread(record.to_provider))
+        try:
+            return await asyncio.shield(building)
+        except asyncio.CancelledError:
+            # SDK construction cannot be interrupted safely in a thread. Do
+            # not abandon a newly created connection pool on cancellation.
+            while not building.done():
+                try:
+                    await asyncio.shield(building)
+                except asyncio.CancelledError:
+                    pass
+            await close_model_provider(building.result())
+            raise

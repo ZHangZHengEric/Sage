@@ -17,6 +17,9 @@ from sagents.v2.contracts.items import UsageSummary
 from sagents.v2.i18n import recovery_payload, tr
 
 
+_OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
+
+
 class ContinuationAction(str, Enum):
     CONTINUE_STEP = "continue_step"
     COMPLETE_TURN = "complete_turn"
@@ -101,6 +104,7 @@ class BudgetRule:
     async def evaluate(self, context: ContinuationContext):
         if context.step_number >= context.max_steps and (
             context.response.tool_calls
+            or context.response.finish_reason in _OUTPUT_LIMIT_REASONS
             or not context.response.text.strip()
             or (context.explicit_status or "").lower()
             in {"continue_work", "continue", "in_progress"}
@@ -141,6 +145,30 @@ class BudgetRule:
                 reason=tr("error.budget.deadline", context.language),
             )
         return None
+
+
+class ResponseLimitRule:
+    """A provider output limit is not evidence that the user task is complete."""
+
+    async def evaluate(self, context: ContinuationContext):
+        if context.response.finish_reason not in _OUTPUT_LIMIT_REASONS:
+            return None
+        if (
+            context.requested_interaction is not None
+            or context.pending_tool_calls
+            or context.response.tool_calls
+        ):
+            return None
+        return ContinuationDecision(
+            action=ContinuationAction.CONTINUE_STEP,
+            reason_code="response.output_limit",
+            reason=(
+                "The previous response reached the model output limit. Continue "
+                "from where it stopped without repeating earlier text. Finish "
+                "the remaining answer or work; do not treat the partial response "
+                "as a completed task."
+            ),
+        )
 
 
 class ExplicitStatusRule:
@@ -382,6 +410,7 @@ class CompositeContinuationPolicy:
     def __init__(self, rules: tuple[ContinuationRule, ...] | None = None) -> None:
         self.rules = rules or (
             BudgetRule(),
+            ResponseLimitRule(),
             ExplicitStatusRule(),
             LoopRecoveryRule(),
             FlowBoundaryRule(),
@@ -419,6 +448,7 @@ class ExplicitStatusContinuationPolicy:
     def __init__(self, *, repeat_threshold: int = 3) -> None:
         self.rules = (
             BudgetRule(),
+            ResponseLimitRule(),
             ExplicitStatusRule(),
             LoopRecoveryRule(repeat_threshold),
             FlowBoundaryRule(),

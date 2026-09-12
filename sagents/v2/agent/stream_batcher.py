@@ -10,9 +10,7 @@ from sagents.v2.contracts.run_state import RunSnapshot
 from sagents.v2.runtime.session.contracts import EventDraft
 
 
-BatchCommit = Callable[
-    [RunSnapshot, tuple[EventDraft, ...]], Awaitable[RunSnapshot]
-]
+BatchCommit = Callable[[RunSnapshot, tuple[EventDraft, ...]], Awaitable[RunSnapshot]]
 
 
 class StreamEventBatcher:
@@ -26,6 +24,8 @@ class StreamEventBatcher:
         max_delay_seconds: float = 0.05,
         max_bytes: int = 4096,
     ) -> None:
+        if max_delay_seconds <= 0 or max_bytes <= 0:
+            raise ValueError("stream batch limits must be positive")
         self._run = run
         self._commit = commit
         self._max_delay = max_delay_seconds
@@ -78,7 +78,13 @@ class StreamEventBatcher:
             drafts = tuple(self._drafts)
             self._drafts.clear()
             self._bytes = 0
-            self._run = await self._commit(self._run, drafts)
+            try:
+                self._run = await self._commit(self._run, drafts)
+            except BaseException as exc:
+                # Commit may have reached storage. Do not retry or let queued
+                # producers pass this failure before the timer handler runs.
+                self._error = exc
+                raise
             return self._run
 
     async def _flush_after_delay(self) -> None:

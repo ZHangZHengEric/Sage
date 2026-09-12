@@ -91,6 +91,17 @@ def message_digest(message: ModelMessage) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
+async def message_digests_async(messages):
+    from copy import deepcopy
+    from sagents.v2._concurrency import bounded_to_thread
+
+    def prepare():
+        snapshot = deepcopy(messages)
+        return lambda: tuple(message_digest(message) for message in snapshot)
+
+    return await bounded_to_thread("context-cpu", None, prepare=prepare)
+
+
 def create_summary(
     *,
     scope: ContextReductionScope,

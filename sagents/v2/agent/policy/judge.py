@@ -12,6 +12,7 @@ from pydantic import Field
 
 from sagents.v2.agent.policy.continuation import (
     BudgetRule,
+    ResponseLimitRule,
     ContinuationAction,
     ContinuationContext,
     ContinuationDecision,
@@ -518,6 +519,7 @@ class LLMJudgeContinuationPolicy:
     def __init__(self, judge: LLMContinuationJudge) -> None:
         self.judge = judge
         self._budget = BudgetRule()
+        self._output_limit = ResponseLimitRule()
         self._flow = FlowBoundaryRule()
         self._pending_tools = ToolOrTextRuleForPendingCalls()
 
@@ -542,6 +544,9 @@ class LLMJudgeContinuationPolicy:
         budget = await self._budget.evaluate(context)
         if budget is not None:
             return budget
+        output_limit = await self._output_limit.evaluate(context)
+        if output_limit is not None:
+            return output_limit
         if context.response.tool_calls:
             pending = await self._pending_tools.evaluate(context)
             assert pending is not None
@@ -592,6 +597,7 @@ class HybridContinuationPolicy:
         self.judge = judge
         self._rules = (
             BudgetRule(),
+            ResponseLimitRule(),
             ExplicitStatusRule(),
             LoopRecoveryRule(repeat_threshold),
             FlowBoundaryRule(),

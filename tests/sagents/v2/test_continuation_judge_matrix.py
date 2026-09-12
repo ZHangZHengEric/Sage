@@ -511,3 +511,38 @@ async def test_explicit_status_only_requests_guidance_at_step_limit():
     assert exhausted.reason_code == "status.missing_at_limit"
     assert exhausted.interaction is not None
     assert complete.reason_code == "status.complete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "max_output_tokens"])
+@pytest.mark.parametrize(
+    "policy_name", ["deterministic", "explicit", "hybrid", "judge"]
+)
+async def test_truncated_text_continues_without_spending_a_judge_call(
+    finish_reason, policy_name
+):
+    from sagents.v2.agent.policy.continuation import CompositeContinuationPolicy
+
+    class UnexpectedJudge:
+        async def decide(self, context):
+            raise AssertionError("output-limit continuation needs no model judge")
+
+    policies = {
+        "deterministic": CompositeContinuationPolicy(),
+        "explicit": ExplicitStatusContinuationPolicy(),
+        "hybrid": HybridContinuationPolicy(UnexpectedJudge()),
+        "judge": LLMJudgeContinuationPolicy(UnexpectedJudge()),
+    }
+    context = _context(
+        response=_response("The remaining steps are:").model_copy(
+            update={"finish_reason": finish_reason}
+        )
+    )
+    decision = await policies[policy_name].decide(context)
+    assert decision.action == ContinuationAction.CONTINUE_STEP
+    assert decision.reason_code == "response.output_limit"
+    assert "without repeating" in decision.reason
+    limited = context.model_copy(update={"step_number": context.max_steps})
+    assert (
+        await policies[policy_name].decide(limited)
+    ).action != ContinuationAction.CONTINUE_STEP

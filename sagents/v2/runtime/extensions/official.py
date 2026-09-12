@@ -381,6 +381,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 context.config.get("max_summary_source_tokens", 24000)
             ),
             unit_compactor=context.config.get("unit_compactor"),
+            max_summary_calls=int(context.config.get("max_summary_calls", 4)),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
@@ -391,6 +392,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "estimator": {},
                 "summary_target_tokens": {"type": "integer", "minimum": 1},
                 "protected_recent_units": {"type": "integer", "minimum": 1},
+                "max_summary_calls": {"type": "integer", "minimum": 1},
                 "max_summary_source_tokens": {
                     "type": "integer",
                     "minimum": 1,
@@ -511,6 +513,19 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: InMemoryJobRuntime(
             context.config.get("runners", {}),
             max_concurrent_jobs=int(context.config.get("max_concurrent_jobs", 32)),
+            max_admitted_jobs=int(context.config.get("max_admitted_jobs", 1024)),
+            max_job_output_bytes=int(
+                context.config.get("max_job_output_bytes", 8 * 1024 * 1024)
+            ),
+            max_job_output_chunks=int(
+                context.config.get("max_job_output_chunks", 8192)
+            ),
+            max_buffered_output_bytes=int(
+                context.config.get("max_buffered_output_bytes", 256 * 1024 * 1024)
+            ),
+            max_buffered_output_chunks=int(
+                context.config.get("max_buffered_output_chunks", 65536)
+            ),
             terminal_ttl_seconds=int(
                 context.config.get("terminal_ttl_seconds", 86_400)
             ),
@@ -530,6 +545,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "properties": {
                 "runners": {"type": "object"},
                 "max_concurrent_jobs": {"type": "integer", "minimum": 1},
+                "max_admitted_jobs": {"type": "integer", "minimum": 1},
+                "max_job_output_bytes": {"type": "integer", "minimum": 1},
+                "max_job_output_chunks": {"type": "integer", "minimum": 1},
+                "max_buffered_output_bytes": {"type": "integer", "minimum": 1},
+                "max_buffered_output_chunks": {"type": "integer", "minimum": 1},
                 "terminal_ttl_seconds": {"type": "integer", "minimum": 1},
                 "max_retained_terminal_jobs": {"type": "integer", "minimum": 0},
                 "max_retained_output_bytes": {"type": "integer", "minimum": 0},
@@ -575,7 +595,16 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "execution.sandbox",
         lambda context, dependencies: LocalWorkspaceSandboxProvider(
             _bytes(context.config["verification_key"]),
-            **{key: context.config[key] for key in ("linux_cgroup_root", "linux_quota_mount", "linux_execution_uid", "linux_execution_gid") if key in context.config},
+            **{
+                key: context.config[key]
+                for key in (
+                    "linux_cgroup_root",
+                    "linux_quota_mount",
+                    "linux_execution_uid",
+                    "linux_execution_gid",
+                )
+                if key in context.config
+            },
             terminal_ttl_seconds=int(
                 context.config.get("terminal_ttl_seconds", 86_400)
             ),
@@ -1017,12 +1046,14 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
         "max_retained_terminal_items": {"type": "integer", "minimum": 0},
     }
     if not in_memory:
-        properties.update({
-            "linux_cgroup_root": {"type": "string"},
-            "linux_quota_mount": {"type": "string"},
-            "linux_execution_uid": {"type": "integer", "minimum": 1},
-            "linux_execution_gid": {"type": "integer", "minimum": 1},
-        })
+        properties.update(
+            {
+                "linux_cgroup_root": {"type": "string"},
+                "linux_quota_mount": {"type": "string"},
+                "linux_execution_uid": {"type": "integer", "minimum": 1},
+                "linux_execution_gid": {"type": "integer", "minimum": 1},
+            }
+        )
     if in_memory:
         properties.update(
             {

@@ -170,6 +170,10 @@ def create_registered_model_provider(
         "default_temperature": route.request.temperature,
         "default_top_p": route.request.top_p,
     }
+    if common["default_max_output_tokens"] is None:
+        # Preserve protocol-specific defaults (Anthropic requires a positive
+        # max_tokens) when a catalog/manifest leaves the request limit unset.
+        common.pop("default_max_output_tokens")
     extra = dict(route.request.extra)
     if protocol == BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS:
         maximum_field = str(
@@ -193,9 +197,7 @@ def create_registered_model_provider(
             extra_body=extra,
         )
         if capability_profile is not None:
-            config = implementation.apply_capability_profile(
-                config, capability_profile
-            )
+            config = implementation.apply_capability_profile(config, capability_profile)
         return OpenAIChatCompletionsModelProvider(config, credential, client=client)
     if protocol == BuiltinModelProtocol.OPENAI_RESPONSES:
         config = OpenAIResponsesConfig(
@@ -208,9 +210,7 @@ def create_registered_model_provider(
             extra_body=extra,
         )
         if capability_profile is not None:
-            config = implementation.apply_capability_profile(
-                config, capability_profile
-            )
+            config = implementation.apply_capability_profile(config, capability_profile)
         return OpenAIResponsesModelProvider(config, credential, client=client)
     config = AnthropicMessagesConfig(
         **common,

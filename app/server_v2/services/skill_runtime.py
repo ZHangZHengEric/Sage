@@ -7,9 +7,11 @@ the tenant workspace already has a local copy.
 from __future__ import annotations
 
 import hashlib
+from contextlib import AsyncExitStack
 from dataclasses import replace
 from pathlib import Path
 
+from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.contracts.commands import StartRun
@@ -25,7 +27,11 @@ from sagents.v2.skill import (
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
-from app.server_v2.domain.catalog import catalog_model, enabled_mcp_servers, require_agent
+from app.server_v2.domain.catalog import (
+    catalog_model,
+    enabled_mcp_servers,
+    require_agent,
+)
 from app.server_v2.domain.skills import (
     SkillRecord,
     inspect_skill_directory,
@@ -33,6 +39,7 @@ from app.server_v2.domain.skills import (
     resolve_artifact_path,
     workspace_skill_path,
 )
+from app.server_v2.services.models import create_catalog_provider, close_model_provider
 from app.server_v2.services.mcp import mcp_plugin
 from app.server_v2.services.official import attach_official_tools, resolve_agent_tools
 from app.server_v2.services.package import server_v2_run_manifest
@@ -48,7 +55,8 @@ class CatalogSkillProvider:
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
         del run_id
         return tuple(
-            _descriptor(item) for item in sorted(self._records.values(), key=lambda value: value.name)
+            _descriptor(item)
+            for item in sorted(self._records.values(), key=lambda value: value.name)
         )
 
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
@@ -68,7 +76,12 @@ class CatalogSkillProvider:
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle:
         descriptor = await self.get_skill(name, run_id=run_id)
         record = self._records[name]
-        package = inspect_skill_directory(resolve_artifact_path(self.data_root, record.artifact_path))
+        package = await bounded_to_thread(
+            "skill-io",
+            lambda: inspect_skill_directory(
+                resolve_artifact_path(self.data_root, record.artifact_path)
+            ),
+        )
         return SkillBundle(
             descriptor=descriptor,
             files=package.files,
@@ -79,12 +92,16 @@ class CatalogSkillProvider:
 class ReadThroughSkillWorkspace:
     """Return the catalog artifact path unless a workspace copy already exists."""
 
-    def __init__(self, data_root: Path, user_id: str, records: tuple[SkillRecord, ...]) -> None:
+    def __init__(
+        self, data_root: Path, user_id: str, records: tuple[SkillRecord, ...]
+    ) -> None:
         self.data_root = Path(data_root)
         self.user_id = user_id
         self._records = {item.name: item for item in records}
 
-    async def materialize(self, bundle: SkillBundle, *, run_id: str, destination: str) -> str:
+    async def materialize(
+        self, bundle: SkillBundle, *, run_id: str, destination: str
+    ) -> str:
         del run_id, destination
         name = bundle.descriptor.name
         workspace = workspace_skill_path(self.data_root, self.user_id, name)
@@ -134,10 +151,11 @@ class CatalogRunDriver:
         self._ports = None
         if ports is None:
             return
-        for handle in ports.scope_handles:
-            closer = getattr(handle, "close", None)
-            if closer is not None:
-                await closer()
+        async with AsyncExitStack() as stack:
+            for handle in ports.scope_handles:
+                closer = getattr(handle, "close", None)
+                if closer is not None:
+                    stack.push_async_callback(closer)
 
 
 SkillAwareRunDriver = CatalogRunDriver
@@ -160,16 +178,18 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         tools=tools,
     )
     resolved = CompositionResolver().resolve(manifest)
-    model = _recorded_model(service, _run_model(service, catalog, agent))
-    ports = await service.application.materialize_agent(
-        manifest,
-        tenant_id=user_id,
-        agent_id=agent.id,
-        run_id=command.idempotency_key,
-        model=model,
-    )
-    extra = []
+    raw_model, model_scope = await _run_model(service, catalog, agent, user_id=user_id)
+    extra = [model_scope] if model_scope is not None else []
+    ports = None
     try:
+        model = _recorded_model(service, raw_model)
+        ports = await service.application.materialize_agent(
+            manifest,
+            tenant_id=user_id,
+            agent_id=agent.id,
+            run_id=command.idempotency_key,
+            model=model,
+        )
         official, official_runtime, sandbox_handle = await attach_official_tools(
             service, command, user_id=user_id
         )
@@ -218,18 +238,19 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             trace_sink=_optional_service(service, "observability.trace-sink"),
         )
         loop.expected_resolved_spec_hash = command.resolved_spec_hash
-        return loop, replace(
-            ports, scope_handles=(*ports.scope_handles, *extra)
-        )
+        return loop, replace(ports, scope_handles=(*extra, *ports.scope_handles))
     except BaseException:
-        for handle in extra:
-            closer = getattr(handle, "close", None)
-            if closer is not None:
-                await closer()
+        async with AsyncExitStack() as stack:
+            for handle in (*extra, *(ports.scope_handles if ports else ())):
+                closer = getattr(handle, "close", None)
+                if closer is not None:
+                    stack.push_async_callback(closer)
         raise
 
 
-async def compose_skill_loop(service, command: StartRun, *, user_id: str, names: tuple[str, ...]):
+async def compose_skill_loop(
+    service, command: StartRun, *, user_id: str, names: tuple[str, ...]
+):
     del names
     loop, _ports = await compose_catalog_loop(service, command, user_id=user_id)
     return loop
@@ -240,11 +261,15 @@ def install_skill_driver(service) -> None:
     agent.driver_factory = lambda run_id: CatalogRunDriver(service, run_id)
 
 
-def _run_model(service, catalog, agent):
+async def _run_model(service, catalog, agent, *, user_id):
     record = catalog_model(catalog, agent.model_id)
     if record is not None:
-        return record.to_provider()
-    return service._host_models or service.application.service("model.provider")
+        if service._host_models is not None:
+            lease = await service._host_models.acquire_model(user_id, record)
+            return lease.provider, lease
+        model = await create_catalog_provider(record)
+        return model, _OwnedModelScope(model)
+    return service._host_models or service.application.service("model.provider"), None
 
 
 def _recorded_model(service, model):
@@ -311,3 +336,13 @@ def bundle_hash(files: dict[str, bytes]) -> str:
         digest.update(content)
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
+
+
+class _OwnedModelScope:
+    def __init__(self, model):
+        self.model = model
+
+    async def close(self):
+        model, self.model = self.model, None
+        if model is not None:
+            await close_model_provider(model)

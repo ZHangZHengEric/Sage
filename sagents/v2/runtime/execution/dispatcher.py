@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from collections.abc import Awaitable, Callable
@@ -26,6 +27,9 @@ from sagents.v2.runtime.execution.scheduler import (
 )
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 @dataclass
 class _DispatchRequest:
     agent: object
@@ -33,12 +37,14 @@ class _DispatchRequest:
     resume: bool
     result: asyncio.Future[RunSnapshot]
     recovered: bool = False
+    claimed: bool = False
 
 
 @dataclass
 class _CleanupRequest:
     operation: Callable[[], Awaitable[Any]]
     result: asyncio.Future[Any]
+    claimed: bool = False
 
 
 def _agent_method(agent: Any, public: str, private: str):
@@ -79,6 +85,7 @@ class LocalWorkerDispatcher:
         self._lifecycle = asyncio.Condition()
         self._submissions_inflight = 0
         self._closed = False
+        self._claim_error: Exception | None = None
 
     def attach_recovery_agent(self, agent, *, replace: bool = False) -> None:
         """Bind the Application Agent used for durable orphan WorkItems."""
@@ -98,6 +105,8 @@ class LocalWorkerDispatcher:
     async def _start_locked(self, *, recover: bool) -> None:
         if self._closed:
             raise RuntimeError("local worker dispatcher is closed")
+        if self._claim_error is not None:
+            raise self._claim_error
         self._workers = [worker for worker in self._workers if not worker.done()]
         if self._workers:
             return
@@ -262,28 +271,63 @@ class LocalWorkerDispatcher:
 
     async def _worker(self, index: int) -> None:
         worker_id = f"local-{index}"
-        while True:
-            lease = await self.scheduler.claim(
-                worker_id,
-                lease_duration=self.lease_duration,
-                policy=self._claim_policy,
-                wait_timeout=1.0,
-            )
+        retry_delay = 0.1
+        while self._claim_error is None:
+            try:
+                lease = await self.scheduler.claim(
+                    worker_id,
+                    lease_duration=self.lease_duration,
+                    policy=self._claim_policy,
+                    wait_timeout=1.0,
+                )
+            except Exception as exc:
+                transient = isinstance(exc, (OSError, TimeoutError)) or (
+                    isinstance(exc, SageV2Error)
+                    and exc.info.retryable
+                    and exc.info.code != "scheduler.persistence_failed"
+                )
+                if not transient:
+                    # A dead worker must not leave accepted callers waiting
+                    # forever when the scheduler requires operator recovery.
+                    self._claim_error = exc
+                    for requests in (self._requests, self._cleanup_requests):
+                        for key, request in tuple(requests.items()):
+                            if request.claimed:
+                                continue
+                            if not request.result.done():
+                                request.result.set_exception(exc)
+                            requests.pop(key, None)
+                    _LOGGER.error("scheduler claim failed permanently", exc_info=True)
+                    return
+                _LOGGER.warning(
+                    "scheduler claim failed; retrying in %.2fs", retry_delay
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 5.0)
+                continue
+            retry_delay = 0.1
             if lease is None:
                 continue
             cleanup = self._cleanup_requests.get(lease.work.work_id)
             if cleanup is not None:
+                cleanup.claimed = True
                 await self._execute_cleanup(lease, cleanup)
                 continue
             request = self._requests.get(lease.work.run_id)
             if request is None:
                 request = self._restore_request(lease)
                 if request is None:
-                    await self.scheduler.release(
-                        lease, LeaseReleaseReason.CANCELLED, requeue=False
-                    )
+                    try:
+                        await self.scheduler.release(
+                            lease, LeaseReleaseReason.CANCELLED, requeue=False
+                        )
+                    except Exception:
+                        # No execution started. An unreleased orphan can expire,
+                        # but must not take a worker out of the pool.
+                        _LOGGER.warning("failed to release orphan work", exc_info=True)
                     continue
                 self._requests[lease.work.run_id] = request
+            request.claimed = True
             renewer = asyncio.create_task(self._renew(lease))
             execution = None
             snapshot = None
@@ -552,7 +596,11 @@ class LocalWorkerDispatcher:
         raw_context = lease.work.payload.get("request_context")
         if not isinstance(raw_context, dict):
             return None
-        context = RequestContext.model_validate(raw_context)
+        try:
+            context = RequestContext.model_validate(raw_context)
+        except (TypeError, ValueError):
+            _LOGGER.warning("cannot recover work with invalid request context")
+            return None
         result = asyncio.get_running_loop().create_future()
         # Recovered work has no in-process caller awaiting this Future.
         result.add_done_callback(self._consume_detached_result)

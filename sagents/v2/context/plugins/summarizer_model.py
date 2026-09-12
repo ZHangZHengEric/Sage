@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from sagents.v2._concurrency import auxiliary_capacity
 import json
 from typing import Any
 
@@ -79,6 +80,21 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         self.timeout_seconds = float(timeout_seconds)
 
     async def summarize(self, request: SummarizationRequest) -> str:
+        async with auxiliary_capacity("context-summary"):
+            try:
+                # Include capabilities discovery and both format attempts in
+                # one bounded operation, not just each streaming iteration.
+                async with asyncio.timeout(self.timeout_seconds):
+                    return await self._summarize(request)
+            except TimeoutError as exc:
+                raise auxiliary_model_timeout_error(
+                    code="context.summarizer.model_timeout",
+                    operation="Model conversation summarization",
+                    timeout_seconds=self.timeout_seconds,
+                    plugin_id=self.plugin_id,
+                ) from exc
+
+    async def _summarize(self, request: SummarizationRequest) -> str:
         parts = []
         if request.previous_summary:
             parts.append(

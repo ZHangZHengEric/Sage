@@ -6,6 +6,8 @@ the replaceable projection from canonical loop state to one model request.
 
 from __future__ import annotations
 
+from sagents.v2.context.token_estimator import estimate_tokens_async
+
 import json
 from dataclasses import dataclass
 from typing import Protocol
@@ -116,9 +118,7 @@ class DefaultAgentStepRequestBuilder:
                 output_schema=localized.output_schema,
             )
             for tool in selection.tools
-            for localized in (
-                localize_tool_definition(tool, response_language),
-            )
+            for localized in (localize_tool_definition(tool, response_language),)
         )
         hidden_index_messages = (
             (self._tool_index_message(selection.hidden_tool_index, language),)
@@ -131,18 +131,17 @@ class DefaultAgentStepRequestBuilder:
             else ()
         )
         suffix_messages = (*hidden_index_messages, *continuation_messages)
-        tool_tokens = self._estimate_tool_tokens(request_tools)
+        tool_tokens = await self._estimate_tool_tokens(request_tools)
         reservation = ContextRequestReservation(
             tool_schema_tokens=tool_tokens,
-            hidden_tool_index_tokens=self.token_estimator.estimate(
-                hidden_index_messages
+            hidden_tool_index_tokens=await estimate_tokens_async(
+                self.token_estimator, hidden_index_messages
             ),
-            continuation_guidance_tokens=self.token_estimator.estimate(
-                continuation_messages
+            continuation_guidance_tokens=await estimate_tokens_async(
+                self.token_estimator, continuation_messages
             ),
             protocol_overhead_tokens=(
-                self._PROVIDER_REQUEST_OVERHEAD_TOKENS
-                + additional_input_reserve_tokens
+                self._PROVIDER_REQUEST_OVERHEAD_TOKENS + additional_input_reserve_tokens
             ),
             message_count=len(suffix_messages),
         )
@@ -154,7 +153,7 @@ class DefaultAgentStepRequestBuilder:
         )
         prepared_messages = (*prepared_messages, *suffix_messages)
         estimated_input_tokens = (
-            self.token_estimator.estimate(prepared_messages)
+            await estimate_tokens_async(self.token_estimator, prepared_messages)
             + tool_tokens
             + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
         )
@@ -180,15 +179,11 @@ class DefaultAgentStepRequestBuilder:
                     "estimated_input_tokens": estimated_input_tokens,
                     "reserved_non_history_tokens": reservation.input_tokens,
                     "tool_schema_tokens": reservation.tool_schema_tokens,
-                    "hidden_tool_index_tokens": (
-                        reservation.hidden_tool_index_tokens
-                    ),
+                    "hidden_tool_index_tokens": (reservation.hidden_tool_index_tokens),
                     "continuation_guidance_tokens": (
                         reservation.continuation_guidance_tokens
                     ),
-                    "protocol_overhead_tokens": (
-                        reservation.protocol_overhead_tokens
-                    ),
+                    "protocol_overhead_tokens": (reservation.protocol_overhead_tokens),
                 },
                 "tool_selection": {
                     "plugin": self.tool_selection_policy.plugin_id,
@@ -204,7 +199,7 @@ class DefaultAgentStepRequestBuilder:
         )
         return PreparedAgentStep(request=request, tools=selection.tools)
 
-    def _estimate_tool_tokens(
+    async def _estimate_tool_tokens(
         self, tools: tuple[ModelToolDefinition, ...]
     ) -> int:
         if not tools:
@@ -218,14 +213,15 @@ class DefaultAgentStepRequestBuilder:
             sort_keys=True,
             separators=(",", ":"),
         )
-        return self.token_estimator.estimate(
+        return await estimate_tokens_async(
+            self.token_estimator,
             (
                 ModelMessage(
                     role="developer",
                     content=(TextBlock(text=payload),),
                     metadata={"request_budget_tools": True},
                 ),
-            )
+            ),
         )
 
     def _validate_final_budget(
