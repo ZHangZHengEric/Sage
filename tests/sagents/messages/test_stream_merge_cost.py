@@ -188,3 +188,25 @@ def test_nonconsecutive_ids_remain_separate_messages():
     ]
     result = MessageManager.merge_new_messages_to_old_messages(parts, [])
     assert [m.content for m in result] == ["one", "two", "three"]
+
+
+def test_ordinary_tool_argument_deltas_do_not_rebuild_compression_graph():
+    manager = MessageManager()
+    with patch.object(manager, '_refresh_history_anchor_index', wraps=manager._refresh_history_anchor_index) as refresh:
+        manager.add_messages(chunk(tool_calls=[tool(0, call_id='call', name='file_write', arguments='{"content":"')]))
+        for _ in range(100):
+            manager.add_messages(chunk(tool_calls=[tool(0, arguments='x')]))
+        manager.add_messages(chunk(tool_calls=[tool(0, arguments='"}')]))
+        assert refresh.call_count == 1
+        assert manager.messages[-1].tool_calls[0]['function']['arguments'] == '{"content":"' + 'x' * 100 + '"}'
+        assert manager.compact_manifest['total_messages'] == 1
+
+
+def test_late_compression_tool_name_still_refreshes_after_becoming_complete():
+    manager = MessageManager()
+    with patch.object(manager, '_refresh_history_anchor_index', wraps=manager._refresh_history_anchor_index) as refresh:
+        manager.add_messages(chunk(tool_calls=[tool(0, call_id='call', name='')]))
+        manager.add_messages(chunk(tool_calls=[tool(0, name='compress_conversation_history')]))
+        manager.add_messages(chunk(tool_calls=[tool(0, arguments='{}')]))
+        assert refresh.call_count == 3
+        assert manager._is_compress_history_tool_call(manager.messages[-1])

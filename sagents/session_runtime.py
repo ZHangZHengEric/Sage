@@ -1,3 +1,4 @@
+from sagents.utils.request_latency import request_stage
 from sagents.utils.latency_diagnostics import diagnose, timed
 import asyncio
 import concurrent.futures
@@ -1141,9 +1142,10 @@ class Session:
                         request_status = "interrupted"
                     else:
                         request_status = "completed"
-                    await asyncio.to_thread(
-                        session_context.end_request, status=request_status
-                    )
+                    with request_stage("request.end_usage"):
+                        await asyncio.to_thread(
+                            session_context.end_request, status=request_status
+                        )
                 except Exception as exc:
                     logger.warning(f"SAgent: 关闭 per-request tokens 统计失败: {exc}")
 
@@ -1160,15 +1162,17 @@ class Session:
             if session_context:
                 try:
                     logger.debug("SAgent: 会话状态保存")
-                    await asyncio.to_thread(
-                        session_context.save,
-                        session_status=self.status,
-                        child_session_ids=list(self.child_session_ids),
-                        interrupt_reason=self.interrupt_reason,
-                    )
+                    with request_stage("request.save_state"):
+                        await asyncio.to_thread(
+                            session_context.save,
+                            session_status=self.status,
+                            child_session_ids=list(self.child_session_ids),
+                            interrupt_reason=self.interrupt_reason,
+                        )
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
-            await self._cleanup_session_resources(session_id)  # pyright: ignore[reportArgumentType]
+            with request_stage("request.cleanup"):
+                await self._cleanup_session_resources(session_id)
 
             # 真正向消费者推送 token_usage 放在最后；任何 yield 异常（含
             # GeneratorExit）都不得影响前面的清理，因此放在所有清理之后。

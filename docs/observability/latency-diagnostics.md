@@ -236,3 +236,12 @@ instrumented executor; metadata, instructions, file trees, caller workspace and
 Agent-owner skill precedence are preserved. Its elapsed/queue/run/resume times
 are separate from model-client creation. This does not alter tool execution or
 cache mutable skill contents across requests.
+
+Full-turn samples revealed additional cumulative work after first output.
+Stage counters now distinguish SDK-stream consumer processing, request preparation,
+LLM result recording, request usage finalization, state persistence, and cleanup.
+These are diagnostic totals that may overlap concurrent work. Ordinary assistant
+tool argument deltas no longer rebuild the entire compression coverage graph;
+new messages, late-arriving compression tool names, compression argument deltas
+and partial compression results still refresh it. The actual inference view
+continues to derive coverage from messages.
