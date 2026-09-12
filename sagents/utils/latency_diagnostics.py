@@ -307,3 +307,24 @@ def timed_file(fn):
             diagnostic.file(entry, time.perf_counter() - started)
 
     return wrapped
+
+
+def record_first_output_latency(session_id, latency_ms):
+    """Flag Sage-side first output above 3 s; this is not a request timeout."""
+    if latency_ms <= 3000 or os.environ.get("SAGE_LATENCY_DIAGNOSTICS", "1") == "0":
+        return
+    _emit(
+        {
+            "version": 1,
+            "operation": "first_output.slow",
+            "timestamp": time.time(),
+            "session_id": str(session_id or "")[:128],
+            "operation_id": uuid.uuid4().hex[:16],
+            "status": "slow",
+            "elapsed_ms": latency_ms,
+            "target_ms": 3000,
+            "stages": {},
+            "counts": {},
+            "slow_files": [],
+        }
+    )

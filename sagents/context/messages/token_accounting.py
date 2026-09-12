@@ -9,6 +9,13 @@ from __future__ import annotations
 
 from collections import Counter, OrderedDict
 from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+import threading
+from sagents.utils.latency_diagnostics import (
+    diagnose,
+    count,
+    to_thread as diagnostic_to_thread,
+)
 from enum import Enum
 import hashlib
 import json
@@ -34,6 +41,11 @@ DEFAULT_COMPRESSION_THRESHOLD = 0.85
 MAX_CHECKPOINTS_PER_SESSION = 32
 MIN_CHECKPOINT_OVERLAP = 0.5
 MAX_DYNAMIC_SCALE = 8.0
+# Content-addressed estimates only; never retain serialized prompts or messages.
+_MAX_TEXT_ESTIMATE_CACHE = 2048
+_text_estimate_cache = OrderedDict()
+_text_estimate_cache_lock = threading.Lock()
+
 _LONG_ASCII_TOKEN_RUN = re.compile(r"[A-Za-z0-9_+/=-]{32,}")
 
 
@@ -309,19 +321,58 @@ class PromptTokenEstimator:
     ) -> PromptComponent:
         safe_value, image_tokens = _accounting_value(value)
         serialized = _canonical_json(safe_value)
-        # Canonical JSON includes role/tool framing; two tokens cover the provider's
-        # per-component separators without pretending to be an exact tokenizer.
-        estimated = _static_text_tokens(serialized) + image_tokens + 2
-        conservative = max(
-            estimated,
-            _conservative_text_tokens(serialized) + image_tokens + 2,
-        )
+        fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        count("budget.components")
+        count("budget.serialized_characters", len(serialized))
+        with _text_estimate_cache_lock:
+            estimates = _text_estimate_cache.get(fingerprint)
+            if estimates is not None:
+                _text_estimate_cache.move_to_end(fingerprint)
+        if estimates is None:
+            count("budget.cache_misses")
+            # Keep the exact arithmetic/order of the original estimators. Cache
+            # only text estimates; image costs and message identity are per-call.
+            estimates = (
+                _static_text_tokens(serialized),
+                _conservative_text_tokens(serialized),
+            )
+            with _text_estimate_cache_lock:
+                _text_estimate_cache[fingerprint] = estimates
+                _text_estimate_cache.move_to_end(fingerprint)
+                while len(_text_estimate_cache) > _MAX_TEXT_ESTIMATE_CACHE:
+                    _text_estimate_cache.popitem(last=False)
+        else:
+            count("budget.cache_hits")
+        estimated = estimates[0] + image_tokens + 2
+        conservative = max(estimated, estimates[1] + image_tokens + 2)
         return PromptComponent(
             kind=kind,
-            fingerprint=_fingerprint(safe_value),
+            fingerprint=fingerprint,
             estimated_tokens=max(1, estimated),
             conservative_tokens=max(1, conservative),
             message_id=message_id,
+        )
+
+    @classmethod
+    @diagnose("prompt_budget.manifest", 100)
+    async def manifest_async(
+        cls,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        tools: Any = None,
+        response_format: Any = None,
+        session_id: Optional[str] = None,
+    ) -> PromptTokenManifest:
+        # Freeze caller-owned containers before yielding; no mutable live-session
+        # messages are examined concurrently by a worker. Strings are immutable
+        # and deepcopy does not duplicate their bodies.
+        snapshot = deepcopy((messages, tools, response_format))
+        return await diagnostic_to_thread(
+            "prompt_budget.manifest",
+            cls.manifest,
+            snapshot[0],
+            tools=snapshot[1],
+            response_format=snapshot[2],
         )
 
     @classmethod
@@ -477,9 +528,7 @@ class PromptBudgetManager:
             - scale * removed_tokens
         )
         unchanged = not added and not removed
-        projected = (
-            checkpoint.actual_prompt_tokens if unchanged else dynamic_projection
-        )
+        projected = checkpoint.actual_prompt_tokens if unchanged else dynamic_projection
         checkpoint.last_used_at = time.time()
         self._checkpoints.move_to_end(profile_id)
         return PromptTokenProjection(

@@ -158,3 +158,15 @@ def test_nested_preparation_shares_one_summary_and_reports_partial_errors(monkey
     assert records[0]["session_id"] == "nested"
     assert records[0]["status"] == "partial_error"
     assert records[0]["stages"]["prepare.nested"]["count"] == 1
+
+
+def test_first_output_above_three_seconds_is_recorded_without_timeout(monkeypatch):
+    records = []
+    monkeypatch.setattr(d, "_emit", records.append)
+    monkeypatch.setenv("SAGE_LATENCY_DIAGNOSTICS", "1")
+    d.record_first_output_latency("session", 3000)
+    assert records == []
+    d.record_first_output_latency("session", 3001)
+    assert records[0]["operation"] == "first_output.slow"
+    assert records[0]["elapsed_ms"] == 3001
+    assert records[0]["target_ms"] == 3000

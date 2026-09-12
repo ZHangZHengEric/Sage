@@ -300,17 +300,13 @@ def test_sanitize_keeps_tool_choice_for_third_party_deepseek_slug() -> None:
             "tool_choice": "required",
             "extra_body": {"thinking": {"type": "enabled"}},
         },
-        model_config={
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        },
+        model_config={"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
         model="deepseek-v4-flash",
     )
     assert out["tool_choice"] == "required"
 
 
-def test_deepseek_history_sanitizer_fills_missing_reasoning_without_mutation() -> (
-    None
-):
+def test_deepseek_history_sanitizer_fills_missing_reasoning_without_mutation() -> None:
     messages = [
         {"role": "user", "content": "weather"},
         {
@@ -363,9 +359,7 @@ def test_deepseek_history_sanitizer_fills_plain_assistant_reasoning_without_muta
     assert "reasoning_content" not in messages[1]
 
 
-def test_deepseek_history_sanitizer_also_fills_when_thinking_off() -> (
-    None
-):
+def test_deepseek_history_sanitizer_also_fills_when_thinking_off() -> None:
     messages = [
         {
             "role": "assistant",
@@ -422,7 +416,9 @@ def test_prepare_deepseek_view_keeps_reasoning_when_current_thinking_is_off() ->
     assert out[0]["tool_calls"][0]["id"] == "call-1"
 
 
-def test_prepare_generic_view_strips_reasoning_and_keeps_visible_tool_text_once() -> None:
+def test_prepare_generic_view_strips_reasoning_and_keeps_visible_tool_text_once() -> (
+    None
+):
     messages = [
         {
             "role": "assistant",
@@ -789,3 +785,31 @@ async def test_create_chat_completion_keeps_image_urls_when_model_supports_image
     )
 
     assert response["kwargs"]["messages"][0]["content"][1] == image_part
+
+
+@pytest.mark.asyncio
+async def test_async_request_observer_completes_before_provider_call():
+    import asyncio
+    from types import SimpleNamespace
+
+    observed = []
+
+    async def observer(request):
+        await asyncio.sleep(0)
+        observed.append(request)
+
+    async def create(**kwargs):
+        assert len(observed) == 1
+        assert observed[0]["messages"] == kwargs["messages"]
+        return {"ok": True}
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    result = await create_chat_completion_with_fallback(
+        client,
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "hello"}],
+        request_observer=observer,
+    )
+    assert result == {"ok": True}

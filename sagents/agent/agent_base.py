@@ -1254,8 +1254,10 @@ class AgentBase(ABC):
                     request_characters,
                     None,
                 )
-            manifest = PromptTokenEstimator.manifest(
-                candidate_dicts, tools=request_tools
+            manifest = await PromptTokenEstimator.manifest_async(
+                candidate_dicts,
+                tools=request_tools,
+                session_id=session_id,
             )
             model_name, provider_identity = self._resolve_prompt_accounting_identity()
             profile_id = PromptBudgetManager.build_profile_id(
@@ -1305,8 +1307,8 @@ class AgentBase(ABC):
         view = MessageManager.build_inference_view(working_messages)
         if message_manager is not None:
             message_manager.store_inference_messages(view)
-        current_tokens, current_characters, current_projection = (
-            await measure_request(view)
+        current_tokens, current_characters, current_projection = await measure_request(
+            view
         )
         if current_tokens <= trigger_limit and not provider_overflow_recovery:
             yield (view, True)
@@ -1321,9 +1323,13 @@ class AgentBase(ABC):
         )
         # A soft budget must not repeatedly summarize an existing summary.
         # Real provider overflow may try it once, then propagate the error.
-        if segment and not provider_overflow_recovery and all(
-            (msg.metadata or {}).get("compression_anchor") is True
-            for msg in segment
+        if (
+            segment
+            and not provider_overflow_recovery
+            and all(
+                (msg.metadata or {}).get("compression_anchor") is True
+                for msg in segment
+            )
         ):
             logger.info(f"{self.agent_name}: 没有新增可压缩历史，跳过摘要重复压缩")
             yield (view, True)
@@ -1383,9 +1389,7 @@ class AgentBase(ABC):
         candidate_working_messages = self._insert_chunks_after_message_id(
             working_messages, source_end, emitted_chunks
         )
-        candidate_view = MessageManager.build_inference_view(
-            candidate_working_messages
-        )
+        candidate_view = MessageManager.build_inference_view(candidate_working_messages)
         after_tokens, after_characters, after_projection = await measure_request(
             candidate_view
         )
@@ -1549,14 +1553,15 @@ class AgentBase(ABC):
         provider_request_attempts: List[Dict[str, Any]] = []
         provider_request_manifests = []
 
-        def record_provider_request(request: Dict[str, Any]) -> None:
+        async def record_provider_request(request: Dict[str, Any]) -> None:
             raw_messages = request.get("messages")
             if isinstance(raw_messages, list):
                 provider_request_manifests.append(
-                    PromptTokenEstimator.manifest(
+                    await PromptTokenEstimator.manifest_async(
                         raw_messages,
                         tools=request.get("tools"),
                         response_format=request.get("response_format"),
+                        session_id=session_id,
                     )
                 )
             provider_request_attempts.append(
@@ -1905,10 +1910,11 @@ class AgentBase(ABC):
                 if request_messages_snapshot is None:
                     preliminary_projection = prompt_budget_manager.project(
                         prompt_profile_id,
-                        PromptTokenEstimator.manifest(
+                        await PromptTokenEstimator.manifest_async(
                             serializable_messages,
                             tools=final_config.get("tools"),
                             response_format=response_format,
+                            session_id=session_id,
                         ),
                     )
                     if preliminary_projection.projected_tokens > prompt_input_limit:
@@ -1951,10 +1957,13 @@ class AgentBase(ABC):
                                 not in candidate_next_request_message_ids
                                 or msg.get("_sage_message_id") in claimed_ids
                             ]
-                    request_accounting_manifest = PromptTokenEstimator.manifest(
-                        serializable_messages,
-                        tools=final_config.get("tools"),
-                        response_format=response_format,
+                    request_accounting_manifest = (
+                        await PromptTokenEstimator.manifest_async(
+                            serializable_messages,
+                            tools=final_config.get("tools"),
+                            response_format=response_format,
+                            session_id=session_id,
+                        )
                     )
                     request_token_projection = prompt_budget_manager.project(
                         prompt_profile_id, request_accounting_manifest
@@ -2532,7 +2541,9 @@ class AgentBase(ABC):
                                 identity_path
                             )
                             role_content = self._bounded_workspace_context(
-                                role_content, "IDENTITY.md", IDENTITY_CONTEXT_MAX_CHARACTERS
+                                role_content,
+                                "IDENTITY.md",
+                                IDENTITY_CONTEXT_MAX_CHARACTERS,
                             )
                             use_identity = True
                     except Exception as e:
@@ -2709,6 +2720,7 @@ class AgentBase(ABC):
             # 3. Active Skills  → semi_stable
             if "active_skill" in include_sections and active_skills:
                 semi_buf += "<active_skills>\n"
+
                 def active_entries():
                     for skill in sorted(
                         active_skills,
@@ -2717,11 +2729,13 @@ class AgentBase(ABC):
                         skill_name = str(skill.get("skill_name", "unknown"))[:200]
                         skill_content = self._bounded_workspace_context(
                             str(skill.get("skill_content", "")),
-                            f"skill {skill_name}", ACTIVE_SKILL_MAX_CHARACTERS,
+                            f"skill {skill_name}",
+                            ACTIVE_SKILL_MAX_CHARACTERS,
                         )
                         skill_content_escaped = (
                             skill_content.replace("&", "&amp;")
-                            .replace("<", "&lt;").replace(">", "&gt;")
+                            .replace("<", "&lt;")
+                            .replace(">", "&gt;")
                         )
                         yield f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
 
@@ -2817,11 +2831,13 @@ class AgentBase(ABC):
                     )
                     if skill_infos:
                         semi_buf += "<available_skills>\n"
+
                         def available_entries():
                             for skill in skill_infos:
                                 name = str(skill.name)[:200]
                                 description = self._bounded_workspace_context(
-                                    str(skill.description), f"skill description {name}",
+                                    str(skill.description),
+                                    f"skill description {name}",
                                     SKILL_DESCRIPTION_MAX_CHARACTERS,
                                 )
                                 yield f"<skill>\n<skill_name>{name}</skill_name>\n<skill_description>{description}</skill_description>\n</skill>\n"
