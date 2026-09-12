@@ -25,6 +25,15 @@ _sink = None
 class _CappedDailyHandler(TimedRotatingFileHandler):
     """Current UTC day plus two backups, at most 10 MiB per day."""
 
+    def getFilesToDelete(self):
+        expired = set(super().getFilesToDelete())
+        oldest_day = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 2 * 86400))
+        base = Path(self.baseFilename)
+        for path in base.parent.glob(base.name + ".????-??-??"):
+            if path.name[-10:] < oldest_day:
+                expired.add(str(path))
+        return sorted(expired)
+
     def emit(self, record):
         try:
             if self.shouldRollover(record):
@@ -56,10 +65,8 @@ def _emit(payload):
                     delay=True,
                 )
                 # Remove expired backups on first write after a long idle/restart.
-                cutoff = time.time() - 3 * 86400
-                for path in root.glob("latency-diagnostics.jsonl.????-??-??"):
-                    if path.stat().st_mtime < cutoff:
-                        path.unlink(missing_ok=True)
+                for path in handler.getFilesToDelete():
+                    Path(path).unlink(missing_ok=True)
                 _sink = logging.Logger("sage.latency.diagnostics", logging.INFO)
                 _sink.propagate = False
                 _sink.addHandler(handler)

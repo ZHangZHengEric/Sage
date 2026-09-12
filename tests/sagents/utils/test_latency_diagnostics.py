@@ -133,9 +133,11 @@ def test_log_size_and_three_day_retention(tmp_path, monkeypatch):
     d._emit({"test": 2})
     assert path.stat().st_size == 10 * 1024 * 1024
     # Daily rollover still runs when the previous day reached its cap.
+    stale.write_text("expired after startup")
     handler.rolloverAt = time.time() - 1
     d._emit({"test": 3})
     assert json.loads(path.read_text()) == {"test": 3}
+    assert not stale.exists()
     handler.close()
 
 
