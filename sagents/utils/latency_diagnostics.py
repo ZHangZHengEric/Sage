@@ -258,6 +258,8 @@ def diagnose(operation, threshold_ms):
             session_id = bound.arguments.get("session_id")
             if session_id is None:
                 session_id = getattr(bound.arguments.get("self"), "session_id", None)
+            if session_id is None:
+                session_id = getattr(bound.arguments.get("request"), "session_id", None)
             diagnostic = Diagnostic(operation, session_id)
             token = _current.set(diagnostic)
             monitor = current_monitor()
@@ -276,6 +278,9 @@ def diagnose(operation, threshold_ms):
                 if monitor is not None:
                     monitor.leave(diagnostic)
                 elapsed = (time.perf_counter() - diagnostic.started) * 1000
+                if operation in {"session.prepare", "memory.search", "prompt_budget.manifest"}:
+                    from sagents.utils.request_latency import record_stage
+                    record_stage(operation, elapsed / 1000)
                 with diagnostic.lock:
                     has_errors = any(
                         key.endswith("errors") and value

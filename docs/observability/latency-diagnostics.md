@@ -183,3 +183,43 @@ and fallback logic without visiting parameters or return schemas. Full provider
 schema generation remains unchanged. Tests compare metadata against full
 schemas across built-in tools and languages, and reject any parameter/return
 access during simplified discovery.
+
+## One-second framework overhead target
+
+`request.first_output` and `request.completed` are small per-execution summaries
+in the same capped, three-calendar-day file. They retain only IDs and numeric
+aggregates (at most 16 stage counters); no interval history or message payloads.
+For `/api/chat` and `/api/stream`, the clock starts at handler entry, before
+configuration lookup and session preparation. It excludes upstream Ling work,
+FastAPI authentication/body parsing before handler invocation, and transport
+work after Sage's visible output. Other callers start at `mark_request_execution`
+or, if unavailable, `prepare_session`.
+
+`framework_overhead_ms` is elapsed wall time minus the **union** of model SDK
+create/stream-read awaits and tool execution. Parallel waits and a model called
+inside a tool are not double-subtracted. `model_wait_union_ms` includes SDK and
+network time; it is not provider-only inference time. Work between stream reads
+is outside model time. `tool_execution_union_ms` is reported separately and is
+excluded from the one-second target. `non_model_ms` is the older literal
+elapsed-minus-model quantity and still includes tool execution; use
+`framework_overhead_ms` and `framework_target_ms` for the new target.
+
+The first-output and completed summaries share an execution ID and have
+independent statuses. A multi-step turn can accumulate over one second of
+framework overhead even when first output is fast. Concurrent local work hidden
+behind a model/tool wait is not on this uncovered wall-clock path; the existing
+loop watchdog and thread CPU/run/resume diagnostics still detect such work.
+Recorded preparation stages include config/dispatch, lock/validation, service
+construction, client construction, workspace assets, conversation lookup,
+Sage session preparation, budget calculations and memory search. Stage durations
+can overlap or nest; do not sum them as mutually exclusive buckets.
+
+Client creation now runs in the existing instrumented thread executor because
+SSL trust-store loading and lazy SDK initialization are synchronous. It performs
+no network request until the client is used on the requesting event loop.
+Standard/fast models reuse one client only within the same request when endpoint
+and credentials are identical; different providers or credentials remain
+isolated. Shared clients are closed once. Cancelled construction disposes of an
+unclaimed client when its worker completes and releases the session run lock.
+The stream accounting scope resets before yielding, allowing disconnect cleanup
+from another task without crossing ContextVar token boundaries.

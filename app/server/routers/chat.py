@@ -3,6 +3,7 @@
 """
 
 import asyncio
+from sagents.utils.request_latency import RequestLatency
 import json
 import time
 import uuid
@@ -494,6 +495,7 @@ def _has_pending_user_injections(session_id: str | None) -> bool:
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
+    latency_budget = RequestLatency()
     validate_and_prepare_request(
         request,
         http_request,
@@ -511,6 +513,7 @@ async def chat(request: ChatRequest, http_request: Request):
         provider_id=request.provider_id,
         fast_provider_id=request.fast_provider_id,
     )
+    inner_request._latency_budget = latency_budget
     chat_service.mark_request_execution(inner_request, request_source="api/chat")
 
     await chat_service.populate_request_from_agent_config(
@@ -542,6 +545,7 @@ async def chat(request: ChatRequest, http_request: Request):
 @chat_router.post("/api/stream")
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
+    request._latency_budget = RequestLatency()
     validate_and_prepare_request(request, http_request)
     await _guard_request_multimodal_images(request)
     chat_service.mark_request_execution(request, request_source="api/stream")
