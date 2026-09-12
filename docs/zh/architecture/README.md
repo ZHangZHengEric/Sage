@@ -102,6 +102,7 @@ flowchart LR
 2. [权限与确认设计方案](DESIGN_PERMISSIONS_AND_CONFIRMATION.md)：面向工具、沙箱与多入口的权限分级、确认流与策略模型（当前未在代码中全面实现）
 3. [sagents v2 模块化与插件化设计](DESIGN_SAGENTS_V2_REFACTOR.md)：对齐当前实现的小内核、领域模块、能力插件和组合根，并明确 provider 回放、完整请求预算与生产执行恢复缺口
 4. [sagents v2 沙箱暂停、释放与恢复](SAGENTS_V2_SANDBOX_LIFECYCLE.md)：审批与计算解耦、资源记录、Scheduler fencing、Job affinity 与 Sandbox Provider v3
+5. [Sage 持续学习与递归自我改进设计](DESIGN_SAGE_RSI.md)：固定模型下的多轮反馈学习、现有能力盘点、开源项目对照、评测晋升与分阶段实施路线
 
 ## 阅读建议
 
