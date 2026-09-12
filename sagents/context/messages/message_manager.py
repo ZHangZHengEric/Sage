@@ -297,14 +297,11 @@ class MessageManager:
                 continue
 
             previous = self.messages[-1] if self.messages else None
-            is_text_delta = (
+            is_assistant_delta = (
                 previous is not None
                 and previous.message_id == message.message_id
                 and previous.role == message.role == MessageRole.ASSISTANT.value
-                and not previous.tool_calls
-                and not message.tool_calls
             )
-            refresh_history = refresh_history or not is_text_delta
             # The ledger owns its messages. Keep prior list/tail views stable,
             # but do not recursively copy unchanged history for every token.
             merged = list(self.messages)
@@ -312,14 +309,22 @@ class MessageManager:
                 merged[-1] = deepcopy(previous)
             MessageManager._merge_into_owned_messages(message, merged)
             self.messages = merged
+            # Ordinary tool argument deltas cannot change compression coverage.
+            # Check the merged name as a function name can arrive in
+            # a later delta; compression calls/results must still refresh eagerly.
+            unchanged_coverage = (
+                is_assistant_delta
+                and not self._is_compress_history_tool_call(previous)
+                and not self._is_compress_history_tool_call(merged[-1])
+            )
+            refresh_history = refresh_history or not unchanged_coverage
 
         self.stats["total_messages"] = len(self.messages)
         self.stats["total_chunks"] += len(messages)
         self.stats["last_updated"] = datetime.datetime.now().isoformat()
 
-        # A text/reasoning delta on an existing plain assistant message cannot
-        # change compression coverage. New messages and all tool deltas still
-        # refresh, including partial compression results becoming valid JSON.
+        # New messages and compression deltas still refresh, including partial
+        # compression results becoming valid JSON.
         if refresh_history:
             self._refresh_history_anchor_index()
         return True

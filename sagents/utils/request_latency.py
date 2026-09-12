@@ -151,6 +151,7 @@ class TimedModelStream:
     def __init__(self, stream):
         self.stream = stream
         self.iterator = stream.__aiter__()
+        self.last_returned_at = None
 
     def __getattr__(self, name):
         return getattr(self.stream, name)
@@ -159,8 +160,13 @@ class TimedModelStream:
         return self
 
     async def __anext__(self):
+        if self.last_returned_at is not None:
+            record_stage("model.stream_consumer", time.perf_counter() - self.last_returned_at)
+            self.last_returned_at = None
         with model_wait():
-            return await self.iterator.__anext__()
+            result = await self.iterator.__anext__()
+        self.last_returned_at = time.perf_counter()
+        return result
 
     async def __aenter__(self):
         await self.stream.__aenter__()
@@ -210,3 +216,16 @@ def timed_tool_execution(fn):
             return await fn(*args, **kwargs)
 
     return wrapped
+
+
+@contextmanager
+def request_stage(name):
+    budget = _current.get()
+    if budget is None:
+        yield
+        return
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        budget.add_stage(name, time.perf_counter() - started)

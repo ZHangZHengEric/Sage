@@ -1,3 +1,4 @@
+from sagents.utils.request_latency import request_stage, record_stage
 from abc import ABC, abstractmethod
 from typing import (
     List,
@@ -1667,6 +1668,7 @@ class AgentBase(ABC):
                 if self.model is None:
                     raise ValueError("Model is not initialized")
 
+                preparation_started = time.perf_counter()
                 prompt_cache_observation = self._build_prompt_cache_observation(
                     messages,
                     final_config.get("tools"),
@@ -2008,6 +2010,7 @@ class AgentBase(ABC):
                     ),
                 )
 
+                record_stage("model.request_prepare", time.perf_counter() - preparation_started)
                 stream = await create_chat_completion_with_fallback(
                     self.model,
                     model=model_name,
@@ -2341,7 +2344,8 @@ class AgentBase(ABC):
                             )
                             llm_response = None
                         if session_context:
-                            session_context.add_llm_request(llm_request, llm_response)  # pyright: ignore[reportArgumentType]
+                            with request_stage("model.record_result"):
+                                session_context.add_llm_request(llm_request, llm_response)
 
                             if llm_response and llm_response.usage:
                                 usage_value = llm_response.usage
