@@ -34,6 +34,7 @@ import sys
 import datetime
 from sagents.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
 from sagents.utils.sandbox.config import VolumeMount
+from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
 from sagents.utils.sandbox.environment import is_server_process
 from sagents.utils.common_utils import detect_machine_environment
 
@@ -1411,6 +1412,39 @@ class SessionContext:
             ("MEMORY.md", "default_memory_md"),
         ]
 
+        if type(self.sandbox) is LocalSandboxProvider:
+            await self.sandbox._ensure_initialized_async()
+
+            def prepare_local():
+                # Keep the existing per-file order/error handling and resolve
+                # permissions immediately before each access, in one worker.
+                for filename, content_key in bootstrap_files:
+                    file_path = os.path.join(self.sandbox_agent_workspace, filename)
+                    try:
+                        exists = self.sandbox._checked_file_operation(
+                            file_path, "read", os.path.exists
+                        )
+                        if not exists:
+                            content = self._get_default_md_content(content_key, filename)
+                            if content:
+                                self.sandbox._checked_file_operation(
+                                    file_path, "write", self.sandbox._write_file_sync,
+                                    content, "utf-8", "overwrite",
+                                )
+                                logger.debug(f"创建引导文件: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"创建引导文件失败 {file_path}: {e}")
+                try:
+                    self.sandbox._checked_file_operation(
+                        os.path.join(self.sandbox_agent_workspace, "memory"),
+                        "mkdir", os.makedirs, exist_ok=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"创建 memory 目录失败: {e}")
+
+            await diagnostic_to_thread("local.bootstrap_files", prepare_local)
+            return
+
         for filename, content_key in bootstrap_files:
             file_path = os.path.join(self.sandbox_agent_workspace, filename)  # pyright: ignore[reportArgumentType,reportCallIssue]
             try:
@@ -1611,16 +1645,21 @@ class SessionContext:
         paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
         sandbox_root = workspace
         common_dirs = ["data", "projects", "temp", "logs"]
-        for d in common_dirs:
-            dir_path = os.path.join(sandbox_root, d)  # pyright: ignore[reportArgumentType,reportCallIssue]
-            if hasattr(self.sandbox, "ensure_directory"):
-                await self.sandbox.ensure_directory(dir_path)  # pyright: ignore[reportOptionalMemberAccess]
-            else:
-                # 沙箱不支持 ensure_directory 接口，报错
-                raise NotImplementedError(
-                    f"沙箱 {type(self.sandbox).__name__} 不支持 ensure_directory 接口，"
-                    f"无法创建目录: {dir_path}"
-                )
+        if type(self.sandbox) is LocalSandboxProvider:
+            await self.sandbox.ensure_directories(
+                [os.path.join(sandbox_root, d) for d in common_dirs]
+            )
+        else:
+            for d in common_dirs:
+                dir_path = os.path.join(sandbox_root, d)  # pyright: ignore[reportArgumentType,reportCallIssue]
+                if hasattr(self.sandbox, "ensure_directory"):
+                    await self.sandbox.ensure_directory(dir_path)  # pyright: ignore[reportOptionalMemberAccess]
+                else:
+                    # 沙箱不支持 ensure_directory 接口，报错
+                    raise NotImplementedError(
+                        f"沙箱 {type(self.sandbox).__name__} 不支持 ensure_directory 接口，"
+                        f"无法创建目录: {dir_path}"
+                    )
         self.system_context["file_permission"] = (
             f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox). "
             f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
