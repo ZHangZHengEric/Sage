@@ -179,6 +179,15 @@ class _FakeApi extends V2ApiClient {
     return (await getAgentConfiguration(agentId)).applyPatch(patch);
   }
 
+  String? lastClonedAgentId;
+  @override
+  Future<AgentConfiguration> cloneAgent(String sourceId, String name) async {
+    lastClonedAgentId = sourceId;
+    final source = await getAgentConfiguration(sourceId);
+    return AgentConfiguration(id: 'agent_cloned', name: name,
+        systemPrefix: source.systemPrefix, maxLoopCount: source.maxLoopCount);
+  }
+
   @override
   Future<AgentConfiguration> createAgent(String name) async {
     lastCreatedAgentName = name;
@@ -753,6 +762,10 @@ Inspect the complete diff before reporting findings.
     desktopSettings = settings;
     return settings;
   }
+
+  @override
+  Future<DesktopSettings> patchSettings(Map<String, Object?> patch) =>
+      saveSettings(DesktopSettings.fromJson({...desktopSettings.toJson(), ...patch}));
 
   @override
   Future<void> removeProject(String projectId) async {
@@ -1616,6 +1629,9 @@ class _GroupedToolsApi extends _FakeApi {
 
 class _RecordingGroupedToolsApi extends _GroupedToolsApi {
   final List<Map<String, Object?>> agentPatches = [];
+  final List<String> patchedAgentIds = [];
+  Completer<void>? patchGate;
+  bool failNextPatch = false;
 
   @override
   Future<AgentConfiguration> patchAgentConfiguration(
@@ -1623,6 +1639,12 @@ class _RecordingGroupedToolsApi extends _GroupedToolsApi {
     Map<String, Object?> patch,
   ) async {
     agentPatches.add(Map<String, Object?>.from(patch));
+    patchedAgentIds.add(agentId);
+    await patchGate?.future;
+    if (failNextPatch) {
+      failNextPatch = false;
+      throw StateError('save failed');
+    }
     return (await getAgentConfiguration(agentId)).applyPatch(patch);
   }
 }
@@ -1963,6 +1985,46 @@ class _DelayedAgentApi extends _FakeApi {
   }
 }
 
+class _QueuedAgentApi extends _FakeApi {
+  final pending = <Completer<AgentConfiguration>>[];
+
+  @override
+  Future<AgentConfiguration> getAgentConfiguration(String agentId) {
+    final completer = Completer<AgentConfiguration>();
+    pending.add(completer);
+    return completer.future;
+  }
+}
+
+class _SerializedSettingsApi extends _FakeApi {
+  final releaseFirst = Completer<void>();
+  final patches = <Map<String, Object?>>[];
+  @override
+  Future<DesktopSettings> patchSettings(Map<String, Object?> patch) async {
+    patches.add(patch);
+    if (patches.length == 1) await releaseFirst.future;
+    return super.patchSettings(patch);
+  }
+}
+
+class _PatchFailuresApi extends _FakeApi {
+  _PatchFailuresApi(this.failures);
+  final Set<int> failures;
+  int calls = 0;
+  AgentConfiguration saved = const AgentConfiguration(id: 'agent_main', name: 'Original');
+  @override
+  Future<AgentConfiguration> patchAgentConfiguration(String id, Map<String, Object?> patch) async {
+    if (failures.contains(++calls)) throw StateError('rejected');
+    return saved = saved.applyPatch(patch);
+  }
+}
+
+class _ReadAfterPatchApi extends _QueuedAgentApi {
+  @override
+  Future<AgentConfiguration> patchAgentConfiguration(String id, Map<String, Object?> patch) async =>
+      const AgentConfiguration(id: 'agent_main', name: 'Saved');
+}
+
 class _MissingProviderAgentApi extends _FakeApi {
   @override
   Future<AgentConfiguration> getAgentConfiguration(String agentId) async =>
@@ -2202,6 +2264,150 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  testWidgets('clone agent flushes pending edits and opens independent editor', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('智能体').first);
+    await tester.pumpAndSettle();
+    final source = controller.agentConfiguration!.id;
+    await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Customized');
+    await tester.tap(find.byKey(const ValueKey('settings-agent-clone')));
+    await tester.pumpAndSettle();
+    expect(api.lastAgentPatch, {'name': 'Customized'});
+    expect(api.lastClonedAgentId, source);
+    expect(controller.agentConfiguration?.id, 'agent_cloned');
+    expect(controller.agentConfiguration?.name, contains('Customized'));
+    expect(find.byKey(const ValueKey('agent-name-field')), findsOneWidget);
+  });
+
+  for (final field in ['workspace', 'preview', 'sandbox']) {
+    testWidgets('closing settings flushes pending $field edits', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(field == 'sandbox' ? '沙箱' : '通用').first);
+      await tester.pumpAndSettle();
+      final key = field == 'workspace' ? 'settings-agent-workspace-path' :
+          field == 'preview' ? 'settings-preview-bytes' : 'settings-sandbox-workspace-root';
+      final value = field == 'workspace' ? '/tmp/close_workspace' :
+          field == 'preview' ? '12345' : '/closed';
+      final input = find.byKey(ValueKey(key));
+      await tester.ensureVisible(input);
+      await tester.pumpAndSettle();
+      await tester.enterText(input, value);
+      await tester.tap(find.byKey(const ValueKey('settings-back-button')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settings-back-button')), findsNothing);
+      if (field == 'workspace') expect(api.lastSettings?.agentWorkspacePath, value);
+      if (field == 'preview') expect(api.lastSettings?.maxPreviewBytes, 12345);
+      if (field == 'sandbox') expect(api.lastSettings?.componentConfigs['execution.sandbox']?['workspace_root'], value);
+      expect(tester.takeException(), isNull);
+    });
+  }
+  test('settings writes are serialized and contain only edited fields', () async {
+    final api = _SerializedSettingsApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    final first = controller.saveSettings(controller.settings.copyWith(themeMode: 'dark'));
+    final second = controller.saveSettings(controller.settings.copyWith(themeMode: 'light'));
+    await Future<void>.delayed(Duration.zero);
+    expect(api.patches, [{'theme_mode': 'dark'}]);
+    api.releaseFirst.complete();
+    await Future.wait([first, second]);
+    expect(controller.settings.themeMode, 'light');
+    expect(controller.settings.projects.single.id, 'project_demo');
+    expect(api.patches.last, {'theme_mode': 'light'});
+  });
+
+  for (final failures in [<int>{1, 2}, <int>{1}, <int>{2}]) {
+    test('agent patch rollback uses confirmed server state $failures', () async {
+      final api = _PatchFailuresApi(failures);
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      controller.agentConfiguration = api.saved;
+      final first = controller.patchAgentConfiguration({'name': 'Edited'}).catchError((Object _) {});
+      final second = controller.patchAgentConfiguration({'description': 'Details'}).catchError((Object _) {});
+      await Future.wait([first, second]);
+      expect(controller.agentConfiguration?.name, api.saved.name);
+      expect(controller.agentConfiguration?.description, api.saved.description);
+    });
+  }
+
+  test('older settings read cannot overwrite successful agent write', () async {
+    final api = _ReadAfterPatchApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    controller.agentConfiguration = const AgentConfiguration(id: 'agent_main', name: 'Old');
+    final read = controller.loadSettingsCatalog(agentId: 'agent_main');
+    await controller.patchAgentConfiguration({'name': 'Saved'});
+    api.pending.single.complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
+    await read;
+    expect(controller.agentConfiguration?.name, 'Saved');
+    expect(controller.settingsAgentLoadingId, isEmpty);
+  });
+  test('settings catalog response cannot overwrite a newer agent selection', () async {
+    final api = _QueuedAgentApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
+    final selection = controller.selectSettingsAgent('agent_review');
+    api.pending[1].complete(const AgentConfiguration(id: 'agent_review', name: 'Review'));
+    await selection;
+    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
+    await catalog;
+    expect(controller.agentConfiguration?.id, 'agent_review');
+    expect(controller.settingsAgentLoadingId, isEmpty);
+    expect(controller.settingsCatalogLoading, isFalse);
+  });
+
+  test('settings selection A B A ignores the first A response', () async {
+    final api = _QueuedAgentApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    final first = controller.selectSettingsAgent('agent_main');
+    final second = controller.selectSettingsAgent('agent_review');
+    final third = controller.selectSettingsAgent('agent_main');
+    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Stale'));
+    await first;
+    expect(controller.agentConfiguration, isNull);
+    expect(controller.settingsAgentLoadingId, 'agent_main');
+    api.pending[2].complete(const AgentConfiguration(id: 'agent_main', name: 'Latest'));
+    await third;
+    api.pending[1].complete(const AgentConfiguration(id: 'agent_review', name: 'Review'));
+    await second;
+    expect(controller.agentConfiguration?.name, 'Latest');
+  });
+
+  test('settings requests can finish after controller disposal', () async {
+    final api = _QueuedAgentApi();
+    final controller = await _controller(api: api);
+    final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
+    final selection = controller.selectSettingsAgent('agent_review');
+    controller.dispose();
+    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
+    api.pending[1].completeError(StateError('late failure'));
+    await Future.wait([catalog, selection]);
+    expect(controller.agentConfiguration, isNull);
+  });
   test('legacy child prompt cache is migrated without duplication', () async {
     const prompt = '实现并验证快速排序';
     final root = Conversation(
@@ -3882,6 +4088,111 @@ void main() {
     expect(find.text('查看完整变更'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('agent text autosave keeps rapid edits to multiple fields', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _RecordingGroupedToolsApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('智能体').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
+    // A second field changes before the first field's debounce expires.
+    final description = find.byType(EditableText).at(1);
+    await tester.enterText(description, 'Specialist description');
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
+    final patches = <String, Object?>{};
+    for (final patch in api.agentPatches) {
+      patches.addAll(patch);
+    }
+    expect(patches['name'], 'Expert');
+    expect(patches['description'], 'Specialist description');
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final navigation in ['switch', 'close']) {
+    testWidgets('agent text autosave flushes before $navigation', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _RecordingGroupedToolsApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
+      await tester.tap(navigation == 'switch'
+          ? find.text('Review Agent')
+          : find.byKey(const ValueKey('settings-back-button')));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(api.patchedAgentIds, ['agent_main']);
+      expect(api.agentPatches.single['name'], 'Expert');
+      if (navigation == 'switch') {
+        expect(controller.agentConfiguration?.id, 'agent_review');
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final scenario in ['in-flight', 'retry']) {
+    testWidgets('agent text autosave handles $scenario before switching', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _RecordingGroupedToolsApi();
+      final controller = await _controller(api: api);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+      if (scenario == 'in-flight') {
+        api.patchGate = Completer<void>();
+      } else {
+        api.failNextPatch = true;
+      }
+      await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pump();
+      await tester.tap(find.text('Review Agent'));
+      await tester.pump();
+      if (scenario == 'in-flight') {
+        expect(controller.agentConfiguration?.id, 'agent_main');
+        api.patchGate!.complete();
+      }
+      await tester.pumpAndSettle();
+      expect(controller.agentConfiguration?.id, 'agent_review');
+      expect(api.patchedAgentIds, everyElement('agent_main'));
+      expect(api.agentPatches.last['name'], 'Expert');
+      expect(api.agentPatches.length, scenario == 'retry' ? 2 : 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('agent tool assignments save and update immediately', (
     tester,
@@ -7502,6 +7813,8 @@ void main() {
         'preferences': {'concise': true},
       },
     });
+    await tester.ensureVisible(find.byKey(const ValueKey('agent-deep-thinking')));
+    await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('agent-deep-thinking')),

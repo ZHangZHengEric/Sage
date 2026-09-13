@@ -10,7 +10,7 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 5;
+const sageSidecarRevision = 7;
 const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {
@@ -99,6 +99,10 @@ class V2ApiClient {
     );
     return UsageOverview.fromJson((value as Map).cast<String, Object?>());
   }
+
+  Future<AgentConfiguration> cloneAgent(String sourceId, String name) async =>
+      AgentConfiguration.fromJson((await _json('POST', '/api/v2/agents',
+          body: {'name': name, 'source_agent_id': sourceId}) as Map).cast<String, Object?>());
 
   Future<AgentConfiguration> createAgent(String name) async =>
       AgentConfiguration.fromJson(
@@ -344,6 +348,12 @@ class V2ApiClient {
   Future<DesktopSettings> saveSettings(DesktopSettings settings) async =>
       DesktopSettings.fromJson(
         (await _json('PUT', '/api/v2/settings', body: settings.toJson()) as Map)
+            .cast<String, Object?>(),
+      );
+
+  Future<DesktopSettings> patchSettings(Map<String, Object?> patch) async =>
+      DesktopSettings.fromJson(
+        (await _json('PATCH', '/api/v2/settings', body: patch) as Map)
             .cast<String, Object?>(),
       );
 

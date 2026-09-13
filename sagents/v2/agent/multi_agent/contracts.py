@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 
 from pydantic import model_validator
 
-from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName
+from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName, VerbatimText
 from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.principals import RequestContext
@@ -41,7 +41,7 @@ class AgentDescriptor(StrictModel):
     agent_id: Identifier
     name: str
     description: str
-    instructions: str
+    instructions: VerbatimText
     mode: AgentMode = AgentMode.SIMPLE
     tools: tuple[ToolName, ...] = ()
     skills: tuple[SkillName, ...] = ()

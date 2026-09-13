@@ -7,6 +7,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sage_desktop_v2/src/api/v2_api.dart';
 
 void main() {
+  test('clone agent sends source identity and preserves returned settings', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      expect(request.method, 'POST');
+      expect(request.uri.path, '/api/v2/agents');
+      expect(jsonDecode(await utf8.decoder.bind(request).join()),
+          {'name': 'Copy', 'source_agent_id': 'original'});
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'code': 0, 'data':
+          {'id': 'copy', 'name': 'Copy', 'max_loop_count': 750}}));
+      await request.response.close();
+    });
+    final api = V2ApiClient(baseUri: Uri.parse('http://127.0.0.1:${server.port}'), authToken: 'clone-token');
+    addTearDown(api.close);
+    final created = await api.cloneAgent('original', 'Copy');
+    expect(created.id, 'copy');
+    expect(created.maxLoopCount, 750);
+  });
+
+  test('settings changes use an authenticated field PATCH', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      expect(request.method, 'PATCH');
+      expect(request.uri.path, '/api/v2/settings');
+      expect(request.headers.value(HttpHeaders.authorizationHeader), 'Bearer settings-token');
+      expect(jsonDecode(await utf8.decoder.bind(request).join()), {'theme_mode': 'dark'});
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'code': 0, 'data': {'theme_mode': 'dark'}}));
+      await request.response.close();
+    });
+    final api = V2ApiClient(baseUri: Uri.parse('http://127.0.0.1:${server.port}'), authToken: 'settings-token');
+    addTearDown(api.close);
+    expect((await api.patchSettings({'theme_mode': 'dark'})).themeMode, 'dark');
+  });
   test('workspace binary requests include the sidecar capability', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final directory = await Directory.systemTemp.createTemp(

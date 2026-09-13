@@ -6,11 +6,11 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName
+from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName, VerbatimText
 
 
 class Instructions(StrictModel):
-    inline: str | None = None
+    inline: VerbatimText | None = None
     path: str | None = None
 
     @model_validator(mode="after")

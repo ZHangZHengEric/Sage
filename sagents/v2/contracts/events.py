@@ -156,6 +156,7 @@ class FlowEventData(StrictModel):
     edge_id: Identifier | None = None
     decided_by: Literal["flow", "model", "policy", "user"] | None = None
     error: RuntimeErrorInfo | None = None
+    output: dict[str, Any] | None = None
 
 
 class ArtifactEventData(StrictModel):

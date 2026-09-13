@@ -31,7 +31,7 @@ def test_sidecar_registry_is_private_and_removed_only_by_its_owner(
 
     assert json.loads(registry.read_text(encoding="utf-8")) == {
         "protocol": "sage.runtime/v2",
-        "revision": 5,
+        "revision": 7,
         "build_id": "test-build",
         "host": "127.0.0.1",
         "port": 54321,

@@ -2270,6 +2270,11 @@ class SessionStoreCoordinator:
             )
             return tuple(self._run_snapshot(row) for row in rows)
 
+    async def has_nonterminal_runs(self) -> bool:
+        """Optional host reclamation probe, including suspended and child Runs."""
+        async with self._lock:
+            return any(row.state not in TERMINAL_RUN_STATES for row in self._runs.values())
+
     async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]:
         """Return root execution intents whose Scheduler work can be rebuilt."""
 

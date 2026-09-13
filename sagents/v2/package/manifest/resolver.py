@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from sagents.v2.contracts.commands import RunConfig
-from sagents.v2.contracts.common import Identifier, StrictModel
+from sagents.v2.contracts.common import Identifier, StrictModel, VerbatimText
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.agents import AgentEntrypoint, AgentMemoryBehavior
 from sagents.v2.package.manifest.flows import FlowDefinition
@@ -24,7 +24,7 @@ from sagents.v2.package.manifest.runtime import RuntimeConfig
 
 class ResolvedAgent(StrictModel):
     name: str
-    instructions: str
+    instructions: VerbatimText
     mode: Literal["simple", "fibre", "team"] = "simple"
     model_bindings: dict[str, str] = Field(default_factory=dict)
     entrypoint: AgentEntrypoint

@@ -85,7 +85,7 @@ def test_health_identifies_the_exact_sidecar_build():
     assert response.json()["data"] == {
         "status": "ok",
         "protocol": "sage.runtime/v2",
-        "revision": 5,
+        "revision": 7,
         "build_id": "source-test-build",
     }
 

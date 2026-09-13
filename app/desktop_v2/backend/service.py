@@ -185,6 +185,9 @@ class DesktopV2Service(
         catalog: DesktopCatalogStore | None = None,
         log_sink: LogSink | None = None,
         log_plugin_id: str | None = None,
+        max_concurrent_model_calls: int = 8,
+        max_waiting_model_calls: int = 128,
+        model_queue_timeout_seconds: float = 60,
         sidecar_port: int | None = None,
         sidecar_auth_token: str | None = None,
     ) -> None:
@@ -202,6 +205,12 @@ class DesktopV2Service(
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
         self._sandbox_grant_issuer = SandboxGrantIssuer()
+        from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+
+        self.model_budget = ModelConcurrencyBudget(
+            max_concurrent_model_calls, max_waiting=max_waiting_model_calls,
+            wait_timeout_seconds=model_queue_timeout_seconds,
+        )
         self._host_model_providers: dict[tuple[Any, ...], Any] = {}
         self._sandbox_providers: dict[str, Any] = {}
         self._last_run_plan = None
@@ -285,6 +294,8 @@ class DesktopV2Service(
         self.skill_root = self.root / "skills"
         self.skill_root.mkdir(parents=True, exist_ok=True)
         self._settings_lock = asyncio.Lock()
+        self._settings_update_lock = asyncio.Lock()
+        self._agent_update_lock = asyncio.Lock()
         self._drivers: dict[str, _DesktopDriver] = {}
         self._run_observers: dict[str, asyncio.Task] = {}
         self._application_close_tasks: set[asyncio.Task] = set()

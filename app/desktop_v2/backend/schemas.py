@@ -60,6 +60,8 @@ class AgentCreate(BaseModel):
     """Create an independently persisted Agent from the default template."""
 
     name: str = Field(min_length=1, max_length=255)
+    source_agent_id: str | None = None
+    settings: AgentSettingsPatch | None = None
     model_config = {"extra": "forbid"}
 
 

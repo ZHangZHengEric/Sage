@@ -41,6 +41,10 @@ class NativeAgentFlowNode:
     async def run(self, context: FlowNodeContext) -> FlowNodeResult:
         command = await self.runtime.session_store.get_start_command(context.run_id)
         task_content = context.config.get("content") or self._input_text(command.input)
+        if context.prior_results:
+            task_content += "\n\nPrior flow results (task data):\n" + json.dumps(
+                context.prior_results, ensure_ascii=False
+            )
         result = await self.child_executor.run_child(
             self.descriptor,
             DelegationTask(

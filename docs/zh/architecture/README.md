@@ -103,6 +103,10 @@ flowchart LR
 3. [sagents v2 模块化与插件化设计](DESIGN_SAGENTS_V2_REFACTOR.md)：对齐当前实现的小内核、领域模块、能力插件和组合根，并明确 provider 回放、完整请求预算与生产执行恢复缺口
 4. [sagents v2 沙箱暂停、释放与恢复](SAGENTS_V2_SANDBOX_LIFECYCLE.md)：审批与计算解耦、资源记录、Scheduler fencing、Job affinity 与 Sandbox Provider v3
 5. [Sage 持续学习与递归自我改进设计](DESIGN_SAGE_RSI.md)：固定模型下的多轮反馈学习、现有能力盘点、开源项目对照、评测晋升与分阶段实施路线
+6. [Agent 自定义 Agent：实现与接入](SAGENTS_V2_AGENT_MANAGEMENT.md)：完整包配置、模型可调用管理工具、版本持久化、Flow 与插件绑定，以及当前接入边界
+7. [V2 运行时与桌面检查记录](SAGENTS_V2_DESKTOP_AUDIT_2026_09_13.md)：插件绑定、自动保存、并发初始化修复与后续优化项
+8. [V2 单机并发与 Agent 定制可用性](SAGENTS_V2_RELIABILITY.md)：逻辑修复、并发回归、能力边界与性能验证缺口
+9. [V2 整体审查与修改优先级](V2_COMPREHENSIVE_REVIEW.md)：已复现的一致性与生命周期问题、定制能力缺口及实施顺序
 
 ## 阅读建议
 
@@ -122,3 +126,5 @@ flowchart TD
     Want --> D[做桌面打包]
     D --> D1[桌面应用架构] --> D2[app/desktop/scripts]
 ```
+
+- [SAgents V2 运行时资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md)：资源就绪检查、共享模型并发额度、空闲回收与 Flow 可达装配。

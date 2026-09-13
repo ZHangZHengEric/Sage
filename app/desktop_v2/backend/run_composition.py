@@ -1018,7 +1018,7 @@ class DesktopRunCompositionMixin:
         return (await self.session_store.get_run(run_id)).session_id
 
     def _manifest(self, agent, provider, tools, skills):
-        max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 200))
+        max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
         deep_thinking, thinking_level = self._thinking_config(agent)
         compatibility_profile = self._verified_model_compatibility_profile(provider)
         plugin_profile = (
@@ -1260,6 +1260,7 @@ class DesktopRunCompositionMixin:
             provider_instance_id=provider.id,
             capability_profile=plugin_profile,
         )
+        model = self.model_budget.wrap(model)
         self._host_model_providers[cache_key] = model
         return model
 

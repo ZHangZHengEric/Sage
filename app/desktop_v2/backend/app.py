@@ -106,6 +106,8 @@ async def _safe(call):
             404
             if exc.info.code.endswith("not_found")
             or exc.info.code.endswith("_not_found")
+            else 429
+            if exc.info.category == ErrorCategory.RATE_LIMITED
             else 409
             if exc.info.category == ErrorCategory.CONFLICT
             else 403
@@ -603,6 +605,11 @@ def create_app(
     @app.put("/api/v2/settings")
     async def put_settings(settings: DesktopV2Settings):
         value = await _safe(runtime_service.save_settings(settings))
+        return _success(value.model_dump(mode="json"))
+
+    @app.patch("/api/v2/settings")
+    async def patch_settings(patch: dict[str, Any]):
+        value = await _safe(runtime_service.patch_settings(patch))
         return _success(value.model_dump(mode="json"))
 
     @app.post("/api/v2/projects")

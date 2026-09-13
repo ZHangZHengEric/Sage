@@ -101,6 +101,7 @@ class SAgentApplication:
         composition_hash: str,
         resolved_plan: ResolvedApplicationPlan | None = None,
         owned_resources: tuple[ApplicationResource, ...] = (),
+        resource_readiness: dict | None = None,
     ) -> None:
         if entrypoint_agent_id not in agents:
             raise ValueError(f"unknown application entrypoint {entrypoint_agent_id!r}")
@@ -109,6 +110,7 @@ class SAgentApplication:
         self._scope_handles = list(scope_handles)
         self._services = dict(services)
         self._adapters = dict(adapters)
+        self.resource_readiness = resource_readiness
         self.composition_hash = composition_hash
         self.resolved_plan = resolved_plan or ResolvedApplicationPlan(
             package_id="unknown",

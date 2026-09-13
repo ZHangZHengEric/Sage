@@ -83,6 +83,13 @@ class WorkspaceController extends ChangeNotifier {
   Timer? _streamingTextRevealTimer;
   Future<void> _agentPatchTail = Future<void>.value();
   int _agentPatchRevision = 0;
+  final Map<String, AgentConfiguration> _confirmedAgents = {};
+  final Map<String, int> _agentWriteVersions = {};
+  final Map<String, int> _pendingAgentWrites = {};
+  Future<void> _settingsSaveTail = Future<void>.value();
+  DesktopSettings? _settingsIntent;
+  int _settingsAgentRevision = 0;
+  int _settingsCatalogRevision = 0;
   int _usageOverviewRevision = 0;
   bool _disposed = false;
 
@@ -774,8 +781,28 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> saveSettings(DesktopSettings value) async {
+  Future<void> saveSettings(DesktopSettings value) {
+    final before = (_settingsIntent ?? settings).toJson();
+    final after = value.toJson();
+    final patch = <String, Object?>{
+      for (final entry in after.entries)
+        if (jsonEncode(before[entry.key]) != jsonEncode(entry.value)) entry.key: entry.value,
+    };
+    _settingsIntent = value;
+    final operation = _sendSettings(_settingsSaveTail, patch);
+    _settingsSaveTail = operation.then<void>((_) {
+      if (identical(_settingsIntent, value)) _settingsIntent = null;
+    }, onError: (Object _) {
+      if (identical(_settingsIntent, value)) _settingsIntent = null;
+    });
+    return operation;
+  }
+
+  Future<void> _sendSettings(Future<void> previous, Map<String, Object?> patch) async {
+    await previous;
     try {
+      if (_disposed) return;
+      final value = DesktopSettings.fromJson({...settings.toJson(), ...patch});
       final languageChanged = settings.language != value.language;
       final workspaceChanged =
           settings.agentWorkspacePath != value.agentWorkspacePath;
@@ -783,7 +810,9 @@ class WorkspaceController extends ChangeNotifier {
           !mapEquals(settings.componentSelections, value.componentSelections) ||
           jsonEncode(settings.componentConfigs) !=
               jsonEncode(value.componentConfigs);
-      settings = await _api.saveSettings(value);
+      final saved = await _api.patchSettings(patch);
+      if (_disposed) return;
+      settings = saved;
       if (languageChanged) {
         _syncToolCatalogLanguage();
         toolCatalog = await _api.listTools();
@@ -799,8 +828,10 @@ class WorkspaceController extends ChangeNotifier {
         notifyListeners();
       }
     } on Object catch (exception) {
-      error = exception.toString();
-      notifyListeners();
+      if (!_disposed) {
+        error = exception.toString();
+        notifyListeners();
+      }
       rethrow;
     }
   }
@@ -816,8 +847,12 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<void> loadSettingsCatalog({String? agentId}) async {
     final targetAgentId = agentId ?? selectedAgentId;
-    if (settingsCatalogLoading || targetAgentId.isEmpty) return;
+    if (_disposed || targetAgentId.isEmpty) return;
+    final catalogRevision = ++_settingsCatalogRevision;
+    final agentRevision = ++_settingsAgentRevision;
+    final writeRevision = _agentWriteVersions[targetAgentId] ?? 0;
     settingsCatalogLoading = true;
+    settingsAgentLoadingId = targetAgentId;
     notifyListeners();
     try {
       _syncToolCatalogLanguage();
@@ -829,17 +864,26 @@ class WorkspaceController extends ChangeNotifier {
         _api.listMcpConnections(),
         _api.listComponents(),
       ]);
-      agentConfiguration = values[0] as AgentConfiguration;
+      if (_disposed || catalogRevision != _settingsCatalogRevision) return;
+      if (agentRevision == _settingsAgentRevision) {
+        _adoptAgentRead(values[0] as AgentConfiguration, writeRevision);
+      }
       toolCatalog = values[1] as List<ToolSummary>;
       skillCatalog = values[2] as List<SkillSummary>;
       modelProviders = values[3] as List<ModelProviderSummary>;
       mcpConnections = values[4] as List<McpConnectionSummary>;
       components = values[5] as List<ComponentSummary>;
     } on Object catch (exception) {
-      error = exception.toString();
+      if (!_disposed && catalogRevision == _settingsCatalogRevision &&
+          agentRevision == _settingsAgentRevision) {
+        error = exception.toString();
+      }
     } finally {
-      settingsCatalogLoading = false;
-      notifyListeners();
+      if (!_disposed && catalogRevision == _settingsCatalogRevision) {
+        settingsCatalogLoading = false;
+        if (agentRevision == _settingsAgentRevision) settingsAgentLoadingId = '';
+        notifyListeners();
+      }
     }
   }
 
@@ -894,29 +938,44 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectSettingsAgent(String agentId) async {
-    if (agentId.isEmpty ||
+    if (_disposed || agentId.isEmpty ||
         (agentConfiguration?.id == agentId && settingsAgentLoadingId.isEmpty)) {
       return;
     }
+    final revision = ++_settingsAgentRevision;
+    final writeRevision = _agentWriteVersions[agentId] ?? 0;
     settingsAgentLoadingId = agentId;
     notifyListeners();
     try {
       final value = await _api.getAgentConfiguration(agentId);
-      if (settingsAgentLoadingId != agentId) return;
-      agentConfiguration = value;
+      if (_disposed || revision != _settingsAgentRevision) return;
+      _adoptAgentRead(value, writeRevision);
     } on Object catch (exception) {
-      if (settingsAgentLoadingId == agentId) error = exception.toString();
+      if (!_disposed && revision == _settingsAgentRevision) error = exception.toString();
     } finally {
-      if (settingsAgentLoadingId == agentId) {
+      if (!_disposed && revision == _settingsAgentRevision) {
         settingsAgentLoadingId = '';
         notifyListeners();
       }
     }
   }
 
+  void _adoptAgentRead(AgentConfiguration value, int writeVersion) {
+    if (writeVersion == (_agentWriteVersions[value.id] ?? 0) &&
+        (_pendingAgentWrites[value.id] ?? 0) == 0) {
+      agentConfiguration = value;
+      _confirmedAgents[value.id] = value;
+    } else if (agentConfiguration?.id != value.id) {
+      agentConfiguration = _confirmedAgents[value.id] ?? value;
+    }
+  }
+
   Future<void> patchAgentConfiguration(Map<String, Object?> patch) {
     final current = agentConfiguration;
-    if (current == null) return Future<void>.value();
+    if (_disposed || current == null) return Future<void>.value();
+    if ((_pendingAgentWrites[current.id] ?? 0) == 0) _confirmedAgents[current.id] = current;
+    _pendingAgentWrites[current.id] = (_pendingAgentWrites[current.id] ?? 0) + 1;
+    _agentWriteVersions[current.id] = (_agentWriteVersions[current.id] ?? 0) + 1;
     final revision = ++_agentPatchRevision;
     final optimistic = current.applyPatch(patch);
     agentConfiguration = optimistic;
@@ -927,7 +986,6 @@ class WorkspaceController extends ChangeNotifier {
       previous: previous,
       agentId: current.id,
       patch: Map<String, Object?>.from(patch),
-      rollback: current,
       revision: revision,
     );
     _agentPatchTail = operation;
@@ -938,7 +996,6 @@ class WorkspaceController extends ChangeNotifier {
     required Future<void> previous,
     required String agentId,
     required Map<String, Object?> patch,
-    required AgentConfiguration rollback,
     required int revision,
   }) async {
     try {
@@ -948,21 +1005,31 @@ class WorkspaceController extends ChangeNotifier {
     }
     try {
       final saved = await _api.patchAgentConfiguration(agentId, patch);
-      if (agentConfiguration?.id == agentId &&
+      _confirmedAgents[agentId] = saved;
+      if (!_disposed && agentConfiguration?.id == agentId &&
           revision == _agentPatchRevision) {
         agentConfiguration = saved;
         _updateAgentSummary(saved);
       }
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     } on Object catch (exception) {
-      if (agentConfiguration?.id == agentId &&
+      if (!_disposed && agentConfiguration?.id == agentId &&
           revision == _agentPatchRevision) {
-        agentConfiguration = rollback;
-        _updateAgentSummary(rollback);
+        final confirmed = _confirmedAgents[agentId]!;
+        agentConfiguration = confirmed;
+        _updateAgentSummary(confirmed);
       }
-      error = exception.toString();
-      notifyListeners();
+      if (!_disposed) error = exception.toString();
+      if (!_disposed) notifyListeners();
       rethrow;
+    } finally {
+      _agentWriteVersions[agentId] = (_agentWriteVersions[agentId] ?? 0) + 1;
+      final remaining = (_pendingAgentWrites[agentId] ?? 1) - 1;
+      if (remaining == 0) {
+        _pendingAgentWrites.remove(agentId);
+      } else {
+        _pendingAgentWrites[agentId] = remaining;
+      }
     }
   }
 
@@ -979,16 +1046,30 @@ class WorkspaceController extends ChangeNotifier {
     ];
   }
 
-  Future<AgentConfiguration> createAgent(String name) async {
+  Future<AgentConfiguration> createAgent(String name) =>
+      _createAgent(() => _api.createAgent(name));
+
+  Future<AgentConfiguration> cloneAgent(String sourceId, String name) =>
+      _createAgent(() async {
+        await _agentPatchTail;
+        return _api.cloneAgent(sourceId, name);
+      });
+
+  Future<AgentConfiguration> _createAgent(Future<AgentConfiguration> Function() create) async {
+    final revision = ++_settingsAgentRevision;
     try {
-      final created = await _api.createAgent(name);
+      final created = await create();
+      if (_disposed) return created;
       agents = [...agents, AgentSummary(id: created.id, name: created.name)];
-      agentConfiguration = created;
+      if (revision == _settingsAgentRevision) agentConfiguration = created;
+      _confirmedAgents[created.id] = created;
       notifyListeners();
       return created;
     } on Object catch (exception) {
-      error = exception.toString();
-      notifyListeners();
+      if (!_disposed) {
+        error = exception.toString();
+        notifyListeners();
+      }
       rethrow;
     }
   }
