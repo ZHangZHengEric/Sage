@@ -1719,3 +1719,59 @@ def run_tests():
 if __name__ == "__main__":
     success = run_tests()
     sys.exit(0 if success else 1)
+
+
+@pytest.mark.asyncio
+async def test_failed_compression_cools_down_same_input_without_hiding_source(monkeypatch):
+    from types import SimpleNamespace
+    import sagents.tool.impl.compress_history_tool as module
+    fixture = TestCompressHistoryTool()
+    fixture.setup_method()
+    tool = fixture.tool
+    context = SimpleNamespace()
+    tool._get_session_context = lambda _: context
+    clock = [1000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    calls = []
+    async def fail(*args):
+        calls.append(1)
+        raise CompressHistoryError("truncated")
+    tool._summarize_batches = fail
+    messages = [fixture.create_message("user", "keep this original message")]
+    first = await tool.compress_conversation_history(messages, "s")
+    second = await tool.compress_conversation_history(messages, "s")
+    assert first["status"] == "error"
+    assert second["error_code"] == "COMPRESSION_RETRY_DEFERRED"
+    assert len(calls) == 1
+    assert messages[0].get_content() == "keep this original message"
+    clock[0] += 61
+    await tool.compress_conversation_history(messages, "s")
+    assert len(calls) == 2
+    assert context._compression_failure["failures"] == 2
+    messages[0].content = "changed source"
+    await tool.compress_conversation_history(messages, "s")
+    assert len(calls) == 3
+    assert context._compression_failure["failures"] == 1
+
+
+@pytest.mark.asyncio
+async def test_large_truncated_view_splits_and_preserves_both_halves():
+    fixture = TestCompressHistoryTool()
+    fixture.setup_method()
+    tool = fixture.tool
+    tool._compression_batches = lambda messages, session_id: [messages]
+    tool._format_messages_for_compression = lambda messages: "A" * 3000 + "B" * 3000
+    texts = []
+    async def model(text, session_id, **kwargs):
+        texts.append(text)
+        if len(texts) <= 2:
+            return CompressionLLMResult(content='{"summary":"cut', finish_reason="length", prompt_tokens=None, completion_tokens=None, configured_output_limit=16384)
+        return CompressionLLMResult(content='{"summary":"preserved"}', finish_reason="stop", prompt_tokens=None, completion_tokens=None, configured_output_limit=16384)
+    tool._call_llm_for_compression = model
+    payload, _, _, count, stats = await tool._summarize_batches([], "s")
+    assert payload["summary"] == "preserved"
+    assert count == 2
+    assert stats["recovery_split_count"] == 1
+    assert len(texts) == 4
+    assert "A" * 3000 in texts[2]
+    assert "B" * 3000 in texts[3]

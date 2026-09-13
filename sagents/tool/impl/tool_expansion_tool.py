@@ -101,7 +101,8 @@ class ToolExpansionTool:
         )
 
         return {
-            "success": bool(expanded_tools),
+            "success": bool(requested) and not invalid_tools,
+            "status": "success" if requested and not invalid_tools else "error",
             "expanded_tools": expanded_tools,
             "invalid_tools": invalid_tools,
             "already_selected_tools": already_selected_tools,

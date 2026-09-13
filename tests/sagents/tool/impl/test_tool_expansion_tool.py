@@ -95,7 +95,7 @@ def test_reports_already_selected_tool_without_setting_refresh(monkeypatch):
         ToolExpansionTool().tool_expand_tools(["alpha_tool"], session_id="s1")
     )
 
-    assert out["success"] is False
+    assert out["success"] is True
     assert out["already_selected_tools"] == ["alpha_tool"]
     assert out["available_expandable_tools"] == []
     assert ctx.audit_status["suggested_tools"] == ["alpha_tool"]
@@ -131,10 +131,21 @@ def test_mixed_valid_invalid_and_already_selected_names(monkeypatch):
         )
     )
 
-    assert out["success"] is True
+    assert out["success"] is False
     assert out["expanded_tools"] == ["beta_tool"]
     assert out["invalid_tools"] == ["missing_tool"]
     assert out["already_selected_tools"] == ["alpha_tool"]
     assert out["available_expandable_tools"] == ["gamma_tool"]
     assert ctx.audit_status["suggested_tools"] == ["alpha_tool", "beta_tool"]
     assert ctx.audit_status["tools_expanded"] is True
+
+
+def test_empty_request_and_partial_invalid_request_are_not_success(monkeypatch):
+    ctx = _ctx(["alpha_tool", "beta_tool"], ["alpha_tool"])
+    _patch_ctx(monkeypatch, ctx)
+    tool = ToolExpansionTool()
+    assert asyncio.run(tool.tool_expand_tools([], session_id="s1"))["success"] is False
+    result = asyncio.run(tool.tool_expand_tools(["beta_tool", "unknown"], session_id="s1"))
+    assert result["success"] is False
+    assert result["expanded_tools"] == ["beta_tool"]
+    assert result["invalid_tools"] == ["unknown"]
