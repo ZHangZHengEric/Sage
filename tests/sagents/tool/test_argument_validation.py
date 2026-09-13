@@ -69,6 +69,10 @@ async def test_manager_rejects_bad_arguments_before_execution(monkeypatch):
     error = json.loads(await manager.run_tool_async("write_file", wrong="secret"))
     assert error["error_code"] == "INVALID_ARGUMENT"
     assert error["missing_fields"] == ["path"]
+    assert error["error"]
+    assert error["required_params"] == ["path"]
+    assert error["provided_params"] == ["wrong"]
+    assert "secret" not in str(error)
     execute.assert_not_awaited()
     await manager.run_tool_async("write_file", path="example.txt")
     execute.assert_awaited_once()
