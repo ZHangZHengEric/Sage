@@ -518,3 +518,26 @@ def test_populate_request_uses_agent_response_language_when_request_omits_it(
 
     assert request.system_context["response_language"] == "zh-CN"  # pyright: ignore[reportOptionalSubscript]
     assert request.system_context["business_key"] == "request_value"  # pyright: ignore[reportOptionalSubscript]
+
+
+def test_server_discovery_skips_host_trees_and_preserves_owner_priority(tmp_path, monkeypatch):
+    from common.services import chat_utils
+    from sagents.skill.skill_manager import SkillManager
+    cfg = _server_cfg(tmp_path)
+    monkeypatch.setattr(chat_utils, '_get_cfg', lambda: cfg)
+    monkeypatch.setattr(chat_utils, '_is_desktop_mode', lambda: False)
+    monkeypatch.setattr(SkillManager, '_instance', None)
+    agent_workspace = Path(cfg.agents_dir) / 'agent'
+    sources = [agent_workspace / 'skills', Path(cfg.user_dir) / 'owner' / 'skills', Path(cfg.skill_dir)]
+    for i, root in enumerate(sources):
+        _write_skill(root, 'shared')
+        (root / 'shared' / 'SKILL.md').write_text(f'---\nname: shared\ndescription: source{i}\n---\nbody{i}')
+    def fail(*args, **kwargs):
+        raise AssertionError('request discovery walked a host file tree')
+    monkeypatch.setattr(SkillManager, '_generate_file_list', fail)
+    proxy, manager = chat_utils.create_skill_proxy(['shared'], user_id='owner', agent_workspace=str(agent_workspace))
+    assert proxy.skills['shared'].description == 'source0'
+    assert manager.skills['shared'].instructions.endswith('body0')
+    (sources[0] / 'shared' / 'SKILL.md').write_text('---\nname: shared\ndescription: fresh edit\n---\nnew')
+    new_proxy, _ = chat_utils.create_skill_proxy(['shared'], user_id='owner', agent_workspace=str(agent_workspace))
+    assert new_proxy.skills['shared'].description == 'fresh edit'

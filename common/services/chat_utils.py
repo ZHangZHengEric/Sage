@@ -96,7 +96,7 @@ def create_skill_proxy(
         agent_skills_dir = os.path.join(agent_workspace, "skills")
         if os.path.exists(agent_skills_dir):
             agent_skill_manager = SkillManager(
-                skill_dirs=[agent_skills_dir], isolated=True
+                skill_dirs=[agent_skills_dir], isolated=True, include_file_list=False
             )
             skill_managers.append(agent_skill_manager)
 
@@ -104,12 +104,14 @@ def create_skill_proxy(
         user_skills_dir = os.path.join(cfg.user_dir, user_id, "skills")
         if os.path.exists(user_skills_dir):
             user_skill_manager = SkillManager(
-                skill_dirs=[user_skills_dir], isolated=True
+                skill_dirs=[user_skills_dir], isolated=True, include_file_list=False
             )
             skill_managers.append(user_skill_manager)
 
     if os.path.exists(cfg.skill_dir):
-        system_skill_manager = SkillManager(skill_dirs=[cfg.skill_dir], isolated=True)
+        system_skill_manager = SkillManager(
+            skill_dirs=[cfg.skill_dir], isolated=True, include_file_list=False
+        )
         skill_managers.append(system_skill_manager)
 
     skill_managers.append(get_skill_manager())

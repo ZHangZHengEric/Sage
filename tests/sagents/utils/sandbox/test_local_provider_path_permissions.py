@@ -124,7 +124,8 @@ def test_local_get_mtime_uses_one_worker_call_and_preserves_permissions(
     assert len(calls) == 2
     with pytest.raises(PermissionError):
         asyncio.run(provider.get_mtime(str(tmp_path / "outside")))
-    assert len(calls) == 2
+    # Permission resolution itself now runs in the worker, still before stat.
+    assert len(calls) == 3
 
 
 def test_local_batch_reads_preserve_mapping_errors_and_permissions(tmp_path):
@@ -147,3 +148,44 @@ def test_local_batch_reads_preserve_mapping_errors_and_permissions(tmp_path):
     assert result[3] == ''
     with pytest.raises(PermissionError):
         asyncio.run(provider.read_existing_files([str(tmp_path / 'outside')]))
+
+
+def test_filesystem_permission_resolution_runs_off_event_loop(tmp_path, monkeypatch):
+    import threading
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    provider = LocalSandboxProvider(
+        sandbox_id='checked-io', sandbox_agent_workspace=str(workspace),
+        volume_mounts=[VolumeMount(str(workspace), '/virtual')],
+        macos_isolation_mode='subprocess', linux_isolation_mode='subprocess',
+    )
+    asyncio.run(provider.initialize())
+    main_thread = threading.get_ident()
+    original = provider._validate_host_path_allowed
+    def checked(*args, **kwargs):
+        assert threading.get_ident() != main_thread
+        return original(*args, **kwargs)
+    monkeypatch.setattr(provider, '_validate_host_path_allowed', checked)
+    async def run():
+        await provider.ensure_directory('/virtual/new')
+        await provider.write_file('/virtual/new/file.txt', 'content')
+        assert await provider.read_file('/virtual/new/file.txt') == 'content'
+        assert await provider.file_exists('/virtual/new/file.txt')
+        assert await provider.get_mtime('/virtual/new') > 0
+        assert len(await provider.list_directory('/virtual/new')) == 1
+        await provider.delete_file('/virtual/new/file.txt')
+        outside = tmp_path / 'outside.txt'
+        outside.write_text('must not read')
+        (workspace / 'escape').symlink_to(outside)
+        with pytest.raises(PermissionError):
+            await provider.read_file('/virtual/escape')
+        # A formerly safe symlink cannot reuse a cached successful validation.
+        (workspace / 'inside.txt').write_text('safe')
+        link = workspace / 'link'
+        link.symlink_to(workspace / 'inside.txt')
+        assert await provider.read_file('/virtual/link') == 'safe'
+        link.unlink()
+        link.symlink_to(outside)
+        with pytest.raises(PermissionError):
+            await provider.read_file('/virtual/link')
+    asyncio.run(run())
