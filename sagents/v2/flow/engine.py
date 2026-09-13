@@ -1095,13 +1095,16 @@ class FlowRuntime:
         payload.setdefault("prompt", tr("approval.guidance", context.language))
         payload.setdefault("guidance", tr("approval.guidance", context.language))
         payload.setdefault("language", normalize_language(context.language))
+        interaction_type = InteractionType(node.config.get("interaction_type", "approval"))
         interaction = InteractionRequest(
             interaction_id=interaction_id,
             run_id=run.run_id,
-            interaction_type=InteractionType.APPROVAL,
+            interaction_type=interaction_type,
             blocking_scope=BlockingScope(node.blocking_scope or "run"),
             allowed_decisions=tuple(
-                node.config.get("allowed_decisions") or ("approve", "deny")
+                node.config.get("allowed_decisions")
+                or (("submit", "cancel") if interaction_type == InteractionType.USER_INPUT
+                    else ("approve", "deny"))
             ),
             eligible_principal_ids=(context.actor.principal_id,),
             payload=payload,
@@ -1110,7 +1113,9 @@ class FlowRuntime:
         suspension = Suspension(
             suspension_id=new_id("suspension"),
             run_id=run.run_id,
-            reason=SuspensionReason.APPROVAL_REQUIRED,
+            reason=(SuspensionReason.INPUT_REQUIRED
+                    if interaction_type in {InteractionType.USER_INPUT, InteractionType.ELICITATION}
+                    else SuspensionReason.APPROVAL_REQUIRED),
             blocking_scope=node.blocking_scope or "run",
             checkpoint_id=checkpoint_id,
             checkpoint_sequence=run.last_run_sequence,
@@ -1370,7 +1375,9 @@ class FlowRuntime:
                 EventDraft(
                     type="flow.completed",
                     flow_execution_id=state.flow_execution_id,
-                    data=FlowEventData(state="completed", flow_id=state.flow_id),
+                    data=FlowEventData(
+                        state="completed", flow_id=state.flow_id, output=state.results
+                    ),
                 ),
                 EventDraft(type="run.completed", data=RunEventData(state="completed")),
             ),

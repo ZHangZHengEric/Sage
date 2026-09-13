@@ -352,6 +352,48 @@ class SAgentBuilder:
         self._log_sink: LogSink | None = None
         self._diagnostic_sink: DiagnosticSink | None = None
         self._model_client: Any | None = None
+        self._agent_management = None
+        self._flow_tool_nodes = {}
+        self._skill_provider = None
+        self._model_budget = None
+        self._job_runtime = None
+        self._check_readiness = False
+
+    def with_job_runtime(self, runtime) -> "SAgentBuilder":
+        """Use a host-owned JobRuntime shared across Applications; host closes it."""
+        self._job_runtime = runtime
+        return self
+
+    def with_model_budget(self, budget) -> "SAgentBuilder":
+        """Share a host-owned ModelConcurrencyBudget across Applications."""
+        self._model_budget = budget
+        return self
+
+    def with_readiness_check(self) -> "SAgentBuilder":
+        """Discover declared resources and attach a report without executing them."""
+        self._check_readiness = True
+        return self
+
+    def with_skill_provider(self, catalog, source, workspace) -> "SAgentBuilder":
+        """Bind standard Skill ports; preserve per-agent allowlists and lazy loading."""
+        self._skill_provider = (catalog, source, workspace)
+        return self
+
+    def with_flow_tool_nodes(self, nodes) -> "SAgentBuilder":
+        """Bind tool-named Flow nodes implementing the public RunnableNode protocol."""
+        self._flow_tool_nodes = dict(nodes)
+        return self
+
+    def with_agent_management(self, service) -> "SAgentBuilder":
+        """Expose full-package tools when explicitly granted in agent.tools.
+
+        The host owns this shared service and closes it after its applications.
+        Managed builders may inject the same service to permit further creation.
+        """
+        from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
+
+        self._agent_management = AgentManagementToolPlugin(service)
+        return self
 
     def with_defaults(self, *, session_root: str | Path) -> "SAgentBuilder":
         self._session_root = Path(session_root).expanduser().resolve()
@@ -534,6 +576,22 @@ class SAgentBuilder:
             raise ValueError("SAgentBuilder requires an Agent entrypoint")
         if selected_agent not in resolved.agents:
             raise ValueError(f"unknown Agent entrypoint {selected_agent!r}")
+        for definition in resolved.agents.values():
+            if definition.entrypoint.type == "loop" and definition.entrypoint.loop != "react":
+                raise ValueError("SAgentBuilder supports the react loop; custom loops require a host driver")
+        uses_flow = resolved.agents[selected_agent].entrypoint.type == "flow"
+        if uses_flow:
+            available_flow_tools = set(self._flow_tool_nodes) | {
+                selection.name for selection in runtime_config.selections("flow.node")
+            }
+            from sagents.v2.flow.reachability import reachable_nodes
+
+            flow_nodes = reachable_nodes(resolved.flows, resolved.agents[selected_agent].entrypoint.flow)
+            for _, node in flow_nodes:
+                if node.type == "tool" and node.tool not in available_flow_tools:
+                    raise ValueError(f"Flow tool node {node.tool!r} needs a flow.node binding or with_flow_tool_nodes()")
+                if node.type == "agent" and resolved.agents[node.agent].entrypoint.type == "flow":
+                    raise ValueError("nested Flow agents must use explicit subflow nodes")
         if (
             (self._tool_catalog is None or self._tool_executor is None)
             and self._selected_plugin(runtime_config, "tool.catalog")
@@ -630,7 +688,13 @@ class SAgentBuilder:
             )
         models_by_agent = {selected_agent: model}
         selected_definition = resolved.agents[selected_agent]
-        for member_id in selected_definition.subagents:
+        if uses_flow:
+            from sagents.v2.flow.reachability import reachable_agents
+
+            composition_members = reachable_agents(resolved.agents, flow_nodes, selected_agent)
+        else:
+            composition_members = selected_definition.subagents
+        for member_id in composition_members:
             if member_id in models_by_agent:
                 continue
             member_model = (
@@ -648,6 +712,12 @@ class SAgentBuilder:
                 )
             )
             models_by_agent[member_id] = member_model
+
+        if self._model_budget is not None:
+            models_by_agent = {
+                key: self._model_budget.wrap(provider)
+                for key, provider in models_by_agent.items()
+            }
 
         async def resolve_session_id(run_id: str) -> str:
             return (await session_store.get_run(run_id)).session_id
@@ -703,6 +773,22 @@ class SAgentBuilder:
         else:
             tool_catalog = InMemoryToolCatalog(())
             tool_executor = InMemoryToolExecutor({}, {})
+        readiness = None
+        if self._check_readiness:
+            from sagents.v2.agent.management.readiness import resource_readiness
+
+            reports = {}
+            for member_id in models_by_agent:
+                reports[member_id] = await resource_readiness(
+                    resolved.agents[member_id], tool_catalog,
+                    skill_provider=self._skill_provider,
+                    management=self._agent_management,
+                    deferred_tools=uses_binding_tools,
+                )
+            readiness = {
+                "ready": all(report["ready"] for report in reports.values()),
+                "agents": reports,
+            }
         scheduler = services["execution.scheduler"]
         scheduler_capabilities = await scheduler.capabilities()
         if (
@@ -824,6 +910,25 @@ class SAgentBuilder:
             reducer=context_reducer,
         )
         factory = AgentCompositionFactory(driver_runtime, context_components=components)
+        flow_tool_nodes = dict(self._flow_tool_nodes)
+        if uses_flow:
+            for selection in runtime_config.selections("flow.node"):
+                if selection.name in flow_tool_nodes:
+                    raise ValueError(f"duplicate Flow node binding {selection.name!r}")
+                descriptor = self.extensions.get(selection.plugin).descriptor
+                node_scope = selection.scope or descriptor.resolved_default_scope()
+                if node_scope == ExtensionScope.RUN:
+                    raise ValueError("Builder flow.node bindings require process, tenant or agent scope")
+                config = self._merge_plugin_config(
+                    plugin_declarations, selection.plugin, dict(selection.config)
+                )
+                flow_tool_nodes[selection.name] = await self._instantiate(
+                    extension_host, process_root, scope_handles,
+                    selection.plugin, config, "flow.node", scope=node_scope,
+                    scope_id=f"flow-node-{selected_agent}-{selection.name}",
+                    tenant_id=tenant_id, agent_id=selected_agent,
+                    offer_name=selection.name,
+                )
         root_descriptor = AgentDescriptor(
             agent_id=selected_agent,
             name=selected_definition.name,
@@ -844,7 +949,7 @@ class SAgentBuilder:
                 skills=resolved.agents[member_id].skills,
                 allow_delegation=False,
             )
-            for member_id in selected_definition.subagents
+            for member_id in composition_members
         )
 
         def configure_official_runtime(value: OfficialToolRuntime) -> None:
@@ -876,6 +981,11 @@ class SAgentBuilder:
                 executor,
                 active_runtime: OfficialToolRuntime | None,
             ):
+                if self._agent_management is not None:
+                    from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
+
+                    catalog = CompositeToolCatalog((catalog, self._agent_management.catalog))
+                    executor = CompositeToolExecutor((executor, self._agent_management.executor))
                 runtime_tools = ()
                 if descriptor.allow_delegation and descriptor.mode == AgentMode.FIBRE:
                     runtime_tools = ("sys_spawn_agent", "sys_delegate_task")
@@ -912,6 +1022,24 @@ class SAgentBuilder:
                     )
                     models_by_agent[definition_id] = models_by_agent[selected_agent]
                 definition = effective_resolved.agents[definition_id]
+                skill_loader = None
+                if self._skill_provider is not None and definition.skills:
+                    from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
+                    from sagents.v2.tool.plugins.skill import SkillToolPlugin
+                    from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
+
+                    skill_catalog, skill_source, skill_workspace = self._skill_provider
+                    skill_loader = factory.create_skill_loader(
+                        effective_resolved, definition_id,
+                        catalog=skill_catalog, source=skill_source, workspace=skill_workspace,
+                        activations=SessionDerivedSkillActivationRepository(
+                            derived_state, resolve_session_id,
+                        ),
+                    )
+                    skill_tools = SkillToolPlugin(skill_loader)
+                    catalog = CompositeToolCatalog((catalog, skill_tools.catalog))
+                    executor = CompositeToolExecutor((executor, skill_tools.executor))
+                    runtime_tools = (*runtime_tools, "load_skill")
                 member_memory_enabled = "search_memory" in definition.tools
                 return factory.create_loop(
                     effective_resolved,
@@ -938,6 +1066,7 @@ class SAgentBuilder:
                     goal_state_service=goal_state_service,
                     tool_selection_policy=tool_selection,
                     additional_runtime_tools=runtime_tools,
+                    skill_loader=skill_loader,
                     additional_context_providers=(
                         AgentRosterContextProvider(
                             registry,
@@ -1049,6 +1178,29 @@ class SAgentBuilder:
                 trace_sink=services["observability.trace-sink"],
                 log_sink=services["observability.log-sink"],
             )
+            if uses_flow:
+                from sagents.v2.flow import FlowRuntime
+                from sagents.v2.flow.driver import AgentFlowDriver
+                from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
+
+                flow_runtime = FlowRuntime(
+                    runtime=driver_runtime,
+                    flows=resolved.flows,
+                    agent_nodes={
+                        descriptor.agent_id: NativeAgentFlowNode(
+                            runtime=driver_runtime,
+                            descriptor=descriptor,
+                            child_executor=mode_factory.child_executor,
+                        )
+                        for descriptor in member_descriptors
+                    },
+                    tool_nodes=flow_tool_nodes,
+                    max_node_visits=selected_definition.max_steps or 100,
+                )
+                return AgentFlowDriver(
+                    flow_runtime, selected_definition.entrypoint.flow,
+                    mode_factory.child_executor,
+                )
             return mode_factory.create_loop(root_descriptor, run_id)
 
         def driver_factory(run_id):
@@ -1200,6 +1352,7 @@ class SAgentBuilder:
                     ("memory.provider", self._memory_provider),
                     ("session-memory.provider", self._session_memory_provider),
                     ("model.provider", self._model_provider),
+                    ("execution.job-runtime", self._job_runtime),
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
@@ -1234,6 +1387,7 @@ class SAgentBuilder:
             composition_hash=composition_hash,
             resolved_plan=resolved_plan,
             owned_resources=(dispatcher,),
+            resource_readiness=readiness,
         )
         application._attach_composer(
             _ApplicationComposer(
@@ -1460,10 +1614,11 @@ class SAgentBuilder:
             agent_id=agent_id,
             run_id=run_id,
             return_handle=True,
+            offer_name=self._selected_offer_name(selection.plugin, "tool.catalog", selection.name),
         )
         executor = handle.providers.require(
             "tool.executor",
-            self._offer_name(selection.plugin, "tool.executor"),
+            self._paired_tool_executor_name(selection.plugin, selection.name),
         )
         if not hasattr(catalog, "list_tools") or not hasattr(executor, "execute"):
             raise TypeError(
@@ -1512,6 +1667,7 @@ class SAgentBuilder:
             scope_id="agent-tool-selection",
             tenant_id=tenant_id,
             agent_id=agent_id,
+            offer_name=self._selected_offer_name(plugin_id, "tool.selection-policy", selection.name) if selection else None,
         )
 
     async def _create_capability(
@@ -1558,6 +1714,7 @@ class SAgentBuilder:
             tenant_id=tenant_id,
             agent_id=agent_id,
             run_id=run_id,
+            offer_name=self._selected_offer_name(plugin_id, capability, selection.name) if selection else None,
         )
 
     async def _instantiate(
@@ -1575,13 +1732,18 @@ class SAgentBuilder:
         agent_id: str | None = None,
         run_id: str | None = None,
         return_handle: bool = False,
+        offer_name: str | None = None,
     ):
         registration = self.extensions.get(plugin_id)
         if capability not in {
             offer.capability for offer in registration.descriptor.provides
         }:
             raise ValueError(f"extension {plugin_id!r} does not provide {capability!r}")
-        name = self._offer_name(plugin_id, capability)
+        name = (
+            offer_name
+            if offer_name is not None
+            else self._offer_name(plugin_id, capability)
+        )
         plan = host.plan(
             (
                 CapabilityRequirement(
@@ -1622,6 +1784,25 @@ class SAgentBuilder:
             for offer in registration.descriptor.provides
             if offer.capability == capability
         )
+
+    def _selected_offer_name(self, plugin_id, capability, name):
+        names = [offer.name for offer in self.extensions.get(plugin_id).descriptor.provides
+                 if offer.capability == capability]
+        if name in names:
+            return name
+        # Preserve implicit default selection for a single implementation.
+        if name == "default" and len(names) == 1:
+            return names[0]
+        raise ValueError(f"extension {plugin_id!r} has no unambiguous {capability!r} offer {name!r}")
+
+    def _paired_tool_executor_name(self, plugin_id, name):
+        names = [offer.name for offer in self.extensions.get(plugin_id).descriptor.provides
+                 if offer.capability == "tool.executor"]
+        if name in names:
+            return name
+        if len(names) == 1:
+            return names[0]
+        raise ValueError(f"extension {plugin_id!r} has no matching tool.executor for {name!r}")
 
     @staticmethod
     def _supported_locked_config(
@@ -1674,7 +1855,7 @@ class SAgentBuilder:
                 capability="execution.scheduler",
                 default_plugin=InMemoryScheduler.plugin_id,
             ),
-            "execution.job-runtime": await self._create_capability(
+            "execution.job-runtime": self._job_runtime if self._job_runtime is not None else await self._create_capability(
                 host,
                 parent,
                 handles,

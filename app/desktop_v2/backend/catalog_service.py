@@ -167,7 +167,13 @@ class DesktopCatalogServiceMixin:
             name=name,
             config=config,
         )
-        await self.catalog.save_agent(created)
+        async with self._agent_update_lock:
+            if request.source_agent_id is not None:
+                source = await self._agent(request.source_agent_id, user_id)
+                created = created.model_copy(update={"config": {**source.config, "name": name}})
+            if request.settings is not None:
+                created = await self._apply_agent_settings(created, request.settings, user_id)
+            await self.catalog.save_agent(created)
         return await self.get_agent_settings(created.agent_id, user_id)
 
     async def list_skills(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
@@ -722,7 +728,14 @@ class DesktopCatalogServiceMixin:
         patch: AgentSettingsPatch,
         user_id: str,
     ) -> dict[str, Any]:
-        agent = await self._agent(agent_id, user_id)
+        async with self._agent_update_lock:
+            agent = await self._agent(agent_id, user_id)
+            updated = await self._apply_agent_settings(agent, patch, user_id)
+            await self.catalog.save_agent(updated)
+        return await self.get_agent_settings(agent_id, user_id)
+
+    async def _apply_agent_settings(self, agent, patch, user_id):
+        agent_id = agent.agent_id
         config = dict(agent.config or {})
         fields = patch.model_fields_set
         updates: dict[str, Any] = {}
@@ -752,6 +765,10 @@ class DesktopCatalogServiceMixin:
         for field, target in mapping.items():
             if field in fields:
                 config[target] = getattr(patch, field)
+        for field in ("llm_provider_id", "fast_llm_provider_id"):
+            if field in fields and (provider_id := getattr(patch, field)):
+                if await self.catalog.get_model_provider(provider_id, user_id) is None:
+                    raise ValueError(f"unknown model provider: {provider_id}")
         if "available_tools" in fields:
             selected_tools = _normalized_assignment_names(
                 patch.available_tools, label="tool"
@@ -796,29 +813,30 @@ class DesktopCatalogServiceMixin:
                 }
             )
         updates.update({"config": config, "updated_at": utc_now()})
-        await self.catalog.save_agent(agent.model_copy(update=updates))
-        return await self.get_agent_settings(agent_id, user_id)
+        return agent.model_copy(update=updates)
 
     async def delete_agent(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
-        agent = await self._agent(agent_id, user_id)
-        values = await self.catalog.list_agents(user_id)
-        replacement = next(
-            (value for value in values if value.agent_id != agent_id), None
-        )
-        if replacement is None:
-            raise ValueError("Cannot delete the only agent")
-        if agent.is_default:
-            await self.catalog.save_agent(
-                replacement.model_copy(update={"is_default": True})
+        async with self._agent_update_lock:
+            agent = await self._agent(agent_id, user_id)
+            values = await self.catalog.list_agents(user_id)
+            replacement = next(
+                (value for value in values if value.agent_id != agent_id), None
             )
-        await self.catalog.delete_agent(agent_id, user_id)
+            if replacement is None:
+                raise ValueError("Cannot delete the only agent")
+            if agent.is_default:
+                await self.catalog.save_agent(
+                    replacement.model_copy(update={"is_default": True})
+                )
+            await self.catalog.delete_agent(agent_id, user_id)
 
-        settings = await self.get_settings()
-        if settings.default_agent_id == agent_id:
-            await self.save_settings(
-                settings.model_copy(update={"default_agent_id": replacement.agent_id})
-            )
-        return await self.list_agents(user_id)
+            async with self._settings_update_lock:
+                settings = await self.get_settings()
+                if settings.default_agent_id == agent_id:
+                    await self._save_settings_unlocked(
+                        settings.model_copy(update={"default_agent_id": replacement.agent_id})
+                    )
+            return await self.list_agents(user_id)
 
     async def list_mcp_connections(self, user_id: str) -> list[dict[str, Any]]:
         await self._initialize_user(user_id)
@@ -827,9 +845,8 @@ class DesktopCatalogServiceMixin:
         connection_errors: dict[str, str] = {}
         plugin = await self._mcp_plugin(user_id)
         try:
-            discovered = await plugin.list_tools(run_id="desktop-mcp-catalog")
+            await plugin.list_tools(run_id="desktop-mcp-catalog")
         except SageV2Error as exc:
-            discovered = ()
             for value in values:
                 if not value.disabled:
                     connection_errors[value.name] = exc.info.message
@@ -1066,24 +1083,25 @@ class DesktopCatalogServiceMixin:
             raise ValueError(
                 f"extension {request.plugin_id!r} does not provide {component_id!r}"
             )
-        settings = await self.get_settings()
-        normalized_config = dict(request.config)
-        if component_id == "tool.selection-policy":
-            normalized_config = _tool_selection_component_config(
-                request.plugin_id, request.config
+        async with self._settings_update_lock:
+            settings = await self.get_settings()
+            normalized_config = dict(request.config)
+            if component_id == "tool.selection-policy":
+                normalized_config = _tool_selection_component_config(
+                    request.plugin_id, request.config
+                )
+            choices = dict(settings.component_selections)
+            choices[component_id] = request.plugin_id
+            configs = dict(settings.component_configs)
+            configs[component_id] = normalized_config
+            await self._save_settings_unlocked(
+                settings.model_copy(
+                    update={
+                        "component_selections": choices,
+                        "component_configs": configs,
+                    }
+                )
             )
-        choices = dict(settings.component_selections)
-        choices[component_id] = request.plugin_id
-        configs = dict(settings.component_configs)
-        configs[component_id] = normalized_config
-        await self.save_settings(
-            settings.model_copy(
-                update={
-                    "component_selections": choices,
-                    "component_configs": configs,
-                }
-            )
-        )
         return {
             "component_id": component_id,
             "plugin_id": request.plugin_id,

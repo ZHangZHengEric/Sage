@@ -152,6 +152,29 @@ the same key only when retrying that exact request.
 
 ## Main capabilities
 
+### Agents that create agents
+
+`AgentManagementService` persists full `SageManifest` bundles, validates their
+composition, and runs any selected agent through ordinary Native Sessions and
+Runs. Hosts inject it with `SAgentBuilder.with_agent_management(service)` and
+explicitly grant the `agent_package_*` tools in each agent's tool list. Created
+agents may receive the same tools to create further agents. This is separate
+from the lightweight Fibre spawn/leaf-delegation contract.
+
+The service requires a host-owned authorizer and fresh-Builder factory. It
+supports immutable versions, forks, CAS activation/rollback, scoped inventory,
+idempotent invocation, multi-turn continuation, status, question replies and
+cancellation. Activation is not a quality evaluation. Plugin source installation
+and automatic self-improvement evaluations are not performed by this service.
+
+Builder also binds declared Agent Flow entrypoints, `flow.node` plugins and
+explicit `with_flow_tool_nodes()` implementations. `with_skill_provider()` wires
+standard Skill ports into lazy loading and active-skill context. Unsupported
+loop implementations and unbound Flow nodes fail explicitly.
+
+See the [implementation and host integration guide](../../docs/zh/architecture/SAGENTS_V2_AGENT_MANAGEMENT.md)
+and the [offline executable example](../../examples/sagents_v2_agent_management.py).
+
 ### Models
 
 Built-in protocols cover OpenAI Responses, OpenAI-compatible Chat

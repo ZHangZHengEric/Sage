@@ -42,10 +42,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _section = 0;
   bool _editingAgent = false;
   bool _saving = false;
+  int _desktopSaveRevision = 0;
+  Future<void> _desktopSaveTail = Future<void>.value();
+  bool _workspaceDirty = false;
+  bool _runtimeDirty = false;
+  bool _sandboxDirty = false;
   String? _deletingAgentId;
   String _settingsAgentId = '';
   String _syncedAgentId = '';
   Timer? _debounce;
+  Timer? _agentTextDebounce;
+  final Map<String, Object?> _pendingAgentText = {};
+  Future<void>? _agentTextSave;
   Timer? _workspaceDebounce;
   Timer? _sandboxDebounce;
   String? _workspaceError;
@@ -85,6 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _agentTextDebounce?.cancel();
     _workspaceDebounce?.cancel();
     _sandboxDebounce?.cancel();
     _name.dispose();
@@ -112,18 +121,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveDesktopSettings(DesktopSettings next) async {
+    final revision = ++_desktopSaveRevision;
     setState(() {
       _draft = next;
       _saving = true;
     });
     try {
-      await widget.controller.saveSettings(next);
-      if (mounted) setState(() => _draft = widget.controller.settings);
+      _desktopSaveTail = widget.controller.saveSettings(next);
+      await _desktopSaveTail;
+      if (mounted && revision == _desktopSaveRevision) setState(() => _draft = widget.controller.settings);
     } catch (_) {
-      if (mounted) setState(() => _draft = widget.controller.settings);
+      if (mounted && revision == _desktopSaveRevision) setState(() => _draft = widget.controller.settings);
       rethrow;
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (revision == _desktopSaveRevision) _desktopSaveTail = Future<void>.value();
+      if (mounted && revision == _desktopSaveRevision) setState(() => _saving = false);
     }
   }
 
@@ -148,6 +160,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _saveWorkspaceLater() {
+    _workspaceDirty = true;
     _workspaceDebounce?.cancel();
     if (_workspaceError != null) {
       setState(() => _workspaceError = null);
@@ -172,6 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       if (mounted) {
         setState(() => _workspaceError = null);
+        if (_workspacePath.text.trim() == path.trim()) _workspaceDirty = false;
       }
     } on Object {
       if (mounted) {
@@ -189,21 +203,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (path == null || path.isEmpty || !mounted) return;
     _workspaceDebounce?.cancel();
     _workspacePath.text = path;
+    _workspaceDirty = true;
     await _saveWorkspacePath(path);
   }
 
   void _saveRuntimeLater() {
+    _runtimeDirty = true;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 650), () {
-      final preview = int.tryParse(_previewBytes.text.trim());
-      final entries = int.tryParse(_treeEntries.text.trim());
-      if (preview == null || preview < 1 || entries == null || entries < 100) {
-        return;
-      }
-      _saveDesktopSettings(
-        _draft.copyWith(maxPreviewBytes: preview, maxTreeEntries: entries),
-      );
+    _debounce = Timer(const Duration(milliseconds: 650), () async {
+      try { await _saveRuntimeFields(); } on Object { /* Shared error banner. */ }
     });
+  }
+
+  Future<void> _saveRuntimeFields() async {
+    final preview = int.tryParse(_previewBytes.text.trim());
+    final entries = int.tryParse(_treeEntries.text.trim());
+    if (preview == null || preview < 1 || preview > 20000000 ||
+        entries == null || entries < 100 || entries > 50000) {
+      throw FormatException(context.l10n.languageCode == 'zh'
+          ? '预览大小需为 1–20000000，文件数量需为 100–50000。'
+          : 'Preview bytes must be 1–20000000 and tree entries 100–50000.');
+    }
+    await _saveDesktopSettings(_draft.copyWith(maxPreviewBytes: preview, maxTreeEntries: entries));
+    if (_previewBytes.text.trim() == '$preview' && _treeEntries.text.trim() == '$entries') _runtimeDirty = false;
   }
 
   Map<String, Object?> get _sandboxConfig => {
@@ -253,6 +275,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _saveSandboxRootLater() {
+    _sandboxDirty = true;
     _sandboxDebounce?.cancel();
     final value = _sandboxRoot.text.trim().replaceAll('\\', '/');
     final invalid =
@@ -269,7 +292,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (invalid) return;
     _sandboxDebounce = Timer(
       const Duration(milliseconds: 650),
-      () => _saveSandbox(workspaceRoot: value),
+      () async {
+        try {
+          await _saveSandbox(workspaceRoot: value);
+          if (_sandboxRoot.text.trim().replaceAll('\\', '/') == value) _sandboxDirty = false;
+        } on Object { /* Shared error banner; keep the dirty value for retry. */ }
+      },
     );
   }
 
@@ -287,7 +315,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _editingAgent = true);
       return;
     }
-    _debounce?.cancel();
+    _agentTextDebounce?.cancel();
     Object? decodedContext;
     try {
       decodedContext = jsonDecode(_systemContext.text);
@@ -314,6 +342,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     try {
+      _pendingAgentText.clear();
       await _saveAgent({
         'name': _name.text,
         'description': _description.text,
@@ -362,6 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _deletingAgentId = agentId);
     try {
+      await _flushAgentText();
       final replacementId = await widget.controller.deleteAgent(agentId);
       if (!mounted) return;
       setState(() {
@@ -376,12 +406,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _createAgent() async {
+  Future<void> _createAgent({String? sourceId}) async {
+    try {
+      await _flushAgentText();
+    } on Object {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
-      final created = await widget.controller.createAgent(
-        context.l10n.text('settings.newAgent'),
-      );
+      final created = sourceId == null
+          ? await widget.controller.createAgent(context.l10n.text('settings.newAgent'))
+          : await widget.controller.cloneAgent(sourceId,
+              '${_name.text} (${context.l10n.text('common.copy')})');
       if (!mounted) return;
       setState(() {
         _settingsAgentId = created.id;
@@ -396,21 +433,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _saveAgentTextLater(String field, TextEditingController controller) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 650), () {
-      if (field == 'runtime_variables' || field == 'system_context') {
-        try {
-          final value = jsonDecode(controller.text);
-          if (value is Map) {
-            _saveAgent({field: value.cast<String, Object?>()});
-          }
-        } on FormatException {
-          return;
+    // Snapshot all changed fields; a later edit must not discard an earlier one
+    // or read controllers after they have been rebound to another agent.
+    _pendingAgentText.remove(field);
+    if (field == 'runtime_variables' || field == 'system_context') {
+      try {
+        final value = jsonDecode(controller.text);
+        if (value is Map) {
+          _pendingAgentText[field] = value.cast<String, Object?>();
         }
-        return;
+      } on FormatException {
+        // Invalid JSON remains in the editor until corrected.
       }
-      _saveAgent({field: controller.text});
+    } else {
+      _pendingAgentText[field] = controller.text;
+    }
+    _agentTextDebounce?.cancel();
+    _agentTextDebounce = Timer(const Duration(milliseconds: 650), () async {
+      try {
+        await _flushAgentText();
+      } on Object {
+        // WorkspaceController exposes the backend error in the shared banner.
+      }
     });
+  }
+
+  Future<void> _flushAgentText() async {
+    _agentTextDebounce?.cancel();
+    final active = _agentTextSave;
+    if (active != null) await active;
+    if (_pendingAgentText.isEmpty) return;
+    final save = _sendPendingAgentText();
+    _agentTextSave = save;
+    try {
+      await save;
+    } finally {
+      if (identical(_agentTextSave, save)) _agentTextSave = null;
+    }
+    if (_pendingAgentText.isNotEmpty) await _flushAgentText();
+  }
+
+  Future<void> _sendPendingAgentText() async {
+    final patch = Map<String, Object?>.from(_pendingAgentText);
+    _pendingAgentText.clear();
+    try {
+      await _saveAgent(patch);
+    } on Object {
+      // Preserve unsaved values, including newer edits made during the request.
+      final newer = Map<String, Object?>.from(_pendingAgentText);
+      _pendingAgentText.addAll(patch);
+      _pendingAgentText.addAll(newer);
+      rethrow;
+    }
+  }
+
+  Future<void> _closeSettings() async {
+    try {
+      _debounce?.cancel();
+      _workspaceDebounce?.cancel();
+      _sandboxDebounce?.cancel();
+      await _desktopSaveTail;
+      await _flushAgentText();
+      if (!mounted) return;
+      if (_runtimeDirty) await _saveRuntimeFields();
+      if (!mounted) return;
+      if (_workspaceDirty) {
+        final path = _workspacePath.text.trim();
+        if (path.isEmpty) throw FormatException(context.l10n.text('settings.pathRequired'));
+        await _saveDesktopSettings(_draft.copyWith(agentWorkspacePath: path));
+        _workspaceDirty = false;
+      }
+      if (_sandboxDirty) {
+        if (_sandboxRootError != null) throw FormatException(_sandboxRootError!);
+        await _saveSandbox(workspaceRoot: _sandboxRoot.text.trim().replaceAll('\\', '/'));
+        _sandboxDirty = false;
+      }
+      if (mounted) widget.onClose();
+    } on Object catch (exception) {
+      if (mounted) DesktopNoticeHost.show(context, message: exception.toString(), isError: true);
+    }
   }
 
   Widget _content() {
@@ -930,7 +1031,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
           ],
           selectedId: _settingsAgentId,
-          onSelected: (value) {
+          onSelected: (value) async {
+            try {
+              await _flushAgentText();
+            } on Object {
+              return;
+            }
+            if (!mounted) return;
             setState(() {
               _settingsAgentId = value;
               _syncedAgentId = '';
@@ -948,6 +1055,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        key: const ValueKey('settings-agent-clone'),
+                        onPressed: _saving ? null : () => _createAgent(sourceId: agent.id),
+                        icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
+                        label: Text(context.l10n.text('common.copy')),
+                      ),
+                    ),
                     _SettingsRowGroup(
                       children: [
                         _AgentTextRow(
@@ -1566,7 +1682,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: const ValueKey('settings-rail'),
                   selected: _section,
                   onSelect: _selectSection,
-                  onBack: widget.onClose,
+                  onBack: _closeSettings,
                   horizontal: true,
                 ),
               ),
@@ -1582,7 +1698,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('settings-rail'),
                 selected: _section,
                 onSelect: _selectSection,
-                onBack: widget.onClose,
+                onBack: _closeSettings,
               ),
             ),
             SizedBox(

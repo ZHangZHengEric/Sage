@@ -361,6 +361,24 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
 
+    async def has_nonterminal_runs(self) -> bool:
+        # The host must stop admission before using this reclamation probe.
+        # Read unloaded Sessions too; a suspended Run is not dispatchable.
+        if await super().has_nonterminal_runs():
+            return True
+        return await asyncio.to_thread(self._has_persisted_nonterminal_runs)
+
+    def _has_persisted_nonterminal_runs(self) -> bool:
+        from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
+
+        terminal = {state.value for state in TERMINAL_RUN_STATES}
+        for snapshot in self.sessions_root.rglob("state.json"):
+            # Fail closed on corrupt data; the lenient peek helper is unsafe here.
+            state, _ = self._read_session_aggregate(snapshot)
+            if any(run.get("state") not in terminal for run in state.get("runs", ())):
+                return True
+        return False
+
     async def list_dispatchable_runs(self):
         """Load only snapshots advertising an active root execution intent."""
 
@@ -1389,9 +1407,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     f"snapshot {snapshot} checksum mismatch",
                 )
             payload["checksum"] = self._checksum(unsigned)
-            self._atomic_json_write(snapshot, payload)
+            if not getattr(self, "_history_read_only", False):
+                self._atomic_json_write(snapshot, payload)
             LOGGER.warning(
-                "repaired legacy unordered-collection checksum: %s", snapshot
+                "normalized legacy unordered-collection checksum for decoding: %s", snapshot
             )
         return payload
 
@@ -1898,3 +1917,33 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
             object.__setattr__(self, name, value)
         else:
             setattr(self._coordinator, name, value)
+
+
+class _SnapshotCodec(_FilesystemSessionState):
+    # Reuse the canonical schema/checksum/journal decoder, not writer lifecycle.
+    def __init__(self, root):
+        self.root = Path(root).resolve()
+        self.sessions_root = self.root / "sessions"
+        self.locations_root = self.root / ".session-store" / "locations"
+        self._history_read_only = True
+
+    def load(self, session_id):
+        snapshot = self._session_dir(session_id) / "state.json"
+        if not snapshot.is_file():
+            return None
+        state, _ = self._read_session_aggregate(snapshot)
+        rows = state.get("sessions", ())
+        if len(rows) != 1 or rows[0]["session_id"] != session_id:
+            raise self._corrupt("session_store.path_mismatch", "Historical Session identity does not match")
+        return state
+
+
+async def read_session_history(root, session_id, context):
+    """Return an authorized in-memory view; never modifies the source files."""
+    state = await asyncio.to_thread(_SnapshotCodec(root).load, session_id)
+    if state is None:
+        return None
+    view = SessionStoreCoordinator(persistence_can_fail=False)
+    view._load_state_locked(state)
+    await view.authorize_session_actor(session_id, context)
+    return view

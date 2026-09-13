@@ -167,8 +167,10 @@ class RecordingModelProvider:
             span.add_event("first_token", timestamp=first_token_at)
             first_token_persisted = True
 
+        provider_stream = None
         try:
-            async for event in self.provider.stream(request):
+            provider_stream = self.provider.stream(request)
+            async for event in provider_stream:
                 if (
                     first_token_at is None
                     and event.kind
@@ -223,31 +225,36 @@ class RecordingModelProvider:
             finalized = True
             raise
         finally:
-            if not finalized:
-                await persist_first_token()
-                await self.sink.fail_model_request(
-                    session_id=session_id,
-                    request=request,
-                    error=RuntimeError("model stream closed before completion"),
-                )
-                closed = RuntimeError("model stream closed before completion")
-                _end_model_span(
-                    span,
-                    started_at,
-                    first_token_at,
-                    error=closed,
-                )
-                self._log(
-                    "model.request.failed",
-                    "model request failed",
-                    session_id=session_id,
-                    request=request,
-                    error=closed,
-                    attributes={
-                        "model_binding": request.model_binding,
-                        "purpose": purpose,
-                    },
-                )
+            try:
+                closer = getattr(provider_stream, "aclose", None)
+                if closer is not None:
+                    await closer()
+            finally:
+                if not finalized:
+                    await persist_first_token()
+                    await self.sink.fail_model_request(
+                        session_id=session_id,
+                        request=request,
+                        error=RuntimeError("model stream closed before completion"),
+                    )
+                    closed = RuntimeError("model stream closed before completion")
+                    _end_model_span(
+                        span,
+                        started_at,
+                        first_token_at,
+                        error=closed,
+                    )
+                    self._log(
+                        "model.request.failed",
+                        "model request failed",
+                        session_id=session_id,
+                        request=request,
+                        error=closed,
+                        attributes={
+                            "model_binding": request.model_binding,
+                            "purpose": purpose,
+                        },
+                    )
 
 
 def _end_model_span(

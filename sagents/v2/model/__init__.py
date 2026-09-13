@@ -57,6 +57,10 @@ _EXPORTS = {
         "sagents.v2.model.plugins.openai_responses",
         "OpenAIResponsesModelProvider",
     ),
+    "ModelConcurrencyBudget": (
+        "sagents.v2.model.middleware.concurrency",
+        "ModelConcurrencyBudget",
+    ),
     "RecordingModelProvider": (
         "sagents.v2.model.middleware.recording",
         "RecordingModelProvider",

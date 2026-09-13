@@ -100,3 +100,19 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/app/desktop_v2 -q
 ## 品牌图标
 
 Desktop v2 复制并沿用旧 Desktop 的 Sage 标识，独立源文件是 `assets/brand/sage_logo.png`。修改后运行 `python scripts/generate_icons.py`，同步生成 macOS AppIcon 与 Windows ICO；旧 Desktop 的图标资源不会被修改。macOS 输出使用与 Yiii 相同的原生图标外形比例，平台遮罩独立保存在 `assets/brand/macos_icon_mask.png`；黑色主体约占画布 89%，四角透明，S 标识位于中央安全区。macOS 版本的 S 使用肉眼不可见的冷白色差，避免 macOS 26 把纯黑白扁平图标误判为单色前景并添加浅色系统底板。
+
+## 设置写入协议
+
+sidecar revision 6 新增 `PATCH /api/v2/settings`，请求体只包含需要更新的顶层字段；嵌套对象作为该字段整体替换。Flutter 串行提交变更字段，后端在同一服务实例内将读取、合并、校验与落盘串行化，项目增删及组件选择共享事务锁。`PUT /api/v2/settings` 保留完整替换语义。此机制不提供多个独立后端进程之间的 CAS。
+
+关闭设置页会等待保存并提交剩余防抖输入；验证或保存失败时保留页面并显示错误。Agent 乐观编辑以服务端确认快照回滚，并防止旧读取覆盖新修改。
+
+Desktop V2 正常运行路径的主模型、成员与辅助模型共用宿主模型调用额度，默认 8；可通过 `DesktopV2Service(max_concurrent_model_calls=...)` 配置。此额度不代表工具进程、内存或全局队列预算。
+
+模型调用等待队列默认最多 128 项、最长等待 60 秒，宿主可用 `max_waiting_model_calls` 与 `model_queue_timeout_seconds` 配置。排队满或超时保留具体错误码；直接 API 返回 HTTP 429，运行中的 Agent 通过错误恢复交互暂停，名额恢复后可重试同一任务。等待超时不会作为模型执行时限。
+
+## Agent 复制与创建配置（sidecar revision 7）
+
+`POST /api/v2/agents` 支持 `source_agent_id` 和可选 `settings`（现有完整 AgentSettingsPatch）。复制只读取当前用户可见的 Agent，创建独立 ID，保留配置后应用覆盖字段；校验完成才保存。创建、更新与删除在单服务实例内串行执行，避免读取旧配置后互相覆盖。此锁不提供多进程 CAS。
+
+Agent 编辑页的“复制”会先提交待保存内容，再打开副本的编辑器。运行时 max_loop_count 与接口统一支持 1–10000，不再静默截为 200。本页面仍是普通 Agent 配置编辑，尚非完整 package/版本/Flow Studio；源码插件加载由 SAgents 宿主显式开启和授权。

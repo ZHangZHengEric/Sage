@@ -116,6 +116,19 @@ class DesktopWorkspaceServiceMixin:
         return settings
 
     async def save_settings(self, value: DesktopV2Settings) -> DesktopV2Settings:
+        async with self._settings_update_lock:
+            return await self._save_settings_unlocked(value)
+
+    async def patch_settings(self, patch: dict[str, Any]) -> DesktopV2Settings:
+        unknown = set(patch) - set(DesktopV2Settings.model_fields)
+        if unknown:
+            raise ValueError(f"unknown settings fields: {sorted(unknown)}")
+        async with self._settings_update_lock:
+            current = await self.get_settings()
+            value = DesktopV2Settings.model_validate({**current.model_dump(), **patch})
+            return await self._save_settings_unlocked(value)
+
+    async def _save_settings_unlocked(self, value: DesktopV2Settings) -> DesktopV2Settings:
         _resolved_sandbox_config(value)
         workspace = await self._ensure_agent_workspace(
             value.agent_workspace_path,
@@ -131,7 +144,12 @@ class DesktopWorkspaceServiceMixin:
             }
         )
         async with self._settings_lock:
-            await asyncio.to_thread(self._write_settings_sync, normalized)
+            writer = asyncio.create_task(asyncio.to_thread(self._write_settings_sync, normalized))
+            try:
+                await asyncio.shield(writer)
+            except asyncio.CancelledError:
+                await writer
+                raise
         return normalized
 
     def _write_settings_sync(self, value: DesktopV2Settings) -> None:
@@ -150,16 +168,18 @@ class DesktopWorkspaceServiceMixin:
             name=name.strip() or root.name,
             path=str(root),
         )
-        settings = await self.get_settings()
-        projects = [value for value in settings.projects if value.id != project.id]
-        projects.append(project)
-        await self.save_settings(settings.model_copy(update={"projects": projects}))
+        async with self._settings_update_lock:
+            settings = await self.get_settings()
+            projects = [value for value in settings.projects if value.id != project.id]
+            projects.append(project)
+            await self._save_settings_unlocked(settings.model_copy(update={"projects": projects}))
         return project
 
     async def remove_project(self, project_id: str) -> None:
-        settings = await self.get_settings()
-        projects = [value for value in settings.projects if value.id != project_id]
-        await self.save_settings(settings.model_copy(update={"projects": projects}))
+        async with self._settings_update_lock:
+            settings = await self.get_settings()
+            projects = [value for value in settings.projects if value.id != project_id]
+            await self._save_settings_unlocked(settings.model_copy(update={"projects": projects}))
 
     async def workspace_root(self, workspace_id: str | None, agent_id: str) -> Path:
         if not _AGENT_ID.fullmatch(agent_id):

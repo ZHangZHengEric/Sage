@@ -14,6 +14,9 @@ from sagents.v2._lazy import exported_names, resolve_export
 require_python()
 
 _EXPORTS = {
+    "AgentManagementService": ("sagents.v2.agent.management", "AgentManagementService"),
+    "AgentPackageBundle": ("sagents.v2.agent.management", "AgentPackageBundle"),
+    "AgentPackageStore": ("sagents.v2.agent.management", "AgentPackageStore"),
     "ActorRef": ("sagents.v2.contracts", "ActorRef"),
     "EventCursor": ("sagents.v2.contracts", "EventCursor"),
     "ExecutionBindingProvider": (
