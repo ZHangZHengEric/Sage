@@ -1320,6 +1320,18 @@ class LocalSandboxProvider(ISandboxHandle):
             exist_ok=True,
         )
 
+    async def ensure_directories(self, paths: List[str]) -> None:
+        """Create directories in order, failing at the same first invalid path."""
+        await self._ensure_initialized_async()
+
+        def create_batch():
+            for path in paths:
+                self._checked_file_operation(
+                    path, "mkdir", os.makedirs, exist_ok=True
+                )
+
+        await diagnostic_to_thread("local.ensure_directories", create_batch)
+
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         await self._ensure_initialized_async()

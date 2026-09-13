@@ -1,6 +1,11 @@
 import asyncio
 from sagents.utils.request_latency import RequestLatency, stream_sync_stage
-from sagents.utils.latency_diagnostics import to_thread as diagnostic_to_thread, diagnose
+from sagents.utils.latency_diagnostics import (
+    to_thread as diagnostic_to_thread,
+    diagnose,
+    stage,
+    timed,
+)
 import json
 import os
 import random
@@ -874,7 +879,9 @@ def _load_agent_workspace_skill_names_sync(agent_skills_path: str) -> List[str]:
 
     from sagents.skill.skill_manager import SkillManager
 
-    skill_manager = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
+    skill_manager = SkillManager(
+        skill_dirs=[agent_skills_path], isolated=True, include_file_list=False
+    )
     return sorted(skill_manager.list_skills())
 
 
@@ -891,7 +898,8 @@ async def _merge_agent_workspace_skills(request: StreamRequest) -> None:
             ensure_exists=False,
         )
     )
-    workspace_skills = await asyncio.to_thread(
+    workspace_skills = await diagnostic_to_thread(
+        "config.workspace_skill_names",
         _load_agent_workspace_skill_names_sync,
         agent_skills_path,
     )
@@ -904,6 +912,7 @@ async def _merge_agent_workspace_skills(request: StreamRequest) -> None:
     )
 
 
+@timed("config.custom_sub_agents")
 async def _populate_custom_sub_agents(request: StreamRequest) -> None:
     if not request.available_sub_agent_ids:
         return
@@ -942,6 +951,7 @@ async def _populate_custom_sub_agents(request: StreamRequest) -> None:
     request.custom_sub_agents = custom_sub_agents
 
 
+@diagnose("request.config", 100)
 async def populate_request_from_agent_config(
     request: StreamRequest,
     *,
@@ -953,7 +963,8 @@ async def populate_request_from_agent_config(
         if require_agent_id:
             raise _chat_exception("chat.agent_id_required")
     else:
-        agent = await AgentConfigDao().get_by_id(request.agent_id)
+        with stage("config.agent_lookup"):
+            agent = await AgentConfigDao().get_by_id(request.agent_id)
         if not agent or not agent.config:
             if require_agent_id:
                 raise _chat_exception("chat.agent_not_found")
@@ -1071,7 +1082,8 @@ async def populate_request_from_agent_config(
         dependency_tasks.append(fast_provider_task)
     if all_agents_task is not None:
         dependency_tasks.append(all_agents_task)
-    await asyncio.gather(*dependency_tasks)
+    with stage("config.provider_dependencies"):
+        await asyncio.gather(*dependency_tasks)
 
     provider = provider_task.result()
     if provider is None:
@@ -1140,7 +1152,8 @@ async def populate_request_from_agent_config(
     _inject_skill_tools(request)
     _strip_skill_tools_when_unavailable(request)
     request.context_budget_config = _build_context_budget_config(request)
-    await _register_extra_mcp_tools(request)
+    with stage("config.register_extra_mcp_tools"):
+        await _register_extra_mcp_tools(request)
 
 
 _CLIENT_CLEANUP_TASKS: set[asyncio.Task] = set()
@@ -1662,19 +1675,24 @@ async def _persist_token_usage_if_available(
         return False
 
 
+@diagnose("request.conversation", 100)
 async def _ensure_conversation(request: StreamRequest) -> None:
     conversation_dao = ConversationDao()
-    existing_conversation = await conversation_dao.get_by_session_id(request.session_id)  # pyright: ignore[reportArgumentType]
+    with stage("conversation.lookup"):
+        existing_conversation = await conversation_dao.get_by_session_id(request.session_id)  # pyright: ignore[reportArgumentType]
     if existing_conversation:
         return
 
-    await conversation_dao.save_conversation(
-        user_id=request.user_id or "default_user",
-        session_id=request.session_id,  # pyright: ignore[reportArgumentType]
-        agent_id=request.agent_id or "default_agent",
-        agent_name=request.agent_name or "Sage Assistant",
-        title=await create_conversation_title(request),
-    )
+    with stage("conversation.title"):
+        title = await create_conversation_title(request)
+    with stage("conversation.save"):
+        await conversation_dao.save_conversation(
+            user_id=request.user_id or "default_user",
+            session_id=request.session_id,  # pyright: ignore[reportArgumentType]
+            agent_id=request.agent_id or "default_agent",
+            agent_name=request.agent_name or "Sage Assistant",
+            title=title,
+        )
 
 
 def _extract_text_from_content(content: Any) -> str:

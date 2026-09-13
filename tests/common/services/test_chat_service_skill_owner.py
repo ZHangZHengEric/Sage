@@ -541,3 +541,20 @@ def test_server_discovery_skips_host_trees_and_preserves_owner_priority(tmp_path
     (sources[0] / 'shared' / 'SKILL.md').write_text('---\nname: shared\ndescription: fresh edit\n---\nnew')
     new_proxy, _ = chat_utils.create_skill_proxy(['shared'], user_id='owner', agent_workspace=str(agent_workspace))
     assert new_proxy.skills['shared'].description == 'fresh edit'
+
+
+def test_workspace_name_discovery_skips_tree_and_sees_live_edits(tmp_path, monkeypatch):
+    from sagents.skill.skill_manager import SkillManager
+
+    _write_skill(tmp_path, 'first')
+    _write_skill(tmp_path, 'second')
+    expected = sorted(SkillManager(skill_dirs=[str(tmp_path)], isolated=True).list_skills())
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('name discovery must not expand skill file trees')
+
+    monkeypatch.setattr(SkillManager, '_generate_file_list', forbidden)
+    assert chat_service._load_agent_workspace_skill_names_sync(str(tmp_path)) == expected
+    (tmp_path / 'first' / 'SKILL.md').unlink()
+    _write_skill(tmp_path, 'third')
+    assert chat_service._load_agent_workspace_skill_names_sync(str(tmp_path)) == ['second', 'third']
