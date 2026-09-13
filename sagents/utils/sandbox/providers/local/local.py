@@ -1169,13 +1169,25 @@ class LocalSandboxProvider(ISandboxHandle):
         finally:
             os.unlink(temp_file)
 
+    def _checked_file_operation(self, path, operation, fn, *args, **kwargs):
+        # Resolve symlinks and enforce the same permissions inside the worker,
+        # immediately before access; never cache resolved paths across calls.
+        with stage("local.path_validation"):
+            actual = self._validate_host_path_allowed(
+                self.to_host_path(path), operation=operation
+            )
+        return fn(actual, *args, **kwargs)
+
     async def read_file(self, path: str, encoding: str = "utf-8") -> str:
         """读取文件"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await diagnostic_to_thread(
-            "local.read_file", self._read_file_sync, actual_path, encoding
+            "local.read_file",
+            self._checked_file_operation,
+            path,
+            "read",
+            self._read_file_sync,
+            encoding,
         )
 
     async def read_existing_files(self, paths: List[str]):
@@ -1215,12 +1227,12 @@ class LocalSandboxProvider(ISandboxHandle):
     ) -> None:
         """写入文件"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="write")
         await diagnostic_to_thread(
             "local.write_file",
+            self._checked_file_operation,
+            path,
+            "write",
             self._write_file_sync,
-            actual_path,
             content,
             encoding,
             mode,
@@ -1229,31 +1241,56 @@ class LocalSandboxProvider(ISandboxHandle):
     async def file_exists(self, path: str) -> bool:
         """检查文件是否存在"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await diagnostic_to_thread(
-            "local.file_exists", os.path.exists, actual_path
+            "local.file_exists",
+            self._checked_file_operation,
+            path,
+            "read",
+            os.path.exists,
         )
 
     async def get_mtime(self, path: str) -> float:
-        """直接 ``os.path.getmtime``，避免每次 stat 都启 sandbox-exec 子进程。
+        """Validate and stat in one worker; permission errors still propagate."""
+        await self._ensure_initialized_async()
 
-        本地沙箱本质就是宿主机上的同一个 inode，读取 mtime 不存在隔离语义
-        （隔离层只是限制写入与命令执行权限），所以这里走 host 直读，
-        和"在 Seatbelt 里跑 ``stat``"等价但 0.3~1s/次 的子进程开销没了。
+        def stat_or_zero(actual):
+            try:
+                return float(os.path.getmtime(actual))
+            except Exception as e:
+                logger.debug(f"LocalSandboxProvider.get_mtime 失败 {path}: {e}")
+                return 0
+
+        return await diagnostic_to_thread(
+            "local.get_mtime", self._checked_file_operation, path, "read", stat_or_zero
+        )
+
+    async def get_directory_snapshot(self, path: str, last_mtime: float):
+        """Combine index stat/list round trips without listing unchanged dirs.
+
+        Return listing errors separately so the index retains its existing
+        cache-update and scan-error behavior. Stat errors keep the zero fallback.
         """
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
-        try:
-            return float(
-                await diagnostic_to_thread(
-                    "local.get_mtime", os.path.getmtime, actual_path
+
+        def snapshot():
+            try:
+                mtime = self._checked_file_operation(path, "read", os.path.getmtime)
+            except Exception as exc:
+                logger.warning(
+                    f"LocalSandboxProvider directory mtime failed {path}: {exc}"
                 )
-            )
-        except Exception as e:
-            logger.debug(f"LocalSandboxProvider.get_mtime 失败 {path}: {e}")
-            return 0
+                mtime = 0.0
+            if mtime <= last_mtime:
+                return float(mtime), None, None
+            try:
+                entries = self._checked_file_operation(
+                    path, "read", self._list_directory_sync, False
+                )
+                return float(mtime), entries, None
+            except Exception as exc:
+                return float(mtime), None, exc
+
+        return await diagnostic_to_thread("local.directory_snapshot", snapshot)
 
     async def list_directory(
         self,
@@ -1262,31 +1299,36 @@ class LocalSandboxProvider(ISandboxHandle):
     ) -> List[FileInfo]:
         """列出目录内容"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="read")
         return await diagnostic_to_thread(
             "local.list_directory",
+            self._checked_file_operation,
+            path,
+            "read",
             self._list_directory_sync,
-            actual_path,
             include_hidden,
         )
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="mkdir")
         await diagnostic_to_thread(
-            "local.ensure_directory", os.makedirs, actual_path, exist_ok=True
+            "local.ensure_directory",
+            self._checked_file_operation,
+            path,
+            "mkdir",
+            os.makedirs,
+            exist_ok=True,
         )
 
     async def delete_file(self, path: str) -> None:
         """删除文件"""
         await self._ensure_initialized_async()
-        actual_path = self.to_host_path(path)
-        actual_path = self._validate_host_path_allowed(actual_path, operation="delete")
         await diagnostic_to_thread(
-            "local.delete_file", self._delete_path_sync, actual_path
+            "local.delete_file",
+            self._checked_file_operation,
+            path,
+            "delete",
+            self._delete_path_sync,
         )
 
     async def get_file_tree(

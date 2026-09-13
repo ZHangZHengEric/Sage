@@ -293,3 +293,27 @@ async def test_local_batch_matches_sequential_live_skill_view(tmp_path, monkeypa
     changed.write_text('---\nname: skill0\ndescription: newer edit\n---\nNew body')
     await batched.sync_from_host(host)
     assert batched._skills_cache['skill0'].description == 'newer edit'
+
+
+async def test_metadata_discovery_preserves_materialized_skill_output(tmp_path, monkeypatch):
+    from sagents.skill.skill_manager import SkillManager
+    root = tmp_path / 'host'
+    skill_dir = root / 'alpha'
+    (skill_dir / 'src').mkdir(parents=True)
+    (skill_dir / 'SKILL.md').write_text('---\nname: alpha\ndescription: Alpha\n---\nInstructions')
+    (skill_dir / 'src' / 'example.py').write_text('print(1)')
+    eager = SkillManager([str(root)], isolated=True)
+    assert 'example.py' in eager.skills['alpha'].file_list
+    original = SkillManager._generate_file_list
+    def forbidden(*args, **kwargs):
+        raise AssertionError('metadata discovery must not scan file trees')
+    monkeypatch.setattr(SkillManager, '_generate_file_list', forbidden)
+    metadata = SkillManager([str(root)], isolated=True, include_file_list=False)
+    assert metadata.list_skills() == eager.list_skills()
+    assert metadata.get_skill_metadata('alpha') == eager.get_skill_metadata('alpha')
+    assert metadata.get_skill_instructions('alpha') == eager.get_skill_instructions('alpha')
+    monkeypatch.setattr(SkillManager, '_generate_file_list', original)
+    managers = [SandboxSkillManager(FakeSandbox(), skills_dir=SKILLS_DIR) for _ in range(2)]
+    for mgr, host in zip(managers, [eager, metadata]):
+        await mgr.sync_from_host(host)
+    assert await managers[0].ensure_materialized('alpha') == await managers[1].ensure_materialized('alpha')

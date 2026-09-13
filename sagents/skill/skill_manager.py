@@ -39,17 +39,28 @@ class SkillManager:
 
     _instance = None
 
-    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False):  # pyright: ignore[reportArgumentType]
+    def __new__(
+        cls,
+        skill_dirs: List[str] = None,
+        isolated: bool = False,
+        include_file_list: bool = True,
+    ):  # pyright: ignore[reportArgumentType]
         if isolated:
             return super(SkillManager, cls).__new__(cls)
         if cls._instance is None:
             cls._instance = super(SkillManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False):  # pyright: ignore[reportArgumentType]
+    def __init__(
+        self,
+        skill_dirs: List[str] = None,
+        isolated: bool = False,
+        include_file_list: bool = True,
+    ):  # pyright: ignore[reportArgumentType]
         if not isolated and getattr(self, "_initialized", False):
             return
 
+        self._include_file_list = include_file_list
         self._initialize(skill_dirs)
         self._initialized = True
 
@@ -337,9 +348,13 @@ class SkillManager:
                         return name
 
                     # Generate compact file tree with skill name as root
-                    file_list = f"{name}/\n" + self._generate_file_list(
-                        skill_path, skill_path, name
-                    )
+                    # Server discovery only needs metadata. Sandbox load_skill
+                    # generates its live tree when the skill is materialized.
+                    file_list = ""
+                    if self._include_file_list:
+                        file_list = f"{name}/\n" + self._generate_file_list(
+                            skill_path, skill_path, name
+                        )
                     schema = SkillSchema(
                         name=name,
                         description=description,

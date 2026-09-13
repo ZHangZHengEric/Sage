@@ -780,11 +780,18 @@ class MemoryIndex:
 
         # Get current directory mtime
         # logger.debug(f"MemoryIndex: Checking mtime for dir: {dir_path}")
-        current_mtime = await self._get_dir_mtime(dir_path)
-        # logger.debug(f"MemoryIndex: Dir {dir_path} mtime: {current_mtime}")
-
-        # Check if directory has changed
         last_mtime = self._dir_mtime_cache.get(dir_path, 0)
+        from sagents.utils.sandbox.providers.local.local import LocalSandboxProvider
+
+        local_snapshot = type(self.sandbox) is LocalSandboxProvider
+        snapshot_entries = snapshot_error = None
+        if local_snapshot:
+            current_mtime, snapshot_entries, snapshot_error = (
+                await self.sandbox.get_directory_snapshot(dir_path, last_mtime)
+            )
+        else:
+            current_mtime = await self._get_dir_mtime(dir_path)
+        # Check if directory has changed
         # logger.debug(f"MemoryIndex: Dir {dir_path} last_mtime: {last_mtime}, current_mtime: {current_mtime}")
         if current_mtime <= last_mtime:
             diagnostic_count("index.directories_unchanged")
@@ -803,7 +810,12 @@ class MemoryIndex:
         try:
             # List directory entries
             with stage("index.list_directory"):
-                entries = await self.sandbox.list_directory(dir_path)
+                if local_snapshot:
+                    if snapshot_error is not None:
+                        raise snapshot_error
+                    entries = snapshot_entries
+                else:
+                    entries = await self.sandbox.list_directory(dir_path)
             diagnostic_count("index.entries_listed", len(entries))
 
             ext_set = set(ext.lower() for ext in file_extensions)
