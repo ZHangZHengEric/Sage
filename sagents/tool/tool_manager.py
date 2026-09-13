@@ -1518,6 +1518,23 @@ class ToolManager:
             tool_started_at,
         )
 
+        # Reject malformed argument boundaries before invoking a side-effecting tool.
+        from .argument_validation import argument_contract_error
+
+        contract_error = argument_contract_error(tool, kwargs)
+        if contract_error is not None:
+            response = json.dumps(contract_error, ensure_ascii=False)
+            self._record_tool_call(
+                session_context, tool, kwargs, tool_started_at, "error",
+                tool_call_id=tool_call_id, response=response,
+                error="INVALID_ARGUMENT",
+            )
+            self._record_tool_trace_end(
+                session_context, tool, request_id, tool_call_id,
+                tool_started_at, "error", error="INVALID_ARGUMENT",
+            )
+            return response
+
         # Step 2: Execute based on tool type (self-call prevention handled at agent level)
 
         try:

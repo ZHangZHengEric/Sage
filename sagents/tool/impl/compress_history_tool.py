@@ -9,6 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import inspect
+import hashlib
+import time
 import math
 import os
 import re
@@ -728,6 +730,7 @@ class CompressHistoryTool:
         completion_usage_observed_count = 0
         actual_output_config_counts: Dict[str, int] = {}
         processed_batch_count = 0
+        recovery_split_count = 0
         final_target_tokens = budget.target_tokens
 
         while text_queue:
@@ -796,6 +799,7 @@ class CompressHistoryTool:
             attempt_payload: Optional[Dict[str, Any]] = None
             attempt_parse_status = "fallback_text"
             attempt_omission: Dict[str, Dict[str, int]] = {}
+            split_after_failure = False
             for attempt in range(2):
                 logger.info(
                     "压缩批次请求开始: "
@@ -843,6 +847,9 @@ class CompressHistoryTool:
                     attempt_result.finish_reason
                 ):
                     if attempt == 1:
+                        if len(queued_part.text) > 2048 and recovery_split_count < 2:
+                            split_after_failure = True
+                            break
                         raise CompressHistoryError(
                             "Compression model output remained truncated after retry"
                         )
@@ -873,6 +880,9 @@ class CompressHistoryTool:
                 if not truncated:
                     break
                 if attempt == 1:
+                    if len(queued_part.text) > 2048 and recovery_split_count < 2:
+                        split_after_failure = True
+                        break
                     raise CompressHistoryError(
                         "Compression model output remained truncated after retry"
                     )
@@ -881,6 +891,17 @@ class CompressHistoryTool:
                     MIN_USABLE_SUMMARY_TARGET_TOKENS,
                     math.floor(attempt_target * RETRY_TARGET_RATIO),
                 )
+
+            if split_after_failure:
+                recovery_split_count += 1
+                middle = len(queued_part.text) // 2
+                text_queue = [
+                    CompressionTextPart(text=part, lineage=queued_part.lineage + ((idx, 2),))
+                    for idx, part in enumerate(
+                        (queued_part.text[:middle], queued_part.text[middle:]), 1
+                    )
+                ] + text_queue
+                continue
 
             if (
                 attempt_result is None
@@ -905,6 +926,7 @@ class CompressHistoryTool:
             "summary_target_tokens": final_target_tokens,
             "llm_request_count": request_count,
             "truncation_retry_count": retry_count,
+            "recovery_split_count": recovery_split_count,
             "finish_reason_counts": finish_reason_counts,
             "provider_prompt_usage_observed_count": prompt_usage_observed_count,
             "provider_completion_usage_observed_count": (
@@ -1731,6 +1753,8 @@ If the history contains a compress_conversation_history tool call or result, it 
             f"🗜️ 开始压缩历史消息: session_id={session_id}, 消息数={len(messages)}"
         )
 
+        retry_context = None
+        fingerprint = None
         try:
             to_compress = [
                 msg for msg in messages if msg.role != MessageRole.SYSTEM.value
@@ -1786,6 +1810,30 @@ If the history contains a compress_conversation_history tool call or result, it 
                         "source_message_ids": source_message_ids or [],
                     },
                 }
+
+            # Store only a bounded, session-scoped failure marker, never message text.
+            try:
+                retry_context = self._get_session_context(session_id)
+            except CompressHistoryError:
+                retry_context = None
+            digest = hashlib.sha256()
+            digest.update(repr(self._get_compression_budget(session_id)).encode())
+            for msg in to_compress:
+                digest.update(json.dumps(
+                    [msg.message_id, msg.role, msg.get_content(), msg.tool_calls],
+                    ensure_ascii=False, default=str,
+                ).encode())
+            fingerprint = digest.hexdigest()
+            previous = getattr(retry_context, "_compression_failure", None)
+            if isinstance(previous, dict) and previous.get("fingerprint") == fingerprint:
+                remaining = previous["retry_at"] - time.monotonic()
+                if remaining > 0:
+                    return {
+                        "status": "error", "error_code": "COMPRESSION_RETRY_DEFERRED",
+                        "message": "Compression retry deferred; original messages are preserved.",
+                        "retry_after_seconds": math.ceil(remaining),
+                        "data": {"compressed": False},
+                    }
 
             logger.info(f"压缩调用方指定的 raw 消息段，共 {len(to_compress)} 条消息")
 
@@ -1908,6 +1956,8 @@ If the history contains a compress_conversation_history tool call or result, it 
                 compression_payload, ensure_ascii=False, indent=2
             )
 
+            if retry_context is not None:
+                retry_context._compression_failure = None
             return {
                 "status": "success",
                 "message": compression_info,
@@ -1915,6 +1965,15 @@ If the history contains a compress_conversation_history tool call or result, it 
             }
 
         except CompressHistoryError as e:
+            if retry_context is not None and fingerprint is not None:
+                previous = getattr(retry_context, "_compression_failure", None)
+                failures = 1
+                if isinstance(previous, dict) and previous.get("fingerprint") == fingerprint:
+                    failures = min(previous.get("failures", 0) + 1, 5)
+                retry_context._compression_failure = {
+                    "fingerprint": fingerprint, "failures": failures,
+                    "retry_at": time.monotonic() + min(60 * 2 ** (failures - 1), 900),
+                }
             logger.error(f"压缩历史消息失败: {e}")
             return {"status": "error", "message": f"Compression failed: {str(e)}"}
         except Exception as e:

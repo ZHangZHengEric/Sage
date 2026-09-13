@@ -457,15 +457,11 @@ async def _check_and_spawn_recurring_tasks():
     Check recurring tasks and spawn one-time task instances if needed.
     This should be called before processing pending tasks.
     """
-    try:
-        result = await _request_json("POST", "/tasks/internal/spawn-due")
-        spawned_count = len((result or {}).get("items") or [])
-        if spawned_count > 0:
-            logger.debug(f"Spawned {spawned_count} tasks from recurring tasks")
-        return spawned_count
-    except Exception as e:
-        logger.error(f"Error spawning recurring tasks: {e}")
-        return 0
+    result = await _request_json("POST", "/tasks/internal/spawn-due")
+    spawned_count = len((result or {}).get("items") or [])
+    if spawned_count > 0:
+        logger.debug(f"Spawned {spawned_count} tasks from recurring tasks")
+    return spawned_count
 
 
 async def scheduler_loop_async():
@@ -481,6 +477,7 @@ async def scheduler_loop_async():
     await _wait_for_api_ready()
 
     loop_count = 0
+    consecutive_failures = 0
 
     while True:
         loop_count += 1
@@ -530,9 +527,16 @@ async def scheduler_loop_async():
                     sleep_seconds = 30
 
         except Exception as e:
-            logger.error(
-                f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True
+            consecutive_failures = min(consecutive_failures + 1, 7)
+            sleep_seconds = min(5 * 2 ** (consecutive_failures - 1), 60)
+            logger.warning(
+                "[SCHEDULER] Poll failed (%s); retry in %ss: %s",
+                consecutive_failures, sleep_seconds, e,
             )
+        else:
+            if consecutive_failures:
+                logger.info("[SCHEDULER] Poll recovered after %s failures", consecutive_failures)
+            consecutive_failures = 0
 
         await asyncio.sleep(sleep_seconds)
 
