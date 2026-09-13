@@ -27,7 +27,7 @@ from copy import deepcopy
 from dataclasses import replace
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
-from .message import MessageRole, MessageType, MessageChunk, copy_message_snapshot
+from .message import MessageRole, MessageType, MessageChunk, copy_message_snapshot, _copy_snapshot_value
 from .token_accounting import (
     ContextViewSpec,
     DEFAULT_COMPRESSION_THRESHOLD,
@@ -873,7 +873,7 @@ class MessageManager:
 
         def _tool_call_to_dict(tc):
             if isinstance(tc, dict):
-                return deepcopy(tc)
+                return _copy_snapshot_value(tc, {})
             return {
                 "id": getattr(tc, "id", "") or "",
                 "index": getattr(tc, "index", None),
@@ -908,21 +908,20 @@ class MessageManager:
             # The first streamed chunk may be reasoning-only; once visible content
             # or tool calls arrive, keep the same message and promote its display
             # type instead of persisting a separate reasoning message.
-            existing_type = existing_message.normalized_message_type()
-            new_type = new_message.normalized_message_type()
             if new_message.tool_calls:
                 existing_message.type = MessageType.TOOL_CALL.value
                 existing_message.message_type = MessageType.TOOL_CALL.value
             elif (
-                existing_type == MessageType.REASONING_CONTENT.value
-                and new_type
-                not in {
+                existing_message.normalized_message_type()
+                == MessageType.REASONING_CONTENT.value
+            ):
+                new_type = new_message.normalized_message_type()
+                if new_type not in {
                     MessageType.REASONING_CONTENT.value,
                     MessageType.EMPTY.value,
-                }
-            ):
-                existing_message.type = new_type
-                existing_message.message_type = new_type
+                }:
+                    existing_message.type = new_type
+                    existing_message.message_type = new_type
 
             # 合并 tool_calls（流式 tool_calls 增量合并）
             if new_message.tool_calls is not None:
@@ -1002,7 +1001,7 @@ class MessageManager:
                         # 添加新的 tool_call
                         existing_message.tool_calls.append(new_tc)
         else:
-            old_messages.append(deepcopy(new_message))
+            old_messages.append(copy_message_snapshot(new_message))
             # logger.debug(f"MessageManager: 创建新消息 {new_message.message_id[:8]}... ")
 
     @staticmethod

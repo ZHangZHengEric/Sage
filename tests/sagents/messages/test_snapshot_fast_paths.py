@@ -103,3 +103,26 @@ def test_instance_snapshot_copy_hook_retains_generic_behavior():
     message = MessageChunk(role='assistant', content='text')
     message.__deepcopy__ = lambda memo: 'instance hook'
     assert copy_message_snapshot(message) == deepcopy(message) == 'instance hook'
+
+
+def test_snapshot_plain_containers_preserve_cycles_aliases_and_custom_backrefs():
+    from copy import deepcopy
+    from sagents.context.messages.message import MessageChunk, copy_message_snapshot
+
+    class Backref:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def __deepcopy__(self, memo):
+            return Backref(deepcopy(self.owner, memo))
+
+    shared = []
+    metadata = {"left": shared, "right": shared}
+    shared.extend([metadata, Backref(metadata)])
+    message = MessageChunk(role="assistant", content="hello", metadata=metadata)
+    message.extra = shared
+    for clone in (deepcopy(message), copy_message_snapshot(message)):
+        assert clone.metadata is not metadata
+        assert clone.metadata["left"] is clone.metadata["right"] is clone.extra
+        assert clone.extra[0] is clone.metadata
+        assert clone.extra[1].owner is clone.metadata

@@ -210,3 +210,26 @@ def test_late_compression_tool_name_still_refreshes_after_becoming_complete():
         manager.add_messages(chunk(tool_calls=[tool(0, arguments='{}')]))
         assert refresh.call_count == 3
         assert manager._is_compress_history_tool_call(manager.messages[-1])
+
+
+def test_tool_delta_preserves_old_snapshot_and_detaches_incoming_arguments():
+    manager = MessageManager()
+    manager.add_messages(chunk(tool_calls=[tool(0, call_id="a", name="first", arguments="one")]))
+    previous = manager.messages
+    incoming = chunk(tool_calls=[tool(0, arguments="two")])
+    manager.add_messages(incoming)
+    assert previous[-1].tool_calls[0]["function"]["arguments"] == "one"
+    assert manager.messages[-1].tool_calls[0]["function"]["arguments"] == "onetwo"
+    manager.messages[-1].tool_calls[0]["function"]["arguments"] = "changed"
+    assert incoming.tool_calls[0]["function"]["arguments"] == "two"
+    assert previous[-1].tool_calls[0]["function"]["arguments"] == "one"
+
+
+def test_tool_copy_preserves_normalization_alias_boundary():
+    shared = tool(0, call_id="a", name="first", arguments="one")
+    manager = MessageManager()
+    manager.add_messages(chunk(tool_calls=[shared], metadata={"original_tool": shared}))
+    manager.add_messages(chunk(tool_calls=[tool(0, arguments="two")]))
+    # The normalized tool-call dictionary is detached from metadata, as before.
+    assert manager.messages[-1].tool_calls[0]["function"]["arguments"] == "onetwo"
+    assert manager.messages[-1].metadata["original_tool"]["function"]["arguments"] == "one"
