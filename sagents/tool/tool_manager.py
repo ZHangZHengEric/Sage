@@ -1523,6 +1523,21 @@ class ToolManager:
 
         contract_error = argument_contract_error(tool, kwargs)
         if contract_error is not None:
+            # Keep the existing error envelope and task-local language contract.
+            missing_fields = contract_error["missing_fields"]
+            contract_error["error"] = (
+                tool_t(
+                    "tool.manager.missing_parameters",
+                    params={"parameters": ", ".join(missing_fields)},
+                )
+                if missing_fields else contract_error["message"]
+            )
+            contract_error["required_params"] = (
+                (getattr(tool, "input_schema", None) or {}).get(
+                    "required", getattr(tool, "required", []) or []
+                )
+            )
+            contract_error["provided_params"] = list(kwargs)
             response = json.dumps(contract_error, ensure_ascii=False)
             self._record_tool_call(
                 session_context, tool, kwargs, tool_started_at, "error",
