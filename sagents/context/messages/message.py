@@ -377,6 +377,27 @@ class MessageChunk:
         return content
 
 
+def _copy_snapshot_value(value, memo):
+    """Copy plain containers with deepcopy's memo and custom-object fallback."""
+    kind = type(value)
+    if kind in _ATOMIC_TYPES:
+        return value
+    if id(value) in memo:
+        return memo[id(value)]
+    if kind is dict:
+        result = {}
+        memo[id(value)] = result
+        for key, item in value.items():
+            result[_copy_snapshot_value(key, memo)] = _copy_snapshot_value(item, memo)
+        return result
+    if kind is list:
+        result = []
+        memo[id(value)] = result
+        result.extend(_copy_snapshot_value(item, memo) for item in value)
+        return result
+    return deepcopy(value, memo)
+
+
 def copy_message_snapshot(message):
     """Clone the known plain record without deepcopy's object reconstruction.
 
@@ -391,7 +412,7 @@ def copy_message_snapshot(message):
     state = result.__dict__
     memo = {id(message): result, id(message.__dict__): state}
     for key, value in message.__dict__.items():
-        copied_value = value if type(value) in _ATOMIC_TYPES else deepcopy(value, memo)
+        copied_value = value if type(value) in _ATOMIC_TYPES else _copy_snapshot_value(value, memo)
         copied_key = key if type(key) in _ATOMIC_TYPES else deepcopy(key, memo)
         state[copied_key] = copied_value
     return result
