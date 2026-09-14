@@ -75,3 +75,32 @@ def test_info_level_filters_debug_from_file_sink(tmp_path):
     finally:
         logger.remove()
         logger.add(sys.stderr, level="DEBUG")
+
+
+def test_enqueued_file_writes_do_not_run_on_caller_and_flush_in_order(tmp_path, monkeypatch):
+    import json
+    import threading
+    from loguru._file_sink import FileSink
+    caller = threading.get_ident()
+    release = threading.Event()
+    writes = []
+    original = FileSink.write
+    def slow_write(sink, message):
+        writes.append(threading.get_ident())
+        assert release.wait(1), 'log write blocked caller before release'
+        return original(sink, message)
+    monkeypatch.setattr(FileSink, 'write', slow_write)
+    init_logging_base(log_name='queued', log_path=str(tmp_path), enqueue=True)
+    try:
+        logger.bind(session_id='session', request_id='request').info('first')
+        logger.bind(session_id='session', request_id='request').info('second')
+        release.set()
+        logger.complete()
+        records = [json.loads(s) for s in (tmp_path/'queued_info.log').read_text().splitlines()]
+        assert [r['msg'] for r in records] == ['first', 'second']
+        assert all(r['session_id']=='session' and r['requestId']=='request' for r in records)
+        assert writes and all(t != caller for t in writes)
+    finally:
+        release.set()
+        logger.remove()
+        logger.add(sys.stderr, level='DEBUG')

@@ -10,6 +10,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .base import BaseTraceHandler
 from sagents.utils.logger import logger
+from sagents.utils.latency_diagnostics import timed
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 
 # ContextVar to hold the stack of (span, token) for the current task.
@@ -48,6 +49,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return output.lower(), ""
         return "finished", ""
 
+    @timed("trace.serialize_attribute_value")
     def _serialize_attribute_value(self, value: Any) -> str:
         if isinstance(value, (dict, list)):
 
@@ -272,6 +274,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
+    @timed("trace.on_llm_start")
     def on_llm_start(
         self,
         session_id: str,
@@ -295,6 +298,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span.set_attribute("session_id", session_id)
         self._push_span(span)
 
+    @timed("trace.on_llm_end")
     def on_llm_end(self, response: Any, **kwargs: Any) -> Any:
         span = self._get_current_span()
         if not span:
@@ -334,6 +338,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def on_llm_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
+    @timed("trace.on_tool_start")
     def on_tool_start(
         self,
         session_id: str,
@@ -371,6 +376,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             pass
         self._push_span(span)
 
+    @timed("trace.on_tool_end")
     def on_tool_end(self, tool_output: Any, **kwargs: Any) -> Any:
         span = self._get_current_span()
         if not span:

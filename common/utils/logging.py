@@ -189,6 +189,7 @@ def init_logging_base(
     log_path: str = "./logs",
     get_request_id: Optional[Callable[[], Optional[str]]] = None,
     use_safe_stdout: bool = False,
+    enqueue: bool = False,
 ) -> None:
     """Initialize loguru logging shared by server and desktop.
 
@@ -251,7 +252,7 @@ def init_logging_base(
 
     # stdout sink
     stdout_sink: Any = SafeStdout() if use_safe_stdout else sys.stdout
-    logger.add(stdout_sink, level=log_level, format="{message}")
+    logger.add(stdout_sink, level=log_level, format="{message}", enqueue=enqueue)
 
     # Ensure log directory exists
     log_dir = Path(log_path)
@@ -261,6 +262,7 @@ def init_logging_base(
         "rotation": "100MB",
         "retention": 20,
         "compression": "zip",
+        "enqueue": enqueue,
         "encoding": "utf8",
         "format": "{message}",
     }
@@ -274,6 +276,7 @@ def init_logging_base(
         "rotation": "10MB",
         "retention": 10,
         "compression": "zip",
+        "enqueue": enqueue,
         "encoding": "utf8",
         "format": "{message}",
     }
