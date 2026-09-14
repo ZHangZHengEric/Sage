@@ -4,6 +4,24 @@ from .base import BaseTraceHandler
 from sagents.utils.logger import logger
 
 
+async def emit_async(manager, event_name, *args, **kwargs):
+    """Prepare expensive attributes off-loop; invoke handlers in this task's context."""
+    if type(manager) is ObservabilityManager:
+        for handler in manager.handlers:
+            try:
+                prepare = getattr(handler, "prepare_event_async", None)
+                event_args, event_kwargs = (
+                    await prepare(event_name, args, kwargs)
+                    if prepare is not None else (args, kwargs)
+                )
+                getattr(handler, event_name)(*event_args, **event_kwargs)
+            except Exception as exc:
+                manager._log_handler_error(handler, event_name, exc)
+    else:
+        # Keep duck-typed integrations using the original synchronous contract.
+        getattr(manager, event_name)(*args, **kwargs)
+
+
 class ObservabilityManager(BaseTraceHandler):
     """
     Manager that dispatches events to multiple trace handlers.

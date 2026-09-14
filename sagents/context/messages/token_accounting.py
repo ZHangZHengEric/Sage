@@ -362,11 +362,17 @@ class PromptTokenEstimator:
         tools: Any = None,
         response_format: Any = None,
         session_id: Optional[str] = None,
+        owned_messages: bool = False,
     ) -> PromptTokenManifest:
         # Freeze caller-owned containers before yielding; no mutable live-session
         # messages are examined concurrently by a worker. Strings are immutable
         # and deepcopy does not duplicate their bodies.
-        snapshot = deepcopy((messages, tools, response_format))
+        # Internal callers may lend a private provider-facing message list until
+        # this await completes. Public/shared inputs retain freeze-before-yield.
+        snapshot = (
+            (messages, *deepcopy((tools, response_format)))
+            if owned_messages else deepcopy((messages, tools, response_format))
+        )
         return await diagnostic_to_thread(
             "prompt_budget.manifest",
             cls.manifest,

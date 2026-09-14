@@ -1,3 +1,4 @@
+import asyncio
 import contextvars
 import dataclasses
 import hashlib
@@ -10,7 +11,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .base import BaseTraceHandler
 from sagents.utils.logger import logger
-from sagents.utils.latency_diagnostics import timed
+from sagents.utils.latency_diagnostics import timed, measured_to_thread
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 
 # ContextVar to hold the stack of (span, token) for the current task.
@@ -24,6 +25,44 @@ _last_llm_span_context: contextvars.ContextVar[Optional[trace.SpanContext]] = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class _PreparedAttribute:
+    value: Optional[str] = None
+    error: Optional[Exception] = None
+
+    def unwrap(self):
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+
+def _tool_attribute(value):
+    if isinstance(value, _PreparedAttribute):
+        return value.unwrap()
+    return json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+
+
+def _llm_messages_attribute(value):
+    if isinstance(value, _PreparedAttribute):
+        return value.unwrap()
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _llm_response_attribute(response):
+    if isinstance(response, _PreparedAttribute):
+        return response.unwrap()
+    if hasattr(response, "model_dump"):
+        value = response.model_dump()
+    elif hasattr(response, "dict"):
+        value = response.dict()
+    elif hasattr(response, "__dict__"):
+        value = response.__dict__
+    else:
+        value = str(response)
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    return encoded[:10000] + "... [truncated]" if len(encoded) > 10000 else encoded
+
+
 class OpenTelemetryTraceHandler(BaseTraceHandler):
     """
     Handler that creates OpenTelemetry spans for agent execution.
@@ -35,6 +74,49 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         self.tracer = trace.get_tracer(service_name)
         self._detached_token_ids: set[int] = set()
         # No longer using self.span_stacks for concurrency safety
+
+    def _prepare_event(self, event_name, args, kwargs):
+        event_args, event_kwargs = list(args), dict(kwargs)
+        def prepare(serializer, value):
+            try:
+                return _PreparedAttribute(value=serializer(value))
+            except Exception as exc:
+                return _PreparedAttribute(error=exc)
+
+        spec = {
+            "on_llm_start": (2, _llm_messages_attribute),
+            "on_llm_end": (0, _llm_response_attribute),
+            "on_tool_start": (2, _tool_attribute),
+            "on_tool_end": (0, _tool_attribute),
+        }
+        index, serializer = spec[event_name]
+        parameter = {
+            "on_llm_start": "messages", "on_llm_end": "response",
+            "on_tool_start": "tool_input", "on_tool_end": "tool_output",
+        }[event_name]
+        if len(event_args) > index:
+            event_args[index] = prepare(serializer, event_args[index])
+        else:
+            event_kwargs[parameter] = prepare(serializer, event_kwargs[parameter])
+        return event_args, event_kwargs
+
+    async def prepare_event_async(self, event_name, args, kwargs):
+        if event_name not in {
+            "on_llm_start", "on_llm_end", "on_tool_start", "on_tool_end",
+        }:
+            return args, kwargs
+        if event_name.endswith("_end") and self._get_current_span() is None:
+            return args, kwargs
+        # Inputs are borrowed only until this await completes; the producing
+        # task does not mutate them while serialization runs.
+        try:
+            return await measured_to_thread(
+                "trace.prepare." + event_name, self._prepare_event, event_name, args, kwargs
+            )
+        except asyncio.CancelledError:
+            if event_name.endswith("_end"):
+                self._pop_span()
+            raise
 
     def _is_ignorable_detach_error(self, error: Exception) -> bool:
         message = str(error)
@@ -51,6 +133,8 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
     @timed("trace.serialize_attribute_value")
     def _serialize_attribute_value(self, value: Any) -> str:
+        if isinstance(value, _PreparedAttribute):
+            return value.unwrap()
         if isinstance(value, (dict, list)):
 
             def default_serializer(obj):
@@ -290,7 +374,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
         try:
-            messages_str = json.dumps(messages, ensure_ascii=False, default=str)
+            messages_str = _llm_messages_attribute(messages)
             span.set_attribute("llm.messages", messages_str)
         except Exception as e:
             logger.error(f"Error setting llm.messages attribute: {e}")
@@ -305,23 +389,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return
 
         try:
-            # Convert response to serializable dict if needed
-            if hasattr(response, "model_dump"):
-                # Pydantic v2 model
-                response_dict = response.model_dump()
-            elif hasattr(response, "dict"):
-                # Pydantic v1 model
-                response_dict = response.dict()
-            elif hasattr(response, "__dict__"):
-                # Regular object
-                response_dict = response.__dict__
-            else:
-                response_dict = str(response)
-
-            # Limit response size to avoid span attribute limits
-            response_str = json.dumps(response_dict, ensure_ascii=False, default=str)
-            if len(response_str) > 10000:
-                response_str = response_str[:10000] + "... [truncated]"
+            response_str = _llm_response_attribute(response)
 
             span.set_attribute("llm.response", response_str)
         except Exception as e:
@@ -366,10 +434,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         if server_name:
             span.set_attribute("mcp.server_name", str(server_name))
         try:
-            if isinstance(tool_input, (dict, list)):
-                input_str = json.dumps(tool_input, ensure_ascii=False)
-            else:
-                input_str = str(tool_input)
+            input_str = _tool_attribute(tool_input)
             span.set_attribute("tool.input", input_str)
         except Exception as e:
             logger.error(f"Error setting tool input attribute: {e}")
@@ -382,10 +447,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         if not span:
             return
         try:
-            if isinstance(tool_output, (dict, list)):
-                output_str = json.dumps(tool_output, ensure_ascii=False)
-            else:
-                output_str = str(tool_output)
+            output_str = _tool_attribute(tool_output)
             span.set_attribute("tool.output", str(output_str))
         except Exception as e:
             logger.error(f"Error setting tool output attribute: {e}")

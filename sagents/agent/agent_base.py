@@ -1,4 +1,4 @@
-from sagents.utils.latency_diagnostics import measured_to_thread as diagnostic_to_thread
+from sagents.utils.latency_diagnostics import measured_to_thread as diagnostic_to_thread, timed
 from sagents.utils.stream_yield import StreamYieldBudget
 from sagents.utils.request_latency import request_stage, record_stage
 from abc import ABC, abstractmethod
@@ -34,6 +34,7 @@ from sagents.context.messages.message import (
     MessageRole,
     MessageType,
     is_message_client_visible,
+    _copy_snapshot_value,
 )
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.messages.message_manager import MessageManager
@@ -174,6 +175,11 @@ def _is_rate_limit_error(error: BaseException) -> bool:
             " tpm",
         )
     )
+
+
+@timed("model.freeze_shared_snapshot")
+def _freeze_shared_request_snapshot(messages):
+    return _copy_snapshot_value(messages, {})
 
 
 class AgentBase(ABC):
@@ -1565,12 +1571,16 @@ class AgentBase(ABC):
                         tools=request.get("tools"),
                         response_format=request.get("response_format"),
                         session_id=session_id,
+                        owned_messages=True,
                     )
                 )
             provider_request_attempts.append(
                 cast(
                     Dict[str, Any],
-                    redact_base64_data_urls_in_value(deepcopy(request)),
+                    await diagnostic_to_thread(
+                        "model.copy_redacted_record",
+                        lambda: redact_base64_data_urls_in_value(deepcopy(request)),
+                    ),
                 )
             )
 
@@ -1682,7 +1692,9 @@ class AgentBase(ABC):
                 first_token_time = None
                 cache_segments: List[Optional[str]] = []
                 if request_messages_snapshot is not None:
-                    serializable_messages = deepcopy(request_messages_snapshot)
+                    serializable_messages = await diagnostic_to_thread(
+                        "model.copy_request_snapshot", deepcopy, request_messages_snapshot
+                    )
                 else:
                     serializable_messages = []
                     for msg in messages:
@@ -1912,6 +1924,10 @@ class AgentBase(ABC):
                     serializable_messages
                 )
                 if request_messages_snapshot is None:
+                    # Freeze shared nested content once, before yielding. Plain
+                    # containers use the memo-preserving fast copier; strings
+                    # are reused. From here this task owns the provider view.
+                    serializable_messages = _freeze_shared_request_snapshot(serializable_messages)
                     preliminary_projection = prompt_budget_manager.project(
                         prompt_profile_id,
                         await PromptTokenEstimator.manifest_async(
@@ -1919,6 +1935,7 @@ class AgentBase(ABC):
                             tools=final_config.get("tools"),
                             response_format=response_format,
                             session_id=session_id,
+                            owned_messages=True,
                         ),
                     )
                     if preliminary_projection.projected_tokens > prompt_input_limit:
@@ -1967,6 +1984,7 @@ class AgentBase(ABC):
                             tools=final_config.get("tools"),
                             response_format=response_format,
                             session_id=session_id,
+                            owned_messages=True,
                         )
                     )
                     request_token_projection = prompt_budget_manager.project(
@@ -1993,11 +2011,15 @@ class AgentBase(ABC):
                     )
                     for msg in serializable_messages:
                         msg.pop("_sage_context_protected", None)
-                    request_messages_snapshot = deepcopy(serializable_messages)
+                    # Transfer this private view instead of copying it again.
+                    # Provider attempts still receive an isolated worker copy.
+                    request_messages_snapshot = serializable_messages
 
                 # Provider clients may normalize/mutate request dictionaries, so
                 # every attempt receives a fresh copy of the frozen snapshot.
-                serializable_messages = deepcopy(request_messages_snapshot)
+                serializable_messages = await diagnostic_to_thread(
+                    "model.copy_request_snapshot", deepcopy, request_messages_snapshot
+                )
                 final_config = {k: v for k, v in final_config.items() if v is not None}
 
                 # 构建 extra_body（与压缩等旁路请求共用同一套模型分支逻辑）
@@ -2291,16 +2313,20 @@ class AgentBase(ABC):
                         # final_config 在前面已经把 'model' pop 走了，这里把模型名补回，
                         # 让 SessionContext 的 per-request tokens 统计能拿到 model 字段。
                         model_config_for_record = {**final_config, "model": model_name}
+                        recorded_messages, recorded_attempts = await diagnostic_to_thread(
+                            "model.copy_completed_record",
+                            lambda: (
+                                deepcopy(provider_request_attempts[-1].get("messages", []))
+                                if provider_request_attempts else [],
+                                deepcopy(provider_request_attempts),
+                            ),
+                        )
                         llm_request = {
                             "logical_request_id": logical_request_id,
                             "step_name": step_name,
                             "model_config": model_config_for_record,
                             "model": model_name,
-                            "messages": deepcopy(
-                                provider_request_attempts[-1].get("messages", [])
-                            )
-                            if provider_request_attempts
-                            else [],
+                            "messages": recorded_messages,
                             "prompt_cache_observation": prompt_cache_observation,
                             "prompt_token_projection": (
                                 request_token_projection.to_dict()
@@ -2322,9 +2348,7 @@ class AgentBase(ABC):
                             if first_token_time
                             else None,
                             "duration_sec": total_time,
-                            "_provider_request_attempts": deepcopy(
-                                provider_request_attempts
-                            ),
+                            "_provider_request_attempts": recorded_attempts,
                             "_provider_metadata": {
                                 "api": "chat.completions",
                                 "base_url": active_base_url,

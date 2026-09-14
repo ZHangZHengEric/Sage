@@ -1035,11 +1035,11 @@ async def create_chat_completion_with_fallback(
         try:
             if request_observer is not None:
                 try:
-                    provider_request = {
-                        "model": model,
-                        "messages": deepcopy(messages),
-                        **deepcopy(request_kwargs),
-                    }
+                    from sagents.utils.latency_diagnostics import measured_to_thread
+                    provider_request = await measured_to_thread(
+                        "model.copy_provider_observation",
+                        lambda: {"model": model, "messages": deepcopy(messages), **deepcopy(request_kwargs)},
+                    )
                     observed = request_observer(provider_request)
                     if inspect.isawaitable(observed):
                         await observed

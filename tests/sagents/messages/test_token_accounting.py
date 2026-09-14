@@ -376,3 +376,26 @@ def test_async_manifest_freezes_input_and_does_not_block_event_loop(monkeypatch)
             release.set()
 
     asyncio.run(run())
+
+
+def test_owned_manifest_borrows_messages_but_freezes_tool_schema(monkeypatch):
+    import asyncio
+    import threading
+    messages = [{"role": "user", "content": "private request"}]
+    tools = [{"type": "function", "function": {"name": "example"}}]
+    original = PromptTokenEstimator.manifest
+    expected = original(messages, tools=tools)
+    caller = threading.get_ident()
+
+    def inspect_owned(cls, actual, **kwargs):
+        assert threading.get_ident() != caller
+        assert actual is messages
+        assert kwargs["tools"] == tools
+        assert kwargs["tools"] is not tools
+        return original(actual, **kwargs)
+
+    monkeypatch.setattr(PromptTokenEstimator, "manifest", classmethod(inspect_owned))
+    actual = asyncio.run(PromptTokenEstimator.manifest_async(
+        messages, tools=tools, owned_messages=True
+    ))
+    assert actual == expected
