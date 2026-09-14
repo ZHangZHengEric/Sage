@@ -137,7 +137,7 @@ def test_chat_endpoint_preserves_provider_override(monkeypatch):
     async def fake_prepare_session(request):
         return object(), asyncio.Lock()
 
-    async def fake_execute_chat_session(stream_service):
+    async def fake_execute_chat_session(stream_service, filtered_stream_types=None):
         if False:
             yield ""
 

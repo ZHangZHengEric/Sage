@@ -1,4 +1,6 @@
 import asyncio
+from common.utils.stream_payload import should_filter_stream_payload
+from sagents.utils.stream_yield import StreamYieldBudget
 from sagents.utils.request_latency import RequestLatency, stream_sync_stage
 from sagents.utils.latency_diagnostics import (
     to_thread as diagnostic_to_thread,
@@ -1519,6 +1521,7 @@ async def prepare_session(
 async def execute_chat_session(
     stream_service: SageStreamService,
     mode: Optional[str] = None,
+    filtered_stream_types=None,
     **kwargs: Any,
 ):
     from sagents.tool.tool_progress import (
@@ -1530,6 +1533,7 @@ async def execute_chat_session(
     session_id = stream_service.request.session_id
     request = stream_service.request
     stream_counter = 0
+    filter_budget = StreamYieldBudget()
     stream_end_emitted = False
     token_usage_payload: Optional[Dict[str, Any]] = None
 
@@ -1559,9 +1563,12 @@ async def execute_chat_session(
 
             if kind == "tool_progress":
                 # progress 事件不进 token usage、不进 MessageManager；直接下发
-                with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
-                    encoded = json.dumps(payload, ensure_ascii=False) + "\n"
-                yield encoded
+                if should_filter_stream_payload(payload, filtered_stream_types):
+                    await filter_budget.checkpoint()
+                else:
+                    with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
+                        encoded = json.dumps(payload, ensure_ascii=False) + "\n"
+                    yield encoded
                 continue
 
             result = payload
@@ -1575,9 +1582,12 @@ async def execute_chat_session(
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
             yield_result.pop("chunk_id", None)
-            with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
-                encoded = json.dumps(yield_result, ensure_ascii=False) + "\n"
-            yield encoded
+            if should_filter_stream_payload(yield_result, filtered_stream_types):
+                await filter_budget.checkpoint()
+            else:
+                with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
+                    encoded = json.dumps(yield_result, ensure_ascii=False) + "\n"
+                yield encoded
             if current_token_usage is not None and not stream_end_emitted:
                 stream_end_emitted = True
                 logger.bind(session_id=session_id).info(

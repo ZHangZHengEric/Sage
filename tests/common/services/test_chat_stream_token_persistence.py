@@ -497,3 +497,58 @@ def test_persist_cancel_protection_coalesces_same_session(monkeypatch):
         ("done", "persist-singleflight"),
     ]
     assert conversation_service._SESSION_PERSISTENCE_TASKS == {}
+
+
+def test_filter_before_encoding_preserves_wire_end_and_billing(monkeypatch):
+    import json
+    calls = []
+    async def persist(service, *, token_usage_payload=None):
+        calls.append(token_usage_payload)
+    async def finalize(request):
+        pass
+    monkeypatch.setattr(chat_service, '_persist_token_usage_if_available', persist)
+    monkeypatch.setattr(chat_service, '_finalize_session_end', finalize)
+    monkeypatch.setattr(chat_service.time, 'time', lambda: 123.0)
+
+    async def run():
+        before = [s async for s in chat_service.execute_chat_session(_FakeStreamService())]
+        after = [s async for s in chat_service.execute_chat_session(_FakeStreamService(), filtered_stream_types={'token_usage'})]
+        await asyncio.sleep(0)
+        assert after == [s for s in before if json.loads(s)['type'] != 'token_usage']
+        assert json.loads(after[-1])['type'] == 'stream_end'
+    asyncio.run(run())
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    assert calls[1]['total_info']['total_tokens'] == 15
+
+
+def test_structured_filter_is_cooperative_for_hidden_burst(monkeypatch):
+    from itertools import count
+    from sagents.utils.stream_yield import StreamYieldBudget
+    from common.utils import stream_merge
+    ticks = count()
+    produced = 0
+    seen = []
+    monkeypatch.setattr(chat_service, 'StreamYieldBudget',
+                        lambda: StreamYieldBudget(clock=lambda: next(ticks) * 0.002))
+
+    async def source(*args, **kwargs):
+        nonlocal produced
+        for i in range(100):
+            produced += 1
+            yield 'message', {'type': 'hidden', 'session_id':'session-web-stream', 'content':'x'}
+    async def finish(*args, **kwargs):
+        pass
+    monkeypatch.setattr(stream_merge, 'interleave_message_and_progress', source)
+    monkeypatch.setattr(chat_service, '_finish_chat_execution', finish)
+
+    async def run():
+        async def heartbeat():
+            await asyncio.sleep(0)
+            seen.append(produced)
+        task = asyncio.create_task(heartbeat())
+        output = [s async for s in chat_service.execute_chat_session(_FakeStreamService(), filtered_stream_types={'hidden'})]
+        await task
+        assert 0 < seen[0] < 100
+        assert len(output) == 1 and 'stream_end' in output[0]
+    asyncio.run(run())
