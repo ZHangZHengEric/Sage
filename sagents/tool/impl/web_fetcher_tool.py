@@ -10,6 +10,7 @@ Scrapling 特性：
 """
 
 import asyncio
+from sagents.utils.latency_diagnostics import measured_to_thread
 import json
 import logging
 import os
@@ -445,16 +446,8 @@ class WebFetcherTool:
             try:
                 page = await self._fetch_html_page(url, timeout)
 
-                # 提取标题
-                title = page.css("title::text").get("")
-                if not title:
-                    title = page.css("h1::text").get("")
-                if not title:
-                    title = page.css("#activity-name::text").get("")
-
-                effective_base_url = self._effective_base_url(page, url)
-                full_content, used_selector, images = self._extract_markdown_content(
-                    page, effective_base_url
+                title, full_content, used_selector, images = await measured_to_thread(
+                    "web_fetch.extract_markdown", self._prepare_page_content, page, url
                 )
 
                 # 生成文件名
@@ -563,16 +556,8 @@ class WebFetcherTool:
             try:
                 page = await self._fetch_html_page(url, timeout)
 
-                # 提取标题
-                title = page.css("title::text").get("")
-                if not title:
-                    title = page.css("h1::text").get("")
-                if not title:
-                    title = page.css("#activity-name::text").get("")
-
-                effective_base_url = self._effective_base_url(page, url)
-                content, used_selector, images = self._extract_markdown_content(
-                    page, effective_base_url
+                title, content, used_selector, images = await measured_to_thread(
+                    "web_fetch.extract_markdown", self._prepare_page_content, page, url
                 )
 
                 # 截断内容
@@ -685,6 +670,18 @@ class WebFetcherTool:
             cleaned_lines.pop()
 
         return "\n".join(cleaned_lines)
+
+    def _prepare_page_content(self, page, url):
+        """Run DOM selection, HTML parsing and conversion in one worker job."""
+        title = page.css("title::text").get("")
+        if not title:
+            title = page.css("h1::text").get("")
+        if not title:
+            title = page.css("#activity-name::text").get("")
+        content, selector, images = self._extract_markdown_content(
+            page, self._effective_base_url(page, url)
+        )
+        return title, content, selector, images
 
     def _extract_markdown_content(self, page, base_url: str):
         """Extract the main content as Markdown while keeping image references."""

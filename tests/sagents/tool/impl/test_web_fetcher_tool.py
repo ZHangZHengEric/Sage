@@ -582,3 +582,32 @@ def test_xiaohongshu_unavailable_page_does_not_fallback_to_shell_markdown(
     assert "Xiaohongshu share post did not return body content" in result["content"]
     assert "data:image" not in result["content"]
     assert result["metadata"]["image_count"] == 0
+
+
+@pytest.mark.parametrize('save', [False, True])
+def test_page_processing_is_off_loop_and_preserves_results(monkeypatch, tmp_path, save):
+    import threading
+    install_html_markdown_stubs(monkeypatch)
+    page = FakePage('Example', {'article':'<article><p>' + 'Long content. '*20 + '</p><img src="/a.png"></article>'})
+    tool = WebFetcherTool()
+    expected = tool._prepare_page_content(page, 'https://example.com')
+    caller = threading.get_ident()
+    observed = []
+    original = tool._prepare_page_content
+    def process(*args):
+        observed.append(threading.get_ident())
+        return original(*args)
+    async def fetch(*args):
+        return page
+    monkeypatch.setattr(tool, '_prepare_page_content', process)
+    monkeypatch.setattr(tool, '_fetch_html_page', fetch)
+    async def run():
+        if save:
+            return await tool._fetch_single_html_with_save('https://example.com', 10000, str(tmp_path), 3, 0)
+        return await tool._fetch_single_html('https://example.com',10000,3,0)
+    result = asyncio.run(run())
+    assert result['status']=='success'
+    assert result['content']==expected[1]
+    assert result['metadata']['title']==expected[0]
+    assert result['metadata']['images']==expected[3]
+    assert observed and all(t != caller for t in observed)

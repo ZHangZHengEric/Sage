@@ -22,6 +22,7 @@ from .file_system_tool import FileSystemTool
 from sagents.utils.agent_session_helper import get_session_sandbox
 from sagents.utils.lock_manager import lock_manager
 from sagents.utils.logger import logger
+from sagents.utils.latency_diagnostics import measured_to_thread
 
 
 @dataclass(frozen=True)
@@ -250,8 +251,8 @@ class ApplyPatchTool:
                     path=operation.path,
                 )
 
-            new_content, lines_added, lines_removed = apply_update_operation(
-                source.content, operation
+            new_content, lines_added, lines_removed = await measured_to_thread(
+                "patch.apply_update", apply_update_operation, source.content, operation
             )
             move_actual_path = None
             if operation.move_path:
@@ -610,7 +611,7 @@ class ApplyPatchTool:
             raise ValueError("ApplyPatchTool: session_id is required")
 
         try:
-            operations = parse_patch(patch)
+            operations = await measured_to_thread("patch.parse", parse_patch, patch)
         except PatchError as error:
             return self._patch_error_payload(error)
 
@@ -680,7 +681,10 @@ class ApplyPatchTool:
                     rollback=rollback,
                 )
 
-            change_results = [self._change_result(change) for change in plan]
+            change_results = await measured_to_thread(
+                "patch.validate_results",
+                lambda: [self._change_result(change) for change in plan],
+            )
             return {
                 "success": True,
                 "status": "success",

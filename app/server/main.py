@@ -124,6 +124,7 @@ def main():
     try:
         cfg = config.init_startup_config()
         init_logging_base(
+            enqueue=True,
             log_name="sage-server",
             log_level=getattr(cfg, "log_level", "INFO"),
             log_path=cfg.logs_dir,
@@ -142,6 +143,10 @@ def main():
 
         traceback.print_exc()
         return 1
+    finally:
+        from loguru import logger
+
+        logger.complete()  # Drain queued file/stdout writes on graceful shutdown.
 
 
 if __name__ == "__main__":

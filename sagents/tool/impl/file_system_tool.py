@@ -6,6 +6,7 @@ from ..tool_base import tool
 from ..error_codes import ToolErrorCode, make_tool_error
 from sagents.utils.file_content_validator import FileContentValidator
 from sagents.utils.logger import logger
+from sagents.utils.latency_diagnostics import measured_to_thread
 from sagents.utils.i18n import tool_t
 from sagents.utils.agent_session_helper import (
     get_session_sandbox as _get_session_sandbox_util,
@@ -577,7 +578,9 @@ class FileSystemTool:
             else:
                 await sandbox.write_file(file_path, content, mode="overwrite")
 
-            validation = self._build_validation_result(file_path, final_content)
+            validation = await measured_to_thread(
+                "file.validate", self._build_validation_result, file_path, final_content
+            )
             lints = await self._auto_lint(file_path, session_id)
             result: Dict[str, Any] = {
                 "status": "success",
@@ -781,8 +784,8 @@ class FileSystemTool:
                     -1 if item[1].get("end_line") is None else -item[1].get("end_line"),
                 ),
             ):
-                step_result = self._apply_line_range_update(
-                    current_content,
+                step_result = await measured_to_thread(
+                    "file.edit_lines", self._apply_line_range_update, current_content,
                     replacement=op.get("replacement", ""),
                     start_line=op.get("start_line"),
                     end_line=op.get("end_line"),
@@ -829,8 +832,8 @@ class FileSystemTool:
                 operation_summaries.append(op_summary)
 
             for index, op, op_summary in other_ops:
-                step_result = self._apply_search_update(
-                    current_content,
+                step_result = await measured_to_thread(
+                    "file.edit_search", self._apply_search_update, current_content,
                     search_pattern=op.get("search_pattern"),
                     replacement=op.get("replacement", ""),
                     replace_all=bool(op.get("replace_all", False)),
@@ -862,7 +865,9 @@ class FileSystemTool:
                 operation_summaries.append(op_summary)
 
             if current_content == content:
-                validation = self._build_validation_result(file_path, current_content)
+                validation = await measured_to_thread(
+                    "file.validate", self._build_validation_result, file_path, current_content
+                )
                 return {
                     "status": "success",
                     "message": (
@@ -888,7 +893,9 @@ class FileSystemTool:
                 total_replacements = 1
 
             await sandbox.write_file(file_path, current_content, mode="overwrite")
-            validation = self._build_validation_result(file_path, current_content)
+            validation = await measured_to_thread(
+                "file.validate", self._build_validation_result, file_path, current_content
+            )
             lints = await self._auto_lint(file_path, session_id)
 
             result = {

@@ -349,3 +349,43 @@ async def test_identical_search_replacement_is_success_without_write():
     assert result["status"] == "success"
     assert result["replacements"] == 0
     assert sandbox.writes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["write", "update"])
+async def test_slow_validation_leaves_event_loop_responsive(monkeypatch, operation):
+    import asyncio
+    import threading
+
+    tool = FileSystemTool()
+    sandbox = _FakeSandbox("old")
+    monkeypatch.setattr(tool, "_get_sandbox", lambda _: sandbox)
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+    caller = threading.get_ident()
+    workers = []
+
+    def validate(path, content):
+        workers.append(threading.get_ident())
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(2), "event loop could not release the validator"
+        return {"status": "passed", "passed": True}
+
+    monkeypatch.setattr(tool, "_build_validation_result", validate)
+    if operation == "write":
+        task = asyncio.create_task(tool.file_write("demo.js", "new", session_id="s"))
+    else:
+        task = asyncio.create_task(tool.file_update(
+            "demo.js", [{"search_pattern": "old", "replacement": "new"}], session_id="s"
+        ))
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        assert workers == [workers[0]] and workers[0] != caller
+        assert not task.done()
+    finally:
+        release.set()
+    result = await task
+    assert result["status"] == "success"
+    assert result["validation"]["passed"]
+    assert sandbox.content == "new"
