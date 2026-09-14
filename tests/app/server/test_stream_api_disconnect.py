@@ -252,3 +252,38 @@ async def test_generator_aclose_cancel_does_not_skip_lock_release(_patch_chat_mo
         pass
 
     _patch_chat_module.safe_release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_filtered_buffered_stream_yields_to_other_tasks(monkeypatch):
+    from itertools import count
+    from sagents.utils.stream_yield import StreamYieldBudget
+
+    ticks = count()
+    monkeypatch.setattr(chat_module, 'StreamYieldBudget',
+                        lambda: StreamYieldBudget(clock=lambda: next(ticks) * 0.002))
+    filtered_type = next(iter(chat_module.SERVER_STREAM_FILTERED_TYPES))
+    produced = 0
+    seen = []
+    closed = []
+
+    async def source():
+        nonlocal produced
+        try:
+            for i in range(100):
+                produced += 1
+                yield json.dumps({'type': filtered_type, 'i': i})
+            yield json.dumps({'type': 'assistant_text', 'content': 'done'})
+        finally:
+            closed.append(True)
+
+    async def heartbeat():
+        await asyncio.sleep(0)
+        seen.append(produced)
+
+    task = asyncio.create_task(heartbeat())
+    output = [chunk async for chunk in chat_module._filter_stream_chunks(source())]
+    await task
+    assert 0 < seen[0] < 100
+    assert len(output) == 1 and json.loads(output[0])['content'] == 'done'
+    assert closed == [True]

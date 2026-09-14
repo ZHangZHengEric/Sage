@@ -23,6 +23,8 @@ from common.core.request_identity import get_request_user_id
 from common.services import chat_service
 from common.services import conversation_service
 from common.utils.stream_batch import batch_stream_chunks
+from common.utils.stream_payload import should_filter_stream_chunk
+from sagents.utils.stream_yield import StreamYieldBudget
 from common.schemas.chat import (
     ChatRequest,
     SandboxApprovalDecisionRequest,
@@ -204,9 +206,10 @@ async def _start_web_stream_session(
     )
     stream_service, lock = await chat_service.prepare_session(request)
     session_id = request.session_id
-    generator = chat_service.execute_chat_session(stream_service=stream_service)
-    if filter_stream_types:
-        generator = _filter_stream_chunks(generator)
+    generator = chat_service.execute_chat_session(
+        stream_service=stream_service,
+        filtered_stream_types=SERVER_STREAM_FILTERED_TYPES if filter_stream_types else None,
+    )
 
     await manager.start_session(session_id, query, generator, lock)  # pyright: ignore[reportArgumentType]
 
@@ -315,19 +318,14 @@ async def stream_with_manager(
 
 
 def _should_filter_stream_chunk(chunk: str) -> bool:
-    try:
-        payload = json.loads(chunk)
-    except Exception:
-        return False
-    return (
-        isinstance(payload, dict)
-        and payload.get("type") in SERVER_STREAM_FILTERED_TYPES
-    )
+    return should_filter_stream_chunk(chunk, SERVER_STREAM_FILTERED_TYPES)
 
 
 async def _filter_stream_chunks(generator):
+    budget = StreamYieldBudget()
     try:
-        async for chunk in generator:
+        async for chunk in budget.iterate(generator):
+            await budget.checkpoint()
             if _should_filter_stream_chunk(chunk):
                 continue
             yield chunk
@@ -526,10 +524,9 @@ async def chat(request: ChatRequest, http_request: Request):
     return StreamingResponse(
         stream_api_with_disconnect_check(
             batch_stream_chunks(
-                _filter_stream_chunks(
-                    chat_service.execute_chat_session(
-                        stream_service=stream_service,
-                    ),
+                chat_service.execute_chat_session(
+                    stream_service=stream_service,
+                    filtered_stream_types=SERVER_STREAM_FILTERED_TYPES,
                 ),
                 session_id=session_id,
             ),
