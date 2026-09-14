@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from typing import Any, Dict, Optional
-from sagents.observability.manager import ObservabilityManager
+from sagents.observability.manager import ObservabilityManager, emit_async
 from sagents.tool.tool_schema import McpToolSpec, SageMcpToolSpec
 from sagents.context.session_context import SessionContext
 
@@ -81,7 +81,8 @@ class ObservableToolManager:
             tool_type = "sage_mcp"
             server_name = tool.server_name
 
-        self.observability_manager.on_tool_start(
+        await emit_async(
+            self.observability_manager, "on_tool_start",
             sid,
             tool_name,
             kwargs,
@@ -102,14 +103,15 @@ class ObservableToolManager:
             if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
                 output_to_log = "<streaming_response>"
 
-            self.observability_manager.on_tool_end(output_to_log, session_id=sid)
+            await emit_async(self.observability_manager, "on_tool_end", output_to_log, session_id=sid)
             return result
         except Exception as e:
             # Use on_tool_error if available, or log error in on_tool_end
             if hasattr(self.observability_manager, "on_tool_error"):
                 self.observability_manager.on_tool_error(e, session_id=sid)
             else:
-                self.observability_manager.on_tool_end(
+                await emit_async(
+                    self.observability_manager, "on_tool_end",
                     f"Error: {str(e)}", session_id=sid
                 )
             raise e
@@ -169,7 +171,8 @@ class ObservableCompletions:
             llm_system = "default_endpoint"
 
         if session_id:
-            self.observability_manager.on_llm_start(
+            await emit_async(
+                self.observability_manager, "on_llm_start",
                 session_id,
                 model_name,
                 messages,
@@ -186,7 +189,8 @@ class ObservableCompletions:
                 if kwargs.get("stream", False):
                     return self._wrap_stream(response, session_id)
                 else:
-                    self.observability_manager.on_llm_end(
+                    await emit_async(
+                        self.observability_manager, "on_llm_end",
                         response, session_id=session_id
                     )
                     return response
@@ -214,7 +218,7 @@ class ObservableCompletions:
             # Since we can't easily reconstruct the full ChatCompletion object without duplicating AgentBase logic,
             # we will log the accumulated content.
             full_content = "".join(collected_content)
-            self.observability_manager.on_llm_end(full_content, session_id=session_id)
+            await emit_async(self.observability_manager, "on_llm_end", full_content, session_id=session_id)
 
 
 class AgentRuntime:

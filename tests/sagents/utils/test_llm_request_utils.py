@@ -813,3 +813,31 @@ async def test_async_request_observer_completes_before_provider_call():
         request_observer=observer,
     )
     assert result == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_provider_observer_copy_off_loop_preserves_isolation(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+    import sagents.utils.llm_request_utils as module
+    caller = threading.get_ident()
+    original = module.deepcopy
+    threads = []
+
+    def copied(value):
+        threads.append(threading.get_ident())
+        return original(value)
+
+    monkeypatch.setattr(module, "deepcopy", copied)
+    messages = [{"role": "user", "content": [{"type": "text", "text": "original"}]}]
+
+    def observer(request):
+        request["messages"][0]["content"][0]["text"] = "observer mutation"
+
+    async def create(**kwargs):
+        assert kwargs["messages"][0]["content"][0]["text"] == "original"
+        return {"ok": True}
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    await create_chat_completion_with_fallback(client, model="gpt-4o", messages=messages, request_observer=observer)
+    assert threads and all(t != caller for t in threads)

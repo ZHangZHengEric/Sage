@@ -16,6 +16,7 @@ from sagents.utils.sandbox.environment import build_agent_environment
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.serialization import make_serializable
+from sagents.utils.latency_diagnostics import measured_to_thread
 from sagents.utils.i18n import (
     get_tool_language,
     normalize_language,
@@ -1893,6 +1894,32 @@ class ToolManager:
 
         return normalized
 
+    @staticmethod
+    def _serialize_mcp_result(result):
+        if isinstance(result, dict) and result.get("content"):
+            content = result["content"]
+            if isinstance(content, list) and len(content) > 0:
+                # Handle list content (e.g., from text/plain results)
+                formatted_content = "\n".join(
+                    [
+                        item["text"]
+                        if type(item) is dict and "text" in item
+                        else item.get("text", str(item))
+                        for item in content
+                    ]
+                )
+            else:
+                formatted_content = content
+            return json.dumps(
+                {"content": make_serializable(formatted_content)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        else:
+            return json.dumps(
+                make_serializable(result), ensure_ascii=False, indent=2
+            )
+
     async def _execute_mcp_tool(
         self,
         tool: McpToolSpec,
@@ -1915,25 +1942,9 @@ class ToolManager:
                 **kwargs,
             )
             mcp_logger.info(f"MCP tool {tool.name} execution completed successfully")
-            # Process MCP result
-            if isinstance(result, dict) and result.get("content"):
-                content = result["content"]
-                if isinstance(content, list) and len(content) > 0:
-                    # Handle list content (e.g., from text/plain results)
-                    formatted_content = "\n".join(
-                        [item.get("text", str(item)) for item in content]
-                    )
-                else:
-                    formatted_content = content
-                return json.dumps(
-                    {"content": make_serializable(formatted_content)},
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            else:
-                return json.dumps(
-                    make_serializable(result), ensure_ascii=False, indent=2
-                )
+            return await measured_to_thread(
+                "tool.serialize_mcp_result", self._serialize_mcp_result, result
+            )
 
         except asyncio.CancelledError:
             mcp_logger.warning(
@@ -1948,6 +1959,12 @@ class ToolManager:
                 _raise_innermost_exception(e)
             mcp_logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
+
+    @staticmethod
+    def _serialize_standard_result(result):
+        return json.dumps(
+            {"content": make_serializable(result)}, ensure_ascii=False, indent=2
+        )
 
     async def _execute_standard_tool_async(
         self, tool: ToolSpec, runtime_session_id: str = "", **kwargs
@@ -1995,8 +2012,8 @@ class ToolManager:
                 logger.warning(
                     f"[_execute_standard_tool_async] SLOW | tool={tool.name} | total_time={execute_cost:.3f}s"
                 )
-            return json.dumps(
-                {"content": make_serializable(result)}, ensure_ascii=False, indent=2
+            return await measured_to_thread(
+                "tool.serialize_standard_result", self._serialize_standard_result, result
             )
 
         except Exception as e:

@@ -1731,6 +1731,45 @@ If the history contains a compress_conversation_history tool call or result, it 
         has_later_update, _ = self._latest_todo_state_from_messages(trailing)
         return None if has_later_update else compressed_state
 
+    def _finalize_compression_payload(self, compression_payload, original_tokens):
+        """Finalize an exclusively owned payload in one worker, preserving metric basis."""
+        stats = compression_payload["stats"]
+        # Measuring the final JSON including metrics about its own length
+        # creates a circular definition. Use one explicit, reproducible
+        # basis: the indented payload with the three self-referential metric
+        # fields removed, while retaining the basis declaration itself.
+        stats["compression_metrics_basis"] = (
+            "indented_payload_without_self_referential_metrics"
+        )
+        # Only stats is changed below; the remaining owned payload is read-only.
+        metrics_payload = {**compression_payload, "stats": dict(stats)}
+        metrics_stats = metrics_payload["stats"]
+        for metric_key in (
+            "compressed_tokens",
+            "compression_ratio",
+            "summary_characters",
+        ):
+            metrics_stats.pop(metric_key, None)
+        metrics_serialized_payload = json.dumps(
+            metrics_payload, ensure_ascii=False, indent=2
+        )
+        summary_characters = len(metrics_serialized_payload)
+        compressed_tokens = self._calculate_tokens(metrics_serialized_payload)
+        compression_ratio = (
+            (original_tokens - compressed_tokens) / original_tokens
+            if original_tokens > 0
+            else 0.0
+        )
+        stats.update(
+            {
+                "compressed_tokens": compressed_tokens,
+                "compression_ratio": compression_ratio,
+                "summary_characters": summary_characters,
+            }
+        )
+        compression_info = json.dumps(compression_payload, ensure_ascii=False, indent=2)
+        return compression_info, compressed_tokens, compression_ratio, summary_characters
+
     async def compress_conversation_history(
         self,
         messages: List[MessageChunk],
@@ -1906,37 +1945,11 @@ If the history contains a compress_conversation_history tool call or result, it 
             }
             compression_payload["stats"] = stats
 
-            # Measuring the final JSON including metrics about its own length
-            # creates a circular definition. Use one explicit, reproducible
-            # basis: the indented payload with the three self-referential metric
-            # fields removed, while retaining the basis declaration itself.
-            stats["compression_metrics_basis"] = (
-                "indented_payload_without_self_referential_metrics"
-            )
-            metrics_payload = deepcopy(compression_payload)
-            metrics_stats = metrics_payload["stats"]
-            for metric_key in (
-                "compressed_tokens",
-                "compression_ratio",
-                "summary_characters",
-            ):
-                metrics_stats.pop(metric_key, None)
-            metrics_serialized_payload = json.dumps(
-                metrics_payload, ensure_ascii=False, indent=2
-            )
-            summary_characters = len(metrics_serialized_payload)
-            compressed_tokens = self._calculate_tokens(metrics_serialized_payload)
-            compression_ratio = (
-                (original_tokens - compressed_tokens) / original_tokens
-                if original_tokens > 0
-                else 0.0
-            )
-            stats.update(
-                {
-                    "compressed_tokens": compressed_tokens,
-                    "compression_ratio": compression_ratio,
-                    "summary_characters": summary_characters,
-                }
+            (
+                compression_info, compressed_tokens, compression_ratio, summary_characters
+            ) = await diagnostic_to_thread(
+                "compression.finalize_payload", self._finalize_compression_payload,
+                compression_payload, original_tokens,
             )
 
             logger.info(
@@ -1952,9 +1965,6 @@ If the history contains a compress_conversation_history tool call or result, it 
                 },
                 "source_message_ids": source_message_ids,
             }
-            compression_info = json.dumps(
-                compression_payload, ensure_ascii=False, indent=2
-            )
 
             if retry_context is not None:
                 retry_context._compression_failure = None
