@@ -103,3 +103,40 @@ async def test_snapshot_defers_listing_error_and_does_not_access_escape(
         None,
         None,
     )
+
+
+@pytest.mark.asyncio
+async def test_index_splitting_shares_existing_fts_worker_and_matches_search(tmp_path, monkeypatch):
+    import threading
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from sagents.tool.impl import memory_index as module
+    loop_thread = threading.get_ident()
+    content = 'uniqueOmega first\n' + '中文 repeated line\n' * 1000
+    provider = SimpleNamespace(read_file=AsyncMock(return_value=content))
+    idx = MemoryIndex(sandbox=provider, workspace_path='/workspace', index_path=str(tmp_path/'new.pkl'))
+    baseline = MemoryIndex(sandbox=None, workspace_path='/workspace', index_path=str(tmp_path/'old.pkl'))
+    calls, split_threads = [], []
+    delegate = module.diagnostic_to_thread
+    split = idx._split_into_chunks
+    async def counted(name, fn, *args, **kwargs):
+        calls.append(name)
+        return await delegate(name, fn, *args, **kwargs)
+    def observed(text):
+        split_threads.append(threading.get_ident())
+        return split(text)
+    monkeypatch.setattr(module, 'diagnostic_to_thread', counted)
+    monkeypatch.setattr(idx, '_split_into_chunks', observed)
+    entry = SimpleNamespace(path='/workspace/file.md', modified_time=1.0, size=len(content.encode()))
+    stats = dict(added=0,updated=0,unchanged=0,errors=0)
+    await idx._process_file(entry, stats)
+    assert stats == dict(added=1,updated=0,unchanged=0,errors=0)
+    assert calls == ['index.fts_sync']
+    assert split_threads and all(t != loop_thread for t in split_threads)
+    baseline._replace_file_documents(entry.path, content, entry.modified_time, entry.size)
+    baseline._sync_file_to_fts(entry.path)
+    assert idx._file_metadata == baseline._file_metadata
+    assert [asdict(r) for r in idx.search('uniqueOmega')] == [asdict(r) for r in baseline.search('uniqueOmega')]
+    calls.clear()
+    await idx._process_file(entry, stats)
+    assert calls == [] and stats['unchanged'] == 1

@@ -1,5 +1,5 @@
 import asyncio
-from common.utils.stream_payload import should_filter_stream_payload
+from common.utils.stream_payload import should_filter_stream_payload, encode_stream_payload
 from sagents.utils.stream_yield import StreamYieldBudget
 from sagents.utils.request_latency import RequestLatency, stream_sync_stage
 from sagents.utils.latency_diagnostics import (
@@ -1566,9 +1566,10 @@ async def execute_chat_session(
                 if should_filter_stream_payload(payload, filtered_stream_types):
                     await filter_budget.checkpoint()
                 else:
-                    with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
-                        encoded = json.dumps(payload, ensure_ascii=False) + "\n"
-                    yield encoded
+                    yield await encode_stream_payload(
+                        payload, latency_budget=getattr(stream_service, "latency_budget", None),
+                        session_id=session_id,
+                    )
                 continue
 
             result = payload
@@ -1585,9 +1586,10 @@ async def execute_chat_session(
             if should_filter_stream_payload(yield_result, filtered_stream_types):
                 await filter_budget.checkpoint()
             else:
-                with stream_sync_stage("delivery.json_encode", getattr(stream_service, "latency_budget", None)):
-                    encoded = json.dumps(yield_result, ensure_ascii=False) + "\n"
-                yield encoded
+                yield await encode_stream_payload(
+                    yield_result, latency_budget=getattr(stream_service, "latency_budget", None),
+                    session_id=session_id,
+                )
             if current_token_usage is not None and not stream_end_emitted:
                 stream_end_emitted = True
                 logger.bind(session_id=session_id).info(

@@ -876,10 +876,10 @@ class MemoryIndex:
                     content = await self._read_file_content(
                         filepath, known_size=entry.size
                     )
-                    self._replace_file_documents(filepath, content, mtime, size)
                     async with timed_lock("index.fts_write_lock", self._fts_write_lock):
                         await diagnostic_to_thread(
-                            "index.fts_sync", self._sync_file_to_fts, filepath
+                            "index.fts_sync", self._replace_and_sync_file_to_fts,
+                            filepath, content, mtime, size
                         )
                     stats["updated"] += 1
                     logger.debug(f"MemoryIndex: Updated file {filepath}")
@@ -888,10 +888,10 @@ class MemoryIndex:
                     content = await self._read_file_content(
                         filepath, known_size=entry.size
                     )
-                    self._replace_file_documents(filepath, content, mtime, size)
                     async with timed_lock("index.fts_write_lock", self._fts_write_lock):
                         await diagnostic_to_thread(
-                            "index.fts_sync", self._sync_file_to_fts, filepath
+                            "index.fts_sync", self._replace_and_sync_file_to_fts,
+                            filepath, content, mtime, size
                         )
                     stats["added"] += 1
                     logger.debug(f"MemoryIndex: Added file {filepath}")
@@ -899,6 +899,12 @@ class MemoryIndex:
             except Exception as e:
                 logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
                 stats["errors"] += 1
+
+    def _replace_and_sync_file_to_fts(self, filepath, content, mtime, size):
+        # Called by the existing serialized FTS worker job. Keep splitting and
+        # document allocation off the event loop without another handoff.
+        self._replace_file_documents(filepath, content, mtime, size)
+        self._sync_file_to_fts(filepath)
 
     @timed("index.replace_file_documents")
     def _replace_file_documents(
