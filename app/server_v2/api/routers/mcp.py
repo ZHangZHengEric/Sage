@@ -1,3 +1,4 @@
+from app.server_v2.services.catalog_transactions import catalog_transaction
 from fastapi import APIRouter
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
@@ -17,6 +18,7 @@ async def list_mcp(user: CurrentUser, service: ServiceDep):
 
 
 @router.post("/api/mcp", response_model=ApiResponse[McpPublic])
+@catalog_transaction
 async def create_mcp(body: McpBody, user: CurrentUser, service: ServiceDep):
     catalog = await service.catalog.get(user.user_id)
     record, catalog = upsert_mcp(catalog, body.model_dump())
@@ -25,6 +27,7 @@ async def create_mcp(body: McpBody, user: CurrentUser, service: ServiceDep):
 
 
 @router.put("/api/mcp/{name}", response_model=ApiResponse[McpPublic])
+@catalog_transaction
 async def update_mcp(name: str, body: McpBody, user: CurrentUser, service: ServiceDep):
     catalog = await service.catalog.get(user.user_id)
     payload = body.model_dump()
@@ -35,6 +38,7 @@ async def update_mcp(name: str, body: McpBody, user: CurrentUser, service: Servi
 
 
 @router.delete("/api/mcp/{name}", response_model=ApiResponse[None])
+@catalog_transaction
 async def remove_mcp(name: str, user: CurrentUser, service: ServiceDep):
     catalog = await service.catalog.get(user.user_id)
     await service.catalog.save(user.user_id, delete_mcp(catalog, name))
@@ -42,6 +46,7 @@ async def remove_mcp(name: str, user: CurrentUser, service: ServiceDep):
 
 
 @router.post("/api/mcp/{name}/refresh", response_model=ApiResponse[McpPublic])
+@catalog_transaction
 async def refresh_mcp(name: str, user: CurrentUser, service: ServiceDep):
     catalog = await service.catalog.get(user.user_id)
     current = next((item for item in catalog.mcp_servers if item.name == name), None)

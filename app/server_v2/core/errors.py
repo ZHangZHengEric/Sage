@@ -12,6 +12,7 @@ REASON_STATUS = {
     "conflict": 409,
     "validation": 422,
     "unavailable": 503,
+    "rate_limited": 429,
     "internal": 500,
 }
 
@@ -74,6 +75,8 @@ def map_sage_error(exc: SageV2Error) -> ServerV2Error:
     info = exc.info
     if info.code.endswith("not_found"):
         reason = "not_found"
+    elif info.category == ErrorCategory.RATE_LIMITED:
+        reason = "rate_limited"
     elif info.category == ErrorCategory.CONFLICT:
         reason = "conflict"
     elif info.category == ErrorCategory.AUTHENTICATION:

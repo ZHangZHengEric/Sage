@@ -4,6 +4,7 @@ import Login from './views/Login.vue'
 import Chat from './views/Chat.vue'
 import Models from './views/Models.vue'
 import Agents from './views/Agents.vue'
+import Studio from './views/Studio.vue'
 import Mcp from './views/Mcp.vue'
 import Skills from './views/Skills.vue'
 import Admin from './views/Admin.vue'
@@ -14,6 +15,7 @@ export const router = createRouter({
     { path: '/login', component: Login, meta: { public: true } },
     { path: '/', component: Chat },
     { path: '/agents', component: Agents },
+    { path: '/studio', component: Studio },
     { path: '/models', component: Models },
     { path: '/mcp', component: Mcp },
     { path: '/skills', component: Skills },

@@ -182,7 +182,7 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
     extra = [model_scope] if model_scope is not None else []
     ports = None
     try:
-        model = _recorded_model(service, raw_model)
+        model = _recorded_model(service, service.model_budget.wrap(raw_model))
         ports = await service.application.materialize_agent(
             manifest,
             tenant_id=user_id,
@@ -217,6 +217,11 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         )
         catalogs = [official.catalog]
         executors = [official.executor]
+        if service.agent_management is not None:
+            from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
+            management = AgentManagementToolPlugin(service.agent_management)
+            catalogs.append(management.catalog)
+            executors.append(management.executor)
         if names:
             skill_tool = SkillToolPlugin(loader, language=service.settings.language)
             catalogs.append(skill_tool.catalog)
@@ -225,6 +230,7 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         if mcp is not None:
             catalogs.append(mcp)
             executors.append(mcp)
+        from app.server_v2.services.tool_policy import server_tool_policy
         loop = factory.create_loop(
             resolved,
             agent.id,
@@ -232,6 +238,7 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             tool_catalog=CompositeToolCatalog(tuple(catalogs)),
             tool_executor=CompositeToolExecutor(tuple(executors)),
             skill_loader=loader if names else None,
+            tool_policy=server_tool_policy(service.agent_management) if service.agent_management is not None else None,
             continuation_policy=ports.continuation_policy,
             tool_selection_policy=ports.tool_selection_policy,
             log_sink=service.application.service("observability.log-sink"),

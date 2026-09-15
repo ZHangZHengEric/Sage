@@ -1,3 +1,4 @@
+from app.server_v2.services.catalog_transactions import catalog_transaction
 from fastapi import APIRouter, File, UploadFile
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
@@ -100,6 +101,7 @@ async def list_agent_skills(agent_id: str, user: CurrentUser, service: ServiceDe
 
 
 @router.put("/api/agents/{agent_id}/skills", response_model=ApiResponse[list[SkillPublic]])
+@catalog_transaction
 async def bind_agent_skills(
     agent_id: str, body: SkillBindBody, user: CurrentUser, service: ServiceDep
 ):

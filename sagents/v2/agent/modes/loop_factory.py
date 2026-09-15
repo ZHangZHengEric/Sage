@@ -77,6 +77,11 @@ class ModeAwareAgentLoopFactory:
                 value = child_loop_factory(descriptor, run_id, context)
                 if hasattr(value, "__await__"):
                     value = await value
+                loop = value[0] if isinstance(value, tuple) else value
+                # Host-bound children use the same runtime identity and child
+                # controller as normally composed children, not the raw manifest.
+                loop.expected_resolved_spec_hash = self.resolved_spec_hash
+                loop.delegated_run_controller = self.child_executor
                 return value
             return self.create_loop(descriptor, run_id)
 

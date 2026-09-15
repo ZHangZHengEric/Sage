@@ -55,8 +55,19 @@ class ServerV2Service:
         threads=None,
         skills=None,
         replay=None,
+        package_authorizer=None,
+        package_extensions=(),
     ) -> None:
         self.settings = settings
+        from sagents.v2.model import ModelConcurrencyBudget
+        self.model_budget = ModelConcurrencyBudget(settings.max_concurrent_runs, max_waiting=settings.max_pending_runs)
+        self.package_authorizer = package_authorizer
+        self.package_extensions = tuple(package_extensions)
+        self.catalog_locks = tuple(asyncio.Lock() for _ in range(64))
+        self.agent_management = None
+        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import SchedulerQuotaGroup, InMemoryScheduler
+        self.run_quota = SchedulerQuotaGroup(settings.max_concurrent_runs, settings.max_concurrent_runs_per_user, settings.max_pending_runs)
+        self._scheduler = InMemoryScheduler(quota_group=self.run_quota, max_pending_items=settings.max_pending_runs)
         self.paths = prepare_server_v2_storage(settings.data_root)
         self.database = database
         self._redis = redis
@@ -107,10 +118,17 @@ class ServerV2Service:
             SAgentBuilder()
             .with_defaults(session_root=self.paths.sessions_root)
             .with_model_provider(self._host_models)
+            .with_model_budget(self.model_budget)
+            .with_scheduler(self._scheduler)
             .build(server_v2_manifest(self.settings))
         )
+        from app.server_v2.services.management import ServerAgentManagement
+        from app.server_v2.repositories.packages import DatabasePackageStore
+        self.agent_management = ServerAgentManagement(
+            self, DatabasePackageStore(self.database) if self.database is not None else None)
         install_skill_driver(self)
         self._log_sagents_registration()
+        self._track(asyncio.create_task(self.agent_management.recover_pending(), name="managed-recovery"))
 
     async def close(self) -> None:
         for task in tuple(self._tasks):
@@ -118,14 +136,17 @@ class ServerV2Service:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
-        try:
-            if self._application is not None:
-                await self._application.close()
-        finally:
+        # Managed applications share host Jobs and model pool: close them first.
+        if self.agent_management is not None:
+            await self.agent_management.close()
+            self.agent_management = None
+        if self._application is not None:
+            await self._application.close()
             self._application = None
-            if self._host_models is not None:
-                await self._host_models.close()
-                self._host_models = None
+        await self._scheduler.close()
+        if self._host_models is not None:
+            await self._host_models.close()
+            self._host_models = None
 
     def backends(self) -> dict[str, str]:
         report = {

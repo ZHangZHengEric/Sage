@@ -87,6 +87,7 @@ class AgentManagementService:
         builder_factory: BuilderFactory,
         authorize: PackageAuthorizer,
         inventory: tuple[dict, ...] = (),
+        store=None,
         max_applications: int = 32,
         max_concurrent_builds: int = 4,
         model_budget=None,
@@ -107,7 +108,7 @@ class AgentManagementService:
         self._operation_keys = ContextVar("managed_application_keys", default=None)
         self._application_users = {}
         self.root = Path(root).resolve()
-        self.store = AgentPackageStore(self.root / "inventory.sqlite3")
+        self.store = store if store is not None else AgentPackageStore(self.root / "inventory.sqlite3")
         self.builder_factory = builder_factory
         self.authorize = authorize
         self.inventory = inventory
@@ -278,6 +279,10 @@ class AgentManagementService:
 
     async def list(self, context: RequestContext, *, limit=50, offset=0):
         return await self.store.list(owner_key(context), limit=limit, offset=offset)
+
+    @managed_operation
+    async def list_runs(self, context, *, limit=50, offset=0):
+        return await self.store.list_invocations(owner_key(context), limit=limit, offset=offset)
 
     async def fork(
         self,
@@ -530,6 +535,37 @@ class AgentManagementService:
             )
         return result
 
+    @managed_operation
+    async def events(self, operation, context, *, after_sequence=0, limit=200):
+        if after_sequence < 0 or not 1 <= limit <= 200:
+            raise ValueError("invalid event pagination")
+        owner = owner_key(context)
+        record = await self.store.invocation(owner, operation)
+        bundle = await self.get(record["ref"], context)
+        await self.authorize("read_run", bundle, context)
+        if not record["handle"]:
+            return {"events": [], "cursor": after_sequence, "terminal": False}
+        key = (owner, record["ref"], record["agent"])
+        storage = None
+        async with self._lock:
+            cold = key not in self._applications and key not in self._application_builds
+        if cold:
+            location = await self.store.history_location(*key)
+            if location:
+                from sagents.v2.runtime.session.plugins.filesystem import read_session_history
+                storage = await read_session_history(location, record["handle"]["session_id"], context)
+        if storage is None:
+            app = await self._application(bundle, record["agent"], context)
+            storage = app.entrypoint().runtime.session_store
+        run_id = record["handle"]["run_id"]
+        # Read the Run first: an empty page concurrent with completion must not
+        # incorrectly claim all final events were already delivered.
+        run = await storage.get_run(run_id)
+        rows = await storage.read_events(run_id, after_sequence=after_sequence, limit=limit)
+        cursor = rows[-1].run_sequence if rows else after_sequence
+        return {"events": [row.model_dump(mode="json") for row in rows], "cursor": cursor,
+                "terminal": run.state in TERMINAL_RUN_STATES and cursor >= run.last_run_sequence}
+
     async def _read_status(self, operation, record, bundle, app):
         return await self._read_status_from_store(operation, record, bundle, app.entrypoint().runtime.session_store)
 
@@ -568,6 +604,7 @@ class AgentManagementService:
                 ).model_dump(mode="json")
         return {
             "operation": operation,
+            "agent_id": record["agent"],
             "ref": record["ref"],
             "run": run.model_dump(mode="json"),
             "result": result.model_dump(mode="json") if result else None,
@@ -609,6 +646,7 @@ class AgentManagementService:
         decision: str = "",
         interaction_id: str | None = None,
         payload: dict | None = None,
+        allow_privileged_interaction: bool = False,
     ):
         record = await self.store.invocation(owner_key(context), operation)
         if record["handle"] is None:
@@ -652,9 +690,11 @@ class AgentManagementService:
                     InteractionType.USER_INPUT,
                     InteractionType.ELICITATION,
                 }:
-                    raise ValueError(
-                        "approvals, credentials and permissions must be resolved by the host"
-                    )
+                    if not allow_privileged_interaction:
+                        raise ValueError(
+                            "approvals, credentials and permissions must be resolved by the host"
+                        )
+                    await self.authorize("approve", bundle, context)
                 if decision not in question.allowed_decisions:
                     raise ValueError("decision is not allowed for this question")
                 command = ReplyInteraction(
@@ -702,6 +742,9 @@ class AgentManagementService:
         else:
             raise ValueError("unknown control action")
         return receipt.model_dump(mode="json")
+
+    async def resources(self, context):
+        return {"extensions": self.inventory, "source_plugins_enabled": self.allow_source_plugins}
 
     def capacity(self):
         """Host diagnostics; not exposed as a cross-tenant model tool."""

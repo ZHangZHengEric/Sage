@@ -339,6 +339,8 @@ class SAgentBuilder:
         self._memory_provider: MemoryProvider | None = None
         self._session_memory_provider: SessionMemoryProvider | None = None
         self._model_provider: ModelProvider | None = None
+        self._extra_tools = []
+        self._scheduler = None
         self._tool_catalog: ToolCatalog | None = None
         self._tool_executor: ToolExecutor | None = None
         self._tool_runtime: OfficialToolRuntime | None = None
@@ -358,6 +360,11 @@ class SAgentBuilder:
         self._model_budget = None
         self._job_runtime = None
         self._check_readiness = False
+
+    def with_scheduler(self, scheduler) -> "SAgentBuilder":
+        """Inject a host-owned scheduler with this Application's own work queue."""
+        self._scheduler = scheduler
+        return self
 
     def with_job_runtime(self, runtime) -> "SAgentBuilder":
         """Use a host-owned JobRuntime shared across Applications; host closes it."""
@@ -436,6 +443,11 @@ class SAgentBuilder:
     ) -> "SAgentBuilder":
         self._tool_catalog = catalog
         self._tool_executor = executor
+        return self
+
+    def with_additional_tools(self, catalog, executor) -> "SAgentBuilder":
+        """Extend every run's catalog without replacing host-bound official tools."""
+        self._extra_tools.append((catalog, executor))
         return self
 
     def with_tool_runtime(self, runtime: OfficialToolRuntime) -> "SAgentBuilder":
@@ -981,6 +993,10 @@ class SAgentBuilder:
                 executor,
                 active_runtime: OfficialToolRuntime | None,
             ):
+                if self._extra_tools:
+                    from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
+                    catalog = CompositeToolCatalog((catalog, *(pair[0] for pair in self._extra_tools)))
+                    executor = CompositeToolExecutor((executor, *(pair[1] for pair in self._extra_tools)))
                 if self._agent_management is not None:
                     from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
 
@@ -1353,6 +1369,7 @@ class SAgentBuilder:
                     ("session-memory.provider", self._session_memory_provider),
                     ("model.provider", self._model_provider),
                     ("execution.job-runtime", self._job_runtime),
+                    ("execution.scheduler", self._scheduler),
                     ("tool.catalog", self._tool_catalog),
                     ("tool.executor", self._tool_executor),
                     ("tool.selection-policy", self._tool_selection),
@@ -1846,7 +1863,7 @@ class SAgentBuilder:
         credential_provider,
     ):
         services = {
-            "execution.scheduler": await self._create_capability(
+            "execution.scheduler": self._scheduler if self._scheduler is not None else await self._create_capability(
                 host,
                 parent,
                 handles,

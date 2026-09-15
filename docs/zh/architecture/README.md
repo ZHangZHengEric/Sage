@@ -128,3 +128,5 @@ flowchart TD
 ```
 
 - [SAgents V2 运行时资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md)：资源就绪检查、共享模型并发额度、空闲回收与 Flow 可达装配。
+
+- [Server V2 多用户 Agent 平台](SERVER_V2_AGENT_PLATFORM.md)：完整包、管理工具、Studio、共享调度与运行控制。
