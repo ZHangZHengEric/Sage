@@ -1049,11 +1049,23 @@ async def create_chat_completion_with_fallback(
                         f"model={model}, error={exc}",
                         session_id="NO_SESSION",
                     )
+            from sagents.utils.model_deadline import (
+                FirstChunkDeadlineStream, first_chunk_timeout_seconds,
+            )
+            import asyncio
+            streaming = request_kwargs.get("stream", False)
+            deadline = asyncio.get_running_loop().time() + first_chunk_timeout_seconds()
             with model_wait(new_call=True):
-                response = await client.chat.completions.create(
-                    model=model, messages=messages, **request_kwargs
-                )
-            return observe_stream(response, request_kwargs.get("stream", False))
+                try:
+                    async with asyncio.timeout_at(deadline if streaming else None):
+                        response = await client.chat.completions.create(
+                            model=model, messages=messages, **request_kwargs
+                        )
+                except TimeoutError as exc:
+                    raise TimeoutError("Model first-chunk timeout while waiting for response headers") from exc
+            if streaming and hasattr(response, "__aiter__"):
+                response = FirstChunkDeadlineStream(response, deadline)
+            return observe_stream(response, streaming)
         except APIError as exc:
             if (
                 response_format is not None

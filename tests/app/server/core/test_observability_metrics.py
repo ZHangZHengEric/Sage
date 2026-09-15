@@ -182,3 +182,30 @@ def test_prometheus_sse_failures_include_session_drilldown_only_for_failure_stat
     assert 'session_id="session-2"' in body
     assert 'session_id="session-3"' in body
     assert 'session_id="session-4"' not in body
+
+
+def test_object_count_heap_walk_is_cached(monkeypatch):
+    from app.server.services import prometheus_metrics as metrics
+    monkeypatch.setattr(metrics, "_OBJECT_COUNT_CACHE", None)
+    clock = [0.0]
+    calls = []
+    monkeypatch.setattr(metrics.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(metrics.gc, "get_objects", lambda: calls.append(True) or [1, 2, 3])
+    assert metrics._cached_python_object_count() == 3
+    clock[0] = 59.0
+    assert metrics._cached_python_object_count() == 3
+    assert len(calls) == 1
+    clock[0] = 60.0
+    assert metrics._cached_python_object_count() == 3
+    assert len(calls) == 2
+
+
+def test_metrics_endpoint_renders_in_worker(monkeypatch):
+    import threading
+    from app.server.routers import observability
+    caller = threading.get_ident()
+    workers = []
+    monkeypatch.setattr(observability, "render_prometheus_metrics", lambda: workers.append(threading.get_ident()) or "metric 1\n")
+    response = asyncio.run(observability.prometheus_metrics())
+    assert response.body == b"metric 1\n"
+    assert workers and workers[0] != caller

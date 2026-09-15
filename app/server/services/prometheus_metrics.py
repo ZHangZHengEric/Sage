@@ -389,14 +389,31 @@ def _render_http_metrics() -> list[str]:
     return lines
 
 
+_OBJECT_COUNT_LOCK = threading.Lock()
+_OBJECT_COUNT_CACHE = None
+_OBJECT_COUNT_UPDATED = 0.0
+
+
+def _cached_python_object_count():
+    # Exact heap traversal is expensive and holds the GIL. Refresh at most once
+    # per minute, even if multiple scrapers request metrics concurrently.
+    global _OBJECT_COUNT_CACHE, _OBJECT_COUNT_UPDATED
+    with _OBJECT_COUNT_LOCK:
+        now = time.monotonic()
+        if _OBJECT_COUNT_CACHE is None or now - _OBJECT_COUNT_UPDATED >= 60.0:
+            _OBJECT_COUNT_CACHE = len(gc.get_objects())
+            _OBJECT_COUNT_UPDATED = time.monotonic()
+        return _OBJECT_COUNT_CACHE
+
+
 def _render_python_metrics() -> list[str]:
     lines: list[str] = []
     lines.extend(
         _metric_block(
             "sage_server_python_objects",
-            "Objects currently tracked by the Python garbage collector.",
+            "Objects tracked by Python GC, sampled at most once per minute.",
             "gauge",
-            len(gc.get_objects()),
+            _cached_python_object_count(),
         )
     )
     lines.extend(

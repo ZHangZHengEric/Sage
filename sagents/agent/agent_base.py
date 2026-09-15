@@ -1662,8 +1662,8 @@ class AgentBase(ABC):
             final_thinking_level = session.session_context.agent_config.get(
                 "thinking_level"
             )
-        # 重试配置 - 增加重试次数以应对网络不稳定情况
-        max_retries = 8
+        # Bound transient retries; provider queue failures must not multiply into hours.
+        max_retries = 3
         retry_count = 0
         last_exception = None
         structured_output_fallback_used = False

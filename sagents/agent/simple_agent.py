@@ -1,3 +1,4 @@
+from sagents.utils.latency_diagnostics import measured_to_thread
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.messages.token_accounting import (
     ContextOverflowStrategy,
@@ -424,7 +425,9 @@ class SimpleAgent(AgentBase):
         else:
             suggested_tools = []
         # 准备工具列表
-        tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
+        tools_json = await measured_to_thread(
+            "model.prepare_tool_schemas", self._prepare_tools, tool_manager, suggested_tools, session_context
+        )
         async for chunks in self._execute_loop(
             messages_input=history_messages,
             tools_json=tools_json,
@@ -1569,7 +1572,8 @@ class SimpleAgent(AgentBase):
                         ]
                     except Exception:
                         refreshed_suggested_tools = []
-                tools_json = self._prepare_tools(
+                tools_json = await measured_to_thread(
+                    "model.prepare_tool_schemas", self._prepare_tools,
                     tool_manager, refreshed_suggested_tools, session_context
                 )
                 logger.info(

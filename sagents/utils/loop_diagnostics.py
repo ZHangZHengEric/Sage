@@ -7,7 +7,8 @@ At most one pending heartbeat, one stack record/second, and bounded task maps.
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
+from collections import Counter, deque
+import gc
 import os
 from pathlib import Path
 import sys
@@ -71,6 +72,8 @@ class LoopDiagnostics:
         self.stop_event = threading.Event()
         self.operations = {}
         self.jobs = {}
+        self.gc_pauses = deque(maxlen=16)
+        self.gc_started = None
         self.sequence = 0
         self.pending_heartbeat = None
         self.last_record = 0.0
@@ -81,10 +84,27 @@ class LoopDiagnostics:
             target=self._run, name="sage-loop-diagnostics", daemon=True
         )
 
+    def _gc_callback(self, phase, info):
+        now = time.perf_counter()
+        if phase == "start":
+            self.gc_started = (now, threading.get_ident())
+        elif phase == "stop" and self.gc_started is not None:
+            started, thread_id = self.gc_started
+            self.gc_started = None
+            self.gc_pauses.append({
+                "finished_at": now, "duration_ms": round((now - started) * 1000, 3),
+                "generation": info.get("generation"), "thread_id": thread_id,
+                "on_event_loop": thread_id == self.loop_thread,
+                "collected": info.get("collected", 0),
+            })
+
     def start(self):
+        gc.callbacks.append(self._gc_callback)
         self.thread.start()
 
     def stop(self):
+        if self._gc_callback in gc.callbacks:
+            gc.callbacks.remove(self._gc_callback)
         self.stop_event.set()
         self.wake.set()
         self.thread.join(timeout=0.5)
@@ -212,6 +232,7 @@ class LoopDiagnostics:
                 "event_loop_stack": loop_stack,
                 "worker_stacks": worker_stacks,
                 "resources": _resources(),
+                "gc_pauses_recent": [p for p in list(self.gc_pauses) if time.perf_counter() - p["finished_at"] <= 2.0],
             }
         )
 

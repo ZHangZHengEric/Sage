@@ -105,3 +105,21 @@ def test_disabled_monitor_creates_no_thread(monkeypatch):
     monkeypatch.setenv("SAGE_LATENCY_DIAGNOSTICS", "0")
     loop_diag.start_loop_diagnostics()
     assert loop_diag.current_monitor() is None
+
+
+def test_gc_pause_records_are_bounded_and_callback_removed():
+    import gc
+    async def run():
+        monitor = loop_diag.LoopDiagnostics(asyncio.get_running_loop())
+        monitor.start()
+        try:
+            assert monitor._gc_callback in gc.callbacks
+            for _ in range(20):
+                monitor._gc_callback("start", {"generation": 2})
+                monitor._gc_callback("stop", {"generation": 2, "collected": 3})
+            assert len(monitor.gc_pauses) == 16
+            assert monitor.gc_pauses[-1]["on_event_loop"]
+        finally:
+            monitor.stop()
+        assert monitor._gc_callback not in gc.callbacks
+    asyncio.run(run())

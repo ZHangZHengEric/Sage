@@ -37,7 +37,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
     api_key = _get_first_api_key(client_params.get("api_key"))
     base_url = client_params.get("base_url")
     model_name = client_params.get("model")
-    client_params.get("timeout", 60 * 30)
+    timeout = client_params.get("timeout", 60.0)
 
     # 快速模型配置（可选）
     fast_api_key = client_params.get("fast_api_key")
@@ -51,6 +51,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
         api_key=api_key,
         base_url=base_url,
         model_name=model_name,
+        timeout=timeout,
         fast_api_key=fast_api_key,
         fast_base_url=fast_base_url,
         fast_model_name=fast_model_name,
