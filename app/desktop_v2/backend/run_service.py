@@ -57,6 +57,7 @@ from app.desktop_v2.backend.run_lifecycle import (
     DesktopDriver as _DesktopDriver,
 )
 from app.desktop_v2.backend.run_composition import DesktopRunCompositionMixin
+from app.desktop_v2.backend.studio import STUDIO_TOOLS
 from app.desktop_v2.backend.runtime_config import (
     _SKILL_NAME,
     _TOOL_NAME,
@@ -106,7 +107,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                         value["name"] for value in await self.list_tools(agent.user_id)
                     )
                 )
-                if isinstance(value, str) and _TOOL_NAME.fullmatch(value)
+                if isinstance(value, str)
+                and _TOOL_NAME.fullmatch(value)
+                and value not in STUDIO_TOOLS
             )
             valid_skills = tuple(
                 value
@@ -190,6 +193,10 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 exc,
                 attributes={"agent_id": request.agent_id},
             )
+            # A failed Studio preflight must not allocate a replacement Session:
+            # membership is durably bound to the original Session identity.
+            if accepted_handle is None and request.studio_id is not None:
+                raise
             language = str(
                 request.response_language or self._read_settings_sync().language or "en"
             )

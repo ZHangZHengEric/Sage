@@ -113,6 +113,7 @@ from sagents.v2.tool import (
     CompositeToolCatalog,
     CompositeToolExecutor,
 )
+from app.desktop_v2.backend.studio import STUDIO_TOOLS, StudioContextProvider
 from app.desktop_v2.backend.package import desktop_v2_manifest
 from app.desktop_v2.backend.schemas import (
     DesktopRunRequest,
@@ -254,7 +255,9 @@ class DesktopRunCompositionMixin:
                     value["name"] for value in await self.list_tools(agent.user_id)
                 )
             )
-            if isinstance(value, str) and _TOOL_NAME.fullmatch(value)
+            if isinstance(value, str)
+            and _TOOL_NAME.fullmatch(value)
+            and value not in STUDIO_TOOLS
         )
         tool_definitions = (*self._native_tool_definitions(), *mcp_definitions)
         known_tools = {value.name for value in tool_definitions}
@@ -650,6 +653,13 @@ class DesktopRunCompositionMixin:
         if mcp_definitions:
             catalogs = (*catalogs, mcp_plugin)
             executors = (*executors, mcp_plugin)
+        studio_binding = await self.studio_run_binding(run_id, agent, session_id)
+        if studio_binding:
+            studio_tools = self.studio_tool_provider(
+                run_id, agent.user_id, studio_binding
+            )
+            catalogs = (*catalogs, studio_tools)
+            executors = (*executors, studio_tools)
         native_catalog = CompositeToolCatalog(catalogs)
         native_executor = CompositeToolExecutor(executors)
         mode = AgentMode(str(agent.config.get("agentMode") or "simple").strip().lower())
@@ -663,7 +673,11 @@ class DesktopRunCompositionMixin:
             mode=mode,
             tools=tuple(
                 value
-                for value in valid_tools
+                for value in (
+                    (*valid_tools, *sorted(STUDIO_TOOLS))
+                    if studio_binding
+                    else valid_tools
+                )
                 if not (
                     continuation_plugin_id == "sage.agent.continuation.llm-judge"
                     and value == "turn_status"
@@ -838,6 +852,13 @@ class DesktopRunCompositionMixin:
                 ActiveSkillsContextProvider(loader),
                 PreferredSkillsContextProvider(),
             )
+            if studio_binding and descriptor.agent_id == agent.agent_id:
+                context_providers = (
+                    *context_providers,
+                    StudioContextProvider(
+                        self.studio_store, agent.user_id, studio_binding
+                    ),
+                )
             if descriptor.agent_id == agent.agent_id:
                 base_continuation_policy = ports.continuation_policy
             else:
@@ -1018,6 +1039,7 @@ class DesktopRunCompositionMixin:
         return (await self.session_store.get_run(run_id)).session_id
 
     def _manifest(self, agent, provider, tools, skills):
+        tools = tuple(name for name in tools if name not in STUDIO_TOOLS)
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
         deep_thinking, thinking_level = self._thinking_config(agent)
         compatibility_profile = self._verified_model_compatibility_profile(provider)
@@ -1623,6 +1645,11 @@ class DesktopRunCompositionMixin:
         for key in ("todo", "external_paths", "shell_completion_reminder"):
             if key in configured_context:
                 metadata[key] = configured_context.pop(key)
+        studio_binding = self.studio_request_binding(
+            request, agent.user_id if agent is not None else ""
+        )
+        if studio_binding:
+            metadata["studio"] = studio_binding
         run_config = CompositionResolver().resolve_run_config(
             resolved,
             request.agent_id,
@@ -1632,6 +1659,8 @@ class DesktopRunCompositionMixin:
             "plan": ("goal_submit",),
             "goal": ("goal_submit", "goal_complete"),
         }.get(request.invocation_mode, ())
+        if studio_binding:
+            invocation_grants = (*invocation_grants, *sorted(STUDIO_TOOLS))
         if invocation_grants:
             base_tools = tuple(
                 name

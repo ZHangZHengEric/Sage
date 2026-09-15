@@ -152,6 +152,9 @@ class RunMessage(BaseModel):
 
 
 class DesktopRunRequest(BaseModel):
+    studio_id: str | None = None
+    studio_member_id: str | None = None
+    studio_message_id: str | None = None
     agent_id: str
     messages: list[RunMessage]
     session_id: str | None = None
@@ -169,6 +172,9 @@ class DesktopRunRequest(BaseModel):
 
     @model_validator(mode="after")
     def migrate_legacy_plan_mode(self):
+        studio_fields = (self.studio_id, self.studio_member_id, self.studio_message_id)
+        if any(value is not None for value in studio_fields) and not all(studio_fields):
+            raise ValueError("Studio identity requires group, member and message IDs")
         if self.plan_mode is True:
             if self.invocation_mode not in {"normal", "plan"}:
                 raise ValueError("plan_mode conflicts with invocation_mode")
