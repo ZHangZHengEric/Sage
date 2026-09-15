@@ -8,12 +8,14 @@ from sagents.utils.logger import logger
 from sagents.llm.sage_openai import SageAsyncOpenAI
 
 
-def _create_openai_client(api_key: str, base_url: Optional[str]) -> AsyncOpenAI:
+def _create_openai_client(api_key: str, base_url: Optional[str], timeout: float = 60.0) -> AsyncOpenAI:
     http_client = httpx.AsyncClient(headers={"Accept-Encoding": "identity"})
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
         http_client=http_client,
+        timeout=httpx.Timeout(timeout, connect=min(timeout, 10.0)),
+        max_retries=0,
     )
     # Resolve lazy SDK chat resources during construction, which the server
     # performs in a worker, rather than on the first event-loop request.
@@ -37,6 +39,7 @@ class OpenAIChat:
         fast_base_url: Optional[str] = None,
         fast_model_name: Optional[str] = None,
         model_capabilities: Optional[Dict[str, Any]] = None,
+        timeout: float = 60.0,
     ):
         self.model_name = model_name
         self.model_capabilities = model_capabilities or {}
@@ -45,6 +48,7 @@ class OpenAIChat:
         self._standard_client = _create_openai_client(
             api_key=api_key,
             base_url=base_url,
+            timeout=timeout,
         )
 
         # 创建快速模型客户端（如果配置了）
@@ -58,7 +62,7 @@ class OpenAIChat:
                 self._fast_client = self._standard_client
             else:
                 self._fast_client = _create_openai_client(
-                    api_key=fast_key, base_url=fast_url,
+                    api_key=fast_key, base_url=fast_url, timeout=timeout,
                 )
 
         # 创建 SageAsyncOpenAI 实例

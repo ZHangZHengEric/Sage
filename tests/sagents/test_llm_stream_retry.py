@@ -1838,3 +1838,22 @@ async def test_simple_agent_stops_after_one_compression_on_provider_overflow(pre
             pass
     assert compressions == [not precompressed]
     assert client.chat.completions.calls == (1 if precompressed else 2)
+
+
+@pytest.mark.asyncio
+async def test_provider_startup_timeout_stops_after_three_attempts(monkeypatch):
+    async def fast_sleep(_seconds):
+        pass
+    monkeypatch.setattr("sagents.agent.agent_base.asyncio.sleep", fast_sleep)
+    client = FakeClient(attempts=[
+        _attempt_raises_before_yield(TimeoutError("Model first-chunk timeout"))
+        for _ in range(4)
+    ])
+    agent = DummyAgent(model=client, model_config={"model": "gpt-test"})
+    with pytest.raises(TimeoutError, match="first-chunk timeout"):
+        async for _ in agent._call_llm_streaming(
+            [MessageChunk(role=MessageRole.USER.value, content="run")],
+            enable_thinking=False,
+        ):
+            pass
+    assert client.chat.completions.calls == 3

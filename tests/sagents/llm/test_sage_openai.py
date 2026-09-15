@@ -93,6 +93,9 @@ class TestSageAsyncOpenAI(unittest.TestCase):
 
         try:
             self.assertEqual(len(constructed_clients), 1)
+            self.assertEqual(constructed_clients[0].kwargs["max_retries"], 0)
+            self.assertEqual(constructed_clients[0].kwargs["timeout"].read, 60.0)
+            self.assertEqual(constructed_clients[0].kwargs["timeout"].connect, 10.0)
             standard_http_client = constructed_clients[0].kwargs["http_client"]
             fast_http_client = client._fast_client.kwargs["http_client"]
 

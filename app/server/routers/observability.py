@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Request
@@ -81,7 +82,7 @@ async def login_jaeger(request: Request):
 @observability_router.get("/metrics")
 async def prometheus_metrics():
     return Response(
-        content=render_prometheus_metrics(),
+        content=await asyncio.to_thread(render_prometheus_metrics),
         media_type=PROMETHEUS_CONTENT_TYPE,
     )
 
