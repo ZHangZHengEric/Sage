@@ -34,6 +34,7 @@ from app.desktop_v2.backend.schemas import (
     RunMessageContent,
 )
 from app.desktop_v2.backend.service import DesktopV2Service
+from app.desktop_v2.backend.studio import StudioSyncRequest
 from app.desktop_v2.backend.anytool import DesktopV2AnyToolApp
 from app.desktop_v2.backend.runtime_protocol import (
     SIDECAR_PROTOCOL,
@@ -361,6 +362,31 @@ def create_app(
                 "active_clients": result.active_clients,
                 "shutdown_requested": result.shutdown_requested,
             }
+        )
+
+    @app.put("/api/v2/studios/{studio_id}")
+    async def sync_studio(studio_id: str, value: StudioSyncRequest, request: Request):
+        return _success(
+            await _safe(
+                runtime_service.sync_studio(
+                    studio_id, value, get_desktop_user_id(request)
+                )
+            )
+        )
+
+    @app.get("/api/v2/studios/{studio_id}/messages")
+    async def studio_messages(
+        studio_id: str, request: Request, after_sequence: int = 0, limit: int = 100
+    ):
+        return _success(
+            await _safe(
+                runtime_service.read_studio(
+                    studio_id,
+                    get_desktop_user_id(request),
+                    after_sequence=after_sequence,
+                    limit=limit,
+                )
+            )
         )
 
     @app.get("/api/v2/agents")
@@ -731,7 +757,7 @@ def create_app(
     async def run_stream(body: DesktopRunRequest, request: Request):
         stream = runtime_service.run_events(body, get_desktop_user_id(request))
         try:
-            first = await anext(stream)
+            first = await _safe(anext(stream))
         except (ValueError, RuntimeError, FileNotFoundError, PermissionError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

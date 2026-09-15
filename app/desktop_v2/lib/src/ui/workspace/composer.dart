@@ -4,7 +4,13 @@ const _composerActionSize = 32.0;
 const _composerControlHeight = 28.0;
 
 class _Composer extends StatefulWidget {
-  const _Composer({required this.controller, required this.conversation});
+  const _Composer({
+    required this.controller,
+    required this.conversation,
+    this.studio,
+  });
+
+  final Studio? studio;
 
   final WorkspaceController controller;
   final Conversation conversation;
@@ -18,6 +24,17 @@ class _ComposerState extends State<_Composer> {
   final _focus = FocusNode();
   final _editorRegionKey = GlobalKey();
   OverlayEntry? _referenceHoverOverlay;
+  bool _mentionOpen = false;
+  int _mentionIndex = 0;
+  String _mentionQuery = '';
+  final Set<String> _knownMentionIds = {};
+  List<StudioMember> get _mentionMembers =>
+      widget.studio?.members
+          .where(
+            (m) => m.name.toLowerCase().contains(_mentionQuery.toLowerCase()),
+          )
+          .toList() ??
+      [];
   ComposerReference? _hoveredReference;
   Offset _hoverPosition = Offset.zero;
 
@@ -29,6 +46,7 @@ class _ComposerState extends State<_Composer> {
     );
     widget.controller.addListener(_syncComposerReferences);
     _syncComposerReferences();
+    _text.addListener(_updateMentions);
   }
 
   @override
@@ -56,6 +74,29 @@ class _ComposerState extends State<_Composer> {
   void _syncComposerReferences() {
     final references = widget.controller.composerReferences;
     _text.syncReferences(references);
+    if (widget.studio != null) {
+      for (final id in widget.controller.studioRecipientIds) {
+        if (_knownMentionIds.add(id)) {
+          final name = widget.studio!.members
+              .firstWhere((m) => m.id == id)
+              .name;
+          final mention = '@$name ';
+          if (!_text.text.contains('@$name')) {
+            final offset = _text.selection.isValid
+                ? _text.selection.start
+                : _text.text.length;
+            _text.value = _text.value.copyWith(
+              text: _text.text.replaceRange(offset, offset, mention),
+              selection: TextSelection.collapsed(
+                offset: offset + mention.length,
+              ),
+            );
+          }
+          _focus.requestFocus();
+        }
+      }
+      _knownMentionIds.retainAll(widget.controller.studioRecipientIds);
+    }
     if (_hoveredReference != null && !references.contains(_hoveredReference)) {
       _hideReferenceHover();
     }
@@ -69,14 +110,67 @@ class _ComposerState extends State<_Composer> {
     }
   }
 
-  void _submit() {
+  void _updateMentions() {
+    if (widget.studio == null) return;
+    final offset = _text.selection.baseOffset;
+    final before = offset >= 0 && offset <= _text.text.length
+        ? _text.text.substring(0, offset)
+        : '';
+    final match = RegExp(r'@([^\s@]*)$').firstMatch(before);
+    setState(() {
+      _mentionOpen = match != null;
+      _mentionQuery = match?.group(1) ?? '';
+      _mentionIndex = 0;
+    });
+  }
+
+  void _chooseStudioMember(StudioMember member) {
+    final value = _text.value;
+    final offset = value.selection.baseOffset;
+    if (offset >= 0) {
+      final before = value.text.substring(0, offset);
+      final at = before.lastIndexOf('@');
+      if (at >= 0 && _mentionOpen) {
+        _text.value = value.copyWith(
+          text: value.text.replaceRange(at, offset, '@${member.name} '),
+          selection: TextSelection.collapsed(
+            offset: at + member.name.length + 2,
+          ),
+        );
+      }
+    }
+    widget.controller.selectStudioMember(member.id, mention: true);
+    setState(() => _mentionOpen = false);
+    _focus.requestFocus();
+  }
+
+  void _removeStudioMember(String id) {
+    final name = widget.studio!.members.firstWhere((m) => m.id == id).name;
+    final text = _text.text.replaceAll('@$name', '');
+    _text.value = _text.value.copyWith(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    widget.controller.removeStudioMention(id);
+  }
+
+  Future<void> _submit() async {
     final content = _text.messageContent;
     if (!content.any(
       (part) => part.isReference || part.text.trim().isNotEmpty,
     )) {
       return;
     }
-    widget.controller.send(_text.plainText, content: content);
+    if (widget.studio != null) {
+      if (widget.controller.studioSending) return;
+      final sent = await widget.controller.sendStudioMessage(
+        _text.plainText,
+        content: content,
+      );
+      if (!mounted || !sent) return;
+    } else {
+      widget.controller.send(_text.plainText, content: content);
+    }
     _text.reset();
     widget.controller.clearComposerReferences(widget.conversation.id);
     _focus.requestFocus();
@@ -179,6 +273,32 @@ class _ComposerState extends State<_Composer> {
   }
 
   KeyEventResult _handleKey(KeyEvent event) {
+    if (widget.studio != null &&
+        _mentionOpen &&
+        event is KeyDownEvent &&
+        _text.value.composing.isCollapsed) {
+      final members = _mentionMembers;
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        setState(() => _mentionOpen = false);
+        return KeyEventResult.handled;
+      }
+      if (members.isNotEmpty &&
+          (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+              event.logicalKey == LogicalKeyboardKey.arrowUp)) {
+        setState(
+          () => _mentionIndex =
+              (_mentionIndex +
+                  (event.logicalKey == LogicalKeyboardKey.arrowDown ? 1 : -1)) %
+              members.length,
+        );
+        return KeyEventResult.handled;
+      }
+      if (members.isNotEmpty && event.logicalKey == LogicalKeyboardKey.enter) {
+        _chooseStudioMember(members[_mentionIndex]);
+        return KeyEventResult.handled;
+      }
+    }
+
     if (event is! KeyDownEvent ||
         (event.logicalKey != LogicalKeyboardKey.enter &&
             event.logicalKey != LogicalKeyboardKey.numpadEnter)) {
@@ -220,239 +340,292 @@ class _ComposerState extends State<_Composer> {
     }.contains(widget.conversation.status);
     final colors = Theme.of(context).colorScheme;
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return DecoratedBox(
-      key: const ValueKey('thread-composer-surface'),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: dark ? 0.48 : 0.95),
-          width: dark ? 1 : 1.15,
-        ),
-        boxShadow: dark
-            ? [
-                BoxShadow(
-                  color: colors.shadow.withValues(alpha: 0.16),
-                  blurRadius: 18,
-                  offset: const Offset(0, 10),
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: colors.shadow.withValues(alpha: 0.12),
-                  blurRadius: 28,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 14),
-                ),
-                BoxShadow(
-                  color: const Color(0xFF667085).withValues(alpha: 0.12),
-                  blurRadius: 8,
-                  offset: const Offset(0, 1),
-                ),
-              ],
+    return _ComposerSurface(
+      surfaceKey: ValueKey(
+        widget.studio == null
+            ? 'thread-composer-surface'
+            : 'studio-composer-surface',
       ),
-      child: GlassCard(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-        shape: const LiquidRoundedSuperellipse(borderRadius: 24),
-        useOwnLayer: true,
-        settings: _composerGlassSettings(context),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _ComposerAssetShelf(
-              assets: widget.controller.attachments,
-              onRemoved: widget.controller.removeAttachment,
-              loadPreview: widget.controller.loadAttachmentPreview,
-              previewScope:
-                  '${widget.controller.selectedAgentId}:${widget.controller.selectedGroup.workspaceId}',
-            ),
-            _ComposerSkillShelf(
-              skills: widget.controller.preferredSkills.toList()..sort(),
-              onRemoved: widget.controller.toggleSkill,
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 36, maxHeight: 124),
-              child: MouseRegion(
-                key: _editorRegionKey,
-                onHover: _handleEditorHover,
-                onExit: (_) => _hideReferenceHover(),
-                child: Focus(
-                  onKeyEvent: (_, event) => _handleKey(event),
-                  child: TextField(
-                    key: const ValueKey('agent-composer'),
-                    controller: _text,
-                    focusNode: _focus,
-                    minLines: 1,
-                    maxLines: null,
-                    textInputAction: TextInputAction.newline,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontSize: 14.5,
-                      height: 1.35,
-                      color: colors.onSurface,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: context.l10n.text(
-                        running
-                            ? 'workspace.inputSteer'
-                            : widget.conversation.planMode
-                            ? 'workspace.inputPlan'
-                            : widget.conversation.goalMode
-                            ? 'workspace.inputGoal'
-                            : 'workspace.inputAgent',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.studio != null &&
+              widget.controller.studioRecipientIds.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 6,
+                children: [
+                  for (final id in widget.controller.studioRecipientIds)
+                    InputChip(
+                      key: ValueKey('studio-mention-chip:$id'),
+                      label: Text(
+                        '@ ${widget.studio!.members.firstWhere((m) => m.id == id).name}',
                       ),
-                      hintStyle: Theme.of(context).textTheme.bodyLarge
-                          ?.copyWith(
-                            fontSize: 14.5,
-                            color: colors.onSurfaceVariant.withValues(
-                              alpha: dark ? 0.68 : 0.76,
-                            ),
-                          ),
-                      isDense: true,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      filled: false,
-                      contentPadding: EdgeInsets.zero,
+                      onDeleted: () => _removeStudioMember(id),
                     ),
+                ],
+              ),
+            ),
+          if (widget.studio != null && _mentionOpen)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 160),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (var i = 0; i < _mentionMembers.length; i++)
+                    ListTile(
+                      dense: true,
+                      selected: i == _mentionIndex,
+                      title: Text(_mentionMembers[i].name),
+                      onTap: () => _chooseStudioMember(_mentionMembers[i]),
+                    ),
+                ],
+              ),
+            ),
+          _ComposerAssetShelf(
+            assets: widget.controller.attachments,
+            onRemoved: widget.controller.removeAttachment,
+            loadPreview: widget.controller.loadAttachmentPreview,
+            previewScope:
+                '${widget.controller.composerAgentId}:${widget.studio?.id ?? widget.controller.selectedGroup.workspaceId}',
+          ),
+          _ComposerSkillShelf(
+            skills: widget.controller.preferredSkills.toList()..sort(),
+            onRemoved: widget.controller.toggleSkill,
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 36, maxHeight: 124),
+            child: MouseRegion(
+              key: _editorRegionKey,
+              onHover: _handleEditorHover,
+              onExit: (_) => _hideReferenceHover(),
+              child: Focus(
+                onKeyEvent: (_, event) => _handleKey(event),
+                child: TextField(
+                  key: ValueKey(
+                    widget.studio == null
+                        ? 'agent-composer'
+                        : 'studio-composer',
+                  ),
+                  readOnly:
+                      widget.studio != null && widget.controller.studioSending,
+                  controller: _text,
+                  focusNode: _focus,
+                  minLines: 1,
+                  maxLines: null,
+                  textInputAction: TextInputAction.newline,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontSize: 14.5,
+                    height: 1.35,
+                    color: colors.onSurface,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: context.l10n.text(
+                      running
+                          ? 'workspace.inputSteer'
+                          : widget.conversation.planMode
+                          ? 'workspace.inputPlan'
+                          : widget.conversation.goalMode
+                          ? 'workspace.inputGoal'
+                          : 'workspace.inputAgent',
+                    ),
+                    hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontSize: 14.5,
+                      color: colors.onSurfaceVariant.withValues(
+                        alpha: dark ? 0.68 : 0.76,
+                      ),
+                    ),
+                    isDense: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    contentPadding: EdgeInsets.zero,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                double labelWidth(String label) {
-                  final painter = TextPainter(
-                    text: TextSpan(
-                      text: label,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              double labelWidth(String label) {
+                final painter = TextPainter(
+                  text: TextSpan(
+                    text: label,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
-                    textDirection: Directionality.of(context),
-                    textScaler: MediaQuery.textScalerOf(context),
-                    maxLines: 1,
-                  )..layout();
-                  final width = painter.width;
-                  painter.dispose();
-                  return width;
-                }
-
-                final mode = widget.conversation.invocationMode;
-                final hasMode = mode != InvocationMode.normal;
-                final approvalWidth = labelWidth(
-                  _approvalModeLabel(
-                    widget.conversation.approvalMode,
-                    context.l10n,
                   ),
-                );
-                final agent = widget.controller.agents
-                    .where(
-                      (agent) => agent.id == widget.controller.selectedAgentId,
-                    )
-                    .firstOrNull;
-                final agentWidth = labelWidth(
-                  agent?.name ?? context.l10n.text('settings.agent'),
-                );
-                final chipWidth = hasMode
-                    ? labelWidth(
-                            context.l10n.text(
-                              mode == InvocationMode.plan
-                                  ? 'workspace.planModeShort'
-                                  : 'workspace.goalModeShort',
+                  textDirection: Directionality.of(context),
+                  textScaler: MediaQuery.textScalerOf(context),
+                  maxLines: 1,
+                )..layout();
+                final width = painter.width;
+                painter.dispose();
+                return width;
+              }
+
+              final mode = widget.conversation.invocationMode;
+              final hasMode = mode != InvocationMode.normal;
+              final approvalWidth = labelWidth(
+                _approvalModeLabel(
+                  widget.conversation.approvalMode,
+                  context.l10n,
+                ),
+              );
+              final agent = widget.controller.agents
+                  .where(
+                    (agent) => agent.id == widget.controller.selectedAgentId,
+                  )
+                  .firstOrNull;
+              final agentWidth = labelWidth(
+                agent?.name ?? context.l10n.text('settings.agent'),
+              );
+              final chipWidth = hasMode
+                  ? labelWidth(
+                          context.l10n.text(
+                            mode == InvocationMode.plan
+                                ? 'workspace.planModeShort'
+                                : 'workspace.goalModeShort',
+                          ),
+                        ) +
+                        36
+                  : 0.0;
+              var compactApproval = false;
+              var compactAgent = false;
+              // Include actual localized label widths before falling back to
+              // a second line. The fixed widths cover icons and padding.
+              double toolbarWidth() =>
+                  _composerActionSize * 2 +
+                  12 +
+                  7 +
+                  (widget.studio != null
+                      ? 0
+                      : compactAgent
+                      ? 40
+                      : 49 + agentWidth) +
+                  (compactApproval ? 40 : 49 + approvalWidth) +
+                  (hasMode ? chipWidth + 6 : 0);
+              if (toolbarWidth() > constraints.maxWidth) {
+                compactApproval = true;
+              }
+              if (toolbarWidth() > constraints.maxWidth) {
+                compactAgent = true;
+              }
+              const controlGap = 6.0;
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _SkillPicker(
+                    controller: widget.controller,
+                    conversation: widget.conversation,
+                    modeEnabled:
+                        !approvalLocked &&
+                        (widget.studio == null ||
+                            !widget.controller.studioSending),
+                  ),
+                  SizedBox(width: controlGap),
+                  Expanded(
+                    child: Wrap(
+                      spacing: controlGap,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Container(
+                          key: const ValueKey('composer-control-cluster'),
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceContainerHighest.withValues(
+                              alpha: dark ? 0.18 : 0.28,
                             ),
-                          ) +
-                          36
-                    : 0.0;
-                var compactApproval = false;
-                var compactAgent = false;
-                // Include actual localized label widths before falling back to
-                // a second line. The fixed widths cover icons and padding.
-                double toolbarWidth() =>
-                    _composerActionSize * 2 +
-                    12 +
-                    7 +
-                    (compactAgent ? 40 : 49 + agentWidth) +
-                    (compactApproval ? 40 : 49 + approvalWidth) +
-                    (hasMode ? chipWidth + 6 : 0);
-                if (toolbarWidth() > constraints.maxWidth) {
-                  compactApproval = true;
-                }
-                if (toolbarWidth() > constraints.maxWidth) {
-                  compactAgent = true;
-                }
-                const controlGap = 6.0;
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _SkillPicker(
-                      controller: widget.controller,
-                      conversation: widget.conversation,
-                      modeEnabled: !approvalLocked,
-                    ),
-                    SizedBox(width: controlGap),
-                    Expanded(
-                      child: Wrap(
-                        spacing: controlGap,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Container(
-                            key: const ValueKey('composer-control-cluster'),
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              color: colors.surfaceContainerHighest.withValues(
-                                alpha: dark ? 0.18 : 0.28,
-                              ),
-                              borderRadius: BorderRadius.circular(11),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (widget.studio == null) ...[
                                 _AgentPicker(
                                   controller: widget.controller,
                                   compact: compactAgent,
                                 ),
                                 const _ComposerToolbarDivider(),
-                                _ApprovalModePicker(
-                                  controller: widget.controller,
-                                  conversation: widget.conversation,
-                                  compact: compactApproval,
-                                  enabled: !approvalLocked,
-                                ),
                               ],
+                              _ApprovalModePicker(
+                                controller: widget.controller,
+                                conversation: widget.conversation,
+                                compact: compactApproval,
+                                enabled:
+                                    !approvalLocked &&
+                                    (widget.studio == null ||
+                                        !widget.controller.studioSending),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (hasMode)
+                          _ComposerModeChip(
+                            mode: mode,
+                            enabled:
+                                !approvalLocked &&
+                                (widget.studio == null ||
+                                    !widget.controller.studioSending),
+                            onClose: () => widget.controller.setInvocationMode(
+                              InvocationMode.normal,
                             ),
                           ),
-                          if (hasMode)
-                            _ComposerModeChip(
-                              mode: mode,
-                              enabled: !approvalLocked,
-                              onClose: () => widget.controller
-                                  .setInvocationMode(InvocationMode.normal),
-                            ),
-                        ],
-                      ),
+                      ],
                     ),
-                    SizedBox(width: controlGap),
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: _text,
-                      builder: (context, value, _) => _ComposerSendButton(
-                        enabled: widget.controller.canSend || running,
-                        running: running,
+                  ),
+                  SizedBox(width: controlGap),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _text,
+                    builder: (context, value, _) => SizedBox(
+                      key: widget.studio == null
+                          ? null
+                          : const ValueKey('studio-send'),
+                      child: _ComposerSendButton(
+                        enabled: widget.studio == null
+                            ? widget.controller.canSend || running
+                            : !widget.controller.studioSending,
+                        running: widget.studio == null
+                            ? running
+                            : widget.controller.studioRecipients.any(
+                                (m) => widget.controller.studioMemberBusy(
+                                  widget.studio!,
+                                  m,
+                                ),
+                              ),
                         hasDraft:
                             value.text.trim().isNotEmpty ||
                             widget.controller.composerReferences.isNotEmpty,
                         onSend: _submit,
-                        onStop: widget.controller.cancel,
+                        onStop: widget.studio == null
+                            ? widget.controller.cancel
+                            : () {
+                                for (final m
+                                    in widget.controller.studioRecipients) {
+                                  if (widget.controller.studioMemberBusy(
+                                    widget.studio!,
+                                    m,
+                                  )) {
+                                    widget.controller.cancelStudioMember(
+                                      widget.studio!,
+                                      m,
+                                    );
+                                  }
+                                }
+                              },
                       ),
                     ),
-                  ],
-                );
-              },
-            ),
-          ],
-        ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -515,10 +688,7 @@ class _ComposerModeChip extends StatelessWidget {
                 constraints: const BoxConstraints(
                   minHeight: _composerControlHeight,
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

@@ -42,6 +42,25 @@ class V2ApiClient {
   String? expectedBuildId;
   String? authToken;
 
+  Future<void> syncStudio(String studioId, Map<String, Object?> body) async {
+    await _json(
+      'PUT',
+      '/api/v2/studios/${Uri.encodeComponent(studioId)}',
+      body: body,
+    );
+  }
+
+  Future<Map<String, Object?>> studioMessages(
+    String studioId, {
+    int afterSequence = 0,
+  }) async =>
+      (await _json(
+                'GET',
+                '/api/v2/studios/${Uri.encodeComponent(studioId)}/messages?after_sequence=$afterSequence&limit=100',
+              )
+              as Map)
+          .cast<String, Object?>();
+
   Future<bool> health() async {
     try {
       final request = await _request(

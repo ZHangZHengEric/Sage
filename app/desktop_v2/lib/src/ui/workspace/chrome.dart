@@ -408,3 +408,55 @@ String _localizedRuntimeDecision(String decision, String language) {
   };
   return values[decision]?[language] ?? values[decision]?['en'] ?? decision;
 }
+
+/// Shared visual shell for ordinary and Studio message composers.
+class _ComposerSurface extends StatelessWidget {
+  const _ComposerSurface({required this.child, required this.surfaceKey});
+  final Widget child;
+  final Key surfaceKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DecoratedBox(
+      key: surfaceKey,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: dark ? 0.48 : 0.95),
+          width: dark ? 1 : 1.15,
+        ),
+        boxShadow: dark
+            ? [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: 0.16),
+                  blurRadius: 18,
+                  offset: const Offset(0, 10),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: 0.12),
+                  blurRadius: 28,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 14),
+                ),
+                BoxShadow(
+                  color: const Color(0xFF667085).withValues(alpha: 0.12),
+                  blurRadius: 8,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+      ),
+      child: GlassCard(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+        shape: const LiquidRoundedSuperellipse(borderRadius: 24),
+        useOwnLayer: true,
+        settings: _composerGlassSettings(context),
+        child: child,
+      ),
+    );
+  }
+}

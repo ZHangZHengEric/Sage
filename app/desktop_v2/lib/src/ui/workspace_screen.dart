@@ -11,6 +11,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import '../models.dart';
+import '../studio_models.dart';
 import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
 import '../state/workspace_controller.dart';
@@ -31,6 +32,8 @@ part 'workspace/message_content.dart';
 part 'workspace/composer.dart';
 part 'workspace/files.dart';
 part 'workspace/chrome.dart';
+part 'workspace/studio.dart';
+part 'workspace_panels/studio_workspace_panel_plugin.dart';
 
 const double _splitHandleHitWidth = 12;
 const double _minRailFraction = 0.16;
@@ -68,6 +71,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _railCollapsed = false;
   bool _workspaceCollapsed = false;
   bool _settingsOpen = false;
+  String _lastStudioId = '';
+
+  void _onStudioDockChanged() {
+    if (widget.controller.selectedStudio != null &&
+        _panelDockController.openInstances.isEmpty &&
+        !_workspaceCollapsed) {
+      setState(() => _workspaceCollapsed = true);
+    }
+  }
+
+  void _onStudioSelectionChanged() {
+    final id = widget.controller.selectedStudioId;
+    if (_lastStudioId == id) return;
+    _lastStudioId = id;
+    _rebuildPanelRegistry();
+    if (id.isNotEmpty) {
+      _openStudioDetails();
+    } else {
+      _panelDockController.open('sage.workspace.files');
+    }
+  }
+
   double _railFraction = _defaultRailFraction;
   double _workspaceFraction =
       _defaultWorkspacePanelSizing.preferredWidthFraction;
@@ -96,16 +121,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         widget.panelDockController ?? WorkspacePanelDockController();
     _ownsPanelDockController = widget.panelDockController == null;
     _rebuildPanelRegistry();
+    _panelDockController.addListener(_onStudioDockChanged);
+    widget.controller.addListener(_onStudioSelectionChanged);
   }
 
   @override
   void didUpdateWidget(covariant WorkspaceScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onStudioSelectionChanged);
+      widget.controller.addListener(_onStudioSelectionChanged);
+    }
     if (oldWidget.panelDockController != widget.panelDockController) {
+      _panelDockController.removeListener(_onStudioDockChanged);
       if (_ownsPanelDockController) _panelDockController.dispose();
       _panelDockController =
           widget.panelDockController ?? WorkspacePanelDockController();
       _ownsPanelDockController = widget.panelDockController == null;
+      _panelDockController.addListener(_onStudioDockChanged);
     }
     if (oldWidget.controller != widget.controller ||
         oldWidget.panelPlugins != widget.panelPlugins ||
@@ -116,6 +149,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   @override
   void dispose() {
+    _panelDockController.removeListener(_onStudioDockChanged);
+    widget.controller.removeListener(_onStudioSelectionChanged);
     if (_ownsPanelDockController) _panelDockController.dispose();
     _planPreview.dispose();
     super.dispose();
@@ -124,9 +159,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   void _rebuildPanelRegistry() {
     _panelRegistry = WorkspacePanelRegistry([
       const _FileWorkspacePanelPlugin(),
-      const _PlanWorkspacePanelPlugin(),
       const TerminalWorkspacePanelPlugin(),
       ...widget.panelPlugins,
+      const _StudioDetailsPlugin(),
+      const _PlanWorkspacePanelPlugin(),
     ]);
     _panelDockController.syncPlugins(
       _panelRegistry.plugins.where((plugin) => plugin.supports(_panelServices)),
@@ -148,6 +184,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _panelDockController.dispatch(
       const WorkspacePanelIntent(pluginId: 'sage.workspace.plan'),
     );
+  }
+
+  void _openStudioDetails() {
+    setState(() => _workspaceCollapsed = false);
+    _panelDockController.open('sage.workspace.studio');
   }
 
   void _resizeRail(double delta, double width) {
@@ -247,18 +288,31 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               Expanded(
                 child: RepaintBoundary(
                   key: const ValueKey('thread-repaint-boundary'),
-                  child: _ThreadPanel(
-                    onOpenPlan: _openPlanPreview,
-                    controller: widget.controller,
-                    compact: true,
-                    railCollapsed: _railCollapsed,
-                    workspaceCollapsed: _workspaceCollapsed,
-                    onToggleRail: () =>
-                        setState(() => _railCollapsed = !_railCollapsed),
-                    onToggleWorkspace: () => setState(
-                      () => _workspaceCollapsed = !_workspaceCollapsed,
-                    ),
-                  ),
+                  child: widget.controller.selectedStudio != null
+                      ? _StudioThread(
+                          key: ValueKey(widget.controller.selectedStudioId),
+                          controller: widget.controller,
+                          onDetails: _openStudioDetails,
+                          workspaceCollapsed: _workspaceCollapsed,
+                          railCollapsed: _railCollapsed,
+                          onToggleWorkspace: () => setState(
+                            () => _workspaceCollapsed = !_workspaceCollapsed,
+                          ),
+                          onToggleRail: () =>
+                              setState(() => _railCollapsed = !_railCollapsed),
+                        )
+                      : _ThreadPanel(
+                          onOpenPlan: _openPlanPreview,
+                          controller: widget.controller,
+                          compact: true,
+                          railCollapsed: _railCollapsed,
+                          workspaceCollapsed: _workspaceCollapsed,
+                          onToggleRail: () =>
+                              setState(() => _railCollapsed = !_railCollapsed),
+                          onToggleWorkspace: () => setState(
+                            () => _workspaceCollapsed = !_workspaceCollapsed,
+                          ),
+                        ),
                 ),
               ),
               if (!_workspaceCollapsed)
@@ -267,6 +321,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   child: RepaintBoundary(
                     key: const ValueKey('workspace-repaint-boundary'),
                     child: WorkspacePanelDock(
+                      onCollapse: widget.controller.selectedStudio == null
+                          ? null
+                          : () => setState(() => _workspaceCollapsed = true),
                       registry: _panelRegistry,
                       services: _panelServices,
                       controller: _panelDockController,
@@ -326,17 +383,33 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 Expanded(
                   child: RepaintBoundary(
                     key: const ValueKey('thread-repaint-boundary'),
-                    child: _ThreadPanel(
-                      onOpenPlan: _openPlanPreview,
-                      controller: widget.controller,
-                      railCollapsed: _railCollapsed,
-                      workspaceCollapsed: _workspaceCollapsed || !showWorkspace,
-                      onToggleRail: () =>
-                          setState(() => _railCollapsed = !_railCollapsed),
-                      onToggleWorkspace: () => setState(
-                        () => _workspaceCollapsed = !_workspaceCollapsed,
-                      ),
-                    ),
+                    child: widget.controller.selectedStudio != null
+                        ? _StudioThread(
+                            key: ValueKey(widget.controller.selectedStudioId),
+                            controller: widget.controller,
+                            onDetails: _openStudioDetails,
+                            workspaceCollapsed: _workspaceCollapsed,
+                            railCollapsed: _railCollapsed,
+                            onToggleWorkspace: () => setState(
+                              () => _workspaceCollapsed = !_workspaceCollapsed,
+                            ),
+                            onToggleRail: () => setState(
+                              () => _railCollapsed = !_railCollapsed,
+                            ),
+                          )
+                        : _ThreadPanel(
+                            onOpenPlan: _openPlanPreview,
+                            controller: widget.controller,
+                            railCollapsed: _railCollapsed,
+                            workspaceCollapsed:
+                                _workspaceCollapsed || !showWorkspace,
+                            onToggleRail: () => setState(
+                              () => _railCollapsed = !_railCollapsed,
+                            ),
+                            onToggleWorkspace: () => setState(
+                              () => _workspaceCollapsed = !_workspaceCollapsed,
+                            ),
+                          ),
                   ),
                 ),
                 if (showWorkspace) ...[
@@ -352,6 +425,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     child: RepaintBoundary(
                       key: const ValueKey('workspace-repaint-boundary'),
                       child: WorkspacePanelDock(
+                        onCollapse: widget.controller.selectedStudio == null
+                            ? null
+                            : () => setState(() => _workspaceCollapsed = true),
                         registry: _panelRegistry,
                         services: _panelServices,
                         controller: _panelDockController,
@@ -484,6 +560,7 @@ class _ProjectRailState extends State<_ProjectRail> {
       _ConversationTile(
         conversation: conversation,
         selected:
+            widget.controller.selectedStudioId.isEmpty &&
             widget.controller.selectedGroupId == groupId &&
             widget.controller.selectedConversationId == conversation.id &&
             !widget.controller.viewingSubSession,
@@ -558,6 +635,7 @@ class _ProjectRailState extends State<_ProjectRail> {
                   onTap: widget.onOpenSettings,
                 ),
               ),
+              _StudioRail(controller: widget.controller, compact: true),
               const SizedBox(width: 8),
               SizedBox(
                 width: 150,
@@ -637,33 +715,36 @@ class _ProjectRailState extends State<_ProjectRail> {
                 onTap: widget.controller.createAgentWorkspaceConversation,
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      context.l10n.text('workspace.projects'),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 13.5,
-                        color: colors.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  _SidebarIconButton(
-                    tooltip: context.l10n.text('workspace.addProject'),
-                    icon: CupertinoIcons.add,
-                    keyValue: 'add-project-button',
-                    onTap: widget.controller.addProject,
-                  ),
-                ],
-              ),
-            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                 children: [
+                  _StudioRail(controller: widget.controller),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 12, 2, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            context.l10n.text('workspace.projects'),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontSize: 13.5,
+                                  color: colors.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                        _SidebarIconButton(
+                          tooltip: context.l10n.text('workspace.addProject'),
+                          icon: CupertinoIcons.add,
+                          keyValue: 'add-project-button',
+                          onTap: widget.controller.addProject,
+                        ),
+                      ],
+                    ),
+                  ),
+
                   for (final group in widget.controller.projectGroups) ...[
                     _WorkspaceHeader(
                       group: group,

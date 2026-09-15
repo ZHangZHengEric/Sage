@@ -369,6 +369,7 @@ class WorkspacePanelDock extends StatefulWidget {
     required this.services,
     required this.controller,
     this.compact = false,
+    this.onCollapse,
     super.key,
   });
 
@@ -376,6 +377,7 @@ class WorkspacePanelDock extends StatefulWidget {
   final WorkspacePanelServices services;
   final WorkspacePanelDockController controller;
   final bool compact;
+  final VoidCallback? onCollapse;
 
   @override
   State<WorkspacePanelDock> createState() => _WorkspacePanelDockState();
@@ -441,7 +443,10 @@ class _WorkspacePanelDockState extends State<WorkspacePanelDock> {
             !open.any((instance) => instance.pluginId == plugin.id))
           plugin,
     ];
-    final showTabs = open.length > 1 || closedPlugins.isNotEmpty;
+    final showTabs =
+        open.length > 1 ||
+        closedPlugins.isNotEmpty ||
+        widget.onCollapse != null;
     final activeInstanceId = widget.controller.activeInstanceId;
     final activeIndex = open.indexWhere(
       (instance) => instance.instanceId == activeInstanceId,
@@ -476,6 +481,7 @@ class _WorkspacePanelDockState extends State<WorkspacePanelDock> {
           onActivate: widget.controller.activateInstance,
           onClose: widget.controller.closeInstance,
           onOpen: widget.controller.open,
+          onCollapse: widget.onCollapse,
         ),
         Expanded(child: content),
       ],
@@ -546,8 +552,10 @@ class _WorkspacePanelTabs extends StatelessWidget {
     required this.onActivate,
     required this.onClose,
     required this.onOpen,
+    this.onCollapse,
   });
 
+  final VoidCallback? onCollapse;
   final List<WorkspacePanelInstance> open;
   final List<WorkspacePanelPlugin> closedPlugins;
   final WorkspacePanelRegistry registry;
@@ -570,6 +578,14 @@ class _WorkspacePanelTabs extends StatelessWidget {
         height: 38,
         child: Row(
           children: [
+            if (onCollapse != null)
+              IconButton(
+                key: const ValueKey('canvas-collapse-button'),
+                tooltip: context.l10n.text('workspace.collapseSidebar'),
+                onPressed: onCollapse,
+                icon: const Icon(CupertinoIcons.sidebar_right, size: 16),
+                visualDensity: VisualDensity.compact,
+              ),
             Expanded(
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,

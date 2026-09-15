@@ -10,9 +10,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/runtime_host.dart';
 import '../api/v2_api.dart';
 import '../models.dart';
+import '../studio_models.dart';
 import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
 import '../usage_models.dart';
+
+part 'workspace_studio.dart';
 
 typedef PreferencesLoader = Future<SharedPreferences> Function();
 
@@ -92,6 +95,20 @@ class WorkspaceController extends ChangeNotifier {
   int _settingsCatalogRevision = 0;
   int _usageOverviewRevision = 0;
   bool _disposed = false;
+
+  void _notifyStudioChanged() => notifyListeners();
+
+  final List<Studio> studios = [];
+  Timer? _studioPollTimer;
+  final Set<String> _studioRefreshing = {};
+  final Set<String> _hostStudios = {};
+  String selectedStudioId = '';
+  String selectedStudioMemberId = '';
+  String studioRecipientId = '';
+  final List<String> studioRecipientIds = [];
+  final Set<String> _studioDispatching = {};
+  final Set<String> _studioSending = {};
+  static const _studiosKey = 'sage.desktop_v2.studios.v1';
 
   SharedPreferences? _preferences;
   List<AgentSummary> agents = const [];
@@ -196,15 +213,30 @@ class WorkspaceController extends ChangeNotifier {
 
   bool get viewingSubSession => selectedSubSessionId.isNotEmpty;
 
+  Conversation? get composerConversation =>
+      selectedStudio?.draft ?? selectedConversation;
+  String get composerConversationId =>
+      selectedStudio?.id ?? selectedConversationId;
+  String get composerAgentId => selectedStudio == null
+      ? selectedAgentId
+      : selectedStudio!.members
+            .firstWhere(
+              (m) =>
+                  m.id ==
+                  (studioRecipientIds.firstOrNull ??
+                      selectedStudio!.coordinatorId),
+            )
+            .agentId;
+
   Set<String> get preferredSkills =>
-      _preferredSkills.putIfAbsent(selectedConversationId, () => <String>{});
+      _preferredSkills.putIfAbsent(composerConversationId, () => <String>{});
 
   List<UploadedAttachment> get attachments =>
-      _attachments.putIfAbsent(selectedConversationId, () => []);
+      _attachments.putIfAbsent(composerConversationId, () => []);
 
   List<ComposerReference> get composerReferences {
     final references = _composerReferences.putIfAbsent(
-      selectedConversationId,
+      composerConversationId,
       () => <ComposerReference>[],
     );
     var hydratedAttachment = false;
@@ -263,6 +295,7 @@ class WorkspaceController extends ChangeNotifier {
       await _runtimeHost?.ensureReady();
       _preferences = await _preferencesLoader();
       _restoreConversations();
+      _restoreStudios();
       final values = await Future.wait<Object>([
         _api.listAgents(),
         _api.getSettings(),
@@ -318,6 +351,8 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void createConversation({bool notify = true}) {
+    selectedStudioId = '';
+    selectedStudioMemberId = '';
     final conversation = Conversation(
       id: _id('conversation'),
       agentId: selectedAgentId,
@@ -341,6 +376,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectAgentWorkspaceConversation(String id) async {
+    final leavingStudio = selectedStudioId.isNotEmpty;
+    selectedStudioId = '';
+    selectedStudioMemberId = '';
+    if (leavingStudio) notifyListeners();
     if (selectedGroupId == agentWorkspaceId &&
         selectedConversationId == id &&
         selectedSubSessionId.isEmpty) {
@@ -357,6 +396,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectGroup(String id) async {
+    final leavingStudio = selectedStudioId.isNotEmpty;
+    selectedStudioId = '';
+    selectedStudioMemberId = '';
+    if (leavingStudio) notifyListeners();
     if (selectedGroupId == id) return;
     selectedGroupId = id;
     final values = _visibleConversations(selectedGroupId);
@@ -371,6 +414,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectConversation(String groupId, String id) async {
+    final leavingStudio = selectedStudioId.isNotEmpty;
+    selectedStudioId = '';
+    selectedStudioMemberId = '';
+    if (leavingStudio) notifyListeners();
     final conversation = _visibleConversations(
       groupId,
     ).where((value) => value.id == id).firstOrNull;
@@ -418,7 +465,7 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
     try {
-      skills = await _api.listSkills(selectedAgentId);
+      skills = await _api.listSkills(composerAgentId);
       preferredSkills.removeWhere(
         (name) => !skills.any((value) => value.name == name),
       );
@@ -506,7 +553,7 @@ class WorkspaceController extends ChangeNotifier {
       changed = true;
     }
     final references = _composerReferences.putIfAbsent(
-      selectedConversationId,
+      composerConversationId,
       () => [],
     );
     if (!references.any((reference) => reference.path == node.path)) {
@@ -542,7 +589,7 @@ class WorkspaceController extends ChangeNotifier {
       _addWorkspaceNodeAttachment(node);
     }
     final references = _composerReferences.putIfAbsent(
-      selectedConversationId,
+      composerConversationId,
       () => [],
     );
     references
@@ -570,7 +617,7 @@ class WorkspaceController extends ChangeNotifier {
     final selectedText = selection.trim();
     if (selectedText.isEmpty) return;
     final references = _composerReferences.putIfAbsent(
-      selectedConversationId,
+      composerConversationId,
       () => [],
     );
     references.add(
@@ -586,7 +633,7 @@ class WorkspaceController extends ChangeNotifier {
 
   void removeComposerReference(ComposerReference value) {
     final references = _composerReferences.putIfAbsent(
-      selectedConversationId,
+      composerConversationId,
       () => <ComposerReference>[],
     );
     references.remove(value);
@@ -636,17 +683,20 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> chooseAndUploadFile() async {
+    final scopeId = composerConversationId;
+    final agentId = composerAgentId;
+    final workspaceId = selectedStudio == null ? selectedGroup.workspaceId : '';
     final file = await file_selector.openFile();
-    if (file == null || selectedAgentId.isEmpty) return;
+    if (file == null || agentId.isEmpty) return;
     try {
       final uploaded = await _api.upload(
-        agentId: selectedAgentId,
-        workspaceId: selectedGroup.workspaceId,
+        agentId: agentId,
+        workspaceId: workspaceId,
         file: file,
       );
-      attachments.add(uploaded);
+      _attachments.putIfAbsent(scopeId, () => []).add(uploaded);
       _composerReferences
-          .putIfAbsent(selectedConversationId, () => [])
+          .putIfAbsent(scopeId, () => [])
           .add(
             ComposerReference(
               fileName: uploaded.name,
@@ -657,7 +707,8 @@ class WorkspaceController extends ChangeNotifier {
               isDirectory: uploaded.isDirectory,
             ),
           );
-      await refreshFiles();
+      if (composerConversationId == scopeId) await refreshFiles();
+      notifyListeners();
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();
@@ -667,8 +718,8 @@ class WorkspaceController extends ChangeNotifier {
   Future<WorkspaceFileContent> loadAttachmentPreview(
     UploadedAttachment attachment,
   ) => _api.workspaceFile(
-    agentId: selectedAgentId,
-    workspaceId: selectedGroup.workspaceId,
+    agentId: composerAgentId,
+    workspaceId: selectedStudio == null ? selectedGroup.workspaceId : '',
     path: attachment.path,
   );
 
@@ -927,7 +978,7 @@ class WorkspaceController extends ChangeNotifier {
         );
       }
       if (selectedAgentId.isNotEmpty) {
-        skills = await _api.listSkills(selectedAgentId);
+        skills = await _api.listSkills(composerAgentId);
       }
       notifyListeners();
     } on Object catch (exception) {
@@ -1087,7 +1138,10 @@ class WorkspaceController extends ChangeNotifier {
       if (selectedAgentId == agentId) {
         selectedAgentId = replacement.id;
       }
-      for (final values in _conversations.values) {
+      for (final entry in _conversations.entries) {
+        // A Studio membership must never silently switch to another Agent.
+        if (studios.any((studio) => studio.id == entry.key)) continue;
+        final values = entry.value;
         for (final conversation in values) {
           if (conversation.agentId == agentId &&
               conversation.status == RunStatus.idle) {
@@ -1731,7 +1785,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void setApprovalMode(ApprovalMode mode) {
-    final conversation = selectedConversation;
+    final conversation = composerConversation;
     if (conversation == null ||
         {
           RunStatus.starting,
@@ -1747,7 +1801,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void setInvocationMode(InvocationMode mode) {
-    final conversation = selectedConversation;
+    final conversation = composerConversation;
     if (conversation == null ||
         {
           RunStatus.starting,
@@ -2204,6 +2258,9 @@ class WorkspaceController extends ChangeNotifier {
     );
     notifyListeners();
     _persist();
+    if ({'run.completed', 'run.failed', 'run.cancelled'}.contains(type)) {
+      unawaited(_syncStudioExecution(conversation));
+    }
   }
 
   bool _shouldRefreshWorkspace(String eventType) =>
@@ -3007,11 +3064,13 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> _saveConversations() async {
+    await _saveStudios();
     await _preferences?.setString(
       _conversationsKey,
       jsonEncode({
         for (final entry in _conversations.entries)
-          entry.key: [for (final value in entry.value) value.toJson()],
+          if (!entry.key.startsWith('studio_'))
+            entry.key: [for (final value in entry.value) value.toJson()],
       }),
     );
   }
@@ -3048,6 +3107,7 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _workspaceRefreshTimer?.cancel();
+    _studioPollTimer?.cancel();
     _streamingTextRevealTimer?.cancel();
     _pendingTextReveals.clear();
     for (final subscription in _streams.values) {

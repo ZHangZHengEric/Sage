@@ -244,14 +244,17 @@ class _ThreadHeader extends StatelessWidget {
 
 class _MessageList extends StatefulWidget {
   const _MessageList({
+    super.key,
     required this.controller,
     required this.conversation,
     this.subSessions = const [],
+    this.readOnly = false,
   });
 
   final WorkspaceController controller;
   final Conversation conversation;
   final List<Conversation> subSessions;
+  final bool readOnly;
 
   @override
   State<_MessageList> createState() => _MessageListState();
@@ -613,27 +616,30 @@ class _MessageListState extends State<_MessageList> {
         questionnairePanelId.isNotEmpty &&
         message.role == 'assistant' &&
         _panelForMessage(message)?.id == questionnairePanelId;
-    Widget questionnaireCard() => _InlineQuestionnaireCard(
-      key: ValueKey('inline-questionnaire:${inlineQuestionnaire!.id}'),
-      interaction: inlineQuestionnaire,
-      onReply: completedQuestionnaire != null
-          ? (decision, {text = '', payload = const {}}) async {
-              if (decision != 'submit') return;
-              final rawAnswers = payload['answers'];
-              final answers = rawAnswers is Map
-                  ? rawAnswers.cast<String, Object?>()
-                  : const <String, Object?>{};
-              await widget.controller.send(
-                _questionnaireResponseMessage(
-                  completedQuestionnaire,
-                  answers,
-                  context.l10n.text('questionnaire.response'),
-                ),
-              );
-            }
-          : widget.controller.viewingSubSession
-          ? widget.controller.replyDisplayInteraction
-          : widget.controller.replyInteraction,
+    Widget questionnaireCard() => IgnorePointer(
+      ignoring: widget.readOnly,
+      child: _InlineQuestionnaireCard(
+        key: ValueKey('inline-questionnaire:${inlineQuestionnaire!.id}'),
+        interaction: inlineQuestionnaire,
+        onReply: completedQuestionnaire != null
+            ? (decision, {text = '', payload = const {}}) async {
+                if (decision != 'submit') return;
+                final rawAnswers = payload['answers'];
+                final answers = rawAnswers is Map
+                    ? rawAnswers.cast<String, Object?>()
+                    : const <String, Object?>{};
+                await widget.controller.send(
+                  _questionnaireResponseMessage(
+                    completedQuestionnaire,
+                    answers,
+                    context.l10n.text('questionnaire.response'),
+                  ),
+                );
+              }
+            : widget.controller.viewingSubSession
+            ? widget.controller.replyDisplayInteraction
+            : widget.controller.replyInteraction,
+      ),
     );
     var questionnaireInserted = false;
     var lastVisibleMessageIndex = -1;
@@ -661,17 +667,19 @@ class _MessageListState extends State<_MessageList> {
             key: ValueKey(message.id),
             message: message,
             onEdit:
-                widget.controller.canRewriteLastUserMessage(
-                  conversation,
-                  message,
-                )
+                !widget.readOnly &&
+                    widget.controller.canRewriteLastUserMessage(
+                      conversation,
+                      message,
+                    )
                 ? (value) => widget.controller.rewriteLastUserMessage(
                     message.id,
                     value,
                   )
                 : null,
             onBranch:
-                panel != null &&
+                !widget.readOnly &&
+                    panel != null &&
                     panel.runId.isNotEmpty &&
                     !panel.running &&
                     panel.completedAt != null &&

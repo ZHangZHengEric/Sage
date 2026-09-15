@@ -54,6 +54,7 @@ from app.desktop_v2.backend.bindings import DesktopExecutionBindingProvider
 from app.desktop_v2.backend.composition import build_desktop_application
 from app.desktop_v2.backend.catalog_service import DesktopCatalogServiceMixin
 from app.desktop_v2.backend.observability import create_desktop_log_sink
+from app.desktop_v2.backend.studio import DesktopStudioMixin, StudioStore
 from app.desktop_v2.backend.schemas import (
     AgentCreate as AgentCreate,
     AgentSettingsPatch as AgentSettingsPatch,
@@ -84,6 +85,7 @@ from app.desktop_v2.backend.workspace_service import DesktopWorkspaceServiceMixi
 
 
 LOGGER = logging.getLogger(__name__)
+
 
 class _DesktopRecoveryAgent:
     """Recompose a Desktop driver for a durable Run with lost scheduler work."""
@@ -174,6 +176,7 @@ class _DesktopRecoveryAgent:
 
 
 class DesktopV2Service(
+    DesktopStudioMixin,
     DesktopCatalogServiceMixin,
     DesktopRunServiceMixin,
     DesktopWorkspaceServiceMixin,
@@ -201,6 +204,7 @@ class DesktopV2Service(
         self.runtime_root = self.root / "runtime"
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.runtime_root / "settings.json"
+        self.studio_store = StudioStore(self.runtime_root / "studios.sqlite3")
         self.extensions = builtin_extension_registry()
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()

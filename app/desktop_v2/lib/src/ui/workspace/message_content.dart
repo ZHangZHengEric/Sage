@@ -170,12 +170,14 @@ class _UserMessageContent extends StatelessWidget {
   const _UserMessageContent({
     required this.data,
     this.content = const [],
+    this.fitContent = false,
     this.onReferenceSelection,
     this.onLoadReference,
     super.key,
   });
 
   final String data;
+  final bool fitContent;
   final List<ChatMessageContent> content;
   final ValueChanged<String>? onReferenceSelection;
   final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
@@ -184,6 +186,7 @@ class _UserMessageContent extends StatelessWidget {
   Widget build(BuildContext context) {
     if (content.any((part) => part.isReference)) {
       return _ConversationMarkdown(
+        fitContent: fitContent,
         data: _structuredMessageMarkdown(content),
         onReferenceSelection: onReferenceSelection,
         inlineSyntaxes: [_MessageReferenceSyntax()],
@@ -198,6 +201,7 @@ class _UserMessageContent extends StatelessWidget {
     final parts = _splitUserMessageContent(data);
     if (!parts.any((part) => part.isReference)) {
       return _ConversationMarkdown(
+        fitContent: fitContent,
         data: data,
         onReferenceSelection: onReferenceSelection,
       );
@@ -215,6 +219,7 @@ class _UserMessageContent extends StatelessWidget {
             )
           else
             _ConversationMarkdown(
+              fitContent: fitContent,
               data: parts[index].value,
               onReferenceSelection: onReferenceSelection,
             ),
@@ -582,12 +587,14 @@ class _ConversationMarkdown extends StatelessWidget {
   const _ConversationMarkdown({
     required this.data,
     this.onReferenceSelection,
+    this.fitContent = false,
     this.inlineSyntaxes = const [],
     this.builders = const {},
     super.key,
   });
 
   final String data;
+  final bool fitContent;
   final ValueChanged<String>? onReferenceSelection;
   final List<md.InlineSyntax> inlineSyntaxes;
   final Map<String, MarkdownElementBuilder> builders;
@@ -597,7 +604,7 @@ class _ConversationMarkdown extends StatelessWidget {
     final markdown = MarkdownBody(
       data: data,
       selectable: false,
-      fitContent: false,
+      fitContent: fitContent,
       styleSheet: _messageMarkdownStyle(context),
       inlineSyntaxes: inlineSyntaxes,
       builders: {'pre': _MessageCodeBlockBuilder(), ...builders},
