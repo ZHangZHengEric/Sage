@@ -133,6 +133,9 @@ services:
     image: docker.m.daocloud.io/jaegertracing/jaeger:2.16.0
     container_name: sage-jaeger
     restart: always
+    environment:
+      # Leave room for mapped binary pages and non-Go allocations.
+      GOMEMLIMIT: 768MiB
     command:
       - --config
       - /etc/jaeger/config.yaml
