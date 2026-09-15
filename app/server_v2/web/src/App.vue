@@ -30,6 +30,7 @@ async function logout() {
       <nav aria-label="主导航">
         <router-link to="/">对话</router-link>
         <router-link to="/agents">智能体</router-link>
+        <router-link to="/studio">Studio</router-link>
         <router-link to="/models">模型</router-link>
         <router-link to="/mcp">MCP</router-link>
         <router-link to="/skills">技能</router-link>

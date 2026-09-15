@@ -22,6 +22,19 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  packageSchema: () => request('/api/agent-packages/schema'),
+  packageTemplate: (agentId = '') => request(`/api/agent-packages/template${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
+  packages: (offset = 0) => request(`/api/agent-packages?limit=50&offset=${offset}`),
+  package: (ref) => request(`/api/agent-packages/${encodeURIComponent(ref)}`),
+  savePackage: (bundle) => request('/api/agent-packages', { method: 'POST', body: JSON.stringify(bundle) }),
+  validatePackage: (bundle) => request('/api/agent-packages/validate', { method: 'POST', body: JSON.stringify({ bundle, readiness: true }) }),
+  activatePackage: (ref, expected_ref) => request(`/api/agent-packages/${encodeURIComponent(ref)}/activate`, { method: 'POST', body: JSON.stringify({ expected_ref }) }),
+  forkPackage: (ref, package_id, version) => request(`/api/agent-packages/${encodeURIComponent(ref)}/fork`, { method: 'POST', body: JSON.stringify({ package_id, version }) }),
+  packageRuns: (offset = 0) => request(`/api/agent-packages/runs?limit=50&offset=${offset}`),
+  runPackage: (body) => request('/api/agent-packages/runs', { method: 'POST', body: JSON.stringify(body) }),
+  packageEvents: (operation, cursor = 0) => request(`/api/agent-packages/runs/${encodeURIComponent(operation)}/events?after_sequence=${cursor}`),
+  packageRun: (operation) => request(`/api/agent-packages/runs/${encodeURIComponent(operation)}`),
+  controlPackageRun: (operation, body) => request(`/api/agent-packages/runs/${encodeURIComponent(operation)}/control`, { method: 'POST', body: JSON.stringify(body) }),
   login: (username, password) =>
     request('/api/auth/login', {
       method: 'POST',

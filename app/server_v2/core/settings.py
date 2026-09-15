@@ -67,8 +67,12 @@ class ServerV2Settings:
     max_concurrent_runs_per_user: int = 2
     max_pending_runs: int = 1024
     max_model_clients: int = 64
+    max_managed_applications: int = 32
+    max_managed_builds: int = 4
 
     def __post_init__(self) -> None:
+        if min(self.max_managed_applications, self.max_managed_builds) < 1:
+            raise ValueError("managed application and build limits must be positive")
         if self.max_model_clients < 1:
             raise ValueError("max_model_clients must be positive")
         if (
@@ -124,6 +128,8 @@ class ServerV2Settings:
             ),
             max_pending_runs=int(_env("SAGE_SERVER_MAX_PENDING_RUNS", "1024")),
             max_model_clients=int(_env("SAGE_SERVER_MAX_MODEL_CLIENTS", "64")),
+            max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
+            max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             mysql_url=mysql_url,
             redis_url=redis_url,
             jaeger_url=_optional_env("SAGE_SERVER_JAEGER_URL"),

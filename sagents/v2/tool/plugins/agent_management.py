@@ -32,6 +32,15 @@ class AgentManagementTools:
     async def agent_package_schema(self) -> dict[str, Any]:
         return self.service.schema()
 
+    @tool(description="Inspect caller-visible model routes, tools and skills supplied by the host.", plan_safe=True)
+    async def agent_package_resources(self, invocation: ToolInvocation | None = None) -> dict[str, Any]:
+        return await self.service.resources(_context(invocation))
+
+    @tool(description="Read a bounded page of an owned operation's runtime events; use the returned cursor for the next page.", plan_safe=True)
+    async def agent_package_events(self, operation: str, after_sequence: int = 0, limit: int = 100,
+                                   invocation: ToolInvocation | None = None) -> dict[str, Any]:
+        return await self.service.events(operation, _context(invocation), after_sequence=after_sequence, limit=limit)
+
     @tool(
         description="List your persistent agent package versions; use exact refs for execution.",
         plan_safe=True,

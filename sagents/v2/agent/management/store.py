@@ -124,7 +124,7 @@ class AgentPackageStore:
             return [
                 dict(row)
                 for row in db.execute(
-                    "SELECT b.ref, b.package, b.version, (a.ref=b.ref) AS active FROM bundles b "
+                    "SELECT b.ref, b.package, b.version, a.ref AS active_ref, (a.ref=b.ref) AS active FROM bundles b "
                     "LEFT JOIN active a ON a.owner=b.owner AND a.package=b.package "
                     "WHERE b.owner=? ORDER BY b.package, b.version LIMIT ? OFFSET ?",
                     (owner, limit, offset),
@@ -316,3 +316,12 @@ class AgentPackageStore:
             row = db.execute("SELECT root FROM history_locations WHERE owner=? AND ref=? AND agent=?",
                              (owner, ref, agent)).fetchone()
             return row["root"] if row else None
+
+    async def list_invocations(self, owner, *, limit=50, offset=0):
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError('invalid invocation pagination')
+        def read():
+            with self._connect() as db:
+                rows = db.execute('SELECT operation, ref, agent, handle FROM invocations WHERE owner=? ORDER BY rowid DESC LIMIT ? OFFSET ?', (owner, limit, offset)).fetchall()
+            return [{**dict(row), 'handle': json.loads(row['handle']) if row['handle'] else None} for row in rows]
+        return await self.call(read)

@@ -27,6 +27,28 @@ from sagents.v2.contracts.errors import (
 _T = TypeVar("_T")
 
 
+class SchedulerQuotaGroup:
+    """Shared single-loop quotas; member queues remain separately routed."""
+
+    def __init__(self, max_active=8, max_per_tenant=2, max_pending=1024):
+        import weakref
+        if min(max_active, max_per_tenant, max_pending) < 1:
+            raise ValueError("scheduler group limits must be positive")
+        self.max_active, self.max_per_tenant, self.max_pending = max_active, max_per_tenant, max_pending
+        self.condition = asyncio.Condition()
+        self.members = weakref.WeakSet()
+
+    def leases(self):
+        return [lease for member in self.members if not member._closed
+                for lease in member._leases.values()
+                if lease.expires_at > member._clock() or lease.work.run_id in member._fenced_runs]
+
+    def pending(self):
+        return sum(1 for member in self.members if not member._closed
+                   for work_id in member._items
+                   if work_id not in member._work_lease and work_id not in member._cancelled)
+
+
 class InMemoryScheduler:
     """Deterministic single-process scheduler used to prove the async contract.
 
@@ -45,6 +67,7 @@ class InMemoryScheduler:
         self,
         *,
         max_pending_items: int = 1024,
+        quota_group: SchedulerQuotaGroup | None = None,
         max_retained_terminal_items: int = 4096,
         clock: Callable[[], datetime] = utc_now,
         state_store: "SchedulerStateStore | None" = None,
@@ -56,7 +79,10 @@ class InMemoryScheduler:
         self._max_pending = max_pending_items
         self._max_retained_terminal = max_retained_terminal_items
         self._clock = clock
-        self._condition = asyncio.Condition()
+        self._quota_group = quota_group
+        self._condition = quota_group.condition if quota_group is not None else asyncio.Condition()
+        if quota_group is not None:
+            quota_group.members.add(self)
         self._fenced_runs: set[str] = set()
         self._pending: list[tuple[float, int, int, str]] = []
         self._items: dict[str, WorkItem] = {}
@@ -106,7 +132,7 @@ class InMemoryScheduler:
                 for work_id in self._items
                 if work_id not in self._work_lease and work_id not in self._cancelled
             )
-            if active_pending >= self._max_pending:
+            if active_pending >= self._max_pending or (self._quota_group is not None and self._quota_group.pending() >= self._quota_group.max_pending):
                 raise self._error(
                     "scheduler.queue_full",
                     ErrorCategory.RATE_LIMITED,
@@ -436,9 +462,16 @@ class InMemoryScheduler:
     def _pop_available_locked(
         self, policy: SchedulerClaimPolicy | None = None
     ) -> WorkItem | None:
+        if self._quota_group is not None:
+            if len(self._quota_group.leases()) >= self._quota_group.max_active:
+                return None
+            ceiling = self._quota_group.max_per_tenant
+            if policy and policy.max_active_per_tenant:
+                ceiling = min(ceiling, policy.max_active_per_tenant)
+            policy = SchedulerClaimPolicy(max_active_per_tenant=ceiling)
         now_timestamp = self._clock().timestamp()
         active_by_tenant: dict[str | None, int] = {}
-        for lease in self._leases.values():
+        for lease in (self._quota_group.leases() if self._quota_group is not None else self._leases.values()):
             tenant_id = lease.work.tenant_id
             active_by_tenant[tenant_id] = active_by_tenant.get(tenant_id, 0) + 1
         eligible: list[tuple[float, int, int, str]] = []
@@ -479,8 +512,16 @@ class InMemoryScheduler:
     def _seconds_until_next_locked(
         self, policy: SchedulerClaimPolicy | None = None
     ) -> float | None:
+        if self._quota_group is not None:
+            leases = self._quota_group.leases()
+            if len(leases) >= self._quota_group.max_active:
+                return min((max(0.01, (lease.expires_at - self._clock()).total_seconds()) for lease in leases), default=None)
+            ceiling = self._quota_group.max_per_tenant
+            if policy and policy.max_active_per_tenant:
+                ceiling = min(ceiling, policy.max_active_per_tenant)
+            policy = SchedulerClaimPolicy(max_active_per_tenant=ceiling)
         active_by_tenant: dict[str | None, int] = {}
-        for lease in self._leases.values():
+        for lease in (self._quota_group.leases() if self._quota_group is not None else self._leases.values()):
             tenant_id = lease.work.tenant_id
             active_by_tenant[tenant_id] = active_by_tenant.get(tenant_id, 0) + 1
         candidates = [
@@ -501,7 +542,7 @@ class InMemoryScheduler:
         # even if no new submit/release notification arrives.
         candidates.extend(
             lease.expires_at.timestamp()
-            for lease in self._leases.values()
+            for lease in (self._quota_group.leases() if self._quota_group is not None else self._leases.values())
             if lease.work.run_id not in self._fenced_runs
         )
         if not candidates:

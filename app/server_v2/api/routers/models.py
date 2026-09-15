@@ -1,3 +1,4 @@
+from app.server_v2.services.catalog_transactions import catalog_transaction
 from fastapi import APIRouter
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
@@ -25,12 +26,14 @@ async def list_models(user: CurrentUser, service: ServiceDep):
 
 
 @router.post("", response_model=ApiResponse[ModelPublic])
+@catalog_transaction
 async def upsert_model(body: ModelBody, user: CurrentUser, service: ServiceDep):
     record = await service.catalog.upsert_model(user.user_id, body.model_dump())
     return success(record.public_dict())
 
 
 @router.delete("/{model_id}", response_model=ApiResponse[None])
+@catalog_transaction
 async def delete_model(model_id: str, user: CurrentUser, service: ServiceDep):
     await service.catalog.delete_model(user.user_id, model_id)
     return success()

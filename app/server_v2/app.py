@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -123,7 +123,10 @@ def _mount_spa(app: FastAPI) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
-        candidate = WEB_DIST / full_path
+        root = WEB_DIST.resolve()
+        candidate = (root / full_path).resolve()
+        if not candidate.is_relative_to(root) or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(WEB_DIST / "index.html")
+        return FileResponse(root / "index.html")
