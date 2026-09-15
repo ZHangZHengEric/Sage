@@ -23,7 +23,8 @@ extensions:
     backends:
       in_memory:
         memory:
-          max_traces: 100000
+          # Bound diagnostic retention to avoid filling the 1 GiB container.
+          max_traces: 1000
 
 receivers:
   otlp:
