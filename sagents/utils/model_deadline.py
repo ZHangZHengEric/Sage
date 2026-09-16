@@ -13,6 +13,17 @@ def first_chunk_timeout_seconds():
     return 30.0
 
 
+def preflight_timeout_seconds():
+    """One wall-clock budget for optional query generation, including retries."""
+    try:
+        value = float(os.environ.get("SAGE_PREFLIGHT_TIMEOUT_SECONDS", "10"))
+        if 0 < value <= 600:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return 10.0
+
+
 class FirstChunkDeadlineStream:
     def __init__(self, stream, deadline):
         self.stream = stream
@@ -28,15 +39,17 @@ class FirstChunkDeadlineStream:
         return self
 
     async def __anext__(self):
-        if self.received:
-            return await self.iterator.__anext__()
         try:
+            if self.received:
+                return await self.iterator.__anext__()
             async with asyncio.timeout_at(self.deadline):
                 result = await self.iterator.__anext__()
             self.received = True
             return result
         except TimeoutError as exc:
             await self.aclose()
+            if self.received:
+                raise
             raise TimeoutError("Model first-chunk timeout: provider did not start producing data") from exc
         except BaseException:
             await self.aclose()

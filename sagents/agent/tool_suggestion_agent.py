@@ -5,6 +5,7 @@
 将推荐结果存入 session_context.audit_status 中供后续使用。
 """
 
+import asyncio
 import json
 import os
 import traceback
@@ -21,6 +22,7 @@ from sagents.tool.tool_baseline import augment_with_baseline_tools
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
+from sagents.utils.model_deadline import preflight_timeout_seconds
 
 DEFAULT_TOOL_SUGGESTION_DIRECT_THRESHOLD = 15
 TOOL_SUGGESTION_DIRECT_THRESHOLD_ENV = "SAGE_TOOL_SUGGESTION_DIRECT_THRESHOLD"
@@ -430,15 +432,25 @@ class ToolSuggestionAgent(AgentBase):
             retry_count = 0
             suggested_tool_ids = []
 
-            while retry_count < max_retries:
-                suggested_tool_ids = await self._get_tool_suggestions(
-                    llm_request_messages, session_context.session_id
-                )
-                if suggested_tool_ids:
-                    break
-                retry_count += 1
+            budget = preflight_timeout_seconds()
+            try:
+                # Include both provider retries and invalid-result retries.
+                async with asyncio.timeout(budget):
+                    while retry_count < max_retries:
+                        suggested_tool_ids = await self._get_tool_suggestions(
+                            llm_request_messages, session_context.session_id
+                        )
+                        if suggested_tool_ids:
+                            break
+                        retry_count += 1
+                        logger.warning(
+                            f"ToolSuggestionAgent: 第{retry_count}次尝试未获取到建议，继续重试..."
+                        )
+            except TimeoutError:
+                suggested_tool_ids = []
                 logger.warning(
-                    f"ToolSuggestionAgent: 第{retry_count}次尝试未获取到建议，继续重试..."
+                    f"ToolSuggestionAgent: selection exceeded {budget}s budget; "
+                    "fall back to available tools"
                 )
 
             # 如果仍未获取到建议工具，使用全量工具列表
