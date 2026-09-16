@@ -5,6 +5,7 @@
 使用 search_memory 工具搜索 Agent 工作空间中的相关文件。
 """
 
+import asyncio
 import json
 import traceback
 import uuid
@@ -18,6 +19,7 @@ from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
 from sagents.utils.llm_request_utils import redact_base64_data_urls_in_value
 from sagents.utils.prompt_manager import PromptManager
+from sagents.utils.model_deadline import preflight_timeout_seconds
 
 
 MEMORY_RECALL_QUERY_CONTEXT_TURNS = 10
@@ -233,9 +235,19 @@ class MemoryRecallAgent(AgentBase):
             )
 
             # 生成搜索查询
-            search_query = await self._generate_search_query(
-                messages=clean_messages, session_context=session_context
-            )
+            budget = preflight_timeout_seconds()
+            try:
+                async with asyncio.timeout(budget):
+                    search_query = await self._generate_search_query(
+                        messages=clean_messages, session_context=session_context
+                    )
+            except TimeoutError:
+                logger.warning(
+                    f"MemoryRecallAgent: query generation exceeded {budget}s budget; "
+                    "skip automatic recall and continue main execution"
+                )
+                yield []
+                return
 
             if not search_query:
                 logger.warning("MemoryRecallAgent: 未能生成搜索查询")
