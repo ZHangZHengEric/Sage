@@ -7,10 +7,10 @@ from sagents.v2._concurrency import auxiliary_capacity
 import json
 from typing import Any
 
-from sagents.v2.context.summary import SummarizationRequest
+from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
 from sagents.v2.model.provider import (
     DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
@@ -209,19 +209,7 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
 
     @staticmethod
     def _message_text(message: ModelMessage) -> str:
-        values = []
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                values.append(block.text)
-            elif isinstance(block, JsonBlock):
-                values.append(
-                    json.dumps(block.value, ensure_ascii=False, sort_keys=True)
-                )
-            else:
-                values.append(
-                    json.dumps(block.model_dump(mode="json"), ensure_ascii=False)
-                )
-        return "\n".join(values)
+        return "\n".join(summary_safe_block_text(block) for block in message.content)
 
     @staticmethod
     def _estimate_source_tokens(value: str) -> int:

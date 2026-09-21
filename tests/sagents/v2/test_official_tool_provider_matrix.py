@@ -9,6 +9,7 @@ from pathlib import Path
 import asyncio
 import errno
 import hashlib
+import json
 
 import pytest
 
@@ -38,7 +39,9 @@ from sagents.v2.tool import (
     tool,
 )
 from sagents.v2.tool.localization import localize_tool_definition
+from sagents.v2.tool.decorated import ToolInvocation
 from sagents.v2.tool.official import OfficialToolRuntime
+from sagents.v2.tool.official.media import MediaTools
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     official_tool_categories,
@@ -323,6 +326,119 @@ async def test_turn_status_publishes_one_shot_continuation_signals(tmp_path: Pat
     assert first.explicit_status == "need_user_input"
     assert first.explicit_status_note == "Choose a deployment target."
     assert second.explicit_status is None
+
+
+class _ImageRuntime:
+    image_context_publisher = None
+
+    async def read_bytes(self, path: str, invocation: ToolInvocation) -> bytes:
+        return Path(path).read_bytes()
+
+
+async def _analyze_image(image_path: str, prompt: str | None = None):
+    return await MediaTools(_ImageRuntime()).analyze_image(
+        image_path=image_path,
+        session_id="session_1",
+        prompt=prompt,
+        invocation=ToolInvocation(call("analyze_image", {}), CONTEXT),
+    )
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
+    tmp_path: Path,
+):
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"not-a-real-png")
+    result = await _analyze_image(str(image), "Check the frame.")
+
+    payload = result.content[0].value
+    followup = result.metadata["followup_user_message"]
+    assert payload["status"] == "success"
+    assert payload["data"]["mode"] == "native_multimodal_context"
+    assert payload["data"]["image_path"] == str(image)
+    assert "base64" not in json.dumps(payload)
+    assert followup["content"][0] == {
+        "kind": "text",
+        "text": "Check the frame.",
+    }
+    assert followup["content"][1]["kind"] == "image"
+    assert followup["content"][1]["uri"].startswith("data:image/png;base64,")
+    assert followup["metadata"]["hidden_from_chat"] is True
+
+    from sagents.v2.agent.engine import AgentLoopEngine
+
+    tool_message, user_message = AgentLoopEngine._ledger_messages_for_tool_result(
+        result
+    )
+    assert tool_message.role == "tool"
+    assert "followup_user_message" not in tool_message.metadata
+    assert "base64" not in json.dumps(tool_message.model_dump(mode="json"))
+    assert user_message.role == "user"
+    assert user_message.content[1].uri.startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_keeps_remote_url_without_downloading():
+    remote = "https://example.invalid/frame.png"
+    result = await _analyze_image(remote, "Look at the remote frame.")
+
+    payload = result.content[0].value
+    followup = result.metadata["followup_user_message"]
+    assert payload["data"]["image_format"] == "remote_url"
+    assert payload["data"]["image_path"] == remote
+    assert followup["content"][1]["uri"] == remote
+    assert "base64" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_reports_missing_file_instead_of_raising():
+    missing = "/workspace/videos/promo/qa/frames/frame-01.png"
+    result = await _analyze_image(missing, "Check the opening frame.")
+
+    payload = result.content[0].value
+    assert result.error is None
+    assert "followup_user_message" not in result.metadata
+    assert payload == {
+        "status": "error",
+        "message": f"Image file not found: {missing}",
+        "data": {
+            "image_path": missing,
+            "reason": "not_found",
+        },
+    }
+
+
+def test_analyze_image_followups_are_grouped_after_all_tool_results():
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.contracts.items import JsonBlock
+    from sagents.v2.tool import ToolExecutionResult
+
+    def image_result(call_id: str, uri: str) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            tool_call_id=call_id,
+            operation_id=f"operation_{call_id}",
+            content=(JsonBlock(value={"status": "success"}),),
+            metadata={
+                "followup_user_message": {
+                    "content": [
+                        {"kind": "text", "text": "Inspect the frame."},
+                        {"kind": "image", "uri": uri, "mime_type": "image/png"},
+                    ]
+                }
+            },
+        )
+
+    messages = AgentLoopEngine._ledger_messages_for_tool_batch(
+        (
+            image_result("call_1", "data:image/png;base64,aaa"),
+            image_result("call_2", "https://example.invalid/b.png"),
+        )
+    )
+    assert [message.role for message in messages] == ["tool", "tool", "user", "user"]
+    assert "base64" not in json.dumps(messages[0].model_dump(mode="json"))
+    assert messages[2].content[1].uri == "data:image/png;base64,aaa"
+    assert messages[3].content[1].uri == "https://example.invalid/b.png"
 
 
 @pytest.mark.asyncio

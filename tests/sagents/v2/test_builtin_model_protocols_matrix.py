@@ -331,6 +331,55 @@ async def test_openai_responses_maps_items_tools_and_stream_events():
     }
 
 
+def test_openai_responses_preserves_image_blocks_in_tool_output():
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=object(),
+    )
+    image_uri = "data:image/png;base64,AA=="
+    outgoing = provider.diagnostic_request(
+        request(
+            messages=(
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_image",
+                            name="analyze_image",
+                            arguments={"image_path": "/workspace/cat.png"},
+                        ),
+                    ),
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_image",
+                    content=(
+                        TextBlock(text="Inspect this image."),
+                        ImageBlock(
+                            uri=image_uri,
+                            mime_type="image/png",
+                            alt="/workspace/cat.png",
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+
+    assert outgoing["input"][1] == {
+        "type": "function_call_output",
+        "call_id": "call_image",
+        "output": [
+            {"type": "input_text", "text": "Inspect this image."},
+            {
+                "type": "input_image",
+                "image_url": image_uri,
+                "detail": "auto",
+            },
+        ],
+    }
+
+
 @pytest.mark.asyncio
 async def test_openai_responses_retries_rejected_reasoning_control_once():
     error = RuntimeError("reasoning is unsupported by this deployment")
