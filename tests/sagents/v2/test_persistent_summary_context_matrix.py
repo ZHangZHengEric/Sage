@@ -8,6 +8,7 @@ import pytest
 from sagents.v2.context import (
     ContextBudget,
     ContextReductionScope,
+    ExtractiveConversationSummarizer,
     InMemoryConversationSummaryStore,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
@@ -25,7 +26,7 @@ from sagents.v2.model import (
     ScriptedModelStep,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock, UsageSummary
+from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock, UsageSummary
 
 
 class RecordingSummarizer:
@@ -371,6 +372,87 @@ async def test_model_summarizer_retries_and_returns_the_structured_contract():
         "attempt": 2,
         "response_language": "en",
     }
+
+
+@pytest.mark.asyncio
+async def test_model_summarizer_does_not_copy_media_payloads_into_source_text():
+    payload = {
+        "summary": "An image was inspected.",
+        "decisions": [],
+        "open_tasks": [],
+        "files_touched": [],
+        "commands_run": [],
+        "important_errors": [],
+        "user_requirements": [],
+    }
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),)
+    )
+    summarizer = ModelConversationSummarizer(model)
+    base64_payload = "A" * 20_000
+    data_url = f"data:image/png;base64,{base64_payload}"
+
+    await summarizer.summarize(
+        SummarizationRequest(
+            scope=scope(),
+            messages=(
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_image",
+                    content=(
+                        TextBlock(text=f"prefix {data_url} suffix"),
+                        JsonBlock(value={"nested": {"image": data_url}}),
+                        ImageBlock(
+                            uri=data_url,
+                            mime_type="image/png",
+                            alt="/workspace/cat.png",
+                        ),
+                    ),
+                ),
+            ),
+            target_tokens=512,
+        )
+    )
+
+    source = model.requests[0].messages[1].content[0].text
+    assert base64_payload not in source
+    assert data_url not in source
+    assert source.count("<redacted data URL; mime=image/png; base64_len=20000>") == 2
+    assert "[image attached: mime=image/png, alt=/workspace/cat.png]" in source
+
+
+@pytest.mark.asyncio
+async def test_extractive_summarizers_replace_images_with_safe_placeholders():
+    data_url = "data:image/jpeg;base64," + ("B" * 20_000)
+    request = SummarizationRequest(
+        scope=scope(),
+        messages=(
+            ModelMessage(
+                role="tool",
+                tool_call_id="call_image",
+                content=(
+                    ImageBlock(
+                        uri=data_url,
+                        mime_type="image/jpeg",
+                        alt="photo.jpg",
+                    ),
+                ),
+            ),
+        ),
+        target_tokens=512,
+    )
+    summarizers = (
+        ExtractiveConversationSummarizer(),
+        PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore()
+        ).summarizer,
+    )
+
+    for summarizer in summarizers:
+        summary = await summarizer.summarize(request)
+        assert "B" * 100 not in summary
+        assert "base64" not in summary
+        assert "[image attached: mime=image/jpeg, alt=photo.jpg]" in summary
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.context.contracts import (
     ContextBudget,
     ContextProjection,
@@ -23,6 +23,7 @@ from sagents.v2.context.summary import (
     SummarizationRequest,
     create_summary,
     message_digests_async,
+    summary_safe_block_text,
 )
 from sagents.v2.context.token_estimator import TokenEstimator, MessageTokenCounter
 from sagents.v2.context.estimation import WireSizeTokenEstimator
@@ -55,18 +56,9 @@ class _ExtractiveConversationSummarizer:
         if request.previous_summary:
             lines.extend([labels[0], request.previous_summary.strip(), labels[1]])
         for message in request.messages:
-            values = []
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    values.append(block.text)
-                elif isinstance(block, JsonBlock):
-                    values.append(
-                        json.dumps(block.value, ensure_ascii=False, sort_keys=True)
-                    )
-                else:
-                    values.append(
-                        json.dumps(block.model_dump(mode="json"), ensure_ascii=False)
-                    )
+            values = [
+                summary_safe_block_text(block) for block in message.content
+            ]
             content = "\n".join(values)
             if message.tool_calls:
                 calls = ", ".join(

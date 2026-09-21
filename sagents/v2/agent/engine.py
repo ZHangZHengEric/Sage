@@ -100,6 +100,7 @@ from sagents.v2.contracts.interactions import (
     InteractionType,
 )
 from sagents.v2.contracts.items import (
+    ImageBlock,
     ItemSnapshot,
     ItemStatus,
     JsonBlock,
@@ -424,8 +425,17 @@ class AgentLoopEngine:
                 step_id=step_id,
                 declined=True,
             )
+        run, followups = await self._persist_followup_user_messages(
+            run, (result,), context, state.turn_id, step_id
+        )
         state = state.model_copy(
-            update={"messages": (*state.messages, self._tool_result_message(result))}
+            update={
+                "messages": (
+                    *state.messages,
+                    self._tool_result_message(result),
+                    *followups,
+                )
+            }
         )
         run = await self._commit_running(
             run,
@@ -610,6 +620,9 @@ class AgentLoopEngine:
             )
             if result is None:
                 return run
+            run, followups = await self._persist_followup_user_messages(
+                run, (result,), context, state.turn_id, started.step_id
+            )
             state = state.model_copy(
                 update={
                     "pending_questionnaire_completed": (
@@ -618,6 +631,7 @@ class AgentLoopEngine:
                     "messages": (
                         *state.messages,
                         self._tool_result_message(result),
+                        *followups,
                     ),
                     "expanded_tool_names": (
                         self.tool_selection_policy.expanded_tools(run.run_id)
@@ -863,9 +877,20 @@ class AgentLoopEngine:
                         step_id=state.pending_tool_step_id,
                         declined=True,
                     )
+            run, followups = await self._persist_followup_user_messages(
+                run,
+                (result,),
+                context,
+                state.turn_id,
+                state.pending_tool_step_id,
+            )
             state = state.model_copy(
                 update={
-                    "messages": (*state.messages, self._tool_result_message(result)),
+                    "messages": (
+                        *state.messages,
+                        self._tool_result_message(result),
+                        *followups,
+                    ),
                     "pending_questionnaire_completed": (
                         state.pending_questionnaire_completed
                         or self._validated_questionnaire_result(
@@ -1224,6 +1249,7 @@ class AgentLoopEngine:
                 )
 
             questionnaire_completed = state.pending_questionnaire_completed
+            completed_tool_results: list[ToolExecutionResult] = []
             if response.tool_calls:
                 # Phase 4: proposal and policy decision are committed before any
                 # external ToolExecutor receives the call.
@@ -1268,8 +1294,18 @@ class AgentLoopEngine:
                             # Guidance for an unavailable Tool starts a new
                             # model decision; retrying this batch would request
                             # the same missing Tool forever.
+                            run, followups = (
+                                await self._persist_followup_user_messages(
+                                    run,
+                                    completed_tool_results,
+                                    context,
+                                    state.turn_id,
+                                    step_id,
+                                )
+                            )
                             state = state.model_copy(
                                 update={
+                                    "messages": (*state.messages, *followups),
                                     "pending_response_step_id": None,
                                     "pending_questionnaire_completed": False,
                                 }
@@ -1337,10 +1373,19 @@ class AgentLoopEngine:
                                 )
                             }
                         )
+                        completed_tool_results.append(result)
                         continue
                     if policy.action == ToolPolicyAction.REQUIRE_INTERACTION:
+                        run, followups = await self._persist_followup_user_messages(
+                            run,
+                            completed_tool_results,
+                            context,
+                            state.turn_id,
+                            step_id,
+                        )
                         state = state.model_copy(
                             update={
+                                "messages": (*state.messages, *followups),
                                 "pending_tool_call": tool_call,
                                 "pending_tool_policy": policy,
                                 "pending_tool_phase": "approval",
@@ -1370,6 +1415,18 @@ class AgentLoopEngine:
                                 self.tool_selection_policy.expanded_tools(run.run_id)
                             ),
                         }
+                    )
+                    completed_tool_results.append(result)
+                run, followups = await self._persist_followup_user_messages(
+                    run,
+                    completed_tool_results,
+                    context,
+                    state.turn_id,
+                    step_id,
+                )
+                if followups:
+                    state = state.model_copy(
+                        update={"messages": (*state.messages, *followups)}
                     )
 
             repeated = self._trailing_repeat_count(state.response_fingerprints)
@@ -2303,9 +2360,16 @@ class AgentLoopEngine:
                 expected_states={RunState.SUSPEND_REQUESTED},
             )
             assert state is not None
+            run, followups = await self._persist_followup_user_messages(
+                run, (result,), context, turn_id, step_id
+            )
             paused_state = state.model_copy(
                 update={
-                    "messages": (*state.messages, self._tool_result_message(result)),
+                    "messages": (
+                        *state.messages,
+                        self._tool_result_message(result),
+                        *followups,
+                    ),
                     "pending_tool_call": None,
                     "pending_tool_policy": None,
                     "pending_tool_phase": None,
@@ -2731,7 +2795,11 @@ class AgentLoopEngine:
                 tool_call_id=call.tool_call_id,
                 content=result.content,
                 error=result.error,
-                metadata=result.metadata,
+                metadata={
+                    key: value
+                    for key, value in result.metadata.items()
+                    if key != "followup_user_message"
+                },
             ),
             status=status,
         )
@@ -3369,16 +3437,103 @@ class AgentLoopEngine:
             data=ItemEventData(operation="completed", item=item),
         )
 
+    async def _persist_followup_user_messages(
+        self, run, results, context, turn_id, step_id
+    ):
+        messages = []
+        drafts = []
+        for result in results:
+            for message in self._followup_user_messages(result):
+                messages.append(message)
+                item_id = new_id("item")
+                item = self._item(
+                    item_id,
+                    run.run_id,
+                    turn_id,
+                    step_id,
+                    MessageItemData(
+                        role="user",
+                        content=message.content,
+                        metadata=message.metadata,
+                    ),
+                )
+                drafts.append(
+                    EventDraft(
+                        type="message.completed",
+                        turn_id=turn_id,
+                        step_id=step_id,
+                        item_id=item_id,
+                        data=ItemEventData(operation="completed", item=item),
+                    )
+                )
+        if not drafts:
+            return run, ()
+        run = await self._commit_running(
+            run, context, tuple(drafts), expected_states={run.state}
+        )
+        return run, tuple(messages)
+
+    @classmethod
+    def _ledger_messages_for_tool_result(cls, result):
+        return cls._ledger_messages_for_tool_batch((result,))
+
+    @classmethod
+    def _ledger_messages_for_tool_batch(cls, results):
+        return (
+            *(cls._tool_result_message(result) for result in results),
+            *(
+                message
+                for result in results
+                for message in cls._followup_user_messages(result)
+            ),
+        )
+
     @staticmethod
     def _tool_result_message(result):
         content = result.content
         if not content and result.error is not None:
             content = (TextBlock(text=result.error.message),)
+        metadata = dict(result.metadata)
+        metadata.pop("followup_user_message", None)
         return ModelMessage(
             role="tool",
             tool_call_id=result.tool_call_id,
             content=content,
-            metadata=result.metadata,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _followup_user_messages(result):
+        raw = result.metadata.get("followup_user_message")
+        if not isinstance(raw, dict):
+            return ()
+        blocks = []
+        for block in raw.get("content") or ():
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("kind")
+            if kind == "text":
+                blocks.append(TextBlock(text=str(block.get("text") or "")))
+            elif kind == "image":
+                uri = block.get("uri")
+                if not uri:
+                    continue
+                blocks.append(
+                    ImageBlock(
+                        uri=str(uri),
+                        mime_type=str(block.get("mime_type") or "image/jpeg"),
+                        alt=block.get("alt"),
+                    )
+                )
+        if not blocks:
+            return ()
+        metadata = raw.get("metadata")
+        return (
+            ModelMessage(
+                role="user",
+                content=tuple(blocks),
+                metadata=metadata if isinstance(metadata, dict) else {},
+            ),
         )
 
     @staticmethod
