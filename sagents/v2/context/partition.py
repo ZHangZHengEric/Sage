@@ -1,8 +1,8 @@
-"""Shared region boundaries; tool units and the current user turn are indivisible."""
+"""Shared tool units and default user-turn protection boundaries."""
 
 from __future__ import annotations
 
-from sagents.v2.contracts.conversation import is_user_request
+from sagents.v2.contracts.conversation import is_tool_context, is_user_request
 
 
 def conversation_units(messages):
@@ -19,6 +19,12 @@ def conversation_units(messages):
                     break
                 unit.append(messages[index])
                 index += 1
+            while index < len(messages) and is_tool_context(messages[index]):
+                source = messages[index].metadata.get("source_tool_call_id")
+                if source is not None and source not in expected:
+                    break
+                unit.append(messages[index])
+                index += 1
         units.append(tuple(unit))
     return units
 
@@ -28,10 +34,7 @@ def current_turn_boundary(units):
         (
             index
             for index in range(len(units) - 1, -1, -1)
-            if any(
-                is_user_request(message)
-                for message in units[index]
-            )
+            if any(is_user_request(message) for message in units[index])
         ),
         max(0, len(units) - 1),
     )

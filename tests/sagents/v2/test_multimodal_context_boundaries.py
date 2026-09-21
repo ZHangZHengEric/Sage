@@ -89,3 +89,9 @@ def test_current_memory_recall_survives_image_followup():
     )
     sequence = (messages[0], memory, memory_result, *messages[1:])
     assert DefaultContextAssembler._strip_historical_search_memory(sequence) == sequence
+
+
+def test_tool_followups_belong_to_the_complete_batch():
+    messages = order_tool_context(ledger())
+    units = conversation_units(messages)
+    assert units == [(messages[0],), messages[1:]]
