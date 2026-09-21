@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sagents.v2.context.summary import SummarizationRequest
-from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.model.contracts import ModelMessage
 
 
@@ -55,16 +54,4 @@ class ExtractiveConversationSummarizer:
 
     @staticmethod
     def _content(message: ModelMessage) -> str:
-        values = []
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                values.append(block.text)
-            elif isinstance(block, JsonBlock):
-                values.append(
-                    json.dumps(block.value, ensure_ascii=False, sort_keys=True)
-                )
-            else:
-                values.append(
-                    json.dumps(block.model_dump(mode="json"), ensure_ascii=False)
-                )
-        return "\n".join(values)
+        return "\n".join(summary_safe_block_text(block) for block in message.content)

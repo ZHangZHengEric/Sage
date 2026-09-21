@@ -514,7 +514,7 @@ class OpenAIResponsesModelProvider:
                     {
                         "type": "function_call_output",
                         "call_id": message.tool_call_id,
-                        "output": cls._plain_content(message),
+                        "output": cls._tool_output(message),
                     }
                 )
                 continue
@@ -551,6 +551,16 @@ class OpenAIResponsesModelProvider:
         return items
 
     @classmethod
+    def _tool_output(cls, message: ModelMessage) -> str | list[dict[str, Any]]:
+        """Keep plain Tool text as a string; emit media as structured parts."""
+        blocks = [
+            cls._content_block(block, role=message.role) for block in message.content
+        ]
+        if len(blocks) == 1 and blocks[0].get("type") == "input_text":
+            return str(blocks[0]["text"])
+        return blocks
+
+    @classmethod
     def _message_item(cls, message: ModelMessage) -> dict[str, Any]:
         role = "developer" if message.role == "developer" else message.role
         return {
@@ -581,18 +591,6 @@ class OpenAIResponsesModelProvider:
         if isinstance(block, AudioBlock):
             return {"type": "input_audio", "audio_url": block.uri}
         raise TypeError(f"unsupported content block {type(block)!r}")
-
-    @classmethod
-    def _plain_content(cls, message: ModelMessage) -> str:
-        values = []
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                values.append(block.text)
-            elif isinstance(block, JsonBlock):
-                values.append(compact_json(block.value))
-            else:
-                values.append(str(cls._content_block(block, role="user")))
-        return "\n".join(values)
 
     @staticmethod
     def _tool_definition(tool) -> dict[str, Any]:
