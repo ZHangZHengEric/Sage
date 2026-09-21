@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import Field
 
@@ -14,7 +15,72 @@ from sagents.v2.contracts.common import StrictModel, new_id, utc_now
 from sagents.v2.context.contracts import ContextReductionScope
 from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model.contracts import ModelMessage
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import (
+    AudioBlock,
+    FileBlock,
+    ImageBlock,
+    JsonBlock,
+    ResourceRefBlock,
+    TextBlock,
+)
+
+
+_DATA_URL_PATTERN = re.compile(
+    r"data:([^;,\s]+);base64,([A-Za-z0-9+/=_-]+)",
+    re.IGNORECASE,
+)
+
+
+def _redact_data_urls(value: str) -> str:
+    def replacement(match: re.Match[str]) -> str:
+        return (
+            f"<redacted data URL; mime={match.group(1)}; "
+            f"base64_len={len(match.group(2))}>"
+        )
+
+    return _DATA_URL_PATTERN.sub(replacement, value)
+
+
+def _summary_safe_json(value: Any) -> Any:
+    if isinstance(value, str):
+        return _redact_data_urls(value)
+    if isinstance(value, dict):
+        return {key: _summary_safe_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_summary_safe_json(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_summary_safe_json(item) for item in value)
+    return value
+
+
+def summary_safe_block_text(block: Any) -> str:
+    """Render a content block for summaries without copying opaque media data."""
+    if isinstance(block, TextBlock):
+        return _redact_data_urls(block.text)
+    if isinstance(block, JsonBlock):
+        return json.dumps(
+            _summary_safe_json(block.value),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    if isinstance(block, ImageBlock):
+        alt = (
+            f", alt={_redact_data_urls(block.alt)[:200]}"
+            if block.alt
+            else ""
+        )
+        return f"[image attached: mime={block.mime_type}{alt}]"
+    if isinstance(block, AudioBlock):
+        return f"[audio attached: mime={block.mime_type}]"
+    if isinstance(block, FileBlock):
+        return (
+            f"[file attached: name={block.name[:200]}, "
+            f"mime={block.mime_type or 'unknown'}]"
+        )
+    if isinstance(block, ResourceRefBlock):
+        name = f", name={block.name[:200]}" if block.name else ""
+        return f"[resource attached: mime={block.mime_type or 'unknown'}{name}]"
+    return f"[{getattr(block, 'kind', 'attachment')} attached]"
 
 
 class ConversationSummary(StrictModel):
