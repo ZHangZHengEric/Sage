@@ -132,3 +132,37 @@ def test_sidecar_rejects_non_loopback_bind_addresses():
         _require_loopback_host("0.0.0.0")
     with pytest.raises(ValueError, match="loopback"):
         _require_loopback_host("192.168.1.10")
+
+
+def test_sidecar_restart_waits_beyond_old_three_second_limit():
+    now = [0.0]
+
+    def factory():
+        if now[0] < 8:
+            raise StoreInUseError(RuntimeErrorInfo(
+                code="session_store.in_use", category=ErrorCategory.CONFLICT,
+                message="previous sidecar draining", safe_to_resume=True,
+            ))
+        return "ready"
+
+    assert _create_after_writer_release(
+        factory, monotonic=lambda: now[0], sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+    ) == "ready"
+    assert 8 <= now[0] < 9
+
+
+def test_sidecar_writer_wait_is_bounded():
+    now = [0.0]
+
+    def factory():
+        raise StoreInUseError(RuntimeErrorInfo(
+            code="session_store.in_use", category=ErrorCategory.CONFLICT,
+            message="still owned", safe_to_resume=True,
+        ))
+
+    with pytest.raises(StoreInUseError):
+        _create_after_writer_release(
+            factory, timeout_seconds=0.3, monotonic=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+    assert now[0] == pytest.approx(0.3)

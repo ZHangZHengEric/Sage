@@ -102,12 +102,12 @@ def _remove_owned_sidecar_registry(path: Path) -> None:
 def _create_after_writer_release(
     factory: Callable[[], _ServiceT],
     *,
-    timeout_seconds: float = 3.0,
+    timeout_seconds: float = 30.0,
     retry_interval_seconds: float = 0.1,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> _ServiceT:
-    """Wait briefly for a previous Desktop sidecar to release its writer lock."""
+    """Allow the previous Desktop sidecar to drain and release its writer lock."""
 
     deadline = monotonic() + timeout_seconds
     while True:
@@ -214,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         port=actual_port,
         log_level="info",
         timeout_keep_alive=65,
+        # Do not let an open SSE stream hold the writer lock indefinitely.
+        timeout_graceful_shutdown=5,
     )
     server = uvicorn.Server(config)
     server_holder["server"] = server

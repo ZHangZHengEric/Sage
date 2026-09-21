@@ -349,7 +349,9 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     tmp_path: Path,
 ):
     image = tmp_path / "frame.png"
-    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"not-a-real-png")
+    from PIL import Image
+
+    Image.new("RGB", (2048, 1024), "red").save(image)
     result = await _analyze_image(str(image), "Check the frame.")
 
     payload = result.content[0].value
@@ -363,8 +365,15 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
         "text": "Check the frame.",
     }
     assert followup["content"][1]["kind"] == "image"
-    assert followup["content"][1]["uri"].startswith("data:image/png;base64,")
+    assert followup["content"][1]["uri"].startswith("data:image/jpeg;base64,")
     assert followup["metadata"]["hidden_from_chat"] is True
+    import base64
+    import io
+
+    encoded = followup["content"][1]["uri"].split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
+        assert normalized.format == "JPEG"
+        assert max(normalized.size) <= 1536
 
     from sagents.v2.agent.engine import AgentLoopEngine
 
@@ -375,7 +384,7 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     assert "followup_user_message" not in tool_message.metadata
     assert "base64" not in json.dumps(tool_message.model_dump(mode="json"))
     assert user_message.role == "user"
-    assert user_message.content[1].uri.startswith("data:image/png;base64,")
+    assert user_message.content[1].uri.startswith("data:image/jpeg;base64,")
 
 
 @pytest.mark.asyncio
@@ -995,3 +1004,25 @@ async def test_line_batch_reconciles_after_worker_restart(
     if expected_state == ReconcileState.UNKNOWN:
         assert not result.error.safe_to_resume
     assert (tmp_path / "notes.txt").read_text() == expected
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_rejects_invalid_image_bytes(tmp_path):
+    image = tmp_path / "broken.png"
+    image.write_bytes(b"not an image")
+    result = await _analyze_image(str(image))
+    assert result.content[0].value["data"]["reason"] == "invalid_image"
+    assert "followup_user_message" not in result.metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolved", [False, True])
+async def test_analyze_image_text_only_model_does_not_read_or_attach(resolved):
+    runtime = _ImageRuntime()
+    runtime.supports_multimodal_input = (lambda agent_id: False) if resolved else False
+    result = await MediaTools(runtime).analyze_image(
+        image_path="/missing.png", session_id="session_1",
+        invocation=ToolInvocation(call("analyze_image", {}), CONTEXT),
+    )
+    assert result.content[0].value["data"]["reason"] == "multimodal_unsupported"
+    assert "followup_user_message" not in result.metadata

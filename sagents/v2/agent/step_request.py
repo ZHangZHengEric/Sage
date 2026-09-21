@@ -9,6 +9,13 @@ from __future__ import annotations
 from sagents.v2.context.token_estimator import estimate_tokens_async
 
 import json
+from collections import OrderedDict
+from sagents.v2.context.calibration import (
+    InputUsageBaseline,
+    fingerprint,
+    input_usage_scope,
+    message_fingerprints,
+)
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -27,6 +34,7 @@ from sagents.v2.i18n import tr
 from sagents.v2.model.contracts import (
     ModelMessage,
     ModelRequest,
+    ModelResponse,
     ModelToolDefinition,
 )
 from sagents.v2.tool.contracts import ToolDefinition
@@ -80,6 +88,7 @@ class DefaultAgentStepRequestBuilder:
         self.tool_selection_policy = tool_selection_policy
         self.token_estimator = token_estimator or JsonHeuristicTokenEstimator()
         self.context_budget = context_budget
+        self._input_baselines: OrderedDict[str, InputUsageBaseline] = OrderedDict()
 
     async def prepare(
         self,
@@ -145,18 +154,39 @@ class DefaultAgentStepRequestBuilder:
             ),
             message_count=len(suffix_messages),
         )
-        prepared_messages = await self.context_assembler.prepare_messages(
-            command,
-            messages,
-            run_id=run_id,
-            reservation=reservation,
+        calibration_scope = fingerprint(
+            {
+                "spec": command.resolved_spec_hash,
+                "config": command.config.model_dump(mode="json"),
+                "tools": [
+                    t.model_dump(mode="json")
+                    for t in sorted(request_tools, key=lambda t: t.name)
+                ],
+                "invocation_mode": command.invocation_mode,
+                "language": language,
+            }
         )
-        prepared_messages = (*prepared_messages, *suffix_messages)
-        estimated_input_tokens = (
-            await estimate_tokens_async(self.token_estimator, prepared_messages)
-            + tool_tokens
-            + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
-        )
+        baseline = self._input_baselines.get(run_id)
+        if baseline is not None and (
+            baseline.scope != calibration_scope
+            or additional_input_reserve_tokens
+            or not getattr(self.token_estimator, "additive", False)
+        ):
+            baseline = None
+        with input_usage_scope(baseline):
+            prepared_messages = await self.context_assembler.prepare_messages(
+                command,
+                messages,
+                run_id=run_id,
+                reservation=reservation,
+            )
+            prepared_messages = (*prepared_messages, *suffix_messages)
+            estimated_input_tokens = (
+                await estimate_tokens_async(self.token_estimator, prepared_messages)
+                + tool_tokens
+                + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
+            )
+        calibrated = baseline is not None and baseline.matches(prepared_messages)
         self._validate_final_budget(
             estimated_input_tokens=estimated_input_tokens,
             message_count=len(prepared_messages),
@@ -173,10 +203,28 @@ class DefaultAgentStepRequestBuilder:
             ),
             tool_choice="auto" if selection.tools else None,
             metadata={
+                "input_calibration_scope": calibration_scope,
                 "turn_id": turn_id,
                 "step_id": step_id,
                 "request_budget": {
                     "estimated_input_tokens": estimated_input_tokens,
+                    "accounting_method": "reported_prefix_plus_estimated_delta"
+                    if calibrated
+                    else "estimated",
+                    "baseline_request_id": baseline.request_id if calibrated else None,
+                    "baseline_input_tokens": baseline.input_tokens
+                    if calibrated
+                    else None,
+                    "estimated_new_message_count": len(prepared_messages)
+                    - len(baseline.messages)
+                    if calibrated
+                    else len(prepared_messages),
+                    "estimated_delta_tokens": estimated_input_tokens
+                    - baseline.input_tokens
+                    - baseline.margin
+                    if calibrated
+                    else None,
+                    "calibration_margin_tokens": baseline.margin if calibrated else 0,
                     "reserved_non_history_tokens": reservation.input_tokens,
                     "tool_schema_tokens": reservation.tool_schema_tokens,
                     "hidden_tool_index_tokens": (reservation.hidden_tool_index_tokens),
@@ -198,6 +246,35 @@ class DefaultAgentStepRequestBuilder:
             },
         )
         return PreparedAgentStep(request=request, tools=selection.tools)
+
+    def observe_response(self, request: ModelRequest, response: ModelResponse) -> None:
+        """Accept only complete, reported usage from this builder's requests."""
+        usage = response.usage
+        scope = request.metadata.get("input_calibration_scope")
+        budget = request.metadata.get("request_budget", {})
+        overhead = (
+            budget.get("tool_schema_tokens", 0) + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
+        )
+        if (
+            not usage.reported
+            or usage.input_tokens <= overhead
+            or not scope
+            or usage.cached_input_tokens > usage.input_tokens
+            or response.provider_metadata.get("compatibility_fallback")
+            or request.tool_choice not in (None, "auto")
+        ):
+            self._input_baselines.pop(request.run_id, None)
+            return
+        self._input_baselines[request.run_id] = InputUsageBaseline(
+            scope=scope,
+            request_id=request.request_id,
+            messages=message_fingerprints(request.messages),
+            input_tokens=usage.input_tokens,
+            non_message_tokens=overhead,
+        )
+        self._input_baselines.move_to_end(request.run_id)
+        while len(self._input_baselines) > 128:
+            self._input_baselines.popitem(last=False)
 
     async def _estimate_tool_tokens(
         self, tools: tuple[ModelToolDefinition, ...]

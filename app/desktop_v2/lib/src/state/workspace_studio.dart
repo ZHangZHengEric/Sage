@@ -95,14 +95,65 @@ extension StudioWorkspace on WorkspaceController {
     selectedStudioMemberId = '';
     studioRecipientId = '';
     studioRecipientIds.clear();
-    _studioPollTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
-      final current = selectedStudio;
-      if (current != null && _hostStudios.contains(current.id)) {
-        unawaited(refreshStudioMessages(current));
-      }
-    });
+    _startStudioPolling();
     _notifyStudioChanged();
     unawaited(refreshSkills());
+  }
+
+  void _startStudioPolling() {
+    _studioPollTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
+      for (final studio in studios) {
+        unawaited(recoverStudio(studio));
+      }
+    });
+  }
+
+  void _acknowledgeStudioRun(Conversation execution) {
+    if (execution.runId.isEmpty) return;
+    for (final studio in studios) {
+      for (final member in studio.members.where(
+        (m) => m.conversationId == execution.id,
+      )) {
+        for (final turn in studio.turns) {
+          turn.startingMemberIds.remove(member.id);
+        }
+      }
+    }
+  }
+
+  Future<void> recoverStudio(Studio studio) async {
+    if (_disposed ||
+        _studioSending.contains(studio.id) ||
+        _studioDispatching.contains(studio.id) ||
+        !_studioRecovering.add(studio.id)) {
+      return;
+    }
+    try {
+      for (final turn in studio.turns) {
+        for (final memberId in [...turn.startingMemberIds]) {
+          final run = await _api.studioRun(studio.id, memberId, turn.id);
+          if (_disposed) return;
+          if (run == null) {
+            continue; // Unknown acceptance: never blindly replay.
+          }
+          final member = studio.members.firstWhere((m) => m.id == memberId);
+          final execution = studioExecution(studio, member)!;
+          execution.runId = run['run_id']!.toString();
+          execution.status = RunStatus.starting;
+          turn.startingMemberIds.remove(memberId);
+          await _saveStudios();
+          _subscribe(execution); // Replay from the last durable local cursor.
+        }
+      }
+      if (studio.turns.any((t) => t.pendingMemberIds.isNotEmpty)) {
+        await _dispatchStudioMembers(studio);
+      }
+      if (_hostStudios.contains(studio.id)) await refreshStudioMessages(studio);
+    } on Object catch (exception) {
+      if (!_disposed) error = exception.toString();
+    } finally {
+      _studioRecovering.remove(studio.id);
+    }
   }
 
   void selectStudioMember(String id, {bool mention = false}) {
@@ -196,7 +247,16 @@ extension StudioWorkspace on WorkspaceController {
         .skip(start + 1)
         .takeWhile((m) => m.role != 'user')
         .where(
-          (m) => m.role == 'assistant' && !m.processOnly && m.text.isNotEmpty,
+          (m) =>
+              m.role == 'assistant' &&
+              !m.processOnly &&
+              m.text.isNotEmpty &&
+              !studio.publicMessages.any(
+                (p) =>
+                    p['turn_id'] == turn.id &&
+                    p['sender'] == (memberId ?? turn.memberId) &&
+                    p['text'].toString().trim() == m.text.trim(),
+              ),
         )
         .toList();
   }
@@ -215,6 +275,7 @@ extension StudioWorkspace on WorkspaceController {
         studio.pinnedTurnIds.add(turnId);
       }
       error = exception.toString();
+      await _saveStudios();
       _notifyStudioChanged();
     }
   }
@@ -232,14 +293,26 @@ extension StudioWorkspace on WorkspaceController {
         studio.updatingCoordinator) {
       return false;
     }
-    final ids = studioRecipientIds.isEmpty
-        ? [studio.coordinatorId]
-        : studioRecipientIds.toSet().toList();
+    final mentioned = {
+      ...studioRecipientIds,
+      ...studioMentionedMemberIds(prompt, studio.members),
+    };
+    final ids = mentioned.isEmpty ? [studio.coordinatorId] : mentioned.toList();
     final members = [
       for (final id in ids) studio.members.firstWhere((m) => m.id == id),
     ];
-    if (members.any((m) => !studioMemberAvailable(m))) return false;
-    final explicitMention = studioRecipientIds.isNotEmpty;
+    if (members.any(
+      (m) =>
+          !studioMemberAvailable(m) ||
+          studio.turns.any(
+            (t) =>
+                t.pendingMemberIds.contains(m.id) ||
+                t.startingMemberIds.contains(m.id),
+          ),
+    )) {
+      return false;
+    }
+    final explicitMention = mentioned.isNotEmpty;
     final turnSkills = preferredSkills.toList();
     final approvalMode = studio.draft.approvalMode.wireValue;
     final invocationMode = studio.draft.invocationMode.wireValue;
@@ -306,6 +379,7 @@ extension StudioWorkspace on WorkspaceController {
       error = null;
       try {
         await _saveStudios();
+        await syncStudio(studio);
       } on Object catch (exception) {
         studio.turns.remove(turn);
         for (final member in members) {
@@ -314,6 +388,7 @@ extension StudioWorkspace on WorkspaceController {
             member,
           )!.messages.removeWhere((m) => m.id == anchors[member.id]);
         }
+        await _saveStudios();
         error = exception.toString();
         _notifyStudioChanged();
         return false;
@@ -350,12 +425,16 @@ extension StudioWorkspace on WorkspaceController {
         if (!turn.pendingMemberIds.contains(memberId)) continue;
         final member = studio.members.firstWhere((m) => m.id == memberId);
         final execution = studioExecution(studio, member)!;
-        // Remove before I/O: a lost acknowledgement must never replay an uncertain Run.
-        turn.pendingMemberIds.remove(memberId);
+        // Keep pending until host sync succeeds. Persist uncertainty before starting.
         execution.runId = '';
         execution.turnId = '';
         execution.runSequence = 0;
         execution.status = RunStatus.starting;
+        execution.processPanels.removeWhere(
+          (p) =>
+              p.anchorMessageId == turn.executionMessageIds[member.id] &&
+              p.runId.isEmpty,
+        );
         execution.processPanels.add(
           RuntimeProcessPanel(
             id: _id('process'),
@@ -367,6 +446,15 @@ extension StudioWorkspace on WorkspaceController {
         try {
           await _saveStudios();
           await syncStudio(studio);
+          turn.pendingMemberIds.remove(memberId);
+          turn.startingMemberIds.add(memberId);
+          try {
+            await _saveStudios();
+          } on Object {
+            turn.startingMemberIds.remove(memberId);
+            turn.pendingMemberIds.add(memberId);
+            rethrow;
+          }
           _listen(
             execution,
             _api.startRun({
@@ -394,7 +482,7 @@ extension StudioWorkspace on WorkspaceController {
           );
         } on Object catch (exception) {
           execution.status = RunStatus.failed;
-
+          _finishProcessPanel(execution);
           error = exception.toString();
           await _saveStudios();
           _notifyStudioChanged();
@@ -421,59 +509,68 @@ extension StudioWorkspace on WorkspaceController {
   }
 
   Future<void> syncStudio(Studio studio) async {
-    await _api.syncStudio(studio.id, {
-      'name': studio.name,
-      'members': [
-        for (final m in studio.members)
-          {
-            'id': m.id,
-            'agent_id': m.agentId,
-            'name': m.name,
-            'session_id': studioExecution(studio, m)!.sessionId,
-          },
-      ],
-      'coordinator_id': studio.coordinatorId,
-      'pinned_turn_ids': const <String>[],
-      'messages': [
-        for (final turn in studio.turns) ...[
-          {
-            'id': turn.id,
-            'turn_id': turn.id,
-            'sender': 'user',
-            'text': turn.text,
-            'kind': 'user',
-            if (turn.addressed) 'recipient_member_ids': turn.memberIds,
-            if (turn.content.isNotEmpty)
-              'content': [for (final p in turn.content) p.toJson()],
-          },
-          for (final memberId in turn.memberIds)
-            if (!_studioTurnActive(studio, turn, memberId))
-              for (final reply in studioReplies(
-                studio,
-                turn,
-                memberId: memberId,
-              ))
-                {
-                  'id': 'result:${turn.id}:${reply.id}',
-                  'turn_id': turn.id,
-                  'sender': memberId,
-                  'text': reply.text,
-                  'kind': 'result',
-                },
-        ],
-      ],
-    });
-    _hostStudios.add(studio.id);
-    studio.hostRegistered = true;
-    await _saveStudios();
-    await refreshStudioMessages(studio);
+    final previous = _studioSyncs[studio.id];
+    final operation = () async {
+      if (previous != null) {
+        try {
+          await previous;
+        } on Object {
+          /* Retry with current state. */
+        }
+      }
+      await _syncStudioNow(studio);
+    }();
+    _studioSyncs[studio.id] = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_studioSyncs[studio.id], operation)) {
+        _studioSyncs.remove(studio.id);
+      }
+    }
   }
 
-  bool _studioTurnActive(Studio studio, StudioTurn turn, String memberId) {
-    final member = studio.members.firstWhere((m) => m.id == memberId);
-    return studioMemberBusy(studio, member) &&
-        studio.turns.lastWhere((t) => t.memberIds.contains(member.id)).id ==
-            turn.id;
+  Future<void> _syncStudioNow(Studio studio) async {
+    final unsynced = studio.turns
+        .where((t) => !studio.syncedTurnIds.contains(t.id))
+        .toList();
+    // Bounded incremental batches also migrate old full-history caches safely.
+    for (var offset = 0; offset < max(1, unsynced.length); offset += 250) {
+      final batch = unsynced.skip(offset).take(250).toList();
+      await _api.syncStudio(studio.id, {
+        'name': studio.name,
+        'members': [
+          for (final m in studio.members)
+            {
+              'id': m.id,
+              'agent_id': m.agentId,
+              'name': m.name,
+              'session_id': studioExecution(studio, m)!.sessionId,
+            },
+        ],
+        'coordinator_id': studio.coordinatorId,
+        'pinned_turn_ids': studio.pinnedTurnIds.toList(),
+        'messages': [
+          for (final turn in batch) ...[
+            {
+              'id': turn.id,
+              'turn_id': turn.id,
+              'sender': 'user',
+              'text': turn.text,
+              'kind': 'user',
+              if (turn.addressed) 'recipient_member_ids': turn.memberIds,
+              if (turn.content.isNotEmpty)
+                'content': [for (final p in turn.content) p.toJson()],
+            },
+          ],
+        ],
+      });
+      studio.syncedTurnIds.addAll(batch.map((t) => t.id));
+      _hostStudios.add(studio.id);
+      studio.hostRegistered = true;
+      await _saveStudios();
+    }
+    await refreshStudioMessages(studio);
   }
 
   Future<void> refreshStudioMessages(Studio studio) async {
@@ -487,10 +584,51 @@ extension StudioWorkspace on WorkspaceController {
           afterSequence: studio.messageCursor,
         );
         if (_disposed) return;
+        var runsChanged = false;
+        if (!_studioSending.contains(studio.id) &&
+            !_studioDispatching.contains(studio.id)) {
+          for (final raw in (result['member_runs'] as List? ?? [])) {
+            final member = studio.members
+                .where((m) => m.id == raw['member_id'])
+                .firstOrNull;
+            if (member == null) continue;
+            final execution = studioExecution(studio, member)!;
+            final run = (raw['run'] as Map).cast<String, Object?>();
+            final runId = run['run_id'].toString();
+            if (runId == execution.runId) continue;
+            final anchorId = 'studio-delivery:$runId';
+            if (!execution.messages.any((m) => m.id == anchorId)) {
+              execution.messages.add(
+                ChatMessage(
+                  id: anchorId,
+                  role: 'user',
+                  text: raw['input_text'].toString(),
+                ),
+              );
+              execution.processPanels.add(
+                RuntimeProcessPanel(
+                  id: anchorId,
+                  anchorMessageId: anchorId,
+                  runId: runId,
+                  startedAt:
+                      DateTime.tryParse(run['created_at'].toString()) ??
+                      DateTime.now(),
+                ),
+              );
+            }
+            await _streams.remove(execution.id)?.cancel();
+            execution.runId = runId;
+            execution.runSequence = 0;
+            execution.status = RunStatus.starting;
+            execution.pendingInteraction = null;
+            _subscribe(execution);
+            runsChanged = true;
+          }
+        }
         final messages = (result['messages'] as List? ?? []).cast<Map>();
         for (final raw in messages) {
           final message = raw.cast<String, Object?>();
-          if (message['kind'] == 'note' &&
+          if ((message['kind'] == 'note' || message['kind'] == 'result') &&
               !studio.publicMessages.any((m) => m['id'] == message['id'])) {
             studio.publicMessages.add(message);
           }
@@ -498,7 +636,7 @@ extension StudioWorkspace on WorkspaceController {
           if (sequence > studio.messageCursor) studio.messageCursor = sequence;
         }
         more = result['has_more'] == true && messages.isNotEmpty;
-        if (messages.isNotEmpty) {
+        if (messages.isNotEmpty || runsChanged) {
           _notifyStudioChanged();
           await _saveStudios();
         }
@@ -587,16 +725,6 @@ extension StudioWorkspace on WorkspaceController {
           for (final c in entry['executions'] as List)
             Conversation.fromJson((c as Map).cast<String, Object?>()),
         ];
-        for (final turn in studio.turns) {
-          for (final id in turn.pendingMemberIds) {
-            final member = studio.members.where((m) => m.id == id).firstOrNull;
-            final execution = values
-                .where((c) => c.id == member?.conversationId)
-                .firstOrNull;
-            if (execution != null) execution.status = RunStatus.failed;
-          }
-          turn.pendingMemberIds.clear();
-        }
         if (!studio.members.any((m) => m.id == studio.coordinatorId) ||
             studio.members.any(
               (m) => !values.any(
@@ -608,7 +736,17 @@ extension StudioWorkspace on WorkspaceController {
         // A start without a recorded Run handle cannot safely be replayed.
         for (final c in values) {
           if (c.status == RunStatus.starting && c.runId.isEmpty) {
-            c.status = RunStatus.failed;
+            final member = studio.members.firstWhere(
+              (m) => m.conversationId == c.id,
+            );
+            final turn = studio.turns
+                .where((t) => t.memberIds.contains(member.id))
+                .lastOrNull;
+            if (turn != null &&
+                !turn.pendingMemberIds.contains(member.id) &&
+                !turn.startingMemberIds.contains(member.id)) {
+              turn.startingMemberIds.add(member.id);
+            }
           }
         }
         restored.add(studio);

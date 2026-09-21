@@ -41,6 +41,10 @@ class SidecarClientLeases:
         self._closing = False
         self._lock = asyncio.Lock()
 
+    @property
+    def closing(self) -> bool:
+        return self._closing
+
     async def attach(self, client_id: str) -> SidecarLeaseResult:
         self._validate_client_id(client_id)
         async with self._lock:
@@ -66,7 +70,9 @@ class SidecarClientLeases:
     async def request_shutdown_if_idle(self) -> SidecarLeaseResult:
         async with self._lock:
             self._prune_locked(self._monotonic())
-            should_shutdown = self._request_shutdown_if_empty_locked(
+            # A relaunch may repeat the idle-shutdown request while the old
+            # process is already draining. Report that handoff as accepted.
+            should_shutdown = self._closing or self._request_shutdown_if_empty_locked(
                 require_prior_client=False
             )
             return SidecarLeaseResult(

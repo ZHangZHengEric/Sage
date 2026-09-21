@@ -28,6 +28,30 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    let clipboardChannel = FlutterMethodChannel(
+      name: "sage_desktop_v2/image_clipboard",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    clipboardChannel.setMethodCallHandler { call, result in
+      guard call.method == "readImage" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let pasteboard = NSPasteboard.general
+      if let png = pasteboard.data(forType: .png) {
+        result(FlutterStandardTypedData(bytes: png))
+        return
+      }
+      // macOS screenshots and copied images commonly provide TIFF data.
+      guard let image = NSImage(pasteboard: pasteboard),
+            let tiff = image.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiff),
+            let png = bitmap.representation(using: .png, properties: [:]) else {
+        result(nil)
+        return
+      }
+      result(FlutterStandardTypedData(bytes: png))
+    }
 
     super.awakeFromNib()
     DispatchQueue.main.async { [weak self] in

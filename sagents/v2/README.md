@@ -459,3 +459,23 @@ pytest tests/sagents/v2
 When changing a provider or store, also run its domain conformance tests. When
 debugging prompts, inspect the final provider request (`messages`, visible
 tools, and cache markers) rather than only the canonical Session history.
+
+### Input usage calibration
+
+The default step builder uses reported total input usage (including its cached
+subset once) as the next request's baseline within the same Run. When the entire
+previous message prefix, resolved configuration, and tool schemas are unchanged,
+only appended messages are estimated. The budget also reserves 3% of the reported
+baseline, with a minimum of 128 tokens. Each response replaces the baseline, so
+this margin does not accumulate. Output usage is not treated as the next input's
+message length, and no per-message count is labelled provider-measured.
+
+Calibration applies to built-in reducer budgeting as well as final request
+validation. Changed/truncated prefixes, changed images or tools, missing usage,
+compatibility fallbacks, and context-overflow retries fall back to the ordinary
+estimator. Non-additive custom estimators retain their existing behavior. The
+bounded in-memory cache stores fingerprints and counters, not prompt bodies;
+a fresh builder or process restart begins with estimation until usage arrives.
+Request diagnostics record the accounting method, baseline request, reported
+input, estimated delta, and safety margin. Calibration scopes are task-local so
+concurrent Runs cannot borrow each other's usage.

@@ -13,6 +13,7 @@ import '../models.dart';
 import '../studio_models.dart';
 import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
+import '../services/image_clipboard.dart';
 import '../usage_models.dart';
 
 part 'workspace_studio.dart';
@@ -101,6 +102,8 @@ class WorkspaceController extends ChangeNotifier {
   final List<Studio> studios = [];
   Timer? _studioPollTimer;
   final Set<String> _studioRefreshing = {};
+  final Set<String> _studioRecovering = {};
+  final Map<String, Future<void>> _studioSyncs = {};
   final Set<String> _hostStudios = {};
   String selectedStudioId = '';
   String selectedStudioMemberId = '';
@@ -310,6 +313,7 @@ class WorkspaceController extends ChangeNotifier {
       _adoptConversationAgent();
       await Future.wait([refreshSkills(), refreshFiles()]);
       await _reconnectRuns();
+      _startStudioPolling();
       await _hydrateSessionTrees();
     } on Object catch (exception) {
       error = exception.toString();
@@ -688,6 +692,47 @@ class WorkspaceController extends ChangeNotifier {
     final workspaceId = selectedStudio == null ? selectedGroup.workspaceId : '';
     final file = await file_selector.openFile();
     if (file == null || agentId.isEmpty) return;
+    await _uploadComposerFile(
+      file,
+      scopeId: scopeId,
+      agentId: agentId,
+      workspaceId: workspaceId,
+    );
+  }
+
+  Future<bool> pasteClipboardImage() async {
+    final scopeId = composerConversationId;
+    final agentId = composerAgentId;
+    final workspaceId = selectedStudio == null ? selectedGroup.workspaceId : '';
+    if (agentId.isEmpty) return false;
+    try {
+      final bytes = await ImageClipboard.readPng();
+      if (bytes == null || bytes.isEmpty) return false;
+      await _uploadComposerFile(
+        file_selector.XFile.fromData(
+          bytes,
+          mimeType: 'image/png',
+          // Native XFile derives the name from path; bytes remain in memory.
+          path: 'clipboard-${DateTime.now().microsecondsSinceEpoch}.png',
+        ),
+        scopeId: scopeId,
+        agentId: agentId,
+        workspaceId: workspaceId,
+      );
+      return true;
+    } on Object catch (exception) {
+      error = exception.toString();
+      notifyListeners();
+      return true;
+    }
+  }
+
+  Future<void> _uploadComposerFile(
+    file_selector.XFile file, {
+    required String scopeId,
+    required String agentId,
+    required String workspaceId,
+  }) async {
     try {
       final uploaded = await _api.upload(
         agentId: agentId,
@@ -1527,11 +1572,25 @@ class WorkspaceController extends ChangeNotifier {
   ) async {
     final source = selectedConversation;
     final prompt = replacement.trim();
-    if (source == null || prompt.isEmpty) return;
+    if (source == null) return;
     final message = source.messages
         .where((value) => value.id == messageId && value.role == 'user')
         .firstOrNull;
     if (message == null || !canRewriteLastUserMessage(source, message)) return;
+    if (prompt.isEmpty && !message.content.any((part) => part.isReference)) return;
+    final updatedContent = <ChatMessageContent>[];
+    var replacedText = false;
+    for (final part in message.content) {
+      if (part.isReference) {
+        updatedContent.add(part);
+      } else if (part.isText && !replacedText) {
+        if (prompt.isNotEmpty) updatedContent.add(ChatMessageContent.text(prompt));
+        replacedText = true;
+      }
+    }
+    if (!replacedText && prompt.isNotEmpty) {
+      updatedContent.add(ChatMessageContent.text(prompt));
+    }
     final targetIndex = source.processPanels.indexWhere(
       (value) => value.anchorMessageId == messageId,
     );
@@ -1564,7 +1623,7 @@ class WorkspaceController extends ChangeNotifier {
         return;
       }
     }
-    await send(prompt);
+    await send(prompt, content: updatedContent);
   }
 
   Future<bool> branchFromRun(String runId) async {
@@ -1877,22 +1936,39 @@ class WorkspaceController extends ChangeNotifier {
             !structuredContent.any((part) => part.isReference))) {
       return;
     }
-    value.messages.add(
-      ChatMessage(
-        id: _id('steer'),
-        role: 'user',
-        text: prompt,
-        content: structuredContent,
-      ),
-    );
-    notifyListeners();
+    final runId = value.runId;
     try {
       await _api.steer(
-        value.runId,
+        runId,
         value.turnId,
         prompt,
         content: structuredContent,
       );
+      final message = ChatMessage(
+        id: _id('steer'),
+        role: 'user',
+        text: prompt,
+        content: structuredContent,
+      );
+      final now = DateTime.now();
+      // A steer stays in the same Run, but starts a new visible timeline
+      // segment. Keep earlier work in place, including in-flight tool calls.
+      for (final panel in value.processPanels) {
+        if (panel.runId == runId && panel.running) {
+          panel.running = false;
+          panel.completedAt = now;
+        }
+      }
+      value.messages.add(message);
+      value.processPanels.add(RuntimeProcessPanel(
+        id: message.id,
+        anchorMessageId: message.id,
+        startedAt: now,
+        runId: runId,
+        running: value.runId == runId && value.status == RunStatus.running,
+      ));
+      notifyListeners();
+      _persist();
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();
@@ -2150,6 +2226,7 @@ class WorkspaceController extends ChangeNotifier {
       final handle = event['handle'];
       if (handle is Map) {
         conversation.runId = handle['run_id']?.toString() ?? conversation.runId;
+        _acknowledgeStudioRun(conversation);
         if (conversation.pendingPlanExecution != null &&
             conversation.runId !=
                 conversation.pendingPlanExecution!['plan_run_id']) {
@@ -2447,7 +2524,11 @@ class WorkspaceController extends ChangeNotifier {
         type.endsWith('.failed') ||
         type.endsWith('.cancelled') ||
         type.endsWith('.completed');
-    final panel = _activeProcessPanel(conversation);
+    // A tool started before a steer must finish in its original segment.
+    final panel = conversation.processPanels.reversed
+        .where((panel) => panel.runId == conversation.runId &&
+            panel.activities.any((activity) => activity.id == id))
+        .firstOrNull ?? _activeProcessPanel(conversation);
     final existing = panel.activities
         .where((value) => value.id == id)
         .firstOrNull;
@@ -2523,9 +2604,13 @@ class WorkspaceController extends ChangeNotifier {
     }
     panel.running = false;
     panel.completedAt = completedAt ?? DateTime.now();
-    for (final activity in panel.activities.where((value) => value.active)) {
-      activity.active = false;
-      activity.completedAt = DateTime.now();
+    for (final segment in conversation.processPanels.where(
+      (value) => value.runId == panel.runId,
+    )) {
+      for (final activity in segment.activities.where((value) => value.active)) {
+        activity.active = false;
+        activity.completedAt = completedAt ?? DateTime.now();
+      }
     }
   }
 

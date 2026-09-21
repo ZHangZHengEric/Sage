@@ -125,3 +125,23 @@ def test_shutdown_if_idle_refuses_to_interrupt_an_attached_client():
         "shutdown_requested": False,
     }
     assert shutdown_requests == []
+
+
+def test_closing_sidecar_is_not_healthy_for_immediate_relaunch():
+    app = create_app(service=_Service(), auth_token=AUTH_TOKEN, shutdown_requested=lambda: None)
+    with TestClient(app) as client:
+        assert client.get("/health", headers=AUTH_HEADERS).status_code == 200
+        client.put("/api/v2/runtime/clients/desktop-client-one", headers=AUTH_HEADERS)
+        client.delete("/api/v2/runtime/clients/desktop-client-one", headers=AUTH_HEADERS)
+        assert client.get("/health", headers=AUTH_HEADERS).status_code == 503
+        assert client.put("/api/v2/runtime/clients/desktop-client-two", headers=AUTH_HEADERS).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_idle_shutdown_remains_accepted_during_restart_handoff():
+    leases = SidecarClientLeases()
+    await leases.attach("desktop-client-one")
+    assert (await leases.detach("desktop-client-one")).shutdown_requested
+    repeated = await leases.request_shutdown_if_idle()
+    assert repeated.shutdown_requested
+    assert repeated.active_clients == 0

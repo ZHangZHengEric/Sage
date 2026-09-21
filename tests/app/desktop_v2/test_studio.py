@@ -276,6 +276,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
         provider = await service._provider(agent, "owner")
         workspace = await service.workspace_root(None, "sage")
         await service.sync_studio("group", group(), "owner")
+        await service._stop_studio_delivery_worker()
         resolved = CompositionResolver().resolve(
             service._manifest(agent, provider, ("file_read",), ())
         )
@@ -452,6 +453,21 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
         )
         async with execution_lease(service, handle.run_id):
             await loop.execute(handle.run_id, service._context("owner"))
+        # Recover by public turn identity, without starting another Run.
+        found = await service.find_studio_run(
+            "group", "member_sage", "studio_message_first", "owner"
+        )
+        assert found["run_id"] == handle.run_id
+        with pytest.raises(SageV2Error):
+            await service.find_studio_run(
+                "group", "member_sage", "studio_message_first", "outsider"
+            )
+        # Backfill from canonical Run events even with no Desktop client connected.
+        public = await service.read_studio("group", "owner")
+        assert sum(m["text"] == "Finished" for m in public["messages"]) == 1
+        await service.publish_studio_run_result(handle.run_id)
+        public = await service.read_studio("group", "owner")
+        assert sum(m["text"] == "Finished" for m in public["messages"]) == 1
         events = await service.session_store.read_events(handle.run_id)
         assert STUDIO_TOOLS <= {
             e.data.tool_name for e in events if e.type == "tool.call.succeeded"
@@ -483,6 +499,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
     reopened = DesktopV2Service(tmp_path)
     try:
         await reopened.start()
+        await reopened._stop_studio_delivery_worker()
         restored_agent = await reopened._agent("sage", "owner")
         restored_binding = await reopened.studio_run_binding(
             handle.run_id, restored_agent, handle.session_id
@@ -543,3 +560,320 @@ def test_studio_http_sync_and_history_are_authenticated(tmp_path):
             client.get("/api/v2/studios/missing/messages", headers=headers).status_code
             == 403
         )
+
+
+def test_public_messages_share_mentions_and_final_answer_deduplication(tmp_path):
+    from app.desktop_v2.backend.studio import studio_mentions
+
+    members = [
+        {"id": "designer", "name": "设计师"},
+        {"id": "engineer", "name": "工程师"},
+    ]
+    text = "@设计师 看配色，@工程师 查性能，@用户 请确认"
+    mentions = studio_mentions(text, members)
+    assert [m["participant_id"] for m in mentions] == ["designer", "engineer", "user"]
+    assert [text[m["start"] : m["end"]] for m in mentions] == [
+        "@设计师",
+        "@工程师",
+        "@用户",
+    ]
+    assert studio_mentions("email@设计师 @设计师额外", members) == []
+    assert (
+        studio_mentions("@设计师", [*members, {"id": "other", "name": "设计师"}]) == []
+    )
+    store = StudioStore(tmp_path / "studio.db")
+    store.sync("group", "owner", group())
+    binding = {
+        "studio_id": "group",
+        "member_id": "member_sage",
+        "turn_id": "studio_message_first",
+    }
+    message = store.send(
+        "group",
+        "owner",
+        message_id="tool:final",
+        sender="member_sage",
+        turn_id="studio_message_first",
+        text="@用户 已完成",
+        recipients=[],
+        reply_to=None,
+        run_id="run",
+    )
+    assert message["mentions"][0]["participant_id"] == "user"
+    assert message["recipient_member_ids"] == ["user"]
+    store.publish_result(binding, "owner", "run", "final_item", "@用户 已完成")
+    assert len(store.read("group", "owner")["messages"]) == 2
+    assert store.result_published("run")
+
+
+@pytest.mark.asyncio
+async def test_studio_send_database_write_does_not_block_event_loop(tmp_path):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from app.desktop_v2.backend.studio import StudioTools
+
+    store = StudioStore(tmp_path / "studio.db")
+    store.sync("group", "owner", group())
+    binding = {
+        "studio_id": "group",
+        "member_id": "member_sage",
+        "turn_id": "studio_message_first",
+    }
+
+    async def command_reader(_):
+        return SimpleNamespace(
+            agent_id="sage",
+            session_id="session_studio",
+            config=SimpleNamespace(
+                metadata={"studio": binding}, enabled_tools=["studio_send_message"]
+            ),
+        )
+
+    tools = StudioTools(
+        store, command_reader, run_id="run", owner="owner", binding=binding
+    )
+    release = threading.Event()
+    entered = threading.Event()
+    original = store.send
+
+    def slow_send(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    store.send = slow_send
+    invocation = SimpleNamespace(
+        call=SimpleNamespace(
+            owner_run_id="run",
+            owner_agent_id="sage",
+            owner_session_id="session_studio",
+            tool_name="studio_send_message",
+            tool_call_id="call",
+        ),
+        request_context=SimpleNamespace(actor=SimpleNamespace(principal_id="owner")),
+    )
+    task = asyncio.create_task(tools.send("public", invocation))
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert entered.is_set()
+        assert not task.done()  # Event loop remains responsive during the write.
+    finally:
+        release.set()
+    assert (await task)["text"] == "public"
+
+
+@pytest.mark.asyncio
+async def test_mentions_queue_wakeups_without_waiting_or_requiring_reply(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+    from app.desktop_v2.backend.studio_delivery import StudioDeliveryMixin
+    from sagents.v2.contracts.run_state import RunState
+
+    store = StudioStore(tmp_path / "studio.db")
+    request = group()
+    request.members.append(
+        StudioMemberInput(
+            id="designer", agent_id="design", name="设计师", session_id="design_session"
+        )
+    )
+    store.sync("group", "owner", request)
+
+    def send(message_id, text, turn_id="studio_message_first"):
+        return store.send(
+            "group",
+            "owner",
+            message_id=message_id,
+            sender="member_sage",
+            turn_id=turn_id,
+            text=text,
+            recipients=[],
+            reply_to=None,
+            run_id="source_run",
+        )
+
+    send("tool:one", "@设计师 看配色，@Sage 查需求，@用户 请确认")
+    send("tool:one", "@设计师 看配色，@Sage 查需求，@用户 请确认")
+    send("tool:public", "我公开补充一下，不需要回复")
+    assert len(store.pending_deliveries()) == 2  # No duplicate and no user Run.
+    release = asyncio.Event()
+
+    class Host(StudioDeliveryMixin):
+        def __init__(self):
+            self.studio_store = store
+            self._studio_delivery_tasks = {}
+            self.started = []
+            self.busy = True
+            self.logger = SimpleNamespace(exception=lambda *a: None)
+            self.session_access = SimpleNamespace(list_session_runs=self.runs)
+
+        def _context(self, owner):
+            return owner
+
+        async def runs(self, session, context):
+            return (
+                [SimpleNamespace(state=RunState.RUNNING)]
+                if session == "design_session" and self.busy
+                else []
+            )
+
+        async def find_studio_run(self, *args):
+            return None
+
+        async def run_events(self, request, owner):
+            self.started.append(request)
+            yield __import__("json").dumps(
+                {
+                    "kind": "stream.opened",
+                    "handle": {"run_id": "run_" + request.studio_member_id},
+                }
+            )
+            await release.wait()
+
+    host = Host()
+    try:
+        await host.dispatch_studio_deliveries()
+        await asyncio.sleep(0.05)
+        assert [r.studio_member_id for r in host.started] == ["member_sage"]
+        assert (
+            host.started[0].messages[0].text
+            == "@设计师 看配色，@Sage 查需求，@用户 请确认"
+        )
+        assert not next(iter(host._studio_delivery_tasks.values())).done()
+        assert len(store.pending_deliveries()) == 1
+        host.busy = False
+        await host.dispatch_studio_deliveries()
+        await asyncio.sleep(0.05)
+        assert {r.studio_member_id for r in host.started} == {"member_sage", "designer"}
+        assert store.pending_deliveries() == []
+        # A mentioned Agent can complete without publishing any public response.
+        binding = {"studio_id": "group", "member_id": "designer", "turn_id": "tool:one"}
+        before = len(store.read("group", "owner")["messages"])
+        store.publish_result(
+            binding, "owner", "run_designer", "internal", "No reply needed"
+        )
+        assert len(store.read("group", "owner")["messages"]) == before
+        # A public response with no @ does not bounce back to its sender.
+        send("tool:reply", "颜色已检查", turn_id="tool:one")
+        assert store.pending_deliveries() == []
+        assert (
+            store.read("group", "owner", message_id="tool:reply")["messages"][0][
+                "turn_id"
+            ]
+            == "studio_message_first"
+        )
+    finally:
+        release.set()
+        await host._stop_studio_delivery_worker()
+
+
+def test_mention_queue_is_durable_and_bounds_cycles(tmp_path):
+    path = tmp_path / "studio.db"
+    store = StudioStore(path)
+    store.sync("group", "owner", group())
+    parent = "studio_message_first"
+    for index in range(8):
+        message_id = f"tool:hop{index}"
+        store.send(
+            "group",
+            "owner",
+            message_id=message_id,
+            sender="member_sage",
+            turn_id=parent,
+            text="@Sage 继续",
+            recipients=[],
+            reply_to=None,
+            run_id=f"run{index}",
+        )
+        parent = message_id
+    with pytest.raises(ValueError, match="8-hop"):
+        store.send(
+            "group",
+            "owner",
+            message_id="tool:overflow",
+            sender="member_sage",
+            turn_id=parent,
+            text="@Sage 继续",
+            recipients=[],
+            reply_to=None,
+            run_id="run8",
+        )
+    restored = StudioStore(path)
+    assert [r["message_id"] for r in restored.pending_deliveries()] == ["tool:hop0"]
+    restored.delivery_started("tool:hop0", "member_sage", "accepted_run")
+    assert [r["message_id"] for r in StudioStore(path).pending_deliveries()] == [
+        "tool:hop1"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mention_delivery_executes_real_v2_run_and_reconciles_lost_receipt(
+    tmp_path, monkeypatch
+):
+    import asyncio
+
+    service = DesktopV2Service(tmp_path)
+    try:
+        await service.list_agents("owner")
+        await service.patch_model_provider(
+            "model_main", ModelProviderPatch(api_keys=["test-key"]), "owner"
+        )
+        await service.patch_agent_settings(
+            "sage", AgentSettingsPatch(available_tools=[]), "owner"
+        )
+        await service.sync_studio("group", group(), "owner")
+        await service._stop_studio_delivery_worker()
+        service._studio_delivery_tasks = {}
+        original = service._build_loop
+        requests = []
+
+        async def build(**kwargs):
+            resolved, loop, resources = await original(**kwargs)
+            loop.continuation_policy = CompositeContinuationPolicy()
+            loop.model = ScriptedModelProvider(
+                (
+                    scripted_step(
+                        text="Internal completion, no reply needed",
+                        assertion=requests.append,
+                    ),
+                )
+            )
+            return resolved, loop, resources
+
+        monkeypatch.setattr(service, "_build_loop", build)
+        service.studio_store.send(
+            "group",
+            "owner",
+            message_id="tool:wake",
+            sender="member_sage",
+            turn_id="studio_message_first",
+            text="@Sage 请处理此消息",
+            recipients=[],
+            reply_to=None,
+            run_id="source",
+        )
+        await service.dispatch_studio_deliveries()
+        await asyncio.wait_for(
+            asyncio.gather(*service._studio_delivery_tasks.values()), timeout=15
+        )
+        found = await service.find_studio_run(
+            "group", "member_sage", "tool:wake", "owner"
+        )
+        assert found["state"] == "completed"
+        assert len(requests) == 1
+        assert "请处理此消息" in str(requests[0].messages)
+        assert "user" in str(requests[0].messages)
+        # Simulate a receipt write lost after the canonical Run already committed.
+        with service.studio_store.connection() as db:
+            db.execute("UPDATE studio_deliveries SET run_id=NULL")
+        await service.dispatch_studio_deliveries()
+        assert service.studio_store.pending_deliveries() == []
+        assert len(requests) == 1
+        public = await service.read_studio("group", "owner")
+        assert len(public["member_runs"]) == 1
+        assert not any("Internal completion" in m["text"] for m in public["messages"])
+    finally:
+        await service.close()

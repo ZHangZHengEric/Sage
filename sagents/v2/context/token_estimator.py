@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from sagents.v2.model.contracts import ModelMessage
+from sagents.v2.context.calibration import scoped_estimator
 
 
 class TokenEstimator(Protocol):
@@ -34,6 +35,7 @@ class CallableTokenEstimator:
 
 async def estimate_tokens_async(estimator, messages):
     """Only built-ins opt into worker execution; custom ports keep their contract."""
+    estimator = scoped_estimator(estimator)
     method = getattr(estimator, "estimate_async", None)
     if method is not None:
         return await method(messages)
@@ -49,6 +51,7 @@ class MessageTokenCounter:
 
     @classmethod
     async def create(cls, estimator, messages):
+        estimator = scoped_estimator(estimator)
         method = getattr(estimator, "estimate_messages_async", None)
         if not getattr(estimator, "additive", False) or method is None:
             return cls(estimator, None)

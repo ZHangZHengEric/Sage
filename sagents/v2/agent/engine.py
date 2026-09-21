@@ -13,6 +13,7 @@ import inspect
 import json
 from collections.abc import Callable
 
+from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.model.contracts import (
@@ -1008,6 +1009,9 @@ class AgentLoopEngine:
         context_overflow_retries = 0
         additional_input_reserve_tokens = 0
         while run.state == RunState.RUNNING:
+            state = state.model_copy(
+                update={"messages": order_tool_context(state.messages)}
+            )
             # Phase 1: observe control-plane state only at a safe boundary. A
             # pause never snapshots the middle of arbitrary Python mutation.
             current = await self.runtime.get_run(run.run_id)
@@ -1205,6 +1209,11 @@ class AgentLoopEngine:
                 if partial_suspension is not None:
                     return partial_suspension
                 assert response is not None
+                observe_response = getattr(
+                    self.step_request_builder, "observe_response", None
+                )
+                if observe_response is not None:
+                    observe_response(request, response)
                 empty_response_retries = 0
                 context_overflow_retries = 0
                 additional_input_reserve_tokens = 0
@@ -1429,6 +1438,9 @@ class AgentLoopEngine:
                         update={"messages": (*state.messages, *followups)}
                     )
 
+            state = state.model_copy(
+                update={"messages": order_tool_context(state.messages)}
+            )
             repeated = self._trailing_repeat_count(state.response_fingerprints)
             signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF

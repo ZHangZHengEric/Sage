@@ -27,6 +27,7 @@ class RuntimeHost {
     RuntimePidKiller killPid = Process.killPid,
     Duration terminationGracePeriod = const Duration(seconds: 10),
     int sidecarReadyAttempts = 20,
+    this.startupTimeout = const Duration(seconds: 45),
     Duration sidecarPollInterval = const Duration(milliseconds: 100),
     this._leaseHeartbeatInterval = const Duration(seconds: 10),
     String? clientId,
@@ -48,6 +49,7 @@ class RuntimeHost {
   final RuntimePidKiller _pidKiller;
   final RuntimePythonVersionReader readPythonVersion;
   final Duration _shutdownGracePeriod;
+  final Duration startupTimeout;
   final int _registryReadyAttempts;
   final Duration _registryPollInterval;
   final Duration _leaseHeartbeatInterval;
@@ -93,12 +95,10 @@ class RuntimeHost {
     final root = _findRepositoryRoot();
     final buildId = _buildIdOverride ?? await _sourceBuildId(root);
     api.expectedBuildId = buildId;
-    if (await api.health()) {
-      await _attachClientLease();
+    if (await api.health() && await _tryAttachClientLease()) {
       return;
     }
     if (await _connectRegisteredSidecar(buildId)) {
-      await _attachClientLease();
       return;
     }
     final executable = _pythonExecutable(root);
@@ -143,52 +143,44 @@ class RuntimeHost {
         .transform(const LineSplitter())
         .asBroadcastStream();
     final readyEndpoint = Completer<(int, String)>();
-    unawaited(
-      stdoutLines
-          .listen(
-            (line) {
-              try {
-                final value = jsonDecode(line);
-                final port = value is Map
-                    ? (value['port'] as num?)?.toInt()
-                    : null;
-                final authToken = value is Map
-                    ? value['auth_token']?.toString()
-                    : null;
-                if (port != null &&
-                    port > 0 &&
-                    authToken != null &&
-                    authToken.isNotEmpty &&
-                    !readyEndpoint.isCompleted) {
-                  readyEndpoint.complete((port, authToken));
-                }
-              } on FormatException {
-                // Existing Sage imports may log before the readiness envelope.
-              }
-            },
-            onError: (Object error, StackTrace stackTrace) {
-              if (!readyEndpoint.isCompleted) {
-                readyEndpoint.completeError(error, stackTrace);
-              }
-            },
-            onDone: () {
-              if (!readyEndpoint.isCompleted) {
-                readyEndpoint.completeError(
-                  const SageApiException(
-                    'Sage Desktop v2 sidecar exited before readiness.',
-                  ),
-                );
-              }
-            },
-          )
-          .asFuture<void>(),
+    stdoutLines.listen(
+      (line) {
+        try {
+          final value = jsonDecode(line);
+          final port = value is Map ? (value['port'] as num?)?.toInt() : null;
+          final authToken = value is Map
+              ? value['auth_token']?.toString()
+              : null;
+          if (port != null &&
+              port > 0 &&
+              authToken != null &&
+              authToken.isNotEmpty &&
+              !readyEndpoint.isCompleted) {
+            readyEndpoint.complete((port, authToken));
+          }
+        } on FormatException {
+          // Existing Sage imports may log before the readiness envelope.
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!readyEndpoint.isCompleted) {
+          readyEndpoint.completeError(error, stackTrace);
+        }
+      },
+      onDone: () {
+        if (!readyEndpoint.isCompleted) {
+          readyEndpoint.completeError(
+            const SageApiException(
+              'Sage Desktop v2 sidecar exited before readiness.',
+            ),
+          );
+        }
+      },
     );
     late final (int, String) endpoint;
     try {
-      endpoint = await readyEndpoint.future.timeout(
-        const Duration(seconds: 10),
-      );
-    } on Object {
+      endpoint = await readyEndpoint.future.timeout(startupTimeout);
+    } on Object catch (error) {
       await process.exitCode.timeout(
         const Duration(seconds: 1),
         onTimeout: () => -1,
@@ -198,7 +190,9 @@ class RuntimeHost {
         return;
       }
       throw _startupException(
-        'Sage Desktop v2 sidecar exited before readiness.',
+        error is TimeoutException
+            ? 'Sage Desktop v2 sidecar startup timed out while waiting for readiness.'
+            : 'Sage Desktop v2 sidecar exited before readiness.',
       );
     }
     final (port, authToken) = endpoint;
@@ -295,7 +289,7 @@ class RuntimeHost {
       // concurrently launched desktop process must give that matching sidecar
       // a short readiness window instead of deleting valid discovery data.
       for (var attempt = 0; attempt < _registryReadyAttempts; attempt++) {
-        if (await api.health()) {
+        if (await api.health() && await _tryAttachClientLease()) {
           final pid = value['pid'];
           _sidecarPid = pid is num && pid.toInt() > 0 ? pid.toInt() : null;
           _ownsSidecar = false;
@@ -400,6 +394,17 @@ class RuntimeHost {
   SageApiException _startupException(String summary) {
     final details = _sidecarStderr.toString().trim();
     return SageApiException(details.isEmpty ? summary : '$summary\n$details');
+  }
+
+  Future<bool> _tryAttachClientLease() async {
+    try {
+      await _attachClientLease();
+      return true;
+    } on SageApiException catch (error) {
+      // Health can win a race with the previous window's final detach.
+      if (error.toString().contains('sidecar is shutting down')) return false;
+      rethrow;
+    }
   }
 
   Future<void> _attachClientLease() async {

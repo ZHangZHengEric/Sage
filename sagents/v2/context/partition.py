@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.contracts.conversation import is_user_request
+
 
 def conversation_units(messages):
     units = []
@@ -27,8 +29,7 @@ def current_turn_boundary(units):
             index
             for index in range(len(units) - 1, -1, -1)
             if any(
-                message.role == "user"
-                and not message.metadata.get("runtime_continuation_guidance", False)
+                is_user_request(message)
                 for message in units[index]
             )
         ),

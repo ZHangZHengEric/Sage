@@ -7,6 +7,7 @@ import json
 import re
 from typing import Protocol
 
+from sagents.v2.contracts.conversation import is_user_request, order_tool_context
 from sagents.v2.context.contracts import (
     ContextBudget,
     ContextPlacement,
@@ -372,7 +373,7 @@ class DefaultContextAssembler:
             (
                 value
                 for value in range(len(messages) - 1, -1, -1)
-                if messages[value].role == "user"
+                if is_user_request(messages[value])
             ),
             None,
         )
@@ -537,6 +538,7 @@ class DefaultContextAssembler:
         messages: tuple[ModelMessage, ...],
     ) -> tuple[ModelMessage, ...]:
         """Drop only malformed provider pairs; never rewrite ordinary user history."""
+        messages = order_tool_context(messages)
         output = []
         index = 0
         while index < len(messages):
@@ -571,9 +573,7 @@ class DefaultContextAssembler:
             (
                 index
                 for index in range(len(messages) - 1, -1, -1)
-                if messages[index].role == "user"
-                and messages[index].metadata.get("runtime_continuation_guidance")
-                is not True
+                if is_user_request(messages[index])
             ),
             None,
         )

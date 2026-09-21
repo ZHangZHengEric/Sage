@@ -310,6 +310,8 @@ def create_app(
 
     @app.get("/health")
     async def health():
+        if client_leases.closing:
+            raise HTTPException(status_code=503, detail="Desktop sidecar is shutting down")
         return _success(
             {
                 "status": "ok",
@@ -373,6 +375,12 @@ def create_app(
                 )
             )
         )
+
+    @app.get("/api/v2/studios/{studio_id}/members/{member_id}/turns/{turn_id}/run")
+    async def studio_run(studio_id: str, member_id: str, turn_id: str, request: Request):
+        return _success(await _safe(runtime_service.find_studio_run(
+            studio_id, member_id, turn_id, get_desktop_user_id(request),
+        )))
 
     @app.get("/api/v2/studios/{studio_id}/messages")
     async def studio_messages(
