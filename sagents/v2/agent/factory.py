@@ -96,6 +96,23 @@ class AgentCompositionFactory:
                     message=f"skills exceed agent policy ceiling: {outside_ceiling}",
                 )
             )
+        async def inherited_skills(run_id: str) -> tuple[str, ...]:
+            from sagents.v2.context.session_history import SessionHistoryLedgerBuilder
+
+            command = await self.runtime.session_store.get_start_command(run_id)
+            messages = await SessionHistoryLedgerBuilder(
+                self.runtime.session_store
+            ).build(command, run_id=run_id)
+            names: list[str] = []
+            for message in reversed(messages):
+                for call in reversed(message.tool_calls):
+                    if call.name != "load_skill":
+                        continue
+                    name = call.arguments.get("skill_name")
+                    if isinstance(name, str) and name and name not in names:
+                        names.append(name)
+            return tuple(names)
+
         return SkillLoader(
             catalog=InvocationGrantSkillCatalog(
                 FilteredSkillCatalog(catalog, selected),
@@ -105,6 +122,7 @@ class AgentCompositionFactory:
             workspace=workspace,
             activations=activations,
             workspace_root=workspace_root,
+            inherited_skills=inherited_skills,
         )
 
     def create_engine(

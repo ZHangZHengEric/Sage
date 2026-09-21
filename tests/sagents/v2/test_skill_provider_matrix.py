@@ -387,3 +387,49 @@ async def test_skill_metadata_reads_are_cached_and_run_off_the_event_loop(
         await provider.get_skill("alpha", run_id="run_3")
     ).description == "Changed description"
     assert len(threads) == 2
+
+
+@pytest.mark.asyncio
+async def test_session_skill_history_loads_recent_unique_skills_within_window():
+    provider, workspace, activations, loader = loader_for(
+        bundle("old", "# Old"), bundle("recent", "# Recent"), bundle("new", "# New")
+    )
+
+    async def history(run_id):
+        assert run_id == "next_run"
+        return ("new", "recent", "new", "old")
+
+    loader.inherited_skills = history
+    loader.token_estimator = lambda text: 10
+    loader.max_active_tokens = 20
+    loaded = await loader.loaded(run_id="next_run")
+    assert [v.descriptor.name for v in loaded] == ["recent", "new"]
+    assert [entry[1] for entry in workspace.materializations] == ["new", "recent"]
+    assert await loader.loaded(run_id="next_run") == loaded
+    await loader.load("recent", run_id="next_run")
+    await loader.load("old", run_id="next_run")
+    assert [v.descriptor.name for v in await loader.loaded(run_id="next_run")] == [
+        "recent",
+        "old",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_inherited_skills_obey_current_grant_and_materialize_for_new_run():
+    provider, workspace, activations, loader = loader_for(
+        bundle("alpha", "# Alpha"), bundle("beta", "# Beta")
+    )
+    await loader.load("alpha", run_id="previous")
+
+    async def history(run_id):
+        return ("beta", "alpha")
+
+    loader.inherited_skills = history
+    loader.catalog = FilteredSkillCatalog(provider, ("alpha",))
+    loaded = await loader.loaded(run_id="next")
+    assert [v.descriptor.name for v in loaded] == ["alpha"]
+    assert loaded[0].run_id == "next"
+    assert ("next", "alpha") in provider.fetches
+    assert not any(name == "beta" for _, name in provider.fetches)
+    loader.catalog = FilteredSkillCatalog(provider, ())
+    assert await loader.loaded(run_id="next") == ()

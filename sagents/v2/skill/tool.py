@@ -31,7 +31,8 @@ class SkillLoadTool:
     @tool(
         name="load_skill",
         description=(
-            "Load one enabled skill into this Run. Use the exact skill name "
+            "Load one enabled skill into the active context. Recent session skills are "
+            "restored within the skill context budget. Use the exact skill name "
             "listed in the available-skills context."
         ),
         input_schema={

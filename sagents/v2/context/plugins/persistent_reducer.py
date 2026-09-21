@@ -9,7 +9,8 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
+from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.context.contracts import (
     ContextBudget,
     ContextProjection,
@@ -56,9 +57,7 @@ class _ExtractiveConversationSummarizer:
         if request.previous_summary:
             lines.extend([labels[0], request.previous_summary.strip(), labels[1]])
         for message in request.messages:
-            values = [
-                summary_safe_block_text(block) for block in message.content
-            ]
+            values = [summary_safe_block_text(block) for block in message.content]
             content = "\n".join(values)
             if message.tool_calls:
                 calls = ", ".join(
@@ -208,7 +207,17 @@ class PersistentSummaryContextReducer:
                 session_id=scope.session_id,
             )
         summary_prefix = (self._summary_message(previous),) if previous else ()
-        current = (*systems, *summary_prefix, *remaining)
+        request_index = next(
+            (i for i in range(len(payload) - 1, -1, -1) if is_user_request(payload[i])),
+            None,
+        )
+        covered_count = len(payload) - len(remaining)
+        anchor = (
+            (payload[request_index],)
+            if request_index is not None and request_index < covered_count
+            else ()
+        )
+        current = (*systems, *summary_prefix, *anchor, *remaining)
 
         def over(values):
             return counter.estimate(values) > maximum or (
@@ -235,7 +244,7 @@ class PersistentSummaryContextReducer:
         mandatory_messages = tuple(
             message for unit in units[mandatory:] for message in unit
         )
-        if over((*systems, *summary_prefix, *mandatory_messages)):
+        if over((*systems, *summary_prefix, *anchor, *mandatory_messages)):
             for index in range(mandatory, len(units)):
                 replacement = await self.unit_compactor.compact(units[index])
                 if replacement is not None:
@@ -249,16 +258,31 @@ class PersistentSummaryContextReducer:
             mandatory_messages = tuple(
                 message for unit in units[mandatory:] for message in unit
             )
-            if over((*systems, *mandatory_messages)) or (
-                mandatory == 0
-                and over((*systems, *summary_prefix, *mandatory_messages))
-            ):
+            if over((*systems, *summary_prefix, *anchor, *mandatory_messages)):
+                # A long Run may summarize completed steps, including image
+                # followups. Keep the latest complete batch and exact request.
+                mandatory = max(0, len(units) - 1)
+                anchor = (
+                    (payload[request_index],)
+                    if request_index is not None
+                    and request_index < covered_count + sum(map(len, units[:mandatory]))
+                    else ()
+                )
+                mandatory_messages = tuple(
+                    m for unit in units[mandatory:] for m in unit
+                )
+                if over((*systems, *anchor, *mandatory_messages)):
+                    raise self._error(
+                        "context.budget_exhausted",
+                        "system, user request and latest tool batch exceed the model budget",
+                    )
+        if mandatory == 0:
+            result = (*systems, *summary_prefix, *anchor, *mandatory_messages)
+            if over(result):
                 raise self._error(
                     "context.budget_exhausted",
-                    "system, summary and current user turn exceed the model budget",
+                    "no completed history remains to reduce within the model budget",
                 )
-        if mandatory == 0:
-            result = (*systems, *summary_prefix, *mandatory_messages)
             historical = (*payload[: len(payload) - len(remaining)], *changed)
             return ContextProjection(
                 messages=result,
@@ -279,8 +303,10 @@ class PersistentSummaryContextReducer:
             recent_units=self.protected_recent_units,
             recent_tokens=soft_tokens,
         )
+        if anchor:
+            boundary = mandatory
         placeholder = self._placeholder_message(previous)
-        placeholder_tokens = counter.estimate((placeholder,))
+        placeholder_tokens = counter.estimate((placeholder, *anchor))
         # Linear accounting for additive built-ins; arbitrary custom estimators
         # retain complete-request semantics instead of unsafe token subtraction.
         suffix_tokens = [0] * (len(units) + 1)
@@ -295,6 +321,7 @@ class PersistentSummaryContextReducer:
                     (
                         *systems,
                         placeholder,
+                        *anchor,
                         *(m for unit in units[index:] for m in unit),
                     )
                 )
@@ -302,7 +329,8 @@ class PersistentSummaryContextReducer:
                 index
             ] > maximum or (
                 budget.max_messages is not None
-                and len(systems) + 1 + suffix_counts[index] > budget.max_messages
+                and len(systems) + 1 + len(anchor) + suffix_counts[index]
+                > budget.max_messages
             )
 
         # Summarize the eligible prefix once, leaving a bounded recent suffix.
@@ -314,6 +342,14 @@ class PersistentSummaryContextReducer:
         selected_count = max(1, selected_count)
         selected = tuple(message for unit in units[:selected_count] for message in unit)
         retained = tuple(message for unit in units[selected_count:] for message in unit)
+        # If selection did not reach the request, it remains in the suffix.
+        selected_end = covered_count + len(selected)
+        anchor = (
+            (payload[request_index],)
+            if request_index is not None and request_index < selected_end
+            else ()
+        )
+        retained = (*anchor, *retained)
         available = maximum - counter.estimate((*systems, *retained))
         if available <= 0 or (
             budget.max_messages is not None
@@ -357,6 +393,23 @@ class PersistentSummaryContextReducer:
         self, scope, previous, messages, *, target_tokens=None
     ):
         target = target_tokens or self.summary_target_tokens
+        # Summary prompts describe media rather than sending pixels. Budget the
+        # same representation so old images do not exhaust the summary batches.
+        messages = tuple(
+            message.model_copy(
+                update={
+                    "content": tuple(
+                        TextBlock(text=summary_safe_block_text(block))
+                        if isinstance(block, ImageBlock)
+                        else block
+                        for block in message.content
+                    )
+                }
+            )
+            if any(isinstance(b, ImageBlock) for b in message.content)
+            else message
+            for message in messages
+        )
         counter = await MessageTokenCounter.create(self.estimator, messages)
         batches = []
         batch = []

@@ -639,11 +639,22 @@ async def test_managed_agent_loads_its_selected_skill(tmp_path):
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
     try:
         saved = await svc.save(AgentPackageBundle.model_validate(data), ctx)
-        await svc.run(saved["ref"], "assistant", "Check", "skill", ctx)
+        first = await svc.run(saved["ref"], "assistant", "Check", "skill", ctx)
         result = await settled(svc, "skill", ctx)
         assert result["run"]["state"] == "completed", result
         assert source.fetches, str(requests[-1])
         assert "Always verify unit dimensions" in str(requests[-1][-1])
+        # Recreate the host so restoration cannot rely on in-memory Run state.
+        await svc.close()
+        svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
+        await svc.run(
+            saved["ref"], "assistant", "Continue", "skill_next", ctx,
+            session_id=first["session_id"],
+        )
+        continued = await settled(svc, "skill_next", ctx)
+        assert continued["run"]["state"] == "completed", continued
+        # The very first request must already contain the complete skill body.
+        assert "Always verify unit dimensions" in str(requests[-1][0])
     finally:
         await svc.close()
 

@@ -443,9 +443,7 @@ async def test_extractive_summarizers_replace_images_with_safe_placeholders():
     )
     summarizers = (
         ExtractiveConversationSummarizer(),
-        PersistentSummaryContextReducer(
-            InMemoryConversationSummaryStore()
-        ).summarizer,
+        PersistentSummaryContextReducer(InMemoryConversationSummaryStore()).summarizer,
     )
 
     for summarizer in summarizers:
@@ -549,3 +547,91 @@ async def test_summary_timeout_includes_capability_discovery():
             )
         )
     assert caught.value.info.code == "context.summarizer.model_timeout"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [
+    ContextBudget(max_input_tokens=100_000, max_messages=6),
+    ContextBudget(max_input_tokens=25_000),
+])
+async def test_long_run_summarizes_old_image_batches_and_reuses_exact_request(budget):
+    request = ModelMessage(
+        role="user", content=(TextBlock(text="Animate this character"),)
+    )
+    messages = [request]
+    for i in range(24):
+        call_id = f"image_{i}"
+        messages.extend(
+            (
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id=call_id, name="analyze_image", arguments={}
+                        ),
+                    ),
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id=call_id,
+                    content=(TextBlock(text="attached"),),
+                ),
+                ModelMessage(
+                    role="user",
+                    content=(
+                        TextBlock(text=f"Frame {i}"),
+                        ImageBlock(
+                            uri="data:image/png;base64,AAAA", mime_type="image/png"
+                        ),
+                    ),
+                    metadata={"tool_context": True, "source_tool_call_id": call_id},
+                ),
+            )
+        )
+    source = tuple(messages)
+    summarizer = RecordingSummarizer()
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        summary_target_tokens=128,
+    )
+    projection = await reducer.reduce(source, budget, scope=scope())
+    assert projection.strategy == "persistent_summary"
+    assert projection.messages[1] == request
+    assert projection.messages[-3:] == source[-3:]
+    assert projection.historical_messages == source[:-3]
+    summarized = tuple(m for r in summarizer.requests for m in r.messages)
+    assert len(summarized) == len(source[:-3])
+    assert not any(isinstance(b, ImageBlock) for m in summarized for b in m.content)
+    assert (
+        sum("[image attached:" in b.text for m in summarized for b in m.content) == 23
+    )
+    replay = await reducer.reduce(source, budget, scope=scope())
+    assert replay.messages == projection.messages
+    # A second reduction inside the same Run must keep the original request.
+    continued = (
+        *source,
+        *(
+            m.model_copy(update={"tool_call_id": "next"})
+            if m.role == "tool"
+            else m.model_copy(
+                update={
+                    "tool_calls": (
+                        ModelToolCall(
+                            tool_call_id="next", name="analyze_image", arguments={}
+                        ),
+                    )
+                }
+            )
+            if m.role == "assistant"
+            else m.model_copy(
+                update={
+                    "metadata": {"tool_context": True, "source_tool_call_id": "next"}
+                }
+            )
+            for m in source[-3:]
+        ),
+    )
+    rolled = await reducer.reduce(continued, budget, scope=scope())
+    assert rolled.messages[1] == request
+    assert rolled.messages[-3:] == continued[-3:]

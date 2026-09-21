@@ -1,4 +1,4 @@
-"""Lazy Skill discovery, materialization, and Run-scoped activation."""
+"""Lazy Skill loading with bounded restoration from Session history."""
 
 from __future__ import annotations
 
@@ -102,9 +102,12 @@ class SkillLoader:
         workspace_root: str = "/workspace",
         max_active_tokens: int = 6_000,
         token_estimator: Callable[[str], int] | None = None,
+        inherited_skills: Callable[[str], Awaitable[tuple[str, ...]]] | None = None,
     ) -> None:
         if max_active_tokens < 1:
             raise ValueError("max_active_tokens must be positive")
+        self.inherited_skills = inherited_skills
+        self._initialized_runs: set[str] = set()
         self.catalog = catalog
         self.source = source
         self.workspace = workspace
@@ -120,7 +123,10 @@ class SkillLoader:
         async with lock:
             return await self._load_once(name, run_id=run_id)
 
-    async def _load_once(self, name: str, *, run_id: str) -> LoadedSkill:
+    async def _load_once(
+        self, name: str, *, run_id: str, budget_tokens: int | None = None
+    ) -> LoadedSkill:
+        limit = self.max_active_tokens if budget_tokens is None else budget_tokens
         descriptor = await self.catalog.get_skill(name, run_id=run_id)
         existing = {
             value.descriptor.name: value
@@ -129,6 +135,11 @@ class SkillLoader:
         # A resumed run with a durable activation record does not fetch or copy
         # the bundle again. The workspace provider owns durability/reattachment.
         if existing is not None:
+            values = await self.activations.list_loaded(run_id=run_id)
+            await self.activations.replace_loaded(
+                run_id=run_id,
+                values=(*(v for v in values if v.descriptor.name != name), existing),
+            )
             return existing
 
         # This is the first operation that is allowed to read the Level-2 bundle.
@@ -151,7 +162,7 @@ class SkillLoader:
             file_list=tuple(sorted(bundle.files)),
             loaded_at=utc_now(),
         )
-        if self.token_estimator(self._context_content(loaded)) > self.max_active_tokens:
+        if self.token_estimator(self._context_content(loaded)) > limit:
             raise self._error(
                 "skill.active_budget_exceeded",
                 "skill instructions exceed the active context budget",
@@ -160,7 +171,7 @@ class SkillLoader:
             bundle, run_id=run_id, destination=destination
         )
         loaded = loaded.model_copy(update={"workspace_path": workspace_path})
-        if self.token_estimator(self._context_content(loaded)) > self.max_active_tokens:
+        if self.token_estimator(self._context_content(loaded)) > limit:
             raise self._error(
                 "skill.active_budget_exceeded",
                 "materialized skill context exceeds the active budget",
@@ -170,7 +181,41 @@ class SkillLoader:
         return loaded
 
     async def loaded(self, *, run_id: str) -> tuple[LoadedSkill, ...]:
-        return await self.activations.list_loaded(run_id=run_id)
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            values = await self.activations.list_loaded(run_id=run_id)
+            if (
+                run_id not in self._initialized_runs
+                and self.inherited_skills is not None
+            ):
+                if not values:
+                    allowed = {
+                        v.name for v in await self.catalog.list_skills(run_id=run_id)
+                    }
+                    remaining = self.max_active_tokens
+                    inherited = []
+                    for name in dict.fromkeys(await self.inherited_skills(run_id)):
+                        if name not in allowed:
+                            continue
+                        try:
+                            value = await self._load_once(
+                                name, run_id=run_id, budget_tokens=remaining
+                            )
+                        except SageV2Error as exc:
+                            if exc.info.code == "skill.active_budget_exceeded":
+                                break
+                            raise
+                        inherited.append(value)
+                        remaining -= self.token_estimator(self._context_content(value))
+                    # Repositories retain chronological order for later eviction.
+                    await self.activations.replace_loaded(
+                        run_id=run_id, values=tuple(reversed(inherited))
+                    )
+                self._initialized_runs.add(run_id)
+                values = await self.activations.list_loaded(run_id=run_id)
+            # Recheck the current grant even for durable activations on resume.
+            allowed = {v.name for v in await self.catalog.list_skills(run_id=run_id)}
+            return tuple(v for v in values if v.descriptor.name in allowed)
 
     async def _load_lock(self, run_id: str, name: str) -> asyncio.Lock:
         # Loading is concurrent across Runs but serialized inside one Agent
