@@ -461,6 +461,12 @@ class OpenAIResponsesModelProvider:
 
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities
+        if not capabilities.supports_multimodal_input and any(
+            isinstance(block, (ImageBlock, AudioBlock))
+            for message in request.messages
+            for block in message.content
+        ):
+            raise self._capability_error("multimodal_input")
         if request.tools and not capabilities.supports_tools:
             raise self._capability_error("tools")
         if (

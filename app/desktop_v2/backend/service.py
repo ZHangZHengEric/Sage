@@ -346,6 +346,7 @@ class DesktopV2Service(
                 self.execution_binding_provider = execution_binding_provider
                 self.application = application
                 self._bind_process_runtime()
+                self._start_studio_delivery_worker()
             except BaseException:
                 self.execution_binding_provider = None
                 self.application = None
@@ -431,6 +432,7 @@ class DesktopV2Service(
             self._closed = True
 
     async def _close_once(self) -> None:
+        await self._stop_studio_delivery_worker()
         observers = tuple(self._run_observers.values())
         self._run_observers.clear()
         for task in observers:

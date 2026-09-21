@@ -629,9 +629,11 @@ class DesktopRunCompositionMixin:
             workspace_root=workspace_root,
         )
         goal_state_service = GoalStateService(self.driver_session_store)
+        multimodal_by_agent = {agent.agent_id: provider.supports_multimodal}
         official_runtime = OfficialToolRuntime(
             sandbox_handle,
             issuer,
+            supports_multimodal_input=multimodal_by_agent.get,
             memory_service=self.memory_service,
             session_memory_service=self.session_memory_service,
             goal_state_service=goal_state_service,
@@ -741,6 +743,7 @@ class DesktopRunCompositionMixin:
                 )
             )
             member_provider = await self._provider(member, member.user_id)
+            multimodal_by_agent[member.agent_id] = member_provider.supports_multimodal
             models_by_agent[member.agent_id] = RecordingModelProvider(
                 await self._model_provider(member_provider, member),
                 sink=self.diagnostics,
@@ -856,7 +859,8 @@ class DesktopRunCompositionMixin:
                 context_providers = (
                     *context_providers,
                     StudioContextProvider(
-                        self.studio_store, agent.user_id, studio_binding
+                        self.studio_store, agent.user_id, studio_binding,
+                        refresh=self.reconcile_studio_results,
                     ),
                 )
             if descriptor.agent_id == agent.agent_id:

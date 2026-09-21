@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import base64
+import io
 import mimetypes
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
+from PIL import Image
+
+from sagents.utils.multimodal_image import compress_image_to_jpeg_bytes_for_llm
+from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import JsonBlock
@@ -55,6 +60,17 @@ class MediaTools:
         prompt: str | None = None,
         invocation: ToolInvocation | None = None,
     ) -> ToolExecutionResult | dict:
+        capability = getattr(self.runtime, "supports_multimodal_input", None)
+        if callable(capability) and invocation is not None:
+            capability = capability(invocation.call.owner_agent_id)
+        if capability is False:
+            assert invocation is not None
+            return self._error_result(
+                invocation,
+                image_path,
+                "The current model does not support image input. Select a vision-capable model.",
+                "multimodal_unsupported",
+            )
         run_id = invocation.call.owner_run_id if invocation is not None else session_id
         if self.runtime.image_context_publisher is not None:
             return await self.runtime.image_context_publisher(
@@ -100,6 +116,21 @@ class MediaTools:
                     f"Unsupported image type: {mime}",
                     "unsupported_type",
                 )
+
+            def normalize():
+                with Image.open(io.BytesIO(data)) as image:
+                    return compress_image_to_jpeg_bytes_for_llm(image)
+
+            try:
+                data = await bounded_to_thread("context-cpu", normalize)
+            except (OSError, ValueError, Image.DecompressionBombError) as exc:
+                return self._error_result(
+                    invocation,
+                    image_path,
+                    f"Invalid or unsupported image: {exc}",
+                    "invalid_image",
+                )
+            mime = "image/jpeg"
             uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
             image_format = mime
         text = (
@@ -141,6 +172,8 @@ class MediaTools:
                     ],
                     "metadata": {
                         "tool_source": "analyze_image",
+                        "tool_context": True,
+                        "source_tool_call_id": invocation.call.tool_call_id,
                         "image_path": image_path,
                         "image_context_mode": "native_multimodal",
                         "hidden_from_chat": True,

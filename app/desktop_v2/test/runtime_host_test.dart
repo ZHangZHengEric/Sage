@@ -48,16 +48,36 @@ class _RegistryApi extends V2ApiClient {
   }
 }
 
+class _ClosingRegistryApi extends _RegistryApi {
+  _ClosingRegistryApi()
+    : super(healthyPorts: const {54321, 54322}, shutdownOnDetach: false);
+
+  @override
+  Future<Map<String, Object?>> attachRuntimeClient(String clientId) async {
+    if (baseUri.port == 54321) {
+      throw const SageApiException('Desktop sidecar is shutting down');
+    }
+    return super.attachRuntimeClient(clientId);
+  }
+}
+
 class _FakeProcess implements Process {
   _FakeProcess({
     required this.pid,
     required int readyPort,
     this.exitOnSigterm = true,
-  }) : _stdout = Stream.value(
-         utf8.encode(
-           '${jsonEncode({'port': readyPort, 'auth_token': 'spawn-token'})}\n',
-         ),
-       );
+    Duration readyDelay = Duration.zero,
+    bool exitBeforeReady = false,
+  }) : _stdout = exitBeforeReady
+           ? const Stream.empty()
+           : Stream.fromFuture(
+               Future.delayed(
+                 readyDelay,
+                 () => utf8.encode(
+                   '${jsonEncode({'port': readyPort, 'auth_token': 'spawn-token'})}\n',
+                 ),
+               ),
+             );
 
   @override
   final int pid;
@@ -121,6 +141,105 @@ class _BlockingRenewalApi extends _RegistryApi {
 }
 
 void main() {
+  test(
+    'RuntimeHost survives final detach racing registered health check',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'sage-restart-race-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final registry = File('${directory.path}/sidecar.json');
+      await registry.writeAsString(
+        jsonEncode({
+          'protocol': sageSidecarProtocol,
+          'revision': sageSidecarRevision,
+          'build_id': 'test-build',
+          'host': '127.0.0.1',
+          'port': 54321,
+          'pid': 123,
+          'auth_token': 'old-token',
+        }),
+      );
+      final process = _FakeProcess(pid: 456, readyPort: 54322);
+      final api = _ClosingRegistryApi();
+      final host = RuntimeHost(
+        api: api,
+        sidecarRegistryFile: registry,
+        buildId: 'test-build',
+        sidecarReadyAttempts: 1,
+        sidecarPollInterval: Duration.zero,
+        startProcess:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                process,
+        killPid: (pid, signal) =>
+            throw StateError('must not kill unowned process'),
+        readPythonVersion: (executable) async => (3, 12),
+      );
+      await host.ensureReady();
+      expect(api.baseUri.port, 54322);
+      expect(api.attachCalls, 1);
+      await host.stopOwnedSidecar();
+    },
+  );
+
+  test(
+    'RuntimeHost waits for delayed readiness during writer handoff',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'sage-restart-delay-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final process = _FakeProcess(
+        pid: 456,
+        readyPort: 54322,
+        readyDelay: const Duration(milliseconds: 80),
+      );
+      final host = RuntimeHost(
+        api: _RegistryApi(healthyPorts: const {54322}, shutdownOnDetach: false),
+        sidecarRegistryFile: File('${directory.path}/sidecar.json'),
+        buildId: 'test-build',
+        startupTimeout: const Duration(seconds: 1),
+        startProcess:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                process,
+        readPythonVersion: (executable) async => (3, 12),
+      );
+      await host.ensureReady();
+      expect(process.killSignals, isEmpty);
+      await host.stopOwnedSidecar();
+    },
+  );
+
+  test(
+    'RuntimeHost reports early stdout close without waiting for readiness timeout',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'sage-restart-exit-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final process = _FakeProcess(
+        pid: 457,
+        readyPort: 54322,
+        exitBeforeReady: true,
+      )..complete(1);
+      final host = RuntimeHost(
+        api: _RegistryApi(healthyPorts: const {}),
+        sidecarRegistryFile: File('${directory.path}/sidecar.json'),
+        buildId: 'test-build',
+        startupTimeout: const Duration(seconds: 30),
+        startProcess:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                process,
+        readPythonVersion: (executable) async => (3, 12),
+      );
+      await expectLater(
+        host.ensureReady().timeout(const Duration(seconds: 2)),
+        throwsA(isA<SageApiException>()),
+      );
+      await host.stopOwnedSidecar();
+    },
+  );
+
   test(
     'RuntimeHost reconnects to a registered sidecar before spawning',
     () async {

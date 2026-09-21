@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.agent.policy.continuation import (
     BudgetRule,
     ResponseLimitRule,
@@ -161,7 +162,7 @@ class LLMContinuationJudge:
     ) -> tuple[ModelMessage, ...]:
         last_user_index = None
         for index, message in enumerate(messages):
-            if message.role == "user":
+            if is_user_request(message):
                 last_user_index = index
         selected = (
             messages[last_user_index:] if last_user_index is not None else messages

@@ -50,6 +50,18 @@ class V2ApiClient {
     );
   }
 
+  Future<Map<String, Object?>?> studioRun(
+    String studioId,
+    String memberId,
+    String turnId,
+  ) async {
+    final value = await _json(
+      'GET',
+      '/api/v2/studios/${Uri.encodeComponent(studioId)}/members/${Uri.encodeComponent(memberId)}/turns/${Uri.encodeComponent(turnId)}/run',
+    );
+    return value is Map ? value.cast<String, Object?>() : null;
+  }
+
   Future<Map<String, Object?>> studioMessages(
     String studioId, {
     int afterSequence = 0,
@@ -120,8 +132,15 @@ class V2ApiClient {
   }
 
   Future<AgentConfiguration> cloneAgent(String sourceId, String name) async =>
-      AgentConfiguration.fromJson((await _json('POST', '/api/v2/agents',
-          body: {'name': name, 'source_agent_id': sourceId}) as Map).cast<String, Object?>());
+      AgentConfiguration.fromJson(
+        (await _json(
+                  'POST',
+                  '/api/v2/agents',
+                  body: {'name': name, 'source_agent_id': sourceId},
+                )
+                as Map)
+            .cast<String, Object?>(),
+      );
 
   Future<AgentConfiguration> createAgent(String name) async =>
       AgentConfiguration.fromJson(

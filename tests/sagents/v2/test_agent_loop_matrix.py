@@ -3607,3 +3607,79 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
         assert "without repeating earlier text" in text
     events = await runtime.session_store.read_events(handle.run_id)
     assert sum(event.type == "run.completed" for event in events) == (max_steps > 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve_once", "deny"])
+async def test_image_followup_survives_approval_and_engine_restart(decision):
+    async def image_handler(call, context):
+        result = await tool_handler(call, context)
+        return result.model_copy(update={"metadata": {"followup_user_message": {
+            "content": [
+                {"kind": "text", "text": "Inspect frame"},
+                {"kind": "image", "uri": "data:image/png;base64,AAAA", "mime_type": "image/png"},
+            ],
+            "metadata": {"tool_source": "analyze_image", "tool_context": True},
+        }}})
+
+    calls = (tool_call("read_value"), ModelToolCall(
+        tool_call_id="call_2", name="write_value", arguments={"key": "b", "value": "2"},
+    ))
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=calls),)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    runtime, handle, loop, executor = await setup_loop(model, handlers={
+        "read_value": image_handler, "write_value": tool_handler,
+    })
+    run = await loop.execute(handle.run_id, CONTEXT)
+    assert run.state == RunState.SUSPENDED
+    suspension, interaction = await _pending_interaction(runtime, run)
+    await runtime.reply_interaction(
+        _approval_reply(run.run_id, run, suspension, interaction, decision, "image:approval"), CONTEXT,
+    )
+    loop = AgentLoopEngine(runtime=runtime, model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor)
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    messages = tuple(m for m in model.requests[-1].messages if m.role != "system")
+    assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "user"]
+    assert [m.tool_call_id for m in messages if m.role == "tool"] == ["call_1", "call_2"]
+    assert messages[-1].content[-1].uri == "data:image/png;base64,AAAA"
+    assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
+
+    command = await runtime.session_store.get_start_command(run.run_id)
+    replay = await loop.ledger_rebuilder.rebuild(
+        command, run_id=run.run_id, through_run_sequence=run.last_run_sequence,
+    )
+    batch = next(index for index, message in enumerate(replay) if message.tool_calls)
+    assert [message.role for message in replay[batch:batch + 4]] == [
+        "assistant", "tool", "tool", "user",
+    ]
+    assert replay[batch + 3].content[-1].uri == "data:image/png;base64,AAAA"
+
+
+@pytest.mark.asyncio
+async def test_reported_usage_calibrates_next_tool_step_in_live_loop():
+    first = completed("", calls=(tool_call(),))
+    first = first.model_copy(update={"response": first.response.model_copy(update={
+        "usage": UsageSummary(reported=True, input_tokens=2000,
+                              cached_input_tokens=1500, output_tokens=100),
+    })})
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(first,)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    runtime, handle, loop, _ = await setup_loop(model)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    before, after = model.requests
+    budget = after.metadata["request_budget"]
+    assert budget["accounting_method"] == "reported_prefix_plus_estimated_delta"
+    assert budget["baseline_request_id"] == before.request_id
+    assert budget["baseline_input_tokens"] == 2000
+    assert budget["estimated_new_message_count"] == 2
+    added = after.messages[len(before.messages):]
+    assert budget["estimated_input_tokens"] == (
+        2000 + 128 + loop.step_request_builder.token_estimator.estimate(added)
+    )

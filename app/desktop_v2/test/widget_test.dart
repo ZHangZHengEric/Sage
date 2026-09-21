@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemChannels;
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:file_selector/file_selector.dart' show XFile;
+import 'package:sage_desktop_v2/src/services/image_clipboard.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
@@ -22,6 +24,17 @@ import 'package:sage_desktop_v2/src/ui/file_preview.dart';
 import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
+
+class _ClipboardApi extends _FakeApi {
+  Uint8List? uploadedBytes;
+
+  @override
+  Future<UploadedAttachment> upload({required String agentId, required XFile file, String workspaceId = ''}) async {
+    uploadedBytes = await file.readAsBytes();
+    return UploadedAttachment(name: file.name, path: 'uploads/${file.name}',
+      virtualPath: '/workspace/uploads/${file.name}', size: uploadedBytes!.length);
+  }
+}
 
 class _FakeApi extends V2ApiClient {
   final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
@@ -935,6 +948,15 @@ Inspect the complete diff before reporting findings.
         'data': {'kind': 'run', 'state': 'completed'},
       },
     ]);
+  }
+}
+
+class _SteeringProcessApi extends _ControlledProcessApi {
+  bool reject = false;
+  @override
+  Future<void> steer(String runId, String turnId, String text,
+      {List<ChatMessageContent> content = const []}) async {
+    if (reject) throw StateError('steer rejected');
   }
 }
 
@@ -2264,6 +2286,149 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  testWidgets('steer splits timeline and keeps in-flight tool ownership', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _SteeringProcessApi();
+    final controller = await _controller(api: api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.send('original');
+    api.emitRunningProcess();
+    await tester.pump();
+    final conversation = controller.selectedConversation!;
+    conversation.turnId = 'turn_controlled';
+    void tool(String type, int sequence, String id) => api._events.add({
+      'type': type, 'run_id': 'run_controlled',
+      'session_id': 'session_controlled', 'run_sequence': sequence,
+      'data': {'tool_call_id': id, 'tool_name': 'shell'},
+    });
+    tool('tool.call.started', 10, 'old-tool');
+    await tester.pump();
+    final oldPanel = conversation.processPanels.single;
+    await controller.steer('new direction');
+    final newPanel = conversation.processPanels.last;
+    expect(conversation.processPanels, hasLength(2));
+    expect(newPanel.anchorMessageId, conversation.messages.last.id);
+    expect(oldPanel.running, isFalse);
+    expect(newPanel.running, isTrue);
+    tool('tool.call.succeeded', 11, 'old-tool');
+    tool('tool.call.started', 12, 'new-tool');
+    await tester.pump();
+    expect(oldPanel.activities.single.active, isFalse);
+    expect(newPanel.activities.single.id, 'new-tool');
+    final restored = Conversation.fromJson(conversation.toJson());
+    expect(restored.processPanels.last.anchorMessageId, newPanel.anchorMessageId);
+    api.reject = true;
+    await controller.steer('rejected direction');
+    expect(conversation.messages.any((m) => m.text == 'rejected direction'), isFalse);
+    expect(conversation.processPanels, hasLength(2));
+    expect(controller.error, contains('steer rejected'));
+    api._events.add({'type': 'run.completed', 'run_id': 'run_controlled',
+      'session_id': 'session_controlled', 'run_sequence': 13, 'data': {}});
+    await tester.pump();
+    expect(newPanel.running, isFalse);
+    expect(newPanel.activities.single.active, isFalse);
+    await api._events.close();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+  });
+
+  for (final first in [true, false]) {
+    for (final replacement in ['changed question', '']) {
+      test('rewrite preserves image and file references first=$first empty=${replacement.isEmpty}', () async {
+        final persisted = jsonDecode(jsonEncode(_persistedBranchableConversation())) as Map<String, dynamic>;
+        if (first) {
+          persisted['run_id'] = 'run_branch_1';
+          persisted['messages'] = (persisted['messages'] as List).take(2).toList();
+          persisted['process_panels'] = (persisted['process_panels'] as List).take(1).toList();
+        }
+        final id = first ? 'user-branch-1' : 'user-branch-2';
+        final original = (persisted['messages'] as List).cast<Map>().singleWhere((m) => m['id'] == id);
+        final references = [
+          const ChatMessageContent.reference(fileName: 'image.png', path: '/workspace/uploads/image.png').toJson(),
+          const ChatMessageContent.reference(fileName: 'notes.md', path: '/workspace/notes.md', quote: 'retain this quote', citationLabel: 'source').toJson(),
+        ];
+        original['content'] = [references[0], {'type': 'text', 'text': original['text']}, references[1]];
+        SharedPreferences.setMockInitialValues({
+          'sage.desktop_v2.conversations.v1': jsonEncode({WorkspaceController.agentWorkspaceId: [persisted]}),
+        });
+        final api = _BranchingApi();
+        final controller = WorkspaceController(api: api, preferencesLoader: SharedPreferences.getInstance);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await controller.rewriteLastUserMessage(id, replacement);
+        await pumpEventQueue();
+        final sent = (api.lastRunBody!['messages'] as List).single as Map;
+        expect((sent['content'] as List).where((part) => part['type'] == 'reference').toList(), references);
+        expect(sent['text'], replacement);
+        final restored = ChatMessage.fromJson(controller.selectedConversation!.messages.last.toJson());
+        expect(restored.content.where((part) => part.isReference).map((part) => part.toJson()).toList(), references);
+      });
+    }
+  }
+
+  for (final brightness in Brightness.values) {
+    for (final image in [true, false]) {
+      testWidgets('composer paste ${image ? "image" : "text"} in ${brightness.name}', (tester) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZfoAAAAASUVORK5CYII=');
+        final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(ImageClipboard.channel, (call) async => image ? png : null);
+        messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.getData') return {'text': 'pasted text'};
+          if (call.method == 'Clipboard.hasStrings') return {'value': !image};
+          return null;
+        });
+        addTearDown(() {
+          messenger.setMockMethodCallHandler(ImageClipboard.channel, null);
+          messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+        });
+        final api = _ClipboardApi();
+        final controller = await _controller(api: api);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        final field = find.byKey(const ValueKey('agent-composer'));
+        await tester.enterText(field, 'draft ');
+        if (brightness == Brightness.light) {
+          final editable = tester.state<EditableTextState>(
+            find.descendant(of: field, matching: find.byType(EditableText)),
+          );
+          editable.showToolbar();
+          await tester.pumpAndSettle();
+          final toolbar = tester.widget<AdaptiveTextSelectionToolbar>(
+            find.byType(AdaptiveTextSelectionToolbar).last,
+          );
+          toolbar.buttonItems!.singleWhere(
+            (item) => item.type == ContextMenuButtonType.paste,
+          ).onPressed!();
+        } else {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        }
+        await tester.pumpAndSettle();
+        final text = tester.widget<TextField>(field).controller!.text;
+        if (image) {
+          expect(api.uploadedBytes, png);
+          expect(controller.attachments, hasLength(1));
+          expect(controller.composerReferences.single.path, startsWith('/workspace/uploads/clipboard-'));
+          expect(text, contains('draft '));
+          expect(text, isNot(contains('pasted text')));
+        } else {
+          expect(api.uploadedBytes, isNull);
+          expect(text, 'draft pasted text');
+        }
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }
+  }
+
   testWidgets('clone agent flushes pending edits and opens independent editor', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -5894,10 +6059,15 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
+        final persisted = jsonDecode(jsonEncode(_persistedBranchableConversation())) as Map<String, dynamic>;
+        ((persisted['messages'] as List).cast<Map>().singleWhere((value) => value['id'] == 'user-branch-2'))['content'] = [
+          const ChatMessageContent.reference(fileName: 'image.png', path: '/workspace/uploads/image.png').toJson(),
+          const ChatMessageContent.text('第二轮问题').toJson(),
+        ];
         SharedPreferences.setMockInitialValues({
           'sage.desktop_v2.conversations.v1': jsonEncode({
             WorkspaceController.agentWorkspaceId: [
-              _persistedBranchableConversation(),
+              persisted,
             ],
           }),
         });
@@ -5984,6 +6154,8 @@ void main() {
           find.byKey(const ValueKey('message-edit-card:user-branch-2')),
           findsOneWidget,
         );
+        expect(find.byKey(const ValueKey('message-edit-attachments:user-branch-2')), findsOneWidget);
+        expect(find.byKey(const ValueKey('message-reference-chip:/workspace/uploads/image.png')), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );

@@ -157,19 +157,16 @@ async def test_final_request_budget_reserves_tool_schema_and_runtime_suffix():
         for block in message.content
         if isinstance(block, TextBlock)
     )
-    assert prepared.request.metadata["request_budget"][
-        "estimated_input_tokens"
-    ] <= budget.max_input_tokens
+    assert (
+        prepared.request.metadata["request_budget"]["estimated_input_tokens"]
+        <= budget.max_input_tokens
+    )
     assert prepared.request.metadata["request_budget"]["tool_schema_tokens"] > 0
-    assert prepared.request.metadata["request_budget"][
-        "continuation_guidance_tokens"
-    ] > 0
-    assert prepared.request.metadata["request_budget"][
-        "protocol_overhead_tokens"
-    ] == 32
-    assert prepared.request.messages[-1].metadata[
-        "runtime_continuation_guidance"
-    ]
+    assert (
+        prepared.request.metadata["request_budget"]["continuation_guidance_tokens"] > 0
+    )
+    assert prepared.request.metadata["request_budget"]["protocol_overhead_tokens"] == 32
+    assert prepared.request.messages[-1].metadata["runtime_continuation_guidance"]
     assert observer.projection is not None
     assert all(
         not message.metadata.get("runtime_continuation_guidance")
@@ -212,9 +209,7 @@ async def test_final_request_budget_fails_before_provider_when_tools_cannot_fit(
             turn_id="turn_oversized",
             step_id="step_oversized",
             messages=(
-                ModelMessage(
-                    role="user", content=(TextBlock(text="current request"),)
-                ),
+                ModelMessage(role="user", content=(TextBlock(text="current request"),)),
             ),
             pending_continuation_reason=None,
             language="en",
@@ -257,8 +252,183 @@ async def test_multimodal_data_uri_fits_by_image_tokens_not_base64_bytes():
         language="en",
     )
 
-    estimated = prepared.request.metadata["request_budget"][
-        "estimated_input_tokens"
-    ]
+    estimated = prepared.request.metadata["request_budget"]["estimated_input_tokens"]
     assert 4_096 <= estimated < 10_000
     assert prepared.request.messages[0].content[1].uri == image_uri
+
+
+async def _calibrated_prepare(
+    builder, messages, *, run_id="calibration_run", command=None
+):
+    return (
+        await builder.prepare(
+            command=command or _command(None),
+            run_id=run_id,
+            turn_id="turn_calibration",
+            step_id="step_calibration",
+            messages=messages,
+            pending_continuation_reason=None,
+            language="en",
+        )
+    ).request
+
+
+def _calibration_builder(assembler=None):
+    return DefaultAgentStepRequestBuilder(
+        context_assembler=assembler or PassthroughContextAssembler(),
+        tool_catalog=InMemoryToolCatalog(()),
+        tool_selection_policy=DirectToolSelectionPolicy(),
+    )
+
+
+def _reported_response(tokens=1000, *, reported=True, cached=0):
+    from sagents.v2.model.contracts import ModelResponse
+    from sagents.v2.contracts.items import UsageSummary
+
+    return ModelResponse(
+        response_id="response_calibration",
+        finish_reason="stop",
+        usage=UsageSummary(
+            reported=reported,
+            input_tokens=tokens,
+            cached_input_tokens=cached,
+            output_tokens=900,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_usage_calibration_reuses_total_input_not_output_or_cache_twice():
+    builder = _calibration_builder()
+    messages = (ModelMessage(role="user", content=(TextBlock(text="x" * 20000),)),)
+    first = await _calibrated_prepare(builder, messages)
+    builder.observe_response(first, _reported_response(cached=800))
+    added = (ModelMessage(role="assistant", content=(TextBlock(text="answer"),)),)
+    second = await _calibrated_prepare(builder, (*messages, *added))
+    budget = second.metadata["request_budget"]
+    assert budget[
+        "estimated_input_tokens"
+    ] == 1000 + 128 + builder.token_estimator.estimate(added)
+    assert budget["accounting_method"] == "reported_prefix_plus_estimated_delta"
+    assert budget["estimated_new_message_count"] == 1
+    # The next successful response replaces the anchor; margins never accumulate.
+    builder.observe_response(second, _reported_response(1100))
+    third = await _calibrated_prepare(builder, second.messages)
+    assert third.metadata["request_budget"]["estimated_input_tokens"] == 1228
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change", ["edited", "removed", "image", "tools", "model", "run", "missing_usage"]
+)
+async def test_usage_calibration_invalidates_changed_request_identity(change):
+    builder = _calibration_builder()
+    messages = (
+        ModelMessage(
+            role="user",
+            content=(
+                TextBlock(text="x" * 1000),
+                ImageBlock(uri="data:image/png;base64,AAAA", mime_type="image/png"),
+            ),
+        ),
+    )
+    first = await _calibrated_prepare(builder, messages)
+    builder.observe_response(
+        first, _reported_response(reported=change != "missing_usage")
+    )
+    command = _command(None)
+    run_id = "calibration_run"
+    if change == "edited":
+        messages = (ModelMessage(role="user", content=(TextBlock(text="edited"),)),)
+    elif change == "removed":
+        messages = ()
+    elif change == "image":
+        messages = (
+            messages[0].model_copy(
+                update={
+                    "content": (
+                        messages[0].content[0],
+                        ImageBlock(
+                            uri="data:image/png;base64,BBBB", mime_type="image/png"
+                        ),
+                    )
+                }
+            ),
+        )
+    elif change == "tools":
+        builder.tool_catalog = InMemoryToolCatalog((_tool("new_tool"),))
+    elif change == "model":
+        command = command.model_copy(
+            update={
+                "config": command.config.model_copy(
+                    update={"model_bindings": {"primary": "different_model"}}
+                )
+            }
+        )
+    elif change == "run":
+        run_id = "other_run"
+    second = await _calibrated_prepare(
+        builder, messages, command=command, run_id=run_id
+    )
+    assert second.metadata["request_budget"]["accounting_method"] == "estimated"
+
+
+@pytest.mark.asyncio
+async def test_usage_calibration_is_used_before_context_reduction():
+    assembler = DefaultContextAssembler(budget=ContextBudget(max_input_tokens=20000))
+    builder = _calibration_builder(assembler)
+    messages = (ModelMessage(role="user", content=(TextBlock(text="x" * 20000),)),)
+    first = await _calibrated_prepare(builder, messages)
+    builder.observe_response(first, _reported_response())
+    # Without calibration, this unchanged current turn cannot fit and raises.
+    assembler.budget = ContextBudget(max_input_tokens=2000)
+    builder.context_budget = assembler.budget
+    second = await _calibrated_prepare(builder, messages)
+    assert second.messages == first.messages
+    assert second.metadata["request_budget"]["estimated_input_tokens"] == 1128
+    # Reported underestimates must also influence reduction, not only final validation.
+    builder.observe_response(second, _reported_response(3000))
+    with pytest.raises(SageV2Error, match="budget"):
+        await _calibrated_prepare(builder, messages)
+
+
+@pytest.mark.asyncio
+async def test_calibration_context_is_task_local_and_restored_after_errors():
+    import asyncio
+    from sagents.v2.context.calibration import (
+        InputUsageBaseline,
+        input_usage_scope,
+        message_fingerprints,
+    )
+    from sagents.v2.context.token_estimator import estimate_tokens_async
+    from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
+
+    estimator = JsonHeuristicTokenEstimator()
+    messages = (ModelMessage(role="user", content=(TextBlock(text="same"),)),)
+    barrier = asyncio.Event()
+
+    async def estimate_with(tokens):
+        baseline = InputUsageBaseline(
+            "scope", "request", message_fingerprints(messages), tokens, 32
+        )
+        with input_usage_scope(baseline):
+            await barrier.wait()
+            return await estimate_tokens_async(estimator, messages)
+
+    first = asyncio.create_task(estimate_with(1000))
+    second = asyncio.create_task(estimate_with(2000))
+    barrier.set()
+    assert await asyncio.gather(first, second) == [1096, 2096]
+    assert await estimate_tokens_async(estimator, messages) == estimator.estimate(
+        messages
+    )
+    with pytest.raises(ValueError):
+        with input_usage_scope(
+            InputUsageBaseline(
+                "scope", "request", message_fingerprints(messages), 1000, 32
+            )
+        ):
+            raise ValueError("projection failed")
+    assert await estimate_tokens_async(estimator, messages) == estimator.estimate(
+        messages
+    )

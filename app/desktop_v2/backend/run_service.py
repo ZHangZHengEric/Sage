@@ -830,6 +830,8 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 EventCursor(run_id=run_id, run_sequence=0)
             ):
                 self._write_runtime_event(event)
+                if event.type == "run.completed":
+                    await self.publish_studio_run_result(run_id)
                 if event.type in {
                     "run.completed",
                     "run.failed",

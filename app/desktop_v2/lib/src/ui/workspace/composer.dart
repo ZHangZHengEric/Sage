@@ -24,6 +24,7 @@ class _ComposerState extends State<_Composer> {
   final _focus = FocusNode();
   final _editorRegionKey = GlobalKey();
   OverlayEntry? _referenceHoverOverlay;
+  bool _pasting = false;
   bool _mentionOpen = false;
   int _mentionIndex = 0;
   String _mentionQuery = '';
@@ -69,6 +70,21 @@ class _ComposerState extends State<_Composer> {
     _text.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  Future<void> _paste(VoidCallback fallback) async {
+    if (_pasting || (widget.studio != null && widget.controller.studioSending)) {
+      return;
+    }
+    _pasting = true;
+    final conversationId = widget.conversation.id;
+    try {
+      final handled = await widget.controller.pasteClipboardImage();
+      if (!mounted || widget.conversation.id != conversationId) return;
+      if (!handled) fallback();
+    } finally {
+      _pasting = false;
+    }
   }
 
   void _syncComposerReferences() {
@@ -400,48 +416,83 @@ class _ComposerState extends State<_Composer> {
               key: _editorRegionKey,
               onHover: _handleEditorHover,
               onExit: (_) => _hideReferenceHover(),
-              child: Focus(
-                onKeyEvent: (_, event) => _handleKey(event),
-                child: TextField(
-                  key: ValueKey(
-                    widget.studio == null
-                        ? 'agent-composer'
-                        : 'studio-composer',
-                  ),
-                  readOnly:
-                      widget.studio != null && widget.controller.studioSending,
-                  controller: _text,
-                  focusNode: _focus,
-                  minLines: 1,
-                  maxLines: null,
-                  textInputAction: TextInputAction.newline,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontSize: 14.5,
-                    height: 1.35,
-                    color: colors.onSurface,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: context.l10n.text(
-                      running
-                          ? 'workspace.inputSteer'
-                          : widget.conversation.planMode
-                          ? 'workspace.inputPlan'
-                          : widget.conversation.goalMode
-                          ? 'workspace.inputGoal'
-                          : 'workspace.inputAgent',
+              child: Actions(
+                actions: <Type, Action<Intent>>{
+                  PasteTextIntent: _ComposerPasteAction(_paste),
+                },
+                child: Focus(
+                  onKeyEvent: (_, event) => _handleKey(event),
+                  child: TextField(
+                    key: ValueKey(
+                      widget.studio == null
+                          ? 'agent-composer'
+                          : 'studio-composer',
                     ),
-                    hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    readOnly:
+                        widget.studio != null &&
+                        widget.controller.studioSending,
+                    contextMenuBuilder: (context, editable) {
+                      final items = editable.contextMenuButtonItems
+                          .where(
+                            (item) => item.type != ContextMenuButtonType.paste,
+                          )
+                          .toList();
+                      items.add(
+                        ContextMenuButtonItem(
+                          type: ContextMenuButtonType.paste,
+                          onPressed: () {
+                            ContextMenuController.removeAny();
+                            unawaited(
+                              _paste(() {
+                                if (editable.mounted) {
+                                  editable.pasteText(
+                                    SelectionChangedCause.toolbar,
+                                  );
+                                }
+                              }),
+                            );
+                          },
+                        ),
+                      );
+                      return AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: editable.contextMenuAnchors,
+                        buttonItems: items,
+                      );
+                    },
+                    controller: _text,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: null,
+                    textInputAction: TextInputAction.newline,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       fontSize: 14.5,
-                      color: colors.onSurfaceVariant.withValues(
-                        alpha: dark ? 0.68 : 0.76,
-                      ),
+                      height: 1.35,
+                      color: colors.onSurface,
                     ),
-                    isDense: true,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
-                    contentPadding: EdgeInsets.zero,
+                    decoration: InputDecoration(
+                      hintText: context.l10n.text(
+                        running
+                            ? 'workspace.inputSteer'
+                            : widget.conversation.planMode
+                            ? 'workspace.inputPlan'
+                            : widget.conversation.goalMode
+                            ? 'workspace.inputGoal'
+                            : 'workspace.inputAgent',
+                      ),
+                      hintStyle: Theme.of(context).textTheme.bodyLarge
+                          ?.copyWith(
+                            fontSize: 14.5,
+                            color: colors.onSurfaceVariant.withValues(
+                              alpha: dark ? 0.68 : 0.76,
+                            ),
+                          ),
+                      isDense: true,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      contentPadding: EdgeInsets.zero,
+                    ),
                   ),
                 ),
               ),
@@ -2031,5 +2082,18 @@ class _ComposerSendButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ComposerPasteAction extends Action<PasteTextIntent> {
+  _ComposerPasteAction(this.paste);
+
+  final Future<void> Function(VoidCallback fallback) paste;
+
+  @override
+  Object? invoke(PasteTextIntent intent) {
+    final fallback = callingAction;
+    unawaited(paste(() => fallback?.invoke(intent)));
+    return null;
   }
 }

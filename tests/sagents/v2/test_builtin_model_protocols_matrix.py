@@ -851,3 +851,25 @@ def test_model_factory_preserves_protocol_output_defaults(protocol, default, max
     assert provider.config.default_max_output_tokens == (
         maximum if maximum is not None else default
     )
+
+
+@pytest.mark.parametrize("protocol", ["chat", "responses", "anthropic"])
+def test_text_only_binding_rejects_image_before_network(protocol):
+    from sagents.v2.model.plugins.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleModelProvider
+
+    caps = CAPABILITIES.model_copy(update={"supports_multimodal_input": False})
+    if protocol == "chat":
+        provider = OpenAICompatibleModelProvider(
+            OpenAICompatibleConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+        )
+    elif protocol == "responses":
+        provider = OpenAIResponsesModelProvider(
+            OpenAIResponsesConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+        )
+    else:
+        provider = AnthropicMessagesModelProvider(
+            AnthropicMessagesConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+        )
+    with pytest.raises(SageV2Error) as caught:
+        provider._validate_request(request())
+    assert caught.value.info.code == "model.capability_unsupported"

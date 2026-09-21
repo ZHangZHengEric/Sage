@@ -132,7 +132,8 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
   Future<void> _submitEdit() async {
     final value = _editor.text.trim();
-    if (value.isEmpty || _submitting || widget.onEdit == null) return;
+    if (_submitting || widget.onEdit == null) return;
+    if (value.isEmpty && !message.content.any((part) => part.isReference)) return;
     setState(() => _submitting = true);
     try {
       await widget.onEdit!(value);
@@ -167,6 +168,15 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
+                          if (message.content.any((part) => part.isReference)) ...[
+                            _UserMessageContent(
+                              key: ValueKey('message-edit-attachments:${message.id}'),
+                              data: '',
+                              content: message.content.where((part) => part.isReference).toList(),
+                              onLoadReference: widget.onLoadReference,
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           TextField(
                             key: ValueKey('message-edit-field:${message.id}'),
                             controller: _editor,

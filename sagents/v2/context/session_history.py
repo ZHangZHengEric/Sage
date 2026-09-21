@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Protocol
 
+from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import ItemEventData, RuntimeEvent
 from sagents.v2.contracts.items import (
@@ -176,7 +177,7 @@ class SessionEventModelProjector:
                         step_key=step_key,
                     )
                 )
-        return tuple(value.message for value in projected)
+        return order_tool_context(tuple(value.message for value in projected))
 
     @staticmethod
     def _assistant_for_step(

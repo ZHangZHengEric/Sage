@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sage_desktop_v2/src/api/v2_api.dart';
 import 'package:sage_desktop_v2/src/app.dart';
 import 'package:sage_desktop_v2/src/models.dart';
+import 'package:sage_desktop_v2/src/studio_models.dart';
 import 'package:sage_desktop_v2/src/state/workspace_controller.dart';
 import 'package:sage_desktop_v2/src/ui/workspace_panels/workspace_panel_plugin.dart';
 
@@ -140,8 +141,143 @@ class HoldingStudioApi extends StudioApi {
   }
 }
 
+class LostHandleStudioApi extends StudioApi {
+  int lookups = 0;
+  String? subscribed;
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) {
+    bodies.add(body);
+    return Stream.error(StateError('lost handle'));
+  }
+
+  @override
+  Future<Map<String, Object?>?> studioRun(
+    String studioId,
+    String memberId,
+    String turnId,
+  ) async {
+    lookups++;
+    return {'run_id': 'recovered_run', 'state': 'completed'};
+  }
+
+  @override
+  Stream<Map<String, Object?>> subscribeRun(
+    String runId, {
+    int afterSequence = 0,
+  }) {
+    subscribed = runId;
+    return Stream.fromIterable([
+      {
+        'type': 'message.delta',
+        'run_id': runId,
+        'run_sequence': 1,
+        'item_id': 'recovered_reply',
+        'data': {'delta': 'recovered result'},
+      },
+      {'type': 'run.completed', 'run_id': runId, 'run_sequence': 2, 'data': {}},
+    ]);
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('failed Studio sync preserves draft and does not dispatch', () async {
+    final api = StudioApi()..rejectSync = true;
+    final controller = WorkspaceController(api: api);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final studio = await controller.createStudio('failure', [
+      'sage',
+    ], coordinatorAgentId: 'sage');
+    expect(await controller.sendStudioMessage('keep this'), isFalse);
+    expect(studio.turns, isEmpty);
+    expect(api.bodies, isEmpty);
+    api.rejectSync = false;
+    expect(await controller.sendStudioMessage('keep this'), isTrue);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(api.bodies, hasLength(1));
+    expect(studio.turns.single.startingMemberIds, isEmpty);
+    await controller.syncStudio(studio);
+    expect(api.studioBodies.last['messages'], isEmpty);
+  });
+
+  test(
+    'typed multi-mentions route by stable identity and ignore quoted examples',
+    () async {
+      final api = HoldingStudioApi();
+      final controller = WorkspaceController(api: api);
+      await controller.initialize();
+      final studio = await controller.createStudio('mentions', [
+        'sage',
+        'designer',
+      ], coordinatorAgentId: 'sage');
+      expect(
+        studioMentionedMemberIds(
+          r'email@Sage `@Designer` \@Sage',
+          studio.members,
+        ),
+        isEmpty,
+      );
+      expect(
+        await controller.sendStudioMessage(
+          '@Sage check code; @Designer check UI',
+        ),
+        isTrue,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(api.bodies.map((b) => b['agent_id']).toSet(), {
+        'sage',
+        'designer',
+      });
+      expect(
+        api.bodies.every(
+          (b) =>
+              (b['messages'] as List).single['text'] ==
+              '@Sage check code; @Designer check UI',
+        ),
+        isTrue,
+      );
+      controller.dispose();
+      for (final stream in api.streams) {
+        await stream.close();
+      }
+    },
+  );
+
+  test(
+    'Studio recovers accepted Run after lost handle and restart without redispatch',
+    () async {
+      final api = LostHandleStudioApi();
+      final controller = WorkspaceController(api: api);
+      await controller.initialize();
+      final studio = await controller.createStudio('recover', [
+        'sage',
+      ], coordinatorAgentId: 'sage');
+      await controller.sendStudioMessage('once');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(studio.turns.single.startingMemberIds, hasLength(1));
+      controller.dispose();
+      final restored = WorkspaceController(api: api);
+      addTearDown(restored.dispose);
+      await restored.initialize();
+      await restored.recoverStudio(restored.studios.single);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(api.bodies, hasLength(1));
+      expect(api.subscribed, 'recovered_run');
+      expect(restored.studios.single.turns.single.startingMemberIds, isEmpty);
+      expect(
+        restored
+            .studioReplies(
+              restored.studios.single,
+              restored.studios.single.turns.single,
+            )
+            .single
+            .text,
+        'recovered result',
+      );
+    },
+  );
 
   test(
     'Studio targets stable member identity, isolates sessions and restores public history',
@@ -158,7 +294,7 @@ void main() {
       final ordinaryApproval = controller.selectedConversation!.approvalMode;
       controller.setStudioApprovalMode(first, designer, ApprovalMode.alwaysAsk);
       expect(
-        await controller.sendStudioMessage('请看看设计，正文引用 @Sage 不改变接收人'),
+        await controller.sendStudioMessage('请看看设计，正文引用 `@Sage` 不改变接收人'),
         isTrue,
       );
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -187,7 +323,14 @@ void main() {
       await controller.sendStudioMessage('请汇总');
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(api.bodies.last['agent_id'], 'sage');
-      expect(api.studioBodies.last.toString(), contains('可以。我们先确定'));
+      // Final results are now published from authoritative backend Run events.
+      expect(
+        (api.studioBodies.last['messages'] as List).every(
+          (m) => m['kind'] == 'user',
+        ),
+        isTrue,
+      );
+      expect(api.studioBodies.last['pinned_turn_ids'], [first.turns.first.id]);
       expect(api.bodies.last['studio_id'], first.id);
       expect(api.bodies.last['studio_member_id'], first.coordinatorId);
       expect(api.bodies.last['messages'], [

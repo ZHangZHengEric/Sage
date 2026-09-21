@@ -147,6 +147,7 @@ class OfficialToolRuntime:
         memory_service: MemoryService | None = None,
         session_memory_service: SessionMemoryService | None = None,
         image_context_publisher: ImageContextPublisher | None = None,
+        supports_multimodal_input: bool | Callable[[str], bool | None] | None = None,
         tool_catalog_resolver: ToolCatalogResolver | None = None,
         tool_selection_policy: ToolSelectionPolicy | None = None,
         job_runtime: JobRuntime | None = None,
@@ -157,6 +158,7 @@ class OfficialToolRuntime:
         self.memory_service = memory_service
         self.session_memory_service = session_memory_service
         self.image_context_publisher = image_context_publisher
+        self.supports_multimodal_input = supports_multimodal_input
         self.tool_catalog_resolver = tool_catalog_resolver
         self.tool_selection_policy = tool_selection_policy
         self.goal_state_service = goal_state_service

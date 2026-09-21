@@ -36,15 +36,18 @@ class StudioTurn {
     this.addressed = false,
     Map<String, String>? executionMessageIds,
     List<String>? pendingMemberIds,
+    List<String>? startingMemberIds,
     this.content = const [],
     this.preferredSkills = const [],
     this.approvalMode = 'high_risk',
     this.invocationMode = 'normal',
   }) : executionMessageIds =
            executionMessageIds ?? {memberId: executionMessageId},
-       pendingMemberIds = pendingMemberIds ?? [];
+       pendingMemberIds = pendingMemberIds ?? [],
+       startingMemberIds = startingMemberIds ?? [];
   final Map<String, String> executionMessageIds;
   final List<String> pendingMemberIds;
+  final List<String> startingMemberIds;
   final List<ChatMessageContent> content;
   final List<String> preferredSkills;
   final String approvalMode;
@@ -65,6 +68,7 @@ class StudioTurn {
     'addressed': addressed,
     'execution_message_ids': executionMessageIds,
     'pending_member_ids': pendingMemberIds,
+    'starting_member_ids': startingMemberIds,
     'content': [for (final part in content) part.toJson()],
     'preferred_skills': preferredSkills,
     'approval_mode': approvalMode,
@@ -80,6 +84,7 @@ class StudioTurn {
     executionMessageIds: (json['execution_message_ids'] as Map?)
         ?.cast<String, String>(),
     pendingMemberIds: (json['pending_member_ids'] as List?)?.cast<String>(),
+    startingMemberIds: (json['starting_member_ids'] as List?)?.cast<String>(),
     content: [
       for (final part in json['content'] as List? ?? [])
         ChatMessageContent.fromJson((part as Map).cast<String, Object?>()),
@@ -98,6 +103,7 @@ class Studio {
     required this.coordinatorId,
     List<StudioTurn>? turns,
     Set<String>? pinnedTurnIds,
+    Set<String>? syncedTurnIds,
     List<Map<String, Object?>>? publicMessages,
     this.messageCursor = 0,
     this.hostRegistered = false,
@@ -110,6 +116,7 @@ class Studio {
            ),
        turns = turns ?? [],
        pinnedTurnIds = pinnedTurnIds ?? {},
+       syncedTurnIds = syncedTurnIds ?? {},
        publicMessages = publicMessages ?? [];
   final String id;
   final String name;
@@ -119,6 +126,7 @@ class Studio {
   bool updatingCoordinator = false;
   final List<StudioTurn> turns;
   final Set<String> pinnedTurnIds;
+  final Set<String> syncedTurnIds;
   final List<Map<String, Object?>> publicMessages;
   int messageCursor;
   bool hostRegistered;
@@ -129,6 +137,7 @@ class Studio {
     'coordinator_id': coordinatorId,
     'turns': [for (final t in turns) t.toJson()],
     'pinned_turn_ids': pinnedTurnIds.toList(),
+    'synced_turn_ids': syncedTurnIds.toList(),
     'public_messages': publicMessages,
     'message_cursor': messageCursor,
     'host_registered': hostRegistered,
@@ -143,6 +152,9 @@ class Studio {
     ],
     messageCursor: (json['message_cursor'] as num?)?.toInt() ?? 0,
     hostRegistered: json['host_registered'] == true,
+    syncedTurnIds: (json['synced_turn_ids'] as List? ?? [])
+        .cast<String>()
+        .toSet(),
     draft: json['draft'] is Map
         ? Conversation.fromJson((json['draft'] as Map).cast<String, Object?>())
         : null,
@@ -159,4 +171,36 @@ class Studio {
         StudioTurn.fromJson((t as Map).cast<String, Object?>()),
     ],
   );
+}
+
+/// Parse explicit mentions without treating code, quotes or emails as routing.
+List<String> studioMentionedMemberIds(String text, List<StudioMember> members) {
+  final names = <String, Set<String>>{};
+  for (final member in members) {
+    names.putIfAbsent(member.name, () => {}).add(member.id);
+  }
+  for (final member in members) {
+    names[member.id] = {member.id};
+  }
+  if (names.isEmpty) return [];
+  final labels = names.keys.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  final ignored = RegExp(
+    r'```[\s\S]*?```|`[^`\n]*`|^[ \t]*>[^\n]*',
+    multiLine: true,
+  ).allMatches(text).toList();
+  final pattern = RegExp(
+    r'(?<![\p{L}\p{N}_@\\])@(' +
+        labels.map(RegExp.escape).join('|') +
+        r')(?![\p{L}\p{N}_])',
+    unicode: true,
+  );
+  return {
+    for (final match in pattern.allMatches(text))
+      if (names[match.group(1)]!.length == 1 &&
+          !ignored.any(
+            (span) => span.start <= match.start && match.start < span.end,
+          ))
+        names[match.group(1)]!.single,
+  }.toList();
 }
