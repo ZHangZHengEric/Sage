@@ -22,15 +22,14 @@
 
 ---
 
-## ✨ **核心亮点**
+## ✨ **核心优势**
 
-- 🗂️ **围绕项目工作** — 在同一个桌面工作区中组织对话、文件、工具执行与终端。
-- 🤖 **打造专属 Agent** — 自由组合指令、模型和工具，将专业能力复用于后续任务。
-- 🤝 **多智能体协作** — 在 Studio 中通过共享对话和定向消息，让不同成员分工处理任务。
-- 🧩 **Skills 与 MCP** — 加载可复用的工作流程，接入外部工具与服务。
-- 🎛️ **自由选择模型** — 桌面端支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 协议。
-- 👀 **看得见，也能掌控** — 跟踪执行进度，暂停或取消 Run，补充输入并处理审批。
-- 🛠️ **嵌入自己的应用** — 通过 `sage.yaml` 定义 Agent 包，基于 SAgents v2 构建 Python 应用。
+- 🧩 **插件化架构** — 按需组合模型、记忆、存储、工具和调度实现，统一管理扩展契约与组件生命周期。
+- 📦 **声明式 Agent 包** — 用 `sage.yaml` 定义指令、能力和运行配置，在 Server Studio 中管理不可变版本。
+- 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
+- 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
+- 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 MCP 服务接入同一智能体工作流程。
+- 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents v2，也可以嵌入自己的 Python 应用。
 
 ---
 
@@ -222,16 +221,19 @@ flowchart TB
 
 ## 💬 **加入社区**
 
-[加入 Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA) · [反馈问题与功能建议](https://github.com/ZHangZHengEric/Sage/issues)
+<div align="center">
+
+[![Slack](https://img.shields.io/badge/加入_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![GitHub Issues](https://img.shields.io/badge/问题与建议-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ZHangZHengEric/Sage/issues)
+
+</div>
 
 ## 💖 **赞助商**
 
-感谢 **循环智能（RcrAI）** 和 **Data** 对 Sage 的支持。
-
 <p align="center">
-  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能（RcrAI）" />
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="assets/sponsors/idata_logo.png" height="50" alt="Data" />
+  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="40" align="middle" alt="RcrAI" />
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/sponsors/idata_mark.png" height="64" align="middle" alt="Data" />
 </p>
 
 ---

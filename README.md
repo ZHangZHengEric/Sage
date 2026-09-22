@@ -22,15 +22,14 @@
 
 ---
 
-## ✨ **What Sage Brings to Your Workflow**
+## ✨ **Why Sage**
 
-- 🗂️ **A workspace for real work** — Conversations, project files, tool activity, and a terminal in one desktop app.
-- 🤖 **Agents built around your tasks** — Combine instructions, models, and tools into reusable agents.
-- 🤝 **Multi-agent collaboration** — Coordinate Studio members through shared conversations and directed messages.
-- 🧩 **Skills & MCP** — Add reusable workflows and connect external tools.
-- 🎛️ **Your choice of models** — Desktop routes support OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages protocols.
-- 👀 **Visible, controllable execution** — Follow progress, pause or cancel Runs, provide input, and handle approvals.
-- 🛠️ **An embeddable runtime** — Define Agent packages in `sage.yaml` and build with SAgents v2 in Python.
+- 🧩 **Plugin-based architecture** — Compose model, memory, storage, tool, and scheduling providers with explicit contracts and managed lifecycles.
+- 📦 **Declarative Agent packages** — Define instructions, capabilities, and runtime configuration in `sage.yaml`; manage immutable versions in Server Studio.
+- 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
+- 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
+- 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and MCP services into the same agent workflow.
+- 🏗️ **One runtime, multiple hosts** — Use SAgents v2 through Desktop and Server, or embed it in your own Python application.
 
 ---
 
@@ -222,16 +221,19 @@ Contributions are welcome through [Issues](https://github.com/ZHangZHengEric/Sag
 
 ## 💬 **Community**
 
-[Join Slack](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA) · [Report a bug or suggest a feature](https://github.com/ZHangZHengEric/Sage/issues)
+<div align="center">
+
+[![Slack](https://img.shields.io/badge/Join_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![GitHub Issues](https://img.shields.io/badge/Issues_%26_Ideas-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ZHangZHengEric/Sage/issues)
+
+</div>
 
 ## 💖 **Sponsors**
 
-Thank you to **RcrAI** and **Data** for supporting Sage.
-
 <p align="center">
-  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI" />
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="assets/sponsors/idata_logo.png" height="50" alt="Data" />
+  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="40" align="middle" alt="RcrAI" />
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/sponsors/idata_mark.png" height="64" align="middle" alt="Data" />
 </p>
 
 ---
