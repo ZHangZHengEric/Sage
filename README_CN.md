@@ -176,22 +176,26 @@ python quickstart.py
 
 ## 🧠 **SAgents v2 内核**
 
-```text
-     Desktop v2                 Server v2
-    Flutter 工作区             Web + Agent Studio
-            \                    /
-                  SAgents v2
-           Agent 包 · Session · Run
-          模型 · 工具 · Skills · 记忆
-             存储 · 沙箱 · 事件
+```mermaid
+flowchart TB
+    desktop["Desktop v2<br/>Flutter 工作区"]
+    server["Server v2<br/>Web 与 Agent Studio"]
+    custom["你的应用<br/>Python 集成"]
+
+    runtime["SAgents v2<br/>Agent 包 · Session · Run"]
+
+    desktop --> runtime
+    server --> runtime
+    custom --> runtime
+
+    runtime --> intelligence["模型与上下文<br/>模型接入 · 记忆"]
+    runtime --> capabilities["工具与工作流<br/>Skills · MCP"]
+    runtime --> execution["执行与状态<br/>存储 · 沙箱 · 事件"]
 ```
 
-| 核心概念 | 职责 |
-| --- | --- |
-| **Agent 包** | 定义指令、模型、工具、Skills 和运行配置。 |
-| **Session** | 保存跨 Run 的持久化对话历史。 |
-| **Run** | 承载一次执行，以及流式进度和交互。 |
-| **扩展组件** | 按需替换模型、存储、记忆、工具和调度实现。 |
+- 📦 **Agent 包** — 定义智能体可以做什么。
+- 💬 **Session** — 保存跨 Run 的对话历史。
+- ⚡ **Run** — 执行任务，提供实时进度与交互。
 
 宿主应用负责界面、身份认证和凭据。内置运行配置面向单进程或单宿主；本机进程执行不提供容器级隔离。
 

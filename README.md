@@ -176,22 +176,26 @@ The existing [Web](docs/en/applications/WEB.md), [CLI](docs/en/applications/CLI.
 
 ## 🧠 **Built on SAgents v2**
 
-```text
-     Desktop v2                 Server v2
-   Flutter workspace          Web + Agent Studio
-            \                    /
-                  SAgents v2
-          Agent packages · Sessions · Runs
-        Models · Tools · Skills · Memory
-           Storage · Sandbox · Events
+```mermaid
+flowchart TB
+    desktop["Desktop v2<br/>Flutter workspace"]
+    server["Server v2<br/>Web & Agent Studio"]
+    custom["Your application<br/>Python integration"]
+
+    runtime["SAgents v2<br/>Agent packages · Sessions · Runs"]
+
+    desktop --> runtime
+    server --> runtime
+    custom --> runtime
+
+    runtime --> intelligence["Models & context<br/>Providers · Memory"]
+    runtime --> capabilities["Tools & workflows<br/>Skills · MCP"]
+    runtime --> execution["Execution & state<br/>Storage · Sandbox · Events"]
 ```
 
-| Building block | Role |
-| --- | --- |
-| **Agent package** | Instructions, models, tools, Skills, and runtime configuration. |
-| **Session** | Durable conversation history shared across Runs. |
-| **Run** | An execution attempt with streamed progress and interaction. |
-| **Extensions** | Replaceable model, storage, memory, tool, and scheduling implementations. |
+- 📦 **Agent package** — Define what an agent can do.
+- 💬 **Session** — Keep its conversation history across Runs.
+- ⚡ **Run** — Execute a task with live progress and interaction.
 
 Your application owns the UI, authentication, and credentials. Built-in runtime configurations target a single process or host; local process execution is not container isolation.
 
