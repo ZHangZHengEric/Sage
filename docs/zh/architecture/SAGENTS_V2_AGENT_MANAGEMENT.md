@@ -1,3 +1,14 @@
+---
+layout: default
+title: Agent 包管理
+parent: 架构
+nav_order: 3
+lang: zh
+ref: v2-detail-SAGENTS_V2_AGENT_MANAGEMENT
+---
+
+{% include lang_switcher.html %}
+
 # SAgents V2：Agent 自定义 Agent 的实现与接入
 
 更新：2026-09-13。本文描述本次新增的运行时能力；它是 RSI 的能力建设基础，不包含自动评分、学习策略搜索或监督晋升闭环。
@@ -93,7 +104,7 @@ service = AgentManagementService(
 
 ## 4. 标准插件与流程节点
 
-沿用 [Extension 契约](../../../sagents/v2/runtime/extensions/contracts.py)：
+沿用 [Extension 契约](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/runtime/extensions/contracts.py)：
 
 - Descriptor 声明 plugin ID、版本、API 版本、能力、配置 schema、依赖和作用域。
 - Registration 提供 factory 与生命周期 hooks。
@@ -154,7 +165,7 @@ Bundle 的 `files["extensions/<plugin_id>.py"]` 可提供 manifest.plugins 中�
 
 **源码插件是可信宿主 Python 扩展，具有宿主进程权限。** 授权须检查内容与来源；模块初始化和验证会执行代码，接口校验不等于安全隔离。当前不自动安装依赖、不提供隔离构建 worker 或非可信源码沙箱。未准入源码不能通过此接口试运行。依赖由宿主预先提供。
 
-[源码插件离线示例](../../../examples/sagents_v2_source_plugin.py)可用 `python3.12 -m examples.sagents_v2_source_plugin` 运行。端到端回归包括源码 Flow 节点编译、注册、包保存、实际运行、结果读取，以及错误源码清理和授权拒绝。Desktop V2 的普通 Agent 编辑页不默认开放此能力。
+[源码插件离线示例](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_source_plugin.py)可用 `python3.12 -m examples.sagents_v2_source_plugin` 运行。端到端回归包括源码 Flow 节点编译、注册、包保存、实际运行、结果读取，以及错误源码清理和授权拒绝。Desktop V2 的普通 Agent 编辑页不默认开放此能力。
 
 ## 5. 持久化、并发与多轮语义
 
@@ -181,23 +192,23 @@ Bundle 的 `files["extensions/<plugin_id>.py"]` 可提供 manifest.plugins 中�
 python3.12 -m examples.sagents_v2_agent_management
 ```
 
-[离线示例](../../../examples/sagents_v2_agent_management.py)使用脚本化模型，真实经过模型工具调用、包保存、Builder 装配和 Native Run，展示父 Agent 创建并调用单位换算 Agent。示例不访问模型 API、不消耗推理额度，不作为模型能力提升证据。
+[离线示例](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_agent_management.py)使用脚本化模型，真实经过模型工具调用、包保存、Builder 装配和 Native Run，展示父 Agent 创建并调用单位换算 Agent。示例不访问模型 API、不消耗推理额度，不作为模型能力提升证据。
 
-[专项测试](../../../tests/sagents/v2/test_agent_management_matrix.py)覆盖完整创建执行、会话续接与重启恢复、版本冲突、并发写入、租户隔离、幂等调用、父模型实际调用管理工具、标准插件配置、Flow 节点绑定、技能加载、多轮提问恢复、审批边界以及已创建 Agent 再创建其他 Agent。
+[专项测试](https://github.com/ZHangZHengEric/Sage/blob/main/tests/sagents/v2/test_agent_management_matrix.py)覆盖完整创建执行、会话续接与重启恢复、版本冲突、并发写入、租户隔离、幂等调用、父模型实际调用管理工具、标准插件配置、Flow 节点绑定、技能加载、多轮提问恢复、审批边界以及已创建 Agent 再创建其他 Agent。
 
 Flow 完成时将节点结果提交到 `flow.completed.output`，管理服务通过 `flow_results` 返回；专项测试验证自定义节点的输出在重启后仍可读取。
 
 2026-09-13 追加核对：Agent Management 专项 **33 项通过**；V2 回归为 **2092 passed、19 skipped、1 deselected**，Desktop V2 Python 宿主回归 **168 项通过**。运行时另排除了 `test_local_sandbox_resource_limits.py` 和 `test_local_workspace_sandbox_matrix.py` 两个文件，deselect 的用例为 `test_shell_and_todo_tools_use_v2_runtime_state`。这些原生沙箱测试受外层执行环境限制，不能将排除项计为通过。离线示例、Ruff 检查与 `git diff --check` 通过；未运行真实模型质量评测。
 
-并发正确性场景与未覆盖边界详见 [单机并发与定制可用性核对](SAGENTS_V2_RELIABILITY.md)。
+并发正确性场景与未覆盖边界详见 [单机并发与定制可用性核对](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/zh/architecture/SAGENTS_V2_RELIABILITY.md)。
 
-本次能力是运行时 opt-in：宿主需要注入管理服务与工具授权，尚未默认接入所有 Server / Desktop 页面。后续产品接入应复用同一服务，而不是在各入口各写一份创建逻辑。
+运行时嵌入仍需宿主注入管理服务与工具授权。Server v2 已通过 `/studio` 和 `/api/agent-packages` 接入完整包平台；Desktop 普通 Agent 编辑器与多成员 Studio 不等同于完整包版本管理。产品接入复用同一管理服务。
 
 ## 追加：设置事务与失败清理
 
 验证实例关闭失败时，管理服务保留 Application 与临时目录，后续 close 可重试。服务关闭或验证清理失败后保持 draining，拒绝新管理操作；清理失败不会恢复运行准入。新增两项故障注入回归，专项共 33 项。
 
-Desktop V2 使用串行字段 PATCH 与单服务事务锁保护设置，关闭前提交工作区、预览与沙箱输入；Agent 失败回滚使用已确认快照。该阶段 sidecar revision 为 6（当前为 7）。后端 168 项、Flutter 202 项、核心 2092 项通过；原生沙箱排除范围不变。实现和剩余边界见 [整体审查](V2_COMPREHENSIVE_REVIEW.md)。
+Desktop V2 使用串行字段 PATCH 与单服务事务锁保护设置，关闭前提交工作区、预览与沙箱输入；Agent 失败回滚使用已确认快照。该阶段 sidecar revision 为 6（当前为 7）。后端 168 项、Flutter 202 项、核心 2092 项通过；原生沙箱排除范围不变。实现和剩余边界见 [整体审查](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/zh/architecture/V2_COMPREHENSIVE_REVIEW.md)。
 
 ## 追加：运行时资源管理
 

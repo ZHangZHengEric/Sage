@@ -2,51 +2,30 @@
 layout: default
 title: 核心概念
 nav_order: 3
-description: "Sage 背后的运行时模型"
 lang: zh
-ref: core-concepts
+ref: v2-CORE_CONCEPTS
 ---
 
 {% include lang_switcher.html %}
 
 # 核心概念
 
-## `SAgent` 是运行时入口
+| 概念 | 含义 |
+| --- | --- |
+| Agent 包 | 经过校验的配置，选择 Agent、模型、工具、Skills 与运行插件；可以来自 YAML 字符串、Python 对象或文件。 |
+| Application | `SAgentApplication` 持有已装配的组件、服务和生命周期，使用后需要关闭。 |
+| Session | 对话历史、Run、检查点和交互状态的权威来源。 |
+| Run | Session 中的一次执行，可能完成、失败、取消，或暂停等待继续。 |
+| Context | 从历史、指令、工具和派生记忆组装的模型请求投影。 |
+| Interaction | 持久化的审批或用户输入请求。 |
+| Host | Desktop、Server 或自建应用，负责身份、凭据、界面和会话索引。 |
 
-`sagents/sagents.py` 暴露了 `SAgent` 类。它的 `run_stream(...)` 方法是执行会话时最核心的运行时 API，负责组合：
+## 执行过程
 
-- 输入消息
-- 模型客户端与模型配置
-- 工具和技能管理器
-- 沙箱配置
-- 智能体模式与流程选择
+`StartRun → 组装上下文 → 模型调用 → 授权工具执行 → 后续步骤 → 完成或暂停`。
 
-## 会话是状态承载单元
+事件描述运行时已经接受的事实。关闭观察连接只会 detach，不会取消 Run；恢复、取消和交互回复使用明确的命令。暂停不等于任务完成。
 
-在 Sage 中，会话是执行的基本单位。一个会话会携带：
+摘要、记忆或诊断失败不能改写权威 Session 历史。无法确认结果的工具副作用需要核对，不能盲目重放。
 
-- 消息历史
-- 任务进度
-- 运行时锁
-- 工具与技能访问能力
-- 记忆和上下文预算设置
-
-运行时通过 `sagents/session_runtime.py` 里的全局 session manager 创建或复用这些会话。
-
-## 智能体模式
-
-运行时支持多种执行风格：
-
-- `simple`：直接单智能体交互
-- `fibre`：支持委派的高级多智能体编排
-- `team`：支持子智能体委派的团队编排
-
-模式选择会影响 `SAgent._build_default_flow(...)` 内部组装的默认流程。
-
-## 工具与技能
-
-工具负责把外部能力暴露给运行时，例如执行命令、访问网络服务或代理 MCP。技能则提供结构化工作流与领域知识，指导模型如何完成一类任务。
-
-## 沙箱与可观察性
-
-Sage 把代码执行、命令调用和部分工具运行放进沙箱抽象中，以便控制权限边界。同时，运行时还集成了可观察性链路，方便排查性能和执行路径问题。
+[Python API](api/API_REFERENCE.md) · [架构](architecture/README.md)

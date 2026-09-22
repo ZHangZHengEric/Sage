@@ -2,116 +2,35 @@
 layout: default
 title: 概览
 nav_order: 1
-description: "面向当前 Sage 仓库的任务型文档"
-permalink: /zh/
 lang: zh
-ref: home
+ref: v2-README
+permalink: /zh/
 ---
 
 {% include lang_switcher.html %}
 
-# Sage 文档
+# 概览
 
-这套文档面向当前仓库实际存在的代码结构，围绕 `examples/`、`app/server/`、`app/desktop/`、`sagents/` 和 `mcp_servers/` 这些真实入口组织。
+本文档面向 **SAgents v2**、**Desktop v2** 和 **Server v2**，要求 Python **3.12+**。
 
-## 适合谁阅读
+| 你的目标 | 从这里开始 |
+| --- | --- |
+| 在本地使用 Sage | [Desktop v2](applications/DESKTOP.md) |
+| 使用多用户 Web 应用 | [Server v2](applications/WEB.md) |
+| 从 Python 运行 Agent | [快速开始](applications/GETTING_STARTED.md) |
+| 组合插件与 Agent 包 | [配置](CONFIGURATION.md) · [插件扩展](architecture/PLUGINS.md) |
+| 集成客户端 | [Python API](api/API_REFERENCE.md) · [HTTP API](api/HTTP_API_REFERENCE.md) |
 
-- 想在本地运行 Sage 的使用者
-- 需要理解运行时和应用结构的贡献者
-- 需要通过工具、技能、API 或 MCP Server 扩展 Sage 的集成人员
+## 理解运行时
 
-## 建议先读
+[核心概念](CORE_CONCEPTS.md) → [架构](architecture/README.md) → [记忆](memory/README.md) → [工具与 MCP](MCP_SERVERS.md)。
 
-1. [应用入口](applications/README.md)：快速开始、Web（含 Docker）、桌面、CLI、TUI 与 Chrome 扩展
-2. [核心概念](CORE_CONCEPTS.md)：运行时模型
-3. [架构](architecture/README.md)：仓库与子系统边界
-4. [配置](CONFIGURATION.md)：环境变量与部署参数
-5. [API 文档](api/README.md)：HTTP 与运行时接口
+## 运行与贡献
 
-## 常见阅读路径
+[环境变量](ENV_VARS.md) · [故障排查](TROUBLESHOOTING.md) · [开发](DEVELOPMENT.md)。
 
-### 我想在本地运行 Sage
+Desktop 是本机单用户宿主；Server 支持多用户，但当前只运行一个 worker。持久化本身不等于分布式执行。
 
-建议阅读：
+## 文档范围
 
-1. [应用入口](applications/README.md)
-2. [配置](CONFIGURATION.md)
-3. [故障排查](TROUBLESHOOTING.md)
-
-### 我想扩展运行时
-
-建议阅读：
-
-1. [核心概念](CORE_CONCEPTS.md)
-2. [架构](architecture/README.md)
-3. [MCP Servers](MCP_SERVERS.md)
-4. [开发](DEVELOPMENT.md)
-
-### 我想和服务端集成
-
-建议阅读：
-
-1. [应用入口](applications/README.md)
-2. [配置](CONFIGURATION.md)
-3. [API 文档](api/README.md)（入口含 [HTTP API 参考](api/HTTP_API_REFERENCE.md) 与历史 Python 参考）
-
-## 文档地图
-
-- [应用入口](applications/README.md)：快速开始、Web、桌面、CLI、TUI 与 Chrome 扩展
-  - [快速开始](applications/GETTING_STARTED.md)
-  - [Web 应用](applications/WEB.md)（手动启动 + **Docker Compose 全栈**）
-  - [桌面应用](applications/DESKTOP.md)
-  - [CLI 使用指南](applications/CLI.md) · [TUI 使用指南](applications/TUI.md)
-  - [Chrome 扩展](applications/CHROME_EXTENSION.md)
-- [核心概念](CORE_CONCEPTS.md)：会话、智能体、工具、技能、流程和沙箱
-- [架构](architecture/README.md)：代码库整体组织方式（含子章节）
-  - 应用层：[Server](architecture/ARCHITECTURE_APP_SERVER.md) · [Desktop](architecture/ARCHITECTURE_APP_DESKTOP.md) · [其它入口](architecture/ARCHITECTURE_APP_OTHERS.md)
-  - sagents 核心：[总览](architecture/ARCHITECTURE_SAGENTS_OVERVIEW.md) · [Agent / Flow](architecture/ARCHITECTURE_SAGENTS_AGENT_FLOW.md) · [Session / Context](architecture/ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md) · [Tool / Skill](architecture/ARCHITECTURE_SAGENTS_TOOL_SKILL.md) · [Sandbox / LLM / Obs](architecture/ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)
-- [配置](CONFIGURATION.md)：运行时环境变量与存储设置
-- [MCP Servers](MCP_SERVERS.md)：内置 MCP Server 以及它们在平台中的角色
-- [API 文档](api/README.md)：HTTP 与历史 Python API 的导航入口
-  - [HTTP API 参考](api/HTTP_API_REFERENCE.md)：与 `register_routes` 一致的后端接口、请求体、返回体与示例；侧栏可展开子文档
-    - 子文档：[认证与用户](api/HTTP_API_AUTH_USER.md) · [对话与流式](api/HTTP_API_CHAT.md) · [Agent 补充](api/HTTP_API_AGENT.md) · [工具 / 技能 / MCP](api/HTTP_API_TOOLS_MCP.md) · [计划任务 /tasks](api/HTTP_API_TASKS.md) · [平台与可观测](api/HTTP_API_PLATFORM.md)
-  - [Python 运行时 API](api/API_REFERENCE.md)：与 `sagents` 源码一致，主站对外 HTTP 请见上条
-- [Memory](memory/README.md)：记忆、检索与 memory-search 工作线
-- [问卷提供方式](QUESTIONNAIRE_FORMATS.md)：Inline Questionnaire、历史 XML+JSON、`questionnaire_async` 与前端兼容规范
-- [落地应用方案](solutions/README.md)：面向行业与业务场景的售前方案集合
-- [开发](DEVELOPMENT.md)：贡献流程和源码位置
-- [故障排查](TROUBLESHOOTING.md)：常见启动和环境问题
-
-## 当前产品入口
-
-### 轻量示例
-
-- `sage run` / `sage chat` / `sage doctor`：开发向 CLI 入口
-- `examples/sage_demo.py`：Streamlit 演示
-- `examples/sage_server.py`：独立 FastAPI 示例服务
-
-### 主应用服务端
-
-- `app/server/main.py`：主 FastAPI 应用入口
-- `app/server/web/`：Vue 3 + Vite Web 客户端
-
-当你需要完整产品能力，而不是演示程序时，优先走这条路径。
-
-### 桌面应用
-
-- `app/desktop/entry.py`：桌面端启动入口
-- `app/desktop/core/main.py`：桌面本地 FastAPI 后端
-- `app/desktop/ui/`：桌面 UI
-
-当你需要打包后的桌面体验，而不是浏览器版应用时，使用这条路径。
-
-### 核心运行时
-
-- `sagents/sagents.py`：`SAgent` 流式运行时入口
-- `sagents/agent/`：智能体实现
-- `sagents/tool/`：工具系统与 MCP 代理支持
-- `sagents/skill/`：Skill 加载与执行
-- `sagents/utils/sandbox/`：沙箱抽象与提供者
-
-## 文档原则
-
-- 这套文档优先保证与当前源码一致，而不是追求历史信息完整。
-- 历史迁移说明和重复页面不再作为主文档集合的一部分。
-- 仓库根目录的 `README.md` 仍然是项目介绍页面；这里是技术层面的权威来源。
+旧版应用指南、设计提案和历史审查记录已移出本站导航与搜索，保留在[仓库历史目录](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/README.md)，不作为 v2 使用说明。独立的 `app/wiki` 内容介绍旧版产品，不是 v2 的参考文档。

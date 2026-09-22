@@ -3,10 +3,10 @@ name: Deploy Documentation
 on:
   push:
     branches: [ main ]
-    paths: [ 'docs/**' ]
+    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/sagents_v2_quickstart.py', '.github/workflows/docs.yml' ]
   pull_request:
     branches: [ main ]
-    paths: [ 'docs/**' ]
+    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/sagents_v2_quickstart.py', '.github/workflows/docs.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +25,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate documentation sources
+        run: |
+          python -m pip install pyyaml
+          python docs/scripts/check_docs.py
+
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -42,6 +52,9 @@ jobs:
           bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
         env:
           JEKYLL_ENV: production
+
+      - name: Validate language navigation
+        run: python docs/scripts/check_language_nav.py
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
