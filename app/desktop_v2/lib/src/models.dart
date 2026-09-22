@@ -455,6 +455,7 @@ class ComponentSummary {
     this.selectedPluginId,
     this.activeSource = '',
     this.activeConfig = const {},
+    this.selectedConfig,
     this.pendingRestart = false,
   });
 
@@ -469,6 +470,7 @@ class ComponentSummary {
   final String? selectedPluginId;
   final String activeSource;
   final Map<String, Object?> activeConfig;
+  final Map<String, Object?>? selectedConfig;
   final bool pendingRestart;
 
   String get implementation {
@@ -491,6 +493,9 @@ class ComponentSummary {
     final rawPlugins = json['plugins'];
     final rawConfig = active['config'] ?? json['config'];
     return ComponentSummary(
+      selectedConfig: json['selected_config'] is Map
+          ? (json['selected_config'] as Map).cast<String, Object?>()
+          : null,
       id: component['component_id']?.toString() ?? json['id']?.toString() ?? '',
       name: component['name']?.toString() ?? json['name']?.toString() ?? '',
       value: component['value']?.toString() ?? '',

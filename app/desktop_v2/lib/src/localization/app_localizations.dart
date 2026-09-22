@@ -258,6 +258,7 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.restoreDefaults': '恢复默认阈值',
     'component.tokenEstimator.name': 'Token 估算',
     'component.tokenEstimator.value': '估算模型请求占用的 Token 数量',
+    'component.skillLoading.name': 'Skill 加载',
     'component.reducer.name': '上下文压缩',
     'component.reducer.value': '在请求超过模型窗口前精简历史消息',
     'component.plugin.jsonHeuristic.name': 'JSON 启发式估算',
@@ -648,6 +649,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Token estimation',
     'component.tokenEstimator.value':
         'Estimates token usage for model requests',
+    'component.skillLoading.name': 'Skill loading',
     'component.reducer.name': 'Context compression',
     'component.reducer.value':
         'Reduces history before it exceeds the model window',
@@ -1060,6 +1062,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Estimativa de tokens',
     'component.tokenEstimator.value':
         'Estima o uso de tokens nas solicitações ao modelo',
+    'component.skillLoading.name': 'Carregamento de Skills',
     'component.reducer.name': 'Compressão de contexto',
     'component.reducer.value':
         'Reduz o histórico antes de exceder a janela do modelo',
@@ -1479,6 +1482,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Estimación de tokens',
     'component.tokenEstimator.value':
         'Estima el uso de tokens en las solicitudes al modelo',
+    'component.skillLoading.name': 'Carga de Skills',
     'component.reducer.name': 'Compresión de contexto',
     'component.reducer.value':
         'Reduce el historial antes de superar la ventana del modelo',
@@ -1898,6 +1902,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Estimation des jetons',
     'component.tokenEstimator.value':
         'Estime les jetons utilisés par les requêtes au modèle',
+    'component.skillLoading.name': 'Chargement des Skills',
     'component.reducer.name': 'Compression du contexte',
     'component.reducer.value':
         'Réduit l’historique avant de dépasser la fenêtre du modèle',
@@ -2315,6 +2320,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Token-Schätzung',
     'component.tokenEstimator.value':
         'Schätzt den Tokenverbrauch von Modellanfragen',
+    'component.skillLoading.name': 'Skill-Laden',
     'component.reducer.name': 'Kontextkomprimierung',
     'component.reducer.value':
         'Reduziert den Verlauf vor dem Überschreiten des Modellfensters',
@@ -2713,6 +2719,7 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.restoreDefaults': '既定のしきい値に戻す',
     'component.tokenEstimator.name': 'Token 見積もり',
     'component.tokenEstimator.value': 'モデルリクエストの Token 使用量を見積もります',
+    'component.skillLoading.name': 'Skill の読み込み',
     'component.reducer.name': 'コンテキスト圧縮',
     'component.reducer.value': 'モデルのウィンドウを超える前に履歴を縮小します',
     'component.plugin.jsonHeuristic.name': 'JSON ヒューリスティック',
@@ -3089,6 +3096,7 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.restoreDefaults': '기본 임계값 복원',
     'component.tokenEstimator.name': 'Token 추정',
     'component.tokenEstimator.value': '모델 요청의 Token 사용량을 추정합니다',
+    'component.skillLoading.name': 'Skill 로딩',
     'component.reducer.name': '컨텍스트 압축',
     'component.reducer.value': '모델 창을 넘기 전에 기록을 줄입니다',
     'component.plugin.jsonHeuristic.name': 'JSON 휴리스틱',
@@ -3482,6 +3490,7 @@ const _translations = <String, Map<String, String>>{
     'component.tokenEstimator.name': 'Оценка Token',
     'component.tokenEstimator.value':
         'Оценивает число Token в запросах к модели',
+    'component.skillLoading.name': 'Загрузка Skills',
     'component.reducer.name': 'Сжатие контекста',
     'component.reducer.value': 'Сокращает историю до превышения окна модели',
     'component.plugin.jsonHeuristic.name': 'Оценка JSON',

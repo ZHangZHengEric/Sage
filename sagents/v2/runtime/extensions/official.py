@@ -9,6 +9,7 @@ inventory.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 
 from sagents.v2.agent.policy import (
     BudgetRule,
@@ -105,6 +106,7 @@ from sagents.v2.runtime.session import (
     PostgresSessionStore,
 )
 from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+from sagents.v2.skill.plugins.loading import SkillLoadingConfig, SkillLoadingPlugin
 from sagents.v2.tool.plugins.delegation import MultiAgentToolPlugin
 from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
@@ -451,9 +453,9 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "type": "object",
             "properties": {
                 "model": {},
-                "model_binding": {"type": "string", "minLength": 1},
-                "max_source_tokens": {"type": "integer", "minimum": 1},
-                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "model_binding": {"type": "string", "minLength": 1, "default": "summary"},
+                "max_source_tokens": {"type": "integer", "minimum": 1, "default": 24_000},
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
             },
             "required": ["model"],
             "additionalProperties": False,
@@ -944,6 +946,8 @@ def _one(
     api_version: str = "2",
     version: str = "2.0.0",
 ) -> None:
+    if config_schema is not None:
+        config_schema = _with_constructor_defaults(implementation, config_schema)
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
@@ -970,6 +974,20 @@ def _one(
             factory=factory,
         )
     )
+
+
+def _with_constructor_defaults(implementation: type, schema: dict) -> dict:
+    """Publish scalar constructor defaults; explicit factory defaults win."""
+    parameters = inspect.signature(implementation).parameters
+    properties = {key: dict(value) for key, value in schema.get("properties", {}).items()}
+    for key, field in properties.items():
+        parameter = parameters.get(key)
+        if parameter is None or "default" in field:
+            continue
+        value = parameter.default
+        if isinstance(value, (str, int, float, bool)):
+            field["default"] = value
+    return {**schema, "properties": properties}
 
 
 def _strict_empty_config_schema() -> dict:
@@ -999,15 +1017,15 @@ def _optional_object_config_schema(name: str) -> dict:
 
 def _continuation_config_schema(*, uses_model: bool = False) -> dict:
     properties = {
-        "repeat_threshold": {"type": "integer", "minimum": 1},
+        "repeat_threshold": {"type": "integer", "minimum": 1, "default": 3},
     }
     required = []
     if uses_model:
         properties.update(
             {
                 "model": {},
-                "model_binding": {"type": "string", "minLength": 1},
-                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "model_binding": {"type": "string", "minLength": 1, "default": "fast"},
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
             }
         )
         required.append("model")
@@ -1231,7 +1249,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "model": {},
                         "language": {"type": "string"},
-                        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+                        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
                     },
                     "required": ["model"],
                     "additionalProperties": False,
@@ -1325,6 +1343,14 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
 
 
 def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
+    registry.register(
+        ExtensionRegistration(
+            descriptor=SkillLoadingPlugin.descriptor,
+            config_model=SkillLoadingConfig,
+            factory=lambda context, dependencies: SkillLoadingPlugin(**context.config),
+            start=lambda plugin, context, dependencies: {"skill.loading": plugin},
+        )
+    )
     registry.register(
         ExtensionRegistration(
             descriptor=EphemeralToolPlugin.descriptor,

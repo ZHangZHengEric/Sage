@@ -479,3 +479,38 @@ a fresh builder or process restart begins with estimation until usage arrives.
 Request diagnostics record the accounting method, baseline request, reported
 input, estimated delta, and safety margin. Calibration scopes are task-local so
 concurrent Runs cannot borrow each other's usage.
+
+Skill loading is selected through `skill.loading`, independently of the Skill
+catalog/source and `load_skill` tool providers. The built-in
+`sage.skill.loading.lazy` plugin accepts `max_active_tokens` (positive integer,
+default `6000`). This bounds the combined active Skill context, not model output.
+
+```yaml
+runtime:
+  capabilities:
+    skill.loading:
+      plugin: sage.skill.loading.lazy
+      config:
+        max_active_tokens: 12000
+```
+
+`plugins[].config` supplies plugin defaults; capability selection config overrides
+those defaults. Builder and Desktop materialize the selected provider. Direct
+`AgentCompositionFactory.create_skill_loader()` callers can use the same manifest
+configuration for the built-in implementation, or inject `skill_loading` with a
+custom `create_loader(**ports)` implementation.
+
+Desktop v2 exposes this under runtime components. Its shared configuration editor
+reads scalar properties (`string`, `integer`, `number`, `boolean`), enum choices, and defaults
+from `config_schema`; saving validates the configuration against the plugin schema
+on the backend. Host-injected required ports are omitted from settings validation
+and validated at plugin instantiation. Complex schemas are not yet editable by
+this scalar form. Skill loading changes apply on the next run.
+
+Desktop plugin forms show registered defaults and saved overrides. Enum fields
+use selectors and preserve the schema value type. Product-injected fields without
+user-facing defaults are hidden; fixed values with defaults are shown read-only
+and omitted from submitted overrides. Built-in registrations publish scalar
+constructor defaults, with explicit factory defaults taking precedence. Desktop
+completion thresholds and model timeouts remain configurable when the selected
+implementation uses them; local tool selection does not expose model timeouts.

@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator, ValidationError
+
 
 from app.desktop_v2.backend.catalog import (
     DesktopAgentRecord,
@@ -21,6 +23,7 @@ from app.desktop_v2.backend.shell_policy import (
 from sagents.v2.tool.localization import localize_tool_definition
 from app.desktop_v2.backend.package import (
     DESKTOP_COMPONENTS as _DESKTOP_COMPONENTS,
+    desktop_component_config_schema,
     stable_component_id as _stable_component_id,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
@@ -956,7 +959,7 @@ class DesktopCatalogServiceMixin:
                             for dependency in descriptor.dependencies
                             if not dependency.optional
                         ],
-                        "config_schema": descriptor.config_schema,
+                        "config_schema": desktop_component_config_schema(capability, descriptor.config_schema, language=settings.language, plugin_id=descriptor.plugin_id),
                     }
                 )
             if capability == "agent.continuation-policy":
@@ -986,6 +989,7 @@ class DesktopCatalogServiceMixin:
                         "scope": component_spec["scope"],
                     },
                     "plugins": plugins,
+                    "selected_config": dict(settings.component_configs.get(capability, {})),
                     "active": {
                         "plugin_id": active_plugin_id,
                         "selected_plugin_id": selected,
@@ -1090,6 +1094,13 @@ class DesktopCatalogServiceMixin:
                 normalized_config = _tool_selection_component_config(
                     request.plugin_id, request.config
                 )
+            schema = desktop_component_config_schema(component_id, registration.descriptor.config_schema)
+            # Runtime ports are supplied by the host, not the settings form.
+            schema.pop("required", None)
+            try:
+                Draft202012Validator(schema).validate(normalized_config)
+            except ValidationError as exc:
+                raise ValueError(f"invalid plugin configuration: {exc.message}") from exc
             choices = dict(settings.component_selections)
             choices[component_id] = request.plugin_id
             configs = dict(settings.component_configs)

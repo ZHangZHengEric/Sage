@@ -2070,6 +2070,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     by_id = {value["component"]["component_id"]: value for value in inventory}
 
     assert set(by_id) == {
+        "skill.loading",
         "agent.continuation-policy",
         "context.token-estimator",
         "context.reducer",
@@ -4993,3 +4994,86 @@ def test_workspace_prompt_listing_stays_within_two_levels(tmp_path: Path):
     assert "src/main.py" in listing
     assert "src/pkg" in listing
     assert "hidden.py" not in listing
+
+
+@pytest.mark.asyncio
+async def test_skill_loading_component_schema_and_validation(tmp_path):
+    from app.desktop_v2.backend.package import desktop_v2_manifest
+    service = DesktopV2Service(tmp_path)
+    try:
+        inventory = await service.component_inventory("user_1")
+        component = next(v for v in inventory if v["component"]["component_id"] == "skill.loading")
+        schema = component["plugins"][0]["config_schema"]
+        assert schema["properties"]["max_active_tokens"]["default"] == 6000
+        for invalid in (0, -1, True, 1.5, "12000"):
+            with pytest.raises(ValueError):
+                await service.select_component("skill.loading", ComponentSelectionRequest(
+                    plugin_id="sage.skill.loading.lazy", config={"max_active_tokens": invalid},
+                ), "user_1")
+        await service.select_component("skill.loading", ComponentSelectionRequest(
+            plugin_id="sage.skill.loading.lazy", config={"max_active_tokens": 12000},
+        ), "user_1")
+        inventory = await service.component_inventory("user_1")
+        component = next(v for v in inventory if v["component"]["component_id"] == "skill.loading")
+        assert component["selected_config"] == {"max_active_tokens": 12000}
+        settings = await service.get_settings()
+        manifest = desktop_v2_manifest(session_root=tmp_path,
+            component_selections=settings.component_selections,
+            component_configs=settings.component_configs)
+        assert manifest.runtime.selections("skill.loading")[0].config == {"max_active_tokens": 12000}
+    finally:
+        await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_summary_plugin_defaults_match_runtime_and_hide_host_binding(tmp_path):
+    import inspect
+    from sagents.v2.context import ModelConversationSummarizer
+    service = DesktopV2Service(tmp_path)
+    try:
+        inventory = await service.component_inventory("user_1")
+        component = next(v for v in inventory if v["component"]["component_id"] == "context.summarizer")
+        plugin = next(p for p in component["plugins"] if p["plugin_id"] == "sage.context.summarizer.model")
+        properties = plugin["config_schema"]["properties"]
+        defaults = inspect.signature(ModelConversationSummarizer).parameters
+        for key in ("model_binding", "max_source_tokens", "timeout_seconds"):
+            assert properties[key]["default"] == defaults[key].default
+        assert properties["model_binding"]["readOnly"] is True
+        with pytest.raises(ValueError):
+            await service.select_component("context.summarizer", ComponentSelectionRequest(
+                plugin_id="sage.context.summarizer.model", config={"model_binding": "other"},
+            ), "user_1")
+        await service.select_component("context.summarizer", ComponentSelectionRequest(
+            plugin_id="sage.context.summarizer.model",
+            config={"max_source_tokens": 16000, "timeout_seconds": 30},
+        ), "user_1")
+    finally:
+        await service.session_store.close()
+
+
+@pytest.mark.asyncio
+async def test_all_user_plugin_fields_have_defaults_or_are_host_owned(tmp_path):
+    from jsonschema import Draft202012Validator
+    service = DesktopV2Service(tmp_path)
+    try:
+        inventory = await service.component_inventory("user_1")
+        checked = 0
+        for component in inventory:
+            if component["component"]["selection_mode"] != "user":
+                continue
+            for plugin in component["plugins"]:
+                schema = plugin["config_schema"]
+                for name, field in schema.get("properties", {}).items():
+                    kind = field.get("type")
+                    if not isinstance(kind, str) or kind not in {"string", "integer", "number", "boolean"}:
+                        continue
+                    if field.get("readOnly") and "default" not in field:
+                        continue
+                    assert "default" in field, (plugin["plugin_id"], name)
+                    Draft202012Validator(field).validate(field["default"])
+                    checked += 1
+                if plugin["plugin_id"] in {"sage.tool-selection.lexical", "sage.tool-selection.recent"}:
+                    assert "model_timeout_seconds" not in schema["properties"]
+        assert checked > 30
+    finally:
+        await service.session_store.close()

@@ -25,6 +25,52 @@ import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
+class _SkillComponentApi extends _FakeApi {
+  @override
+  Future<List<ComponentSummary>> listComponents() async => [
+    ComponentSummary(
+      id: 'skill.loading', name: 'Skill loading', value: '',
+      selectionMode: 'user', applyMode: 'next_run',
+      selectedPluginId: lastSelectedComponentPlugin ?? 'sage.skill.loading.lazy',
+      selectedConfig: lastSelectedComponentConfig ?? const {},
+      activePluginId: 'sage.skill.loading.lazy',
+      plugins: [ComponentPluginSummary(
+        id: 'sage.skill.loading.lazy', name: 'Skill loading', value: '',
+        configSchema: {'type': 'object', 'properties': {
+          'max_active_tokens': {'type': 'integer', 'minimum': 1, 'default': 6000},
+        }},
+      ), ComponentPluginSummary(
+        id: 'test.skill.other', name: 'Custom Skill loading', value: '',
+        configSchema: {'type': 'object', 'properties': {
+          'cache_enabled': {'type': 'boolean', 'default': true},
+        }},
+      )],
+    ),
+  ];
+}
+
+class _SummaryComponentApi extends _FakeApi {
+  @override
+  Future<List<ComponentSummary>> listComponents() async => const [
+    ComponentSummary(
+      id: 'context.summarizer', name: 'Context summarizer',
+      selectionMode: 'user', selectedPluginId: 'sage.context.summarizer.model',
+      activePluginId: 'sage.context.summarizer.model', selectedConfig: {},
+      plugins: [ComponentPluginSummary(
+        id: 'sage.context.summarizer.model', name: 'Model summary', value: '',
+        configSchema: {'type': 'object', 'properties': {
+          'root': {'type': 'string', 'readOnly': true},
+          'format': {'enum': ['json', 'text'], 'default': 'json'},
+          'batch_size': {'enum': [1, 2, 4], 'default': 2},
+          'model_binding': {'type': 'string', 'default': 'summary', 'readOnly': true},
+          'max_source_tokens': {'type': 'integer', 'default': 24000, 'minimum': 1},
+          'timeout_seconds': {'type': 'number', 'default': 60, 'exclusiveMinimum': 0},
+        }},
+      )],
+    ),
+  ];
+}
+
 class _ClipboardApi extends _FakeApi {
   Uint8List? uploadedBytes;
 
@@ -5768,7 +5814,7 @@ void main() {
             controller.setInvocationMode(
               width == 600 ? InvocationMode.plan : InvocationMode.goal,
             );
-            tester.view.physicalSize = Size(width, 800);
+            tester.view.physicalSize = Size(width, 520);
             await tester.pumpAndSettle();
             expect(
               tester.takeException(),
@@ -7043,6 +7089,178 @@ void main() {
   });
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
+    for (final width in [1200.0, 760.0]) {
+      testWidgets('component navigation tracks scrolling ${brightness.name} $width', (tester) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        tester.view.physicalSize = Size(width, 520);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final controller = await _controller();
+        try {
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-button')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('运行组件'));
+          await tester.pumpAndSettle();
+          final nav = find.byKey(const ValueKey('settings-components-navigation'));
+          final body = find.byKey(const ValueKey('settings-body-scroll'));
+          final bodyController = tester.widget<SingleChildScrollView>(body).controller!;
+          final navController = tester.widget<SingleChildScrollView>(nav).controller!;
+          Finder link(String id) => find.byKey(ValueKey('settings-component-nav-$id'));
+          bool selected(String id) => tester.widget<Semantics>(link(id)).properties.selected == true;
+          expect(selected('agent.continuation-policy'), isTrue);
+          expect(tester.widget<SingleChildScrollView>(nav).scrollDirection,
+              width == 1200 ? Axis.vertical : Axis.horizontal);
+          final tool = link('tool.selection-policy');
+          await tester.ensureVisible(tool);
+          await tester.tap(tool);
+          await tester.pumpAndSettle();
+          expect(selected('tool.selection-policy'), isTrue);
+          expect(bodyController.offset, greaterThan(0));
+          // All sections stay mounted: jumping never replaces the right pane.
+          expect(find.byKey(const ValueKey('settings-component-workspace.initializer')), findsOneWidget);
+          final offsetBeforeSave = bodyController.offset;
+          final save = find.byKey(const ValueKey('settings-tool-selection-save'));
+          await tester.ensureVisible(save);
+          await tester.tap(save);
+          await tester.pumpAndSettle();
+          expect(bodyController.offset, greaterThanOrEqualTo(offsetBeforeSave));
+          // Direct scrolling updates selection and keeps the nav item visible.
+          bodyController.jumpTo(bodyController.position.maxScrollExtent);
+          await tester.pumpAndSettle();
+          expect(selected('workspace.initializer'), isTrue);
+          expect(navController.offset, greaterThan(0));
+          expect(tester.getRect(link('workspace.initializer')).overlaps(tester.getRect(nav)), isTrue);
+          bodyController.jumpTo(0);
+          await tester.pumpAndSettle();
+          expect(selected('agent.continuation-policy'), isTrue);
+          expect(navController.offset, 0);
+          expect(tester.takeException(), isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          controller.dispose();
+        }
+      });
+    }
+
+    testWidgets('plugin defaults read-only fields and enum controls ${brightness.name}', (tester) async {
+      tester.platformDispatcher.platformBrightnessTestValue = brightness;
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _SummaryComponentApi();
+      final controller = await _controller(api: api);
+      try {
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('运行组件'));
+        await tester.pumpAndSettle();
+        expect(find.text('root'), findsNothing);
+        final binding = find.byKey(const ValueKey('settings-plugin-context.summarizer-model_binding'));
+        expect(tester.widget<GlassTextField>(binding).readOnly, isTrue);
+        expect(find.text('summary'), findsOneWidget);
+        expect(find.text('24000'), findsOneWidget);
+        expect(find.text('60'), findsOneWidget);
+        final timeout = find.byKey(const ValueKey('settings-plugin-context.summarizer-timeout_seconds'));
+        final save = find.byKey(const ValueKey('settings-plugin-save-context.summarizer'));
+        await tester.enterText(timeout, '0');
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(save).onPressed, isNull);
+        await tester.tap(find.text('恢复默认阈值'));
+        await tester.pumpAndSettle();
+        expect(find.text('60'), findsOneWidget);
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponentConfig, {'max_source_tokens': 24000, 'timeout_seconds': 60.0, 'format': 'json', 'batch_size': 2});
+        final format = find.byKey(const ValueKey('settings-plugin-enum-context.summarizer-format'));
+        await tester.ensureVisible(format);
+        await tester.tap(format);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('text').last);
+        await tester.pumpAndSettle();
+        final batch = find.byKey(const ValueKey('settings-plugin-enum-context.summarizer-batch_size'));
+        await tester.ensureVisible(batch);
+        await tester.tap(batch);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('4').last);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponentConfig, {'max_source_tokens': 24000, 'timeout_seconds': 60.0, 'format': 'text', 'batch_size': 4});
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+      }
+    });
+
+    testWidgets('skill plugin schema form in ${brightness.name}', (tester) async {
+      tester.platformDispatcher.platformBrightnessTestValue = brightness;
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _SkillComponentApi();
+      final controller = await _controller(api: api);
+      try {
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('运行组件'));
+        await tester.pumpAndSettle();
+        final field = find.byKey(const ValueKey('settings-plugin-skill.loading-max_active_tokens'));
+        final save = find.byKey(const ValueKey('settings-plugin-save-skill.loading'));
+        expect(field, findsOneWidget);
+        expect(find.text('6000'), findsOneWidget);
+        await tester.enterText(field, '0');
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(save).onPressed, isNull);
+        await tester.enterText(field, '12000');
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponent, 'skill.loading');
+        expect(api.lastSelectedComponentConfig, {'max_active_tokens': 12000});
+        expect(find.text('12000'), findsOneWidget);
+        final owner = find.byKey(const ValueKey(
+          'settings-plugin-fields-skill.loading-sage.skill.loading.lazy'));
+        expect(find.descendant(of: owner, matching: field), findsOneWidget);
+        final picker = find.byKey(const ValueKey('settings-component-picker-skill.loading'));
+        await tester.ensureVisible(picker);
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Custom Skill loading').last);
+        await tester.pumpAndSettle();
+        expect(field, findsNothing);
+        expect(owner, findsNothing);
+        final otherOwner = find.byKey(const ValueKey(
+          'settings-plugin-fields-skill.loading-test.skill.other'));
+        expect(otherOwner, findsOneWidget);
+        expect(find.descendant(of: otherOwner, matching: find.byType(Switch)), findsOneWidget);
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponentPlugin, 'test.skill.other');
+        expect(api.lastSelectedComponentConfig, {'cache_enabled': true});
+
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+      }
+    });
+
     testWidgets(
       'component settings explain active plugins and enforce route ownership in ${brightness.name}',
       (tester) async {
@@ -7054,7 +7272,6 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final api = _FakeApi();
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
 
@@ -7067,10 +7284,10 @@ void main() {
           find.byKey(const ValueKey('settings-component-context.reducer')),
           findsOneWidget,
         );
-        expect(find.text('上下文压缩'), findsOneWidget);
+        expect(find.text('上下文压缩'), findsNWidgets(2));
         expect(find.text('在请求超过模型窗口前精简历史消息'), findsOneWidget);
         expect(find.text('持久摘要'), findsWidgets);
-        expect(find.text('Run 完成判定'), findsOneWidget);
+        expect(find.text('Run 完成判定'), findsNWidgets(2));
         expect(find.text('无工具调用即完成'), findsWidgets);
         expect(find.text('无工具调用 + LLM Judge'), findsOneWidget);
         expect(find.text('结束工具（turn_status）'), findsOneWidget);
@@ -7078,7 +7295,7 @@ void main() {
           find.byKey(const ValueKey('settings-continuation-policy-details')),
           findsOneWidget,
         );
-        expect(find.text('工具选择策略'), findsOneWidget);
+        expect(find.text('工具选择策略'), findsNWidgets(2));
         expect(find.text('大模型工具选择'), findsWidgets);
         expect(find.text('BM25 相关性选择'), findsOneWidget);
         expect(find.text('最近使用优先'), findsOneWidget);
@@ -7088,10 +7305,10 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('插件参数'), findsOneWidget);
-        expect(find.text('长期记忆'), findsOneWidget);
+        expect(find.text('长期记忆'), findsNWidgets(2));
         expect(find.text('本地 BM25 记忆'), findsWidgets);
         expect(find.text('/Users/test/sage/runtime/memory'), findsOneWidget);
-        expect(find.text('记忆检索词生成'), findsOneWidget);
+        expect(find.text('记忆检索词生成'), findsNWidgets(2));
         expect(find.text('直接使用用户输入'), findsWidgets);
         expect(find.text('LLM 生成检索词'), findsOneWidget);
         expect(
@@ -7118,30 +7335,30 @@ void main() {
                 .dy,
           ),
         );
-        expect(find.text('会话记忆'), findsOneWidget);
+        expect(find.text('会话记忆'), findsNWidgets(2));
         expect(find.text('SQLite BM25 会话记忆'), findsWidgets);
         expect(find.text('关闭会话记忆'), findsOneWidget);
         expect(
           find.text('/Users/test/sage/runtime/session-memory'),
           findsOneWidget,
         );
-        expect(find.text('模型请求记录'), findsOneWidget);
+        expect(find.text('模型请求记录'), findsNWidgets(2));
         expect(find.text('文件模型请求记录'), findsWidgets);
         expect(find.textContaining('Session → LLM 请求'), findsWidgets);
         expect(
           find.text('/Users/test/sage/runtime/diagnostics'),
           findsOneWidget,
         );
-        expect(find.text('结构化日志'), findsOneWidget);
+        expect(find.text('结构化日志'), findsNWidgets(2));
         expect(find.text('轮转文件日志'), findsWidgets);
-        expect(find.text('执行沙箱'), findsOneWidget);
+        expect(find.text('执行沙箱'), findsNWidgets(2));
         expect(
           find.byKey(const ValueKey('settings-sandbox-workspace-config')),
           findsOneWidget,
         );
         expect(find.textContaining('固定虚拟路径：/workspace'), findsOneWidget);
         expect(find.textContaining('使用当前工作区'), findsOneWidget);
-        expect(find.text('工作区初始化'), findsOneWidget);
+        expect(find.text('工作区初始化'), findsNWidgets(2));
         expect(find.text('Claw Mode'), findsWidgets);
         expect(find.text('空白工作区'), findsOneWidget);
         expect(
@@ -7209,6 +7426,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(api.lastSelectedComponent, 'memory.recall-query');
         expect(api.lastSelectedComponentPlugin, 'sage.memory.recall-query.llm');
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
       },
     );
   }
@@ -8466,7 +8685,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
         await tester.pumpAndSettle();
-        tester.view.physicalSize = Size(width, 800);
+        tester.view.physicalSize = Size(width, 520);
         await tester.pumpAndSettle();
 
         expect(

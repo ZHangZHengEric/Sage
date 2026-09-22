@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
@@ -757,25 +758,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _components() => _SettingsContent(
     title: context.l10n.text('settings.components'),
     status: _saving,
+    fillRemaining: true,
     children: [
-      for (final component in _orderedRuntimeComponents(
-        widget.controller.components,
-      ))
-        _ComponentSettingsCard(
-          component: component,
-          onSelect: (pluginId, config) async {
-            setState(() => _saving = true);
-            try {
-              await widget.controller.selectComponent(
-                component.id,
-                pluginId,
-                config: config,
-              );
-            } finally {
-              if (mounted) setState(() => _saving = false);
-            }
-          },
-        ),
+      _RuntimeComponentsPane(
+        components: _orderedRuntimeComponents(widget.controller.components),
+        onSelect: (componentId, pluginId, config) async {
+          setState(() => _saving = true);
+          try {
+            await widget.controller.selectComponent(
+              componentId, pluginId, config: config,
+            );
+          } finally {
+            if (mounted) setState(() => _saving = false);
+          }
+        },
+      ),
     ],
   );
 
@@ -1760,6 +1757,241 @@ List<(String, IconData)> _navItems(BuildContext context) => [
   (context.l10n.text('settings.archive'), CupertinoIcons.archivebox),
 ];
 
+class _RuntimeComponentsPane extends StatefulWidget {
+  const _RuntimeComponentsPane({
+    required this.components,
+    required this.onSelect,
+  });
+
+  final List<ComponentSummary> components;
+  final Future<void> Function(String, String, Map<String, Object?>) onSelect;
+
+  @override
+  State<_RuntimeComponentsPane> createState() => _RuntimeComponentsPaneState();
+}
+
+class _RuntimeComponentsPaneState extends State<_RuntimeComponentsPane> {
+  final _body = ScrollController();
+  final _navigation = ScrollController();
+  final _sections = <String, GlobalKey>{};
+  final _links = <String, GlobalKey>{};
+  String? _active;
+  int _jumpRevision = 0;
+  bool _jumping = false;
+  bool _syncPending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _body.addListener(_syncActive);
+    _updateSections();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RuntimeComponentsPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateSections();
+  }
+
+  void _updateSections() {
+    final ids = widget.components.map((item) => item.id).toSet();
+    _sections.removeWhere((id, _) => !ids.contains(id));
+    _links.removeWhere((id, _) => !ids.contains(id));
+    for (final id in ids) {
+      _sections.putIfAbsent(id, GlobalKey.new);
+      _links.putIfAbsent(id, GlobalKey.new);
+    }
+    if (!ids.contains(_active)) {
+      _active = widget.components.firstOrNull?.id;
+    }
+    _scheduleSync();
+  }
+
+  void _scheduleSync() {
+    if (_syncPending) return;
+    _syncPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncPending = false;
+      if (mounted) _syncActive();
+    });
+  }
+
+  double? _offset(String id) {
+    final render = _sections[id]?.currentContext?.findRenderObject();
+    if (render == null || !render.attached) return null;
+    return RenderAbstractViewport.of(
+      render,
+    ).getOffsetToReveal(render, 0).offset;
+  }
+
+  void _syncActive() {
+    if (_jumping || !_body.hasClients || widget.components.isEmpty) return;
+    var id = widget.components.first.id;
+    for (final item in widget.components) {
+      final offset = _offset(item.id);
+      if (offset != null && offset <= _body.offset + 24) id = item.id;
+    }
+    if (_body.position.maxScrollExtent > 0 && _body.position.extentAfter <= 1) {
+      id = widget.components.last.id;
+    }
+    if (_active == id) return;
+    setState(() => _active = id);
+    _revealLink(id);
+  }
+
+  void _revealLink(String id) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _active != id) return;
+      final render = _links[id]?.currentContext?.findRenderObject();
+      if (render == null || !_navigation.hasClients) return;
+      final viewport = RenderAbstractViewport.of(render);
+      final start = viewport.getOffsetToReveal(render, 0).offset;
+      final end = viewport.getOffsetToReveal(render, 1).offset;
+      final current = _navigation.offset;
+      final target = start < current ? start : (end > current ? end : current);
+      _navigation.jumpTo(
+        target.clamp(0.0, _navigation.position.maxScrollExtent),
+      );
+    });
+  }
+
+  Future<void> _jumpTo(String id) async {
+    final offset = _offset(id);
+    if (offset == null || !_body.hasClients) return;
+    final revision = ++_jumpRevision;
+    _jumping = true;
+    setState(() => _active = id);
+    _revealLink(id);
+    final target = offset.clamp(0.0, _body.position.maxScrollExtent);
+    if (MediaQuery.of(context).disableAnimations) {
+      _body.jumpTo(target);
+    } else {
+      await _body.animateTo(
+        target,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    if (mounted && revision == _jumpRevision) _jumping = false;
+  }
+
+  @override
+  void dispose() {
+    _body.dispose();
+    _navigation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 700;
+      final navWidth = compact ? 180.0 : 250.0;
+      final colors = Theme.of(context).colorScheme;
+      final links = <Widget>[
+        for (final (index, item) in widget.components.indexed) ...[
+          SizedBox(
+            key: _links[item.id],
+            width: compact ? navWidth : navWidth - 8,
+            child: Semantics(
+              key: ValueKey('settings-component-nav-${item.id}'),
+              selected: _active == item.id,
+              child: Tooltip(
+                message: _runtimeComponentName(item, context.l10n),
+                child: _SettingsChoiceButton(
+                  item: _SettingsChoice(
+                    id: item.id,
+                    label: _runtimeComponentName(item, context.l10n),
+                  ),
+                  selected: _active == item.id,
+                  onTap: () => _jumpTo(item.id),
+                ),
+              ),
+            ),
+          ),
+          if (index < widget.components.length - 1)
+            if (compact)
+              const SizedBox(width: 8)
+            else
+              Divider(height: 1, color: colors.outlineVariant),
+        ],
+      ];
+      final navigation = ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: Scrollbar(
+          controller: _navigation,
+          thumbVisibility: true,
+          thickness: 5,
+          radius: const Radius.circular(3),
+          child: SingleChildScrollView(
+            key: const ValueKey('settings-components-navigation'),
+            controller: _navigation,
+            primary: false,
+            padding: EdgeInsets.only(right: compact ? 0 : 8),
+            scrollDirection: compact ? Axis.horizontal : Axis.vertical,
+            child: compact ? Row(children: links) : Column(children: links),
+          ),
+        ),
+      );
+      final body = NotificationListener<ScrollMetricsNotification>(
+        onNotification: (_) {
+          _scheduleSync();
+          return false;
+        },
+        child: NotificationListener<ScrollStartNotification>(
+          onNotification: (notification) {
+            if (notification.dragDetails != null) {
+              _jumpRevision++;
+              _jumping = false;
+            }
+            return false;
+          },
+          child: Scrollbar(
+            controller: _body,
+            child: SingleChildScrollView(
+              key: const ValueKey('settings-body-scroll'),
+              controller: _body,
+              primary: false,
+              padding: const EdgeInsets.only(right: 12, bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final item in widget.components)
+                    Padding(
+                      key: _sections[item.id],
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _ComponentSettingsCard(
+                        component: item,
+                        onSelect: (pluginId, config) =>
+                            widget.onSelect(item.id, pluginId, config),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      if (compact) {
+        return Column(
+          children: [
+            SizedBox(height: 52, child: navigation),
+            const SizedBox(height: 12),
+            Expanded(child: body),
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(width: navWidth, child: navigation),
+          const SizedBox(width: 32),
+          Expanded(child: body),
+        ],
+      );
+    },
+  );
+}
 class _ComponentSettingsCard extends StatelessWidget {
   const _ComponentSettingsCard({
     required this.component,
@@ -2008,14 +2240,6 @@ class _ComponentSettingsCard extends StatelessWidget {
                   ),
                 ),
               ),
-            if (component.id == 'tool.selection-policy')
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: _ToolSelectionConfigEditor(
-                  component: component,
-                  onSave: (config) => onSelect(selected, config),
-                ),
-              ),
             const SizedBox(height: 14),
             Divider(height: 1, color: colors.outlineVariant),
             const SizedBox(height: 12),
@@ -2024,13 +2248,13 @@ class _ComponentSettingsCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
-                    plugin.id == active
+                    plugin.id == selected
                         ? CupertinoIcons.checkmark_circle_fill
                         : plugin.available
                         ? CupertinoIcons.circle
                         : CupertinoIcons.nosign,
                     size: 16,
-                    color: plugin.id == active
+                    color: plugin.id == selected
                         ? colors.primary
                         : colors.onSurfaceVariant,
                   ),
@@ -2061,6 +2285,17 @@ class _ComponentSettingsCard extends StatelessWidget {
                                 height: 1.35,
                               ),
                         ),
+                        if (selectable && plugin.id == selected &&
+                            _editablePluginProperties(plugin.configSchema).isNotEmpty)
+                          Padding(
+                            key: ValueKey('settings-plugin-fields-${component.id}-${plugin.id}'),
+                            padding: const EdgeInsets.only(top: 12, bottom: 8),
+                            child: _PluginConfigEditor(
+                              key: ValueKey('${component.id}:${plugin.id}'),
+                              component: component,
+                              onSave: (config) => onSelect(plugin.id, config),
+                            ),
+                          ),
                         if (!plugin.available && plugin.dependencies.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 3),
@@ -2244,43 +2479,59 @@ class _SandboxResourceConfigEditorState
   }
 }
 
-class _ToolSelectionConfigEditor extends StatefulWidget {
-  const _ToolSelectionConfigEditor({
-    required this.component,
-    required this.onSave,
-  });
+Map<String, Map<String, Object?>> _editablePluginProperties(
+  Map<String, Object?> schema,
+) {
+  final raw = schema['properties'];
+  if (raw is! Map) return const {};
+  return {
+    for (final entry in raw.entries)
+      if (entry.value is Map &&
+          ((entry.value as Map)['readOnly'] != true ||
+              (entry.value as Map)['default'] != null) &&
+          ((entry.value as Map)['enum'] is List || const {
+            'string',
+            'integer',
+            'number',
+            'boolean',
+          }.contains((entry.value as Map)['type'])))
+        entry.key.toString(): (entry.value as Map).cast<String, Object?>(),
+  };
+}
+
+class _PluginConfigEditor extends StatefulWidget {
+  const _PluginConfigEditor({super.key, required this.component, required this.onSave});
 
   final ComponentSummary component;
   final ValueChanged<Map<String, Object?>> onSave;
 
   @override
-  State<_ToolSelectionConfigEditor> createState() =>
-      _ToolSelectionConfigEditorState();
+  State<_PluginConfigEditor> createState() => _PluginConfigEditorState();
 }
 
-class _ToolSelectionConfigEditorState
-    extends State<_ToolSelectionConfigEditor> {
+class _PluginConfigEditorState extends State<_PluginConfigEditor> {
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, bool> _booleans = {};
   String _configFingerprint = '';
 
   ComponentPluginSummary? get _plugin {
-    final selected = widget.component.selectedPluginId;
+    final selected = widget.component.selectedPluginId ?? widget.component.activePluginId;
     for (final plugin in widget.component.plugins) {
       if (plugin.id == selected) return plugin;
     }
     return null;
   }
 
-  Map<String, Map<String, Object?>> get _properties {
-    final raw = _plugin?.configSchema['properties'];
-    if (raw is! Map) return const {};
-    return {
-      for (final entry in raw.entries)
-        if (entry.value is Map)
-          entry.key.toString(): (entry.value as Map).cast<String, Object?>(),
-    };
-  }
+  Map<String, Object?> get _config => widget.component.selectedConfig ?? {
+    for (final entry in widget.component.activeConfig.entries)
+      if (_properties.containsKey(entry.key) &&
+          (widget.component.selectedPluginId == null ||
+              widget.component.selectedPluginId == widget.component.activePluginId))
+        entry.key: entry.value,
+  };
+
+  Map<String, Map<String, Object?>> get _properties =>
+      _editablePluginProperties(_plugin?.configSchema ?? const {});
 
   @override
   void initState() {
@@ -2289,10 +2540,10 @@ class _ToolSelectionConfigEditorState
   }
 
   @override
-  void didUpdateWidget(covariant _ToolSelectionConfigEditor oldWidget) {
+  void didUpdateWidget(covariant _PluginConfigEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
     final fingerprint = jsonEncode([
-      widget.component.activeConfig,
+      _config,
       widget.component.selectedPluginId,
       _plugin?.configSchema,
     ]);
@@ -2308,14 +2559,15 @@ class _ToolSelectionConfigEditorState
     _controllers.clear();
     _booleans.clear();
     _configFingerprint = jsonEncode([
-      widget.component.activeConfig,
+      _config,
       widget.component.selectedPluginId,
       _plugin?.configSchema,
     ]);
     for (final entry in _properties.entries) {
       final schema = entry.value;
       final value =
-          widget.component.activeConfig[entry.key] ?? schema['default'];
+          schema['readOnly'] == true ? schema['default'] :
+              (_config[entry.key] ?? schema['default']);
       if (schema['type'] == 'boolean') {
         _booleans[entry.key] = value == true;
       } else {
@@ -2327,28 +2579,56 @@ class _ToolSelectionConfigEditorState
   }
 
   Map<String, Object?>? _value() {
-    final result = <String, Object?>{};
+    final result = <String, Object?>{
+      for (final entry in _config.entries)
+        if ((_plugin?.configSchema['properties'] as Map?)?[entry.key] is! Map ||
+            (((_plugin?.configSchema['properties'] as Map)[entry.key] as Map)['readOnly'] != true))
+          entry.key: entry.value,
+    };
     for (final entry in _properties.entries) {
       final schema = entry.value;
+      if (schema['readOnly'] == true) {
+        result.remove(entry.key);
+        continue;
+      }
       if (schema['type'] == 'boolean') {
         result[entry.key] = _booleans[entry.key] ?? false;
         continue;
       }
       final raw = _controllers[entry.key]?.text.trim() ?? '';
       Object? value;
-      if (schema['type'] == 'integer') {
+      final choices = schema['enum'];
+      if (choices is List) {
+        final index = choices.indexWhere((option) => option.toString() == raw);
+        if (index < 0) return null;
+        value = choices[index];
+      } else if (schema['type'] == 'integer') {
         value = int.tryParse(raw);
       } else if (schema['type'] == 'number') {
         value = double.tryParse(raw);
       } else {
         value = raw;
       }
-      if (value == null) return null;
+      if (raw.isEmpty &&
+          schema['type'] != 'boolean' &&
+          schema['default'] == null &&
+          !((_plugin?.configSchema['required'] as List?) ?? const []).contains(
+            entry.key,
+          )) {
+        result.remove(entry.key);
+        continue;
+      }
+      if (value == null && !(choices is List && choices.contains(null))) return null;
+      if (choices is List && !choices.contains(value)) return null;
       if (value is num) {
         final minimum = schema['minimum'];
         final maximum = schema['maximum'];
         if (minimum is num && value < minimum) return null;
         if (maximum is num && value > maximum) return null;
+        final exclusiveMinimum = schema['exclusiveMinimum'];
+        final exclusiveMaximum = schema['exclusiveMaximum'];
+        if (exclusiveMinimum is num && value <= exclusiveMinimum) return null;
+        if (exclusiveMaximum is num && value >= exclusiveMaximum) return null;
       }
       result[entry.key] = value;
     }
@@ -2382,7 +2662,11 @@ class _ToolSelectionConfigEditorState
     final properties = _properties;
     final config = _value();
     return Container(
-      key: const ValueKey('settings-tool-selection-config'),
+      key: ValueKey(
+        widget.component.id == 'tool.selection-policy'
+            ? 'settings-tool-selection-config'
+            : 'settings-plugin-config-${widget.component.id}',
+      ),
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -2393,19 +2677,21 @@ class _ToolSelectionConfigEditorState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            context.l10n.text('component.toolSelection.settings'),
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            context.l10n.text('component.toolSelection.settingsHelp'),
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-          ),
+          if (widget.component.id == 'tool.selection-policy') ...[
+            Text(
+              context.l10n.text('component.toolSelection.settings'),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              context.l10n.text('component.toolSelection.settingsHelp'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+            ),
+          ],
           if (properties.isEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -2441,19 +2727,43 @@ class _ToolSelectionConfigEditorState
                               style: Theme.of(context).textTheme.labelMedium,
                             ),
                             const SizedBox(height: 5),
-                            if (entry.value['type'] == 'boolean')
+                            if (entry.value['enum'] is List && (entry.value['enum'] as List).isNotEmpty)
+                              _SettingsPicker<String>(
+                                key: ValueKey('settings-plugin-enum-${widget.component.id}-${entry.key}'),
+                                fallbackToFirst: false,
+                                width: fieldWidth,
+                                enabled: entry.value['readOnly'] != true,
+                                value: entry.value['type'] == 'boolean'
+                                    ? (_booleans[entry.key] ?? false).toString()
+                                    : (_controllers[entry.key]?.text ?? ''),
+                                options: [
+                                  for (final option in entry.value['enum'] as List)
+                                    _PickerOption(value: option.toString(), label: option.toString()),
+                                ],
+                                onChanged: (value) => setState(() {
+                                  if (entry.value['type'] == 'boolean') {
+                                    _booleans[entry.key] = value == 'true';
+                                  } else {
+                                    _controllers[entry.key]?.text = value;
+                                  }
+                                }),
+                              )
+                            else if (entry.value['type'] == 'boolean')
                               Switch(
                                 value: _booleans[entry.key] ?? false,
-                                onChanged: (value) => setState(
+                                onChanged: entry.value['readOnly'] == true ? null : (value) => setState(
                                   () => _booleans[entry.key] = value,
                                 ),
                               )
                             else
                               GlassTextField(
                                 key: ValueKey(
-                                  'settings-tool-selection-${entry.key}',
+                                  widget.component.id == 'tool.selection-policy'
+                                      ? 'settings-tool-selection-${entry.key}'
+                                      : 'settings-plugin-${widget.component.id}-${entry.key}',
                                 ),
                                 controller: _controllers[entry.key],
+                                readOnly: entry.value['readOnly'] == true,
                                 height: 34,
                                 keyboardType:
                                     {
@@ -2501,7 +2811,11 @@ class _ToolSelectionConfigEditorState
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  key: const ValueKey('settings-tool-selection-save'),
+                  key: ValueKey(
+                    widget.component.id == 'tool.selection-policy'
+                        ? 'settings-tool-selection-save'
+                        : 'settings-plugin-save-${widget.component.id}',
+                  ),
                   onPressed: config == null
                       ? null
                       : () => widget.onSave(config),
@@ -2554,6 +2868,7 @@ String _runtimeComponentName(
 ) => switch (component.id) {
   'agent.continuation-policy' =>
     l10n.languageCode == 'zh' ? 'Run 完成判定' : 'Run completion policy',
+  'skill.loading' => l10n.text('component.skillLoading.name'),
   'context.token-estimator' => l10n.text('component.tokenEstimator.name'),
   'context.reducer' => l10n.text('component.reducer.name'),
   'context.summarizer' =>
@@ -3516,8 +3831,10 @@ class _SettingsPicker<T> extends StatelessWidget {
     required this.onChanged,
     this.width = 250,
     this.enabled = true,
+    this.fallbackToFirst = true,
   });
 
+  final bool fallbackToFirst;
   final T value;
   final List<_PickerOption<T>> options;
   final ValueChanged<T> onChanged;
@@ -3528,7 +3845,7 @@ class _SettingsPicker<T> extends StatelessWidget {
     for (final option in options) {
       if (option.value == value) return option;
     }
-    return options.isEmpty ? null : options.first;
+    return options.isEmpty || !fallbackToFirst ? null : options.first;
   }
 
   @override
@@ -6681,7 +6998,9 @@ class _SkillDocument extends StatelessWidget {
                   onPressed: content == null
                       ? null
                       : () async {
-                          await Clipboard.setData(ClipboardData(text: content!));
+                          await Clipboard.setData(
+                            ClipboardData(text: content!),
+                          );
                           if (!context.mounted) return;
                           DesktopNoticeHost.show(
                             context,

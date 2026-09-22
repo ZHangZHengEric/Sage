@@ -1844,3 +1844,96 @@ async def test_materialization_lock_remains_shared_by_concurrent_waiters(
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
         await application.close()
+
+
+@pytest.mark.asyncio
+async def test_skill_loading_config_reaches_factory_and_rematerialized_ports(tmp_path):
+    from sagents.v2.agent.factory import AgentCompositionFactory
+    from sagents.v2.package.manifest.resolver import CompositionResolver
+    from sagents.v2.skill import (
+        InMemorySkillActivationRepository, InMemorySkillProvider,
+        InMemorySkillWorkspace, SkillBundle, SkillDescriptor,
+    )
+
+    package = BuiltinPackageFactory.create(
+        "assistant", package_id="test.skill-config", model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    package = package.model_copy(update={"plugins": (
+        PluginDeclaration(id="sage.skill.loading.lazy", config={"max_active_tokens": 9000}),
+    )})
+    application = await (SAgentBuilder().with_defaults(session_root=tmp_path)
+                         .with_model_provider(ScriptedModelProvider(())).build(package))
+    try:
+        assert application.service("skill.loading").config.max_active_tokens == 9000
+        configured = package.model_copy(update={"runtime": package.runtime.model_copy(
+            update={"capabilities": {**package.runtime.capabilities,
+                "skill.loading": CapabilitySelection(
+                    plugin="sage.skill.loading.lazy", config={"max_active_tokens": 12000},
+                ),
+            }},
+        )})
+        ports = await application.materialize_agent(configured, run_id="run_skill_config")
+        assert ports.skill_loading.config.max_active_tokens == 12000
+        assert any(p.capability == "skill.loading" for p in ports.resolved_plan.providers)
+        resolved = CompositionResolver().resolve(configured)
+        provider = InMemorySkillProvider((SkillBundle(
+            descriptor=SkillDescriptor(name="large", description="large", source_id="test"),
+            files={"SKILL.md": b"x" * 30000}, content_hash="sha256:large",
+        ),))
+        # Exercise actual admission with a body larger than the old 6000 limit.
+        for plugin in (ports.skill_loading, None):
+            loader = AgentCompositionFactory(application.entrypoint().runtime).create_skill_loader(
+                resolved, "assistant", catalog=provider, source=provider,
+                workspace=InMemorySkillWorkspace(), activations=InMemorySkillActivationRepository(),
+                skill_loading=plugin,
+            )
+            loader.catalog = provider
+            loaded = await loader.load("large", run_id="run_skill_config")
+            assert len(loaded.instructions) == 30000
+            assert loader.max_active_tokens == 12000
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_materialized_user_config_is_not_overwritten_by_host_defaults(tmp_path):
+    from sagents.v2.agent.policy import LoopRecoveryRule
+    package = BuiltinPackageFactory.create(
+        "assistant", package_id="test.user-config", model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    package = package.model_copy(update={"runtime": package.runtime.model_copy(update={
+        "capabilities": {**package.runtime.capabilities,
+            "agent.continuation-policy": CapabilitySelection(
+                plugin="sage.agent.continuation.hybrid",
+                config={"repeat_threshold": 7, "timeout_seconds": 12},
+            ),
+            "memory.recall-query": CapabilitySelection(
+                plugin="sage.memory.recall-query.llm", config={"timeout_seconds": 15},
+            ),
+            "context.summarizer": CapabilitySelection(
+                plugin="sage.context.summarizer.model",
+                config={"max_source_tokens": 16000, "timeout_seconds": 18},
+            ),
+        },
+    })})
+    application = await (SAgentBuilder().with_defaults(session_root=tmp_path)
+                         .with_model_provider(ScriptedModelProvider(())).build(package))
+    try:
+        ports = await application.materialize_agent(package, run_id="configured-run")
+        assert ports.continuation_policy.judge.timeout_seconds == 12
+        assert ports.memory_query_generator.timeout_seconds == 15
+        assert ports.summarizer.max_source_tokens == 16000
+        assert ports.summarizer.timeout_seconds == 18
+        deterministic = package.model_copy(update={"runtime": package.runtime.model_copy(update={
+            "capabilities": {**package.runtime.capabilities,
+                "agent.continuation-policy": CapabilitySelection(
+                    plugin="sage.agent.continuation.deterministic", config={"repeat_threshold": 7},
+                ),
+            },
+        })})
+        ports = await application.materialize_agent(deterministic, run_id="configured-deterministic")
+        assert next(r for r in ports.continuation_policy.rules if isinstance(r, LoopRecoveryRule)).threshold == 7
+    finally:
+        await application.close()
