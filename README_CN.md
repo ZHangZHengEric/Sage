@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
+[![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
@@ -16,299 +16,213 @@
 
 ### 🎯 **让复杂工作走向可靠交付**
 
-> 🌟 **面向任务执行、自动化调度、浏览器工作流、IM 交付与企业部署的生产级智能体平台。**
+> 🌟 **面向项目工作、工具执行与多智能体协作的开源平台，支持桌面端、Web 与自建应用。**
 
 </div>
 
 ---
 
-## 📸 **产品截图**
+## ✨ **核心优势**
 
-<div align="center">
-
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/workbench.png" width="100%" alt="工作台"/>
-      <br/><strong>可视化工作台</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/chat.png" width="100%" alt="对话"/>
-      <br/><strong>实时协作</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/preview.png" width="100%" alt="预览"/>
-      <br/><strong>多格式支持</strong>
-    </td>
-  </tr>
-</table>
-
-</div>
-
-> 📖 **详细文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
-
----
-
-## ✨ **核心亮点**
-
-- 🤖 **从规划到交付**：内置规划、执行、自检、记忆召回与工具推荐等智能体能力，面向复杂任务闭环。
-- 🌐 **多入口接入**：支持桌面端、Web、CLI 和 Chrome 扩展，覆盖开发、运营与日常使用场景。
-- 🔁 **自动化与循环任务**：支持定时任务、问卷收集流程与长任务执行，并提供可见的进度反馈。
-- 💬 **全渠道 IM 集成**：支持 WeChat Personal(iLink)、企业微信、飞书、钉钉等渠道的消息与文件收发。
-- 🧰 **统一工具体系**：内置工具、Skills、MCP 服务、浏览器自动化、搜索与图片生成能力可统一编排。
-- 🛡️ **安全沙箱执行**：支持本地、passthrough、远程等多种沙箱模式，保障运行时隔离与安全。
-- 🛠️ **可视化工作台**：统一查看文件、工具输出、代码、图表、Mermaid、Draw.io、音视频与远程预览内容。
-- 🏢 **企业级基础能力**：提供本地账号认证、可配置 CORS、共享服务架构、CI 覆盖和多平台发布能力。
+- 🧩 **插件化架构** — 按需组合模型、记忆、存储、工具和调度实现，统一管理扩展契约与组件生命周期。
+- 📦 **声明式 Agent 包** — 用 `sage.yaml` 定义指令、能力和运行配置，在 Server Studio 中管理不可变版本。
+- 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
+- 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
+- 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 MCP 服务接入同一智能体工作流程。
+- 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents v2，也可以嵌入自己的 Python 应用。
 
 ---
 
 ## 🚀 **快速开始**
 
-**环境要求（从源码跑 Web）：** Python 3.10+、Node.js 18+。**SAgents v2 与 Desktop v2 需要 Python 3.12+。**
+| 选择你的入口 | 从这里开始 |
+| --- | --- |
+| 💻 **Desktop v2** — 本地项目工作与智能体协作 | [桌面端指南](app/desktop_v2/README.md) |
+| 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/server_v2/README.md) |
+| 🧠 **SAgents v2** — 将智能体能力集成到自己的应用 | [运行时快速开始](sagents/v2/README.md#quick-start) |
+| 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases) |
 
-### Web（克隆后一键启动）
+### 💻 从源码启动桌面端
+
+需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **Flutter**。macOS 下运行：
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-./scripts/dev-up.sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+cd app/desktop_v2
+flutter pub get
+flutter run -d macos
 ```
 
-浏览器打开 [http://localhost:5173](http://localhost:5173)。登录后在“模型源管理”中添加模型 Provider，再创建或配置 Agent。首次可能提示**最小模式**（SQLite）与**完整模式**等选择，想最快跑通选最小模式即可。可选：`PYTHON_BIN=...` 或 `USE_UV=1 ./scripts/dev-up.sh` 指定解释器或用 [uv](https://github.com/astral-sh/uv) 装依赖。
+**添加模型 → 配置 Agent → 开始对话或打开项目。**
 
-**详细文档：** [Web 应用](docs/zh/applications/WEB.md)（手工起前后端、Docker Compose 全栈、端口等）
+应用自动启动本机后端。设置与会话数据保存在 `~/sage/runtime`，默认工作区为 `~/sage/agent_workspace`。
 
-### 桌面端（安装包）
+Windows、Linux 配置见 [桌面端指南](app/desktop_v2/README.md)。安装包以对应版本说明为准；现有发布工作流构建的是旧版 Tauri 应用。
 
-在 [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases) 下载 `**.dmg`（macOS）**、Windows 的 `**.exe`（NSIS 安装包）** 或 `**.deb`（Linux）**，按下面安装。
+### 🌐 从源码启动服务端
 
-**macOS**
-
-1. 打开对应 CPU 架构的 `.dmg`，将 **Sage.app** 拖入 **应用程序**。
-2. 当前安装包**尚未**经 Apple 公证/签名。若提示「无法验证开发者」或「无法检查是否包含恶意软件」：在 **访达 → 应用程序** 中 **右键** `Sage.app` → **打开**，在弹窗中再次点 **打开**（为 Gatekeeper 增加一次性例外）。
-3. 若仍被拦截：**系统设置 → 隐私与安全性**，在页面下方找到与 Sage 相关的提示，点 **仍要打开** 后再启动一次。
-4. 若提示应用**已损坏**或始终无法打开，可在终端清除隔离属性后重试：
+需要 **Python 3.12+**、**MySQL** 和 **Node.js 22.12+**。在仓库根目录、已激活 Python 环境的终端中执行：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Sage.app
+python -m pip install -e '.[server-v2]'
+cp app/server_v2/.env.example app/server_v2/.env
 ```
 
-**Windows**
-
-1. 运行 `.exe` 安装程序并按向导完成安装。
-2. 若出现 **SmartScreen**「已保护你的电脑」等提示，可点 **更多信息** → **仍要运行**（具体文案因系统版本可能略有不同）。
-
-**Linux（Debian / Ubuntu）**
-
-1. 从 Releases 下载对应架构的 `.deb`。
-2. 在终端安装（请按实际文件名替换）：
+在 `.env` 中配置 MySQL 连接、JWT 密钥和初始管理员账号，然后运行：
 
 ```bash
-sudo apt install ./Sage-<version>-<arch>.deb
+cd app/server_v2/web
+npm install
+npm run build
+cd ../../..
+python -m app.server_v2
 ```
 
-多数桌面环境也可直接双击 `.deb` 安装。
+打开 **[localhost:8090](http://localhost:8090)**，添加模型和 Agent 后开始对话；进入 **`/studio`** 管理 Agent 包。
 
-**详细文档：** [桌面应用](docs/zh/applications/DESKTOP.md)（从源码构建、环境变量、各平台说明）
+详细配置见 [服务端指南](app/server_v2/README.md)。Server v2 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
 
-### CLI
+### 🧑‍💻 用 SAgents v2 运行第一个 Agent
+
+**一个 Python 文件即可，无需创建 `sage.yaml`。** 完成上面的 Python 安装后，保存为 `quickstart.py`，将 `your-model` 替换为可用模型：
+
+```python
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
+
+import asyncio
+from uuid import uuid4
+
+from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.contracts.commands import InputItem
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
+
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
+
+
+async def main():
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    try:
+        context = RequestContext(actor=ActorRef(
+            principal_id="user-1", principal_type=PrincipalType.USER,
+        ))
+        stream = await app.entrypoint().run_stream(StartRun(
+            agent_id="main",
+            input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
+            resolved_spec_hash=app.composition_hash,
+            idempotency_key=str(uuid4()),
+        ), context)
+        async for event in stream.events:
+            print(event.model_dump_json())
+        print((await stream.wait()).state)
+    finally:
+        await app.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ```bash
-pip install -e .
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-export SAGE_DB_TYPE="file"
-sage doctor
-sage run "用一句话打个招呼"
-# 或: sage chat
+export MODEL_API_KEY="your-api-key"
+python quickstart.py
 ```
 
-**详细文档：** [CLI 使用指南](docs/zh/applications/CLI.md)
-
-### TUI
-
-先 `pip install -e .` 并设置与上相同的 `SAGE_DEFAULT_`* 与 `SAGE_DB_TYPE=file`，再使用 `sage-terminal`（或按文档从 `app/terminal/` 用 `cargo` 运行）。
-
-**详细文档：** [TUI 使用指南](docs/zh/applications/TUI.md)
-
-### Chrome 扩展
-
-在 `chrome://extensions/` 中开启「开发者模式」，**加载已解压的扩展程序**，选择目录 `app/chrome-extension/`。若本机服务端口与默认探测不一致，在扩展中填写后端地址。
-
-**详细文档：** [Chrome 扩展](docs/zh/applications/CHROME_EXTENSION.md)
+`loads()` 解析 YAML 字符串，`build()` 直接接收 manifest 对象。示例输出事件和最终状态，不启用文件或 Shell 工具。[更多配置方式 →](docs/zh/applications/GETTING_STARTED.md)
 
 ---
 
-## 🏗️ **系统架构**
+## 🧠 **SAgents v2 内核**
 
 ```mermaid
-graph TD
-    User[用户] --> Desktop[💻 桌面应用]
-    User --> Web[🌐 Web 应用]
-    User --> CLI[⌨️ CLI]
-    User --> Ext[🧩 Chrome 扩展]
-    User --> IM[💬 IM 渠道]
+flowchart TB
+    desktop["Desktop v2<br/>Flutter 工作区"]
+    server["Server v2<br/>Web 与 Agent Studio"]
+    custom["你的应用<br/>Python 集成"]
 
-    Desktop --> AppLayer[🧭 应用服务层]
-    Web --> AppLayer
-    CLI --> AppLayer
-    Ext --> AppLayer
-    IM --> AppLayer
+    runtime["SAgents v2<br/>Agent 包 · Session · Run"]
 
-    subgraph App[产品层]
-        AppLayer --> Chat[💬 对话与会话]
-        AppLayer --> AgentsUI[🤖 Agent 管理]
-        AppLayer --> Tasks[⏰ 任务与自动化]
-        AppLayer --> Browser[🌐 浏览器桥接]
-        AppLayer --> Workbench[🛠️ 可视化工作台]
-    end
+    desktop --> runtime
+    server --> runtime
+    custom --> runtime
 
-    subgraph Core[SAgents 核心]
-        AppLayer --> Runtime[🧠 Session Runtime]
-        Runtime --> Flow[📋 AgentFlow]
-        Flow --> Agents["🤖 智能体<br/>Plan / Simple / Fibre / Self-Check"]
-        Agents --> Memory[🧠 记忆召回]
-        Agents --> Skills[🧩 Skills]
-        Agents --> ToolMgr[🛠️ 工具管理器]
-    end
-
-    subgraph Tools[执行与集成]
-        ToolMgr --> MCP[🔌 MCP 服务]
-        ToolMgr --> BrowserTools[🌍 浏览器自动化]
-        ToolMgr --> Search[🔎 统一搜索]
-        ToolMgr --> ImageGen[🎨 图片生成]
-        ToolMgr --> Questionnaire[📝 问卷]
-        ToolMgr --> IMTools[📨 IM 交付]
-    end
-
-    subgraph RuntimeEnv[运行时与基础设施]
-        Agents --> Sandbox[📦 沙箱运行时]
-        Sandbox --> Local[本地]
-        Sandbox --> Pass[Passthrough]
-        Sandbox --> Remote[远程]
-        AppLayer <--> Common[🧱 共享 Common 服务层]
-        Common <--> DB[(SQL 数据库)]
-        Workbench <--> FS[(RustFS / 本地文件)]
-        Runtime -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
-    end
+    runtime --> intelligence["模型与上下文<br/>模型接入 · 记忆"]
+    runtime --> capabilities["工具与工作流<br/>Skills · MCP"]
+    runtime --> execution["执行与状态<br/>存储 · 沙箱 · 事件"]
 ```
 
+- 📦 **Agent 包** — 定义智能体可以做什么。
+- 💬 **Session** — 保存跨 Run 的对话历史。
+- ⚡ **Run** — 执行任务，提供实时进度与交互。
 
+宿主应用负责界面、身份认证和凭据。内置运行配置面向单进程或单宿主；本机进程执行不提供容器级隔离。
 
----
-
-## 📅 **v1.1.0 更新内容**
-
-### 🤖 **SAgents 内核更新**
-
-- **执行链路增强**：新增 `PlanAgent`、`SelfCheckAgent`、`MemoryRecallAgent` 与 `ToolSuggestionAgent`
-- **上下文效率优化**：补强用户输入优化与历史消息压缩，提升长任务执行稳定性
-- **会话与消息能力升级**：支持编辑并重跑、增强进度反馈、补强 Session 检查与调试体验
-- **工具能力扩展**：新增问卷采集工作流，强化工具调用展示、结果截断与可观测性
-
-### 💻 **产品层更新**
-
-- **新增多入口**：加入 Sage CLI、Chrome 扩展与浏览器自动化能力
-- **工作台升级**：增强音频、视频、Mermaid、Draw.io、远程文件预览等渲染支持
-- **聊天体验优化**：完善进度消息、交付流展示、推理内容展示与工作区交互
-- **IM 集成增强**：扩展 WeChat Personal(iLink)、企业微信、飞书、钉钉等渠道能力，并强化文件消息流程
-
-### 🛡️ **平台与基础设施**
-
-- **企业级能力补齐**：新增本地账号认证，并增强认证、CORS 与安全配置
-- **沙箱与运行时升级**：重构本地 / passthrough / 远程沙箱能力，完善 Node runtime 与 sidecar 打包
-- **共享架构升级**：抽离 `common/` 共享服务、模型与 Schema，提升桌面端与服务端复用度
-- **文档与 CI**：重建文档体系，新增 CLI 指南，并补充测试与持续集成覆盖
-
-**[查看完整发布说明](release_notes/v1.1.0.md)**
+[了解运行时 →](sagents/v2/README.md) · [阅读架构设计 →](sagents/v2/ARCHITECTURE.md)
 
 ---
 
-## 📚 **文档资源**
+## 📚 **文档导航**
 
-- 📖 **完整文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
-- 📝 **发布说明**: [release_notes/](release_notes/)
-- 🏗️ **架构说明**: 查看 `sagents/`、`common/` 与 `app/` 目录了解核心运行时与产品层结构
-- 🔧 **配置指南**: `app/desktop/` 目录下的环境变量和配置文件
+| 了解 Sage | 构建与扩展 |
+| --- | --- |
+| [文档索引](docs/zh/README.md) | [运行时集成手册](sagents/v2/使用手册.md) |
+| [Desktop v2](app/desktop_v2/README.md) | [Server Agent 平台](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| [Server v2](app/server_v2/README.md) | [部署指南](deploy/README.md) |
+| [版本说明](release_notes/) | [开发变更日志](change_log.md) |
 
----
+请优先阅读所选入口对应的组件文档。
 
-## 🛠️ **开发**
+## 🛠️ **参与贡献**
 
-### 项目结构
+运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/desktop_v2/`](app/desktop_v2/)，Web 平台位于 [`app/server_v2/`](app/server_v2/)。
 
-```
-Sage/
-├── sagents/                    # SAgents 核心运行时、流程、上下文、工具与沙箱
-├── common/                     # 共享模型、Schema、服务与核心客户端
-├── app/
-│   ├── desktop/                # 桌面应用（Python 后端 + Vue UI + Tauri 壳）
-│   ├── server/                 # 服务端应用与 Web 前端
-│   ├── cli/                    # Sage CLI 入口与服务
-│   └── chrome-extension/       # 浏览器扩展与侧边栏
-├── mcp_servers/                # IM、搜索、调度、图片生成等服务
-├── docs/                       # 中英文文档
-└── release_notes/              # 版本发布说明
-```
+欢迎提交 [Issue](https://github.com/ZHangZHengEric/Sage/issues) 或 Pull Request。请附上复现步骤，并运行受影响组件的检查：Python 测试位于 [`tests/`](tests/)，Desktop v2 使用 `flutter analyze` 和 `flutter test`。
 
-### 参与贡献
-
-我们欢迎贡献！请查看我们的 [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) 了解任务和讨论。
-
----
-
-## 💖 **赞助者**
+## 💬 **加入社区**
 
 <div align="center">
 
-感谢以下赞助者对 Sage 的支持：
-
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="嘟嘟巴士"/>
-      </a>
-      <br/>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能"/>
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
-      </a>
-    </td>
-  </tr>
-</table>
+[![Slack](https://img.shields.io/badge/加入_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+[![GitHub Issues](https://img.shields.io/badge/问题与建议-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ZHangZHengEric/Sage/issues)
 
 </div>
 
+## 💖 **赞助商**
 
-
----
-
-## 🦌 **加入我们的社区**
-
-<div align="center">
-
-### 💬 与我们交流
-
-[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
-
-### 📱 微信群
-
-<img src="assets/WeChatGroup.jpg" width="300" alt="微信群二维码"/>
-
-*扫码加入我们的微信社区 🦌*
-
-</div>
+<p align="center">
+  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="40" align="middle" alt="RcrAI" />
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/sponsors/idata_mark.png" height="64" align="middle" alt="Data" />
+</p>
 
 ---
 
 <div align="center">
-Built with ❤️ by the Sage Team 🦌
+
+[MIT 许可证](LICENSE) · Built with ❤️ by the Sage Team 🦌
+
 </div>

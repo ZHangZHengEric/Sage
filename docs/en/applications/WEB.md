@@ -1,133 +1,50 @@
 ---
-
-## layout: default
-title: Web Application
-parent: Applications
-nav_order: 4
-description: "Run the browser-based Sage stack: dev script, manual backend + Vite, and Docker Compose"
+layout: default
+title: Server v2
+nav_order: 3
 lang: en
-ref: web-app
+ref: v2-applications-WEB
+parent: Applications
+---
 
 {% include lang_switcher.html %}
 
-# Web Application
+# Server v2
 
-The **Web** product is the FastAPI server (`app/server/`) plus the Vue 3 client (`app/server/web/`). Use it when you need the full in-browser experience: auth, agents, tools, and the visual workbench.
+## Requirements
 
+Python 3.12+, MySQL, and Node.js 22.12+. Complete the [source setup](GETTING_STARTED.md) first. **Redis is not a Server v2 startup dependency.**
 
-| Path                                                                 | Best for                                                              |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [One-command startup](#one-command-startup)                          | Local development (same as [Getting Started](GETTING_STARTED.md))     |
-| [Manual: backend + Vite dev server](#manual-start-backend--frontend) | Split terminals, custom ports, or debugging one side only             |
-| [Docker Compose](#docker-compose-full-stack)                         | Containerized Sage services (MySQL, RustFS, Jaeger, etc.)              |
+## Start
 
-
-## One-command startup
+Run from the checkout root with the Python environment active:
 
 ```bash
-git clone https://github.com/ZHangZHengEric/Sage.git
-cd Sage
-./scripts/dev-up.sh
+python -m pip install -e '.[server-v2]'
+cp app/server_v2/.env.example app/server_v2/.env
 ```
 
-After startup (defaults):
-
-- **Web UI (Vite dev):** [http://localhost:5173](http://localhost:5173)
-- **Backend API:** [http://localhost:8080](http://localhost:8080)
-- **Health:** [http://localhost:8080/api/health](http://localhost:8080/api/health)
-
-After signing in, add a model provider in Model Source Management, then create or configure an Agent. Server startup does not require default LLM environment variables.
-
-The script may offer **Minimal** (SQLite) vs **Full** dependencies — choose Minimal for the fastest first run. For generated `.env` layout and env vars, see [Getting Started — Configuration](GETTING_STARTED.md#configuration-files) and [Configuration](../CONFIGURATION.md).
-
-## Manual start: backend + frontend
-
-Use this when you do not use `dev-up.sh` or you want to run processes separately.
-
-1. **Install deps** (from repo root)
+Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/server_v2/.env`.
 
 ```bash
-pip install -r requirements.txt
-cd app/server/web && npm install && cd ../../..
+cd app/server_v2/web
+npm install
+npm run build
+cd ../../..
+python -m app.server_v2
 ```
 
-1. **Backend**
+Open [http://127.0.0.1:8090](http://127.0.0.1:8090). Configure a model and an Agent after login. `/studio` manages Agent packages; `/docs` exposes the running server's OpenAPI.
 
-```bash
-# plus other env from .env if needed
-python -m app.server.main
-```
+For frontend development use `npm run dev` in `app/server_v2/web`; Vite proxies to port 8090. Process environment variables override the component `.env` file.
 
-Listens on `0.0.0.0:${SAGE_PORT:-8080}`.
+## Storage and deployment boundary
 
-1. **Frontend** (second terminal)
+- MySQL stores users, catalogs, thread indexes, Agent package inventory, and runtime Sessions.
+- AG-UI replay reads canonical RuntimeEvents from Sage Sessions, not a separate Redis event log.
+- Workspace files live under the configured data root's tenant directories.
+- Run **one worker**. The built-in SessionStore rejects a second writer; the Scheduler and JobRuntime do not supply multi-host durability.
 
-```bash
-cd app/server/web
-npm run dev
-```
+[`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md) contains several stacks. Inspect the image and module used by a Compose environment before treating it as a Server v2 deployment.
 
-1. **Configure the SPA** — see `app/server/web/.env.example` and `VITE_SAGE_API_BASE_URL` (must point at your running API).
-
-## Docker Compose (full stack)
-
-`[deploy/prod/docker-compose.yml](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/prod/docker-compose.yml)` starts the Sage platform services: `sage-server`, static `sage-web`, optional `sage-wiki`, MySQL, RustFS (S3-compatible), and Jaeger. It is intended for **production-like** or integrated demos, not the lightest dev loop (for that, prefer `./scripts/dev-up.sh` in Minimal mode).
-
-**What gets exposed (defaults in the compose file):**
-
-
-| Service       | Host port (typical)          | Notes                                      |
-| ------------- | ---------------------------- | ------------------------------------------ |
-| `sage-server` | 30050 → 8080                 | Primary HTTP API                           |
-| `sage-web`    | 30051 → 80                   | Pre-built web assets behind nginx in image |
-| `sage-wiki`   | 30057 → 80                   | Wiki front-end (depends on API)            |
-| `sage-mysql`  | 30052 → 3306                 |                                            |
-| `sage-rustfs` | 30054 (API), 30055 (console) |                                            |
-
-
-### Prerequisites
-
-- Docker with **Compose v2** (`docker compose`)
-- Sufficient host resources (the compose file sets a **16G** memory limit on `sage-server`; adjust in `deploy/prod/docker-compose.yml` if needed)
-- A valid env file for the target environment, for example `deploy/prod/.env`. Copy from `deploy/prod/.env.example` and set at least database and object-storage variables.
-
-`SAGE_ROOT` must point to a directory on the host used for **persistent volumes** (MySQL data, `sage-server` sessions/agents/logs, RustFS data, etc.).
-
-### Run
-
-```bash
-cd /path/to/Sage
-cp deploy/prod/.env.example deploy/prod/.env
-# edit deploy/prod/.env: secrets, SAGE_MYSQL_PASSWORD, SAGE_S3_* as needed
-deploy/compose.sh prod up -d --build
-```
-
-**Logs:**
-
-```bash
-deploy/compose.sh prod logs -f sage-server
-deploy/compose.sh prod logs -f sage-web
-```
-
-**Health check (API):**
-
-```bash
-curl -sS http://127.0.0.1:30050/api/health
-```
-
-**Open the web UI** — Compose serves the SPA under `/sage/` and proxies the API through same-origin `/prod-api`. With the sample `.env.example` values, try `http://127.0.0.1:30051/sage/`, or the exact URL your team documents for the deployed nginx route.
-
-### Stop
-
-```bash
-deploy/compose.sh prod down
-```
-
-**Port conflicts:** If another process uses 30050–30057, change the published port variables in `deploy/prod/.env` and update the public/browser-reachable URLs consistently.
-
-## See also
-
-- [Getting Started](GETTING_STARTED.md) — first-run script and config overview
-- [Server architecture](../architecture/ARCHITECTURE_APP_SERVER.md)
-- [Configuration](../CONFIGURATION.md) · [Environment variables](../ENV_VARS.md)
-- [Troubleshooting](../TROUBLESHOOTING.md)
+[Environment reference](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/README.md)

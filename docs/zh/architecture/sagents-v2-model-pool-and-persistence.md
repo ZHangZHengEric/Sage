@@ -1,3 +1,14 @@
+---
+layout: default
+title: 模型池与持久化
+parent: 架构
+nav_order: 8
+lang: zh
+ref: v2-detail-sagents-v2-model-pool-and-persistence
+---
+
+{% include lang_switcher.html %}
+
 # SAgents V2 模型复用与增量持久化
 
 2026-09-12，继续优化单机多用户并发。本文补充之前的效率、上下文预算和质量审查，不代表生产容量认证。

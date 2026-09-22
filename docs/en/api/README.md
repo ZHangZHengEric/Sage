@@ -1,18 +1,20 @@
 ---
 layout: default
-title: API documentation
-nav_order: 7
-has_children: true
-description: "Entry point for HTTP and Python (SAgent) runtime documentation"
+title: API
+nav_order: 8
 lang: en
-ref: api-docs
+ref: v2-api-README
+has_children: true
 ---
 
 {% include lang_switcher.html %}
 
-# API documentation
+# API
 
-Use this page to pick the right doc set (and avoid mixing the hosted **HTTP** API with the **Python** `sagents` API):
+| Interface | Use |
+| --- | --- |
+| [Python runtime](API_REFERENCE.md) | Embed SAgents v2 and own its lifecycle. |
+| [Server HTTP](HTTP_API_REFERENCE.md) | Authenticate users and manage models, Agents, Skills, MCP, and Runs. |
+| [Platform and observability](HTTP_API_PLATFORM.md) | Inspect health, logs, and storage boundaries. |
 
-- **[HTTP API Reference](HTTP_API_REFERENCE.md)** (expand for **subpages**): backend HTTP endpoints, payloads, and `curl` examples aligned with `register_routes` in `app/server/routers`. This is the **source of truth** for integrating with the current server.
-- **[Python runtime API](API_REFERENCE.md)**: embedding `SAgent` and related types from this repo; **not** the HTTP surface of the main app. Skip it if you only integrate over HTTP.
+Server v2 and the Desktop sidecar are different APIs. Server chat uses AG-UI SSE at `POST /api/agent`; Desktop uses authenticated local `/api/v2/...` routes and native runtime events. Do not copy routes from the legacy server into a v2 client.

@@ -1,3 +1,14 @@
+---
+layout: default
+title: 上下文预算
+parent: 架构
+nav_order: 6
+lang: zh
+ref: v2-detail-sagents-v2-context-budget
+---
+
+{% include lang_switcher.html %}
+
 # V2 上下文预算与并发准备
 
 模型请求按以下边界组装。所有裁剪和摘要只作用于请求投影；Session 的原始消息、工具结果及事件保持完整。

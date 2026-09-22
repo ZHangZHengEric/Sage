@@ -6,9 +6,9 @@ permalink: /
 description: "Choose a documentation language"
 ---
 
-# Choose Your Language
+# Sage v2 Documentation
 
-Select the documentation language you want to use:
+Documentation for SAgents v2, Desktop v2, and Server v2. Select a language:
 
 - [English]({{ '/en/' | relative_url }})
 - [简体中文]({{ '/zh/' | relative_url }})

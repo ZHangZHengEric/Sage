@@ -50,105 +50,86 @@ The most important behavior is:
 
 ## Quick start
 
-The public entry point is:
+**No manifest file is required.** Parse YAML text with `SageManifestLoader.loads()` and pass the resulting `SageManifest` to `build()`:
 
 ```python
-from sagents.v2 import SAgentApplication, SAgentBuilder
-```
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
-`SAgentBuilder` reads the package, resolves its plugins once, and builds a fully
-injected runtime.
-
-### 1. Define a small Agent package
-
-```yaml
-# sage.yaml
-schema_version: sage/v2
-kind: application
-
-metadata:
-  id: com.example.assistant
-  version: 1.0.0
-  name: Example Assistant
-
-credentials:
-  model-key:
-    source: env
-    key: MODEL_API_KEY
-
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: model-key
-    model: your-model
-
-agents:
-  main:
-    name: Main Assistant
-    instructions:
-      inline: Be helpful, concise, and explicit about uncertainty.
-    models:
-      primary: primary
-
-entrypoint:
-  agent: main
-```
-
-This example intentionally has no tools. Official file and shell tools require
-the host to provide an `OfficialToolRuntime` backed by an explicit sandbox.
-
-### 2. Build and run it
-
-```python
 import asyncio
+from uuid import uuid4
 
 from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
+
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
 
 
-async def main() -> None:
-    application = await (
-        SAgentBuilder()
-        .with_defaults(session_root="runtime")
-        .build("sage.yaml")
-    )
-    agent = application.entrypoint()
-
-    context = RequestContext(
-        actor=ActorRef(
-            principal_id="user-1",
-            principal_type=PrincipalType.USER,
-        )
-    )
-    command = StartRun(
-        agent_id="main",
-        input=(
-            InputItem(
-                role="user",
-                content=(TextBlock(text="Explain this repository."),),
-            ),
-        ),
-        resolved_spec_hash=application.composition_hash,
-        idempotency_key="request-1",
-    )
-
-    stream = await agent.run_stream(command, context)
-    async for event in stream.events:
-        print(event.type)
-
-    result = await stream.wait()
-    print(result.state)
-    await application.close()
+async def main():
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    try:
+        context = RequestContext(actor=ActorRef(
+            principal_id="user-1", principal_type=PrincipalType.USER,
+        ))
+        stream = await app.entrypoint().run_stream(StartRun(
+            agent_id="main",
+            input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
+            resolved_spec_hash=app.composition_hash,
+            idempotency_key=str(uuid4()),
+        ), context)
+        async for event in stream.events:
+            print(event.model_dump_json())
+        print((await stream.wait()).state)
+    finally:
+        await app.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-In a real host, use a unique idempotency key for each logical request and reuse
-the same key only when retrying that exact request.
+After installing the checkout with `python -m pip install -e .`, replace
+`your-model`, set `MODEL_API_KEY`, and run the script with Python 3.12+.
+The checked-in example runs as `python -m examples.sagents_v2_quickstart`.
+It prints events and the final state, and saves Session data under `runtime/`.
+It does not enable file or shell tools; those require explicit host resource bindings.
+
+| Configuration input | Builder usage |
+| --- | --- |
+| YAML text | `build(SageManifestLoader().loads(yaml_text))` |
+| Python dictionary | `build(SageManifest.model_validate(config_dict))` |
+| File | `build("path/to/sage.yaml")` |
+| Resolved package | `build(resolved_manifest)` |
+
+Import `SageManifest` and `SageManifestLoader` from `sagents.v2.package.manifest`.
+A raw string passed to `build()` is a path, not YAML content. Use inline instructions
+for string manifests; `load()` resolves instruction files inside a package directory.
+Use a unique idempotency key for each logical request, reusing it only for a retry
+of the same request. Always close the application when the host is done.
+
+[Full setup guide](../../docs/en/applications/GETTING_STARTED.md) ·
+[Executable example](../../examples/sagents_v2_quickstart.py)
 
 ## Main capabilities
 
@@ -224,13 +205,8 @@ is declared. System instructions, current-turn protection, historical summary
 work, and auxiliary concurrency have separate bounds. See the
 [context budget and concurrency guide](../../docs/zh/architecture/sagents-v2-context-budget.md)
 for configuration, overflow behavior, and reproducible benchmarks.
-The [efficiency and quality audit](../../docs/zh/architecture/sagents-v2-efficiency-quality-audit.md)
-records runtime and storage fixes, regression coverage, and deployment limits.
 The [single-host concurrency guide](../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)
 describes per-Run mutation fencing, Server concurrency settings, and benchmarks.
-The [answer quality audit](../../docs/zh/architecture/sagents-v2-answer-quality-audit.md)
-covers bounded continuation after output limits, model initialization and cleanup,
-and truthful failure reporting.
 
 ### Memory
 

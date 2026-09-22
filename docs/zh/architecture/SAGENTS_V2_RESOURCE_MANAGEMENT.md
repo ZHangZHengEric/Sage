@@ -1,3 +1,14 @@
+---
+layout: default
+title: 资源管理
+parent: 架构
+nav_order: 4
+lang: zh
+ref: v2-detail-SAGENTS_V2_RESOURCE_MANAGEMENT
+---
+
+{% include lang_switcher.html %}
+
 # SAgents V2 运行时资源管理
 
 日期：2026-09-13。范围为 SAgents V2 及 Desktop V2，不包含监督学习。
@@ -88,7 +99,7 @@ Desktop V2 可通过 `max_waiting_model_calls`、`model_queue_timeout_seconds` �
 
 仍需实现：整个宿主进程的内存预算与公平调度、第三方存储的通用离线读取、Desktop 完整 package Studio、非可信源码隔离构建与依赖安装，以及真实模型长时间负载基准。这些均未由本轮测试替代。
 
-最终回归结果见 [整体审查](V2_COMPREHENSIVE_REVIEW.md)。原生沙箱排除范围保留，不计为通过。
+最终回归结果见 [整体审查](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/zh/architecture/V2_COMPREHENSIVE_REVIEW.md)。原生沙箱排除范围保留，不计为通过。
 
 ## 跨 Application 共享 JobRuntime
 

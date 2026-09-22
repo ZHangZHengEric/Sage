@@ -1,159 +1,111 @@
 ---
 layout: default
 title: 快速开始
-parent: 应用入口
 nav_order: 1
-description: "安装 Sage 并运行主要入口"
 lang: zh
-ref: getting-started
+ref: v2-applications-GETTING_STARTED
+parent: 应用入口
 ---
 
 {% include lang_switcher.html %}
 
 # 快速开始
 
-**分入口专题：** [Web（浏览器 + Docker Compose）](WEB.md) · [桌面](DESKTOP.md) · [CLI](CLI.md) · [TUI](TUI.md) · [Chrome 扩展](CHROME_EXTENSION.md)
+## 安装
 
-## 一键启动（推荐）
-
-**适用场景：** 本地开发、快速体验
+使用 Python 3.12+。macOS/Linux 下运行：
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-
-# 2. 运行启动脚本
-./scripts/dev-up.sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
-**首次运行时，脚本会提示你选择配置模式：**
+Windows 使用 `py -3.12 -m venv .venv` 创建环境，在 PowerShell 中执行 `.venv\Scripts\Activate.ps1` 激活。
 
-- **精简模式**（推荐新手）：使用 SQLite，无需外部依赖
-  - 模板文件：`.env.example.minimal`
-  - 适合：本地快速开发
-- **完整模式**：使用 MySQL + ES + RustFS
-  - 模板文件：`.env.example`
-  - 适合：生产环境模拟
+## 一个 Python 文件即可运行
 
-**启动成功后：**
-- 前端访问：http://localhost:5173
-- 后端 API：http://localhost:8080
-- 健康检查：http://localhost:8080/api/health
-- 登录后在“模型源管理”中添加模型 Provider
+**不需要创建 `sage.yaml` 文件。** `SageManifestLoader.loads()` 将 YAML 字符串解析为 manifest，再直接传给 `SAgentBuilder.build()`。
 
-## 配置文件说明
+保存为 `quickstart.py`，把 `your-model` 替换为账号可用的模型：
 
-启动脚本会自动创建以下配置文件：
+```python
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
-### 后端配置
+import asyncio
+from uuid import uuid4
 
-- **位置：** 根目录 `.env`
-- **模板：**
-  - `.env.example.minimal` - 精简配置（SQLite，无外部依赖）
-  - `.env.example` - 完整配置（MySQL + ES + RustFS）
-- **用途：** Python 后端服务配置
-- **关键配置项：**
-  - `SAGE_DB_TYPE` - 数据库类型（sqlite/mysql）
-  - `SAGE_PORT` - 后端端口（默认 8080）
+from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.contracts.commands import InputItem
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
 
-### 前端配置
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
 
-- **位置：** `app/server/web/.env.development`
-- **模板：** `app/server/web/.env.example`
-- **用途：** Vite 前端构建配置
-- **关键配置项：**
-  - `VITE_SAGE_API_BASE_URL` - 后端 API 地址
-  - `VITE_SAGE_WEB_BASE_PATH` - Web 基础路径
 
----
+async def main():
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    try:
+        context = RequestContext(actor=ActorRef(
+            principal_id="user-1", principal_type=PrincipalType.USER,
+        ))
+        stream = await app.entrypoint().run_stream(StartRun(
+            agent_id="main",
+            input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
+            resolved_spec_hash=app.composition_hash,
+            idempotency_key=str(uuid4()),
+        ), context)
+        async for event in stream.events:
+            print(event.model_dump_json())
+        print((await stream.wait()).state)
+    finally:
+        await app.close()
 
-## 手动启动（进阶）
 
-**Web 专题**（含仅手动起前后端、[Docker Compose 全栈](WEB.md#docker-compose-全栈)）见 [Web 应用](WEB.md)。
-
-如果你需要按步骤手动控制开发环境启动，可参考以下步骤。
-
-### 前置条件
-
-- Python 3.10 或更高版本
-- 运行 Web 客户端和部分桌面流程所需的 Node.js
-- 登录后手动添加模型 Provider 所需的有效 API Key
-
-在仓库根目录安装 Python 依赖：
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ```bash
-pip install -r requirements.txt
+export MODEL_API_KEY="your-api-key"
+python quickstart.py
 ```
 
-如果你计划运行 Web 客户端，还需要在 `app/server/web/` 下单独安装 Node.js 依赖。
+程序输出运行事件和最终 Run 状态，会真实调用模型，并在 `runtime/` 中保存 Session 数据。示例未启用文件或 Shell 工具。PowerShell 使用 `$env:MODEL_API_KEY="your-api-key"` 设置密钥。
 
-## 最小环境变量
+也可以从仓库根目录运行[可执行示例](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_quickstart.py)：`python -m examples.sagents_v2_quickstart`。
 
-Server 启动不需要默认 LLM 环境变量。登录后在“模型源管理”中添加模型 Provider；未添加前，依赖模型的功能会提示缺少 Provider。
+## 选择配置输入
 
-如果你使用本地 `.env` 文件，`app/server/main.py` 和 `app/desktop/core/main.py` 都会自动加载它。
+| 输入方式 | 用法 |
+| --- | --- |
+| YAML 字符串 | `build(SageManifestLoader().loads(yaml_text))` |
+| Python 字典 | `build(SageManifest.model_validate(config))` |
+| 包文件 | `build("path/to/sage.yaml")` |
+| 已解析的包 | `build(resolved_manifest)` |
 
-## 认证
+两个 manifest 类型均从 `sagents.v2.package.manifest` 导入。直接传给 `build()` 的字符串是**路径**，不会自动识别为 YAML 内容。字符串配置应使用内联指令；文件加载会以包目录为基准解析指令文件，并限制文件位于包目录内。
 
-Sage 只使用内置本地账号，登录与自注册都只需要用户名和密码。
-
-本地开发默认使用 `SAGE_ENV=development`。如果你将 `SAGE_ENV` 设为 `production` 或 `staging`，还必须显式提供以下 secret：
-
-- `SAGE_JWT_KEY`
-- `SAGE_REFRESH_TOKEN_SECRET`
-- `SAGE_SESSION_SECRET`
-
-在这类生产环境配置下，Sage 也会强制启用安全的 session cookie。
-
-## 运行 CLI
-
-如果你想最快完成一次本地冒烟验证，可以运行 CLI：
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-sage doctor
-sage run "帮我分析当前仓库"
-sage chat
-```
-
-这是验证模型配置和基本运行时链路是否正常的最快方式。
-
-更完整的命令行使用说明请参考 [CLI 使用指南](CLI.md)。
-
-## 手动启动 Web 服务
-
-### 启动后端
-
-启动后端：
-
-```bash
-python -m app.server.main
-```
-
-### 启动前端
-
-在另一个终端：
-
-```bash
-cd app/server/web
-npm install
-npm run dev
-```
-
----
-
-## 桌面版构建
-
-安装包、首次打开、完整构建说明见 [桌面应用](DESKTOP.md)。
-
-从源码构建桌面应用时，可使用：
-
-```bash
-# macOS/Linux
-app/desktop/scripts/build.sh release
-
-# Windows
-./app/desktop/scripts/build_windows.ps1 release
-```
+下一步：[配置](../CONFIGURATION.md)、[工具接入](../MCP_SERVERS.md)、[运行时 API](../api/API_REFERENCE.md)。
