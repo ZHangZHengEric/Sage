@@ -24,8 +24,10 @@ from app.server_v2.agui.sse import (
 from app.server_v2.core.errors import ServerV2Error, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.core.settings import ServerV2Settings
-from app.server_v2.domain.catalog import require_agent
+from app.server_v2.domain.catalog import enabled_mcp_servers, require_agent
 from app.server_v2.domain.threads import resolve_thread_agent_id
+from app.server_v2.services.composition import composition_metadata
+from app.server_v2.services.mcp import McpPluginCache
 from app.server_v2.services.models import (
     HostModelProvider,
     bind_model_user,
@@ -33,10 +35,7 @@ from app.server_v2.services.models import (
 )
 from app.server_v2.services.official import install_sandbox
 from app.server_v2.services.package import server_v2_manifest
-from app.server_v2.services.skill_runtime import (
-    install_skill_driver,
-    skill_snapshot_metadata,
-)
+from app.server_v2.services.skill_runtime import install_skill_driver
 from app.server_v2.services.skills import SkillCatalogService
 from app.server_v2.storage import prepare_server_v2_storage
 
@@ -81,6 +80,7 @@ class ServerV2Service:
 
             self.skills = skills if skills is not None else DatabaseSkillStore(database)
         self.skill_catalog = SkillCatalogService(self.skills, self.paths.data_root)
+        self.mcp_plugins = McpPluginCache()
         self._fallback_model = model_provider
         self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
@@ -142,6 +142,7 @@ class ServerV2Service:
             await self._application.close()
             self._application = None
         await self._scheduler.close()
+        self.mcp_plugins.clear()
         if self._host_models is not None:
             await self._host_models.close()
             self._host_models = None
@@ -152,6 +153,11 @@ class ServerV2Service:
             "session_store": "mysql" if self.settings.mysql_url else "filesystem",
             "agui_replay": "session-store",
             "log": "stdout",
+            # Run ownership lives in this process (driver registry + in-memory
+            # scheduler). A shared MySQL does NOT make the deployment
+            # multi-node: two instances on one database would both drive the
+            # same Run. Horizontal scaling needs an owner lease first.
+            "run_ownership": "single-process",
         }
         if self.settings.jaeger_url:
             report["trace"] = "otlp"
@@ -190,28 +196,52 @@ class ServerV2Service:
         await self.threads.remove(thread_id, record.user_id)
 
     async def thread_events(
-        self, thread_id: str, user_id: str, *, admin: bool = False
-    ) -> list[dict]:
+        self,
+        thread_id: str,
+        user_id: str,
+        *,
+        admin: bool = False,
+        limit: int = 500,
+        offset: int | None = None,
+    ) -> dict[str, object]:
+        """Return one bounded page of AG-UI frames for a thread.
+
+        A thread grows without bound, so the transport projection is paginated
+        over source events. ``offset``/``limit`` count source events, not
+        frames: one event can translate into several frames and a page must
+        never split an event's frames across two responses. ``offset=None``
+        returns the newest window, which is what opening a chat needs.
+        """
+
         record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
             raise ServerV2Error("not_found", "thread not found")
+        limit = max(1, min(int(limit), 2000))
         try:
             events = await self.application.service(
                 "session.access"
             ).read_session_events(thread_id, self.request_context(record.user_id))
         except SageV2Error as exc:
-            if exc.info.code.endswith("not_found"):
-                return []
-            raise map_sage_error(exc) from exc
+            if not exc.info.code.endswith("not_found"):
+                raise map_sage_error(exc) from exc
+            events = []
+        total = len(events)
+        start = max(0, total - limit) if offset is None else max(0, int(offset))
+        page = events[start : start + limit]
         adapter = AgUiProtocolAdapter(enable_sage_extensions=True)
         frames: list[dict] = []
-        for event in events:
+        for event in page:
             result = adapter.translate(event)
             for frame in result.frames:
                 frames.append(
                     frame_to_agui_event(frame, thread_id=thread_id, run_id=event.run_id)
                 )
-        return frames
+        return {
+            "events": frames,
+            "total": total,
+            "offset": start,
+            "limit": limit,
+        }
 
     async def start_agui_run(
         self,
@@ -243,13 +273,19 @@ class ServerV2Service:
             composition_hash=self.application.composition_hash,
             default_agent_id=record.id,
             enabled_skills=enabled,
-            metadata=skill_snapshot_metadata(skill_records),
+            metadata=composition_metadata(
+                agent=record,
+                skills=skill_records,
+                mcp_servers=tuple(
+                    item.name for item in enabled_mcp_servers(catalog)
+                ),
+            ),
         )
         if command.agent_id != record.id:
             command = command.model_copy(update={"agent_id": record.id})
             agent_id = record.id
         await self.threads.upsert(thread_id, user_id, agent_id=record.id)
-        if not await self._has_configured_model(user_id):
+        if not self._has_configured_model(catalog):
             return single_error_sse(
                 self._model_missing_message(),
                 code="server.model_not_configured",
@@ -366,10 +402,10 @@ class ServerV2Service:
             return None
         return run.session_id
 
-    async def _has_configured_model(self, user_id: str) -> bool:
+    def _has_configured_model(self, catalog) -> bool:
         if self._fallback_model is not None:
             return True
-        return await self.catalog.default_model(user_id) is not None
+        return bool(catalog.models)
 
     def _model_missing_message(self) -> str:
         if str(self.settings.language).lower().startswith("zh"):

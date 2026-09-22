@@ -15,11 +15,11 @@ Sage 的 `sagents.v2` Skill 设计方向是正确的：Level-1 元数据与 Leve
 |---|---|---|
 | P0（Skill 部分已完成） | 普通聊天接通 Application materialize 的 `skill.loading` port；MCP 的 composition 收敛另行处理 | manifest 选择、scope、stop/close 与自定义 Skill plugin 配置生效 |
 | P0（已完成） | 修正 Skill workspace materialization：资源必须位于 Run 可见的 `/workspace`，不能把 data-root artifact 的宿主绝对路径当作 workspace path | `scripts/`、`references/`、`assets/` 在 sandbox 中真实可访问，同时不扩大文件权限 |
-| P1 | 将 MCP 目录缓存提升到配置指纹对应的 tenant/agent scope，Run 仅绑定快照；保留短连接调用，之后再用明确 owner 的连接池替换 | 去掉每 Run `initialize + list_tools`，又不提前引入跨 Run 连接取消/清理竞态 |
+| P1（已完成） | 将 MCP 目录缓存提升到配置指纹对应的 tenant scope，Run 仅绑定快照；保留短连接调用，之后再用明确 owner 的连接池替换 | 去掉每 Run `initialize + list_tools`，又不提前引入跨 Run 连接取消/清理竞态 |
 | P1（已完成） | Skill activation 统一使用 `SessionDerivedSkillActivationRepository`，以权威 Tool 历史重建，禁止 server_v2 私有的 `InMemorySkillActivationRepository` 成为恢复状态 | suspend/resume、进程重启和上下文恢复语义一致，且不新增业务存储 |
 | P2 | 为 MCP 增加 `tools/list_changed` 的完整 snapshot reconciliation，并让目录版本进入 composition identity/可观测字段 | 可处理运行中工具新增、更新和删除，避免只在下个 Run 才看到变化 |
 
-截至本文同日的实现状态：Skill 相关 P0/P1 已完成；普通聊天使用 `ports.skill_loading`，activation 使用 `SessionDerivedSkillActivationRepository`，`RunConfig.metadata` 保存无密钥的 Skill version/content-hash 快照，显式 `load_skill` 才写入租户 workspace 的内容寻址缓存。Server V2 测试 `112 passed`，相关 SAgents V2 Skill/Builder 测试 `57 passed`。MCP 项尚未包含在本次修改中。
+截至本文同日的实现状态：Skill 相关 P0/P1 与 MCP 目录缓存 P1 已完成。普通聊天使用 `ports.skill_loading`，activation 使用 `SessionDerivedSkillActivationRepository`；`RunConfig.metadata` 不再只冻结 Skill，而是冻结整份 Run composition（Agent 配置、Skill version/content-hash、启用的 MCP server 名单），执行期只回放快照，凭据仍按 id/name 从活目录解析，因此密钥不落 Run 存储、轮换即时生效。MCP 插件由 `McpPluginCache` 按 `(user, 配置指纹)` 在 Run 之间共享，重配置时换新实例而不改旧实例，正在执行的 Run 保留自己的目录快照。Server V2 测试 `122 passed`。P2 的 `tools/list_changed` reconciliation 仍未开始；让 MCP 目录版本进入 manifest 级 composition identity 需要 `AgentDefinition` 增加字段，未在本次改动范围内。
 
 ## 1. 证据基线与仓库拆分
 

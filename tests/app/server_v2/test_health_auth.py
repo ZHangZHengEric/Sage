@@ -104,6 +104,7 @@ def test_health(client: TestClient):
         "session_store": "filesystem",
         "agui_replay": "session-store",
         "log": "stdout",
+        "run_ownership": "single-process",
     }
     assert response.json()["request_id"]
     assert response.headers["x-request-id"] == response.json()["request_id"]

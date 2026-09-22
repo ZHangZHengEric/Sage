@@ -13,7 +13,6 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.catalog import enabled_mcp_servers
-from app.server_v2.services.mcp import mcp_plugin
 from app.server_v2.services.official import (
     official_tool_catalog,
     resolve_agent_tools,
@@ -337,7 +336,7 @@ class ServerAgentManagement(AgentManagementService):
             ReadThroughSkillWorkspace(self.host.paths.data_root, user_id, records),
         )
         catalog = await self.host.catalog.get(user_id)
-        mcp = mcp_plugin(enabled_mcp_servers(catalog))
+        mcp = self.host.mcp_plugins.get(user_id, enabled_mcp_servers(catalog))
         if mcp:
             builder.with_additional_tools(mcp, mcp)
         return builder

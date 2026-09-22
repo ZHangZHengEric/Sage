@@ -86,8 +86,8 @@ async function openThread(id) {
   threadId.value = id
   error.value = ''
   applyThreadAgent(id)
-  const events = await api.threadEvents(id)
-  const history = messagesFromEvents(events)
+  const page = await api.threadEvents(id)
+  const history = messagesFromEvents(page?.events || [])
   messages.value = history
   agent.value.threadId = id
   agent.value.setMessages(history)

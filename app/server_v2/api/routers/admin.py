@@ -1,6 +1,4 @@
-from typing import Any
-
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.server_v2.api.deps import AdminUser, ServiceDep
 from app.server_v2.schemas import (
@@ -8,6 +6,7 @@ from app.server_v2.schemas import (
     AdminModelPublic,
     AdminThreadPublic,
     ApiResponse,
+    ThreadEventPage,
     UserPublic,
 )
 from app.server_v2.core.errors import success
@@ -52,7 +51,17 @@ async def admin_models(_: AdminUser, service: ServiceDep):
 
 @router.get(
     "/threads/{thread_id}/events",
-    response_model=ApiResponse[list[dict[str, Any]]],
+    response_model=ApiResponse[ThreadEventPage],
 )
-async def admin_thread_events(thread_id: str, admin: AdminUser, service: ServiceDep):
-    return success(await service.thread_events(thread_id, admin.user_id, admin=True))
+async def admin_thread_events(
+    thread_id: str,
+    admin: AdminUser,
+    service: ServiceDep,
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int | None = Query(default=None, ge=0),
+):
+    return success(
+        await service.thread_events(
+            thread_id, admin.user_id, admin=True, limit=limit, offset=offset
+        )
+    )

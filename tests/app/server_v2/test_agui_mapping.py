@@ -59,9 +59,15 @@ def test_maps_enabled_skills_from_catalog_bindings():
     assert command.config.enabled_skills == ("demo",)
 
 
-def test_maps_trusted_run_metadata_with_skill_snapshot():
+def test_maps_trusted_run_metadata_with_composition_snapshot():
     request = _input()
-    metadata = {"server_v2.skill_snapshot": [{"name": "demo", "version_id": "v1"}]}
+    metadata = {
+        "server_v2.composition": {
+            "agent": {"id": "main", "name": "Main"},
+            "skills": [{"name": "demo", "version_id": "v1"}],
+            "mcp_servers": [],
+        }
+    }
 
     *_, command = to_start_run(
         request,

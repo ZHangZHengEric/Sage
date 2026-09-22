@@ -90,11 +90,11 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
   listThreads: () => request('/api/threads'),
-  threadEvents: (id) => request(`/api/threads/${id}/events`),
+  threadEvents: (id, limit = 500) => request(`/api/threads/${id}/events?limit=${limit}`),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),
   adminUsers: () => request('/api/admin/users'),
   adminThreads: () => request('/api/admin/threads'),
   adminModels: () => request('/api/admin/models'),
-  adminThreadEvents: (id) => request(`/api/admin/threads/${id}/events`),
+  adminThreadEvents: (id, limit = 500) => request(`/api/admin/threads/${id}/events?limit=${limit}`),
   health: () => request('/health'),
 }

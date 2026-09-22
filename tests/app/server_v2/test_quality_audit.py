@@ -12,17 +12,17 @@ from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
 from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 
+from app.server_v2.domain.catalog import require_agent
 from app.server_v2.services.models import (
     HostModelProvider,
     bind_model_user,
     create_catalog_provider,
     reset_model_user,
 )
+from app.server_v2.services.composition import composition_metadata, load_composition
 from app.server_v2.services.skill_runtime import (
     CatalogRunDriver,
-    _skill_snapshot,
     compose_catalog_loop,
-    skill_snapshot_metadata,
 )
 from tests.app.server_v2.conftest import make_test_service, scripted_hello
 from tests.app.server_v2.fakes import MemoryCatalogStore
@@ -231,7 +231,11 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         update={
             "config": RunConfig(
                 enabled_skills=("demo",),
-                metadata=skill_snapshot_metadata(accepted),
+                metadata=composition_metadata(
+                    agent=require_agent(await service.catalog.get("user"), "main"),
+                    skills=accepted,
+                    mcp_servers=(),
+                ),
             )
         }
     )
@@ -268,35 +272,83 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         await service.close()
 
 
-def test_skill_snapshot_rejects_a_user_skill_owned_by_another_tenant():
+@pytest.mark.asyncio
+async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
+    tmp_path, monkeypatch
+):
+    service = make_test_service(tmp_path)
+    await service.start()
+    catalog = await service.catalog.get("user")
+    admitted = require_agent(catalog, "main").model_copy(
+        update={"instructions": "Admitted instructions"}
+    )
+    command = _command().model_copy(
+        update={
+            "config": RunConfig(
+                enabled_skills=(),
+                metadata=composition_metadata(
+                    agent=admitted, skills=(), mcp_servers=()
+                ),
+            )
+        }
+    )
+    catalog.agents[0].instructions = "Edited after the Run was admitted"
+    await service.catalog.save("user", catalog)
+    captured = {}
+    original = AgentCompositionFactory.create_loop
+
+    def capture(self, resolved, agent_id, **kwargs):
+        captured["instructions"] = resolved.agents[agent_id].instructions
+        return original(self, resolved, agent_id, **kwargs)
+
+    monkeypatch.setattr(AgentCompositionFactory, "create_loop", capture)
+    monkeypatch.setattr(
+        "app.server_v2.services.skill_runtime.attach_official_tools",
+        _attach_without_host_sandbox,
+    )
+    try:
+        _, ports = await compose_catalog_loop(service, command, user_id="user")
+        assert captured["instructions"] == "Admitted instructions"
+        driver = CatalogRunDriver(service, "run")
+        driver._ports = ports
+        await driver._close_ports()
+    finally:
+        await service.close()
+
+
+def test_run_composition_rejects_a_user_skill_owned_by_another_tenant():
     command = _command().model_copy(
         update={
             "config": RunConfig(
                 enabled_skills=("demo",),
                 metadata={
-                    "server_v2.skill_snapshot": [
-                        {
-                            "skill_id": "skill_1",
-                            "version_id": "version_1",
-                            "revision": 1,
-                            "dimension": "user",
-                            "owner_user_id": "other-user",
-                            "name": "demo",
-                            "description": "Demo",
-                            "artifact_path": "users/other-user/demo/version_1",
-                            "skill_md_sha256": "sha256:skill",
-                            "package_sha256": "sha256:package",
-                            "file_count": 1,
-                            "total_bytes": 1,
-                            "status": "active",
-                        }
-                    ]
+                    "server_v2.composition": {
+                        "agent": {"id": "main", "name": "Main Assistant"},
+                        "mcp_servers": [],
+                        "skills": [
+                            {
+                                "skill_id": "skill_1",
+                                "version_id": "version_1",
+                                "revision": 1,
+                                "dimension": "user",
+                                "owner_user_id": "other-user",
+                                "name": "demo",
+                                "description": "Demo",
+                                "artifact_path": "users/other-user/demo/version_1",
+                                "skill_md_sha256": "sha256:skill",
+                                "package_sha256": "sha256:package",
+                                "file_count": 1,
+                                "total_bytes": 1,
+                                "status": "active",
+                            }
+                        ],
+                    }
                 },
             )
         }
     )
 
     with pytest.raises(SageV2Error) as caught:
-        _skill_snapshot(command, user_id="user")
+        load_composition(command, user_id="user")
 
-    assert caught.value.info.code == "skill.snapshot_invalid"
+    assert caught.value.info.code == "run.composition_invalid"
