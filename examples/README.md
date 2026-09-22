@@ -2,6 +2,12 @@
 
 This directory contains the standalone examples for the Sage project.
 
+For the v2 public-API, offline multi-project concurrency example, see
+[MULTI_PROJECT.md](MULTI_PROJECT.md) and `sagents_v2_multi_project.py`.
+
+For inherited and explicit team/fibre child-run model selections, see
+[CHILD_RUN_BINDINGS.md](CHILD_RUN_BINDINGS.md).
+
 ## Prerequisites
 
 - Python 3.10 or newer

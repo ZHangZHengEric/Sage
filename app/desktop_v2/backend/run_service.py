@@ -76,6 +76,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
     async def run_events(
         self, request: DesktopRunRequest, user_id: str
     ) -> AsyncIterator[str]:
+        request = request.model_copy(deep=True)
         await self.start()
         accepted_handle = None
         driver: _DesktopDriver | None = None
@@ -92,10 +93,12 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         )
         try:
             request = await self._normalize_desktop_fork_request(request, user_id)
-            agent = await self._agent(request.agent_id, user_id)
-            provider = await self._provider(agent, user_id)
-            workspace = await self.workspace_root(
-                request.workspace_id, request.agent_id
+            environment = await self._capture_run_environment(request, user_id)
+            agent = environment.agents[request.agent_id]
+            provider = environment.provider(agent)
+            workspace = environment.workspace
+            mcp_definitions = await environment.mcp.list_tools(
+                run_id="desktop-admission"
             )
             configured_tools = agent.config.get("availableTools")
             valid_tools = tuple(
@@ -104,7 +107,11 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     configured_tools
                     if configured_tools is not None
                     else tuple(
-                        value["name"] for value in await self.list_tools(agent.user_id)
+                        value.name
+                        for value in (
+                            *self._native_tool_definitions(),
+                            *mcp_definitions,
+                        )
                     )
                 )
                 if isinstance(value, str)
@@ -127,12 +134,27 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 agent=agent,
                 provider=provider,
                 workspace=workspace,
+                environment=environment,
+            )
+            command = command.model_copy(
+                update={
+                    "config": command.config.model_copy(
+                        update={
+                            "metadata": {
+                                **command.config.metadata,
+                                "desktop_environment": environment.snapshot,
+                            }
+                        }
+                    )
+                },
+                deep=True,
             )
             context = self._context(
                 user_id,
                 language=str(command.config.metadata.get("response_language") or "en"),
             )
             accepted_handle = await self.runtime.start_run(command, context)
+            self._run_environments.setdefault(accepted_handle.run_id, environment)
 
             async def build_driver():
                 return await self._build_loop(
@@ -148,6 +170,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     component_snapshot=command.config.metadata.get(
                         "runtime_components"
                     ),
+                    environment=environment,
                 )
 
             driver = _DesktopDriver(
@@ -250,6 +273,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 context=context,
                 idempotency_key=f"desktop-preflight-fail:{handle.run_id}",
             )
+            self._run_environments.pop(handle.run_id, None)
             await self._index_session(failed.session_id)
             yield (
                 json.dumps(
@@ -572,15 +596,24 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         await self.start()
         self._ensure_run_observer(run_id)
         command = await self.session_store.get_start_command(run_id)
-        agent = await self._agent_for_command(command, user_id)
+        environment = await self._environment_for_command(command, user_id, run_id)
+        agent = await self._agent_in_environment(command, environment, user_id)
         memory_enabled = _agent_memory_enabled(
             agent, self.memory_plugin_id, self.session_memory_plugin_id
         )
         driver = self._drivers.get(run_id)
         if driver is None:
-            provider = await self._provider_for_command(command, agent, user_id)
+            provider = (
+                environment.provider(agent)
+                if environment is not None
+                else await self._provider_for_command(command, agent, user_id)
+            )
             workspace_id = command.config.metadata.get("workspace_id")
-            workspace = await self.workspace_root(workspace_id, command.agent_id)
+            workspace = (
+                environment.workspace
+                if environment is not None
+                else await self.workspace_root(workspace_id, command.agent_id)
+            )
 
             async def build_driver():
                 return await self._build_loop(
@@ -600,6 +633,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     component_snapshot=command.config.metadata.get(
                         "runtime_components"
                     ),
+                    environment=environment,
                 )
 
             driver = _DesktopDriver(
@@ -837,6 +871,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     "run.failed",
                     "run.cancelled",
                 }:
+                    self._run_environments.pop(run_id, None)
                     return
         except asyncio.CancelledError:
             raise

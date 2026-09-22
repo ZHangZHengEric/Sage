@@ -26,7 +26,10 @@ from sagents.v2.agent.multi_agent import (
     WorkspaceSharingPolicy,
 )
 from sagents.v2.tool.plugins.delegation import MultiAgentToolPlugin
-from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
+from sagents.v2.agent.multi_agent.executors import (
+    ChildRunConfigResolver,
+    LoopChildRunExecutor,
+)
 
 
 ModelProviderFactory = Callable[[AgentDescriptor, str], ModelProvider]
@@ -54,6 +57,7 @@ class ModeAwareAgentLoopFactory:
         workspace_policy: WorkspaceSharingPolicy = WorkspaceSharingPolicy.SHARED_PARENT,
         fallback_invocation_mode: str | None = None,
         child_loop_factory=None,
+        child_run_config_resolver: ChildRunConfigResolver | None = None,
         trace_sink=None,
         log_sink=None,
     ) -> None:
@@ -90,6 +94,7 @@ class ModeAwareAgentLoopFactory:
             loop_factory=build_child,
             resolved_spec_hash=resolved_spec_hash,
             descriptor_resolver=registry.get,
+            run_config_resolver=child_run_config_resolver,
         )
 
     def create_loop(self, descriptor: AgentDescriptor, run_id: str) -> AgentLoopEngine:

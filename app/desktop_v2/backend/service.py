@@ -32,6 +32,8 @@ from sagents.v2.contracts.session_commit import (
 )
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.session import (
+    SessionStore,
+    DerivedStateStore,
     FilesystemSessionStore,
     LeaseFencedSessionStore,
 )
@@ -106,10 +108,21 @@ class _DesktopRecoveryAgent:
     async def _compose_driver(self, run_id, context):
         command = await self.service.session_store.get_start_command(run_id)
         user_id = context.actor.principal_id
-        agent = await self.service._agent_for_command(command, user_id)
-        provider = await self.service._provider_for_command(command, agent, user_id)
-        workspace = await self.service.workspace_root(
-            command.config.metadata.get("workspace_id"), command.agent_id
+        environment = await self.service._environment_for_command(
+            command, user_id, run_id
+        )
+        agent = await self.service._agent_in_environment(command, environment, user_id)
+        provider = (
+            environment.provider(agent)
+            if environment is not None
+            else await self.service._provider_for_command(command, agent, user_id)
+        )
+        workspace = (
+            environment.workspace
+            if environment is not None
+            else await self.service.workspace_root(
+                command.config.metadata.get("workspace_id"), command.agent_id
+            )
         )
 
         async def build():
@@ -128,6 +141,7 @@ class _DesktopRecoveryAgent:
                 run_id=run_id,
                 resolved_spec_hash=command.resolved_spec_hash,
                 component_snapshot=command.config.metadata.get("runtime_components"),
+                environment=environment,
             )
 
         driver = _DesktopDriver(self.service, None, workspace, None, lazy_builder=build)
@@ -186,6 +200,8 @@ class DesktopV2Service(
         root: Path | None = None,
         *,
         catalog: DesktopCatalogStore | None = None,
+        session_store: SessionStore | None = None,
+        derived_state_store: DerivedStateStore | None = None,
         log_sink: LogSink | None = None,
         log_plugin_id: str | None = None,
         max_concurrent_model_calls: int = 8,
@@ -194,6 +210,12 @@ class DesktopV2Service(
         sidecar_port: int | None = None,
         sidecar_auth_token: str | None = None,
     ) -> None:
+        """Create one process service. Injected stores are borrowed, never closed.
+
+        When borrowing an authoritative store, pass a derived_state_store too if
+        derived state should be durable; otherwise the builder provides memory
+        derived state. Close this service before closing host-owned stores.
+        """
         if sidecar_auth_token is not None and not sidecar_auth_token.strip():
             raise ValueError("Desktop sidecar auth token must not be empty")
         self.root = (root or Path.home() / "sage").resolve()
@@ -234,11 +256,15 @@ class DesktopV2Service(
             "Desktop v2 service is initializing",
             attributes={"root": str(self.root), "log_plugin": self.log_plugin_id},
         )
-        owner_adoption = adopt_unowned_sessions(
-            self.runtime_root,
-            principal_id="default_user",
+        owner_adoption = (
+            adopt_unowned_sessions(
+                self.runtime_root,
+                principal_id="default_user",
+            )
+            if session_store is None
+            else None
         )
-        if owner_adoption.adopted_sessions:
+        if owner_adoption is not None and owner_adoption.adopted_sessions:
             self.logger.info(
                 "session.legacy_owner_adopted",
                 "Assigned the local Desktop user to legacy unowned Sessions",
@@ -246,7 +272,14 @@ class DesktopV2Service(
             )
         settings = self._read_settings_sync()
         self.session_plugin_id = _DESKTOP_COMPONENT_DEFAULTS["session.store"]
-        self.session_store = FilesystemSessionStore(self.runtime_root)
+        self._owns_session_store = session_store is None
+        self.session_store = (
+            session_store
+            if session_store is not None
+            else FilesystemSessionStore(self.runtime_root)
+        )
+        self._derived_state_store = derived_state_store
+        self._run_environments = {}
         self.runtime = HarnessRuntime(self.session_store)
         self.diagnostic_plugin_id = _DESKTOP_COMPONENT_DEFAULTS[
             "observability.diagnostic-sink"
@@ -336,7 +369,13 @@ class DesktopV2Service(
                 log_sink=self.log_sink,
                 diagnostic_sink=self.diagnostics,
                 session_store=self.session_store,
-                derived_state_store=self.session_store,
+                derived_state_store=(
+                    self._derived_state_store
+                    if self._derived_state_store is not None
+                    else self.session_store
+                    if self._owns_session_store
+                    else None
+                ),
                 component_selections=settings.component_selections,
                 component_configs=settings.component_configs,
                 language=language,
@@ -470,7 +509,9 @@ class DesktopV2Service(
         if self.execution_binding_provider is not None:
             await self.execution_binding_provider.close()
             self.execution_binding_provider = None
-        await self.session_store.close()
+        if self._owns_session_store:
+            await self.session_store.close()
+        self._run_environments.clear()
         self._host_model_providers.clear()
         self._sandbox_providers.clear()
         self._workspace_initializations.clear()

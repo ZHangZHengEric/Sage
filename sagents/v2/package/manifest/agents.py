@@ -52,6 +52,9 @@ class AgentDefinition(StrictModel):
     # never grants delegation by inference.
     mode: Literal["simple", "fibre", "team"] = "simple"
     models: dict[Identifier, Identifier] = Field(default_factory=dict)
+    # Defaults in models do not override a parent's per-Run selection. Use this
+    # explicit map when this Agent must select a different route as a child.
+    delegation_model_bindings: dict[Identifier, Identifier] = Field(default_factory=dict)
     entrypoint: AgentEntrypoint = Field(default_factory=AgentEntrypoint)
     tools: tuple[ToolName, ...] = ()
     skills: tuple[SkillName, ...] = ()
