@@ -42,6 +42,8 @@ Studio 提供完整 JSON 定义编辑、Schema/宿主能力检查、资源验证
 
 官方工具通过 ExecutionBindingProvider 按真实 Run ID 取得本用户的工作区沙箱，子 Run 独立绑定资源；MCP 与 Skill 复用当前用户的目录。模型连接从用户客户端池借用，释放模型流后归还租约；配置凭据不进入包库存。
 
+server_v2 面向公网多租户，MCP 只接受 `sse` 与 `streamable_http` 两种网络传输，不支持 `stdio`：stdio 会在服务进程内执行租户提供的命令，等于把任意代码执行开放给任何注册用户。传输合法性在保存时校验（非法配置返回 422），而不是等到组装 Run 才失败；持久化中的历史 stdio 记录在读取时跳过，不会让整份 catalog 无法加载。单个不可用的 MCP 只损失该服务器的工具，不会中断整个 Run。MCP 插件按 (用户, 服务器指纹) 复用以命中发现缓存，`POST /api/mcp/{name}/refresh` 会让该用户的缓存失效，使发现失败或过期的工具列表有明确的恢复路径。
+
 ## 并发与生命周期
 
 旧聊天 Application 与 managed Applications 使用独立队列、共同的 SchedulerQuotaGroup。共享条件锁保证领取与额度检查原子执行；总并发、每用户并发与待处理数量不随包数量成倍增长。各 dispatcher 只领取本应用的任务。此机制限制调度租约，不承诺跨租户严格 FIFO；内联子 Agent 仍使用核心委派限制和共享模型额度。

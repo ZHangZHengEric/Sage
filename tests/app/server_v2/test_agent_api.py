@@ -34,9 +34,34 @@ def test_create_mcp_server(client):
     headers = {"Authorization": f"Bearer {token}"}
     created = client.post(
         "/api/mcp",
-        json={"name": "files", "protocol": "stdio", "command": "npx"},
+        json={
+            "name": "files",
+            "protocol": "streamable_http",
+            "url": "https://mcp.example.com/files",
+        },
         headers=headers,
     )
     assert created.status_code == 200
     listed = client.get("/api/mcp", headers=headers)
     assert [item["name"] for item in listed.json()["data"]] == ["files"]
+
+
+def test_an_unreachable_mcp_transport_is_refused_before_it_reaches_a_chat(client):
+    token = register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    stdio = client.post(
+        "/api/mcp",
+        json={"name": "local", "protocol": "stdio", "command": "npx"},
+        headers=headers,
+    )
+    no_url = client.post(
+        "/api/mcp",
+        json={"name": "broken", "protocol": "sse"},
+        headers=headers,
+    )
+
+    assert stdio.status_code == 422
+    assert no_url.status_code == 422
+    assert "URL" in no_url.json()["message"]
+    assert client.get("/api/mcp", headers=headers).json()["data"] == []

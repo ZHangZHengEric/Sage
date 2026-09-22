@@ -13,10 +13,8 @@ const hasServers = computed(() => servers.value.length > 0)
 function emptyForm() {
   return {
     name: '',
-    protocol: 'stdio',
+    protocol: 'streamable_http',
     url: '',
-    command: '',
-    argsText: '',
     description: '',
     api_key: '',
   }
@@ -34,8 +32,6 @@ async function save() {
       name: form.value.name,
       protocol: form.value.protocol,
       url: form.value.url || null,
-      command: form.value.command || null,
-      args: form.value.argsText.split(/\s+/).filter(Boolean),
       description: form.value.description,
       api_key: form.value.api_key,
     }
@@ -57,8 +53,6 @@ function edit(item) {
     name: item.name,
     protocol: item.protocol,
     url: item.url || '',
-    command: item.command || '',
-    argsText: (item.args || []).join(' '),
     description: item.description || '',
     api_key: '',
   }
@@ -105,22 +99,13 @@ onMounted(async () => {
       <label class="field">
         <span>协议</span>
         <select v-model="form.protocol">
-          <option value="stdio">stdio</option>
-          <option value="sse">sse</option>
           <option value="streamable_http">streamable_http</option>
+          <option value="sse">sse</option>
         </select>
       </label>
-      <label v-if="form.protocol === 'stdio'" class="field">
-        <span>命令</span>
-        <input v-model="form.command" required />
-      </label>
-      <label v-else class="field">
-        <span>URL</span>
-        <input v-model="form.url" required />
-      </label>
       <label class="field">
-        <span>参数</span>
-        <input v-model="form.argsText" placeholder="空格分隔" />
+        <span>URL</span>
+        <input v-model="form.url" type="url" placeholder="https://example.com/mcp" required />
       </label>
       <label class="field">
         <span>描述</span>
@@ -146,7 +131,7 @@ onMounted(async () => {
           <tr v-for="item in servers" :key="item.name">
             <td>
               {{ item.name }}
-              <div class="muted">{{ item.description || item.command || item.url }}</div>
+              <div class="muted">{{ item.description || item.url }}</div>
             </td>
             <td>{{ item.protocol }}</td>
             <td class="muted">{{ (item.tools || []).join(', ') || '未刷新' }}</td>
