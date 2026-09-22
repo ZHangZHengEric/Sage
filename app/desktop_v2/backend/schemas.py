@@ -151,6 +151,26 @@ class RunMessage(BaseModel):
         return self
 
 
+class DesktopMcpBinding(BaseModel):
+    """Select a catalog server and supply non-secret, run-specific environment."""
+
+    model_config = {"extra": "forbid"}
+    name: str = Field(min_length=1)
+    env: dict[str, str] = Field(default_factory=dict)
+    required: bool = True
+
+
+class DesktopRunContext(BaseModel):
+    """Overrides for one invocation; never written back to the agent catalog."""
+
+    model_config = {"extra": "forbid"}
+    system_context: dict[str, Any] = Field(default_factory=dict)
+    model_provider_id: str | None = None
+    fast_model_provider_id: str | None = None
+    tools: list[str] | None = None
+    mcp_bindings: list[DesktopMcpBinding] | None = None
+
+
 class DesktopRunRequest(BaseModel):
     studio_id: str | None = None
     studio_member_id: str | None = None
@@ -159,6 +179,7 @@ class DesktopRunRequest(BaseModel):
     messages: list[RunMessage]
     session_id: str | None = None
     workspace_id: str | None = None
+    run_context: DesktopRunContext = Field(default_factory=DesktopRunContext)
     response_language: str | None = None
     preferred_skills: list[str] = Field(default_factory=list)
     attachment_paths: list[str] = Field(default_factory=list)
@@ -187,6 +208,8 @@ __all__ = [
     "AgentSettingsPatch",
     "ComponentSelectionRequest",
     "DesktopProject",
+    "DesktopMcpBinding",
+    "DesktopRunContext",
     "DesktopRunRequest",
     "DesktopV2Settings",
     "MCPConnectionRequest",

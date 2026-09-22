@@ -117,6 +117,7 @@ from app.desktop_v2.backend.studio import STUDIO_TOOLS, StudioContextProvider
 from app.desktop_v2.backend.package import desktop_v2_manifest
 from app.desktop_v2.backend.schemas import (
     DesktopRunRequest,
+    DesktopV2Settings,
     RunMessage,
     RunMessageReferenceContent,
     RunMessageTextContent,
@@ -130,6 +131,7 @@ from app.desktop_v2.backend.run_context import (
     PreferredSkillsContextProvider,
     SandboxSkillWorkspace,
 )
+from app.desktop_v2.backend.run_environment import DesktopRunEnvironmentMixin
 from app.desktop_v2.backend.runtime_config import (
     _PLAN_BLOCKED_TOOLS,
     _REASONING_DISABLE_EXTRAS,
@@ -145,7 +147,7 @@ from app.desktop_v2.backend.usage_analytics import (
 )
 
 
-class DesktopRunCompositionMixin:
+class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     """Compose immutable Run manifests, providers, tools, and sandboxes."""
 
     async def _build_loop(
@@ -162,6 +164,7 @@ class DesktopRunCompositionMixin:
         resolved_spec_hash: str | None = None,
         component_snapshot: dict[str, Any] | None = None,
         force_leaf: bool = False,
+        environment=None,
     ):
         await self.start()
         provisioned: list[Any] = []
@@ -187,6 +190,7 @@ class DesktopRunCompositionMixin:
                 resolved_spec_hash=resolved_spec_hash,
                 component_snapshot=component_snapshot,
                 force_leaf=force_leaf,
+                environment=environment,
                 sandbox_observer=provisioned.append,
             )
             lifecycle = None
@@ -235,10 +239,15 @@ class DesktopRunCompositionMixin:
         resolved_spec_hash: str | None = None,
         component_snapshot: dict[str, Any] | None = None,
         force_leaf: bool = False,
+        environment=None,
         sandbox_observer,
     ):
         skill_provider = self._skill_provider()
-        mcp_plugin = await self._mcp_plugin(agent.user_id)
+        mcp_plugin = (
+            environment.mcp
+            if environment is not None
+            else await self._mcp_plugin(agent.user_id)
+        )
         mcp_definitions = await mcp_plugin.list_tools(run_id="desktop-composition")
         valid_skills = tuple(
             value
@@ -252,7 +261,8 @@ class DesktopRunCompositionMixin:
                 configured_tools
                 if configured_tools is not None
                 else tuple(
-                    value["name"] for value in await self.list_tools(agent.user_id)
+                    value.name
+                    for value in (*self._native_tool_definitions(), *mcp_definitions)
                 )
             )
             if isinstance(value, str)
@@ -270,7 +280,11 @@ class DesktopRunCompositionMixin:
             valid_tools = (*valid_tools, "load_skill")
         manifest = self._manifest(agent, provider, valid_tools, valid_skills)
         resolved = CompositionResolver().resolve(manifest)
-        settings = await self.get_settings()
+        settings = (
+            DesktopV2Settings.model_validate(environment.snapshot["settings"])
+            if environment is not None
+            else await self.get_settings()
+        )
         if component_snapshot:
             settings = settings.model_copy(
                 update={
@@ -308,7 +322,11 @@ class DesktopRunCompositionMixin:
                 "model": provider.model,
             },
         )
-        judge_provider = await self._fast_provider(agent, provider)
+        judge_provider = (
+            environment.provider(agent, fast=True)
+            if environment is not None
+            else await self._fast_provider(agent, provider)
+        )
         judge_recording_model = RecordingModelProvider(
             await self._model_provider(judge_provider, agent, enable_thinking=False),
             sink=self.diagnostics,
@@ -699,7 +717,11 @@ class DesktopRunCompositionMixin:
             mode in {AgentMode.FIBRE, AgentMode.TEAM}
             and str(agent.config.get("subAgentSelectionMode") or "auto_all") == "manual"
         )
-        catalog_members = await self.catalog.list_agents(agent.user_id)
+        catalog_members = (
+            tuple(environment.agents.values())
+            if environment is not None
+            else await self.catalog.list_agents(agent.user_id)
+        )
         members_by_id = {value.agent_id: value for value in catalog_members}
         for member in catalog_members:
             if member.agent_id == agent.agent_id:
@@ -740,7 +762,11 @@ class DesktopRunCompositionMixin:
                     allow_delegation=False,
                 )
             )
-            member_provider = await self._provider(member, member.user_id)
+            member_provider = (
+                environment.provider(member)
+                if environment is not None
+                else await self._provider(member, member.user_id)
+            )
             multimodal_by_agent[member.agent_id] = member_provider.supports_multimodal
             models_by_agent[member.agent_id] = RecordingModelProvider(
                 await self._model_provider(member_provider, member),
@@ -754,7 +780,11 @@ class DesktopRunCompositionMixin:
                     "model": member_provider.model,
                 },
             )
-            member_judge_provider = await self._fast_provider(member, member_provider)
+            member_judge_provider = (
+                environment.provider(member, fast=True)
+                if environment is not None
+                else await self._fast_provider(member, member_provider)
+            )
             judge_models_by_agent[member.agent_id] = RecordingModelProvider(
                 await self._model_provider(
                     member_judge_provider, member, enable_thinking=False
@@ -962,8 +992,12 @@ class DesktopRunCompositionMixin:
                 )
             child_run = await self.runtime.get_run(child_run_id)
             child_command = await self.session_store.get_start_command(child_run_id)
-            member_provider = await self._provider_for_command(
-                child_command, member, member.user_id
+            member_provider = (
+                environment.provider(member)
+                if environment is not None
+                else await self._provider_for_command(
+                    child_command, member, member.user_id
+                )
             )
             _, child_loop, child_sandbox = await self._build_loop(
                 agent=member,
@@ -976,9 +1010,10 @@ class DesktopRunCompositionMixin:
                 run_id=child_run_id,
                 resolved_spec_hash=child_command.resolved_spec_hash,
                 component_snapshot=child_command.config.metadata.get(
-                    "runtime_components"
+                    "runtime_components", component_snapshot
                 ),
                 force_leaf=descriptor.mode != AgentMode.TEAM,
+                environment=environment,
             )
             return child_loop, child_sandbox
 
@@ -1534,8 +1569,13 @@ class DesktopRunCompositionMixin:
         agent=None,
         provider: DesktopModelProviderRecord | None = None,
         workspace=None,
+        environment=None,
     ):
-        settings = self._read_settings_sync()
+        settings = (
+            DesktopV2Settings.model_validate(environment.snapshot["settings"])
+            if environment is not None
+            else self._read_settings_sync()
+        )
         _, sandbox_config = _resolved_sandbox_config(settings)
         workspace_root = _sandbox_workspace_root(
             sandbox_config,

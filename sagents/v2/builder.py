@@ -1201,6 +1201,19 @@ class SAgentBuilder:
                 delegation_concurrency_limiter=delegation_limiter,
                 loop_composer=compose,
                 child_loop_factory=child_factory,
+                child_run_config_resolver=lambda descriptor, parent_command: (
+                    CompositionResolver().resolve_child_run_config(
+                        resolved,
+                        # Dynamically spawned Fibre agents narrow the root's
+                        # tools/skills and use its model policy ceiling.
+                        descriptor.agent_id
+                        if descriptor.agent_id in resolved.agents
+                        else selected_agent,
+                        parent_config=parent_command.config,
+                        tools=descriptor.tools,
+                        skills=descriptor.skills,
+                    )
+                ),
                 trace_sink=services["observability.trace-sink"],
                 log_sink=services["observability.log-sink"],
             )
@@ -1434,7 +1447,9 @@ class SAgentBuilder:
 
     def _resolve_package(self, package):
         if isinstance(package, ResolvedSageManifest):
-            return None, package
+            # Frozen models can still contain mutable dictionaries. Keep the
+            # application's policy and child defaults independent of the host.
+            return None, package.model_copy(deep=True)
         if isinstance(package, (str, Path)):
             package = SageManifestLoader().load(package)
         if not isinstance(package, SageManifest):

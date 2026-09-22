@@ -27,6 +27,7 @@ class ResolvedAgent(StrictModel):
     instructions: VerbatimText
     mode: Literal["simple", "fibre", "team"] = "simple"
     model_bindings: dict[str, str] = Field(default_factory=dict)
+    delegation_model_bindings: dict[str, str] = Field(default_factory=dict)
     entrypoint: AgentEntrypoint
     max_steps: int | None = None
     tools: tuple[str, ...] = ()
@@ -82,6 +83,18 @@ class CompositionResolver:
                         "manifest.model_not_found",
                         f"agent {agent_id!r} binding {binding!r} references unknown model {route_id!r}",
                     )
+            if not set(agent.delegation_model_bindings) <= set(agent.models):
+                raise _error(
+                    "manifest.model_binding_not_found",
+                    f"agent {agent_id!r} delegation overrides require declared model slots",
+                )
+            if not set(agent.delegation_model_bindings.values()) <= set(
+                agent.models.values()
+            ):
+                raise _error(
+                    "manifest.model_override_denied",
+                    f"agent {agent_id!r} delegation models exceed its policy ceiling",
+                )
             for child_id in agent.subagents:
                 if child_id not in manifest.agents:
                     raise _error(
@@ -129,6 +142,7 @@ class CompositionResolver:
                 instructions=agent.instructions.inline or "",
                 mode=agent.mode,
                 model_bindings=dict(agent.models),
+                delegation_model_bindings=dict(agent.delegation_model_bindings),
                 entrypoint=agent.entrypoint,
                 max_steps=max_steps,
                 tools=agent.tools,
@@ -184,6 +198,41 @@ class CompositionResolver:
             runtime=manifest.runtime,
             credentials=dict(manifest.credentials),
             interfaces=dict(manifest.interfaces),
+        )
+
+    def resolve_child_run_config(
+        self,
+        resolved: ResolvedSageManifest,
+        agent_id: str,
+        *,
+        parent_config: RunConfig,
+        tools: tuple[str, ...] | None = None,
+        skills: tuple[str, ...] | None = None,
+    ) -> RunConfig:
+        """Resolve a child's durable selection before allocating its Run.
+
+        Priority: explicit delegation overrides > parent's resolved choices >
+        child defaults. Inherit the primary slot and slots declared by the child;
+        parent-only auxiliary slots do not grant the child additional routes.
+        A disallowed inherited selection is rejected, never silently replaced.
+        Resume must reuse the stored RunConfig rather than call this again.
+        """
+        agent = resolved.agents[agent_id]
+        bindings = dict(agent.model_bindings)
+        bindings.update(
+            {
+                slot: route
+                for slot, route in parent_config.model_bindings.items()
+                if slot == "primary" or slot in agent.model_bindings
+            }
+        )
+        bindings.update(agent.delegation_model_bindings)
+        return self.resolve_run_config(
+            resolved,
+            agent_id,
+            model_bindings=bindings,
+            tools=tools,
+            skills=skills,
         )
 
     def resolve_run_config(

@@ -39,6 +39,9 @@ LoopFactory = Callable[
     | Awaitable[AgentLoopEngine | tuple[AgentLoopEngine, object]],
 ]
 DescriptorResolver = Callable[[str], Awaitable[AgentDescriptor]]
+ChildRunConfigResolver = Callable[
+    [AgentDescriptor, StartRun], RunConfig | Awaitable[RunConfig]
+]
 
 
 _INHERITED_RUNTIME_METADATA = (
@@ -64,11 +67,13 @@ class LoopChildRunExecutor:
         loop_factory: LoopFactory,
         resolved_spec_hash: str,
         descriptor_resolver: DescriptorResolver | None = None,
+        run_config_resolver: ChildRunConfigResolver | None = None,
     ) -> None:
         self.runtime = runtime
         self.loop_factory = loop_factory
         self.resolved_spec_hash = resolved_spec_hash
         self.descriptor_resolver = descriptor_resolver
+        self.run_config_resolver = run_config_resolver
         self._descriptors_by_run: dict[str, AgentDescriptor] = {}
         self._tasks_by_run: dict[str, DelegationTask] = {}
         self._loops_by_run: dict[str, AgentLoopEngine] = {}
@@ -127,6 +132,24 @@ class LoopChildRunExecutor:
                 f"<current_time>{current_time}</current_time>"
             )
         continuing = task.child_session_id is not None
+        # Builder installs a policy-aware resolver. Low-level hosts without a
+        # manifest retain the parent's explicit selection rather than dropping it.
+        config = RunConfig(
+            model_bindings=deepcopy(parent_command.config.model_bindings),
+            enabled_tools=descriptor.tools,
+            enabled_skills=descriptor.skills,
+        )
+        if self.run_config_resolver is not None:
+            config = self.run_config_resolver(descriptor, parent_command)
+            if inspect.isawaitable(config):
+                config = await config
+        config = config.model_copy(
+            update={
+                "flow_boundary": task.flow_boundary,
+                "metadata": {**config.metadata, **metadata},
+            },
+            deep=True,
+        )
         command = StartRun(
             session_id=task.child_session_id if continuing else parent.session_id,
             agent_id=descriptor.agent_id,
@@ -137,12 +160,7 @@ class LoopChildRunExecutor:
                     metadata=input_metadata,
                 ),
             ),
-            config=RunConfig(
-                enabled_tools=descriptor.tools,
-                enabled_skills=descriptor.skills,
-                flow_boundary=task.flow_boundary,
-                metadata=metadata,
-            ),
+            config=config,
             session_concurrency_mode=(
                 SessionConcurrencyMode.SERIAL
                 if continuing
