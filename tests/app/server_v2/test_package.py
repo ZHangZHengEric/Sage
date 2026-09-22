@@ -134,7 +134,6 @@ async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
     from app.server_v2.core.settings import ServerV2Settings
 
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/test")
-    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://localhost")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS", "24")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "6")
     monkeypatch.setenv("SAGE_SERVER_MAX_PENDING_RUNS", "128")

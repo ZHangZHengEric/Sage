@@ -12,7 +12,6 @@ from sagents.v2.model.contracts import (
 )
 from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 
-from app.server_v2.agui.replay import AguiReplayStore
 from app.server_v2.app import create_app
 from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.services.runtime import ServerV2Service
@@ -64,7 +63,6 @@ def scripted_hello(steps: int = 1) -> ScriptedModelProvider:
 def make_test_service(
     tmp_path: Path,
     *,
-    redis=None,
     model_provider=None,
     fallback=True,
     **overrides,
@@ -76,12 +74,10 @@ def make_test_service(
     return ServerV2Service(
         settings,
         model_provider=provider,
-        redis=redis,
         users=MemoryUserStore(),
         catalog=MemoryCatalogStore(),
         threads=MemoryThreadIndex(),
         skills=MemorySkillStore(),
-        replay=None if redis is not None else AguiReplayStore(),
     )
 
 

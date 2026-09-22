@@ -72,7 +72,6 @@ otel = [
 server-v2 = [
   "aiomysql>=0.2.0",
   "SQLAlchemy[asyncio]>=2.0,<2.2",
-  "redis>=5.0.0",
   "prometheus-client>=0.20.0",
 ]
 

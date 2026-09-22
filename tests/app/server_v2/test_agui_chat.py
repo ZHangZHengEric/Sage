@@ -230,6 +230,7 @@ def test_last_event_id_replays_only_unseen_events(client: TestClient):
     assert frames[0][1]["type"] == "RUN_STARTED"
     cursor = frames[0][0]
     assert cursor
+    assert cursor.startswith("v1:")
     replay = client.post(
         "/api/agent",
         json=_run_input(),
@@ -243,3 +244,36 @@ def test_last_event_id_replays_only_unseen_events(client: TestClient):
     assert [event["type"] for event in replayed] == [
         event["type"] for _, event in frames[1:]
     ]
+
+
+@pytest.mark.timeout(30)
+def test_last_event_id_can_resume_inside_one_canonical_runtime_event(
+    client: TestClient,
+):
+    token = register_and_login(client)
+    first = client.post(
+        "/api/agent",
+        json=_run_input(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert first.status_code == 200
+    frames = _parse_sse_frames(first.text)
+    start_index = next(
+        index
+        for index, (_, event) in enumerate(frames)
+        if event["type"] == "TEXT_MESSAGE_START" and event.get("role") == "assistant"
+    )
+    cursor = frames[start_index][0]
+    assert cursor
+
+    replay = client.post(
+        "/api/agent",
+        json=_run_input(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Last-Event-ID": cursor,
+        },
+    )
+
+    assert replay.status_code == 200
+    assert _parse_sse(replay.text)[0]["type"] == "TEXT_MESSAGE_CONTENT"

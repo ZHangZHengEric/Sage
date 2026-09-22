@@ -16,19 +16,16 @@ def test_default_jwt_secret_meets_hmac_minimum():
     assert len(DEFAULT_JWT_SECRET.encode()) >= 32
 
 
-def test_from_env_requires_mysql_and_redis(tmp_path: Path, monkeypatch):
+def test_from_env_requires_mysql(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SAGE_SERVER_MYSQL_URL", raising=False)
-    monkeypatch.delenv("SAGE_SERVER_REDIS_URL", raising=False)
     with pytest.raises(ValueError, match="MYSQL"):
         ServerV2Settings.from_env(data_root=tmp_path)
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
-    with pytest.raises(ValueError, match="REDIS"):
-        ServerV2Settings.from_env(data_root=tmp_path)
+    assert ServerV2Settings.from_env(data_root=tmp_path).mysql_url
 
 
-def test_settings_read_mysql_redis_jaeger_from_env(tmp_path: Path, monkeypatch):
+def test_settings_read_mysql_jaeger_from_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
-    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.setenv("SAGE_SERVER_JAEGER_URL", "http://sage-jaeger:4317")
     monkeypatch.setenv("SAGE_SERVER_JAEGER_PUBLIC_URL", "http://127.0.0.1:16686/jaeger")
     monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
@@ -36,7 +33,6 @@ def test_settings_read_mysql_redis_jaeger_from_env(tmp_path: Path, monkeypatch):
     settings = ServerV2Settings.from_env(data_root=tmp_path)
     assert settings.mysql_url == "mysql://sage@127.0.0.1/sage"
     assert settings.database_url() == "mysql+aiomysql://sage@127.0.0.1/sage"
-    assert settings.redis_url == "redis://127.0.0.1:6379/0"
     assert settings.jaeger_url == "http://sage-jaeger:4317"
     assert settings.jaeger_public_url == "http://127.0.0.1:16686/jaeger"
     assert settings.log_level == "warning"
@@ -54,7 +50,6 @@ def test_settings_reject_invalid_logging_choices(
     tmp_path: Path, monkeypatch, name, value
 ):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
-    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.setenv(name, value)
 
     with pytest.raises(ValueError, match=name):
@@ -63,7 +58,6 @@ def test_settings_reject_invalid_logging_choices(
 
 def test_main_preserves_server_logging_configuration(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
-    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
     captured = {}
     monkeypatch.setattr("app.server_v2.main.load_env_file", lambda: None)
@@ -86,20 +80,15 @@ def test_main_loads_dotenv_from_package_root(tmp_path: Path, monkeypatch):
         "\n".join(
             (
                 "SAGE_SERVER_MYSQL_URL=mysql://sage@127.0.0.1/sage",
-                "SAGE_SERVER_REDIS_URL=redis://127.0.0.1:6379/0",
                 "",
             )
         ),
         encoding="utf-8",
     )
-    for name in (
-        "SAGE_SERVER_MYSQL_URL",
-        "SAGE_SERVER_REDIS_URL",
-    ):
+    for name in ("SAGE_SERVER_MYSQL_URL",):
         monkeypatch.delenv(name, raising=False)
     assert load_env_file(env_file) == env_file
-    settings = ServerV2Settings.from_env(data_root=tmp_path)
-    assert settings.redis_url == "redis://127.0.0.1:6379/0"
+    ServerV2Settings.from_env(data_root=tmp_path)
     assert ENV_FILE.name == ".env"
     assert ENV_FILE.parent.name == "server_v2"
 
@@ -113,7 +102,7 @@ def test_health(client: TestClient):
     assert payload["backends"] == {
         "host_store": "memory",
         "session_store": "filesystem",
-        "agui_replay": "memory",
+        "agui_replay": "session-store",
         "log": "stdout",
     }
     assert response.json()["request_id"]
@@ -172,20 +161,18 @@ def test_login_sets_session_cookie(client: TestClient):
     assert logout.status_code == 200
 
 
-def test_create_app_wires_required_clients(tmp_path: Path, monkeypatch):
+def test_create_app_wires_mysql_as_only_required_client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv(
         "SAGE_SERVER_MYSQL_URL", "mysql://root:sage@127.0.0.1:3306/sage_v2"
     )
-    monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.delenv("SAGE_SERVER_JAEGER_URL", raising=False)
     app = create_app(settings=ServerV2Settings.from_env(data_root=tmp_path))
     runtime = app.state.service
     assert runtime.database is not None
     assert runtime.database.name == "database"
-    assert runtime._redis is not None
-    assert runtime._redis.name == "redis"
     assert runtime.settings.jaeger_url is None
     assert isinstance(runtime.users, DatabaseUserStore)
+    assert len(app.state.resources._resources) == 1
 
 
 def test_jaeger_routes_absent_without_url(client: TestClient):

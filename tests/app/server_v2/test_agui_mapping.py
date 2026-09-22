@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from ag_ui.core import RunAgentInput
 
 from app.server_v2.agui.mapping import to_start_run
 from app.server_v2.agui.sse import (
     ClientOwnedUserTextFilter,
-    RunStartedGate,
+    canonical_agui_sse,
     frame_to_agui_event,
 )
 from app.server_v2.core.errors import ServerV2Error
@@ -84,26 +86,6 @@ def test_rewrites_client_run_identity():
     }
 
 
-def test_holds_custom_until_run_started():
-    gate = RunStartedGate()
-    assert gate.release({"type": "CUSTOM", "name": "sage.run.accepted"}) == []
-    released = gate.release(
-        {"type": "RUN_STARTED", "threadId": "thread-1", "runId": "run-1"}
-    )
-    assert [event["type"] for event in released] == ["RUN_STARTED", "CUSTOM"]
-    assert gate.release({"type": "TEXT_MESSAGE_CONTENT", "delta": "hi"}) == [
-        {"type": "TEXT_MESSAGE_CONTENT", "delta": "hi"}
-    ]
-
-
-def test_run_error_can_open_the_stream_without_run_started():
-    gate = RunStartedGate()
-    gate.release({"type": "CUSTOM", "name": "sage.run.accepted"})
-    assert gate.release({"type": "RUN_ERROR", "message": "no model"}) == [
-        {"type": "RUN_ERROR", "message": "no model"}
-    ]
-
-
 def test_skips_client_owned_user_text_but_keeps_assistant():
     filt = ClientOwnedUserTextFilter()
     assert filt.allow({"type": "TEXT_MESSAGE_START", "messageId": "u1", "role": "user"}) is False
@@ -112,3 +94,22 @@ def test_skips_client_owned_user_text_but_keeps_assistant():
     assert filt.allow({"type": "TEXT_MESSAGE_START", "messageId": "a1", "role": "assistant"}) is True
     assert filt.allow({"type": "TEXT_MESSAGE_CONTENT", "messageId": "a1", "delta": "hello"}) is True
     assert filt.allow({"type": "RUN_ERROR", "message": "no model"}) is True
+
+
+@pytest.mark.asyncio
+async def test_canonical_stream_keeps_idle_connection_alive():
+    async def delayed_events():
+        await asyncio.Event().wait()
+        if False:
+            yield None
+
+    stream = canonical_agui_sse(
+        delayed_events(),
+        thread_id="thread-1",
+        run_id="run-1",
+        last_event_id=None,
+        heartbeat_seconds=0.001,
+    )
+
+    assert await anext(stream) == ": heartbeat\n\n"
+    await stream.aclose()

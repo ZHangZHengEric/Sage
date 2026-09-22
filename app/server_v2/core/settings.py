@@ -8,7 +8,6 @@ from pathlib import Path
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_JWT_SECRET = "dev-only-change-me-sage-server-jwt-secret"
-REDIS_KEY_PREFIX = "sage-server"
 
 
 def _env(name: str, default: str) -> str:
@@ -58,7 +57,6 @@ class ServerV2Settings:
     log_format: str = "json"
     log_directory: str | None = None
     mysql_url: str | None = None
-    redis_url: str | None = None
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
@@ -96,11 +94,8 @@ class ServerV2Settings:
     @classmethod
     def from_env(cls, *, data_root: Path | None = None) -> ServerV2Settings:
         mysql_url = _optional_env("SAGE_SERVER_MYSQL_URL")
-        redis_url = _optional_env("SAGE_SERVER_REDIS_URL")
         if not mysql_url:
             raise ValueError("SAGE_SERVER_MYSQL_URL is required")
-        if not redis_url:
-            raise ValueError("SAGE_SERVER_REDIS_URL is required")
         root = data_root or Path(_env("SAGE_SERVER_DATA", "data/server_v2"))
         return cls(
             host=_env("SAGE_SERVER_HOST", "127.0.0.1"),
@@ -131,7 +126,6 @@ class ServerV2Settings:
             max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             mysql_url=mysql_url,
-            redis_url=redis_url,
             jaeger_url=_optional_env("SAGE_SERVER_JAEGER_URL"),
             jaeger_service_name=_env("SAGE_SERVER_JAEGER_SERVICE_NAME", "sage-server"),
             jaeger_public_url=_env(
