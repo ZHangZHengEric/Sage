@@ -16,6 +16,12 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 
 
 DESKTOP_COMPONENTS = {
+    "skill.loading": {
+        "default": "sage.skill.loading.lazy",
+        "selection_mode": "user",
+        "apply_mode": "next_run",
+        "scope": "agent",
+    },
     "agent.continuation-policy": {
         "default": "sage.agent.continuation.deterministic",
         "selection_mode": "user",
@@ -108,6 +114,7 @@ DESKTOP_COMPONENT_DEFAULTS = {
 # Builder consumes these at process build or via materialize_agent.
 # Sandbox stays a host binding.
 _MANIFEST_CAPABILITIES = (
+    "skill.loading",
     "session.store",
     "memory.provider",
     "session-memory.provider",
@@ -140,6 +147,7 @@ def stable_component_id(capability: str, plugin_id: str) -> str:
     if plugin_id.startswith("sage."):
         return plugin_id
     prefixes = {
+        "skill.loading": "sage.skill.loading.",
         "agent.continuation-policy": "sage.agent.continuation.",
         "context.token-estimator": "sage.context.token-estimator.",
         "context.reducer": "sage.context.reducer.",
@@ -233,3 +241,48 @@ def _runtime_capabilities(
         }
         capabilities[capability] = CapabilitySelection(plugin=plugin_id, config=config)
     return capabilities
+
+
+# Product-owned bindings are displayed when a real value exists, but not editable.
+DESKTOP_COMPONENT_CONFIG_LOCKS = {
+    "context.summarizer": {"model_binding": "summary"},
+    "agent.continuation-policy": {"model_binding": "fast"},
+}
+
+_DESKTOP_INJECTED_FIELDS = {
+    "context.summarizer": {"model"},
+    "context.reducer": {"store", "summarizer", "estimator", "unit_compactor"},
+    "context.summary-store": {"derived_state"},
+    "memory.recall-query": {"model", "language"},
+    "workspace.initializer": {"language"},
+    "agent.continuation-policy": {"model"},
+    "memory.provider": {"root"},
+    "session-memory.provider": {"root"},
+    "session.store": {"root", "dsn"},
+    "observability.log-sink": {"root"},
+    "observability.diagnostic-sink": {"root", "legacy_root"},
+    "execution.sandbox": {"verification_key", "process_handlers", "network_handlers"},
+}
+
+
+def desktop_component_config_schema(
+    capability: str, schema: Mapping[str, Any] | None, *, language: str | None = None,
+    plugin_id: str | None = None,
+) -> dict:
+    result = dict(schema or {})
+    properties = {key: dict(value) for key, value in result.get("properties", {}).items()}
+    for key in _DESKTOP_INJECTED_FIELDS.get(capability, set()):
+        if key in properties:
+            properties[key]["readOnly"] = True
+            if key == "language" and language is not None:
+                properties[key].update(default=language, const=language)
+    for key, value in DESKTOP_COMPONENT_CONFIG_LOCKS.get(capability, {}).items():
+        if key in properties:
+            properties[key] = {**properties[key], "default": value, "const": value, "readOnly": True}
+    # Local selection policies never call a model; this shared legacy field is inert.
+    if plugin_id in {"sage.tool-selection.lexical", "sage.tool-selection.recent"}:
+        properties.pop("model_timeout_seconds", None)
+    if plugin_id == "sage.agent.continuation.llm-judge":
+        properties.pop("repeat_threshold", None)
+    result["properties"] = properties
+    return result

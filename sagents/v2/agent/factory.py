@@ -81,6 +81,7 @@ class AgentCompositionFactory:
         activations: SkillActivationRepository,
         enabled_skills: tuple[str, ...] | None = None,
         workspace_root: str = "/workspace",
+        skill_loading=None,
     ) -> SkillLoader:
         """Create a lazy loader restricted to the Agent's resolved Skill ceiling."""
 
@@ -113,7 +114,25 @@ class AgentCompositionFactory:
                         names.append(name)
             return tuple(names)
 
-        return SkillLoader(
+        if skill_loading is None:
+            from sagents.v2.skill.plugins.loading import SkillLoadingPlugin
+
+            selections = resolved.runtime.selections("skill.loading")
+            if len(selections) > 1:
+                raise ValueError("skill.loading requires a single provider")
+            selection = selections[0] if selections else None
+            if selection is not None and selection.plugin != SkillLoadingPlugin.plugin_id:
+                raise ValueError("custom skill.loading provider must be injected")
+            config = next(
+                (dict(p.config) for p in resolved.plugins
+                 if p.id == SkillLoadingPlugin.plugin_id),
+                {},
+            )
+            if selection is not None:
+                config.update(selection.config)
+            skill_loading = SkillLoadingPlugin(**config)
+
+        return skill_loading.create_loader(
             catalog=InvocationGrantSkillCatalog(
                 FilteredSkillCatalog(catalog, selected),
                 self.runtime.session_store.get_start_command,

@@ -37,6 +37,7 @@ from sagents.v2.runtime.artifact import InMemoryArtifactStore
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.skill.plugins.loading import SkillLoadingPlugin
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
 from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
 from sagents.v2.workspace import BareWorkspaceInitializer
@@ -902,6 +903,14 @@ class SAgentBuilder:
             tenant_id=tenant_id,
             agent_id=selected_agent,
         )
+        skill_loading = await self._create_capability(
+            extension_host, process_root, scope_handles,
+            runtime_config, plugin_declarations,
+            capability="skill.loading",
+            default_plugin=SkillLoadingPlugin.plugin_id,
+            default_scope=ExtensionScope.AGENT,
+            tenant_id=tenant_id, agent_id=selected_agent,
+        )
         continuation_policy = await self._create_capability(
             extension_host,
             process_root,
@@ -1048,6 +1057,7 @@ class SAgentBuilder:
                     skill_loader = factory.create_skill_loader(
                         effective_resolved, definition_id,
                         catalog=skill_catalog, source=skill_source, workspace=skill_workspace,
+                        skill_loading=skill_loading,
                         activations=SessionDerivedSkillActivationRepository(
                             derived_state, resolve_session_id,
                         ),
@@ -1308,6 +1318,7 @@ class SAgentBuilder:
             "context.summarizer": summarizer,
             "context.unit-compactor": unit_compactor,
             "context.reducer": context_reducer,
+            "skill.loading": skill_loading,
             "agent.continuation-policy": continuation_policy,
             "agent.approval-memory": approval_memory,
         }
@@ -2426,6 +2437,17 @@ class _ApplicationComposer:
                 tenant_id=tenant_id,
                 agent_id=selected_agent,
             )
+            skill_loading = await self._port(
+                runtime, declarations,
+                capability="skill.loading",
+                default_plugin=SkillLoadingPlugin.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                scope_id=f"materialize-skill-loading:{selected_agent}",
+                identities=identities,
+                run_handles=run_handles,
+                selected_handles=selected_handles,
+                tenant_id=tenant_id, agent_id=selected_agent,
+            )
             tool_selection = await self._port(
                 runtime,
                 declarations,
@@ -2440,7 +2462,7 @@ class _ApplicationComposer:
                 tenant_id=tenant_id,
                 agent_id=selected_agent,
             )
-            continuation_lock = {"repeat_threshold": 3}
+            continuation_lock = {}
             if effective_model is not None:
                 continuation_lock["model"] = effective_model
             continuation_lock.update(dict(locks.get("agent.continuation-policy") or {}))
@@ -2508,6 +2530,7 @@ class _ApplicationComposer:
             token_estimator=estimator,
             summarizer=summarizer,
             context_reducer=context_reducer,
+            skill_loading=skill_loading,
             continuation_policy=continuation,
             tool_selection_policy=tool_selection,
             tool_catalog=tool_catalog,

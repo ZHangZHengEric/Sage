@@ -28,6 +28,7 @@ from app.desktop_v2.backend.shell_policy import (
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from app.desktop_v2.backend.package import (
     DESKTOP_COMPONENT_DEFAULTS as _DESKTOP_COMPONENT_DEFAULTS,
+    DESKTOP_COMPONENT_CONFIG_LOCKS,
     stable_component_id as _stable_component_id,
 )
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
@@ -83,7 +84,6 @@ from sagents.v2.runtime.credentials import CredentialMaterial
 from sagents.v2.model import (
     RecordingModelProvider,
 )
-from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
@@ -459,23 +459,20 @@ class DesktopRunCompositionMixin:
             locked_configs={
                 "context.summarizer": {
                     "model": recording_model,
-                    "model_binding": "summary",
+                    **DESKTOP_COMPONENT_CONFIG_LOCKS["context.summarizer"],
                 },
                 "memory.recall-query": (
                     {
                         "model": memory_query_model,
                         "language": settings.language,
-                        "timeout_seconds": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
                     }
                     if memory_query_plugin_id == "sage.memory.recall-query.llm"
                     else {}
                 ),
                 "tool.selection-policy": tool_selection_config,
                 "agent.continuation-policy": {
-                    "repeat_threshold": 3,
                     "model": judge_recording_model,
-                    "model_binding": "fast",
-                    "timeout_seconds": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                    **DESKTOP_COMPONENT_CONFIG_LOCKS["agent.continuation-policy"],
                 },
                 "workspace.initializer": {"language": settings.language},
             },
@@ -626,6 +623,7 @@ class DesktopRunCompositionMixin:
             source=skill_provider,
             workspace=skill_workspace,
             activations=self.activations,
+            skill_loading=ports.skill_loading,
             workspace_root=workspace_root,
         )
         goal_state_service = GoalStateService(self.driver_session_store)
@@ -876,11 +874,10 @@ class DesktopRunCompositionMixin:
                     ),
                     locked_configs={
                         "agent.continuation-policy": {
-                            "repeat_threshold": 3,
                             "model": judge_models_by_agent.get(
                                 descriptor.agent_id, judge_recording_model
                             ),
-                            "model_binding": "fast",
+                            **DESKTOP_COMPONENT_CONFIG_LOCKS["agent.continuation-policy"],
                         }
                     },
                     cache_identities=run_cache_identities,

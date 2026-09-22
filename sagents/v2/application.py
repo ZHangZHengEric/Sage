@@ -60,6 +60,7 @@ class MaterializedAgentPorts:
     workspace_initializer: Any | None
     resolved_plan: ResolvedApplicationPlan
     scope_handles: tuple[Any, ...]
+    skill_loading: Any | None = None
     tool_catalog: Any | None = None
     tool_executor: Any | None = None
 
