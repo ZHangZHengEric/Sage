@@ -1024,8 +1024,8 @@ def test_unknown_fenced_alias_can_be_repaired_with_registered_alias(
 @pytest.mark.parametrize(
     "relative_doc_path",
     [
-        "docs/zh/QUESTIONNAIRE_FORMATS.md",
-        "docs/en/QUESTIONNAIRE_FORMATS.md",
+        "docs/archive/zh/QUESTIONNAIRE_FORMATS.md",
+        "docs/archive/en/QUESTIONNAIRE_FORMATS.md",
     ],
 )
 def test_documented_questionnaire_examples_pass_self_check(

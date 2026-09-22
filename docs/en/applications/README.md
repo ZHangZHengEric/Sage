@@ -2,79 +2,19 @@
 layout: default
 title: Applications
 nav_order: 2
-has_children: true
-description: "Getting Started, CLI, and the main Sage application surfaces"
 lang: en
-ref: applications
+ref: v2-applications-README
+has_children: true
 ---
 
 {% include lang_switcher.html %}
 
 # Applications
 
-This section collects the main entry points for using and starting Sage. Read this group first if you want to decide whether to enter through the CLI, the demo app, the main server, or the desktop build.
+| Entry point | Requirements | Guide |
+| --- | --- | --- |
+| Desktop v2 | Python 3.12+, Flutter, native desktop toolchain | [Desktop](DESKTOP.md) |
+| Server v2 | Python 3.12+, MySQL, Node.js 22.12+ | [Server](WEB.md) |
+| Embedded runtime | Python 3.12+ and a model provider | [Python quick start](GETTING_STARTED.md) |
 
-## Current Pages
-
-1. [Getting Started](GETTING_STARTED.md) — first clone, `dev-up.sh`, shared config
-2. [Web Application](WEB.md) — Vite + FastAPI, manual split start, **Docker Compose**
-3. [Desktop](DESKTOP.md) — release installers, macOS/Windows first launch, build from source
-4. [CLI Guide](CLI.md)
-5. [TUI Guide](TUI.md)
-6. [Chrome extension](CHROME_EXTENSION.md) — load unpacked, connect to a local API
-
-## Which Surface Should You Use
-
-### CLI
-
-Use `sage run`, `sage chat`, and `sage doctor` when you need the fastest development-oriented entry point for local testing, prompt iteration, and runtime diagnostics.
-
-### Terminal TUI
-
-Use `sage tui` when you want a terminal-first interactive experience on top of the same local Sage runtime, especially for session resume, slash-command workflows, and transcript browsing.
-
-### Streamlit demo
-
-Use `examples/sage_demo.py` when you want a lightweight demo UI without starting the full application server.
-
-### Main server + web UI
-
-Use `app/server/main.py` with `app/server/web/` when you need the primary multi-user application stack:
-
-- authentication
-- agent management
-- tool and skill administration
-- observability endpoints
-- browser-based chat experience
-
-### Desktop app
-
-Use `app/desktop/entry.py` and the desktop source tree when you need a packaged local application with a desktop-local backend and UI shell.
-
-## Web Application Structure
-
-- `app/server/main.py`: FastAPI app creation and startup
-- `app/server/routers/`: HTTP route groups
-- `app/server/services/`: application service layer
-- `app/server/web/src/`: Vue application source
-
-The web client contains views for agents, chat, tools, skills, versions, model providers, and system settings.
-
-## Desktop Application Structure
-
-- `app/desktop/entry.py`: bootstrap and path setup
-- `app/desktop/core/main.py`: desktop-local FastAPI service
-- `app/desktop/ui/`: frontend UI source
-- `app/desktop/scripts/`: build and development scripts
-
-The desktop backend binds to `127.0.0.1` and is intended for local packaged execution.
-
-## Shared Platform Behavior
-
-The server and desktop app both wrap Sage runtime capabilities behind FastAPI applications. They share the same broad platform concepts:
-
-- session-based execution
-- agent and tool management
-- streaming responses
-- skill and MCP integration
-- persistent configuration and storage
+Desktop and Server share SAgents v2 but own separate identity, credentials, settings, and conversation indexes. Desktop v2 does not import v1 data. The legacy `scripts/dev-up.sh` does not start Server v2.

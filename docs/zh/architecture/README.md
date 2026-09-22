@@ -2,131 +2,41 @@
 layout: default
 title: 架构
 nav_order: 4
-has_children: true
-description: "Sage 仓库与子系统架构总览，含应用与 sagents 核心运行时的二级文档"
 lang: zh
-ref: architecture
+ref: v2-architecture-README
+has_children: true
 ---
 
 {% include lang_switcher.html %}
 
 # 架构
 
-Sage 不是一个单一二进制，而是一个分层的代码库。架构这一章被拆成两条主线：
-
-- **应用架构**：每一个面向使用者的入口（Web 服务端、桌面端、CLI、示例与浏览器扩展等）各自的形态、启动路径与边界。
-- **核心运行时 `sagents/` 架构**：所有应用都共享的会话与智能体引擎，是真正承载“跑一次对话/一次任务”的中枢。
-
-这一章下面有多篇二级文档，分别拆开讲。本页只提供大图与索引，细节请进入对应子页。
-
-## 仓库分层全景
+## 应用与运行时边界
 
 ```mermaid
 flowchart TB
-    subgraph G_App ["应用层 app/"]
-        Server[server<br/>主 FastAPI + Vue 3 Web]
-        Desktop[desktop<br/>桌面入口 + 本地后端 + UI]
-        CLI[cli<br/>sage 命令]
-        Ext[chrome-extension<br/>侧边栏插件]
-        Skills[skills<br/>内置技能包]
-        Wiki[wiki<br/>静态站点]
-    end
-
-    subgraph G_Ex ["入口示例 examples/"]
-        DemoCLI[sage_cli.py]
-        DemoUI[sage_demo.py · Streamlit]
-        DemoSrv[sage_server.py · FastAPI]
-    end
-
-    subgraph G_Sagents ["核心运行时 sagents/"]
-        Runtime[Session · Agent · Flow · Tool · Skill · Sandbox · Obs]
-    end
-
-    subgraph 外部能力
-        MCP[mcp_servers · 内置 MCP]
-        Common[common · 共享基础设施]
-        Docs[docs · 当前文档]
-    end
-
-    Server --> Runtime
-    Desktop --> Runtime
-    CLI --> Runtime
-    DemoCLI --> Runtime
-    DemoUI --> Runtime
-    DemoSrv --> Runtime
-    Ext -->|HTTP| Server
-    Runtime --> MCP
-    Runtime -.基础.-> Common
+    desktop[Desktop v2] --> runtime[SAgents v2]
+    server[Server v2] --> runtime
+    custom[自建 Python 宿主] --> runtime
+    runtime --> model[模型与上下文]
+    runtime --> tools[工具与 Skills]
+    runtime --> state[会话与执行]
 ```
 
+宿主负责身份认证、凭据、界面、全局会话索引和工具资源绑定。`SAgentApplication` 负责运行时装配和组件生命周期。SessionStore 保存权威 Session 状态和已确认事件。
 
+## 按主题阅读
 
-## 一次会话的高层数据流
+- [插件架构](PLUGINS.md)：注册、配置、作用域与宿主注入。
+- [记忆](../memory/README.md)：上下文投影与持久历史的区别。
+- [工具与 MCP](../MCP_SERVERS.md)：能力与授权。
+- [沙箱生命周期](SAGENTS_V2_SANDBOX_LIFECYCLE.md)：暂停与资源释放。
+- [Agent 包管理](SAGENTS_V2_AGENT_MANAGEMENT.md) · [Server Agent 平台](SERVER_V2_AGENT_PLATFORM.md)。
+- [资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [单机并发](sagents-v2-single-host-concurrency.md)。
+- [上下文预算](sagents-v2-context-budget.md) · [模型池与持久化](sagents-v2-model-pool-and-persistence.md)。
+- [本机沙箱约束](sagents-v2-local-sandbox-security.md)。
+- [完整运行时架构](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md)：依赖规则与契约。
 
-```mermaid
-flowchart LR
-    UserIn((用户输入)) --> EntryApp[某个应用入口]
-    EntryApp -->|run_stream 调用| SAgent[SAgent 入口]
-    SAgent --> Sess[Session/SessionContext]
-    Sess --> Flow[FlowExecutor + AgentFlow]
-    Flow --> Agents[各类 Agent]
-    Agents --> LLM[模型层]
-    Agents --> Tools[工具/技能]
-    Tools --> Sandbox[沙箱]
-    Sess --> Obs[可观测性]
-    Agents -->|流式 MessageChunk| EntryApp
-    EntryApp -->|SSE/JSON| UserIn
-```
+## 部署边界
 
-
-
-## 这一章包含哪些二级文档
-
-应用架构（不同 app 的形态与边界）：
-
-1. [服务端与 Web 应用架构](ARCHITECTURE_APP_SERVER.md)：`app/server/` 的 FastAPI、路由、服务、启动与 Web 客户端结构
-2. [桌面应用架构](ARCHITECTURE_APP_DESKTOP.md)：`app/desktop/` 的本地后端、UI、Tauri 壳与与 sagents 的关系
-3. [CLI、示例与外部入口架构](ARCHITECTURE_APP_OTHERS.md)：`app/cli/`、`examples/`、`app/chrome-extension/`、`app/wiki/` 等轻量入口
-
-核心运行时 `sagents/` 架构（这一章的核心）：
-
-1. [sagents 总览](ARCHITECTURE_SAGENTS_OVERVIEW.md)：分层、模块边界与典型一次 `run_stream` 的全链路
-2. [智能体（Agent）与流程（Flow）编排](ARCHITECTURE_SAGENTS_AGENT_FLOW.md)：`AgentBase`、各专用 Agent、`AgentFlow` / `FlowExecutor`、三种 `agent_mode`
-3. [会话与上下文（Session & Context）](ARCHITECTURE_SAGENTS_SESSION_CONTEXT.md)：`Session`、`SessionContext`、消息管理、会话/用户记忆与 workflow
-4. [工具与技能（Tool & Skill）系统](ARCHITECTURE_SAGENTS_TOOL_SKILL.md)：`ToolManager` / `ToolProxy`、内置工具、MCP 代理、`SkillManager` / `SkillProxy`、沙箱内技能
-5. [沙箱、LLM 适配与可观测性](ARCHITECTURE_SAGENTS_SANDBOX_OBS.md)：`SandboxProviderFactory` 三种沙箱、`SageAsyncOpenAI` 模型层与 OpenTelemetry 链路
-
-### 设计与方案
-
-1. [sagents v2 中文交互式架构导览](sagents-v2-visual-guide.html)：用可切换架构地图、Run 模拟器与数据边界图理解当前 v2 的装配、执行、持久化和多 Agent 逻辑
-2. [权限与确认设计方案](DESIGN_PERMISSIONS_AND_CONFIRMATION.md)：面向工具、沙箱与多入口的权限分级、确认流与策略模型（当前未在代码中全面实现）
-3. [sagents v2 模块化与插件化设计](DESIGN_SAGENTS_V2_REFACTOR.md)：对齐当前实现的小内核、领域模块、能力插件和组合根，并明确 provider 回放、完整请求预算与生产执行恢复缺口
-4. [sagents v2 沙箱暂停、释放与恢复](SAGENTS_V2_SANDBOX_LIFECYCLE.md)：审批与计算解耦、资源记录、Scheduler fencing、Job affinity 与 Sandbox Provider v3
-5. [Sage 持续学习与递归自我改进设计](DESIGN_SAGE_RSI.md)：固定模型下的多轮反馈学习、现有能力盘点、开源项目对照、评测晋升与分阶段实施路线
-6. [Agent 自定义 Agent：实现与接入](SAGENTS_V2_AGENT_MANAGEMENT.md)：完整包配置、模型可调用管理工具、版本持久化、Flow 与插件绑定，以及当前接入边界
-7. [V2 运行时与桌面检查记录](SAGENTS_V2_DESKTOP_AUDIT_2026_09_13.md)：插件绑定、自动保存、并发初始化修复与后续优化项
-8. [V2 单机并发与 Agent 定制可用性](SAGENTS_V2_RELIABILITY.md)：逻辑修复、并发回归、能力边界与性能验证缺口
-9. [V2 整体审查与修改优先级](V2_COMPREHENSIVE_REVIEW.md)：已复现的一致性与生命周期问题、定制能力缺口及实施顺序
-
-## 阅读建议
-
-```mermaid
-flowchart TD
-    Want[你想做什么]
-
-    Want --> A[理解一次对话怎么被驱动]
-    A --> A1[sagents 总览] --> A2[Agent + Flow] --> A3[Session + Context]
-
-    Want --> B[做服务端集成或部署]
-    B --> B1[服务端与 Web 应用架构] --> B2[配置 + HTTP API 参考]
-
-    Want --> C[做扩展<br/>自定义工具/MCP/技能/子智能体]
-    C --> C1[工具与技能系统] --> C2[Agent + Flow 的扩展点]
-
-    Want --> D[做桌面打包]
-    D --> D1[桌面应用架构] --> D2[app/desktop/scripts]
-```
-
-- [SAgents V2 运行时资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md)：资源就绪检查、共享模型并发额度、空闲回收与 Flow 可达装配。
-
-- [Server V2 多用户 Agent 平台](SERVER_V2_AGENT_PLATFORM.md)：完整包、管理工具、Studio、共享调度与运行控制。
+内置调度器和会话存储不构成分布式运行时。SQL 持久化、用户配额与 fencing 是不同的保证。Server v2 支持单 worker。本机进程执行不等于容器隔离，安全边界取决于所选 provider 实际执行的约束。

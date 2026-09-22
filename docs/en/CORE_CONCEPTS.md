@@ -2,75 +2,30 @@
 layout: default
 title: Core Concepts
 nav_order: 3
-description: "The runtime model behind Sage"
 lang: en
-ref: core-concepts
+ref: v2-CORE_CONCEPTS
 ---
 
 {% include lang_switcher.html %}
 
 # Core Concepts
 
-## `SAgent` Is the Runtime Entry
+| Concept | Meaning |
+| --- | --- |
+| Agent package | A validated manifest selecting agents, models, tools, Skills, and runtime plugins. It can come from YAML text, a Python object, or a file. |
+| Application | `SAgentApplication` owns resolved components, runtime services, and their lifetimes. Always close it. |
+| Session | The authority for conversation history, Runs, checkpoints, and interactions. |
+| Run | An execution attempt within a Session; it may complete, fail, cancel, or suspend for continuation. |
+| Context | A model-request projection assembled from history, instructions, tools, and derived memory. |
+| Interaction | A durable request for approval or user input. |
+| Host | Desktop, Server, or your application; owns identity, credentials, UI, and conversation indexing. |
 
-`sagents/sagents.py` exposes the `SAgent` class. Its `run_stream(...)` method is the central runtime API used to execute a session with:
+## Execution
 
-- input messages
-- model client and model configuration
-- tool and skill managers
-- sandbox configuration
-- agent mode and flow selection
+`StartRun → context assembly → model → authorized tools → further steps → completion or suspension`.
 
-## Sessions Hold State
+Events describe accepted runtime facts. Closing an observer detaches it; it does not cancel the Run. Resume, cancel, and interaction replies use explicit commands. A suspended Run is not a completed Run.
 
-Sage treats the session as the unit of execution. A session carries:
+Session history remains authoritative when summaries, memory, or diagnostics fail. Tool side effects whose outcome cannot be established must be reconciled, not blindly repeated.
 
-- message history
-- task progress
-- runtime locks
-- tool and skill access
-- memory and context budget settings
-
-The runtime creates or reuses sessions through the global session manager in `sagents/session_runtime.py`.
-
-## Agent Modes
-
-The runtime supports multiple execution styles:
-
-- `simple`: direct single-agent interaction
-- `fibre`: advanced multi-agent orchestration with delegation support
-- `team`: team orchestration with delegated child agents
-
-Mode selection influences the default flow assembled inside `SAgent._build_default_flow(...)`.
-
-## Flows Control Execution
-
-`sagents/flow/` defines the declarative flow primitives used by the runtime, including sequence, parallel, condition, switch, and loop nodes. The runtime can:
-
-- build the default flow automatically
-- accept a custom flow
-- combine flow control with agent mode and session state
-
-## Tools and Skills Are Separate Extension Systems
-
-### Tools
-
-Tools are operational capabilities exposed to the model, implemented under `sagents/tool/`. This includes local built-in tools and MCP-backed tools.
-
-### Skills
-
-Skills are host-side instruction bundles and helper assets loaded by the skill system. The runtime exposes them through `SkillManager`.
-
-## Sandboxing Is a First-Class Concern
-
-Sandboxing lives under `sagents/utils/sandbox/`. The runtime supports:
-
-- `local`
-- `remote`
-- `passthrough`
-
-The effective sandbox mode is controlled by runtime arguments and `SAGE_SANDBOX_MODE`.
-
-## Observability Is Built In
-
-Sage includes OpenTelemetry-oriented observability components under `sagents/observability/`. Tracing is intended to be part of normal runtime operation, not a separate afterthought.
+[Python API](api/API_REFERENCE.md) · [Architecture](architecture/README.md)

@@ -1,3 +1,14 @@
+---
+layout: default
+title: 单机并发
+parent: 架构
+nav_order: 9
+lang: zh
+ref: v2-detail-sagents-v2-single-host-concurrency
+---
+
+{% include lang_switcher.html %}
+
 # SAgents V2 单机并发
 
 本轮优化针对一个应用进程内的多用户、多会话 Agent 并发。运行中的网络请求、工具和不同会话的持久化可以交错执行；同一 Run 的状态提交与租户配额仍保持一致性。
@@ -37,7 +48,7 @@ SAGE_SERVER_MAX_PENDING_RUNS=1024
 
 这组数值是可调起点，不是所有机器的最佳值。不要将增加排队上限等同于提高吞吐。模型限流或数据库成为瓶颈时，应降低执行并发，观察队列等待与 P95/P99 延迟。
 
-直接使用 `SAgentBuilder` 时，在 `execution.scheduler` 的插件 config 中使用 `max_concurrent_runs`、`max_concurrent_runs_per_tenant`、`max_pending_items`。Job 的执行、接纳和输出预算见[资源审查报告](sagents-v2-efficiency-quality-audit.md)。
+直接使用 `SAgentBuilder` 时，在 `execution.scheduler` 的插件 config 中使用 `max_concurrent_runs`、`max_concurrent_runs_per_tenant`、`max_pending_items`。Job 的执行、接纳和输出预算见[资源审查报告](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/zh/architecture/sagents-v2-efficiency-quality-audit.md)。
 
 ## 验证与复现
 
