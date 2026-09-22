@@ -6,18 +6,33 @@ from types import SimpleNamespace
 
 import pytest
 
+from sagents.v2.agent.factory import AgentCompositionFactory
+from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
+from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
+
 from app.server_v2.services.models import (
     HostModelProvider,
     bind_model_user,
-    reset_model_user,
     create_catalog_provider,
+    reset_model_user,
 )
-from app.server_v2.services.skill_runtime import CatalogRunDriver, compose_catalog_loop
+from app.server_v2.services.skill_runtime import (
+    CatalogRunDriver,
+    _skill_snapshot,
+    compose_catalog_loop,
+    skill_snapshot_metadata,
+)
 from tests.app.server_v2.conftest import make_test_service, scripted_hello
 from tests.app.server_v2.fakes import MemoryCatalogStore
 from tests.app.server_v2.test_models import _save_demo_model
 from tests.app.server_v2.test_skill_runtime import _command
+
+
+async def _attach_without_host_sandbox(*args, **kwargs):
+    del args, kwargs
+    return EphemeralToolPlugin(), None, None
 
 
 @pytest.mark.asyncio
@@ -151,3 +166,137 @@ async def test_cleanup_failure_does_not_skip_other_run_resources():
         await driver._close_ports()
     assert closed == [2, 1, 0]
     await driver._close_ports()
+
+
+@pytest.mark.asyncio
+async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activations(
+    tmp_path, monkeypatch
+):
+    service = make_test_service(tmp_path)
+    await service.start()
+    await service.skill_catalog.publish_markdown(
+        name="demo",
+        content="---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n",
+        user_id="user",
+        role="user",
+    )
+    await service.skill_catalog.bind_agent_skills(
+        owner_user_id="user", agent_id="main", names=["demo"]
+    )
+    captured = {}
+    original = AgentCompositionFactory.create_skill_loader
+
+    def capture(self, *args, **kwargs):
+        captured.update(kwargs)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
+
+    monkeypatch.setattr(
+        "app.server_v2.services.skill_runtime.attach_official_tools",
+        _attach_without_host_sandbox,
+    )
+    try:
+        _, ports = await compose_catalog_loop(service, _command(), user_id="user")
+        assert captured["skill_loading"] is ports.skill_loading
+        assert isinstance(
+            captured["activations"], SessionDerivedSkillActivationRepository
+        )
+        driver = CatalogRunDriver(service, "run")
+        driver._ports = ports
+        await driver._close_ports()
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
+    tmp_path, monkeypatch
+):
+    service = make_test_service(tmp_path)
+    await service.start()
+    first = await service.skill_catalog.publish_markdown(
+        name="demo",
+        content="---\nname: demo\ndescription: First\n---\n\n# First\n",
+        user_id="user",
+        role="user",
+    )
+    await service.skill_catalog.bind_agent_skills(
+        owner_user_id="user", agent_id="main", names=["demo"]
+    )
+    accepted = tuple(
+        await service.skill_catalog.bound_skills(owner_user_id="user", agent_id="main")
+    )
+    command = _command().model_copy(
+        update={
+            "config": RunConfig(
+                enabled_skills=("demo",),
+                metadata=skill_snapshot_metadata(accepted),
+            )
+        }
+    )
+    second = await service.skill_catalog.update_content(
+        first.skill_id,
+        "---\nname: demo\ndescription: Second\n---\n\n# Second\n",
+        user_id="user",
+        role="user",
+    )
+    await service.skill_catalog.bind_agent_skills(
+        owner_user_id="user", agent_id="main", names=[]
+    )
+    captured = {}
+    original = AgentCompositionFactory.create_skill_loader
+
+    def capture(self, *args, **kwargs):
+        captured["catalog"] = kwargs["catalog"]
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
+    monkeypatch.setattr(
+        "app.server_v2.services.skill_runtime.attach_official_tools",
+        _attach_without_host_sandbox,
+    )
+    try:
+        _, ports = await compose_catalog_loop(service, command, user_id="user")
+        descriptor = await captured["catalog"].get_skill("demo", run_id="run")
+        assert descriptor.version == first.version_id
+        assert descriptor.version != second.version_id
+        driver = CatalogRunDriver(service, "run")
+        driver._ports = ports
+        await driver._close_ports()
+    finally:
+        await service.close()
+
+
+def test_skill_snapshot_rejects_a_user_skill_owned_by_another_tenant():
+    command = _command().model_copy(
+        update={
+            "config": RunConfig(
+                enabled_skills=("demo",),
+                metadata={
+                    "server_v2.skill_snapshot": [
+                        {
+                            "skill_id": "skill_1",
+                            "version_id": "version_1",
+                            "revision": 1,
+                            "dimension": "user",
+                            "owner_user_id": "other-user",
+                            "name": "demo",
+                            "description": "Demo",
+                            "artifact_path": "users/other-user/demo/version_1",
+                            "skill_md_sha256": "sha256:skill",
+                            "package_sha256": "sha256:package",
+                            "file_count": 1,
+                            "total_bytes": 1,
+                            "status": "active",
+                        }
+                    ]
+                },
+            )
+        }
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        _skill_snapshot(command, user_id="user")
+
+    assert caught.value.info.code == "skill.snapshot_invalid"

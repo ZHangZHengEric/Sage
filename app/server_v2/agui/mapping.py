@@ -88,6 +88,7 @@ def to_start_run(
     composition_hash: str,
     default_agent_id: str,
     enabled_skills: tuple[str, ...] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> tuple[str, str, str, StartRun]:
     thread_id = validate_agui_id(request.thread_id, field="threadId")
     run_id = validate_agui_id(request.run_id, field="runId")
@@ -97,7 +98,10 @@ def to_start_run(
         session_id=thread_id,
         agent_id=agent_id,
         input=(latest_user_input(request),),
-        config=RunConfig(enabled_skills=enabled_skills),
+        config=RunConfig(
+            enabled_skills=enabled_skills,
+            metadata=dict(metadata or {}),
+        ),
         resolved_spec_hash=composition_hash,
         idempotency_key=run_id,
     )
