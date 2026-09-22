@@ -74,7 +74,7 @@ Desktop v2 将运行数据和设置保存在 `~/sage/runtime`，导入的 Skills
 
 ### Server v2
 
-Server v2 需要 MySQL、Redis，以及兼容 Vite 7 的 Node.js（可使用 Node.js 22.12+）。在仓库根目录、已激活 Python 环境的终端中运行：
+Server v2 需要 MySQL，以及兼容 Vite 7 的 Node.js（可使用 Node.js 22.12+）。在仓库根目录、已激活 Python 环境的终端中运行：
 
 ```bash
 python -m pip install -e '.[server-v2]'
@@ -83,7 +83,7 @@ cp app/server_v2/.env.example app/server_v2/.env
 
 启动前编辑 `app/server_v2/.env`：
 
-- 将 `SAGE_SERVER_MYSQL_URL` 和 `SAGE_SERVER_REDIS_URL` 设置为实际服务连接地址。
+- 将 `SAGE_SERVER_MYSQL_URL` 设置为实际 MySQL 连接地址。
 - 将 `SAGE_SERVER_JWT_SECRET` 设置为自己的密钥，至少 32 字节。
 - 通过 `SAGE_SERVER_ADMIN_USERNAME` 和 `SAGE_SERVER_ADMIN_PASSWORD` 设置初始管理员账号。
 
@@ -99,7 +99,7 @@ python -m app.server_v2
 
 打开 [http://127.0.0.1:8090](http://127.0.0.1:8090)，使用配置的管理员账号登录，添加模型和 Agent。API 文档位于 `/docs`，Agent 包管理入口位于 `/studio`。
 
-Server v2 当前使用**单 worker** 运行。MySQL 持久化和 Redis 事件回放不代表运行时已支持横向扩容。配置和部署边界见 [Server v2 指南](app/server_v2/README.md)。
+Server v2 当前使用**单 worker** 运行。事件回放直接读取 Sage Session 的权威 RuntimeEvent；MySQL 持久化不代表运行时已支持横向扩容。配置和部署边界见 [Server v2 指南](app/server_v2/README.md)。
 
 ### 嵌入 SAgents v2
 
@@ -200,6 +200,12 @@ flutter test
 ## 赞助商
 
 感谢 **循环智能（RcrAI）** 和 **Data** 对 Sage 的支持。
+
+<p align="center">
+  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能（RcrAI）" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/sponsors/idata_logo.png" height="50" alt="Data" />
+</p>
 
 ## 许可证
 

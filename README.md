@@ -74,7 +74,7 @@ See the [Desktop v2 guide](app/desktop_v2/README.md) for workspace behavior, con
 
 ### Server v2
 
-Server v2 requires MySQL, Redis, and Node.js compatible with Vite 7 (Node.js 22.12+ is suitable). From the repository root, with the Python environment active:
+Server v2 requires MySQL and Node.js compatible with Vite 7 (Node.js 22.12+ is suitable). From the repository root, with the Python environment active:
 
 ```bash
 python -m pip install -e '.[server-v2]'
@@ -83,7 +83,7 @@ cp app/server_v2/.env.example app/server_v2/.env
 
 Edit `app/server_v2/.env` before starting:
 
-- Set `SAGE_SERVER_MYSQL_URL` and `SAGE_SERVER_REDIS_URL` to your service connections.
+- Set `SAGE_SERVER_MYSQL_URL` to your MySQL connection URL.
 - Set `SAGE_SERVER_JWT_SECRET` to your own secret of at least 32 bytes.
 - Set `SAGE_SERVER_ADMIN_USERNAME` and `SAGE_SERVER_ADMIN_PASSWORD` for the initial administrator.
 
@@ -99,7 +99,7 @@ python -m app.server_v2
 
 Open [http://127.0.0.1:8090](http://127.0.0.1:8090), sign in with the administrator credentials you configured, and add a model and an Agent. API documentation is available at `/docs`; Agent package management is available at `/studio`.
 
-Server v2 currently runs with **one worker**. MySQL persistence and Redis event replay do not make the runtime horizontally scalable. See the [Server v2 guide](app/server_v2/README.md) for configuration and deployment boundaries.
+Server v2 currently runs with **one worker**. Event replay reads canonical RuntimeEvents from Sage Sessions. MySQL persistence does not make the runtime horizontally scalable. See the [Server v2 guide](app/server_v2/README.md) for configuration and deployment boundaries.
 
 ### Embed SAgents v2
 
@@ -200,6 +200,12 @@ Use [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) for bugs and 
 ## Sponsors
 
 Thank you to **RcrAI** and **Data** for supporting Sage.
+
+<p align="center">
+  <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/sponsors/idata_logo.png" height="50" alt="Data" />
+</p>
 
 ## License
 
