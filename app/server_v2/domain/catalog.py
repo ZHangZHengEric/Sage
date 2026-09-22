@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import logging
 import re
+from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sagents.v2.contracts.common import new_id
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
@@ -13,6 +23,8 @@ from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 
 from app.server_v2.core.errors import ServerV2Error
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ModelRecord(BaseModel):
@@ -78,26 +90,47 @@ class AgentRecord(BaseModel):
         }
 
 
+SUPPORTED_MCP_PROTOCOLS = ("sse", "streamable_http")
+
+
 class McpServerRecord(BaseModel):
+    """A remote MCP server.
+
+    server_v2 is a public multi-tenant service, so only network transports
+    exist here. A ``stdio`` server would run a tenant-supplied command inside
+    the server process, which is a remote code execution primitive handed to
+    anyone who can register an account.
+    """
+
     name: str
-    protocol: str = "stdio"
+    protocol: Literal["sse", "streamable_http"] = "streamable_http"
     url: str | None = None
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
     api_key: SecretStr | None = None
     disabled: bool = False
     description: str = ""
     tools: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_transport(self) -> McpServerRecord:
+        """Reject a server that cannot be reached, at the point it is saved.
+
+        The transport was previously only checked while composing a Run, so a
+        malformed server was accepted with 200 and then surfaced as an opaque
+        runtime failure in the next chat.
+        """
+
+        parsed = urlsplit(self.url or "")
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError(
+                f"{self.protocol} MCP requires an absolute http(s) URL"
+            )
+        return self
 
     def public_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "protocol": self.protocol,
             "url": self.url,
-            "command": self.command,
-            "args": list(self.args),
-            "env": dict(self.env),
             "disabled": self.disabled,
             "description": self.description,
             "tools": list(self.tools),
@@ -110,6 +143,34 @@ class UserCatalog(BaseModel):
     agents: list[AgentRecord] = Field(default_factory=list)
     models: list[ModelRecord] = Field(default_factory=list)
     mcp_servers: list[McpServerRecord] = Field(default_factory=list)
+
+    @field_validator("mcp_servers", mode="before")
+    @classmethod
+    def drop_unsupported_transports(cls, value: object) -> object:
+        """Ignore persisted servers this deployment refuses to run.
+
+        Rows predating the stdio removal — and rows saved before the transport
+        was validated at write time — must not make a whole catalog unreadable:
+        skipping one obsolete server costs that server's Tools, while rejecting
+        the record would lock the tenant out of every Agent and model too.
+        """
+
+        if not isinstance(value, list):
+            return value
+        kept: list[object] = []
+        for item in value:
+            if not isinstance(item, dict):
+                kept.append(item)
+                continue
+            try:
+                kept.append(McpServerRecord.model_validate(item))
+            except ValidationError:
+                _LOGGER.warning(
+                    "dropping unsupported mcp server %r (protocol=%r)",
+                    item.get("name"),
+                    item.get("protocol"),
+                )
+        return kept
 
 
 def empty_catalog() -> UserCatalog:
@@ -193,36 +254,42 @@ def upsert_mcp(
     name = str(payload.get("name") or "").strip()
     if not _AGENT_ID.fullmatch(name):
         raise ServerV2Error("validation", f"invalid mcp name: {name!r}")
-    protocol = str(payload.get("protocol") or "stdio").strip()
-    if protocol not in {"stdio", "sse", "streamable_http"}:
+    protocol = str(payload.get("protocol") or "streamable_http").strip()
+    if protocol not in SUPPORTED_MCP_PROTOCOLS:
         raise ServerV2Error("validation", f"unsupported mcp protocol: {protocol}")
     existing = next((item for item in catalog.mcp_servers if item.name == name), None)
     api_key = str(payload.get("api_key") or "")
     secret = existing.api_key if existing is not None else None
     if api_key:
         secret = SecretStr(api_key)
-    record = McpServerRecord(
-        name=name,
-        protocol=protocol,
-        url=str(payload.get("url") or "") or None,
-        command=str(payload.get("command") or "") or None,
-        args=[str(item) for item in payload.get("args") or [] if str(item).strip()],
-        env={
-            str(key): str(value)
-            for key, value in dict(payload.get("env") or {}).items()
-            if str(key).strip()
-        },
-        api_key=secret,
-        disabled=bool(payload.get("disabled", False)),
-        description=str(payload.get("description") or "")[:500],
-        tools=_unique_names(payload.get("tools") if payload.get("tools") is not None else (
-            existing.tools if existing is not None else []
-        )),
-    )
+    tools = payload.get("tools")
+    try:
+        record = McpServerRecord(
+            name=name,
+            protocol=protocol,  # type: ignore[arg-type]
+            url=str(payload.get("url") or "").strip() or None,
+            api_key=secret,
+            disabled=bool(payload.get("disabled", False)),
+            description=str(payload.get("description") or "")[:500],
+            tools=_unique_names(
+                tools
+                if tools is not None
+                else (existing.tools if existing is not None else [])
+            ),
+        )
+    except ValidationError as exc:
+        raise ServerV2Error("validation", _first_error(exc)) from exc
     servers = [item for item in catalog.mcp_servers if item.name != name]
     servers.append(record)
     catalog.mcp_servers = servers
     return record, catalog
+
+
+def _first_error(exc: ValidationError) -> str:
+    for item in exc.errors():
+        message = str(item.get("msg") or "").removeprefix("Value error, ").strip()
+        return message or "invalid mcp server"
+    return "invalid mcp server"
 
 
 def delete_mcp(catalog: UserCatalog, name: str) -> UserCatalog:

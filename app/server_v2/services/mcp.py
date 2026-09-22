@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from collections.abc import Iterable
 
@@ -8,17 +9,16 @@ from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.catalog import McpServerRecord
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def to_mcp_config(record: McpServerRecord, *, required: bool = False) -> McpServerConfig:
     try:
         return McpServerConfig(
             name=record.name,
-            protocol=record.protocol,  # type: ignore[arg-type]
+            protocol=record.protocol,
             url=record.url,
             api_key=record.api_key,
-            command=record.command,
-            args=tuple(record.args),
-            env=dict(record.env),
             required=required,
         )
     except Exception as exc:
@@ -38,9 +38,24 @@ async def discover_mcp_tools(config: McpServerConfig) -> list[str]:
 def mcp_server_configs(
     records: Iterable[McpServerRecord],
 ) -> tuple[McpServerConfig, ...]:
-    return tuple(
-        to_mcp_config(item, required=False) for item in records if not item.disabled
-    )
+    """Project enabled records onto transport configs, skipping broken ones.
+
+    A server is validated when it is saved, but a record can still become
+    unusable later — a catalog written by an older build, or a transport this
+    deployment no longer supports. Dropping it degrades to "that server has no
+    Tools", which matches how an unreachable server already behaves; raising
+    would fail the entire Run over one bad row.
+    """
+
+    configs: list[McpServerConfig] = []
+    for item in records:
+        if item.disabled:
+            continue
+        try:
+            configs.append(to_mcp_config(item, required=False))
+        except ServerV2Error:
+            _LOGGER.warning("skipping unusable mcp server %r", item.name)
+    return tuple(configs)
 
 
 class McpPluginCache:
@@ -79,6 +94,18 @@ class McpPluginCache:
         while len(self._plugins) > self._max_entries:
             self._plugins.popitem(last=False)
         return plugin
+
+    def invalidate(self, user_id: str) -> None:
+        """Forget this user's plugins so the next Run rediscovers their Tools.
+
+        A discovery result is cached for the lifetime of the entry, and the
+        fingerprint covers only the transport — so a server that was down when
+        it was first listed, or that has since gained Tools, would otherwise
+        stay stale forever with no way for the tenant to recover.
+        """
+
+        for key in [item for item in self._plugins if item[0] == user_id]:
+            self._plugins.pop(key, None)
 
     def clear(self) -> None:
         self._plugins.clear()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from ag_ui.core import RunAgentInput
 from pydantic import BaseModel, Field
@@ -70,11 +70,8 @@ class ToolPublic(BaseModel):
 
 class McpBody(BaseModel):
     name: str
-    protocol: str = "stdio"
+    protocol: Literal["sse", "streamable_http"] = "streamable_http"
     url: str | None = None
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
     api_key: str = ""
     disabled: bool = False
     description: str = ""
@@ -84,9 +81,6 @@ class McpPublic(BaseModel):
     name: str
     protocol: str
     url: str | None = None
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
     disabled: bool = False
     description: str = ""
     tools: list[str] = Field(default_factory=list)

@@ -6,9 +6,12 @@ from app.server_v2.domain.catalog import McpServerRecord
 from app.server_v2.services.mcp import McpPluginCache
 
 
-def _server(name: str, *, command: str = "demo", disabled: bool = False):
+def _server(name: str, *, url: str = "", disabled: bool = False):
     return McpServerRecord(
-        name=name, protocol="stdio", command=command, disabled=disabled
+        name=name,
+        protocol="streamable_http",
+        url=url or f"https://mcp.example.com/{name}",
+        disabled=disabled,
     )
 
 
@@ -56,3 +59,14 @@ def test_cache_is_bounded_by_eviction():
     cache.get("user_1", [_server("c")])
 
     assert cache.get("user_1", [_server("a")]) is not first
+
+
+def test_invalidate_forces_rediscovery_for_that_user_only():
+    cache = McpPluginCache()
+    mine = cache.get("user_1", [_server("files")])
+    theirs = cache.get("user_2", [_server("files")])
+
+    cache.invalidate("user_1")
+
+    assert cache.get("user_1", [_server("files")]) is not mine
+    assert cache.get("user_2", [_server("files")]) is theirs

@@ -24,11 +24,15 @@ def test_upsert_agent_keeps_skill_bindings():
     assert record.skills == ["demo"]
 
 
-def test_upsert_mcp_stdio():
+def test_upsert_mcp_streamable_http():
     catalog = empty_catalog()
     record, catalog = upsert_mcp(
         catalog,
-        {"name": "files", "protocol": "stdio", "command": "npx", "args": ["-y", "demo"]},
+        {
+            "name": "files",
+            "protocol": "streamable_http",
+            "url": "https://mcp.example.com/files",
+        },
     )
     assert record.name == "files"
     assert [item.name for item in catalog.mcp_servers] == ["files"]

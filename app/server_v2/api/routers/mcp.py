@@ -53,15 +53,13 @@ async def refresh_mcp(name: str, user: CurrentUser, service: ServiceDep):
     if current is None:
         raise ServerV2Error("not_found", "mcp server not found")
     tools = await discover_mcp_tools(to_mcp_config(current))
-    record, catalog = upsert_mcp(
-        catalog,
-        {
-            **current.public_dict(),
-            "api_key": (
-                current.api_key.get_secret_value() if current.api_key is not None else ""
-            ),
-            "tools": tools,
-        },
-    )
+    record = current.model_copy(update={"tools": list(dict.fromkeys(tools))})
+    catalog.mcp_servers = [
+        record if item.name == name else item for item in catalog.mcp_servers
+    ]
     await service.catalog.save(user.user_id, catalog)
+    # Refresh is the only verb that asks for rediscovery without changing the
+    # transport, so the cached plugin would otherwise keep serving the Tools it
+    # saw the first time — including an empty list from a server that was down.
+    service.mcp_plugins.invalidate(user.user_id)
     return success(record.public_dict())
