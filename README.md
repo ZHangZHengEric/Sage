@@ -1,6 +1,26 @@
-# Sage
+<div align="center">
 
-[English](README.md) · [简体中文](README_CN.md) · [Documentation](docs/en/README.md) · [Releases](https://github.com/ZHangZHengEric/Sage/releases) · [MIT License](LICENSE)
+# 🌟 **Experience Sage's Power**
+
+![cover](assets/cover.png)
+
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
+[![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+
+# 🧠 **Sage Agent Platform**
+
+### 🎯 **From Complex Work to Reliable Delivery**
+
+> 🌟 **An open-source agent platform for project work, tool execution, and multi-agent collaboration — on your desktop, on the web, or in your own application.**
+
+</div>
+
+---
 
 Sage brings AI agents into the workspace where your work happens. Give an agent a project, connect the models and tools it needs, and work with it from the first instruction through file changes, tool execution, and review.
 

@@ -1,6 +1,26 @@
-# Sage
+<div align="center">
 
-[English](README.md) · [简体中文](README_CN.md) · [项目文档](docs/zh/README.md) · [版本发布](https://github.com/ZHangZHengEric/Sage/releases) · [MIT 许可证](LICENSE)
+# 🌟 **体验 Sage 的强大能力**
+
+![cover](assets/cover.png)
+
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
+[![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+
+# 🧠 **Sage 智能体平台**
+
+### 🎯 **让复杂工作走向可靠交付**
+
+> 🌟 **面向项目工作、工具执行与多智能体协作的开源平台，支持桌面端、Web 与自建应用。**
+
+</div>
+
+---
 
 Sage 让 AI 智能体进入实际工作的现场。连接项目，配置模型与工具，从提出任务到文件修改、工具执行和结果检查，在同一个工作区中与智能体协作。
 
