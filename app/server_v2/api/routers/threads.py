@@ -1,9 +1,12 @@
-from typing import Any
-
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
-from app.server_v2.schemas import AUTH_ERRORS, ApiResponse, ThreadPublic
+from app.server_v2.schemas import (
+    AUTH_ERRORS,
+    ApiResponse,
+    ThreadEventPage,
+    ThreadPublic,
+)
 from app.server_v2.core.errors import success
 
 router = APIRouter(
@@ -23,9 +26,19 @@ async def list_threads(user: CurrentUser, service: ServiceDep):
     )
 
 
-@router.get("/{thread_id}/events", response_model=ApiResponse[list[dict[str, Any]]])
-async def get_thread_events(thread_id: str, user: CurrentUser, service: ServiceDep):
-    return success(await service.thread_events(thread_id, user.user_id))
+@router.get("/{thread_id}/events", response_model=ApiResponse[ThreadEventPage])
+async def get_thread_events(
+    thread_id: str,
+    user: CurrentUser,
+    service: ServiceDep,
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int | None = Query(default=None, ge=0),
+):
+    return success(
+        await service.thread_events(
+            thread_id, user.user_id, limit=limit, offset=offset
+        )
+    )
 
 
 @router.delete("/{thread_id}", response_model=ApiResponse[None])

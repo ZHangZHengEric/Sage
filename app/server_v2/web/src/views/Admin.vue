@@ -23,7 +23,7 @@ async function load() {
 
 async function openThread(id) {
   selected.value = id
-  rawEvents.value = await api.adminThreadEvents(id)
+  rawEvents.value = (await api.adminThreadEvents(id))?.events || []
 }
 
 onMounted(async () => {

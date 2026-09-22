@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.server_v2.core.database import Database
 from app.server_v2.db.models import AgentSkillSelectionRow, SkillRow, SkillVersionRow
@@ -56,22 +56,25 @@ class DatabaseSkillStore:
     async def list_visible(
         self, *, user_id: str, role: str, dimension: SkillDimension | None = None
     ) -> list[SkillRecord]:
+        # Visibility is a WHERE clause, not a full scan: this runs on every chat
+        # turn, so it must stay proportional to the caller's own Skills.
+        statement = (
+            select(SkillRow, SkillVersionRow)
+            .join(SkillVersionRow, SkillRow.current_version_id == SkillVersionRow.version_id)
+            .where(SkillRow.status == "active")
+        )
+        if dimension is not None:
+            statement = statement.where(SkillRow.dimension == dimension)
+        if role != "admin":
+            statement = statement.where(
+                or_(
+                    SkillRow.dimension == "system",
+                    SkillRow.owner_user_id == user_id,
+                )
+            )
         async with self.database.session() as session:
-            rows = list((await session.execute(select(SkillRow))).scalars().all())
-            versions = {
-                row.version_id: row
-                for row in (await session.execute(select(SkillVersionRow))).scalars().all()
-            }
-        records = [
-            _record(row, versions[row.current_version_id])
-            for row in rows
-            if row.current_version_id in versions
-        ]
-        return [
-            item
-            for item in records
-            if _visible(item, user_id=user_id, role=role, dimension=dimension)
-        ]
+            rows = (await session.execute(statement)).all()
+        return [_record(row, version) for row, version in rows]
 
     async def publish(self, record: SkillRecord) -> SkillRecord:
         reject_absolute_artifact_path(record.artifact_path)
@@ -183,24 +186,6 @@ class DatabaseSkillStore:
             )
             for row in sorted(rows, key=lambda item: item.position)
         ]
-
-
-def _visible(
-    item: SkillRecord,
-    *,
-    user_id: str,
-    role: str,
-    dimension: SkillDimension | None,
-) -> bool:
-    if item.status != "active":
-        return False
-    if dimension is not None and item.dimension != dimension:
-        return False
-    if item.dimension == "system":
-        return True
-    if item.owner_user_id == user_id:
-        return True
-    return role == "admin"
 
 
 def _record(row: SkillRow, version: SkillVersionRow) -> SkillRecord:

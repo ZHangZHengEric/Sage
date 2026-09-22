@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import AsyncExitStack
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from sagents.v2._concurrency import bounded_to_thread
@@ -37,74 +37,20 @@ from app.server_v2.domain.catalog import (
 from app.server_v2.domain.skills import (
     SkillPackage,
     SkillRecord,
-    artifact_relative_path,
     inspect_skill_directory,
-    normalize_skill_name,
     package_sha256_of,
     resolve_artifact_path,
     workspace_skill_path,
     write_skill_package,
 )
+from app.server_v2.services.composition import (
+    RunComposition,
+    load_composition,
+    selected_mcp_servers,
+)
 from app.server_v2.services.models import create_catalog_provider, close_model_provider
-from app.server_v2.services.mcp import mcp_plugin
 from app.server_v2.services.official import attach_official_tools, resolve_agent_tools
 from app.server_v2.services.package import server_v2_run_manifest
-
-
-SKILL_SNAPSHOT_METADATA_KEY = "server_v2.skill_snapshot"
-
-
-def skill_snapshot_metadata(records: tuple[SkillRecord, ...]) -> dict[str, object]:
-    """Serialize the exact immutable Skill versions admitted with a Run."""
-
-    return {SKILL_SNAPSHOT_METADATA_KEY: [asdict(record) for record in records]}
-
-
-def _skill_snapshot(
-    command: StartRun, *, user_id: str
-) -> tuple[SkillRecord, ...] | None:
-    raw = command.config.metadata.get(SKILL_SNAPSHOT_METADATA_KEY)
-    if raw is None:
-        return None
-    if not isinstance(raw, list):
-        raise _invalid_skill_snapshot("Skill snapshot must be a list")
-    records: list[SkillRecord] = []
-    try:
-        for value in raw:
-            if not isinstance(value, dict):
-                raise TypeError("Skill snapshot entries must be objects")
-            record = SkillRecord(**value)
-            normalize_skill_name(record.name)
-            if record.dimension not in {"system", "user"}:
-                raise ValueError(f"invalid skill dimension: {record.dimension!r}")
-            if record.dimension == "user" and record.owner_user_id != user_id:
-                raise ValueError(f"skill {record.name!r} belongs to another user")
-            expected_path = artifact_relative_path(
-                dimension=record.dimension,
-                owner_user_id=record.owner_user_id,
-                name=record.name,
-                version_id=record.version_id,
-            )
-            if record.artifact_path != expected_path:
-                raise ValueError(f"skill {record.name!r} has an invalid artifact path")
-            records.append(record)
-    except (ServerV2Error, TypeError, ValueError) as exc:
-        raise _invalid_skill_snapshot(str(exc)) from exc
-    enabled = command.config.enabled_skills
-    if enabled is None or tuple(record.name for record in records) != tuple(enabled):
-        raise _invalid_skill_snapshot("Skill snapshot does not match the Run grant")
-    return tuple(records)
-
-
-def _invalid_skill_snapshot(message: str) -> SageV2Error:
-    return SageV2Error(
-        RuntimeErrorInfo(
-            code="skill.snapshot_invalid",
-            category=ErrorCategory.VALIDATION,
-            message=message,
-            safe_to_resume=False,
-        )
-    )
 
 
 class CatalogSkillProvider:
@@ -295,19 +241,10 @@ class CatalogRunDriver:
                     stack.push_async_callback(closer)
 
 
-SkillAwareRunDriver = CatalogRunDriver
-
-
 async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
     catalog = await service.catalog.get(user_id)
-    agent = require_agent(catalog, command.agent_id)
-    records = _skill_snapshot(command, user_id=user_id)
-    if records is None:
-        records = tuple(
-            await service.skill_catalog.bound_skills(
-                owner_user_id=user_id, agent_id=agent.id
-            )
-        )
+    frozen = await _composition(service, command, catalog, user_id=user_id)
+    agent, records = frozen.agent, frozen.skills
     names = tuple(record.name for record in records)
     tools = resolve_agent_tools(agent.tools, has_skills=bool(names))
     manifest = server_v2_run_manifest(
@@ -376,7 +313,9 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             skill_tool = SkillToolPlugin(loader, language=service.settings.language)
             catalogs.append(skill_tool.catalog)
             executors.append(skill_tool.executor)
-        mcp = mcp_plugin(enabled_mcp_servers(catalog))
+        mcp = service.mcp_plugins.get(
+            user_id, selected_mcp_servers(catalog, frozen.mcp_servers)
+        )
         if mcp is not None:
             catalogs.append(mcp)
             executors.append(mcp)
@@ -394,6 +333,9 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             log_sink=service.application.service("observability.log-sink"),
             trace_sink=_optional_service(service, "observability.trace-sink"),
         )
+        # The host manifest hash, not a per-Run one: it catches a Run routed
+        # to a restarted process with different backends. Drift in the Agent's
+        # own configuration is handled by the frozen composition instead.
         loop.expected_resolved_spec_hash = command.resolved_spec_hash
         return loop, replace(ports, scope_handles=(*extra, *ports.scope_handles))
     except BaseException:
@@ -405,17 +347,37 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         raise
 
 
-async def compose_skill_loop(
-    service, command: StartRun, *, user_id: str, names: tuple[str, ...]
-):
-    del names
-    loop, _ports = await compose_catalog_loop(service, command, user_id=user_id)
-    return loop
-
-
 def install_skill_driver(service) -> None:
     agent = service.application.entrypoint()
     agent.driver_factory = lambda run_id: CatalogRunDriver(service, run_id)
+
+
+async def _composition(service, command: StartRun, catalog, *, user_id: str):
+    """Replay the admitted composition, or derive one for an internal Run.
+
+    Runs that did not enter through the AG-UI endpoint carry no snapshot. They
+    compose from the live catalog, but a grant the caller already narrowed is
+    still a ceiling: it is never widened back to the Agent's own bindings.
+    """
+
+    frozen = load_composition(command, user_id=user_id)
+    if frozen is not None:
+        return frozen
+    agent = require_agent(catalog, command.agent_id)
+    records = tuple(
+        await service.skill_catalog.bound_skills(
+            owner_user_id=user_id, agent_id=agent.id
+        )
+    )
+    granted = command.config.enabled_skills
+    if granted is not None:
+        allowed = set(granted)
+        records = tuple(item for item in records if item.name in allowed)
+    return RunComposition(
+        agent=agent,
+        skills=records,
+        mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
+    )
 
 
 async def _run_model(service, catalog, agent, *, user_id):
@@ -446,12 +408,6 @@ def _recorded_model(service, model):
     )
 
 
-def workspace_content_hash(path: Path) -> str:
-    if not path.is_dir():
-        return ""
-    return package_sha256_of(path)
-
-
 def _descriptor(record: SkillRecord) -> SkillDescriptor:
     return SkillDescriptor(
         name=record.name,
@@ -466,33 +422,11 @@ def _descriptor(record: SkillRecord) -> SkillDescriptor:
     )
 
 
-def _context_components(service) -> ContextComponentBundle:
-    try:
-        return ContextComponentBundle(
-            token_estimator=service.application.service("context.token-estimator"),
-            summary_store=service.application.service("context.summary-store"),
-            summarizer=service.application.service("context.summarizer"),
-            reducer=service.application.service("context.reducer"),
-        )
-    except KeyError:
-        return ContextComponentBundle()
-
-
 def _optional_service(service, name: str):
     try:
         return service.application.service(name)
     except KeyError:
         return None
-
-
-def bundle_hash(files: dict[str, bytes]) -> str:
-    digest = hashlib.sha256()
-    for path, content in sorted(files.items()):
-        digest.update(path.encode())
-        digest.update(b"\0")
-        digest.update(content)
-        digest.update(b"\0")
-    return f"sha256:{digest.hexdigest()}"
 
 
 class _OwnedModelScope:

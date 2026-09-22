@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from ag_ui.core import RunAgentInput
 from pydantic import BaseModel, Field
@@ -189,6 +189,15 @@ class ThreadPublic(BaseModel):
     title: str
     agent_id: str = ""
     updated_at: str
+
+
+class ThreadEventPage(BaseModel):
+    """One bounded window of AG-UI frames plus the source event count."""
+
+    events: list[dict[str, Any]]
+    total: int
+    offset: int
+    limit: int
 
 
 class AdminThreadPublic(ThreadPublic):

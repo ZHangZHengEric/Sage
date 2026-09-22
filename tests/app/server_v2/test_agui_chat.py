@@ -160,7 +160,9 @@ def test_live_stream_skips_user_text_but_history_keeps_it(client: TestClient):
     assert any(event["type"] == "TEXT_MESSAGE_CONTENT" for event in live)
     history = client.get("/api/threads/thread-1/events", headers=headers)
     assert history.status_code == 200
-    replayed = history.json()["data"]
+    page = history.json()["data"]
+    replayed = page["events"]
+    assert page["offset"] == 0 and page["total"] > 0
     assert any(
         event.get("type") == "TEXT_MESSAGE_START" and event.get("role") == "user"
         for event in replayed
