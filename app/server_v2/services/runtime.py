@@ -33,7 +33,10 @@ from app.server_v2.services.models import (
 )
 from app.server_v2.services.official import install_sandbox
 from app.server_v2.services.package import server_v2_manifest
-from app.server_v2.services.skill_runtime import install_skill_driver
+from app.server_v2.services.skill_runtime import (
+    install_skill_driver,
+    skill_snapshot_metadata,
+)
 from app.server_v2.services.skills import SkillCatalogService
 from app.server_v2.storage import prepare_server_v2_storage
 
@@ -229,12 +232,18 @@ class ServerV2Service:
         record = require_agent(
             catalog, resolve_thread_agent_id(existing, requested_agent) or None
         )
-        enabled = await self.skill_catalog.bound_names(user_id, record.id)
+        skill_records = tuple(
+            await self.skill_catalog.bound_skills(
+                owner_user_id=user_id, agent_id=record.id
+            )
+        )
+        enabled = tuple(item.name for item in skill_records)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
             composition_hash=self.application.composition_hash,
             default_agent_id=record.id,
             enabled_skills=enabled,
+            metadata=skill_snapshot_metadata(skill_records),
         )
         if command.agent_id != record.id:
             command = command.model_copy(update={"agent_id": record.id})

@@ -7,6 +7,7 @@ from sagents.v2.skill import (
     SkillLoader,
 )
 from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 
 from app.server_v2.domain.skills import workspace_skill_path
@@ -67,13 +68,20 @@ async def test_listing_available_skills_does_not_copy_to_workspace(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_load_skill_read_through_catalog_artifact(tmp_path: Path):
+async def test_load_skill_materializes_content_addressed_workspace_bundle(
+    tmp_path: Path,
+):
     _, record, _, loader = await _bound_loader(tmp_path)
     loaded = await loader.load("demo", run_id="run_1")
     workspace = workspace_skill_path(tmp_path, "user_1", "demo")
 
-    assert loaded.workspace_path == str(record.absolute_path(tmp_path))
+    assert loaded.workspace_path.startswith("/workspace/skills/.catalog/demo/")
     assert not workspace.exists()
+    relative = loaded.workspace_path.removeprefix("/workspace/")
+    materialized = tmp_path / "tenants" / "user_1" / "workspace" / relative
+    assert materialized.is_dir()
+    assert (materialized / "SKILL.md").is_file()
+    assert materialized != record.absolute_path(tmp_path)
     assert "# Demo" in loaded.instructions
 
 
@@ -94,5 +102,21 @@ async def test_workspace_edit_is_copy_on_write(tmp_path: Path):
     )
 
     loaded = await loader.load("demo", run_id="run_1")
-    assert loaded.workspace_path == str(workspace)
+    assert loaded.workspace_path == "/workspace/skills/demo"
     assert await catalog.workspace_status(user_id="user_1", name="demo") == "modified"
+
+
+@pytest.mark.asyncio
+async def test_workspace_rejects_bundle_without_an_admitted_record(tmp_path: Path):
+    _, _, provider, _ = await _bound_loader(tmp_path)
+    bundle = await provider.fetch("demo", run_id="run_1")
+    workspace = ReadThroughSkillWorkspace(tmp_path, "user_1", ())
+
+    with pytest.raises(SageV2Error) as caught:
+        await workspace.materialize(
+            bundle,
+            run_id="run_1",
+            destination="/workspace/skills/demo",
+        )
+
+    assert caught.value.info.code == "skill.not_found"

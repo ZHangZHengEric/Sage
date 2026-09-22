@@ -59,6 +59,21 @@ def test_maps_enabled_skills_from_catalog_bindings():
     assert command.config.enabled_skills == ("demo",)
 
 
+def test_maps_trusted_run_metadata_with_skill_snapshot():
+    request = _input()
+    metadata = {"server_v2.skill_snapshot": [{"name": "demo", "version_id": "v1"}]}
+
+    *_, command = to_start_run(
+        request,
+        composition_hash="sha256:test",
+        default_agent_id="main",
+        enabled_skills=("demo",),
+        metadata=metadata,
+    )
+
+    assert command.config.metadata == metadata
+
+
 def test_rejects_invalid_run_id():
     with pytest.raises(ServerV2Error):
         to_start_run(
