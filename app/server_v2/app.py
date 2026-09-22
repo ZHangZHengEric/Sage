@@ -18,7 +18,7 @@ from app.server_v2.core.observability import (
     build_observability_router,
     init_logging,
 )
-from app.server_v2.core.settings import REDIS_KEY_PREFIX, ServerV2Settings
+from app.server_v2.core.settings import ServerV2Settings
 from app.server_v2.services.runtime import ServerV2Service
 
 WEB_DIST = Path(__file__).resolve().parent / "web" / "dist"
@@ -48,14 +48,9 @@ def required_resources(settings: ServerV2Settings):
     url = settings.database_url()
     if not url:
         raise ValueError("SAGE_SERVER_MYSQL_URL is required")
-    if not settings.redis_url:
-        raise ValueError("SAGE_SERVER_REDIS_URL is required")
     from app.server_v2.core.database import Database, DatabaseSettings
-    from app.server_v2.core.redis import Redis, RedisSettings
 
-    return Database(DatabaseSettings(url=url)), Redis(
-        RedisSettings(url=settings.redis_url, key_prefix=REDIS_KEY_PREFIX)
-    )
+    return (Database(DatabaseSettings(url=url)),)
 
 
 def create_app(
@@ -66,13 +61,12 @@ def create_app(
         runtime = service
         settings = service.settings
         database = service.database
-        redis = service._redis
     else:
         settings = settings or ServerV2Settings.from_env()
-        database, redis = required_resources(settings)
-        runtime = ServerV2Service(settings, database=database, redis=redis)
+        (database,) = required_resources(settings)
+        runtime = ServerV2Service(settings, database=database)
     _ensure_logging(settings)
-    resources = tuple(item for item in (database, redis) if item is not None)
+    resources = tuple(item for item in (database,) if item is not None)
     registry = ResourceRegistry(
         resources,
         probe_timeout_seconds=1.0,

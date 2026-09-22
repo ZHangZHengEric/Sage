@@ -16,7 +16,7 @@ core/           基础设施
 
 新业务按 `domain/<name>.py` + `repositories/<name>.py` 加；有跨表/跨系统编排再加 `services/<name>.py`。
 
-生产启动强制 MySQL + Redis：`SAGE_SERVER_MYSQL_URL`、`SAGE_SERVER_REDIS_URL`。单测注入 Memory store / 内存回放，不写本地 JSON。
+生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放直接读取 Sage Session 的 canonical RuntimeEvent，Redis 不再是聊天事件事实源或启动依赖。
 
 单进程并发可用 `SAGE_SERVER_MAX_CONCURRENT_RUNS`（默认 8）、`SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER`（默认 2）和 `SAGE_SERVER_MAX_PENDING_RUNS`（默认 1024）配置。参数必须为正数，分别约束总执行、每用户执行及等待队列，见[单机并发说明](../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)。
 
@@ -40,14 +40,14 @@ python -m app.server_v2 --data-root /tmp/sage-server-v2
 |---|---|---|
 | 用户 / catalog / 会话索引 | MySQL `users` / `catalogs` / `threads` | Memory mock |
 | Sage Session | `sage.session.mysql`（无表前缀） | filesystem（`data_root/runtime/sessions`） |
-| AG-UI 回放 | Redis Stream | 进程内存 |
+| AG-UI 回放 | Sage Session `run_events` | Sage Session `run_events` |
 | 工作区 | `{data_root}/tenants/{user_id}/workspace/` | 同左 |
 | Skill catalog | MySQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
 | Agent / MCP | `catalogs` JSON：`agents[]`（提示词、model_id、tools、skills）+ `mcp_servers[]` | 同左 |
 
 对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + skill 组成 Composite，再 `materialize_agent` 加载 sagents/v2 loop。进程 Application 只 build 一次。
 
-`/health` 的 `backends` 按实际装配报告（`mysql` / `memory` / `redis` / `filesystem` / `stdout`）。sagents 结构化日志由 host 固定接到 `sage.logging.stdout`，默认输出 `sage.log/v1` JSONL；`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 可显式切到本地阅读用的 `text`。stdout 的持久化由容器日志驱动或 Alloy/Loki 负责，不写审计业务表。
+`/health` 的 `backends` 按实际装配报告（`mysql` / `memory` / `filesystem` / `session-store` / `stdout`）。sagents 结构化日志由 host 固定接到 `sage.logging.stdout`，默认输出 `sage.log/v1` JSONL；`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 可显式切到本地阅读用的 `text`。stdout 的持久化由容器日志驱动或 Alloy/Loki 负责，不写审计业务表。
 
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
 
