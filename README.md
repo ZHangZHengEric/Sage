@@ -88,43 +88,11 @@ See the [Server guide](app/server_v2/README.md) for configuration. Server v2 cur
 
 ### 🧑‍💻 Run your first SAgents v2 agent
 
-After the Python setup above, save these two files in the same directory. The example prints runtime events and the final state.
-
-**1. Define the agent — `sage.yaml`**
-
-```yaml
-# sage.yaml
-schema_version: sage/v2
-kind: application
-metadata:
-  id: com.example.assistant
-  version: 1.0.0
-  name: My Assistant
-credentials:
-  model-key:
-    source: env
-    key: MODEL_API_KEY
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: model-key
-    model: your-model
-agents:
-  main:
-    name: My Assistant
-    instructions:
-      inline: Be helpful and concise.
-    models:
-      primary: primary
-entrypoint:
-  agent: main
-```
-
-**2. Start a Run — `quickstart.py`**
+**One Python file; no `sage.yaml` required.** After the Python setup above, save as `quickstart.py` and replace `your-model` with an available model:
 
 ```python
-# quickstart.py
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
+
 import asyncio
 from uuid import uuid4
 
@@ -132,44 +100,59 @@ from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
+
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
 
 
 async def main():
-    app = await SAgentBuilder().with_defaults(session_root="runtime").build("sage.yaml")
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
     try:
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
-        command = StartRun(
+        stream = await app.entrypoint().run_stream(StartRun(
             agent_id="main",
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
             resolved_spec_hash=app.composition_hash,
             idempotency_key=str(uuid4()),
-        )
-        stream = await app.entrypoint().run_stream(command, context)
+        ), context)
         async for event in stream.events:
             print(event.model_dump_json())
-        result = await stream.wait()
-        print(result.state)
+        print((await stream.wait()).state)
     finally:
         await app.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
-
-**3. Replace `your-model` with an available model ID, set your key, and run**
 
 ```bash
 export MODEL_API_KEY="your-api-key"
 python quickstart.py
 ```
 
-This example calls the model without file or shell tools. [Tool integration and configuration →](sagents/v2/使用手册.md)
-
-### ⌨️ More ways to use Sage
-
-The existing [Web](docs/en/applications/WEB.md), [CLI](docs/en/applications/CLI.md), [TUI](docs/en/applications/TUI.md), and [Chrome extension](docs/en/applications/CHROME_EXTENSION.md) remain available. These use the legacy stack and have separate setup instructions. Desktop v2 does not import v1 settings or data.
+`loads()` parses YAML text; `build()` accepts the manifest object directly. This prints events and the final state, without file or shell tools. [More configuration options →](docs/en/applications/GETTING_STARTED.md)
 
 ---
 

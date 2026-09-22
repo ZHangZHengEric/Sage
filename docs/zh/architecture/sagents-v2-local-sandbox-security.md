@@ -1,3 +1,14 @@
+---
+layout: default
+title: 本机沙箱
+parent: 架构
+nav_order: 7
+lang: zh
+ref: v2-detail-sagents-v2-local-sandbox-security
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 local 沙箱：资源限制与验证
 
 本次范围是 `sage.sandbox.local-workspace`，覆盖官方文件、Shell、后台 Shell 作业和技能写入入口。MCP 服务不在范围内。v1 的 `sagents/utils/sandbox` 不是 v2 使用的执行后端，本次没有修改其行为。

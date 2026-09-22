@@ -1,78 +1,47 @@
 ---
-
-## layout: default
-title: Desktop Application
-parent: Applications
-nav_order: 5
-description: "Install the Sage desktop app, first-launch on macOS/Windows, and build from source"
+layout: default
+title: Desktop v2
+nav_order: 2
 lang: en
-ref: desktop-app
+ref: v2-applications-DESKTOP
+parent: Applications
+---
 
 {% include lang_switcher.html %}
 
-# Desktop Application
+# Desktop v2
 
-The **Desktop** app is a Tauri-packaged product: a local HTTP backend on `127.0.0.1` plus a desktop shell UI. It is the best fit for daily **offline-friendly** work on a single machine without running the full `app/server` dev stack in terminals.
+## Start from source
 
-
-| Topic                                           | Where                                                                                                                  |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Installers (`.dmg` / `.exe` / `.deb`)           | [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases)                                                     |
-| Build prerequisites (Rust, Node, Python, Tauri) | [Desktop build & install — detailed](../../../app/desktop/docs/installation.md)                                        |
-| End-user / ops topics                           | [Operations manual](../../../app/desktop/docs/ops_manual.md) · [User manual](../../../app/desktop/docs/user_manual.md) |
-| Architecture                                    | [Desktop app architecture](../architecture/ARCHITECTURE_APP_DESKTOP.md)                                                |
-
-
-## Install from release packages
-
-1. Download the package for your OS from [Releases](https://github.com/ZHangZHengEric/Sage/releases) (e.g. `.dmg` for macOS, NSIS `.exe` for Windows, `.deb` for Linux).
-2. Run the installer or drag the app as documented on the download page.
-3. Launch Sage from the Start menu, Applications folder, or app grid.
-
-## macOS: Gatekeeper and “damaged” app
-
-Releases are **not** always Apple-notarized. If you see *cannot be opened because the developer cannot be verified* or *Apple cannot check it for malware*:
-
-1. In **Finder → Applications**, **right-click** `Sage.app` → **Open** → confirm **Open** in the dialog.
-2. If still blocked: **System Settings → Privacy & Security** → find the Sage message → **Open Anyway**, then try again.
-3. If the app is reported as **damaged** or will not start, clear quarantine and retry:
+Complete the [Python setup](GETTING_STARTED.md). Install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Sage.app
+cd app/desktop_v2
+flutter pub get
+flutter run -d macos
 ```
 
-## Windows: SmartScreen
+Use `-d windows` or `-d linux` for those targets. The managed Python sidecar starts automatically on loopback with a temporary port and bearer capability token. The integrated PTY terminal currently supports macOS and Linux.
 
-If **Windows SmartScreen** blocks the installer, use **More info** → **Run anyway** (wording can vary by Windows version).
+## First task
 
-## Linux: `.deb` install
+1. Add a model route in Settings: protocol, endpoint, model ID, and API key.
+2. Select that route for an Agent; configure its tools and Skills.
+3. Start a conversation in Agent Workspace, or register a project directory.
+4. Inspect files and tool progress; answer input and approval requests when needed.
 
-On Debian / Ubuntu, after downloading the matching `.deb`:
+Model routes support OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. MCP connections discover tools when configured and enabled. Studio provides shared conversations with member-directed messages.
 
-```bash
-sudo apt install ./Sage-<version>-<arch>.deb
-```
+## Data and settings
 
-Many desktop environments also support double-clicking the package.
+| Location | Purpose |
+| --- | --- |
+| `~/sage/runtime` | Settings, catalogs, session index, and Session state |
+| `~/sage/skills` | Imported Skills |
+| `~/sage/agent_workspace` | Default shared Agent Workspace |
 
-## Build from source
+Settings save automatically. Model and Agent settings are not overridden by environment variables. For source debugging, the backend accepts `--data-root /absolute/path`. Registered projects keep their own file roots.
 
-From the repository root (see [full steps](../../../app/desktop/docs/installation.md) for environment setup):
+Desktop v2 does not import v1 data. Existing Tauri release installers follow their own release instructions; do not assume they are Flutter v2 builds.
 
-```bash
-# macOS / Linux
-app/desktop/scripts/build.sh release
-```
-
-```powershell
-# Windows
-./app/desktop/scripts/build_windows.ps1 release
-```
-
-Artifacts and platform-specific notes are in the [installation guide](../../../app/desktop/docs/installation.md).
-
-## See also
-
-- [Getting Started](GETTING_STARTED.md) — also mentions desktop build at the end
-- [Environment variables — Desktop & install](../ENV_VARS.md#8-desktop--install)
-
+[Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/desktop_v2/README.md) · [Troubleshooting](../TROUBLESHOOTING.md)

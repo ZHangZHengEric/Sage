@@ -1,45 +1,28 @@
 ---
 layout: default
-title: Memory
-nav_order: 8
-has_children: true
-description: "Documents related to session memory, user memory, workspace memory, and memory search"
+title: Memory and Context
+nav_order: 7
 lang: en
-ref: memory
+ref: v2-memory-README
 ---
 
 {% include lang_switcher.html %}
 
-# Memory
+# Memory and Context
 
-This section collects the Sage memory system docs. In Sage, memory is broader than user memory: it also includes session history, Agent workspace files, and `search_memory`-based workspace retrieval.
+## Four different responsibilities
 
-## Architecture
+| Layer | Authority and purpose |
+| --- | --- |
+| SessionStore | Canonical Session history, Run state, and events. |
+| Context | A temporary model-request projection of history and instructions. |
+| Derived state | Summaries and other rebuildable data; never a second authoritative message ledger. |
+| Memory providers | Long-term memory and retrieval over omitted Session history. |
 
-```mermaid
-flowchart TB
-    A[Conversation / files / experience] --> B[Session Memory<br/>short-term history]
-    A --> C[User Memory<br/>long-term memory]
-    A --> D[Agent Workspace<br/>workspace files / task files / MEMORY.md]
-    C --> E[Memory Extraction<br/>auto extract & dedupe]
-    D --> F[search_memory<br/>workspace retrieval]
-    B --> G[SessionContext]
-    C --> G
-    D --> G
-    E --> G
-    F --> G
-```
+Context reduction does not delete raw Session events. Fixed instructions and required current-turn content are protected by budgets; if they cannot fit, the runtime reports the problem instead of silently discarding constraints.
 
-## What This Folder Contains
+Skill loading has a separate active-context budget. Provider-reported usage can calibrate input estimates, but missing usage must not be invented or reported as measured tokens.
 
-- Session memory: short-term conversation history and compression
-- User memory: cross-session long-term memory and extraction
-- Workspace memory: Agent workspace files, notes, and task outputs
-- Memory search: `search_memory`-based workspace retrieval and validation
+Desktop's summary state uses the selected SessionStore's derived namespace. Workspace identity and memory files belong to the workspace; they are not a substitute for Session storage. Neither local summary storage nor SQL persistence guarantees automatic replay of uncertain tool side effects.
 
-## Current Documents
-
-1. [Session Memory](SESSION_MEMORY.md)
-2. [User Memory](USER_MEMORY.md)
-3. [Workspace Memory](WORKSPACE_MEMORY.md)
-4. [Memory Search Validation](memory-search/README.md)
+[Context budgets (Chinese)](../../zh/architecture/sagents-v2-context-budget.md) · [Runtime reference](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/README.md)

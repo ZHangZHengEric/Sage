@@ -1,5 +1,5 @@
 title: "Sage Documentation"
-description: "Accurate, task-oriented documentation for the current Sage codebase"
+description: "SAgents v2, Desktop v2, and Server v2 documentation"
 baseurl: "/Sage"
 url: "https://zhangzhengeric.github.io"
 
@@ -13,6 +13,7 @@ plugins:
   - jekyll-sitemap
   - jekyll-seo-tag
   - jekyll-remote-theme
+  - jekyll-relative-links
 
 mermaid:
   src: 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
@@ -29,7 +30,7 @@ search:
 nav_order_title: "Navigation"
 color_scheme: light
 
-logo: "/assets/logo.png"
+logo: "/assets/sage_logo.svg"
 
 footer_content: "Sage documentation for the current repository layout. Source available under the MIT license."
 
@@ -106,3 +107,9 @@ exclude:
   - "*.gemspec"
   - "*.gem"
   - plans/
+  - archive/
+  - scripts/
+
+relative_links:
+  enabled: true
+  collections: true

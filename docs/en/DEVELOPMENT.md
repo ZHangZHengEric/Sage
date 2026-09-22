@@ -2,122 +2,54 @@
 layout: default
 title: Development
 nav_order: 10
-description: "Contributor workflow and source locations"
 lang: en
-ref: development
+ref: v2-DEVELOPMENT
 ---
 
 {% include lang_switcher.html %}
 
 # Development
 
-## Repository Areas
+## Source map
 
-- `sagents/`: runtime and orchestration
-- `app/server/`: main backend and web application
-- `app/desktop/`: desktop backend, UI, and build scripts
-- `examples/`: runnable examples and demos
-- `mcp_servers/`: built-in MCP server implementations
-- `app/skills/`: bundled skill content and helper assets
+| Directory | Responsibility |
+| --- | --- |
+| `sagents/v2/` | Runtime contracts, composition, providers, and execution |
+| `app/desktop_v2/` | Flutter UI and local FastAPI sidecar |
+| `app/server_v2/` | Multi-user server and Vue web client |
+| `tests/sagents/v2/` | Runtime tests and conformance checks |
+| `tests/app/desktop_v2/`, `tests/app/server_v2/` | Host integration tests |
+| `docs/en/`, `docs/zh/` | Current bilingual v2 documentation |
 
-## Local Development Workflow
+## Validate a change
 
-### Backend
+Use the Python 3.12+ environment from [Getting Started](applications/GETTING_STARTED.md). Install server extras for server tests:
 
 ```bash
-pip install -r requirements.txt
-python -m app.server.main
+python -m pip install -e '.[server-v2]' pytest pytest-asyncio pytest-timeout
+python -m pytest tests/sagents/v2 tests/app/desktop_v2 tests/app/server_v2 -q
 ```
 
-Use this path when you want to work on the main backend rather than the lightweight examples.
-
-### Web frontend
+Run focused tests while developing. Live-provider tests require explicit configuration and may incur model costs. Database tests with injected test stores do not prove production MySQL behavior.
 
 ```bash
-cd app/server/web
+cd app/desktop_v2
+flutter analyze
+flutter test
+```
+
+```bash
+cd app/server_v2/web
 npm install
-npm run dev
+npm run build
 ```
 
-Common frontend environment variables:
-
-- `VITE_SAGE_API_BASE_URL`
-- `VITE_SAGE_WEB_BASE_PATH`
-
-### Desktop
-
-For source builds and packaging, start with:
+## Documentation checks
 
 ```bash
-app/desktop/scripts/build.sh release
+.venv/bin/python docs/scripts/check_docs.py
+bash docs/scripts/build_jekyll.sh
+python3 docs/scripts/check_language_nav.py
 ```
 
-Development scripts also exist under `app/desktop/scripts/`.
-
-### Lightweight examples
-
-If you want the smallest possible feedback loop, start from:
-
-```bash
-python examples/sage_cli.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
-```
-
-### Documentation site
-
-The docs site uses GitHub Pages Jekyll dependencies, so build it with the Ruby version pinned in `docs/.ruby-version`.
-
-With RVM:
-
-```bash
-source ~/.rvm/scripts/rvm
-rvm use 3.2.9
-cd docs
-bundle config set path vendor/bundle
-bundle install
-bundle exec jekyll serve
-```
-
-For a one-off build:
-
-```bash
-source ~/.rvm/scripts/rvm
-rvm use 3.2.9 do bash -lc 'cd docs && bundle exec jekyll build'
-```
-
-## Where To Read First
-
-### Runtime behavior
-
-- `sagents/sagents.py`
-- `sagents/agent/`
-- `sagents/flow/`
-- `sagents/context/`
-
-### Server behavior
-
-- `app/server/main.py`
-- `app/server/routers/`
-- `app/server/services/`
-- `app/server/core/`
-
-### Frontend behavior
-
-- `app/server/web/src/views/`
-- `app/server/web/src/api/`
-- `app/server/web/src/components/`
-
-### Example behavior
-
-- `examples/README.md`
-- `app/cli/main.py`
-- `examples/sage_server.py`
-
-## Documentation Standards for This Repository
-
-- Prefer documenting stable concepts and entry points, not temporary refactors.
-- Treat source files as the authority when docs and code disagree.
-- Avoid duplicating the same full document set in multiple languages unless there is an explicit maintenance owner.
-- Keep top-level docs short and route readers to source directories for implementation details.
+The Jekyll build requires Ruby and the gems in `docs/Gemfile`. Current pages must have matching language metadata, valid local links, and a v2 source reference. Historical files belong in `docs/archive/`, which is excluded from publication. Do not turn old audit pass counts into current readiness guarantees.

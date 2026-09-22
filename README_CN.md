@@ -88,43 +88,11 @@ python -m app.server_v2
 
 ### 🧑‍💻 用 SAgents v2 运行第一个 Agent
 
-完成上面的 Python 环境安装后，将以下两个文件放在同一目录。示例输出运行事件与最终状态。
-
-**1. 定义 Agent — `sage.yaml`**
-
-```yaml
-# sage.yaml
-schema_version: sage/v2
-kind: application
-metadata:
-  id: com.example.assistant
-  version: 1.0.0
-  name: My Assistant
-credentials:
-  model-key:
-    source: env
-    key: MODEL_API_KEY
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: model-key
-    model: your-model
-agents:
-  main:
-    name: My Assistant
-    instructions:
-      inline: Be helpful and concise.
-    models:
-      primary: primary
-entrypoint:
-  agent: main
-```
-
-**2. 发起任务 — `quickstart.py`**
+**一个 Python 文件即可，无需创建 `sage.yaml`。** 完成上面的 Python 安装后，保存为 `quickstart.py`，将 `your-model` 替换为可用模型：
 
 ```python
-# quickstart.py
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
+
 import asyncio
 from uuid import uuid4
 
@@ -132,44 +100,59 @@ from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
+
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
 
 
 async def main():
-    app = await SAgentBuilder().with_defaults(session_root="runtime").build("sage.yaml")
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
     try:
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
-        command = StartRun(
+        stream = await app.entrypoint().run_stream(StartRun(
             agent_id="main",
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
             resolved_spec_hash=app.composition_hash,
             idempotency_key=str(uuid4()),
-        )
-        stream = await app.entrypoint().run_stream(command, context)
+        ), context)
         async for event in stream.events:
             print(event.model_dump_json())
-        result = await stream.wait()
-        print(result.state)
+        print((await stream.wait()).state)
     finally:
         await app.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
-
-**3. 将 `your-model` 替换为你可用的模型 ID，设置密钥并运行**
 
 ```bash
 export MODEL_API_KEY="your-api-key"
 python quickstart.py
 ```
 
-此示例仅调用模型，不启用文件或 Shell 工具。[工具接入与更多配置 →](sagents/v2/使用手册.md)
-
-### ⌨️ 更多使用方式
-
-已有的 [Web](docs/zh/applications/WEB.md)、[CLI](docs/zh/applications/CLI.md)、[TUI](docs/zh/applications/TUI.md) 和 [Chrome 扩展](docs/zh/applications/CHROME_EXTENSION.md) 仍可使用，基于旧版应用栈，配置方式见各自指南。Desktop v2 不导入 v1 的设置和数据。
+`loads()` 解析 YAML 字符串，`build()` 直接接收 manifest 对象。示例输出事件和最终状态，不启用文件或 Shell 工具。[更多配置方式 →](docs/zh/applications/GETTING_STARTED.md)
 
 ---
 

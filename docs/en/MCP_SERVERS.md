@@ -1,56 +1,31 @@
 ---
 layout: default
-title: MCP Servers
+title: Tools, Skills and MCP
 nav_order: 6
-description: "Built-in MCP servers in the Sage repository"
 lang: en
-ref: mcp-servers
+ref: v2-MCP_SERVERS
 ---
 
 {% include lang_switcher.html %}
 
-# MCP Servers
+# Tools, Skills and MCP
 
-## Overview
+| Capability | Purpose |
+| --- | --- |
+| Built-in tools | File, process, planning, and other runtime operations exposed through the v2 catalog/executor. |
+| Skills | Reusable instructions and resources, discovered and loaded through Skill providers. |
+| MCP | External servers whose discovered tools join the host's tool catalog. |
 
-The repository includes built-in MCP server implementations under `mcp_servers/`. These are part of Sage's extension model and can be surfaced through the tool system.
+## Desktop
 
-## Included Servers
+Configure tools and Skills on the Agent, and add MCP connections in Settings. Enabled connections are discovered during catalog/runtime composition. Discovery failures are reported rather than silently ignored. `load_skill` activates selected resources; selecting a Skill alone does not mean its full content is already in model context.
 
-### Search
+## Server
 
-`mcp_servers/search/`
+Use model/Agent/Skill/MCP management in the web client. Skills support ZIP upload and per-Agent selection. MCP management uses `/api/mcp`; refresh a connection to rediscover tools. See [HTTP API](api/HTTP_API_REFERENCE.md).
 
-Provides unified search capability with multiple provider backends such as Tavily, Brave, Serper, SerpAPI, and others.
+## Embedded hosts
 
-### Image generation
+The minimal quick start intentionally has no file or shell tools. Official tools require an `OfficialToolRuntime` with explicit workspace and sandbox bindings. Host-provided tool execution must validate grants at the resource boundary. An in-memory manifest does not authorize access to arbitrary host files.
 
-`mcp_servers/image_generation/`
-
-Provides unified image generation with provider adapters.
-
-### Task scheduler
-
-`mcp_servers/task_scheduler/`
-
-Provides scheduled task execution and persistence backed by a local database path derived from `SAGE_ROOT`.
-
-### IM server
-
-`mcp_servers/im_server/`
-
-Provides messaging-channel integration and provider-specific implementations for systems such as Feishu, DingTalk, iMessage, WeChat Work, and related channel adapters.
-
-## How MCP Fits the Runtime
-
-At the runtime level, MCP support is exposed through the tool subsystem:
-
-- `sagents/tool/mcp_proxy.py`
-- `sagents/tool/mcp_tool_base.py`
-- `sagents/tool/tool_manager.py`
-
-The intent is to make external or hosted capabilities look like tool invocations available to an agent session.
-
-## Operational Note
-
-Some MCP servers require provider credentials, external services, or additional environment setup. Treat `mcp_servers/` as the implementation layer; deployment policy should live with the specific app surface that hosts them.
+Use the [integration manual](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/使用手册.md) to select catalogs, executors, Skill sources, and policy providers. The `mcp_servers/` directory also contains integrations used by older applications; their presence does not enable them in v2 automatically.

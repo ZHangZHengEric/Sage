@@ -1,41 +1,22 @@
 ---
 layout: default
-title: Platform, storage, and observability
-parent: HTTP API Reference
-nav_order: 7
-description: "LLM providers, system, OSS, Jaeger, liveness and links"
+title: Platform and Observability
+nav_order: 3
 lang: en
-ref: http-api-platform
+ref: v2-api-HTTP_API_PLATFORM
+parent: API
 ---
 
 {% include lang_switcher.html %}
 
-# Platform, storage, and observability
+# Platform and Observability
 
-Routers: `llm_provider.py`, `system.py`, `oss.py`, `observability.py`. The root liveness `GET /active` is registered in `app/server/main.py`, not under `/api`.
+- `GET /health` and `GET /active` report service health and actual backend selections.
+- Server logs use `sage.log/v1` JSON lines by default. Configure level, format, and optional directory with `SAGE_SERVER_LOG_*`.
+- Request correlation uses `X-Request-ID`; JSON responses also include `request_id`.
+- Optional Jaeger integration uses `SAGE_SERVER_JAEGER_*`; it is not required to run chat.
+- Session state is authoritative. Diagnostic files and log retention must not be used to reconstruct a second message ledger.
 
-## LLM provider (`/api/llm-provider/...`)
+Server v2 uses MySQL for application inventory and Session persistence, and Session events for AG-UI replay. Desktop uses its own local data root and catalog. Neither host uses the legacy desktop-update API.
 
-- `verify` vs `verify-capabilities` vs `verify-multimodal` answer different questions: connectivity, capability probing, and image probes.
-- `create` returns `data: {"provider_id": ...}`; use that id in `update` and `delete`.
-- Default providers are protected on delete; see the main doc’s business-error examples.
-
-## System and usage stats
-
-- `GET /api/system/info` is used by the SPA to decide whether self-registration is enabled—do not assume it exposes secret keys.
-- `POST /api/system/update_settings` is **admin**-only.
-- `POST /api/system/agent/usage-stats` is per-user usage with `days` and optional `agent_id`.
-
-## OSS upload
-
-- `POST /api/oss/upload` backs user uploads. Desktop builds may return paths that the UI later maps locally—treat the response schema as part of the contract you test against, not a universal HTTPS URL.
-
-## Jaeger and observability
-
-- `/api/observability/jaeger* ` routes handle redirects and local administrator authentication.
-
-## Liveness: `GET /active` vs `GET /api/health`
-
-- `/active` is **plain text**; `/api/health` returns a JSON `BaseResponse`. Use them for different kinds of checks (LB vs in-app health).
-
-[Back to HTTP API Reference](HTTP_API_REFERENCE.md)
+[Environment variables](../ENV_VARS.md) · [Server component](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/README.md)

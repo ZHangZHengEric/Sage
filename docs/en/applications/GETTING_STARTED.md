@@ -1,227 +1,111 @@
 ---
 layout: default
 title: Getting Started
-parent: Applications
 nav_order: 1
-description: "Install Sage and run the main entry points"
 lang: en
-ref: getting-started
+ref: v2-applications-GETTING_STARTED
+parent: Applications
 ---
 
 {% include lang_switcher.html %}
 
 # Getting Started
 
-**Deeper, app-specific quick starts:** [Web (browser + Docker Compose)](WEB.md) · [Desktop](DESKTOP.md) · [CLI](CLI.md) · [TUI](TUI.md) · [Chrome extension](CHROME_EXTENSION.md)
+## Install
 
-## One-Command Startup (Recommended)
-
-**Best for:** Local development, quick testing
+Use Python 3.12+. In a macOS/Linux shell:
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-
-# 2. Run the startup script
-./scripts/dev-up.sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
-**First run?** The script will prompt you to choose a configuration mode:
+On Windows use `py -3.12 -m venv .venv`, then `.venv\Scripts\Activate.ps1` in PowerShell.
 
-- **Minimal mode** (recommended for beginners): SQLite, no external dependencies
-  - Template: `.env.example.minimal`
-  - Best for: Quick local development
-- **Full mode**: MySQL + RustFS
-  - Template: `.env.example`
-  - Best for: Production-like environment
+## Run from one Python file
 
-**After successful startup:**
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8080
-- Health check: http://localhost:8080/api/health
-- After signing in, add a model provider in Model Source Management
+**No `sage.yaml` file is required.** `SageManifestLoader.loads()` parses a YAML string into a manifest, which `SAgentBuilder.build()` accepts directly.
 
-## Configuration Files
+Save as `quickstart.py` and replace `your-model` with a model available to your account:
 
-The startup script will automatically create these configuration files:
+```python
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
-### Backend Configuration
+import asyncio
+from uuid import uuid4
 
-- **Location:** Root directory `.env`
-- **Templates:**
-  - `.env.example.minimal` - Minimal config (SQLite, no external dependencies)
-  - `.env.example` - Full config (MySQL + ES + RustFS)
-- **Purpose:** Python backend service configuration
-- **Key settings:**
-  - `SAGE_DB_TYPE` - Database type (sqlite/mysql)
-  - `SAGE_PORT` - Backend port (default 8080)
+from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.contracts.commands import InputItem
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
 
-### Frontend Configuration
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
 
-- **Location:** `app/server/web/.env.development`
-- **Template:** `app/server/web/.env.example`
-- **Purpose:** Vite frontend build configuration
-- **Key settings:**
-  - `VITE_SAGE_API_BASE_URL` - Backend API URL
-  - `VITE_SAGE_WEB_BASE_PATH` - Web base path
 
----
+async def main():
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    try:
+        context = RequestContext(actor=ActorRef(
+            principal_id="user-1", principal_type=PrincipalType.USER,
+        ))
+        stream = await app.entrypoint().run_stream(StartRun(
+            agent_id="main",
+            input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
+            resolved_spec_hash=app.composition_hash,
+            idempotency_key=str(uuid4()),
+        ), context)
+        async for event in stream.events:
+            print(event.model_dump_json())
+        print((await stream.wait()).state)
+    finally:
+        await app.close()
 
-## Manual Startup (Advanced)
 
-The full **Web** stack (manual processes, Vite, and [Docker Compose](WEB.md#docker-compose-full-stack)) is also documented in [Web Application](WEB.md).
-
-If you need manual control over the development startup process, follow these steps.
-
-### Prerequisites
-
-- Python 3.10 or newer
-- Node.js for the web client and some desktop workflows
-- A valid API key for the model provider you will add after signing in
-
-Install Python dependencies from the repository root:
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ```bash
-pip install -r requirements.txt
+export MODEL_API_KEY="your-api-key"
+python quickstart.py
 ```
 
-If you plan to run the web client, install Node.js dependencies separately under `app/server/web/`.
+This prints runtime events and the final Run state. It makes a real model request and writes Session data under `runtime/`. The example enables no file or shell tools. In PowerShell, set the key with `$env:MODEL_API_KEY="your-api-key"`.
 
-## Minimum Environment
+The checked-in [executable example](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_quickstart.py) can also be run from the repository root as `python -m examples.sagents_v2_quickstart`.
 
-Server startup does not require default LLM environment variables. Add a model provider in Model Source Management after signing in; model-dependent features report a missing Provider until then.
+## Choose a configuration input
 
-If you keep a local `.env`, both `app/server/main.py` and `app/desktop/core/main.py` load it automatically.
+| Input | Usage |
+| --- | --- |
+| YAML string | `build(SageManifestLoader().loads(yaml_text))` |
+| Python dictionary | `build(SageManifest.model_validate(config))` |
+| Package file | `build("path/to/sage.yaml")` |
+| Resolved package | `build(resolved_manifest)` |
 
-## Authentication
+Import both manifest types from `sagents.v2.package.manifest`. A raw string passed directly to `build()` is a **path**, not YAML content. String manifests should use inline instructions. File loading resolves instruction files relative to the package directory and checks that they remain inside it.
 
-Sage uses built-in local accounts. Sign-in and self-registration both require only a username and password.
-
-For local development, the default `SAGE_ENV` is `development`. If you set `SAGE_ENV=production` or `SAGE_ENV=staging`, you must also provide explicit values for:
-
-- `SAGE_JWT_KEY`
-- `SAGE_REFRESH_TOKEN_SECRET`
-- `SAGE_SESSION_SECRET`
-
-Production-like mode also forces secure session cookies.
-
-## Run the CLI
-
-For the fastest runtime smoke test:
-
-You should be able to complete at least one of these checks:
-
-- CLI starts and accepts a prompt
-- `python -m app.server.main` starts successfully
-- `curl http://127.0.0.1:8080/api/health` returns a healthy response
-- the web UI loads after `npm run dev`
-
-The fastest way to validate the runtime is the CLI:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-sage doctor
-sage run "Help me analyze the current repository"
-sage chat
-```
-
-For a dedicated command-line usage guide, see [CLI Guide](CLI.md).
-
-## Manually Start Web Services
-
-### Start Backend
-
-Start the primary FastAPI service:
-
-```bash
-python -m app.server.main
-```
-
-By default the server listens on `0.0.0.0:${SAGE_PORT:-8080}`.
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8080/api/health
-```
-
-### Start Frontend
-
-In a second terminal:
-
-```bash
-cd app/server/web
-npm install
-npm run dev
-```
-
-For the web UI, the commonly relevant frontend variables are:
-
-- `VITE_SAGE_API_BASE_URL`
-- `VITE_SAGE_WEB_BASE_PATH`
-
----
-
-## Other Demos & Tools
-
-```bash
-streamlit run examples/sage_demo.py -- \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
-```
-
-## Run the Standalone Example Server
-
-```bash
-python examples/sage_server.py \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
-```
-
-Use this only when you want the lightweight example service, not the full `app/server` stack.
-
-The example configs that ship with `examples/` are:
-
-- `examples/mcp_setting.json`
-- `examples/preset_running_agent_config.json`
-- `examples/coding_agent_config.json`
-- `examples/preset_running_config.json`
-
-Use `sage chat --agent-config coding --workspace /path/to/repo` or `sage tui --agent-config coding --workspace /path/to/repo` to start from the bundled coding preset. The explicit workspace is required for this preset so repository tools are scoped to the project you intend to edit.
-
-### Streamlit Demo
-
-```bash
-streamlit run examples/sage_demo.py -- \
-  --default_llm_api_key "$SAGE_DEFAULT_LLM_API_KEY" \
-  --default_llm_api_base_url "$SAGE_DEFAULT_LLM_API_BASE_URL" \
-  --default_llm_model_name "$SAGE_DEFAULT_LLM_MODEL_NAME"
-```
-
----
-
-## Build Desktop App from Source
-
-For installers, first-launch, and a fuller build walkthrough, see [Desktop Application](DESKTOP.md).
-
-```bash
-app/desktop/scripts/build.sh release
-```
-
-Windows source build:
-
-```powershell
-./app/desktop/scripts/build_windows.ps1 release
-```
-
-## Recommended Reading After Setup
-
-1. [Core Concepts](CORE_CONCEPTS.md)
-2. [Architecture](architecture/README.md)
-3. [Configuration](CONFIGURATION.md)
-
-If something fails during startup, go next to [Troubleshooting](TROUBLESHOOTING.md).
+Next: [configuration](../CONFIGURATION.md), [tools](../MCP_SERVERS.md), and [runtime API](../api/API_REFERENCE.md).

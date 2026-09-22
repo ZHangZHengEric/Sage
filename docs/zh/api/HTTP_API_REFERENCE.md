@@ -1,761 +1,105 @@
 ---
 layout: default
-title: HTTP API 参考
-parent: API 文档
-nav_order: 1
-has_children: true
-description: "基于当前代码库的后端 HTTP API 参考"
+title: Server HTTP API
+nav_order: 2
 lang: zh
-ref: http-api-reference
+ref: v2-api-HTTP_API_REFERENCE
+parent: API
 ---
 
 {% include lang_switcher.html %}
 
-# HTTP API 参考
+# Server HTTP API
 
-这页只写当前代码库里真实存在的后端 HTTP 接口，按“先总览、再细节、最后示例”的方式组织。
+本页面向 **`app/server_v2`**，不是旧版服务端。请求结构、响应模型和状态码以运行服务的 `/docs` 或 `/openapi.json` 为准。
 
-在 Python 中嵌入运行时（`SAgent`）请看 [API 参考](API_REFERENCE.md)。接当前**服务端 HTTP** 以本页为准。
+## 身份认证
 
-**适用范围**：下列路由以 `app/server/routers` 的 `register_routes` 为准（Sage 主站 FastAPI）。桌面端 `app/desktop` 另有部分路由（如 IM、浏览器扩展、问卷等），**不在**本页列举。
+`POST /api/auth/login` 接收 JSON `username`、`password`，返回 `data.access_token` 并设置 `sage_server_v2` cookie。受保护路由由服务端依赖层解析认证身份，管理员路由要求管理员权限。
 
-## 能力域结构总览
+## 对话与回放
 
-### 和 OpenAPI 的关系
-
-**OpenAPI 3** 是接口契约的标准形态（可从 FastAPI 生成，与本页手工表可并存）。下表是 **按「层级 → 模块 → 路由源文件」** 的**文字索引**，便于扫一眼有哪些能力域、代码落在哪个文件、路径前缀长什么样。层级**只用于分类**，不表示必须按层依次调用。完整 Method/Path 以 **「接口速览」** 为准，二级文档 7 篇为场景说明。
-
-### 第 1 层：接入与身份
-
-
-| 模块          | 路由源         | 主要路径 / 族                                                                              |
-| ----------- | ----------- | ------------------------------------------------------------------------------------- |
-| 本地账号         | `auth.py`   | `/api/auth/…`：用户名密码注册、登录、session 与退出登录                                               |
-| 用户与兼容       | `user.py`   | `/api/user/…`：config、list/add/delete、options、change-password；以及旧版 `check_login` 等兼容入口 |
-
-
-### 第 2 层：核心业务
-
-
-| 模块            | 路由源                           | 主要路径 / 族                                                                                                                                                |
-| ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 流式与输入优化       | `chat.py`                     | `POST /api/chat` / `stream` / `web-stream`；`…/chat/optimize-input`；`GET …/stream/resume/`*、`/stream/active_sessions`                                    |
-| 会话、分享与中断      | `conversation.py`             | `GET/POST/DELETE /api/conversations*`，`…/share/…/messages`；`POST /api/sessions/…/interrupt`、tasks_status；`…/edit-last-user-message`、`/rerun-stream`     |
-| Agent 与工作区    | `agent.py`                    | `/api/agent/…`：CRUD、auto-generate*、system-prompt*、abilities、多用户 `auth`；`file_workspace`*；`GET/POST /api/agent/tasks/…` 异步大任务与 cancel；`workspace/delete` |
-| 计划调度          | `task.py`                     | 前缀 `/tasks/…`（**不是** `/api/tasks`）：一次性/周期任务及 `internal/…`；与上表「Agent 异步 tasks」[不是同一套](HTTP_API_TASKS.md#planner-vs-agent-async)                          |
-| 工具 / 技能 / MCP | `tool.py`、`skill.py`、`mcp.py` | 分别为 `/api/tools`、`/api/skills`、`/api/mcp`（含 `exec`、各类 sync、refresh 等）                                                                                   |
-
-
-### 第 3 层：平台与观测
-
-
-| 模块          | 路由源                | 主要路径 / 族                                                                                       |
-| ----------- | ------------------ | ---------------------------------------------------------------------------------------------- |
-| 模型与校验       | `llm_provider.py`  | `/api/llm-provider/…`：verify*、list、create、update、delete                                        |
-| 系统与统计       | `system.py`        | `/api/system/info`、`/api/health`、`/api/system/update_settings`、`/api/system/agent/usage-stats` |
-| 文件上传        | `oss.py`           | `POST /api/oss/upload`                                                                         |
-| 可观测与 Jaeger | `observability.py` | `/api/observability/jaeger*（含 login/auth/重定向）`                                                 |
-| 根探活         | `main.py`          | `GET /active`：无 `/api` 前缀的纯文本探活（与 `GET /api/health` 不同）                                        |
-
-
-**阅读提示**：第 2 层内可并行对接多模块；`**GET /api/agent/tasks/…`** 与 `**/tasks/…` 计划任务** 名称相近，含义不同，见[计划任务子文档](HTTP_API_TASKS.md#planner-vs-agent-async)。
-
-## 深入阅读（二级文档）
-
-- [认证与用户](HTTP_API_AUTH_USER.md)：本地账号 session、注册与管理员接口。
-- [对话、流式与消息编辑](HTTP_API_CHAT.md)：`optimize-input`、`rerun-stream`、与三种流式入口的差异。
-- [Agent 补充能力](HTTP_API_AGENT.md)：异步 `submit`、能力卡片、`/api/agent/tasks/`*、工作区与授权。
-- [工具、技能与 MCP](HTTP_API_TOOLS_MCP.md)：`/api/tools/exec`、技能同步、MCP 注册与刷新。
-- [计划任务与 `/tasks` 接口](HTTP_API_TASKS.md)：一次性/周期任务、内部调度、与 Agent 异步任务区别。
-- [平台、存储与可观测](HTTP_API_PLATFORM.md)：LLM Provider、系统设置、OSS、Jaeger 与探活。
-
-**二级文档是否「全」**：主表是**全量端点速览**；子文档覆盖 `app/server` 下 8 类路由的**使用场景与易混点**。**仍未单独成文、但可补充的内容**包括：从代码生成的 **OpenAPI 契约**、**错误码/异常**统一表、**中间件白名单**全列表、**每个 DTO 字段**级参考（现分散在主表样例中）、**流式行协议/事件 JSON** 的逐字段说明、以及 **安全与幂等** 约定。有深度对接需求时，建议以仓库路由代码 + 主表为准，子文档为导读。
-
-**给二次开发者的建议**：与 Sage Server 对接时，常见顺序是 **第 1 层身份 → 第 2 层业务（可只接其中一域）→ 第 3 层平台**；**同一层内**多域在运行时**可并行**做集成。若你扩展 **HTTP 或路由**，请同步更新本仓 `HTTP_API_REFERENCE` 与相关子页。
-
-## 快速约定
-
-
-| 项           | 说明                                                                                                                                                                                           |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Base URL    | 例如 `http://127.0.0.1:8000`                                                                                                                                                                   |
-| 主响应格式       | 大多数 `/api/`* 接口返回 `BaseResponse[T]`；**计划任务**模块路径前缀为 `/tasks`（非 `/api/tasks`），且多数字段直接为 Pydantic 响应体，无外层 `code`                                                                                |
-| 流式接口        | `/api/chat`、`/api/chat/optimize-input/stream`、`/api/stream`、`/api/web-stream`、`/api/conversations/{id}/rerun-stream`、`/api/stream/resume/`*、`/api/stream/active_sessions` 不返回 `BaseResponse` |
-| 文件下载        | `/api/agent/{agent_id}/file_workspace/download` 返回文件流                                                                                                                                        |
-| 探活          | `GET /active` 返回纯文本，**无** `BaseResponse` 包裹，也无 `/api` 前缀                                                                                                                                     |
-| 登录态         | 当前产品接口大多依赖服务端 session；只拿到 `access_token` 不等于能直接访问所有产品接口                                                                                                                                      |
-
-
-标准响应包裹：
+`POST /api/agent` 接收 AG-UI `RunAgentInput`，返回 `text/event-stream`。新对话通过 `forwardedProps.agentId` 选择 Agent，首次 Run 会固定该 thread 的 Agent。重连已接受的 Run 时发送 `Last-Event-ID`。回放读取权威 Session 事件，不使用 Redis 保存另一份事件流。
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {},
-  "timestamp": 1710000000.123
+  "threadId": "example-thread",
+  "runId": "example-run",
+  "state": {},
+  "messages": [{"id": "message-1", "role": "user", "content": "Hello"}],
+  "tools": [],
+  "context": [],
+  "forwardedProps": {"agentId": "your-agent-id"}
 }
 ```
 
-字段含义：
-
-
-| 字段          | 含义                  |
-| ----------- | ------------------- |
-| `code`      | 业务状态码，通常 `200` 表示成功 |
-| `message`   | 结果说明                |
-| `data`      | 具体返回数据              |
-| `timestamp` | 服务端时间戳              |
-
-
-## 接口速览
-
-### 认证与用户
-
-Sage 只使用本地账号，登录与自注册都只接收用户名和密码。
-
-
-| Method | Path                                        | 请求                                | 返回 `data`                                       | 用途                 |
-| ------ | ------------------------------------------- | --------------------------------- | ----------------------------------------------- | ------------------ |
-| POST   | `/api/auth/register`                        | `RegisterRequest`                 | `{"user_id"}`                                   | 本地账号注册             |
-| POST   | `/api/auth/login`                           | `LoginRequest`                    | `{"access_token","refresh_token","expires_in"}` | 本地账号登录             |
-| GET    | `/api/auth/session`                         | 无                                 | `UserInfoResponse`                              | 读取当前登录用户与初始化状态     |
-| POST   | `/api/auth/logout`                          | 无                                 | `{}`                                            | 退出登录               |
-| GET    | `/api/user/options`                         | 无                                 | 用户选项列表                                          | 用户下拉选择器            |
-| POST   | `/api/user/change-password`                 | `{"old_password","new_password"}` | `{}`                                            | 修改当前用户密码           |
-| GET    | `/api/user/list`                            | Query: `page`,`page_size`         | `{"items":[],"total":n}`                        | 管理员查看用户列表          |
-| POST   | `/api/user/add`                             | `UserAddRequest`                  | `{"user_id"}`                                   | 管理员创建用户            |
-| POST   | `/api/user/delete`                          | `{"user_id"}`                     | `{}`                                            | 管理员删除用户            |
-| GET    | `/api/user/config`                          | 无                                 | `{"config":{}}`                                 | 获取当前用户配置           |
-| POST   | `/api/user/config`                          | `{"config":{}}`                   | `{"config":{}}`                                 | 更新当前用户配置           |
-
-
-兼容旧路径：
-
-- `/api/user/register`
-- `/api/user/login`
-- `/api/user/logout`
-- `/api/user/check_login`
-
-这几条和 `/api/auth/*` 对应接口语义基本一致，主要是兼容保留。
-
-### Chat 与流式
-
-
-| Method | Path                                           | 请求                         | 返回                  | 用途                                              |
-| ------ | ---------------------------------------------- | -------------------------- | ------------------- | ----------------------------------------------- |
-| POST   | `/api/chat/optimize-input`                     | `UserInputOptimizeRequest` | `BaseResponse`      | 对当前用户输入做润色/优化（同步 JSON）                          |
-| POST   | `/api/chat/optimize-input/stream`              | 同上                         | `text/plain` 流      | 流式逐条输出优化片段（每行一条 JSON）                           |
-| POST   | `/api/chat`                                    | `ChatRequest`              | `text/plain` 流      | 必须指定 `agent_id` 的聊天流                            |
-| POST   | `/api/stream`                                  | `StreamRequest`            | `text/plain` 流      | 更通用的聊天流；由 Agent 已保存配置或 `agent_id` 等字段解析行为（见子文档） |
-| POST   | `/api/web-stream`                              | `StreamRequest`            | `text/plain` 流      | 支持重连与活跃会话管理的 Web 流（同会话重入会先中断旧流）                 |
-| GET    | `/api/stream/resume/{session_id}`              | Query: `last_index`        | `text/plain` 流      | 断线重连                                            |
-| GET    | `/api/stream/active_sessions`                  | 无                          | `text/event-stream` | 订阅当前活跃流会话                                       |
-| POST   | `/api/conversations/{session_id}/rerun-stream` | `RerunStreamRequest`       | `text/plain` 流      | 以「最后一条用户消息」为 query 在 Web 流管理下重跑                 |
-
-
-### 会话与历史
-
-
-| Method | Path                                                     | 请求                                                                | 返回 `data`        | 用途                      |
-| ------ | -------------------------------------------------------- | ----------------------------------------------------------------- | ---------------- | ----------------------- |
-| GET    | `/api/conversations`                                     | Query: `page`,`page_size`,`user_id`,`search`,`agent_id`,`sort_by` | 分页会话列表           | 会话侧边栏 / 搜索              |
-| GET    | `/api/conversations/{session_id}/messages`               | 无                                                                 | 消息列表             | 读取会话消息                  |
-| GET    | `/api/share/conversations/{session_id}/messages`         | 无                                                                 | 消息列表             | 分享页读取消息                 |
-| POST   | `/api/conversations/{session_id}/title`                  | `{"title"}`                                                       | 更新结果             | 修改会话标题                  |
-| POST   | `/api/conversations/{session_id}/edit-last-user-message` | `{"content"}`                                                     | 更新结果             | 编辑该会话最后一条用户消息内容         |
-| DELETE | `/api/conversations/{session_id}`                        | 无                                                                 | `{"session_id"}` | 删除会话                    |
-| POST   | `/api/sessions/{session_id}/interrupt`                   | `{"message"}` 可省略                                                 | 中断结果             | 中断正在运行的会话               |
-| POST   | `/api/sessions/{session_id}/tasks_status`                | 无                                                                 | 任务状态             | 查询会话任务进度（对话内任务，非下表计划任务） |
-
-
-### 计划与调度任务（`/tasks`，非 `/api` 前缀）
-
-路径注册于 `app/server/routers/task.py`。多数响应为 **Pydantic 模型**或裸 JSON，**不是**主文档开头的 `BaseResponse` 四字段包裹。下列「内部」端点供调度器/工作进程与运维使用，并受身份与 `SAGE_TASK_SCHEDULER_USER_ID` 等逻辑影响，接入前见 [子文档](HTTP_API_TASKS.md)。
-
-
-| Method | Path                                           | 请求                                    | 返回概要                    | 用途                          |
-| ------ | ---------------------------------------------- | ------------------------------------- | ----------------------- | --------------------------- |
-| GET    | `/tasks/one-time`                              | Query: `page`,`page_size`,`agent_id?` | 一次性任务列表                 | 分页列出按时刻执行的一次性任务             |
-| GET    | `/tasks/one-time/{task_id}`                    | 无                                     | `TaskResponse`          | 读取单条                        |
-| POST   | `/tasks/one-time`                              | `OneTimeTaskCreate`                   | `TaskResponse`          | 创建一次性任务（`execute_at` 等见子文档） |
-| PUT    | `/tasks/one-time/{task_id}`                    | `OneTimeTaskUpdate`                   | `TaskResponse`          | 更新                          |
-| DELETE | `/tasks/one-time/{task_id}`                    | 无                                     | `{"success":true}`      | 删除                          |
-| GET    | `/tasks/recurring`                             | Query: `page`,`page_size`,`agent_id?` | 周期任务列表                  | 分页                          |
-| GET    | `/tasks/recurring/{task_id}`                   | 无                                     | `RecurringTaskResponse` | 读取周期任务                      |
-| POST   | `/tasks/recurring`                             | `RecurringTaskCreate`                 | `RecurringTaskResponse` | 创建（cron 表达式）                |
-| PUT    | `/tasks/recurring/{task_id}`                   | `RecurringTaskUpdate`                 | `RecurringTaskResponse` | 更新                          |
-| DELETE | `/tasks/recurring/{task_id}`                   | 无                                     | `{"success":true}`      | 删除                          |
-| POST   | `/tasks/recurring/{task_id}/toggle`            | `{"enabled": bool}`                   | `RecurringTaskResponse` | 启停                          |
-| GET    | `/tasks/recurring/{task_id}/history`           | Query: `page`,`page_size`             | 历史执行记录                  | 周期任务某次跑出的子任务/历史             |
-| GET    | `/tasks/one-time/{task_id}/history`            | Query: `limit`                        | 历史列表                    | 一次性任务简史                     |
-| POST   | `/tasks/internal/spawn-due`                    | 无                                     | `{"items":[]}`          | 到点生成待执行子任务等（调度用）            |
-| GET    | `/tasks/internal/due`                          | Query: `limit`                        | `{"items":[]}`          | 取待拉取/执行项                    |
-| POST   | `/tasks/internal/one-time/{task_id}/claim`     | 无                                     | `{"claimed":...}`       | 工作进程抢占任务                    |
-| POST   | `/tasks/internal/one-time/{task_id}/complete`  | `{"response"}` 可省略                    | 任务对象                    | 标记完成                        |
-| POST   | `/tasks/internal/one-time/{task_id}/fail`      | `{"error_message"}` 可省略               | 任务对象                    | 标记失败                        |
-| POST   | `/tasks/internal/recurring/{task_id}/complete` | 无                                     | 结果体                     | 周期任务某轮完成回调                  |
-
-
-### Agent
-
-
-| Method | Path                                            | 请求                                        | 返回 `data`          | 用途                                                       |
-| ------ | ----------------------------------------------- | ----------------------------------------- | ------------------ | -------------------------------------------------------- |
-| GET    | `/api/agent/list`                               | 无                                         | `AgentConfigDTO[]` | 获取当前用户可见 Agent                                           |
-| GET    | `/api/agent/template/default_system_prompt`     | Query: `language`                         | `{"content"}`      | 获取默认提示词模板                                                |
-| POST   | `/api/agent/create`                             | `AgentConfigDTO`                          | `{"agent_id"}`     | 创建 Agent                                                 |
-| GET    | `/api/agent/{agent_id}`                         | 无                                         | `AgentConfigDTO`   | 获取 Agent 详情                                              |
-| PUT    | `/api/agent/{agent_id}`                         | `AgentConfigDTO`                          | `{"agent_id"}`     | 更新 Agent                                                 |
-| DELETE | `/api/agent/{agent_id}`                         | 无                                         | `{"agent_id"}`     | 删除 Agent                                                 |
-| POST   | `/api/agent/auto-generate`                      | `{"agent_description","available_tools"}` | 自动生成结果             | 自然语言生成 Agent 草稿                                          |
-| POST   | `/api/agent/system-prompt/optimize`             | `{"original_prompt","optimization_goal"}` | 优化结果               | 优化 system prompt                                         |
-| GET    | `/api/agent/{agent_id}/auth`                    | 无                                         | 授权用户列表             | 读取 Agent 授权                                              |
-| POST   | `/api/agent/{agent_id}/auth`                    | `{"user_ids":[]}`                         | `{}`               | 更新 Agent 授权                                              |
-| POST   | `/api/agent/{agent_id}/file_workspace`          | Query: `session_id`                       | 工作区文件列表            | 获取工作区文件                                                  |
-| GET    | `/api/agent/{agent_id}/file_workspace/download` | Query: `file_path`,`session_id?`          | 文件流                | 下载工作区文件                                                  |
-| DELETE | `/api/agent/{agent_id}/file_workspace/delete`   | Query: `file_path`,`session_id?`          | 删除结果               | 删除工作区文件                                                  |
-| POST   | `/api/agent/auto-generate/submit`               | `AutoGenAgentRequest`                     | 任务提交结果             | 将「自动生成 Agent」改为异步任务（轮询 `GET /api/agent/tasks/{task_id}`） |
-| POST   | `/api/agent/system-prompt/optimize/submit`      | `SystemPromptOptimizeRequest`             | 任务提交结果             | 将 system prompt 优化改为异步任务                                 |
-| POST   | `/api/agent/abilities`                          | `AgentAbilitiesRequest`                   | 能力卡片列表等            | 为 Agent 生成功能/能力点卡片（如 UI 展示用）                             |
-| GET    | `/api/agent/tasks/{task_id}`                    | 无                                         | 异步任务状态             | 查询 `submit` 类接口或内部异步任务                                   |
-| POST   | `/api/agent/tasks/{task_id}/cancel`             | 无                                         | 任务信息               | 取消上述异步任务                                                 |
-
-
-### Tools、Skills、MCP
-
-
-| Method | Path                                   | 请求                                            | 返回 `data`                                                   | 用途                                                      |
-| ------ | -------------------------------------- | --------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
-| GET    | `/api/tools`                           | Query: `type`                                 | `{"tools":[]}`                                              | 获取工具列表                                                  |
-| POST   | `/api/tools/exec`                      | `{"tool_name","tool_params"}`                 | 工具执行结果                                                      | 直接执行工具                                                  |
-| GET    | `/api/skills`                          | Query: `agent_id`,`dimension`                 | `{"skills":[]}`                                             | 获取技能列表                                                  |
-| GET    | `/api/skills/agent-available`          | Query: `agent_id`                             | `{"skills":[]}`                                             | 获取某个 Agent 的可用技能                                        |
-| POST   | `/api/skills/upload`                   | `multipart/form-data`                         | `{"user_id"}`                                               | 上传 ZIP 导入 Skill                                         |
-| POST   | `/api/skills/import-url`               | `{"url","is_system","is_agent","agent_id"}`   | `{"user_id"}`                                               | 从 URL 导入 Skill                                          |
-| DELETE | `/api/skills`                          | Query: `name`,`agent_id?`                     | 无或空对象                                                       | 删除 Skill                                                |
-| GET    | `/api/skills/content`                  | Query: `name`                                 | `{"content"}`                                               | 获取 `SKILL.md` 内容                                        |
-| PUT    | `/api/skills/content`                  | `{"name","content"}`                          | 无或空对象                                                       | 更新 `SKILL.md`                                           |
-| POST   | `/api/skills/sync-to-agent`            | `multipart/form-data`：`skill_name`,`agent_id` | 同步结果                                                        | 将某技能同步到**当前用户**的单个 Agent 工作区                            |
-| POST   | `/api/skills/sync-to-agent-workspaces` | `{"agent_id","skill_names?"}`                 | `{"agent_id","resolved_skill_names","workspace_count",...}` | 将技能批量同步到**所有**现存用户下该 Agent 的 workspace（管理员/扩展场景）        |
-| POST   | `/api/skills/sync-workspace-skills`    | `{"user_id","agent_id","purge_extra"}`        | 同步结果                                                        | 按 Agent 已保存配置，把技能列表落盘到 workspace；`purge_extra` 为真时删多余文件 |
-| POST   | `/api/mcp/add`                         | `MCPServerRequest`                            | `{"server_name","status"}`                                  | 新增 MCP Server                                           |
-| GET    | `/api/mcp/list`                        | 无                                             | `{"servers":[]}`                                            | 获取 MCP Server 列表                                        |
-| DELETE | `/api/mcp/{server_name}`               | 无                                             | `{"server_name"}`                                           | 删除 MCP Server                                           |
-| POST   | `/api/mcp/{server_name}/refresh`       | 无                                             | `{"server_name","status"}`                                  | 刷新 MCP Server                                           |
-
-
-### Provider、系统、存储与可观测性
-
-
-| Method | Path                                     | 请求                       | 返回                                                  | 用途                             |
-| ------ | ---------------------------------------- | ------------------------ | --------------------------------------------------- | ------------------------------ |
-| POST   | `/api/llm-provider/verify`               | `LLMProviderCreate`      | 验证结果                                                | 校验 Provider 是否可用（连通性等）         |
-| POST   | `/api/llm-provider/verify-capabilities`  | `LLMProviderCreate`      | 能力探测数据                                              | 连接并探测多模态/结构化输出等能力              |
-| POST   | `/api/llm-provider/verify-multimodal`    | `LLMProviderCreate`      | 验证结果                                                | 校验多模态能力                        |
-| GET    | `/api/llm-provider/list`                 | 无                        | Provider 列表                                         | 获取 Provider                    |
-| POST   | `/api/llm-provider/create`               | `LLMProviderCreate`      | `{"provider_id"}`                                   | 创建 Provider，返回新 ID             |
-| PUT    | `/api/llm-provider/update/{provider_id}` | `LLMProviderUpdate`      | Provider                                            | 更新 Provider                    |
-| DELETE | `/api/llm-provider/delete/{provider_id}` | 无                        | 删除结果                                                | 删除 Provider                    |
-| GET    | `/api/system/info`                       | 无                        | 系统公开配置                                              | 前端初始化                          |
-| POST   | `/api/system/update_settings`            | `{"allow_registration"}` | `{}`                                                | 更新系统设置                         |
-| POST   | `/api/system/agent/usage-stats`          | `{"days","agent_id?"}`   | `{"usage":{...}}`                                   | 当前用户下 Agent 调用量统计（按天聚合）        |
-| GET    | `/api/health`                            | 无                        | `{"status","timestamp","service"}`                  | 健康检查                           |
-| GET    | `/active`                                | 无                        | 纯文本                                                 | Uvicorn 根探活，非 JSON 包裹          |
-| POST   | `/api/agent/workspace/delete`            | `{"agent_id","user_id"}` | `{"agent_id","user_id","workspace_path","deleted"}` | 删除指定用户个人工作空间下的 Agent workspace |
-| POST   | `/api/oss/upload`                        | `multipart/form-data`    | `{"url"}`                                           | 上传文件到对象存储                      |
-| GET    | `/api/observability/jaeger/login`        | Query: `next?`           | 302 或错误                                             | 进入 Jaeger 前鉴权                  |
-| GET    | `/api/observability/jaeger/auth`         | 无                        | 204/401/403                                         | 探测当前用户是否可访问 Jaeger             |
-| GET    | `/api/observability/jaeger`              | 无                        | 307                                                 | 重定向到 Jaeger 根地址                |
-| ANY    | `/api/observability/jaeger/{full_path}`  | 保留原请求                    | 307                                                 | 重定向到 Jaeger 具体路径               |
-
-
-## 关键请求与返回模型
-
-### 注册与登录
-
-注册：
-
-```json
-{
-  "username": "alice",
-  "password": "StrongPassword123"
-}
-```
-
-登录：
-
-```json
-{
-  "username": "alice",
-  "password": "StrongPassword123"
-}
-```
-
-登录成功返回：
-
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_in": 3600
-}
-```
-
-### ChatRequest
-
-`/api/chat` 使用这个模型，必须有 `agent_id`：
-
-```json
-{
-  "messages": [
-    {
-      "message_id": "optional",
-      "role": "user",
-      "content": "Hello"
-    }
-  ],
-  "session_id": "sess_123",
-  "user_id": "optional",
-  "system_context": {},
-  "agent_id": "agent_abc",
-  "provider_id": "provider_xxx",
-  "fast_provider_id": "provider_fast_xxx"
-}
-```
-
-说明：
-
-
-| 字段               | 含义                               |
-| ---------------- | -------------------------------- |
-| `messages`       | 消息列表                             |
-| `message_id`     | 消息 ID，可选                         |
-| `role`           | 角色，如 `user`、`assistant`、`system` |
-| `content`        | 字符串，或多模态数组                       |
-| `session_id`     | 会话 ID，可复用历史会话                    |
-| `user_id`        | 不传时服务端通常从 session 注入             |
-| `system_context` | 结构化上下文                           |
-| `agent_id`       | 必填，指定使用哪个 Agent                  |
-| `provider_id`    | 可选，本次请求覆盖 Agent 主模型 Provider       |
-| `fast_provider_id` | 可选，本次请求覆盖 Agent 快速模型 Provider     |
-
-
-### StreamRequest
-
-`/api/stream` 与 `/api/web-stream` 在 `ChatRequest` 基础上支持更多运行时覆盖字段：
-
-- `agent_name`
-- `deep_thinking`
-- `max_loop_count`
-- `agent_mode`
-- `more_suggest`
-- `available_workflows`
-- `llm_model_config`
-- `system_prefix`
-- `available_tools`
-- `available_skills`
-- `available_sub_agent_ids`
-- `force_summary`
-- `memory_type`
-- `custom_sub_agents`
-- `context_budget_config`
-- `extra_mcp_config`
-
-适用场景：
-
-- 你要按单次请求临时覆盖 Agent 的运行参数
-
-### RerunStreamRequest
-
-`POST /api/conversations/{session_id}/rerun-stream` 使用。全部可选，未填时服务端从会话中解析 Agent 等默认值：
-
-
-| 字段                        | 含义                          |
-| ------------------------- | --------------------------- |
-| `agent_id`                | 覆盖要跑的 Agent；默认取会话中存储的 agent |
-| `agent_mode`              | 单次重跑的 Agent 模式              |
-| `more_suggest`            | 是否生成更多建议                    |
-| `max_loop_count`          | 本次最大循环步数                    |
-| `available_sub_agent_ids` | 本次允许的子 Agent 列表             |
-
-
-### UserInputOptimizeRequest
-
-`POST /api/chat/optimize-input` 与 `.../stream` 使用：
-
-
-| 字段                                    | 含义                            |
-| ------------------------------------- | ----------------------------- |
-| `current_input`                       | 当前待优化输入，必填                    |
-| `history_messages`                    | `role`+`content` 的显示用历史，可空    |
-| `session_id` / `agent_id` / `user_id` | 均可选；`user_id` 缺省时从 session 注入 |
-
-
-### AgentConfigDTO
-
-```json
-{
-  "id": "optional",
-  "user_id": "optional",
-  "name": "Research Agent",
-  "systemPrefix": "You are a careful research assistant.",
-  "systemContext": {},
-  "availableWorkflows": {},
-  "availableTools": ["web_search"],
-  "availableSubAgentIds": [],
-  "availableSkills": ["market-research"],
-  "memoryType": "session",
-  "maxLoopCount": 10,
-  "deepThinking": false,
-  "llm_provider_id": "provider_xxx",
-  "enableMultimodal": false,
-  "agentMode": "team",
-  "description": "Handles market research"
-}
-```
-
-### LLMProviderCreate
-
-```json
-{
-  "name": "OpenAI Compatible",
-  "base_url": "https://api.example.com/v1",
-  "api_keys": ["sk-xxxx"],
-  "model": "gpt-4o",
-  "max_tokens": 4096,
-  "temperature": 0.7,
-  "top_p": 1,
-  "presence_penalty": 0,
-  "max_model_len": 128000,
-  "supports_multimodal": true,
-  "is_default": true
-}
-```
-
-约束：
-
-- `api_keys` 必须且只能包含一个非空单行 key
-
-### MCPServerRequest
-
-```json
-{
-  "name": "docs-mcp",
-  "protocol": "streamable_http",
-  "streamable_http_url": "https://mcp.example.com",
-  "sse_url": null,
-  "api_key": "secret"
-}
-```
-
-## 字段级说明
-
-### `AgentConfigDTO` 字段表
-
-
-| 字段                        | 类型       | 含义            | 什么时候用               |
-| ------------------------- | -------- | ------------- | ------------------- |
-| `name`                    | string   | Agent 名称      | 必填，创建和展示都要用         |
-| `systemPrefix`            | string   | 系统提示词         | 定义 Agent 的角色和行为边界   |
-| `systemContext`           | object   | 结构化上下文        | 需要给 Agent 注入固定上下文时  |
-| `availableWorkflows`      | object   | 可用工作流映射       | Agent 需要工作流能力时      |
-| `availableTools`          | string[] | 允许使用的工具       | 控制 Agent 工具权限       |
-| `availableSubAgentIds`    | string[] | 可调度子 Agent 列表 | 需要多 Agent 协作时       |
-| `availableSkills`         | string[] | 可用 Skill 列表   | 希望 Agent 使用 Skill 时 |
-| `memoryType`              | string   | 记忆模式          | 通常用 `session`       |
-| `maxLoopCount`            | integer  | 推理/工具循环上限     | 控制最长运行步数            |
-| `deepThinking`            | boolean  | 更深推理模式        | 复杂推理场景可开启           |
-| `llm_provider_id`         | string   | 绑定的模型提供方 ID   | 想明确指定 Provider 时    |
-| `enableMultimodal`        | boolean  | 是否启用多模态       | 需要图像输入时             |
-| `agentMode`               | string   | Agent 模式      | `simple`、`fibre` 或 `team` |
-| `description`             | string   | Agent 描述      | 管理页和自动生成场景          |
-
-
-### `StreamRequest` 额外字段表
-
-
-| 字段                          | 类型       | 含义               | 什么时候用              |
-| --------------------------- | -------- | ---------------- | ------------------ |
-| `agent_name`                | string   | 临时指定 Agent 名称    | 调试或临时覆盖展示名         |
-| `deep_thinking`             | boolean  | 临时启用深度推理         | 单次请求更重推理           |
-| `max_loop_count`            | integer  | 单次请求循环上限         | 控制成本或运行深度          |
-| `agent_mode`                | string   | 单次请求 Agent 模式    | `simple`、`fibre` 或 `team` |
-| `more_suggest`              | boolean  | 生成更多建议           | 前端想要更多候选建议时        |
-| `available_workflows`       | object   | 临时工作流集合          | 调试或临时工作流注入         |
-| `llm_model_config`          | object   | 临时模型配置           | 临时覆盖模型参数           |
-| `system_prefix`             | string   | 临时 system prompt | 不改 Agent 配置，只改单次请求 |
-| `available_tools`           | string[] | 临时工具列表           | 缩小或扩大单次可用工具        |
-| `available_skills`          | string[] | 临时技能列表           | 缩小或扩大单次可用技能        |
-| `available_sub_agent_ids`   | string[] | 临时子 Agent 列表     | 单次请求允许哪些子 Agent    |
-| `force_summary`             | boolean  | 强制总结             | 想在结束时强制输出总结        |
-| `memory_type`               | string   | 单次记忆模式           | 临时切换记忆策略           |
-| `custom_sub_agents`         | array    | 内联子 Agent 配置     | 不依赖已保存子 Agent      |
-| `context_budget_config`     | object   | 上下文预算配置          | 控制请求预算；主历史只使用大模型持久摘要压缩 |
-| `extra_mcp_config`          | object   | 额外 MCP 配置        | 临时挂接 MCP server 参数 |
-
-
-### `LLMProviderCreate` 字段表
-
-
-| 字段                    | 类型       | 含义             | 备注              |
-| --------------------- | -------- | -------------- | --------------- |
-| `name`                | string   | Provider 名称    | 展示名             |
-| `base_url`            | string   | OpenAI 兼容接口基地址 | 通常以 `/v1` 结尾    |
-| `api_keys`            | string[] | API Key 列表     | 当前只允许 1 个 key   |
-| `model`               | string   | 模型名            | 如 `gpt-4o`      |
-| `max_tokens`          | integer  | 最大输出 token     | 可选              |
-| `temperature`         | float    | 采样温度           | 可选              |
-| `top_p`               | float    | top-p 采样参数     | 可选              |
-| `presence_penalty`    | float    | 话题新颖度惩罚        | 可选              |
-| `max_model_len`       | integer  | 模型上下文长度        | 可选              |
-| `supports_multimodal` | boolean  | 是否支持多模态        | 主要给 UI 和校验逻辑用   |
-| `is_default`          | boolean  | 是否默认 Provider  | 创建时当前实现最终会存成非默认 |
-
-
-### `MCPServerRequest` 字段表
-
-
-| 字段                    | 类型     | 含义                 | 备注                                  |
-| --------------------- | ------ | ------------------ | ----------------------------------- |
-| `name`                | string | MCP Server 名称      | 同名冲突要避免                             |
-| `protocol`            | string | 协议类型               | 当前代码注释写的是 `streamable_http` 或 `sse` |
-| `streamable_http_url` | string | Streamable HTTP 地址 | `protocol=streamable_http` 时用       |
-| `sse_url`             | string | SSE 地址             | `protocol=sse` 时用                   |
-| `api_key`             | string | MCP Server 访问密钥    | 可选                                  |
-
-
-## 常见错误响应
-
-### 未登录
-
-常见于：
-
-- `GET /api/auth/session`
-- `GET /api/user/options`
-- `POST /api/user/change-password`
-- `GET /api/user/config`
-
-示例：
-
-```json
-{
-  "code": 401,
-  "message": "未登录",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-### 权限不足
-
-常见于：
-
-- `GET /api/user/list`
-- `POST /api/user/add`
-- `POST /api/user/delete`
-- `POST /api/system/update_settings`
-- `GET /api/observability/jaeger/auth`
-
-示例：
-
-```json
-{
-  "code": 403,
-  "message": "权限不足",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-### 本地注册未开启
-
-常见于：
-
-- `POST /api/auth/register`
-- 对应 `/api/user/*` 兼容接口
-
-示例：
-
-```json
-{
-  "code": 400,
-  "message": "当前服务未启用本地账号密码登录",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-或
-
-```json
-{
-  "code": 400,
-  "message": "当前服务未启用本地账号注册",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-### Provider 不存在或不可修改
-
-常见于：
-
-- `PUT /api/llm-provider/update/{provider_id}`
-- `DELETE /api/llm-provider/delete/{provider_id}`
-
-示例：
-
-```json
-{
-  "code": 500,
-  "message": "Provider not found",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-或：
-
-```json
-{
-  "code": 500,
-  "message": "Cannot delete default provider",
-  "data": null,
-  "timestamp": 1710000000.123
-}
-```
-
-说明：
-
-- 这里返回的是业务错误包裹，不一定是你预期的 HTTP 404/403
-- 这是当前代码的真实行为，不是理想化设计
-
-### Tool 不存在或执行失败
-
-常见于：
-
-- `POST /api/tools/exec`
-
-可能场景：
-
-- `tool_name` 填错
-- 工具管理器未初始化
-- MCP 工具无权限
-- 工具运行时异常
-
-这类错误很多时候会走异常路径，实际响应可能不是统一的 `BaseResponse` 成功格式，前端接入时要按失败分支处理。
-
-### 聊天请求参数无效
-
-常见于：
-
-- `POST /api/chat`
-- `POST /api/stream`
-- `POST /api/web-stream`
-
-最典型场景：
-
-- `messages` 为空
-
-这类情况会抛业务异常，例如“消息列表不能为空”。
-
-## 常用调用示例
-
-### 1. 登录并保存 cookie
-
-```bash
-curl -c cookies.txt -X POST http://127.0.0.1:8000/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"alice","password":"StrongPassword123"}'
-```
-
-### 2. 读取当前登录态
-
-```bash
-curl -b cookies.txt http://127.0.0.1:8000/api/auth/session
-```
-
-### 3. 发起流式对话
-
-```bash
-curl -N -b cookies.txt -X POST http://127.0.0.1:8000/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "messages":[{"role":"user","content":"Summarize the repository structure."}],
-    "session_id":"sess_123",
-    "agent_id":"agent_abc"
-  }'
-```
-
-### 4. 断线重连继续订阅
-
-```bash
-curl -N http://127.0.0.1:8000/api/stream/resume/sess_123?last_index=15
-```
-
-### 5. 创建 Agent
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/agent/create \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name":"Research Agent",
-    "systemPrefix":"You are a careful research assistant.",
-    "availableTools":["web_search"],
-    "availableSkills":["market-research"],
-    "memoryType":"session",
-    "maxLoopCount":10
-  }'
-```
-
-### 6. 执行工具
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/tools/exec \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "tool_name":"web_search",
-    "tool_params":{"query":"Sage repository"}
-  }'
-```
-
-### 7. 导入 Skill
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/import-url \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "url":"https://example.com/skill.zip",
-    "is_system":false,
-    "is_agent":false,
-    "agent_id":null
-  }'
-```
-
-### 7.1 批量同步 Agent workspace skills
-
-```bash
-curl -b cookies.txt -X POST http://127.0.0.1:8000/api/skills/sync-to-agent-workspaces \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "agent_id":"agent_xxx",
-    "skill_names":["research-helper","writer-helper"]
-  }'
-```
-
-不传 `skill_names` 时，会按 Agent 配置中的 `availableSkills` / `available_skills` 批量同步到所有现存 `agents/{user_id}/{agent_id}` workspace。
-
-### 8. 上传对象存储文件
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/oss/upload \
-  -F 'file=@./example.png' \
-  -F 'path=uploads/images'
-```
-
-## 备注
-
-- 这页只保留当前代码里真实存在、且对接方真正需要知道的信息；已与 `app/server/routers` 中实际注册的路由逐组核对；桌面等其它入口的额外 API 不写入本页。
-- 旧接口、推测行为、历史遗留说明都尽量压缩到最小。
-- 如果后面继续补，会优先补“错误响应示例”和“字段级枚举说明”，不会再把页面写回成流水账。
+按实际情况替换 ID。新的逻辑请求使用新的 Run ID，重连不应创建另一个逻辑任务。
+
+## 路由清单
+
+以下清单对应当前注册的路由源码。Jaeger 路由按宿主配置启用。完整 schema 请使用 OpenAPI，此清单不替代客户端 SDK。
+
+| Method | Path | Router |
+| --- | --- | --- |
+| `GET` | `/api/admin/users` | `admin` |
+| `GET` | `/api/admin/threads` | `admin` |
+| `GET` | `/api/admin/models` | `admin` |
+| `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
+| `POST` | `/api/agent` | `agent` |
+| `GET` | `/api/tools` | `agents` |
+| `GET` | `/api/agents` | `agents` |
+| `POST` | `/api/agents` | `agents` |
+| `GET` | `/api/agents/{agent_id}` | `agents` |
+| `PUT` | `/api/agents/{agent_id}` | `agents` |
+| `DELETE` | `/api/agents/{agent_id}` | `agents` |
+| `POST` | `/api/auth/register` | `auth` |
+| `POST` | `/api/auth/login` | `auth` |
+| `GET` | `/api/auth/session` | `auth` |
+| `POST` | `/api/auth/logout` | `auth` |
+| `GET` | `/health` | `health` |
+| `GET` | `/active` | `health` |
+| `GET` | `/api/mcp` | `mcp` |
+| `POST` | `/api/mcp` | `mcp` |
+| `PUT` | `/api/mcp/{name}` | `mcp` |
+| `DELETE` | `/api/mcp/{name}` | `mcp` |
+| `POST` | `/api/mcp/{name}/refresh` | `mcp` |
+| `GET` | `/api/models` | `models` |
+| `POST` | `/api/models` | `models` |
+| `DELETE` | `/api/models/{model_id}` | `models` |
+| `GET` | `/api/observability/jaeger/login` | `observability` |
+| `GET` | `/api/observability/jaeger/auth` | `observability` |
+| `GET` | `/api/observability/jaeger` | `observability` |
+| `GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD` | `/api/observability/jaeger/{full_path:path}` | `observability` |
+| `GET` | `/api/agent-packages/schema` | `packages` |
+| `GET` | `/api/agent-packages/capacity` | `packages` |
+| `GET` | `/api/agent-packages/resources` | `packages` |
+| `GET` | `/api/agent-packages/template` | `packages` |
+| `GET` | `/api/agent-packages` | `packages` |
+| `POST` | `/api/agent-packages/validate` | `packages` |
+| `POST` | `/api/agent-packages` | `packages` |
+| `GET` | `/api/agent-packages/runs` | `packages` |
+| `POST` | `/api/agent-packages/runs` | `packages` |
+| `GET` | `/api/agent-packages/runs/{operation}` | `packages` |
+| `GET` | `/api/agent-packages/runs/{operation}/events` | `packages` |
+| `POST` | `/api/agent-packages/runs/{operation}/control` | `packages` |
+| `GET` | `/api/agent-packages/{ref}` | `packages` |
+| `POST` | `/api/agent-packages/{ref}/activate` | `packages` |
+| `POST` | `/api/agent-packages/{ref}/fork` | `packages` |
+| `GET` | `/api/skills` | `skills` |
+| `POST` | `/api/skills/upload` | `skills` |
+| `POST` | `/api/skills` | `skills` |
+| `GET` | `/api/skills/{skill_id}` | `skills` |
+| `PUT` | `/api/skills/{skill_id}` | `skills` |
+| `DELETE` | `/api/skills/{skill_id}` | `skills` |
+| `GET` | `/api/agents/{agent_id}/skills` | `skills` |
+| `PUT` | `/api/agents/{agent_id}/skills` | `skills` |
+| `PUT` | `/api/workspace/skills/{name}` | `skills` |
+| `GET` | `/api/threads` | `threads` |
+| `GET` | `/api/threads/{thread_id}/events` | `threads` |
+| `DELETE` | `/api/threads/{thread_id}` | `threads` |
+
+宿主基础设施还提供 `GET /livez`、`GET /readyz` 和 `GET /metrics`，这些不展示在 OpenAPI 中。Readiness 会检查已注册资源。
+
+成功与失败的 JSON 都包含 `request_id`，服务端同时返回 `X-Request-ID`。流式响应使用 AG-UI 事件格式。
+
+[路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/api/routers/) · [服务端启动](../applications/WEB.md)

@@ -1,3 +1,14 @@
+---
+layout: default
+title: 沙箱生命周期
+parent: 架构
+nav_order: 2
+lang: zh
+ref: v2-detail-SAGENTS_V2_SANDBOX_LIFECYCLE
+---
+
+{% include lang_switcher.html %}
+
 # SAgents v2 沙箱暂停、释放与恢复
 
 SAgents v2 将审批状态与执行计算分开持久化。`InteractionRequest`、Agent

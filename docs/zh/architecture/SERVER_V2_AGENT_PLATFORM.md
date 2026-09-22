@@ -1,3 +1,14 @@
+---
+layout: default
+title: Server Agent 平台
+parent: 架构
+nav_order: 5
+lang: zh
+ref: v2-detail-SERVER_V2_AGENT_PLATFORM
+---
+
+{% include lang_switcher.html %}
+
 # Server V2：多用户 Agent 服务平台
 
 日期：2026-09-14。范围：Server V2 与所复用的 SAgents V2 核心；不修改旧 Desktop，不加入监督学习或自动晋升闭环。
@@ -90,4 +101,4 @@ Server Web 使用仓库锁定依赖完成 Vite 构建；独立无头 Chrome 验�
 
 核心完整回归排除 `test_local_sandbox_resource_limits.py`、`test_local_workspace_sandbox_matrix.py`，并 deselect `test_official_tool_provider_matrix.py::test_shell_and_todo_tools_use_v2_runtime_state`，不计为通过。
 
-数据库仓储使用真实 SQLAlchemy 事务在 SQLite 测试库验证；没有在本轮连接生产 MySQL/Redis，没有做多小时真实模型负载、Windows 或原生沙箱实机验收。既有核心原生沙箱排除项不计为通过。仍只支持单 worker；MySQL/Redis 不使它自动具备横向扩容能力。没有承诺全进程 RSS 限制、非可信插件隔离或监督学习闭环。
+数据库仓储使用真实 SQLAlchemy 事务在 SQLite 测试库验证；该阶段验证没有连接生产 MySQL，没有做多小时真实模型负载、Windows 或原生沙箱实机验收。既有核心原生沙箱排除项不计为通过。仍只支持单 worker；MySQL 持久化不使它自动具备横向扩容能力；AG-UI 回放已改为直接读取 Session 事件，Redis 不再是启动依赖。没有承诺全进程 RSS 限制、非可信插件隔离或监督学习闭环。

@@ -1,3 +1,14 @@
+---
+layout: default
+title: Sandbox Lifecycle
+parent: Architecture
+nav_order: 2
+lang: en
+ref: v2-detail-SAGENTS_V2_SANDBOX_LIFECYCLE
+---
+
+{% include lang_switcher.html %}
+
 # SAgents v2 sandbox suspension, release, and restore
 
 SAgents v2 persists approval state independently from execution compute.
