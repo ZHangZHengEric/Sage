@@ -1,312 +1,206 @@
-<div align="center">
+# Sage
 
-# 🌟 **Experience Sage's Power**
+[English](README.md) · [简体中文](README_CN.md) · [Documentation](docs/en/README.md) · [Releases](https://github.com/ZHangZHengEric/Sage/releases) · [MIT License](LICENSE)
 
-![cover](assets/cover.png)
+Sage brings AI agents into the workspace where your work happens. Give an agent a project, connect the models and tools it needs, and work with it from the first instruction through file changes, tool execution, and review.
 
-[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
-[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-1.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
-[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+Use the desktop app for hands-on work, the web application for multi-user access, or the Python runtime to build your own agent experience. Sage is open source under the MIT license.
 
-# 🧠 **Sage Agent Platform**
+## A workspace for work that goes beyond chat
 
-### 🎯 **From Complex Work to Reliable Delivery**
+**Work with your project in context.** Keep conversations, project files, execution progress, and a terminal in one desktop workspace. Start in the shared Agent Workspace or connect an existing project directory, then inspect the files and results as the agent works.
 
-> 🌟 **A production-ready agent platform for task execution, automation, browser workflows, IM delivery, and enterprise deployment.**
+**Turn capabilities into reusable agents.** Choose a model, define instructions, and combine built-in tools, Skills, and MCP connections. Reuse that configuration across tasks, or define an Agent package in `sage.yaml` to integrate it into your own application.
 
-</div>
+**Collaborate with visibility and control.** Follow model output and tool activity as they happen. Pause a Run, add input, handle an approval, or cancel execution. Desktop Studio brings agents into a shared conversation with member-directed messages; Server Studio adds Agent package editing, immutable versions, execution history, and review.
 
----
+**Build on an extensible foundation.** SAgents v2 separates the agent runtime from the application that hosts it. Model providers, storage, memory, tools, and scheduling have explicit extension interfaces, so you can adapt the runtime to your application without adopting a particular UI.
 
-## 📸 **Product Screenshots**
+## Put Sage to work
 
-<div align="center">
+| Workflow | How Sage supports it |
+| --- | --- |
+| Code and project work | Connect a project, let an agent read and edit files with configured tools, and inspect execution alongside the results. |
+| Repeatable specialist tasks | Package instructions, model choices, Skills, and tools into an Agent you can use again. |
+| Multi-agent collaboration | Give Studio members distinct responsibilities and direct messages to the member who should handle them. |
+| Your own agent product | Embed SAgents v2 and provide your own interface, authentication, credentials, and workspace policies. |
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/workbench.png" width="100%" alt="Workbench"/>
-      <br/><strong>Visual Workbench</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/chat.png" width="100%" alt="Chat"/>
-      <br/><strong>Real-time Collaboration</strong>
-    </td>
-    <td align="center" width="33%">
-      <img src="assets/screenshots/preview.png" width="100%" alt="Preview"/>
-      <br/><strong>Multi-format Support</strong>
-    </td>
-  </tr>
-</table>
+Model routes in Desktop v2 support **OpenAI Chat Completions**, **OpenAI Responses**, and **Anthropic Messages** protocols. Skills supply reusable workflows; MCP connections bring external tools into the agent's available capabilities.
 
-</div>
+## Choose an entry point
 
-> 📖 **Detailed Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+| Entry point | Best for | Code and guide |
+| --- | --- | --- |
+| Desktop v2 | A local workspace for conversations, projects, files, and agents | [Flutter desktop](app/desktop_v2/README.md) |
+| Server v2 | A multi-user web application with model, Agent, Skill, and MCP management | [Server and web client](app/server_v2/README.md) |
+| SAgents v2 | Embedding the agent runtime in your own application | [Runtime guide](sagents/v2/README.md) |
+| Legacy applications | The existing Desktop, Web, CLI, TUI, and Chrome extension | [Application guides](docs/en/applications/README.md) |
 
----
+The repository contains both generations. SAgents v2, Desktop v2, and Server v2 require **Python 3.12+**; legacy applications retain a Python 3.10+ baseline. Desktop v2 has its own settings and data layout and does not import Desktop v1 data. Features and configuration are specific to each entry point.
 
-## ✨ **Key Features**
+## Quick start
 
-- 🤖 **Planning to Delivery**: Built-in planning, execution, self-check, memory recall, and tool suggestion agents for complex task completion.
-- 🌐 **Multi-Entry Product Surface**: Use Sage from desktop, web, CLI, and Chrome extension depending on the workflow.
-- 🔁 **Automation & Recurring Tasks**: Run scheduled jobs, questionnaire-driven collection flows, and long-running operational tasks with progress visibility.
-- 💬 **Omnichannel IM Integration**: Connect WeChat Personal (iLink), WeCom, Feishu, and DingTalk with message and file delivery support.
-- 🧰 **Unified Tooling System**: Combine built-in tools, Skills, MCP servers, browser automation, search, and image generation in one execution stack.
-- 🛡️ **Sandboxed Execution**: Local, passthrough, and remote sandbox options for safer agent runtime isolation.
-- 🛠️ **Visual Workbench**: Inspect files, tool outputs, code, charts, Mermaid, Draw.io, audio, video, and remote previews in one workspace.
-- 🏢 **Enterprise-Ready Foundation**: Local account authentication, configurable CORS, shared service architecture, CI coverage, and deployable multi-platform packaging.
+### Prepare the source checkout
 
----
-
-## 🚀 **Quick Start**
-
-**Prerequisites (web from source):** Python 3.10+, Node.js 18+. **SAgents v2 and Desktop v2 require Python 3.12+.**
-
-### Web (clone and run)
+The following commands use a POSIX shell on macOS or Linux:
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-./scripts/dev-up.sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
-Open [http://localhost:5173](http://localhost:5173). After signing in, add a model provider in Model Source Management, then create or configure an Agent. The first run may ask for **Minimal** (SQLite) vs **Full** stacks — Minimal is the quickest. Optional: `PYTHON_BIN=...` or `USE_UV=1 ./scripts/dev-up.sh` if you use a custom Python or [uv](https://github.com/astral-sh/uv).
+On Windows, create the environment with `py -3.12 -m venv .venv` and activate it with `.venv\Scripts\Activate.ps1` in PowerShell.
 
-**Detailed documentation:** [Web Application](docs/en/applications/WEB.md) — manual backend + Vite, Docker Compose, and port notes.
+### Desktop v2
 
-### Desktop (installers)
-
-Download the latest `.dmg` (macOS), `.exe` NSIS installer (Windows), or `.deb` (Linux) from [GitHub Releases](https://github.com/ZHangZHengEric/Sage/releases), then install as below.
-
-**macOS**
-
-1. Open the `.dmg` for your CPU (Intel or Apple Silicon), drag **Sage.app** into **Applications**.
-2. The build is **not** currently Apple-notarized. If macOS says the developer cannot be verified or the app cannot be checked for malware: in **Finder → Applications**, **right‑click** `Sage.app` → **Open**, then confirm **Open** in the dialog (this adds a one-time exception for Gatekeeper).
-3. If it is still blocked: **System Settings → Privacy & Security**, scroll to the message about Sage, click **Open Anyway**, then try opening the app again.
-4. If macOS reports the app is **damaged** or will not open, clear the quarantine flag and retry:
+Install Flutter with desktop support for your platform and a bundled Dart SDK compatible with [pubspec.yaml](app/desktop_v2/pubspec.yaml) (`^3.12.2`). After preparing the Python environment above, run:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Sage.app
+cd app/desktop_v2
+flutter pub get
+flutter run -d macos
 ```
 
-**Windows**
+Use `-d windows` or `-d linux` for the corresponding desktop target, with its native build tools installed. The integrated PTY terminal currently supports macOS and Linux.
 
-1. Run the `.exe` installer and complete the wizard.
-2. If **Windows SmartScreen** warns about an unknown publisher, click **More info** → **Run anyway** (wording may vary by Windows version).
+The app starts its local Python sidecar automatically. In Settings, add a model route with its protocol, endpoint, model name, and API key, then configure an Agent to use it. Start a conversation in the shared Agent Workspace or register a project directory to work with its files. Add Skills and MCP connections as needed.
 
-**Linux (Debian / Ubuntu)**
+Desktop v2 stores runtime data and settings in `~/sage/runtime`, imported Skills in `~/sage/skills`, and the default shared workspace in `~/sage/agent_workspace`. Agent and model settings are managed in the app rather than through environment-variable overrides.
 
-1. Download the `.deb` for your architecture from Releases.
-2. Install from a terminal (adjust the filename):
+See the [Desktop v2 guide](app/desktop_v2/README.md) for workspace behavior, configuration, and development checks. For packaged desktop builds, consult [Releases](https://github.com/ZHangZHengEric/Sage/releases) and the instructions for that release; the repository's existing desktop release workflow targets the legacy Tauri app.
+
+### Server v2
+
+Server v2 requires MySQL, Redis, and Node.js compatible with Vite 7 (Node.js 22.12+ is suitable). From the repository root, with the Python environment active:
 
 ```bash
-sudo apt install ./Sage-<version>-<arch>.deb
+python -m pip install -e '.[server-v2]'
+cp app/server_v2/.env.example app/server_v2/.env
 ```
 
-You can also double-click the `.deb` in many desktop environments.
+Edit `app/server_v2/.env` before starting:
 
-**Detailed documentation:** [Desktop Application](docs/en/applications/DESKTOP.md) — build from source, env, and platform notes.
+- Set `SAGE_SERVER_MYSQL_URL` and `SAGE_SERVER_REDIS_URL` to your service connections.
+- Set `SAGE_SERVER_JWT_SECRET` to your own secret of at least 32 bytes.
+- Set `SAGE_SERVER_ADMIN_USERNAME` and `SAGE_SERVER_ADMIN_PASSWORD` for the initial administrator.
 
-### CLI
+Build the web client and start the server:
 
 ```bash
-pip install -e .
-export SAGE_DEFAULT_LLM_API_KEY="your-api-key"
-export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
-export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-chat"
-export SAGE_DB_TYPE="file"
-sage doctor
-sage run "Say hello briefly."
-# or: sage chat
+cd app/server_v2/web
+npm install
+npm run build
+cd ../../..
+python -m app.server_v2
 ```
 
-**Detailed documentation:** [CLI Guide](docs/en/applications/CLI.md)
+Open [http://127.0.0.1:8090](http://127.0.0.1:8090), sign in with the administrator credentials you configured, and add a model and an Agent. API documentation is available at `/docs`; Agent package management is available at `/studio`.
 
-### TUI
+Server v2 currently runs with **one worker**. MySQL persistence and Redis event replay do not make the runtime horizontally scalable. See the [Server v2 guide](app/server_v2/README.md) for configuration and deployment boundaries.
 
-After `pip install -e .` and the same `SAGE_DEFAULT_*` + `SAGE_DB_TYPE=file` as above, use `sage-terminal` (or run from `app/terminal/` with `cargo` — see the guide).
+### Embed SAgents v2
 
-**Detailed documentation:** [TUI Guide](docs/en/applications/TUI.md)
+Use `SAgentBuilder` to load an Agent package and create an `SAgentApplication`. The host supplies model credentials, user identity, workspace access, and any tool execution environment.
 
-### Chrome extension
-
-Load the unpacked extension from `app/chrome-extension/` in `chrome://extensions/` (Developer mode). Point the extension at your local Sage backend if the port differs from defaults.
-
-**Detailed documentation:** [Chrome extension](docs/en/applications/CHROME_EXTENSION.md)
-
----
-
-## 🏗️ **System Architecture**
-
-```mermaid
-graph TD
-    User[User] --> Desktop[💻 Desktop App]
-    User --> Web[🌐 Web App]
-    User --> CLI[⌨️ CLI]
-    User --> Ext[🧩 Chrome Extension]
-    User --> IM[💬 IM Channels]
-
-    Desktop --> AppLayer[🧭 App Service Layer]
-    Web --> AppLayer
-    CLI --> AppLayer
-    Ext --> AppLayer
-    IM --> AppLayer
-
-    subgraph App[Product Layer]
-        AppLayer --> Chat[💬 Chat & Sessions]
-        AppLayer --> AgentsUI[🤖 Agent Management]
-        AppLayer --> Tasks[⏰ Tasks & Automations]
-        AppLayer --> Browser[🌐 Browser Bridge]
-        AppLayer --> Workbench[🛠️ Visual Workbench]
-    end
-
-    subgraph Core[SAgents Core]
-        AppLayer --> Runtime[🧠 Session Runtime]
-        Runtime --> Flow[📋 AgentFlow]
-        Flow --> Agents["🤖 Agents<br/>Plan / Simple / Fibre / Self-Check"]
-        Agents --> Memory[🧠 Memory Recall]
-        Agents --> Skills[🧩 Skills]
-        Agents --> ToolMgr[🛠️ Tool Manager]
-    end
-
-    subgraph Tools[Execution & Integration]
-        ToolMgr --> MCP[🔌 MCP Servers]
-        ToolMgr --> BrowserTools[🌍 Browser Automation]
-        ToolMgr --> Search[🔎 Unified Search]
-        ToolMgr --> ImageGen[🎨 Image Generation]
-        ToolMgr --> Questionnaire[📝 Questionnaire]
-        ToolMgr --> IMTools[📨 IM Delivery]
-    end
-
-    subgraph RuntimeEnv[Runtime & Infrastructure]
-        Agents --> Sandbox[📦 Sandbox Runtime]
-        Sandbox --> Local[Local]
-        Sandbox --> Pass[Passthrough]
-        Sandbox --> Remote[Remote]
-        AppLayer <--> Common[🧱 Shared Common Services]
-        Common <--> DB[(SQL Database)]
-        Workbench <--> FS[(RustFS / Local Files)]
-        Runtime -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
-    end
+```python
+from sagents.v2 import SAgentApplication, SAgentBuilder
 ```
 
----
+The [runtime quick start](sagents/v2/README.md#quick-start) includes a complete `sage.yaml` and a runnable Python example. The [integration manual](sagents/v2/使用手册.md) covers capability selection and configuration in detail (Chinese).
 
-## 📅 **What's New in v1.1.0**
+### Existing applications
 
-### 🤖 **SAgents Kernel Updates**
+The legacy entry points remain available with their own setup instructions:
 
-- **Execution Chain Enhancements**: Added `PlanAgent`, `SelfCheckAgent`, `MemoryRecallAgent`, and `ToolSuggestionAgent`
-- **Context Efficiency**: Improved user input optimization and conversation history compression for long-running tasks
-- **Session & Messaging**: Added edit-and-rerun support, richer progress feedback, and better session inspection workflows
-- **Tooling Expansion**: Added questionnaire collection workflows and improved tool-call rendering, truncation, and observability
+| Application | Start here |
+| --- | --- |
+| Web | Run `./scripts/dev-up.sh` from the repository root; see the [Web guide](docs/en/applications/WEB.md). This starts the legacy stack. |
+| Desktop | See [release assets](https://github.com/ZHangZHengEric/Sage/releases) and the [Desktop guide](docs/en/applications/DESKTOP.md). |
+| CLI | Configure the model, then use `sage doctor`, `sage run`, or `sage chat`; see the [CLI guide](docs/en/applications/CLI.md). |
+| TUI | See the [terminal guide](docs/en/applications/TUI.md) for installation and launch commands. |
+| Chrome extension | Load `app/chrome-extension/` as an unpacked extension and connect it to the backend; see the [extension guide](docs/en/applications/CHROME_EXTENSION.md). |
 
-### 💻 **Product Layer Updates**
+## How the pieces fit together
 
-- **New Entry Points**: Added Sage CLI, Chrome extension, and browser automation tooling
-- **Workbench Upgrades**: Expanded support for audio, video, Mermaid, Draw.io, remote file preview, and richer tool cards
-- **Chat Experience**: Improved progress messages, delivery flow display, reasoning content presentation, and workspace interactions
-- **IM Integrations**: Expanded WeChat Personal (iLink), WeCom, Feishu, and DingTalk support with stronger file messaging flows
-
-### 🛡️ **Platform & Infrastructure**
-
-- **Enterprise Readiness**: Added local account authentication and stronger auth/CORS/security controls
-- **Sandbox & Runtime**: Refactored local/passthrough/remote sandbox support and improved Node runtime/sidecar packaging
-- **Shared Architecture**: Extracted reusable `common/` services, models, and schemas across desktop and server
-- **Documentation & CI**: Rebuilt the docs structure, added CLI guides, and expanded CI/test coverage
-
-**[View Full Release Notes](release_notes/v1.1.0.md)**
-
----
-
-## 📚 **Documentation**
-
-- 📖 **Full Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
-- 📝 **Release Notes**: [release_notes/](release_notes/)
-- 🏗️ **Architecture**: See `sagents/`, `common/`, and `app/` for the core runtime and product layers
-- 🔧 **Configuration**: Environment variables and config files in `app/desktop/`
-
----
-
-## 🛠️ **Development**
-
-### Project Structure
-
+```text
+Desktop v2 (Flutter + local FastAPI)    Server v2 (Web + multi-user API)
+                  \                    /
+                     SAgents v2
+             Agent packages · Sessions · Runs
+          Models · Tools · Skills · Context · Memory
+              Storage · Jobs · Sandbox · Events
 ```
+
+A **Session** owns durable conversation history. A **Run** is one execution attempt within that Session. An **Agent package** selects instructions, models, tools, Skills, and runtime components. The host application owns its user interface, authentication, credentials, and conversation index.
+
+Runtime events let applications show model output, tool activity, approvals, and completion. Disconnecting an observer does not cancel the underlying Run. Storage and scheduling guarantees depend on the selected implementations: the built-in configurations target a single process or host, and local process execution does not provide container-level isolation.
+
+Read the [runtime architecture](sagents/v2/ARCHITECTURE.md) for extension contracts and the [single-host concurrency guide](docs/zh/architecture/sagents-v2-single-host-concurrency.md) for current limits (Chinese).
+
+## Documentation
+
+| Topic | Reference |
+| --- | --- |
+| Documentation index | [English](docs/en/README.md) · [简体中文](docs/zh/README.md) |
+| Desktop v2 | [Setup, workspace, models, and runtime behavior](app/desktop_v2/README.md) |
+| Server v2 | [Configuration, storage, and Agent packages](app/server_v2/README.md) |
+| SAgents v2 | [Overview and examples](sagents/v2/README.md) · [Integration manual](sagents/v2/使用手册.md) |
+| Server Agent platform | [Packages, Studio, APIs, and validation boundaries](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| Deployment | [Environment layouts and Docker Compose](deploy/README.md) |
+| Changes | [Release notes](release_notes/) · [Development changelog](change_log.md) |
+
+Some component guides are currently in Chinese. Start with the guide for your chosen entry point; older application guides describe the legacy stack.
+
+## Development
+
+```text
 Sage/
-├── sagents/                    # SAgents core runtime, flow, context, tools, sandbox
-├── common/                     # Shared models, schemas, services, core clients
-├── app/
-│   ├── desktop/                # Desktop app (Python backend + Vue UI + Tauri shell)
-│   ├── server/                 # Server app and web frontend
-│   ├── cli/                    # Sage CLI entrypoint and services
-│   └── chrome-extension/       # Browser extension and sidepanel
-├── mcp_servers/                # IM, search, scheduler, image generation and more
-├── docs/                       # English and Chinese documentation
-└── release_notes/              # Version release notes
+├── sagents/v2/          # Embeddable v2 agent runtime
+├── sagents/             # Legacy runtime and shared agent modules
+├── app/desktop_v2/      # Flutter desktop and local Python sidecar
+├── app/server_v2/       # Multi-user server and web client
+├── app/desktop/         # Legacy Tauri desktop
+├── app/server/          # Legacy server and web client
+├── app/cli/             # CLI
+├── app/terminal/        # Terminal UI
+├── app/chrome-extension/
+├── app/skills/          # Built-in Skills
+├── common/              # Shared application infrastructure
+├── mcp_servers/         # MCP integrations
+├── tests/               # Runtime and application tests
+├── examples/            # Integration examples
+├── deploy/              # Deployment and monitoring configuration
+└── docs/                # English and Chinese documentation
 ```
 
-### Contributing
+For Python changes, install `pytest` and run the tests for the component you modify. For example, from the repository root:
 
-We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) for tasks and discussions.
+```bash
+python -m pip install pytest pytest-asyncio pytest-timeout
+python -m pytest tests/sagents/v2 tests/app/desktop_v2 tests/app/server_v2 -q
+```
 
----
+For Desktop v2 changes:
 
-## 💖 **Sponsors**
+```bash
+cd app/desktop_v2
+flutter analyze
+flutter test
+```
 
-<div align="center">
+Contributions are welcome through [Issues](https://github.com/ZHangZHengEric/Sage/issues) and pull requests. Include the affected entry point, reproduction steps, and relevant validation results.
 
-We are grateful to our sponsors for their support in making Sage better:
+## Community
 
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
-      </a>
-      <br/>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
-      </a>
-    </td>
-    <td align="center" width="33%">
-      <a href="#" target="_blank">
-        <img src="assets/sponsors/idata_logo.png" height="50" alt="Data"/>
-      </a>
-    </td>
-  </tr>
-</table>
+Use [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) for bugs and feature requests, or join the [Slack community](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA) for discussion.
 
-</div>
+## Sponsors
 
+Thank you to **RcrAI** and **Data** for supporting Sage.
 
+## License
 
----
-
-## 🦌 **Join Our Community**
-
-<div align="center">
-
-### 💬 Connect with us
-
-[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
-
-### 📱 WeChat Group
-
-<img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
-
-*Scan to join our WeChat community 🦌*
-
-</div>
-
----
-
-<div align="center">
-Built with ❤️ by the Sage Team 🦌
-</div>
+Sage is available under the [MIT License](LICENSE).
