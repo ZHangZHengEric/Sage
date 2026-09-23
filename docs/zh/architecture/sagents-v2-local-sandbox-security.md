@@ -55,7 +55,7 @@ CPU 的 100% 表示一个逻辑核心的计算配额，200% 表示两个核心�
 }
 ```
 
-以上项传给 LocalWorkspaceSandboxProvider 构造函数；Desktop 放在 `execution.sandbox` 配置的顶层。**没有提供 `linux_cgroup_root` / `linux_quota_mount` 时不创建 cgroup、不做 project 配额校验**，隔离照常，计量退回到与 macOS 相同的进程树采样；这也是 server_v2、CLI 和未配置的 Desktop 的默认状态。要求 Linux 5.14+、提供 `quotactl_fd` 的 libc、支持 `--bind-fd`、`--ro-bind-fd`、`--unshare-user`、`--disable-userns`、`--seccomp` 的 bubblewrap、xfsprogs、libseccomp2、允许用户命名空间，且 cgroup 子树已启用 `cpu memory pids` 控制器。`--disable-userns` 必须带显式 `--unshare-user`，`--unshare-all` 里的 `--unshare-user-try` 不满足这个检查。启动时检查 bubblewrap 实际提供的参数；缺少 FD 挂载支持的旧版本会被拒绝。`quotactl_fd` 的 project 查询需要宿主具备相应权限；可由有权限的 Sage 宿主完成验证，但执行 UID/GID 必须非 root，工作区须属于执行 UID，且目录上级允许该用户进入。
+以上项传给 LocalWorkspaceSandboxProvider 构造函数；Desktop 放在 `execution.sandbox` 配置的顶层。**没有提供 `linux_cgroup_root` / `linux_quota_mount` 时不创建 cgroup、不做 project 配额校验**，隔离照常，计量退回到与 macOS 相同的进程树采样；这也是 server_v2、CLI 和未配置的 Desktop 的默认状态。要求 Linux 5.14+、提供 `quotactl_fd` 的 libc、支持 `--bind-fd`、`--ro-bind-fd`、`--unshare-user`、`--disable-userns`、`--seccomp` 的 bubblewrap、xfsprogs、libseccomp2、允许用户命名空间，且 cgroup 子树已启用 `cpu memory pids` 控制器。`--disable-userns` 必须带显式 `--unshare-user`，`--unshare-all` 里的 `--unshare-user-try` 不满足这个检查。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1`，不放开时 bwrap 会在写入 uid map 时得到 Permission denied。启动时检查 bubblewrap 实际提供的参数；缺少 FD 挂载支持的旧版本会被拒绝。`quotactl_fd` 的 project 查询需要宿主具备相应权限；可由有权限的 Sage 宿主完成验证，但执行 UID/GID 必须非 root，工作区须属于执行 UID，且目录上级允许该用户进入。
 
 管理员在**专用 XFS 测试卷和专用目录**上准备配额的示例（不要直接用于未核对的现有项目）：
 
