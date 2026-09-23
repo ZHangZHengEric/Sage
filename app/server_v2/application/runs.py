@@ -16,8 +16,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RunService:
-    def __init__(self, host) -> None:
-        self.host = host
+    def __init__(self, *, runtime, sessions, execution) -> None:
+        self.runtime = runtime
+        self.sessions = sessions
+        self.execution = execution
 
     async def cancel_run(
         self,
@@ -36,7 +38,7 @@ class RunService:
         fact.
         """
 
-        runtime = self.host.application.entrypoint().runtime
+        runtime = self.runtime.entrypoint().runtime
         receipt = await runtime.cancel_run(
             CancelRun(
                 run_id=run_id,
@@ -71,14 +73,13 @@ class RunService:
         afterwards could be answering a question that has since changed.
         """
 
-        access = self.host.application.service("session.access")
-        run = await access.get_run(run_id, context)
+        run = await self.sessions.get_run(run_id, context)
         if run.state != RunState.SUSPENDED or run.suspension_id is None:
             raise ServerV2Error(
                 "conflict", f"run is {run.state.value}, not waiting for input"
             )
-        suspension = await access.get_suspension(run.suspension_id, context)
-        runtime = self.host.application.entrypoint().runtime
+        suspension = await self.sessions.get_suspension(run.suspension_id, context)
+        runtime = self.runtime.entrypoint().runtime
         if suspension.interaction_id is None:
             receipt = await runtime.resume_run(
                 ResumeRun(
@@ -91,7 +92,7 @@ class RunService:
                 context,
             )
         else:
-            interaction = await access.get_interaction(
+            interaction = await self.sessions.get_interaction(
                 suspension.interaction_id, context
             )
             answer = decide(interaction) if decide is not None else None
@@ -146,14 +147,14 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
-        agent = self.host.application.entrypoint()
+        agent = self.runtime.entrypoint()
         run = await agent.runtime.get_run(run_id)
-        if run.state != RunState.RESUMING or self.host.execution.driving(run_id):
+        if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
         token = bind_model_user(user_id)
         bound = False
         try:
-            bound = self.host.execution.bind_model(session_id, user_id)
+            bound = self.execution.bind_model(session_id, user_id)
             execution = await agent.continue_run(run_id, context)
             task = asyncio.create_task(
                 self._continue_drive(
@@ -161,11 +162,11 @@ class RunService:
                 ),
                 name=f"server-v2-{label}-resume-{run_id}",
             )
-            self.host.execution.adopt(run_id, task)
+            self.execution.adopt(run_id, task)
             bound = False
         finally:
             if bound:
-                self.host.execution.unbind_model(session_id)
+                self.execution.unbind_model(session_id)
             reset_model_user(token)
 
     async def start_detached_run(
@@ -195,16 +196,11 @@ class RunService:
         token = bind_model_user(user_id)
         bound = False
         try:
-            bound = self.host.execution.bind_model(session_id, user_id)
-            stream = await self.host.application.run_interface(
-                interface,
-                command,
-                context,
-                agent_id=self.host.application.resolved_plan.entrypoint_agent_id,
-            )
+            bound = self.execution.bind_model(session_id, user_id)
+            stream = await self.runtime.open_run(interface, command, context)
             run_id = stream.handle.run_id
             if (
-                self.host.execution.driving(run_id)
+                self.execution.driving(run_id)
                 or stream.handle.state in TERMINAL_RUN_STATES
                 or stream.handle.state == RunState.SUSPENDED
             ):
@@ -219,12 +215,12 @@ class RunService:
                 ),
                 name=f"server-v2-{label}-{run_id}",
             )
-            self.host.execution.adopt(run_id, task)
+            self.execution.adopt(run_id, task)
             bound = False
             return run_id
         finally:
             if bound:
-                self.host.execution.unbind_model(session_id)
+                self.execution.unbind_model(session_id)
             reset_model_user(token)
 
     async def _drive(self, stream, *, session_id: str, label: str, on_finished) -> None:
@@ -239,8 +235,8 @@ class RunService:
             try:
                 await stream.detach()
             finally:
-                self.host.execution.unbind_model(session_id)
-                self.host.execution.release(run_id)
+                self.execution.unbind_model(session_id)
+                self.execution.release(run_id)
 
     async def _continue_drive(
         self, execution, *, run_id: str, session_id: str, label: str
@@ -252,8 +248,8 @@ class RunService:
                 "background %s resume of run %s crashed", label, run_id, exc_info=exc
             )
         finally:
-            self.host.execution.unbind_model(session_id)
-            self.host.execution.release(run_id)
+            self.execution.unbind_model(session_id)
+            self.execution.release(run_id)
 
 
 def _accepted(receipt) -> None:

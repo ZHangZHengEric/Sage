@@ -29,7 +29,6 @@ from app.server_v2.domain.api_keys import (
     require_scope,
 )
 from app.server_v2.domain.catalog import AgentRecord, require_agent
-from app.server_v2.bootstrap.host import ServerV2Service
 
 # A2A caps a page at what a caller asked for; these bound what the walk over a
 # tenant's threads is allowed to cost when the caller does not say.
@@ -63,8 +62,26 @@ class A2AService:
     surfaces can never disagree about what happened in a conversation.
     """
 
-    def __init__(self, service: ServerV2Service) -> None:
-        self._service = service
+    def __init__(
+        self,
+        *,
+        threads,
+        catalog,
+        admission,
+        runs,
+        sessions,
+        execution,
+        runtime,
+        context_for,
+    ) -> None:
+        self._threads = threads
+        self._catalog = catalog
+        self._admission = admission
+        self._runs = runs
+        self._sessions = sessions
+        self._execution = execution
+        self._runtime = runtime
+        self._context_for = context_for
         self._adapter = A2AProtocolAdapter()
 
     async def card(self, key: ApiKeyRecord, *, base_url: str) -> AgentCard:
@@ -132,7 +149,7 @@ class A2AService:
         """
 
         require_scope(key, SCOPE_READ)
-        context = self._service.a2a_request_context(key)
+        context = self._context_for(key)
         run = await self._run(task_id, context)
         return self._events(
             task_id,
@@ -146,14 +163,14 @@ class A2AService:
         """Ask a Run to stop and answer with the Task that resulted."""
 
         require_scope(key, SCOPE_INVOKE)
-        context = self._service.a2a_request_context(key)
+        context = self._context_for(key)
         run = await self._run(task_id, context)
         if run.state in TERMINAL_RUN_STATES:
             # A2A distinguishes "cannot be cancelled" from "does not exist", and
             # a Run that already finished is the former.
             raise ServerV2Error("conflict", f"task is already {run.state.value}")
         try:
-            await self._service.runs.cancel_run(
+            await self._runs.cancel_run(
                 task_id, context, expected_revision=run.revision
             )
         except SageV2Error as exc:
@@ -179,15 +196,15 @@ class A2AService:
         """
 
         require_scope(key, SCOPE_READ)
-        context = self._service.a2a_request_context(key)
+        context = self._context_for(key)
         size = page_size if 0 < page_size <= _MAX_PAGE else _DEFAULT_PAGE
-        sessions = await self._sessions(key, context_id=context_id)
+        sessions = await self._session_ids(key, context_id=context_id)
         cursor = _Page.parse(page_token)
         tasks: list[Task] = []
         for index, session_id in enumerate(sessions):
             if index < cursor.session_index:
                 continue
-            runs = await self._runs(session_id, context)
+            runs = await self._list_runs(session_id, context)
             start = cursor.run_index if index == cursor.session_index else 0
             for offset, run in enumerate(runs[start:], start=start):
                 if state and _state_of(run) != state:
@@ -208,7 +225,7 @@ class A2AService:
         self, task_id: str, key: ApiKeyRecord, *, history_length: int = 0
     ) -> Task:
         require_scope(key, SCOPE_READ)
-        context = self._service.a2a_request_context(key)
+        context = self._context_for(key)
         run = await self._run(task_id, context)
         return await self._task(
             task_id, run.session_id, context, history_length=history_length
@@ -220,11 +237,10 @@ class A2AService:
         if message.task_id:
             return await self._resume(message, key)
         require_scope(key, SCOPE_INVOKE)
-        service = self._service
         user_id = key.owner_user_id
         session_id = context_id(message)
 
-        admitted = await service.admission.prepare(
+        admitted = await self._admission.prepare(
             user_id=user_id,
             session_id=session_id,
             agent_id=key.agent_id or "",
@@ -233,22 +249,22 @@ class A2AService:
             absent="context not found",
         )
         if not admitted.model_ready:
-            raise ServerV2Error("validation", service.execution.model_missing_message())
+            raise ServerV2Error("validation", self._execution.model_missing_message())
         command = to_start_run(
             message,
             session_id=session_id,
             agent_id=admitted.agent_id,
-            composition_hash=service.application.composition_hash,
+            composition_hash=self._runtime.composition_hash,
             enabled_skills=tuple(item.name for item in admitted.skills),
             metadata=admitted.metadata,
         )
-        await service.admission.remember(
+        await self._admission.remember(
             session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
         )
 
-        context = service.a2a_request_context(key, correlation_id=get_request_id())
+        context = self._context_for(key, correlation_id=get_request_id())
         try:
-            run_id = await service.runs.start_detached_run(
+            run_id = await self._runs.start_detached_run(
                 "a2a",
                 command,
                 context,
@@ -262,7 +278,7 @@ class A2AService:
             run_id=run_id,
             session_id=session_id,
             context=context,
-            service=service,
+            sessions=self._sessions,
         )
 
     async def _resume(self, message: Message, key: ApiKeyRecord) -> _Started:
@@ -277,8 +293,7 @@ class A2AService:
         """
 
         require_scope(key, SCOPE_INVOKE)
-        service = self._service
-        context = service.a2a_request_context(key, correlation_id=get_request_id())
+        context = self._context_for(key, correlation_id=get_request_id())
         task_id = message.task_id
         run = await self._run(task_id, context)
         if run.state != RunState.SUSPENDED:
@@ -289,7 +304,7 @@ class A2AService:
                 "validation", f"task is {run.state.value} and is not waiting for input"
             )
         try:
-            await service.runs.resume_detached_run(
+            await self._runs.resume_detached_run(
                 task_id,
                 context,
                 user_id=key.owner_user_id,
@@ -305,7 +320,7 @@ class A2AService:
             run_id=task_id,
             session_id=run.session_id,
             context=context,
-            service=service,
+            sessions=self._sessions,
             after=run.last_run_sequence,
         )
 
@@ -319,8 +334,7 @@ class A2AService:
         resumed: bool = False,
         history_length: int,
     ) -> AsyncIterator[Event]:
-        access = self._service.application.service("session.access")
-        events = access.subscribe_events(
+        events = self._sessions.subscribe(
             EventCursor(run_id=run_id, run_sequence=0), context
         )
         async for event in task_stream(
@@ -334,14 +348,13 @@ class A2AService:
             yield event
 
     async def _run(self, task_id: str, context):
-        access = self._service.application.service("session.access")
         try:
-            return await access.get_run(task_id, context)
+            return await self._sessions.get_run(task_id, context)
         except SageV2Error as exc:
             raise _absent(exc) from exc
 
-    async def _sessions(self, key: ApiKeyRecord, *, context_id: str) -> list[str]:
-        threads = await self._service.threads.list_for(key.owner_user_id)
+    async def _session_ids(self, key: ApiKeyRecord, *, context_id: str) -> list[str]:
+        threads = await self._threads.list_for(key.owner_user_id)
         ids = [thread.thread_id for thread in threads]
         if not context_id:
             return ids
@@ -349,10 +362,9 @@ class A2AService:
         # reason an unreadable Task is reported as missing.
         return [item for item in ids if item == context_id]
 
-    async def _runs(self, session_id: str, context) -> list:
-        access = self._service.application.service("session.access")
+    async def _list_runs(self, session_id: str, context) -> list:
         try:
-            runs = await access.list_session_runs(session_id, context)
+            runs = await self._sessions.list_runs(session_id, context)
         except SageV2Error:
             return []
         return sorted(runs, key=lambda run: (run.created_at, run.run_id))
@@ -360,9 +372,8 @@ class A2AService:
     async def _task(
         self, run_id: str, session_id: str, context, *, history_length: int
     ) -> Task:
-        access = self._service.application.service("session.access")
         try:
-            events = await access.read_events(run_id, context)
+            events = await self._sessions.read_run_events(run_id, context)
         except SageV2Error as exc:
             raise _absent(exc) from exc
         reducer = TaskReducer(run_id, session_id)
@@ -372,7 +383,7 @@ class A2AService:
         return reducer.build(history_length=history_length)
 
     async def _agent_for(self, key: ApiKeyRecord) -> AgentRecord:
-        catalog = await self._service.catalog.get(key.owner_user_id)
+        catalog = await self._catalog.get(key.owner_user_id)
         return require_agent(catalog, key.agent_id or None)
 
 
@@ -390,7 +401,7 @@ class _Started:
     run_id: str
     session_id: str
     context: object
-    service: ServerV2Service
+    sessions: object
     after: int = 0
 
     async def finished(self) -> None:
@@ -401,8 +412,7 @@ class _Started:
         this caller does not own the stream, but it can still watch the record.
         """
 
-        access = self.service.application.service("session.access")
-        events = access.subscribe_events(
+        events = self.sessions.subscribe(
             EventCursor(run_id=self.run_id, run_sequence=0), self.context
         )
         try:

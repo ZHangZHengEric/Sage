@@ -193,7 +193,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
     monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
 
     monkeypatch.setattr(
-        "app.server_v2.application.skill_runtime.attach_official_tools",
+        "app.server_v2.application.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:
@@ -257,7 +257,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
 
     monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
     monkeypatch.setattr(
-        "app.server_v2.application.skill_runtime.attach_official_tools",
+        "app.server_v2.application.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:
@@ -303,7 +303,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 
     monkeypatch.setattr(AgentCompositionFactory, "create_loop", capture)
     monkeypatch.setattr(
-        "app.server_v2.application.skill_runtime.attach_official_tools",
+        "app.server_v2.application.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:

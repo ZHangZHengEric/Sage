@@ -4,7 +4,7 @@
 
 ```text
 api/            HTTP 路由、鉴权、请求响应。只调用例
-application/    用例：identity、catalog、skills、conversations、packages、a2a
+application/    用例：identity、catalog、skills、conversations、packages、a2a、sessions、loop
 domain/         记录和纯规则，不读库
 infrastructure/ MySQL 客户端与表、仓储、工作区、模型池、MCP/A2A 客户端
 adapters/       agui/、a2a/ 协议翻译
@@ -13,7 +13,7 @@ core/           配置、错误、JWT、HTTP、观测
 web/            前端
 ```
 
-新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例。AG-UI 与 A2A 共用 `application/admission.py` 受理 Run，MCP/A2A/技能端口在 `application/assembly.py`。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
+新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例。AG-UI 与 A2A 共用 `application/admission.py` 受理 Run，Session 读取在 `application/sessions.py`，对话与包任务的技能、MCP、A2A 和模型租约在 `application/loop.py`。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放直接读取 Sage Session 的 canonical RuntimeEvent。
 

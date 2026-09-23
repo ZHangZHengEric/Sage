@@ -15,8 +15,13 @@ from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.catalog import enabled_a2a_agents, enabled_mcp_servers
 from app.server_v2.application.official import (
     official_tool_catalog,
+    provision_workspace,
     resolve_agent_tools,
-    workspace_sandbox_spec,
+)
+from app.server_v2.application.loop import (
+    open_model_lease,
+    package_model_record,
+    prepare_tenant_binding,
 )
 from app.server_v2.application.manifest import server_v2_manifest
 
@@ -30,22 +35,21 @@ class CatalogPackageModel:
         catalog = await self.host.catalog.get(self.user_id)
         route = self.routes.get(binding)
         selected = route.model if route else "default"
-        record = next((item for item in catalog.models if item.id == selected), None)
-        if selected == "default":
-            record = next((item for item in catalog.models if item.is_default), None)
-            record = record or next(iter(catalog.models), None)
+        record = package_model_record(catalog, selected)
         if record is None:
             if selected != "default" or self.host.execution.fallback_model is None:
                 raise ServerV2Error(
                     "validation", "package model is unavailable in caller catalog"
                 )
             yield self.host.execution.fallback_model
-        else:
-            lease = await self.host.execution.acquire_model(self.user_id, record)
-            try:
-                yield lease.provider
-            finally:
-                await lease.close()
+            return
+        _provider, scope = await open_model_lease(
+            self.host.execution, self.user_id, record
+        )
+        try:
+            yield scope.provider
+        finally:
+            await scope.close()
 
     async def capabilities(self, binding):
         async with self.provider(binding) as provider:
@@ -86,8 +90,8 @@ class PackageBindings:
         elif policy != "shared_parent":
             raise ValueError("unsupported workspace policy")
         workspace.mkdir(parents=True, exist_ok=True)
-        handle = await self.host.execution.sandbox_provider.provision(
-            workspace_sandbox_spec(workspace), request.context, run_id=request.run_id
+        handle = await provision_workspace(
+            self.host.execution, workspace, request.context, run_id=request.run_id
         )
         return RunExecutionBinding(
             run_id=request.run_id,
@@ -347,20 +351,19 @@ class ServerAgentManagement(AgentManagementService):
         )
         for registration in self.host.package_extensions:
             builder.register(registration)
-        from app.server_v2.application.assembly import skill_ports, tenant_tools
-
         records = tuple(
             await self.host.skills.list_visible(user_id=user_id, role="user")
         )
-        provider, workspace = skill_ports(self.host, user_id, records)
-        builder.with_skill_provider(provider, provider, workspace)
         catalog = await self.host.catalog.get(user_id)
-        for tool in tenant_tools(
+        binding = prepare_tenant_binding(
             self.host,
             user_id,
+            records,
             enabled_mcp_servers(catalog),
             enabled_a2a_agents(catalog),
-        ):
+        )
+        builder.with_skill_provider(binding.provider, binding.provider, binding.workspace)
+        for tool in binding.external:
             builder.with_additional_tools(tool, tool)
         return builder
 

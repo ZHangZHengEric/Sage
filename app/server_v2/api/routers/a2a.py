@@ -12,7 +12,6 @@ from google.protobuf.json_format import MessageToDict
 from app.server_v2.adapters.a2a.card import RPC_PATH
 from app.server_v2.adapters.a2a.context import REQUEST_ATTR, SageCallContextBuilder
 from app.server_v2.adapters.a2a.handler import SageRequestHandler
-from app.server_v2.application.a2a import A2AService
 from app.server_v2.api.deps import CredentialDep, ServiceDep
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.api_keys import (
@@ -72,7 +71,7 @@ KeyDep = Annotated[ApiKeyRecord, Depends(a2a_key)]
 async def jsonrpc(request: Request, key: KeyDep, service: ServiceDep) -> Response:
     await _authorize_method(request, key)
     dispatcher = JsonRpcDispatcher(
-        SageRequestHandler(A2AService(service)),
+        SageRequestHandler(service.a2a),
         context_builder=SageCallContextBuilder(),
     )
     return await dispatcher.handle_requests(request)
@@ -90,7 +89,7 @@ async def agent_card(request: Request, key: KeyDep, service: ServiceDep) -> Resp
     """
 
     require_scope(key, SCOPE_READ)
-    card = await A2AService(service).card(key, base_url=_base_url(request, service))
+    card = await service.a2a.card(key, base_url=_base_url(request, service))
     return JSONResponse(MessageToDict(card, preserving_proto_field_name=False))
 
 

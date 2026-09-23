@@ -28,8 +28,11 @@ class AdmittedRun:
 
 
 class RunAdmission:
-    def __init__(self, host) -> None:
-        self.host = host
+    def __init__(self, *, threads, catalog, skills, execution) -> None:
+        self.threads = threads
+        self.catalog = catalog
+        self.skills = skills
+        self.execution = execution
 
     async def prepare(
         self,
@@ -41,18 +44,16 @@ class RunAdmission:
         call_depth: int = 0,
         absent: str = "thread not found",
     ) -> AdmittedRun:
-        existing = await self.host.threads.find(session_id)
+        existing = await self.threads.find(session_id)
         if existing is not None and existing.user_id != user_id:
             raise ServerV2Error("not_found", absent)
-        catalog = await self.host.catalog.get(user_id)
+        catalog = await self.catalog.get(user_id)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id
         )
         agent = require_agent(catalog, requested or None)
         skills = tuple(
-            await self.host.skill_catalog.bound_skills(
-                owner_user_id=user_id, agent_id=agent.id
-            )
+            await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id)
         )
         return AdmittedRun(
             session_id=session_id,
@@ -67,12 +68,12 @@ class RunAdmission:
                 a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
                 call_depth=call_depth,
             ),
-            model_ready=self.host.execution.has_model(catalog),
+            model_ready=self.execution.has_model(catalog),
         )
 
     async def remember(
         self, session_id: str, user_id: str, *, title: str, agent_id: str
     ) -> None:
-        await self.host.threads.upsert(
+        await self.threads.upsert(
             session_id, user_id, title=title, agent_id=agent_id
         )

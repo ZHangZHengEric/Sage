@@ -1184,6 +1184,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "table_prefix": {"type": "string"},
+                        "pool_maxsize": {"type": "integer", "minimum": 1},
                     },
                     "required": ["dsn"],
                     "additionalProperties": False,
@@ -1214,6 +1215,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     if "table_prefix" not in context.config
                     else str(context.config.get("table_prefix") or "")
                 ),
+                pool_maxsize=int(context.config.get("pool_maxsize", 16)),
             ),
         )
     )
