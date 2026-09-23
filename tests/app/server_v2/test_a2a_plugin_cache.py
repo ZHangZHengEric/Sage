@@ -10,7 +10,7 @@ from __future__ import annotations
 from sagents.v2.tool.plugins.a2a import MAX_CALL_DEPTH
 
 from app.server_v2.domain.catalog import A2AAgentRecord
-from app.server_v2.services.a2a_client import A2APluginCache
+from app.server_v2.infrastructure.a2a_client import A2APluginCache
 
 
 def _peer(name: str, *, url: str = "", disabled: bool = False) -> A2AAgentRecord:

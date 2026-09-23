@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.server_v2.api.routers import a2a_agents as router
+from app.server_v2.application import catalog
 from app.server_v2.core.errors import ServerV2Error
 from tests.app.server_v2.conftest import register_and_login
 
@@ -117,7 +117,7 @@ def test_refresh_records_what_the_card_advertises_now(client, monkeypatch):
         assert config.name == "researcher"
         return ["a2a_researcher_research", "a2a_researcher_summarise"]
 
-    monkeypatch.setattr(router, "discover_a2a_skills", fake_discover)
+    monkeypatch.setattr(catalog, "discover_a2a_skills", fake_discover)
     headers = auth(client)
     client.post("/api/a2a-agents", json=PEER, headers=headers)
 
@@ -149,7 +149,7 @@ def test_a_peer_that_cannot_be_read_reports_why_and_stays_unchanged(client, monk
     async def fake_discover(config):
         raise ServerV2Error("validation", "a2a discovery failed: no route to host")
 
-    monkeypatch.setattr(router, "discover_a2a_skills", fake_discover)
+    monkeypatch.setattr(catalog, "discover_a2a_skills", fake_discover)
     headers = auth(client)
     client.post("/api/a2a-agents", json=PEER, headers=headers)
 
@@ -172,7 +172,7 @@ def test_every_edit_drops_the_cached_card(client, service, monkeypatch):
     async def fake_discover(config):
         return []
 
-    monkeypatch.setattr(router, "discover_a2a_skills", fake_discover)
+    monkeypatch.setattr(catalog, "discover_a2a_skills", fake_discover)
     forgotten: list[str] = []
     monkeypatch.setattr(
         service.a2a_plugins, "invalidate", lambda user_id: forgotten.append(user_id)

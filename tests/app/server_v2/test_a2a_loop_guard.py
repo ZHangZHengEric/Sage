@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 from sagents.v2.testing.plugins import ScriptedModelProvider
 from sagents.v2.tool.plugins.a2a import CALL_DEPTH_KEY, MAX_CALL_DEPTH
 
-from app.server_v2.app import create_app
-from app.server_v2.services.a2a_client import A2APluginCache
+from app.server_v2.bootstrap.app import create_app
+from app.server_v2.infrastructure.a2a_client import A2APluginCache
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 from tests.app.server_v2.test_a2a_card import (  # noqa: F401
     a2a_client,

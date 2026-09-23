@@ -11,12 +11,12 @@ from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 
 from app.server_v2.domain.skills import workspace_skill_path
-from app.server_v2.repositories.skills import MemorySkillStore
-from app.server_v2.services.skill_runtime import (
+from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
+from app.server_v2.application.skill_runtime import (
     CatalogSkillProvider,
     ReadThroughSkillWorkspace,
 )
-from app.server_v2.services.skills import SkillCatalogService
+from app.server_v2.application.skills import SkillCatalogService
 
 
 def _command() -> StartRun:

@@ -2,9 +2,9 @@ import asyncio
 
 import pytest
 
-from app.server_v2.core.database import Database, DatabaseSettings
-from app.server_v2.db.models import create_host_schema
-from app.server_v2.repositories.packages import DatabasePackageStore
+from app.server_v2.infrastructure.database import Database, DatabaseSettings
+from app.server_v2.infrastructure.database.schema import create_host_schema
+from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.package.presets import BuiltinPackageFactory
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from sagents.v2.model.contracts import ModelEventKind, ModelRequest
 
-from app.server_v2.services.models import HostModelProvider
+from app.server_v2.infrastructure.models import HostModelProvider
 from tests.app.server_v2.conftest import scripted_hello
 from tests.app.server_v2.fakes import MemoryCatalogStore
 

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.server_v2.app import create_app
+from app.server_v2.bootstrap.app import create_app
 from tests.app.server_v2.conftest import (
     make_test_service,
     register_and_login,

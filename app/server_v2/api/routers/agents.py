@@ -1,12 +1,10 @@
-from app.server_v2.services.catalog_transactions import catalog_transaction
 from fastapi import APIRouter
 
-from app.server_v2.api.deps import CurrentUser, ServiceDep
+from app.server_v2.api.deps import CatalogDep, CurrentUser, ServiceDep
+from app.server_v2.application.official import official_tool_catalog
 from app.server_v2.core.errors import success
-from app.server_v2.domain.catalog import delete_agent, require_agent, upsert_agent
-from app.server_v2.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
-from app.server_v2.schemas.http import AgentBody, AgentPublic, ToolPublic
-from app.server_v2.services.official import official_tool_catalog
+from app.server_v2.api.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
+from app.server_v2.api.schemas.http import AgentBody, AgentPublic, ToolPublic
 
 router = APIRouter(tags=["agents"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
 
@@ -21,48 +19,33 @@ async def list_tools(_: CurrentUser, service: ServiceDep):
 
 
 @router.get("/api/agents", response_model=ApiResponse[list[AgentPublic]])
-async def list_agents(user: CurrentUser, service: ServiceDep):
-    catalog = await service.catalog.get(user.user_id)
-    return success([item.public_dict() for item in catalog.agents])
+async def list_agents(user: CurrentUser, catalog: CatalogDep):
+    agents = await catalog.list_agents(user.user_id)
+    return success([item.public_dict() for item in agents])
 
 
 @router.post("/api/agents", response_model=ApiResponse[AgentPublic])
-@catalog_transaction
-async def create_agent(body: AgentBody, user: CurrentUser, service: ServiceDep):
-    catalog = await service.catalog.get(user.user_id)
-    record, catalog = upsert_agent(catalog, body.model_dump())
-    await service.catalog.save(user.user_id, catalog)
+async def create_agent(body: AgentBody, user: CurrentUser, catalog: CatalogDep):
+    record = await catalog.create_agent(user.user_id, body.model_dump())
     return success(record.public_dict())
 
 
 @router.get("/api/agents/{agent_id}", response_model=ApiResponse[AgentPublic])
-async def get_agent(agent_id: str, user: CurrentUser, service: ServiceDep):
-    catalog = await service.catalog.get(user.user_id)
-    record = require_agent(catalog, agent_id)
-    payload = record.public_dict()
-    payload["skills"] = list(
-        await service.skill_catalog.bound_names(user.user_id, agent_id)
-    )
-    return success(payload)
+async def get_agent(agent_id: str, user: CurrentUser, catalog: CatalogDep):
+    return success(await catalog.get_agent(user.user_id, agent_id))
 
 
 @router.put("/api/agents/{agent_id}", response_model=ApiResponse[AgentPublic])
-@catalog_transaction
 async def update_agent(
-    agent_id: str, body: AgentBody, user: CurrentUser, service: ServiceDep
+    agent_id: str, body: AgentBody, user: CurrentUser, catalog: CatalogDep
 ):
-    catalog = await service.catalog.get(user.user_id)
-    require_agent(catalog, agent_id)
-    payload = body.model_dump()
-    payload["id"] = agent_id
-    record, catalog = upsert_agent(catalog, payload)
-    await service.catalog.save(user.user_id, catalog)
+    record = await catalog.update_agent(
+        user.user_id, agent_id, body.model_dump()
+    )
     return success(record.public_dict())
 
 
 @router.delete("/api/agents/{agent_id}", response_model=ApiResponse[None])
-@catalog_transaction
-async def remove_agent(agent_id: str, user: CurrentUser, service: ServiceDep):
-    catalog = await service.catalog.get(user.user_id)
-    await service.catalog.save(user.user_id, delete_agent(catalog, agent_id))
+async def remove_agent(agent_id: str, user: CurrentUser, catalog: CatalogDep):
+    await catalog.delete_agent(user.user_id, agent_id)
     return success()

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 
-from app.server_v2.api.deps import AdminUser, ServiceDep
-from app.server_v2.schemas import (
+from app.server_v2.api.deps import AdminDep, AdminUser
+from app.server_v2.api.schemas import (
     ADMIN_ERRORS,
     AdminModelPublic,
     AdminThreadPublic,
@@ -15,38 +15,18 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], responses=ADMIN_ERRORS)
 
 
 @router.get("/users", response_model=ApiResponse[list[UserPublic]])
-async def admin_users(_: AdminUser, service: ServiceDep):
-    return success([user.public_dict() for user in await service.users.list_users()])
+async def admin_users(_: AdminUser, admin: AdminDep):
+    return success(await admin.list_users())
 
 
 @router.get("/threads", response_model=ApiResponse[list[AdminThreadPublic]])
-async def admin_threads(_: AdminUser, service: ServiceDep):
-    return success(
-        [
-            {
-                **item.model_dump(mode="json"),
-                "username": await service.username_for(item.user_id),
-            }
-            for item in await service.threads.list_all()
-        ]
-    )
+async def admin_threads(_: AdminUser, admin: AdminDep):
+    return success(await admin.list_threads())
 
 
 @router.get("/models", response_model=ApiResponse[list[AdminModelPublic]])
-async def admin_models(_: AdminUser, service: ServiceDep):
-    users = await service.users.list_users()
-    return success(
-        [
-            {
-                **model.public_dict(),
-                "user_id": user_id,
-                "username": await service.username_for(user_id),
-            }
-            for user_id, model in await service.catalog.list_all_models(
-                [user.user_id for user in users]
-            )
-        ]
-    )
+async def admin_models(_: AdminUser, admin: AdminDep):
+    return success(await admin.list_models())
 
 
 @router.get(
@@ -55,13 +35,13 @@ async def admin_models(_: AdminUser, service: ServiceDep):
 )
 async def admin_thread_events(
     thread_id: str,
-    admin: AdminUser,
-    service: ServiceDep,
+    user: AdminUser,
+    admin: AdminDep,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int | None = Query(default=None, ge=0),
 ):
     return success(
-        await service.thread_events(
-            thread_id, admin.user_id, admin=True, limit=limit, offset=offset
+        await admin.thread_events(
+            thread_id, user.user_id, limit=limit, offset=offset
         )
     )

@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    from app.server_v2.app import create_app
+    from app.server_v2.bootstrap.app import create_app
     from app.server_v2.core.settings import ServerV2Settings
 
     settings = ServerV2Settings.from_env(data_root=args.data_root)

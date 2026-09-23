@@ -4,8 +4,8 @@ import pytest
 
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.skills import resolve_artifact_path
-from app.server_v2.repositories.skills import MemorySkillStore
-from app.server_v2.services.skills import SkillCatalogService
+from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
+from app.server_v2.application.skills import SkillCatalogService
 
 
 def _service(tmp_path: Path) -> SkillCatalogService:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 
 from app.server_v2.api.deps import ServiceDep
-from app.server_v2.schemas import ApiResponse, HealthPayload
+from app.server_v2.api.schemas import ApiResponse, HealthPayload
 from app.server_v2.core.errors import success
 
 router = APIRouter(tags=["health"])

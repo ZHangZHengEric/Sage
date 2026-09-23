@@ -5,9 +5,15 @@ from typing import Annotated
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.server_v2.application.admin import AdminService
+from app.server_v2.application.catalog import CatalogService
+from app.server_v2.application.conversations import ConversationService
+from app.server_v2.application.credentials import CredentialService
+from app.server_v2.application.identity import IdentityService
+from app.server_v2.application.skills import SkillCatalogService
+from app.server_v2.bootstrap.host import ServerV2Service
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.core.jwt import decode_access_token
-from app.server_v2.services.runtime import ServerV2Service
 from app.server_v2.domain.users import UserRecord
 
 _bearer = HTTPBearer(auto_error=False)
@@ -22,6 +28,38 @@ def get_service(request: Request) -> ServerV2Service:
 
 
 ServiceDep = Annotated[ServerV2Service, Depends(get_service)]
+
+
+def get_catalog(host: ServiceDep) -> CatalogService:
+    return host.catalog
+
+
+def get_identity(host: ServiceDep) -> IdentityService:
+    return host.identity
+
+
+def get_credentials(host: ServiceDep) -> CredentialService:
+    return host.credentials
+
+
+def get_conversations(host: ServiceDep) -> ConversationService:
+    return host.conversations
+
+
+def get_skills(host: ServiceDep) -> SkillCatalogService:
+    return host.skill_catalog
+
+
+def get_admin(host: ServiceDep) -> AdminService:
+    return host.admin
+
+
+CatalogDep = Annotated[CatalogService, Depends(get_catalog)]
+IdentityDep = Annotated[IdentityService, Depends(get_identity)]
+CredentialDep = Annotated[CredentialService, Depends(get_credentials)]
+ConversationDep = Annotated[ConversationService, Depends(get_conversations)]
+SkillDep = Annotated[SkillCatalogService, Depends(get_skills)]
+AdminDep = Annotated[AdminService, Depends(get_admin)]
 
 
 def _token_from(
@@ -45,7 +83,7 @@ async def get_optional_user(
         claims = decode_access_token(token, secret=service.settings.jwt_secret)
     except ServerV2Error:
         return None
-    return await service.users.get_by_id(str(claims.get("userid") or ""))
+    return await service.identity.get_by_id(str(claims.get("userid") or ""))
 
 
 async def get_current_user(
@@ -57,7 +95,7 @@ async def get_current_user(
     if not token:
         raise ServerV2Error("unauthenticated", "authentication required")
     claims = decode_access_token(token, secret=service.settings.jwt_secret)
-    user = await service.users.get_by_id(str(claims["userid"]))
+    user = await service.identity.get_by_id(str(claims["userid"]))
     if user is None:
         raise ServerV2Error("unauthenticated", "authentication required")
     return user

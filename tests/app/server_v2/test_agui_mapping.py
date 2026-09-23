@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from ag_ui.core import RunAgentInput
 
-from app.server_v2.agui.mapping import to_start_run
-from app.server_v2.agui.sse import (
+from app.server_v2.adapters.agui.mapping import to_start_run
+from app.server_v2.adapters.agui.sse import (
     ClientOwnedUserTextFilter,
     canonical_agui_sse,
     frame_to_agui_event,
