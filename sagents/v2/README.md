@@ -311,11 +311,13 @@ no global Session index.
 
 For MySQL, model text deltas are live-only stream previews. They carry a
 `preview_sequence` and `preview_epoch` alongside the last canonical
-`run_sequence`, and are buffered in process for short reconnects. Completed
-messages, tool boundaries, suspensions, and terminal states remain durable.
-After a process restart, an unfinished preview may be lost; the next durable
-event still resumes from the unchanged canonical Run cursor. A subscriber that
-falls behind the bounded preview buffer receives `stream.gap`.
+`run_sequence`. The process retains all previews for unfinished Items so a
+subscriber can replay every model delta during the active step. An Item's
+previews are released when its durable completion is committed; terminal Run
+events release any remaining previews. Completed messages, tool boundaries,
+suspensions, and terminal states remain durable. After a process restart, an
+unfinished preview may be lost; the next durable event still resumes from the
+unchanged canonical Run cursor.
 
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
