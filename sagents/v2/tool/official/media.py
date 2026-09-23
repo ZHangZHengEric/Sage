@@ -8,15 +8,75 @@ import mimetypes
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
-from PIL import Image
+from PIL import Image, ImageOps
 
-from sagents.utils.multimodal_image import compress_image_to_jpeg_bytes_for_llm
 from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import JsonBlock
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
+# V2 carries its own copy rather than importing the V1 helper: V2 is built to
+# stand alone, and a model-facing byte budget is not a detail worth coupling
+# two implementations over.
+_MAX_IMAGE_EDGE = 1536
+# Budget for one compressed image. Base64 inflates it by roughly a third.
+_TARGET_IMAGE_BYTES = 4 * 1024 * 1024
+_JPEG_QUALITY = 85
+_MIN_JPEG_QUALITY = 60
+_FALLBACK_IMAGE_EDGES = (1280, 1024, 768, 512)
+
+
+def _normalize_image_for_jpeg(image: Image.Image) -> Image.Image:
+    """Apply EXIF orientation, flatten transparency onto white, convert to RGB."""
+
+    image = ImageOps.exif_transpose(image)
+    if image.mode in ("RGBA", "LA", "P"):
+        if image.mode == "P":
+            image = image.convert("RGBA")
+        background = Image.new("RGB", image.size, (255, 255, 255))
+        mask = image.split()[-1] if image.mode in ("RGBA", "LA") else None
+        background.paste(image.convert("RGBA"), mask=mask)
+        return background
+    if image.mode != "RGB":
+        return image.convert("RGB")
+    return image.copy()
+
+
+def _candidate_edges(max_edge: int) -> list[int]:
+    edges = [max_edge, *(edge for edge in _FALLBACK_IMAGE_EDGES if edge < max_edge)]
+    return list(dict.fromkeys(edge for edge in edges if edge > 0))
+
+
+def compress_image_to_jpeg_bytes_for_llm(
+    image: Image.Image,
+    *,
+    max_edge: int = _MAX_IMAGE_EDGE,
+    target_bytes: int = _TARGET_IMAGE_BYTES,
+    quality: int = _JPEG_QUALITY,
+) -> bytes:
+    """Encode as JPEG, giving up resolution and then quality to fit the budget.
+
+    The smallest encoding seen is kept as a fallback: an image that cannot be
+    squeezed under the budget is still better sent smaller than sent whole.
+    """
+
+    base = _normalize_image_for_jpeg(image)
+    best: bytes | None = None
+    for edge in _candidate_edges(max_edge):
+        resized = base.copy()
+        resized.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+        for step in range(quality, _MIN_JPEG_QUALITY - 1, -5):
+            output = io.BytesIO()
+            resized.save(output, format="JPEG", quality=step)
+            data = output.getvalue()
+            if best is None or len(data) < len(best):
+                best = data
+            if len(data) <= target_bytes:
+                return data
+    assert best is not None
+    return best
 
 
 class MediaTools:

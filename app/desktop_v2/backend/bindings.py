@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 from sagents.v2.agent.multi_agent import WorkspaceSharingPolicy
@@ -76,9 +75,10 @@ class DesktopExecutionBindingProvider:
         )
         self.read_only = read_only
         self.process_enabled = process_enabled
-        self.resources = resources or ResourceLimits(
-            require_hard_limits=sys.platform != "darwin"
-        )
+        # 内核硬限制来自管理员委派的 cgroup 子树与 XFS project 挂载，随 provider
+        # 一起配置；默认构造的 provider 没有它们，所以默认不声称拥有。配了的宿主
+        # 由 runtime_config 把 require_hard_limits 传进来。
+        self.resources = resources or ResourceLimits(require_hard_limits=False)
         self.bindings: list[RunExecutionBinding] = []
         self._lock = asyncio.Lock()
         self._closed = False

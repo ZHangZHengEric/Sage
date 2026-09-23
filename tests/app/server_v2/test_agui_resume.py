@@ -39,6 +39,23 @@ def _frames(body: str) -> list[dict]:
     ]
 
 
+def _kinds(frames: list[dict]) -> list[str]:
+    """Name each frame the way a client switches on it: CUSTOM by extension."""
+
+    return [
+        frame.get("name") if frame.get("type") == "CUSTOM" else frame.get("type")
+        for frame in frames
+    ]
+
+
+def _custom(frames: list[dict], name: str) -> list[dict]:
+    return [
+        frame["value"]
+        for frame in frames
+        if frame.get("type") == "CUSTOM" and frame.get("name") == name
+    ]
+
+
 def _ask(client: TestClient, token: str) -> list[dict]:
     """Run a thread up to its approval question and return the AG-UI frames."""
 
@@ -113,10 +130,7 @@ def test_resuming_a_thread_streams_the_run_to_completion(tmp_path):
         response = _resume(client, token, "approve_once")
 
         assert response.status_code == 200, response.text
-        kinds = [
-            frame.get("name") if frame.get("type") == "CUSTOM" else frame.get("type")
-            for frame in _frames(response.text)
-        ]
+        kinds = _kinds(_frames(response.text))
 
     assert "sage.run.suspended" in kinds
     assert "RUN_FINISHED" in kinds
@@ -174,3 +188,75 @@ def test_one_user_cannot_resume_another_users_thread(tmp_path):
         response = _resume(client, other, "approve_once")
 
     assert response.status_code == 404, response.text
+
+
+@pytest.mark.timeout(30)
+def test_the_suspension_stream_names_the_question_and_the_answers_it_takes(tmp_path):
+    """A client that cannot see the question has nothing to put in front of a user.
+
+    The web chat builds its approval prompt out of this one frame: what is
+    being asked, and which answers the pending question accepts. The prose in
+    the transcript is not enough — ``approve_once`` is vocabulary the server
+    owns, and a UI that guessed it would be guessing about a write.
+    """
+
+    with TestClient(create_app(service=_asking_service(tmp_path))) as client:
+        token = register_and_login(client)
+        frames = _ask(client, token)
+
+    asked = _custom(frames, "sage.interaction.requested")
+    assert len(asked) == 1
+    assert asked[0]["interaction_type"] == "approval"
+    assert list(asked[0]["allowed_decisions"]) == ["approve_once", "deny", "cancel"]
+    assert asked[0]["payload"]["tool_name"] == "file_write"
+
+
+@pytest.mark.timeout(30)
+def test_a_reopened_thread_still_carries_the_question_it_is_waiting_on(tmp_path):
+    """Closing the tab must not strand the Run.
+
+    A client reopening a waiting thread rebuilds it from the stored events, so
+    the question has to be among them — otherwise the only way back to a
+    suspended Run is the stream that happened to be open when it suspended.
+    The Run boundary matters too: answering replays the Run from its first
+    event, so a client needs to see where its own transcript rewinds to, and
+    that the message it sent sits before that point rather than inside the
+    replay.
+    """
+
+    with TestClient(create_app(service=_asking_service(tmp_path))) as client:
+        token = register_and_login(client)
+        _ask(client, token)
+        page = client.get(
+            "/api/threads/thread-1/events",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()["data"]
+
+    kinds = _kinds(page["events"])
+    assert "sage.interaction.requested" in kinds
+    assert kinds.index("TEXT_MESSAGE_START") < kinds.index("RUN_STARTED")
+
+
+@pytest.mark.timeout(30)
+def test_an_answered_question_stops_being_pending(tmp_path):
+    """The record says the question was closed, not merely that a Run moved on.
+
+    A client decides whether to show the prompt by reading the thread, so an
+    answer that left no trace would put an approval back in front of a user
+    who has already given it.
+    """
+
+    with TestClient(create_app(service=_asking_service(tmp_path))) as client:
+        token = register_and_login(client)
+        _ask(client, token)
+        _resume(client, token, "approve_once")
+        page = client.get(
+            "/api/threads/thread-1/events?limit=2000",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()["data"]
+
+    resolved = _custom(page["events"], "sage.interaction.resolved")
+    asked = _custom(page["events"], "sage.interaction.requested")
+    assert [item["interaction_id"] for item in resolved] == [
+        item["interaction_id"] for item in asked
+    ]

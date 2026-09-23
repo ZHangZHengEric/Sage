@@ -580,6 +580,16 @@ class LocalWorkspaceSandboxProvider:
         )
 
     async def capabilities(self) -> SandboxCapabilities:
+        # Kernel hard limits come from the delegated cgroup subtree and the XFS
+        # project mount, which an administrator provides. A host without them
+        # still isolates through bubblewrap but meters by sampling, exactly as
+        # native macOS does, so it must not claim limits it cannot enforce —
+        # admission refuses a spec that requires them rather than letting
+        # provisioning discover it later.
+        metered = sys.platform == "linux" and bool(
+            self._boundary_options["cgroup_root"]
+            and self._boundary_options["quota_mount"]
+        )
         return SandboxCapabilities(
             isolation_level=IsolationLevel.PROCESS,
             os=os.name,
@@ -593,10 +603,10 @@ class LocalWorkspaceSandboxProvider:
             ),
             resources=ResourceLimitCapabilities(
                 wall_time=True,
-                cpu=sys.platform == "linux",
-                memory=sys.platform == "linux",
-                disk=sys.platform == "linux",
-                process_count=sys.platform == "linux",
+                cpu=metered,
+                memory=metered,
+                disk=metered,
+                process_count=metered,
             ),
             supports_background_jobs=False,
             supports_suspend=False,

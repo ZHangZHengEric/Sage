@@ -358,13 +358,21 @@ class LocalResourceBoundary:
                 raise ValueError(
                     "workspace_root overlaps the Linux runtime or is not canonical"
                 )
-            if (
-                not shutil.which("bwrap")
-                or not self.cgroup_root
-                or not self.quota_mount
-            ):
+            if not shutil.which("bwrap"):
+                raise RuntimeError("Linux local sandbox requires bwrap")
+            # Quotas are the hard-limit half of this boundary, and they are the
+            # half an administrator has to prepare: a delegated cgroup subtree
+            # and an XFS project mount. Without them the kernel cannot cap CPU,
+            # memory or disk, so a spec that asks for hard limits is refused
+            # here exactly as native macOS refuses it. The isolation half is not
+            # negotiable either way — bubblewrap still unshares every namespace,
+            # drops capabilities and applies the seccomp filter below, so an
+            # unconfigured host runs contained work without quotas rather than
+            # an ordinary host subprocess.
+            metered = bool(self.cgroup_root and self.quota_mount)
+            if self.row.spec.resources.require_hard_limits and not metered:
                 raise RuntimeError(
-                    "Linux local sandbox requires bwrap, linux_cgroup_root and linux_quota_mount"
+                    "Linux hard limits require linux_cgroup_root and linux_quota_mount"
                 )
             # A root host process must use a dedicated unprivileged worker.
             if self.execution_uid == 0 or self.execution_gid == 0:
@@ -375,41 +383,52 @@ class LocalResourceBoundary:
                 raise PermissionError(
                     "workspace must belong to the sandbox execution user"
                 )
-            await asyncio.to_thread(
-                check_project_quota,
-                self.row.root,
-                self.quota_mount.resolve(strict=True),
-                self.row.spec.resources.disk_mb * 1024**2,
-            )
-            controllers = (
-                (self.cgroup_root / "cgroup.subtree_control").read_text().split()
-            )
-            if not {"cpu", "memory", "pids"}.issubset(controllers):
-                raise RuntimeError(
-                    "delegate cpu, memory and pids controllers before provisioning"
+            if metered:
+                assert self.quota_mount is not None and self.cgroup_root is not None
+                await asyncio.to_thread(
+                    check_project_quota,
+                    self.row.root,
+                    self.quota_mount.resolve(strict=True),
+                    self.row.spec.resources.disk_mb * 1024**2,
                 )
-            self.cgroup = self.cgroup_root / self.row.ref.sandbox_id
-            self.cgroup.mkdir()
-            try:
-                limits = self.row.spec.resources
-                _write_checked(
-                    self.cgroup / "cpu.max", f"{int(limits.cpu_percent * 1000)} 100000"
+                controllers = (
+                    (self.cgroup_root / "cgroup.subtree_control").read_text().split()
                 )
-                _write_checked(
-                    self.cgroup / "memory.max", str(limits.memory_mb * 1024**2)
-                )
-                _write_checked(self.cgroup / "memory.swap.max", "0")
-                _write_checked(self.cgroup / "memory.oom.group", "1")
-                _write_checked(self.cgroup / "pids.max", str(limits.max_processes))
-                if not (self.cgroup / "cgroup.kill").exists():
-                    raise RuntimeError("cgroup.kill support is required (Linux 5.14+)")
-                (self.cgroup / "cgroup.subtree_control").write_text(
-                    "+cpu +memory +pids"
-                )
-            except BaseException:
-                self.cgroup.rmdir()
-                self.cgroup = None
-                raise
+                if not {"cpu", "memory", "pids"}.issubset(controllers):
+                    raise RuntimeError(
+                        "delegate cpu, memory and pids controllers before provisioning"
+                    )
+                self.cgroup = self.cgroup_root / self.row.ref.sandbox_id
+                self.cgroup.mkdir()
+                try:
+                    limits = self.row.spec.resources
+                    _write_checked(
+                        self.cgroup / "cpu.max",
+                        f"{int(limits.cpu_percent * 1000)} 100000",
+                    )
+                    _write_checked(
+                        self.cgroup / "memory.max", str(limits.memory_mb * 1024**2)
+                    )
+                    _write_checked(self.cgroup / "memory.swap.max", "0")
+                    _write_checked(self.cgroup / "memory.oom.group", "1")
+                    _write_checked(self.cgroup / "pids.max", str(limits.max_processes))
+                    if not (self.cgroup / "cgroup.kill").exists():
+                        raise RuntimeError(
+                            "cgroup.kill support is required (Linux 5.14+)"
+                        )
+                    (self.cgroup / "cgroup.subtree_control").write_text(
+                        "+cpu +memory +pids"
+                    )
+                except BaseException:
+                    self.cgroup.rmdir()
+                    self.cgroup = None
+                    raise
+            else:
+                import psutil
+
+                # Without a cgroup the supervisor samples the process tree, so
+                # verify that dependency before admitting work, as macOS does.
+                psutil.Process()
         elif sys.platform == "darwin":
             if self.row.spec.resources.require_hard_limits:
                 raise RuntimeError(
@@ -447,8 +466,13 @@ class LocalResourceBoundary:
             from sagents.v2.contracts.common import new_id
 
             bwrap = _trusted_utility("bwrap", self.row.root)
-            job = self.cgroup / new_id("job")
-            job.mkdir()
+            # One cgroup per command, under the sandbox's own. A host without a
+            # delegated subtree has no cgroup to put the command in; the
+            # launcher already knows how to start one unmetered, because that
+            # is how every macOS command starts.
+            if self.cgroup is not None:
+                job = self.cgroup / new_id("job")
+                job.mkdir()
             try:
                 launch_fds = [
                     os.open(self.row.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -463,7 +487,8 @@ class LocalResourceBoundary:
             except BaseException:
                 for fd in launch_fds:
                     os.close(fd)
-                job.rmdir()
+                if job is not None:
+                    job.rmdir()
                 raise
             root_source, scratch_source = [str(fd) for fd in launch_fds[:2]]
             writable = (
