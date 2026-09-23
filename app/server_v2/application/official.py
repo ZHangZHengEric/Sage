@@ -136,12 +136,12 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str):
 
     install_sandbox(service)
     host_workspace = service.paths.workspace_dir(user_id)
-    handle = await service._sandbox_provider.provision(
+    handle = await service.execution.sandbox_provider.provision(
         workspace_sandbox_spec(host_workspace),
         service.request_context(user_id),
         run_id=command.idempotency_key,
     )
-    runtime = OfficialToolRuntime(handle, service._sandbox_grant_issuer)
+    runtime = OfficialToolRuntime(handle, service.execution.sandbox_grant_issuer)
     plugin = OfficialToolPlugin(
         ExtensionScopeContext(
             scope=ExtensionScope.RUN,

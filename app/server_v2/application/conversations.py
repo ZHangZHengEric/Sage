@@ -13,15 +13,8 @@ from app.server_v2.adapters.agui.sse import (
     frame_to_agui_event,
     single_error_sse,
 )
-from app.server_v2.application.composition import composition_metadata
 from app.server_v2.core.errors import ServerV2Error, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
-from app.server_v2.domain.catalog import (
-    enabled_a2a_agents,
-    enabled_mcp_servers,
-    require_agent,
-)
-from app.server_v2.domain.threads import resolve_thread_agent_id
 
 
 class ConversationService:
@@ -78,38 +71,29 @@ class ConversationService:
         )
         requested_agent = str(props.get("agentId") or "").strip()
         thread_id = validate_agui_id(request.thread_id, field="threadId")
-        existing = await self.host.threads.find(thread_id)
-        if existing is not None and existing.user_id != user_id:
-            raise ServerV2Error("not_found", "thread not found")
-        catalog = await self.host.catalog.get(user_id)
-        record = require_agent(
-            catalog, resolve_thread_agent_id(existing, requested_agent) or None
+        admitted = await self.host.admission.prepare(
+            user_id=user_id,
+            session_id=thread_id,
+            agent_id=requested_agent,
+            pin_existing=True,
         )
-        skill_records = tuple(
-            await self.host.skill_catalog.bound_skills(
-                owner_user_id=user_id, agent_id=record.id
-            )
-        )
-        enabled = tuple(item.name for item in skill_records)
+        enabled = tuple(item.name for item in admitted.skills)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
             composition_hash=self.host.application.composition_hash,
-            default_agent_id=record.id,
+            default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
-            metadata=composition_metadata(
-                agent=record,
-                skills=skill_records,
-                mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
-                a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
-            ),
+            metadata=admitted.metadata,
         )
-        if command.agent_id != record.id:
-            command = command.model_copy(update={"agent_id": record.id})
-            agent_id = record.id
-        await self.host.threads.upsert(thread_id, user_id, agent_id=record.id)
-        if not self.host._has_configured_model(catalog):
+        if command.agent_id != admitted.agent_id:
+            command = command.model_copy(update={"agent_id": admitted.agent_id})
+            agent_id = admitted.agent_id
+        await self.host.admission.remember(
+            thread_id, user_id, title="", agent_id=admitted.agent_id
+        )
+        if not admitted.model_ready:
             return single_error_sse(
-                self.host._model_missing_message(),
+                self.host.execution.model_missing_message(),
                 code="server.model_not_configured",
             )
 
@@ -229,7 +213,7 @@ class ConversationService:
         user_id: str,
         agent_id: str,
     ):
-        logger = self.host._sagents_logger().bind(
+        logger = self.host.execution.sagents_logger().bind(
             thread_id=thread_id, run_id=client_run_id
         )
         logger.info(

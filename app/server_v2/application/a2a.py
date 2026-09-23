@@ -28,13 +28,7 @@ from app.server_v2.domain.api_keys import (
     ApiKeyRecord,
     require_scope,
 )
-from app.server_v2.domain.catalog import (
-    AgentRecord,
-    enabled_a2a_agents,
-    enabled_mcp_servers,
-    require_agent,
-)
-from app.server_v2.application.composition import composition_metadata
+from app.server_v2.domain.catalog import AgentRecord, require_agent
 from app.server_v2.bootstrap.host import ServerV2Service
 
 # A2A caps a page at what a caller asked for; these bound what the walk over a
@@ -230,38 +224,26 @@ class A2AService:
         user_id = key.owner_user_id
         session_id = context_id(message)
 
-        existing = await service.threads.find(session_id)
-        if existing is not None and existing.user_id != user_id:
-            # Another tenant's context. Reported as absent rather than
-            # forbidden so the id space is not a membership oracle.
-            raise ServerV2Error("not_found", "context not found")
-
-        catalog = await service.catalog.get(user_id)
-        agent = require_agent(catalog, key.agent_id or None)
-        service.ensure_model_configured(catalog)
-        depth = _call_depth(message)
-        skills = tuple(
-            await service.skill_catalog.bound_skills(
-                owner_user_id=user_id, agent_id=agent.id
-            )
+        admitted = await service.admission.prepare(
+            user_id=user_id,
+            session_id=session_id,
+            agent_id=key.agent_id or "",
+            pin_existing=False,
+            call_depth=_call_depth(message),
+            absent="context not found",
         )
+        if not admitted.model_ready:
+            raise ServerV2Error("validation", service.execution.model_missing_message())
         command = to_start_run(
             message,
             session_id=session_id,
-            agent_id=agent.id,
+            agent_id=admitted.agent_id,
             composition_hash=service.application.composition_hash,
-            enabled_skills=tuple(item.name for item in skills),
-            metadata=composition_metadata(
-                agent=agent,
-                skills=skills,
-                mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
-                a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
-                call_depth=depth,
-            ),
+            enabled_skills=tuple(item.name for item in admitted.skills),
+            metadata=admitted.metadata,
         )
-        title = _title_of(command)
-        await service.threads.upsert(
-            session_id, user_id, title=title, agent_id=agent.id
+        await service.admission.remember(
+            session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
         )
 
         context = service.a2a_request_context(key, correlation_id=get_request_id())

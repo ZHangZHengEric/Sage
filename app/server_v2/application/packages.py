@@ -19,10 +19,6 @@ from app.server_v2.application.official import (
     workspace_sandbox_spec,
 )
 from app.server_v2.application.manifest import server_v2_manifest
-from app.server_v2.application.skill_runtime import (
-    CatalogSkillProvider,
-    ReadThroughSkillWorkspace,
-)
 
 
 class CatalogPackageModel:
@@ -39,13 +35,13 @@ class CatalogPackageModel:
             record = next((item for item in catalog.models if item.is_default), None)
             record = record or next(iter(catalog.models), None)
         if record is None:
-            if selected != "default" or self.host._fallback_model is None:
+            if selected != "default" or self.host.execution.fallback_model is None:
                 raise ServerV2Error(
                     "validation", "package model is unavailable in caller catalog"
                 )
-            yield self.host._fallback_model
+            yield self.host.execution.fallback_model
         else:
-            lease = await self.host._host_models.acquire_model(self.user_id, record)
+            lease = await self.host.execution.acquire_model(self.user_id, record)
             try:
                 yield lease.provider
             finally:
@@ -90,7 +86,7 @@ class PackageBindings:
         elif policy != "shared_parent":
             raise ValueError("unsupported workspace policy")
         workspace.mkdir(parents=True, exist_ok=True)
-        handle = await self.host._sandbox_provider.provision(
+        handle = await self.host.execution.sandbox_provider.provision(
             workspace_sandbox_spec(workspace), request.context, run_id=request.run_id
         )
         return RunExecutionBinding(
@@ -100,7 +96,7 @@ class PackageBindings:
             workspace_root="/workspace",
             workspace_policy=request.workspace_policy,
             sandbox=handle,
-            grant_issuer=self.host._sandbox_grant_issuer,
+            grant_issuer=self.host.execution.sandbox_grant_issuer,
             lifecycle=request.lifecycle,
         )
 
@@ -175,6 +171,23 @@ class ServerAgentManagement(AgentManagementService):
                 for item in host.package_extensions
             ),
         )
+
+    def context_for(self, user_id: str):
+        return self.host.request_context(user_id)
+
+    def capacity_snapshot(self) -> dict:
+        group = self.host.run_quota
+        return {
+            "management": self.capacity(),
+            "models": self.host.model_budget.snapshot(),
+            "runs": {
+                "active": len(group.leases()),
+                "pending": group.pending(),
+                "max_active": group.max_active,
+                "max_per_user": group.max_per_tenant,
+                "max_pending": group.max_pending,
+            },
+        }
 
     def schema(self):
         return {
@@ -334,25 +347,21 @@ class ServerAgentManagement(AgentManagementService):
         )
         for registration in self.host.package_extensions:
             builder.register(registration)
+        from app.server_v2.application.assembly import skill_ports, tenant_tools
+
         records = tuple(
             await self.host.skills.list_visible(user_id=user_id, role="user")
         )
-        provider = CatalogSkillProvider(records, self.host.paths.data_root)
-        builder.with_skill_provider(
-            provider,
-            provider,
-            ReadThroughSkillWorkspace(self.host.paths.data_root, user_id, records),
-        )
+        provider, workspace = skill_ports(self.host, user_id, records)
+        builder.with_skill_provider(provider, provider, workspace)
         catalog = await self.host.catalog.get(user_id)
-        mcp = self.host.mcp_plugins.get(user_id, enabled_mcp_servers(catalog))
-        if mcp:
-            builder.with_additional_tools(mcp, mcp)
-        # A managed package is composed from the live catalog, not from a
-        # frozen Run, so there is no inherited hop count to read: a package
-        # task is always the first hop.
-        peers = self.host.a2a_plugins.get(user_id, enabled_a2a_agents(catalog))
-        if peers:
-            builder.with_additional_tools(peers, peers)
+        for tool in tenant_tools(
+            self.host,
+            user_id,
+            enabled_mcp_servers(catalog),
+            enabled_a2a_agents(catalog),
+        ):
+            builder.with_additional_tools(tool, tool)
         return builder
 
     async def template(self, context, agent_id=None):
