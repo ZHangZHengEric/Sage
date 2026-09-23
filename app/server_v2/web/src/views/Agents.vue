@@ -5,6 +5,7 @@ import { api } from '../api.js'
 const agents = ref([])
 const models = ref([])
 const mcp = ref([])
+const peers = ref([])
 const skills = ref([])
 const officialTools = ref([])
 const bound = ref([])
@@ -14,7 +15,15 @@ const editing = ref('')
 const form = ref(emptyForm())
 
 const hasAgents = computed(() => agents.value.length > 0)
-const mcpTools = computed(() => [...new Set(mcp.value.flatMap((item) => item.tools || []))])
+// External Tools are granted per catalog rather than per Agent: they only
+// exist once the server or peer has been asked, so nothing here could name
+// them ahead of time. Shown, not offered.
+const externalTools = computed(() => [
+  ...new Set([
+    ...mcp.value.flatMap((item) => item.tools || []),
+    ...peers.value.flatMap((item) => (item.disabled ? [] : item.skills || [])),
+  ]),
+])
 const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
 const officialGroups = computed(() => {
   const groups = new Map()
@@ -37,16 +46,19 @@ function emptyForm() {
 }
 
 async function refresh() {
-  const [nextAgents, nextModels, nextMcp, nextSkills, nextTools] = await Promise.all([
-    api.listAgents(),
-    api.listModels(),
-    api.listMcp(),
-    api.listSkills(),
-    api.listTools(),
-  ])
+  const [nextAgents, nextModels, nextMcp, nextPeers, nextSkills, nextTools] =
+    await Promise.all([
+      api.listAgents(),
+      api.listModels(),
+      api.listMcp(),
+      api.listA2aAgents(),
+      api.listSkills(),
+      api.listTools(),
+    ])
   agents.value = nextAgents
   models.value = nextModels
   mcp.value = nextMcp
+  peers.value = nextPeers
   skills.value = nextSkills
   officialTools.value = nextTools
   if (editing.value) {
@@ -168,16 +180,12 @@ onMounted(async () => {
           </label>
         </div>
       </div>
-      <div v-if="mcpTools.length" class="field">
-        <span>MCP 工具</span>
-        <label v-for="name in mcpTools" :key="name" class="row">
-          <input
-            type="checkbox"
-            :checked="form.tools.includes(name)"
-            @change="toggleTool(name)"
-          />
-          {{ name }}
-        </label>
+      <div v-if="externalTools.length" class="field">
+        <span>外部工具</span>
+        <p class="muted">
+          MCP 与 A2A 的工具由租户目录整体授予，本租户的每个智能体都能用，无需在这里勾选。
+        </p>
+        <p class="muted mono">{{ externalTools.join(', ') }}</p>
       </div>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="row">

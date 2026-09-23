@@ -33,6 +33,7 @@ async function logout() {
         <router-link to="/studio">Studio</router-link>
         <router-link to="/models">模型</router-link>
         <router-link to="/mcp">MCP</router-link>
+        <router-link to="/a2a">A2A</router-link>
         <router-link to="/skills">技能</router-link>
         <router-link v-if="isAdmin()" to="/admin">总览</router-link>
       </nav>

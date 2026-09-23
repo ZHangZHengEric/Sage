@@ -54,6 +54,14 @@ class InvocationGrantToolCatalog:
     Runtime control tools are granted explicitly per invocation.  The same
     check protects both model-visible listing and direct lookup, so a provider
     cannot execute a hidden control tool by returning its name.
+
+    ``granted_catalogs`` grants whole catalogs rather than names.  Some Tools
+    are not the Agent's to choose from: an external catalog declares its own
+    Tools at runtime, so no static list on the Agent could name them, and
+    composing such a catalog into a Run without granting it produces Tools that
+    are visible and then refused at call time.  The grant is resolved per Run
+    rather than captured here, because the catalog behind it changes while a
+    composed Agent is still cached.
     """
 
     _CONTROL_TOOLS = frozenset({"goal_submit", "goal_complete"})
@@ -69,11 +77,33 @@ class InvocationGrantToolCatalog:
         command_reader: Callable[[str], Awaitable[object]],
         *,
         fallback_invocation_mode: str | None = None,
+        granted_catalogs: tuple[ToolCatalog, ...] = (),
     ) -> None:
         self._catalog = catalog
         self._base_allowed = frozenset(allowed_names) - self._CONTROL_TOOLS
         self._command_reader = command_reader
         self._fallback_invocation_mode = fallback_invocation_mode
+        self._granted_catalogs = tuple(granted_catalogs)
+
+    async def _granted(self, run_id: str) -> frozenset[str]:
+        """Name what the wholly granted catalogs are offering this Run.
+
+        Discovery degrades per server rather than per Run — an external
+        provider that is down costs its own Tools and nothing else. Letting an
+        exception out here would undo that by turning a provider that is merely
+        unreachable into a Run that cannot list its Tools at all.
+        """
+
+        names: set[str] = set()
+        for catalog in self._granted_catalogs:
+            try:
+                names.update(
+                    definition.name
+                    for definition in await catalog.list_tools(run_id=run_id)
+                )
+            except Exception:
+                continue
+        return frozenset(names)
 
     async def _allowed(self, run_id: str) -> frozenset[str]:
         try:
@@ -92,6 +122,11 @@ class InvocationGrantToolCatalog:
         base = self._base_allowed
         if configured is not None:
             base &= frozenset(configured)
+        if self._granted_catalogs:
+            # Outside the ``configured`` intersection on purpose: that list
+            # narrows the Agent's own declared Tools, and cannot name Tools
+            # that only exist once an external provider has been asked.
+            base |= (await self._granted(run_id)) - self._CONTROL_TOOLS
         return base | self._MODE_GRANTS.get(mode, frozenset())
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
