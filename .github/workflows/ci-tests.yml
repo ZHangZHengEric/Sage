@@ -44,11 +44,27 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 blocks unprivileged user namespaces unless bwrap's
+          # AppArmor profile is loaded. --disable-userns needs that namespace.
+          if [ -f /etc/apparmor.d/bwrap ]; then
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          fi
+          bwrap --unshare-user --disable-userns \
+            --ro-bind /usr /usr \
+            --ro-bind-try /bin /bin \
+            --ro-bind-try /lib /lib \
+            --ro-bind-try /lib64 /lib64 \
+            -- /usr/bin/true
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # A2A routes stay unmounted without this extra, and the app suite
+          # covers them. Keep it off the other suites (protobuf).
+          if [ "${{ matrix.suite }}" = "app" ]; then
+            pip install 'a2a-sdk[fastapi]>=1.1.4,<2'
+          fi
 
       - name: Run Pytest Suite
         # The Linux sandbox binds the workspace at its own workspace_root, and
