@@ -66,6 +66,18 @@ export const api = {
     request(`/api/mcp/${name}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteMcp: (name) => request(`/api/mcp/${name}`, { method: 'DELETE' }),
   refreshMcp: (name) => request(`/api/mcp/${name}/refresh`, { method: 'POST' }),
+  listA2aAgents: () => request('/api/a2a-agents'),
+  createA2aAgent: (body) =>
+    request('/api/a2a-agents', { method: 'POST', body: JSON.stringify(body) }),
+  updateA2aAgent: (name, body) =>
+    request(`/api/a2a-agents/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteA2aAgent: (name) =>
+    request(`/api/a2a-agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  refreshA2aAgent: (name) =>
+    request(`/api/a2a-agents/${encodeURIComponent(name)}/refresh`, { method: 'POST' }),
   listSkills: () => request('/api/skills'),
   publishSkill: (body) =>
     request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),

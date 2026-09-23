@@ -70,6 +70,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.tool-selection.llm",
         "sage.tool-selection.recent",
         "sage.skill.filesystem",
+        "sage.skill.loading.lazy",
         "sage.model.openai-responses",
         "sage.model.openai-chat-completions",
         "sage.model.anthropic-messages",

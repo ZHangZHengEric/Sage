@@ -10,6 +10,7 @@ import asyncio
 import errno
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -650,6 +651,10 @@ async def test_apply_patch_is_atomic_and_workspace_scoped(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="CI does not run Linux sandbox process checks",
+)
 async def test_shell_and_todo_tools_use_v2_runtime_state(tmp_path: Path):
     plugin = await plugin_for(tmp_path)
     shell = await plugin.executor.execute(

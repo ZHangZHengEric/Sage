@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.server_v2.api.deps import CurrentUser, ServiceDep
 from app.server_v2.schemas import (
@@ -6,6 +7,7 @@ from app.server_v2.schemas import (
     ApiResponse,
     ThreadEventPage,
     ThreadPublic,
+    ThreadResumeBody,
 )
 from app.server_v2.core.errors import success
 
@@ -38,6 +40,52 @@ async def get_thread_events(
         await service.thread_events(
             thread_id, user.user_id, limit=limit, offset=offset
         )
+    )
+
+
+@router.post(
+    "/{thread_id}/resume",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "AG-UI 0.1.19 SSE event stream",
+        },
+        409: {"description": "thread is not waiting for input"},
+        422: {"description": "decision not offered by the pending question"},
+    },
+)
+async def resume_thread(
+    thread_id: str,
+    body: ThreadResumeBody,
+    request: Request,
+    user: CurrentUser,
+    service: ServiceDep,
+):
+    """Answer a waiting thread and stream the work the answer releases.
+
+    This is a stream rather than an acknowledgement for the same reason
+    ``/api/agent`` is: the answer restarts a Run, and the client wants to watch
+    it, not to be told it was accepted and then have to reconnect.
+    """
+
+    last_event_id = (request.headers.get("last-event-id") or "").strip() or None
+    stream = await service.resume_agui_run(
+        thread_id,
+        run_id=body.runId,
+        user_id=user.user_id,
+        decision=body.decision,
+        payload=body.payload,
+        last_event_id=last_event_id,
+    )
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Sage-AG-UI-Replay": service.backends()["agui_replay"],
+        },
     )
 
 

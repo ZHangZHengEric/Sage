@@ -523,3 +523,81 @@ def test_events_are_cursor_based_and_owner_scoped(client):
     assert (
         client.get("/api/agent-packages/capacity", headers=headers).status_code == 403
     )
+
+
+def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
+    """A peer is configured on the tenant, not declared in the package.
+
+    The package's manifest names official tools, which is all a package author
+    can name: an A2A peer's Tools only exist once its card has been read. Being
+    composed into the Run is therefore not enough — without a grant the model
+    sees the Tool and is refused the moment it uses it.
+    """
+
+    from fastapi.testclient import TestClient
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+
+    from app.server_v2.app import create_app
+    from app.server_v2.services.a2a_client import A2APluginCache
+    from tests.app.server_v2.conftest import make_test_service
+    from tests.app.server_v2.test_a2a_resume import _step
+    from tests.sagents.v2.test_a2a_tool_bridge_matrix import FakePeer
+
+    transport = FakePeer()
+    provider = ScriptedModelProvider(
+        (
+            _step(
+                1,
+                "I will ask the researcher.",
+                "a2a_researcher_research",
+                {"message": "what is new"},
+            ),
+            *(_step(index, "researcher says: the answer") for index in range(2, 4)),
+        )
+    )
+    service = make_test_service(tmp_path, model_provider=provider)
+    service.a2a_plugins = A2APluginCache(transport=transport)
+
+    with TestClient(create_app(service=service)) as client:
+        headers = {"Authorization": f"Bearer {register_and_login(client)}"}
+        created = client.post(
+            "/api/a2a-agents",
+            json={"name": "researcher", "url": "https://peer.example.com"},
+            headers=headers,
+        )
+        assert created.status_code == 200, created.text
+        bundle = client.get("/api/agent-packages/template", headers=headers).json()[
+            "data"
+        ]
+        saved = client.post("/api/agent-packages", headers=headers, json=bundle).json()[
+            "data"
+        ]
+        started = client.post(
+            "/api/agent-packages/runs",
+            headers=headers,
+            json=dict(
+                ref=saved["ref"],
+                agent_id="assistant",
+                content="what is new",
+                operation="delegate",
+            ),
+        )
+        assert started.status_code == 200, started.text
+
+        pending = settled(client, headers, "delegate")
+        assert pending["needs_attention"], pending
+        approved = client.post(
+            "/api/agent-packages/runs/delegate/control",
+            headers=headers,
+            json=dict(
+                action="approve",
+                interaction_id=pending["interaction"]["interaction_id"],
+                decision="approve_once",
+            ),
+        )
+        assert approved.status_code == 200, approved.text
+        assert settled(client, headers, "delegate")["terminal"]
+
+    assert len(transport.sent) == 1
+    message = transport.sent[0][1]["params"]["message"]
+    assert message["parts"][0]["text"] == "what is new"

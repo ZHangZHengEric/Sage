@@ -71,9 +71,13 @@ def test_tool_name_contract_rejects_dot_names():
 
 def test_no_hand_written_builtin_catalogs_or_placeholder_plugin_folders():
     tool_root = Path(__file__).parents[3] / "sagents" / "v2" / "tool"
+    # Constructing a ToolDefinition by hand is allowed only where the Tools are
+    # not ours to declare: these three translate a schema discovered at runtime
+    # — a decorated method, an MCP server's tool list, an A2A peer's Agent Card.
     allowed_converters = {
         tool_root / "decorators.py",
         tool_root / "plugins" / "mcp.py",
+        tool_root / "plugins" / "a2a.py",
     }
     offenders = []
     for path in tool_root.rglob("*.py"):

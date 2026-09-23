@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -178,7 +177,14 @@ def _resolved_sandbox_config(
     )
     config = dict(_SANDBOX_DEFAULTS.get(plugin_id, {}))
     config.update(settings.component_configs.get("execution.sandbox", {}))
-    resource_config = {"require_hard_limits": sys.platform != "darwin"}
+    # 内核硬限制来自管理员委派的 cgroup 子树与 XFS project 挂载；没配就不声称
+    # 拥有它们，否则 admission 会放行一个 provisioning 必然拒绝的 spec。显式写
+    # 在 resources 里的取值仍然优先。
+    resource_config = {
+        "require_hard_limits": bool(
+            config.get("linux_cgroup_root") and config.get("linux_quota_mount")
+        )
+    }
     resource_config.update(config.get("resources", {}))
     config["resources"] = ResourceLimits.model_validate(resource_config).model_dump(
         mode="json"

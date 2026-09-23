@@ -26,7 +26,7 @@ dependencies = [
   "python-dotenv>=1.0.0",
   "pyyaml>=6.0",
   "aiofiles>=0.8.0",
-  "fastapi>=0.104.0",
+  "fastapi>=0.115.2",
   "uvicorn[standard]>=0.24.0",
   "uvloop>=0.21.0; sys_platform != 'win32'",
   "pydantic>=2.5.0",
@@ -73,7 +73,12 @@ server-v2 = [
   "aiomysql>=0.2.0",
   "SQLAlchemy[asyncio]>=2.0,<2.2",
   "prometheus-client>=0.20.0",
+  "a2a-sdk[fastapi]>=1.1.4,<2",
 ]
+# A2A pulls in protobuf, which conflicts with other protobuf consumers in a
+# shared environment. It stays an extra so a deployment that does not speak A2A
+# never inherits that dependency chain.
+a2a = ["a2a-sdk[fastapi]>=1.1.4,<2"]
 
 [project.urls]
 Homepage = "https://github.com/ZHangZHengEric/Sage"

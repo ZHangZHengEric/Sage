@@ -447,7 +447,12 @@ class SAgentBuilder:
         return self
 
     def with_additional_tools(self, catalog, executor) -> "SAgentBuilder":
-        """Extend every run's catalog without replacing host-bound official tools."""
+        """Extend every run's catalog without replacing host-bound official tools.
+
+        These Tools are granted as a catalog rather than per Agent: an external
+        provider declares its own Tools at runtime, so an Agent's ``tools`` list
+        could not name them even if the host wanted it to.
+        """
         self._extra_tools.append((catalog, executor))
         return self
 
@@ -1092,6 +1097,7 @@ class SAgentBuilder:
                     goal_state_service=goal_state_service,
                     tool_selection_policy=tool_selection,
                     additional_runtime_tools=runtime_tools,
+                    granted_catalogs=tuple(pair[0] for pair in self._extra_tools),
                     skill_loader=skill_loader,
                     additional_context_providers=(
                         AgentRosterContextProvider(

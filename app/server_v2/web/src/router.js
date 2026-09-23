@@ -6,6 +6,7 @@ import Models from './views/Models.vue'
 import Agents from './views/Agents.vue'
 import Studio from './views/Studio.vue'
 import Mcp from './views/Mcp.vue'
+import A2A from './views/A2A.vue'
 import Skills from './views/Skills.vue'
 import Admin from './views/Admin.vue'
 
@@ -18,6 +19,7 @@ export const router = createRouter({
     { path: '/studio', component: Studio },
     { path: '/models', component: Models },
     { path: '/mcp', component: Mcp },
+    { path: '/a2a', component: A2A },
     { path: '/skills', component: Skills },
     { path: '/admin', component: Admin, meta: { admin: true } },
   ],

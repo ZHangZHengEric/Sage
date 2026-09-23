@@ -364,11 +364,14 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(tmp_path, monke
         assert str(job) == command[4]
         assert command[2] == "-c"  # No mutable workspace helper before isolation.
         assert "--unshare-all" in command and "--cap-drop" in command
+        assert command.index("--unshare-user") < command.index("--disable-userns")
         assert "--disable-userns" in command
         assert "--seccomp" in command
         assert command.count("--bind-fd") == 3
         assert len(fds) == 4 and len(set(fds)) == 4
         assert command.count("--remount-ro") == 3
+        assert command[command.index("--bind") + 1] == "/dev/null"
+        assert command.index("--bind") < command.index("--remount-ro")
         assert "LD_PRELOAD" not in environment
         assert command.index("LD_PRELOAD") > command.index("--setenv")
     finally:

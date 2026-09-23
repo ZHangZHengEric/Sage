@@ -449,6 +449,30 @@ input, textarea, select {
   box-shadow: 0 2px 8px -2px rgb(0 0 0 / 0.06);
 }
 .composer:focus-within { border-color: color-mix(in oklab, var(--primary) 28%, var(--border)); }
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in oklab, var(--primary) 32%, var(--border));
+  border-radius: var(--composer-radius);
+  background: color-mix(in oklab, var(--primary) 6%, var(--composer-bg));
+}
+.ask-head { display: flex; align-items: center; gap: var(--space-2); }
+.ask p { margin: 0; font-size: 0.875rem; }
+.ask-args {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.8125rem;
+  background: var(--muted);
+  border-radius: var(--space-2);
+  padding: var(--space-3);
+}
+.ask textarea { min-height: 48px; resize: vertical; }
 .composer textarea {
   min-height: 40px;
   max-height: 160px;
