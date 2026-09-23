@@ -26,7 +26,6 @@ from sagents.v2.skill import (
 )
 from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
-from sagents.v2.tool.provider import ToolCatalog
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
 from app.server_v2.core.errors import ServerV2Error
@@ -284,8 +283,9 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
                 reducer=ports.context_reducer,
             ),
         )
-        provider = CatalogSkillProvider(records, service.paths.data_root)
-        workspace = ReadThroughSkillWorkspace(service.paths.data_root, user_id, records)
+        from app.server_v2.application.assembly import skill_ports, tenant_tools
+
+        provider, workspace = skill_ports(service, user_id, records)
 
         async def resolve_session_id(run_id: str) -> str:
             run = await service.application.entrypoint().runtime.session_store.get_run(
@@ -323,23 +323,16 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         # is all the product lets it choose from. Without this they would be
         # composed into the Run and then refused at call time, so configuring a
         # peer or an MCP server would look like it worked and never do anything.
-        external: list[ToolCatalog] = []
-        mcp = service.mcp_plugins.get(
-            user_id, selected_mcp_servers(catalog, frozen.mcp_servers)
-        )
-        if mcp is not None:
-            catalogs.append(mcp)
-            executors.append(mcp)
-            external.append(mcp)
-        peers = service.a2a_plugins.get(
+        external = tenant_tools(
+            service,
             user_id,
+            selected_mcp_servers(catalog, frozen.mcp_servers),
             selected_a2a_agents(catalog, frozen.a2a_agents),
             call_depth=frozen.call_depth,
         )
-        if peers is not None:
-            catalogs.append(peers)
-            executors.append(peers)
-            external.append(peers)
+        for tool in external:
+            catalogs.append(tool)
+            executors.append(tool)
         from app.server_v2.application.tool_policy import server_tool_policy
         loop = factory.create_loop(
             resolved,
@@ -405,13 +398,14 @@ async def _composition(service, command: StartRun, catalog, *, user_id: str):
 
 async def _run_model(service, catalog, agent, *, user_id):
     record = catalog_model(catalog, agent.model_id)
+    pool = service.execution.model_pool
     if record is not None:
-        if service._host_models is not None:
-            lease = await service._host_models.acquire_model(user_id, record)
+        if pool is not None:
+            lease = await service.execution.acquire_model(user_id, record)
             return lease.provider, lease
         model = await create_catalog_provider(record)
         return model, _OwnedModelScope(model)
-    return service._host_models or service.application.service("model.provider"), None
+    return pool or service.application.service("model.provider"), None
 
 
 def _recorded_model(service, model):

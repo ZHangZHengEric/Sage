@@ -13,7 +13,7 @@ core/           配置、错误、JWT、HTTP、观测
 web/            前端
 ```
 
-新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例，不直接拿仓储，也不在依赖里新建服务。开跑、续跑、取消在 `application/runs.py`，AG-UI 对话在 `application/conversations.py`。
+新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例。AG-UI 与 A2A 共用 `application/admission.py` 受理 Run，MCP/A2A/技能端口在 `application/assembly.py`。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放直接读取 Sage Session 的 canonical RuntimeEvent。
 

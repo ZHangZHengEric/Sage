@@ -8,7 +8,7 @@ from app.server_v2.domain.catalog import (
     empty_catalog,
 )
 from app.server_v2.infrastructure.persistence.api_keys import MemoryApiKeyStore  # noqa: F401
-from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
+from app.server_v2.infrastructure.persistence.skills import MemorySkillStore  # noqa: F401
 from app.server_v2.domain.threads import (
     ThreadRecord,
     apply_thread_upsert,
@@ -53,11 +53,22 @@ class MemoryCatalogStore:
         self._catalogs: dict[str, UserCatalog] = {}
 
     async def get(self, user_id: str) -> UserCatalog:
-        return self._catalogs.get(user_id) or empty_catalog()
+        current = self._catalogs.get(user_id)
+        if current is None:
+            return empty_catalog()
+        return current.model_copy(deep=True)
 
     async def save(self, user_id: str, catalog: UserCatalog) -> UserCatalog:
-        self._catalogs[user_id] = catalog
+        self._catalogs[user_id] = catalog.model_copy(deep=True)
         return catalog
+
+    async def replace_section(
+        self, user_id: str, section: str, catalog: UserCatalog
+    ) -> UserCatalog:
+        current = self._catalogs.get(user_id) or empty_catalog()
+        updated = current.model_copy(update={section: getattr(catalog, section)})
+        self._catalogs[user_id] = updated
+        return updated
 
     async def list_models(self, user_id: str) -> list[ModelRecord]:
         return (await self.get(user_id)).models
@@ -82,11 +93,12 @@ class MemoryCatalogStore:
         self, user_id: str, payload: dict[str, object]
     ) -> ModelRecord:
         record, catalog = apply_upsert(await self.get(user_id), payload)
-        await self.save(user_id, catalog)
+        await self.replace_section(user_id, "models", catalog)
         return record
 
     async def delete_model(self, user_id: str, model_id: str) -> None:
-        await self.save(user_id, apply_delete(await self.get(user_id), model_id))
+        catalog = apply_delete(await self.get(user_id), model_id)
+        await self.replace_section(user_id, "models", catalog)
 
 
 class MemoryThreadIndex:

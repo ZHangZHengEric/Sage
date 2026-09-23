@@ -16,6 +16,8 @@ from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.observability import StructuredLogger
 
 from app.server_v2.application.admin import AdminService
+from app.server_v2.application.admission import RunAdmission
+from app.server_v2.application.execution import ProcessExecution
 from app.server_v2.application.catalog import CatalogService
 from app.server_v2.application.conversations import ConversationService
 from app.server_v2.application.credentials import CredentialService
@@ -109,6 +111,8 @@ class ServerV2Service:
             skills=self.skill_catalog,
         )
         self.credentials = CredentialService(self.api_keys, self.catalog)
+        self.execution = ProcessExecution(self)
+        self.admission = RunAdmission(self)
         self.runs = RunService(self)
         self.conversations = ConversationService(self)
         self.admin = AdminService(self)

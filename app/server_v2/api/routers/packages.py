@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import SageV2Error
-from app.server_v2.api.deps import AdminUser, CurrentUser, ServiceDep
+from app.server_v2.api.deps import AdminUser, CurrentUser, PackageDep
 from app.server_v2.core.errors import ServerV2Error, map_sage_error, success
 
 router = APIRouter(prefix="/api/agent-packages", tags=["agent-packages"])
@@ -69,40 +69,27 @@ class Control(BaseModel):
 
 
 @router.get("/schema")
-async def schema(user: CurrentUser, service: ServiceDep):
-    return success(service.agent_management.schema())
+async def schema(user: CurrentUser, packages: PackageDep):
+    return success(packages.schema())
 
 
 @router.get("/capacity")
-async def capacity(user: AdminUser, service: ServiceDep):
-    group = service.run_quota
-    return success(
-        {
-            "management": service.agent_management.capacity(),
-            "models": service.model_budget.snapshot(),
-            "runs": {
-                "active": len(group.leases()),
-                "pending": group.pending(),
-                "max_active": group.max_active,
-                "max_per_user": group.max_per_tenant,
-                "max_pending": group.max_pending,
-            },
-        }
-    )
+async def capacity(user: AdminUser, packages: PackageDep):
+    return success(packages.capacity_snapshot())
 
 
 @router.get("/resources")
-async def resources(user: CurrentUser, service: ServiceDep):
+async def resources(user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.resources(service.request_context(user.user_id))
+        packages.resources(packages.context_for(user.user_id))
     )
 
 
 @router.get("/template")
-async def template(user: CurrentUser, service: ServiceDep, agent_id: str | None = None):
+async def template(user: CurrentUser, packages: PackageDep, agent_id: str | None = None):
     return await result(
-        service.agent_management.template(
-            service.request_context(user.user_id), agent_id
+        packages.template(
+            packages.context_for(user.user_id), agent_id
         )
     )
 
@@ -110,66 +97,66 @@ async def template(user: CurrentUser, service: ServiceDep, agent_id: str | None 
 @router.get("")
 async def inventory(
     user: CurrentUser,
-    service: ServiceDep,
+    packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     return await result(
-        service.agent_management.list(
-            service.request_context(user.user_id), limit=limit, offset=offset
+        packages.list(
+            packages.context_for(user.user_id), limit=limit, offset=offset
         )
     )
 
 
 @router.post("/validate")
-async def validate(body: Validation, user: CurrentUser, service: ServiceDep):
+async def validate(body: Validation, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.validate(
-            body.bundle, service.request_context(user.user_id), readiness=body.readiness
+        packages.validate(
+            body.bundle, packages.context_for(user.user_id), readiness=body.readiness
         )
     )
 
 
 @router.post("")
-async def save(body: AgentPackageBundle, user: CurrentUser, service: ServiceDep):
+async def save(body: AgentPackageBundle, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.save(body, service.request_context(user.user_id))
+        packages.save(body, packages.context_for(user.user_id))
     )
 
 
 @router.get("/runs")
 async def runs(
     user: CurrentUser,
-    service: ServiceDep,
+    packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     return await result(
-        service.agent_management.list_runs(
-            service.request_context(user.user_id), limit=limit, offset=offset
+        packages.list_runs(
+            packages.context_for(user.user_id), limit=limit, offset=offset
         )
     )
 
 
 @router.post("/runs")
-async def run(body: Invocation, user: CurrentUser, service: ServiceDep):
+async def run(body: Invocation, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.run(
+        packages.run(
             body.ref,
             body.agent_id,
             body.content,
             body.operation,
-            service.request_context(user.user_id),
+            packages.context_for(user.user_id),
             session_id=body.session_id,
         )
     )
 
 
 @router.get("/runs/{operation}")
-async def status(operation: str, user: CurrentUser, service: ServiceDep):
+async def status(operation: str, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.status(
-            operation, service.request_context(user.user_id)
+        packages.status(
+            operation, packages.context_for(user.user_id)
         )
     )
 
@@ -178,14 +165,14 @@ async def status(operation: str, user: CurrentUser, service: ServiceDep):
 async def events(
     operation: str,
     user: CurrentUser,
-    service: ServiceDep,
+    packages: PackageDep,
     after_sequence: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=200),
 ):
     return await result(
-        service.agent_management.events(
+        packages.events(
             operation,
-            service.request_context(user.user_id),
+            packages.context_for(user.user_id),
             after_sequence=after_sequence,
             limit=limit,
         )
@@ -194,13 +181,13 @@ async def events(
 
 @router.post("/runs/{operation}/control")
 async def control(
-    operation: str, body: Control, user: CurrentUser, service: ServiceDep
+    operation: str, body: Control, user: CurrentUser, packages: PackageDep
 ):
     return await result(
-        service.agent_management.control(
+        packages.control(
             operation,
             "reply" if body.action == "approve" else body.action,
-            service.request_context(user.user_id),
+            packages.context_for(user.user_id),
             decision=body.decision,
             interaction_id=body.interaction_id,
             payload=body.payload,
@@ -210,11 +197,11 @@ async def control(
 
 
 @router.get("/{ref}")
-async def get(ref: str, user: CurrentUser, service: ServiceDep):
+async def get(ref: str, user: CurrentUser, packages: PackageDep):
     async def read():
         return (
-            await service.agent_management.get(
-                ref, service.request_context(user.user_id)
+            await packages.get(
+                ref, packages.context_for(user.user_id)
             )
         ).model_dump(mode="json")
 
@@ -222,18 +209,18 @@ async def get(ref: str, user: CurrentUser, service: ServiceDep):
 
 
 @router.post("/{ref}/activate")
-async def activate(ref: str, body: Activation, user: CurrentUser, service: ServiceDep):
+async def activate(ref: str, body: Activation, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.activate(
-            ref, body.expected_ref, service.request_context(user.user_id)
+        packages.activate(
+            ref, body.expected_ref, packages.context_for(user.user_id)
         )
     )
 
 
 @router.post("/{ref}/fork")
-async def fork(ref: str, body: Fork, user: CurrentUser, service: ServiceDep):
+async def fork(ref: str, body: Fork, user: CurrentUser, packages: PackageDep):
     return await result(
-        service.agent_management.fork(
-            ref, body.package_id, body.version, service.request_context(user.user_id)
+        packages.fork(
+            ref, body.package_id, body.version, packages.context_for(user.user_id)
         )
     )

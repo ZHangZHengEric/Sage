@@ -23,7 +23,10 @@ class UserRow(Base):
 class CatalogRow(Base):
     __tablename__ = "catalogs"
     user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    agents: Mapped[list[Any]] = mapped_column(JSON)
+    models: Mapped[list[Any]] = mapped_column(JSON)
+    mcp_servers: Mapped[list[Any]] = mapped_column(JSON)
+    a2a_agents: Mapped[list[Any]] = mapped_column(JSON)
 
 
 class ThreadRow(Base):

@@ -11,6 +11,7 @@ from app.server_v2.application.conversations import ConversationService
 from app.server_v2.application.credentials import CredentialService
 from app.server_v2.application.identity import IdentityService
 from app.server_v2.application.skills import SkillCatalogService
+from app.server_v2.application.packages import ServerAgentManagement
 from app.server_v2.bootstrap.host import ServerV2Service
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.core.jwt import decode_access_token
@@ -54,12 +55,20 @@ def get_admin(host: ServiceDep) -> AdminService:
     return host.admin
 
 
+def get_packages(host: ServiceDep) -> ServerAgentManagement:
+    management = host.agent_management
+    if management is None:
+        raise RuntimeError("package management is not started")
+    return management
+
+
 CatalogDep = Annotated[CatalogService, Depends(get_catalog)]
 IdentityDep = Annotated[IdentityService, Depends(get_identity)]
 CredentialDep = Annotated[CredentialService, Depends(get_credentials)]
 ConversationDep = Annotated[ConversationService, Depends(get_conversations)]
 SkillDep = Annotated[SkillCatalogService, Depends(get_skills)]
 AdminDep = Annotated[AdminService, Depends(get_admin)]
+PackageDep = Annotated[ServerAgentManagement, Depends(get_packages)]
 
 
 def _token_from(

@@ -59,7 +59,7 @@ server_v2 面向公网多租户，MCP 只接受 `sse` 与 `streamable_http` 两�
 
 JobRuntime 由主宿主拥有，各应用共享任务并发、准入与输出限制。关闭顺序为 managed Applications、主 Application、主调度器、模型池。关闭失败保留对象，供再次 close 清理；不会先丢掉引用。容量不足可回收可持久恢复且无非终态任务的空闲实例；没有安全候选时返回过载，而不是无限建立实例。
 
-Agent、模型、MCP、Skill 绑定的 catalog 读改写由 `CatalogService` 持有同一组进程内锁，防止独立 HTTP 请求保存旧快照覆盖其他字段。不同用户通常使用不同锁槽；这是单进程事务保护，不是跨进程 CAS。
+Agent、模型、MCP、A2A peer、Skill 绑定分列保存。每一类写操作只替换自己的列，并使用该类自己的进程内锁。不同类的保存不会互相覆盖。这仍是单进程保护，不是跨进程 CAS。
 
 ## 持久化与恢复
 
