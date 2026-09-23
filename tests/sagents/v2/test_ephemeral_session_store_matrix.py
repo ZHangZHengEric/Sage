@@ -21,6 +21,7 @@ from sagents.v2.contracts.commands import (
     SteerRun,
 )
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.events import ItemEventData, StepEventData
 from sagents.v2.contracts.interactions import (
     BlockingScope,
     InteractionRequest,
@@ -39,6 +40,7 @@ from sagents.v2.contracts.run_state import (
     SessionConcurrencyMode,
 )
 from sagents.v2.runtime.kernel import HarnessRuntime
+from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
 
@@ -84,6 +86,54 @@ async def running_runtime() -> tuple[HarnessRuntime, str, str]:
     )
     assert run.state == RunState.RUNNING
     return runtime, handle.session_id, handle.run_id
+
+
+@pytest.mark.asyncio
+async def test_live_preview_does_not_advance_canonical_run_cursor():
+    runtime, _, run_id = await running_runtime()
+    store = runtime.session_store
+    run = await store.get_run(run_id)
+    before = await store.read_events(run_id)
+    preview_run = await store.publish_stream_preview(
+        run_id=run_id,
+        expected_revision=run.revision,
+        drafts=(
+            EventDraft(
+                type="message.delta",
+                item_id="item_preview",
+                data=ItemEventData(operation="delta", delta="hello"),
+            ),
+        ),
+        context=CONTEXT,
+    )
+    assert preview_run.last_run_sequence == run.last_run_sequence
+    assert await store.read_events(run_id) == before
+    observer = store.subscribe_events(
+        EventCursor(run_id=run_id, run_sequence=run.last_run_sequence)
+    )
+    try:
+        preview = await anext(observer)
+    finally:
+        await observer.aclose()
+    assert preview.type == "message.delta"
+    assert preview.preview_sequence == 1
+    assert preview.run_sequence == run.last_run_sequence
+
+    committed = await store.commit_run(
+        run_id=run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.RUNNING},
+        new_state=RunState.RUNNING,
+        drafts=(
+            EventDraft(
+                type="step.completed",
+                data=StepEventData(state="completed", attempt=1),
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="after_preview",
+    )
+    assert committed.events[0].run_sequence == run.last_run_sequence + 1
 
 
 def test_session_store_distributed_capabilities_are_explicit():

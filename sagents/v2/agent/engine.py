@@ -1763,6 +1763,58 @@ class AgentLoopEngine:
         controlled_events = self._control_aware_model_events(stream, run, command)
 
         async def commit_delta_batch(batch_run, drafts):
+            if self.runtime.session_store.capabilities.get("volatile_stream_previews"):
+                started = tuple(
+                    draft for draft in drafts
+                    if draft.type in {"message.started", "reasoning.started"}
+                )
+                previews = tuple(
+                    draft for draft in drafts
+                    if draft.type in {"message.delta", "reasoning.delta"}
+                )
+                if started:
+                    try:
+                        batch_run = await self._commit_running(
+                            batch_run,
+                            context,
+                            started,
+                            expected_states={batch_run.state},
+                        )
+                    except SageV2Error as exc:
+                        if exc.info.category != ErrorCategory.CONFLICT:
+                            raise
+                        latest = await self.runtime.get_run(batch_run.run_id)
+                        if latest.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                            raise
+                        batch_run = await self._commit_running(
+                            latest,
+                            context,
+                            started,
+                            expected_states={latest.state},
+                        )
+                if not previews:
+                    return batch_run
+                try:
+                    return await self.runtime.session_store.publish_stream_preview(
+                        run_id=batch_run.run_id,
+                        expected_revision=batch_run.revision,
+                        drafts=previews,
+                        context=context,
+                    )
+                except SageV2Error as exc:
+                    if exc.info.category != ErrorCategory.CONFLICT:
+                        raise
+                    latest = await self.runtime.get_run(batch_run.run_id)
+                    if latest.state in TERMINAL_RUN_STATES:
+                        return latest
+                    if latest.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                        raise
+                    return await self.runtime.session_store.publish_stream_preview(
+                        run_id=latest.run_id,
+                        expected_revision=latest.revision,
+                        drafts=previews,
+                        context=context,
+                    )
             try:
                 return await self._commit_running(batch_run, context, drafts)
             except SageV2Error as exc:

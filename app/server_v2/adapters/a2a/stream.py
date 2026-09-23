@@ -54,7 +54,7 @@ async def task_stream(
     opened = False
     async for event in events:
         frames = adapter.translate(event).frames
-        replayed = event.run_sequence <= resume_after
+        replayed = event.preview_sequence is None and event.run_sequence <= resume_after
         if replayed:
             for frame in frames:
                 reducer.push(frame)

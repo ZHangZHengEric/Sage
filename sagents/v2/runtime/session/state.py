@@ -46,6 +46,7 @@ from sagents.v2.contracts.events import (
     EventSourceType,
     InteractionEventData,
     ItemEventData,
+    ProtocolEventData,
     RunEventData,
     RuntimeEvent,
     SandboxEventData,
@@ -241,6 +242,11 @@ class SessionStoreCoordinator:
         self._runs: dict[str, _RunRow] = {}
         self._run_events: dict[str, list[RuntimeEvent]] = {}
         self._session_events: dict[str, list[RuntimeEvent]] = {}
+        self._preview_epoch = new_id("preview")
+        self._preview_sequences: dict[str, int] = {}
+        self._stream_previews: dict[str, list[RuntimeEvent]] = {}
+        self._preview_text: dict[str, dict[str, list[str]]] = {}
+        self._preview_suppressed: dict[str, set[str | None]] = {}
         # Fork history is copied at acceptance time, so a child Run does not
         # read mutable parent state while it executes. Deletion still follows
         # Session ownership and cascades from parent to descendants.
@@ -1839,6 +1845,83 @@ class SessionStoreCoordinator:
             self._fanout_locked(run_id, events)
             return result
 
+    async def publish_stream_preview(
+        self,
+        *,
+        run_id: str,
+        expected_revision: int,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+    ) -> RunSnapshot:
+        """Fan out model deltas without advancing the durable Run ledger."""
+
+        if not drafts or any(
+            draft.type not in {"message.delta", "reasoning.delta"}
+            for draft in drafts
+        ):
+            raise ValueError("stream preview accepts only model text deltas")
+        async with self._run_session_read(run_id):
+            row = self._runs[run_id]
+            self._authorize_session_actor_locked(row.session_id, context)
+            if row.revision != expected_revision:
+                raise self._conflict(
+                    "run.revision_conflict",
+                    f"expected run revision {expected_revision}, current {row.revision}",
+                )
+            if row.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                raise self._conflict(
+                    "run.invalid_transition",
+                    f"cannot publish stream preview while {row.state.value}",
+                )
+            sequence = self._preview_sequences.get(run_id, 0)
+            retained = self._stream_previews.setdefault(run_id, [])
+            suppressed = self._preview_suppressed.setdefault(run_id, set())
+            events: list[RuntimeEvent] = []
+            for draft in drafts:
+                item_id = draft.item_id
+                if item_id in suppressed:
+                    continue
+                if len(retained) + len(events) >= 1024:
+                    suppressed.add(item_id)
+                    continue
+                sequence += 1
+                events.append(
+                    RuntimeEvent(
+                        event_id=new_id("event"),
+                        type=draft.type,
+                        occurred_at=self._clock(),
+                        durability=EventDurability.REPLAY_BUFFERED,
+                        session_id=row.session_id,
+                        run_id=run_id,
+                        run_sequence=row.last_run_sequence,
+                        preview_sequence=sequence,
+                        preview_epoch=self._preview_epoch,
+                        turn_id=draft.turn_id,
+                        step_id=draft.step_id,
+                        item_id=draft.item_id,
+                        correlation_id=context.trace.correlation_id,
+                        actor=context.actor,
+                        source=draft.source,
+                        data=draft.data,
+                    )
+                )
+            if not events:
+                return self._run_snapshot(row)
+            self._preview_sequences[run_id] = sequence
+            text = self._preview_text.setdefault(run_id, {})
+            for event in events:
+                if (
+                    event.type == "message.delta"
+                    and event.item_id is not None
+                    and isinstance(event.data, ItemEventData)
+                ):
+                    text.setdefault(event.item_id, []).append(
+                        str(event.data.delta or "")
+                    )
+            retained.extend(events)
+            self._fanout_locked(run_id, tuple(events))
+            return self._run_snapshot(row)
+
     async def get_run(self, run_id: str) -> RunSnapshot:
         async with self._run_session_read(run_id):
             row = self._runs.get(run_id)
@@ -2369,6 +2452,51 @@ class SessionStoreCoordinator:
                     raise ValueError("limit must be positive")
                 events = events[:limit]
             return tuple(events)
+
+    async def read_stream_previews(
+        self, run_id: str, *, after_preview_sequence: int = 0
+    ) -> tuple[RuntimeEvent, ...]:
+        """Read retained process-local model deltas for tree observers."""
+
+        async with self._run_session_read(run_id):
+            row = self._runs[run_id]
+            pending = tuple(
+                event
+                for event in self._stream_previews.get(run_id, ())
+                if (event.preview_sequence or 0) > after_preview_sequence
+            )
+            if not pending:
+                return ()
+            if (
+                (pending[0].preview_sequence or 0) == after_preview_sequence + 1
+                and pending[0].run_sequence == row.last_run_sequence
+            ):
+                return pending
+            assert row.request_context is not None
+            return (
+                RuntimeEvent(
+                    event_id=new_id("event"),
+                    type="stream.gap",
+                    occurred_at=self._clock(),
+                    durability=EventDurability.REPLAY_BUFFERED,
+                    session_id=row.session_id,
+                    run_id=run_id,
+                    run_sequence=row.last_run_sequence,
+                    preview_sequence=self._preview_sequences[run_id],
+                    preview_epoch=self._preview_epoch,
+                    actor=row.request_context.actor,
+                    source=EventSource(source_type=EventSourceType.PROTOCOL),
+                    data=ProtocolEventData(
+                        state="preview_evicted",
+                        from_sequence=after_preview_sequence + 1,
+                        to_sequence=self._preview_sequences[run_id],
+                        partial_items={
+                            item_id: "".join(chunks)
+                            for item_id, chunks in self._preview_text.get(run_id, {}).items()
+                        },
+                    ),
+                ),
+            )
 
     async def read_fork_base_events(self, run_id: str) -> tuple[RuntimeEvent, ...]:
         """Return the immutable parent-history copy captured for a fork Run."""
@@ -2919,11 +3047,11 @@ class SessionStoreCoordinator:
     async def subscribe_events(
         self, cursor: EventCursor
     ) -> AsyncIterator[RuntimeEvent]:
-        """Replay after a cursor, then follow a bounded per-observer queue.
+        """Replay canonical events and retained live previews, then follow.
 
         A slow observer is failed with its last delivered cursor instead of
-        blocking execution or other observers. Reconnection resumes from the
-        canonical Run log.
+        blocking execution or other observers. The canonical Run cursor never
+        advances for previews.
         """
 
         subscriber = _Subscriber(
@@ -2931,14 +3059,98 @@ class SessionStoreCoordinator:
             last_delivered=cursor.run_sequence,
         )
         async with self._run_session_read(cursor.run_id):
+            row = self._runs[cursor.run_id]
             replay = tuple(
                 event
                 for event in self._run_events[cursor.run_id]
                 if event.run_sequence > cursor.run_sequence
             )
+            previews = self._stream_previews.get(cursor.run_id, ())
+            boundary_changed = bool(
+                previews and previews[0].run_sequence != row.last_run_sequence
+            )
+            if (
+                cursor.preview_epoch == self._preview_epoch
+                and cursor.run_sequence == row.last_run_sequence
+                and not boundary_changed
+            ):
+                pending = tuple(
+                    event
+                    for event in previews
+                    if (event.preview_sequence or 0) > cursor.preview_sequence
+                )
+            else:
+                pending = tuple(previews)
+            preview_baseline = (
+                cursor.preview_sequence
+                if cursor.preview_epoch == self._preview_epoch
+                else 0
+            )
+            if pending and (
+                boundary_changed
+                or (pending[0].preview_sequence or 0) > preview_baseline + 1
+            ):
+                assert row.request_context is not None
+                pending = (
+                    RuntimeEvent(
+                        event_id=new_id("event"),
+                        type="stream.gap",
+                        occurred_at=self._clock(),
+                        durability=EventDurability.REPLAY_BUFFERED,
+                        session_id=row.session_id,
+                        run_id=row.run_id,
+                        run_sequence=row.last_run_sequence,
+                        preview_sequence=self._preview_sequences[cursor.run_id],
+                        preview_epoch=self._preview_epoch,
+                        actor=row.request_context.actor,
+                        source=EventSource(source_type=EventSourceType.PROTOCOL),
+                        data=ProtocolEventData(
+                            state="preview_evicted",
+                            from_sequence=preview_baseline + 1,
+                            to_sequence=self._preview_sequences[cursor.run_id],
+                            partial_items={
+                                item_id: "".join(chunks)
+                                for item_id, chunks in self._preview_text.get(cursor.run_id, {}).items()
+                            },
+                        ),
+                    ),
+                )
+            elif (
+                not pending
+                and cursor.preview_epoch is not None
+                and cursor.preview_epoch != self._preview_epoch
+                and cursor.preview_sequence > 0
+            ):
+                assert row.request_context is not None
+                next_preview = max(self._preview_sequences.get(cursor.run_id, 0), 1)
+                self._preview_sequences[cursor.run_id] = next_preview
+                pending = (
+                    RuntimeEvent(
+                        event_id=new_id("event"),
+                        type="stream.gap",
+                        occurred_at=self._clock(),
+                        durability=EventDurability.REPLAY_BUFFERED,
+                        session_id=row.session_id,
+                        run_id=row.run_id,
+                        run_sequence=row.last_run_sequence,
+                        preview_sequence=next_preview,
+                        preview_epoch=self._preview_epoch,
+                        actor=row.request_context.actor,
+                        source=EventSource(source_type=EventSourceType.PROTOCOL),
+                        data=ProtocolEventData(
+                            state="preview_epoch_changed",
+                            from_sequence=cursor.preview_sequence,
+                            to_sequence=next_preview,
+                            partial_items={},
+                        ),
+                    ),
+                )
             self._subscribers.setdefault(cursor.run_id, set()).add(subscriber)
         try:
             for event in replay:
+                subscriber.last_delivered = event.run_sequence
+                yield event
+            for event in pending:
                 subscriber.last_delivered = event.run_sequence
                 yield event
             while True:
@@ -2975,6 +3187,10 @@ class SessionStoreCoordinator:
     async def load_state(self, payload: dict[str, Any]) -> None:
         async with self._lock:
             self._load_state_locked(payload)
+            self._stream_previews.clear()
+            self._preview_sequences.clear()
+            self._preview_text.clear()
+            self._preview_epoch = new_id("preview")
 
     def _dump_state_locked(self) -> dict[str, Any]:
         """Serialize the complete reference Session state while the store lock is held."""
@@ -3425,6 +3641,21 @@ class SessionStoreCoordinator:
 
         self._sessions = sessions
         self._runs = runs
+        self._stream_previews = {
+            run_id: previews
+            for run_id, previews in self._stream_previews.items()
+            if run_id in runs and runs[run_id].state not in TERMINAL_RUN_STATES
+        }
+        self._preview_sequences = {
+            run_id: sequence
+            for run_id, sequence in self._preview_sequences.items()
+            if run_id in runs and runs[run_id].state not in TERMINAL_RUN_STATES
+        }
+        self._preview_text = {
+            run_id: text
+            for run_id, text in self._preview_text.items()
+            if run_id in runs and runs[run_id].state not in TERMINAL_RUN_STATES
+        }
         self._run_events = run_events
         self._fork_base_events = {
             run_id: fork_base_events.get(run_id, ()) for run_id in runs
@@ -3885,6 +4116,27 @@ class SessionStoreCoordinator:
                     )
                     subscriber.closed = True
                     break
+        completed_items = {
+            event.item_id
+            for event in events
+            if event.type
+            in {"message.completed", "reasoning.completed", "item.completed"}
+            and event.item_id is not None
+        }
+        if completed_items and run_id in self._stream_previews:
+            self._stream_previews[run_id] = [
+                event for event in self._stream_previews[run_id]
+                if event.item_id not in completed_items
+            ]
+            for item_id in completed_items:
+                self._preview_text.get(run_id, {}).pop(item_id, None)
+        if any(
+            event.type in {"run.completed", "run.failed", "run.cancelled"}
+            for event in events
+        ):
+            self._stream_previews.pop(run_id, None)
+            self._preview_sequences.pop(run_id, None)
+            self._preview_text.pop(run_id, None)
 
     @staticmethod
     def _handle(row: _RunRow) -> RunHandle:

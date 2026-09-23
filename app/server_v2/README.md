@@ -15,7 +15,7 @@ web/            前端
 
 新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例。AG-UI 与 A2A 共用 `application/admission.py` 受理 Run，Session 读取在 `application/sessions.py`，对话与包任务的技能、MCP、A2A 和模型租约在 `application/loop.py`。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
-生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放直接读取 Sage Session 的 canonical RuntimeEvent。
+生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
 单进程并发可用 `SAGE_SERVER_MAX_CONCURRENT_RUNS`（默认 8）、`SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER`（默认 2）和 `SAGE_SERVER_MAX_PENDING_RUNS`（默认 1024）配置。参数必须为正数，分别约束总执行、每用户执行及等待队列，见[单机并发说明](../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)。
 

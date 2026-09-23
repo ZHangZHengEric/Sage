@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sagents.v2.contracts.events import RuntimeEvent
@@ -45,17 +45,39 @@ def run_error_event(message: str, *, code: str | None = None) -> dict[str, Any]:
 
 @dataclass(frozen=True, order=True, slots=True)
 class CanonicalSseCursor:
-    """Position of one AG-UI frame inside one canonical RuntimeEvent."""
+    """Position of one AG-UI frame in the canonical or live preview stream."""
 
     run_sequence: int = 0
     frame_index: int = -1
+    preview_sequence: int = 0
+    preview_epoch: str | None = field(default=None, compare=False)
 
     def encode(self) -> str:
+        if self.preview_sequence and self.preview_epoch:
+            return (
+                f"v2:{self.run_sequence}:{self.preview_sequence}:"
+                f"{self.frame_index}:{self.preview_epoch}"
+            )
         return f"v1:{self.run_sequence}:{self.frame_index}"
 
     @classmethod
     def parse(cls, value: str | None) -> "CanonicalSseCursor":
         parts = (value or "").strip().split(":")
+        if len(parts) == 5 and parts[0] == "v2":
+            try:
+                run_sequence = int(parts[1])
+                preview_sequence = int(parts[2])
+                frame_index = int(parts[3])
+            except ValueError:
+                return cls()
+            if (
+                run_sequence < 1
+                or preview_sequence < 1
+                or frame_index < 0
+                or not parts[4]
+            ):
+                return cls()
+            return cls(run_sequence, frame_index, preview_sequence, parts[4])
         if len(parts) != 3 or parts[0] != "v1":
             return cls()
         try:
@@ -67,6 +89,20 @@ class CanonicalSseCursor:
             return cls()
         return cls(run_sequence=run_sequence, frame_index=frame_index)
 
+    def follows(self, cursor: "CanonicalSseCursor") -> bool:
+        if self.run_sequence != cursor.run_sequence:
+            return self.run_sequence > cursor.run_sequence
+        if (
+            self.preview_sequence
+            and cursor.preview_sequence
+            and self.preview_epoch != cursor.preview_epoch
+        ):
+            return True
+        return (self.preview_sequence, self.frame_index) > (
+            cursor.preview_sequence,
+            cursor.frame_index,
+        )
+
 
 async def canonical_agui_sse(
     events: AsyncIterator[RuntimeEvent],
@@ -77,7 +113,7 @@ async def canonical_agui_sse(
     restarted_after: int = 0,
     heartbeat_seconds: float = 20.0,
 ) -> AsyncIterator[str]:
-    """Project one canonical Run log into a resumable AG-UI SSE stream.
+    """Project canonical Run events and live previews into an AG-UI SSE stream.
 
     Replaying from the beginning is intentional: the AG-UI adapter has small
     item-lifecycle state, so rebuilding it makes a cursor inside a multi-frame
@@ -119,8 +155,13 @@ async def canonical_agui_sse(
                     # AG-UI requires its run lifecycle frame first. Native
                     # accepted/queued/input facts remain in the canonical log.
                     continue
-            position = CanonicalSseCursor(event.run_sequence, frame_index)
-            if position <= cursor:
+            position = CanonicalSseCursor(
+                event.run_sequence,
+                frame_index,
+                event.preview_sequence or 0,
+                event.preview_epoch,
+            )
+            if not position.follows(cursor):
                 continue
             yield format_sse(position.encode(), payload)
         if event.type in {

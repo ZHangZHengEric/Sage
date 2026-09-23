@@ -114,14 +114,26 @@ class _EventTracker:
         self.renderer = renderer
         self.seen: list[str] = []
         self.run_sequence = start_sequence
+        self.preview_sequence = 0
+        self.preview_epoch: str | None = None
 
     def render(self, event) -> None:
         self.seen.append(event.type)
         self.run_sequence = max(self.run_sequence, event.run_sequence)
+        if event.preview_sequence is not None:
+            if event.preview_epoch != self.preview_epoch:
+                self.preview_epoch = event.preview_epoch
+                self.preview_sequence = 0
+            self.preview_sequence = max(self.preview_sequence, event.preview_sequence)
         self.renderer.handle(event)
 
     def cursor(self, run_id: str) -> EventCursor:
-        return EventCursor(run_id=run_id, run_sequence=self.run_sequence)
+        return EventCursor(
+            run_id=run_id,
+            run_sequence=self.run_sequence,
+            preview_sequence=self.preview_sequence,
+            preview_epoch=self.preview_epoch,
+        )
 
 
 async def run_task(
