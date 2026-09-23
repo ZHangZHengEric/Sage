@@ -539,7 +539,10 @@ class LocalResourceBoundary:
                 "/proc",
                 "--dev",
                 "/dev",
-                "--ro-bind",
+                # git and shells open /dev/null O_RDWR. --remount-ro below is
+                # not recursive, so this mount stays writable while the rest
+                # of the private /dev tmpfs does not.
+                "--bind",
                 "/dev/null",
                 "/dev/null",
                 "--bind-fd" if writable else "--ro-bind-fd",

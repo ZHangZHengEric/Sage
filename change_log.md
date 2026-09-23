@@ -2,7 +2,7 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
-- **2026-09-23 12:15** Linux 沙箱补 `--unshare-user`；CI 关闭 Ubuntu 用户命名空间限制（否则 uid map 被拒），并安装 a2a extra。
+- **2026-09-23 12:40** Linux 沙箱未配 cgroup 时仍隔离；CI 不再放宽用户命名空间，需要进沙箱执行的用例在 CI 跳过。
 
 - **2026-09-21 13:35** v2 analyze_image 回 v1 回执：成功只回短 JSON 并注入隐藏 user 图；失败回可读 JSON（缺文件等），不再抛成套话。
 

@@ -30,6 +30,14 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 
 
+# GitHub-hosted Ubuntu denies the user namespace bubblewrap needs, and its
+# Python lives outside the system directories the sandbox mounts. These checks
+# still run on a host that allows user namespaces.
+_SKIP_SANDBOX_PROCESS_IN_CI = pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="CI does not run Linux sandbox process checks",
+)
+
 CONTEXT = RequestContext(
     actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
 )
@@ -315,6 +323,7 @@ async def test_local_workspace_enforces_configured_subdirectory_roots(tmp_path: 
 
 
 @pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_local_process_is_argv_only_allowlisted_and_output_bounded(
     tmp_path: Path,
 ):
@@ -341,6 +350,7 @@ async def test_local_process_is_argv_only_allowlisted_and_output_bounded(
 @pytest.mark.asyncio
 @pytest.mark.timeout(8)
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_local_process_cancellation_reaps_descendants_and_releases_slot(
     tmp_path: Path,
 ):
@@ -432,6 +442,7 @@ async def run_read_only(tmp_path: Path, argv: tuple[str, ...], **provision_kwarg
 
 
 @pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_read_only_process_runs_validated_pipelines_inside_os_sandbox(
     tmp_path: Path,
 ):
@@ -495,6 +506,7 @@ async def test_read_only_process_honours_the_executable_allowlist(tmp_path: Path
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 @pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path):
     """仓库配置里的 fsmonitor / external diff / hooks 都不会被只读 git 执行。"""
 
@@ -587,6 +599,7 @@ async def test_read_only_process_rejects_mutating_shell_commands(
 
 
 @pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_local_process_binds_grant_to_argv_and_does_not_inherit_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -795,6 +808,7 @@ async def test_local_workspace_without_protected_paths_keeps_git_writable(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop", ["timeout", "cancel"])
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, stop):
     import signal
     import sys
@@ -865,6 +879,7 @@ async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, 
 
 
 @pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
     import sys
 

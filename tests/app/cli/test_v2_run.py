@@ -5,6 +5,7 @@ import asyncio
 import errno
 import io
 import json
+import os
 import sys
 from pathlib import Path
 import time
@@ -1698,6 +1699,10 @@ async def test_binding_forwards_the_request_lifecycle(tmp_path):
         await coordinated.close()
 
 
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="CI does not run Linux sandbox process checks",
+)
 async def test_shell_tool_runs_inside_the_run_sandbox(tmp_path):
     model = shell_model()
     _, _, agent, command = await make_shell_agent(tmp_path, model)
@@ -1742,6 +1747,10 @@ async def test_read_only_sandbox_rejects_mutating_shell_commands(tmp_path):
     assert "kind_unsupported" not in err.getvalue()
 
 
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="CI does not run Linux sandbox process checks",
+)
 async def test_read_only_sandbox_runs_inspection_commands_without_a_shell(tmp_path):
     """plan 模式（只读沙箱）可以跑 read_only_shell 语法的检查命令：各段直接启动、不经 bash。"""
 
@@ -2647,6 +2656,10 @@ class InterruptOnToolStart(PlainRenderer):
             self.interrupt.set()
 
 
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="CI does not run Linux sandbox process checks",
+)
 async def test_interrupt_during_a_shell_command_cancels_promptly_and_kills_the_job(
     tmp_path,
 ):
