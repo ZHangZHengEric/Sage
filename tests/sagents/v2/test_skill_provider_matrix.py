@@ -98,6 +98,38 @@ async def test_discovery_and_context_metadata_never_copy_skill_to_workspace():
 
 
 @pytest.mark.asyncio
+async def test_available_skills_catalog_keeps_full_description():
+    long_description = (
+        "Built-in default production strategy when no selected personalized "
+        "Skill covers the full video. Use for a confirmed total duration "
+        "longer than 30 seconds."
+    )
+    assert len(long_description) > 50
+    provider = InMemorySkillProvider(
+        (
+            SkillBundle(
+                descriptor=SkillDescriptor(
+                    name="long-video",
+                    description=long_description,
+                    source_id="test",
+                ),
+                files={"SKILL.md": b"# Long"},
+                content_hash="sha256:" + "a" * 64,
+            ),
+        )
+    )
+
+    segments = await AvailableSkillsContextProvider(provider).segments(
+        command(), run_id="run_1"
+    )
+
+    assert f"<skill_description>{long_description}</skill_description>" in (
+        segments[0].content
+    )
+    assert "..." not in segments[0].content
+
+
+@pytest.mark.asyncio
 async def test_only_explicit_load_fetches_and_copies_the_selected_skill_once():
     provider, workspace, _, loader = loader_for(
         bundle("alpha", "# Alpha"), bundle("beta", "# Beta")
