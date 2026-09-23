@@ -15,7 +15,7 @@ from app.server_v2.domain.catalog import (
     empty_catalog,
     upsert_mcp,
 )
-from app.server_v2.services.mcp import mcp_server_configs
+from app.server_v2.infrastructure.mcp import mcp_server_configs
 
 
 def _payload(**overrides) -> dict[str, object]:

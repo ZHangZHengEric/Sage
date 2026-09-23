@@ -7,21 +7,14 @@ from app.server_v2.domain.catalog import (
     apply_upsert,
     empty_catalog,
 )
-from app.server_v2.repositories.api_keys import MemoryApiKeyStore  # noqa: F401
-from app.server_v2.repositories.skills import MemorySkillStore
+from app.server_v2.infrastructure.persistence.api_keys import MemoryApiKeyStore  # noqa: F401
+from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
 from app.server_v2.domain.threads import (
     ThreadRecord,
     apply_thread_upsert,
     require_owned_thread,
 )
-from app.server_v2.domain.users import (
-    Role,
-    UserRecord,
-    build_user_record,
-    reject_duplicate_username,
-    reject_second_admin,
-    require_valid_password,
-)
+from app.server_v2.domain.users import UserRecord
 
 
 class MemoryUserStore:
@@ -51,33 +44,8 @@ class MemoryUserStore:
             None,
         )
 
-    async def create(
-        self, username: str, password: str, *, role: Role = "user"
-    ) -> UserRecord:
-        record = build_user_record(username, password, role=role)
-        reject_duplicate_username(await self.get_by_username(record.username))
-        reject_second_admin(role, await self.admin())
-        self._users[record.user_id] = record
-        return record
-
-    async def ensure_admin(self, username: str, password: str) -> UserRecord:
-        existing = await self.admin()
-        if existing is not None:
-            return existing
-        named = await self.get_by_username(username)
-        if named is not None:
-            upgraded = UserRecord(
-                user_id=named.user_id,
-                username=named.username,
-                password_hash=named.password_hash,
-                role="admin",
-            )
-            self._users[named.user_id] = upgraded
-            return upgraded
-        return await self.create(username, password, role="admin")
-
-    async def authenticate(self, username: str, password: str) -> UserRecord:
-        return require_valid_password(await self.get_by_username(username), password)
+    async def save(self, user: UserRecord) -> None:
+        self._users[user.user_id] = user
 
 
 class MemoryCatalogStore:

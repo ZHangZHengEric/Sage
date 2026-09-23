@@ -12,9 +12,9 @@ from sagents.v2.model.contracts import (
 )
 from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 
-from app.server_v2.app import create_app
+from app.server_v2.bootstrap.app import create_app
 from app.server_v2.core.settings import ServerV2Settings
-from app.server_v2.services.runtime import ServerV2Service
+from app.server_v2.bootstrap.host import ServerV2Service
 from tests.app.server_v2.fakes import (
     MemoryCatalogStore,
     MemorySkillStore,

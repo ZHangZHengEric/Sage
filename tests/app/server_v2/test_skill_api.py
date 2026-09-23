@@ -3,9 +3,9 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from app.server_v2.app import create_app
+from app.server_v2.bootstrap.app import create_app
 from app.server_v2.core.errors import ServerV2Error
-from app.server_v2.domain.skills import inspect_skill_zip
+from app.server_v2.infrastructure.skill_files import inspect_skill_zip
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
 

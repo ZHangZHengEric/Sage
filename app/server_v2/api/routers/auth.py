@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Response
 
-from app.server_v2.api.deps import CurrentUser, ServiceDep
-from app.server_v2.schemas import (
+from app.server_v2.api.deps import CurrentUser, IdentityDep, ServiceDep
+from app.server_v2.api.schemas import (
     AUTH_ERRORS,
     VALIDATION_ERRORS,
     ApiResponse,
@@ -25,8 +25,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
         **VALIDATION_ERRORS,
     },
 )
-async def register(body: RegisterBody, service: ServiceDep):
-    user = await service.users.create(body.username, body.password)
+async def register(body: RegisterBody, identity: IdentityDep):
+    user = await identity.register(body.username, body.password)
     return success(user.public_dict())
 
 
@@ -38,8 +38,8 @@ async def register(body: RegisterBody, service: ServiceDep):
         **VALIDATION_ERRORS,
     },
 )
-async def login(body: LoginBody, service: ServiceDep, response: Response):
-    user = await service.users.authenticate(body.username, body.password)
+async def login(body: LoginBody, identity: IdentityDep, service: ServiceDep, response: Response):
+    user = await identity.authenticate(body.username, body.password)
     token, expires_in = create_access_token(
         user_id=user.user_id,
         username=user.username,

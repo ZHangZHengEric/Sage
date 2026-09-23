@@ -9,11 +9,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from google.protobuf.json_format import MessageToDict
 
-from app.server_v2.a2a.card import RPC_PATH
-from app.server_v2.a2a.context import REQUEST_ATTR, SageCallContextBuilder
-from app.server_v2.a2a.handler import SageRequestHandler
-from app.server_v2.a2a.service import A2AService
-from app.server_v2.api.deps import ServiceDep
+from app.server_v2.adapters.a2a.card import RPC_PATH
+from app.server_v2.adapters.a2a.context import REQUEST_ATTR, SageCallContextBuilder
+from app.server_v2.adapters.a2a.handler import SageRequestHandler
+from app.server_v2.application.a2a import A2AService
+from app.server_v2.api.deps import CredentialDep, ServiceDep
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.api_keys import (
     SCOPE_INVOKE,
@@ -47,8 +47,8 @@ _METHOD_SCOPES = {
 
 async def a2a_key(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    service: ServiceDep,
+    bearer: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    keys: CredentialDep,
 ) -> ApiKeyRecord:
     """Authenticate the caller and pin the credential to this request.
 
@@ -57,10 +57,10 @@ async def a2a_key(
     work inside ``SageCallContextBuilder``.
     """
 
-    token = (credentials.credentials.strip() if credentials is not None else "")
+    token = (bearer.credentials.strip() if bearer is not None else "")
     if not token:
         raise ServerV2Error("unauthenticated", "api key required")
-    key = await service.api_keys.authenticate(token)
+    key = await keys.authenticate(token)
     setattr(request.state, REQUEST_ATTR, key)
     return key
 

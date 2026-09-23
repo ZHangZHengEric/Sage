@@ -143,7 +143,7 @@ def test_flow_feedback_and_human_only_approval(client, kind):
 
 def test_authorized_source_plugin_runs_through_server(service):
     from fastapi.testclient import TestClient
-    from app.server_v2.app import create_app
+    from app.server_v2.bootstrap.app import create_app
     from tests.sagents.v2.test_agent_management_matrix import source_plugin_bundle
 
     calls = []
@@ -218,7 +218,7 @@ def test_package_grants_fail_before_saving(client, change):
 
 def test_agent_creates_agent_through_management_tool(service):
     from fastapi.testclient import TestClient
-    from app.server_v2.app import create_app
+    from app.server_v2.bootstrap.app import create_app
     from sagents.v2.testing.plugins import ScriptedModelProvider
     from tests.sagents.v2.test_agent_management_matrix import tool_step
     from tests.app.server_v2.conftest import scripted_hello
@@ -265,7 +265,7 @@ def test_spa_cannot_serve_outside_dist(service, tmp_path, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
 
-    module = importlib.import_module("app.server_v2.app")
+    module = importlib.import_module("app.server_v2.bootstrap.app")
     root = tmp_path / "web"
     (root / "assets").mkdir(parents=True)
     (root / "index.html").write_text("studio")
@@ -417,7 +417,7 @@ def test_flow_executes_member_agent_with_host_limits(client):
 
 def test_source_tool_plugin_uses_standard_registration(service):
     from fastapi.testclient import TestClient
-    from app.server_v2.app import create_app
+    from app.server_v2.bootstrap.app import create_app
     from sagents.v2.testing.plugins import ScriptedModelProvider
     from tests.sagents.v2.test_agent_management_matrix import tool_step
     from tests.app.server_v2.conftest import scripted_hello
@@ -537,8 +537,8 @@ def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
     from fastapi.testclient import TestClient
     from sagents.v2.testing.plugins import ScriptedModelProvider
 
-    from app.server_v2.app import create_app
-    from app.server_v2.services.a2a_client import A2APluginCache
+    from app.server_v2.bootstrap.app import create_app
+    from app.server_v2.infrastructure.a2a_client import A2APluginCache
     from tests.app.server_v2.conftest import make_test_service
     from tests.app.server_v2.test_a2a_resume import _step
     from tests.sagents.v2.test_a2a_tool_bridge_matrix import FakePeer

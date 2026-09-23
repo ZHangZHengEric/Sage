@@ -3,19 +3,17 @@
 多用户 AG-UI 宿主。代码直接在 `app/server_v2/`，前端在 `web/`。
 
 ```text
-api/            HTTP 路由与鉴权
-schemas/        OpenAPI / 请求响应 DTO
-services/       跨聚合用例（Sage runtime + AG-UI）
-domain/         领域记录与规则，不碰 SQL
-repositories/   MySQL 仓储（实现 domain 端口）
-db/             表元数据
-storage/        工作区 / session 目录
-agui/           AG-UI 映射与回放
-a2a/            A2A 协议映射（Card / Task / JSON-RPC handler）
-core/           基础设施
+api/            HTTP 路由、鉴权、请求响应。只调用例
+application/    用例：identity、catalog、skills、conversations、packages、a2a
+domain/         记录和纯规则，不读库
+infrastructure/ MySQL 客户端与表、仓储、工作区、模型池、MCP/A2A 客户端
+adapters/       agui/、a2a/ 协议翻译
+bootstrap/      进程装配（create_app、ServerV2Service）
+core/           配置、错误、JWT、HTTP、观测
+web/            前端
 ```
 
-新业务按 `domain/<name>.py` + `repositories/<name>.py` 加；有跨表/跨系统编排再加 `services/<name>.py`。
+新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例，不直接拿仓储，也不在依赖里新建服务。开跑、续跑、取消在 `application/runs.py`，AG-UI 对话在 `application/conversations.py`。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放直接读取 Sage Session 的 canonical RuntimeEvent。
 

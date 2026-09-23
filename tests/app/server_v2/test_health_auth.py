@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.server_v2.app import create_app
+from app.server_v2.bootstrap.app import create_app
 from app.server_v2.core.settings import DEFAULT_JWT_SECRET, ServerV2Settings
 from app.server_v2.main import ENV_FILE, load_env_file, main
-from app.server_v2.repositories import DatabaseUserStore
+from app.server_v2.infrastructure.persistence import DatabaseUserStore
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
 
@@ -62,7 +62,7 @@ def test_main_preserves_server_logging_configuration(monkeypatch, tmp_path: Path
     captured = {}
     monkeypatch.setattr("app.server_v2.main.load_env_file", lambda: None)
     monkeypatch.setattr("app.server_v2.main._pick_port", lambda host, port: port)
-    monkeypatch.setattr("app.server_v2.app.create_app", lambda settings: object())
+    monkeypatch.setattr("app.server_v2.bootstrap.app.create_app", lambda settings: object())
 
     def fake_run(application, **kwargs):
         captured.update(kwargs)

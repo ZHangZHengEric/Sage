@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.server_v2.domain.catalog import McpServerRecord
-from app.server_v2.services.mcp import McpPluginCache
+from app.server_v2.infrastructure.mcp import McpPluginCache
 
 
 def _server(name: str, *, url: str = "", disabled: bool = False):

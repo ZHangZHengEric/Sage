@@ -361,7 +361,7 @@ def test_the_card_advertises_streaming_once_it_is_implemented(a2a_client):  # no
 
 
 def _slow_app(tmp_path):
-    from app.server_v2.app import create_app
+    from app.server_v2.bootstrap.app import create_app
     from tests.app.server_v2.conftest import make_test_service
 
     return create_app(

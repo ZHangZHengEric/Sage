@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from sagents.v2.runtime.observability import StdoutLogSink
 
-from app.server_v2.app import create_app
-from app.server_v2.services.package import server_v2_manifest
+from app.server_v2.bootstrap.app import create_app
+from app.server_v2.application.manifest import server_v2_manifest
 from tests.app.server_v2.conftest import make_settings, make_test_service
 
 
