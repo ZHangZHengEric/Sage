@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import uuid
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,7 +26,6 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session.plugins import mysql as mysql_plugin
 from sagents.v2.runtime.session.plugins.mysql import (
     MysqlSessionStore,
-    StoreInUseError,
     _MysqlSessionState,
     parse_mysql_dsn,
 )
@@ -85,6 +87,83 @@ def test_mysql_store_requires_explicit_dsn():
         MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="Bad-Prefix")
 
 
+@pytest.mark.asyncio
+async def test_mysql_unchanged_indexes_do_not_write():
+    state = _MysqlSessionState("mysql://root@127.0.0.1/sage")
+    compact = {
+        "runs": [{"run_id": "run_1"}],
+        "start_idempotency": [
+            {
+                "tenant_id": "tenant",
+                "principal_type": "user",
+                "principal_id": "person",
+                "idempotency_key": "start",
+                "run_id": "run_1",
+                "request_digest": "digest",
+            }
+        ],
+    }
+    state._persisted_locations["session"] = state._location_rows("session", compact)
+    state._persisted_start_keys["session"] = state._start_key_rows("session", compact)
+    cursor = AsyncMock()
+    await state._sync_locations(cursor, "session", state._location_rows("session", compact))
+    await state._sync_start_idempotency(
+        cursor, "session", state._start_key_rows("session", compact)
+    )
+    cursor.execute.assert_not_awaited()
+    cursor.executemany.assert_not_awaited()
+
+    changed = {**compact, "runs": [{"run_id": "run_2"}], "start_idempotency": []}
+    mutation = {
+        "deletes": {
+            "runs": [["run_1"]],
+            "start_idempotency": [["tenant", "user", "person", "start"]],
+        },
+        "upserts": {"runs": changed["runs"]},
+    }
+    await state._sync_locations(
+        cursor, "session", state._location_rows_after_mutation("session", mutation)
+    )
+    await state._sync_start_idempotency(
+        cursor, "session", state._start_rows_after_mutation("session", mutation)
+    )
+    assert cursor.executemany.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_mysql_writer_connections_can_overlap_across_sessions():
+    state = _MysqlSessionState("mysql://root@127.0.0.1/sage")
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+
+    class Pool:
+        @asynccontextmanager
+        async def acquire(self):
+            nonlocal active
+            active += 1
+            if active == 2:
+                ready.set()
+            try:
+                yield object()
+            finally:
+                active -= 1
+
+    state._pool = Pool()
+
+    async def write():
+        async with state._writer_connection():
+            await release.wait()
+
+    tasks = [asyncio.create_task(write()) for _ in range(2)]
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        assert active == 2
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+
+
 def test_parse_mysql_dsn_requires_database():
     parsed = parse_mysql_dsn("mysql://user:p%40ss@db.example:3307/sage_app")
     assert parsed["host"] == "db.example"
@@ -97,18 +176,10 @@ def test_parse_mysql_dsn_requires_database():
 
 
 @pytest.mark.asyncio
-async def test_mysql_store_fails_closed_after_writer_lock_connection_loss():
-    class ClosedConnection:
-        closed = True
-
+async def test_mysql_ready_pool_needs_no_dedicated_connection():
     state = _MysqlSessionState("mysql://root@127.0.0.1/sage")
     state._pool = object()
-    state._lock_conn = ClosedConnection()
-
-    with pytest.raises(SageV2Error) as exc_info:
-        await state._ensure_ready()
-
-    assert exc_info.value.info.code == "session_store.writer_lock_lost"
+    await state._ensure_ready()
 
 
 class _FakeCursor:
@@ -158,7 +229,7 @@ async def test_mysql_plugin_start_opens_schema_before_first_write():
 async def test_bootstrap_skips_existing_tables():
     state = _MysqlSessionState("mysql://root@127.0.0.1/sage", table_prefix="")
     connection = _FakeConnection(
-        {"sessions", "run_events", "locations", "start_idempotency", "derived_state"}
+        {"sessions", "session_mutations", "run_events", "locations", "start_idempotency", "derived_state"}
     )
     created = await state._bootstrap(connection)
     assert created == ()
@@ -176,6 +247,7 @@ async def test_bootstrap_creates_missing_tables_only():
     connection = _FakeConnection({"sessions"})
     created = await state._bootstrap(connection)
     assert created == (
+        "session_mutations",
         "run_events",
         "locations",
         "start_idempotency",
@@ -186,8 +258,8 @@ async def test_bootstrap_creates_missing_tables_only():
         for statement in connection.cursor_obj.statements
         if "CREATE TABLE" in statement
     ]
-    assert len(creates) == 4
-    assert all("IF NOT EXISTS" not in statement for statement in creates)
+    assert len(creates) == 5
+    assert all("IF NOT EXISTS" in statement for statement in creates)
 
 
 def test_mysql_upsert_uses_row_alias_instead_of_values_function():
@@ -203,7 +275,6 @@ def test_mysql_capabilities_claim_single_process_without_connecting():
     assert store.capabilities["multi_process_writes"] is False
     assert store.capabilities["cross_process_subscribe"] is False
     assert store.capabilities["global_session_index"] is False
-    assert store.lock_name.startswith("sage_sess_mysql_")
     assert not hasattr(store, "list_sessions")
 
 
@@ -309,14 +380,13 @@ async def test_run_events_are_appended_across_commits(mysql_dsn):
 
 
 @pytest.mark.asyncio
-async def test_advisory_lock_rejects_a_second_writer(mysql_dsn):
+async def test_two_store_instances_can_open_the_same_prefix(mysql_dsn):
     prefix = _prefix()
     first = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
     await first.create_run(command(), CONTEXT)
     second = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    with pytest.raises(StoreInUseError) as exc_info:
-        await second.create_run(command("other"), CONTEXT)
-    assert exc_info.value.info.code == "session_store.in_use"
+    other = await second.create_run(command("other"), CONTEXT)
+    assert other.handle.session_id != (await first.create_run(command(), CONTEXT)).handle.session_id
     await first.close()
     await second.close()
 
