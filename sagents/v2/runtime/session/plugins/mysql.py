@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import Any
@@ -172,6 +173,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             "global_session_index": False,
             "derived_state_authoritative": False,
             "cross_process_subscribe": False,
+            "volatile_stream_previews": True,
         }
 
     def composition_identity(self) -> dict[str, str]:
@@ -416,8 +418,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
             session_row["revision_sequences"] = {
                 str(new_revision): int(session_row["last_sequence"])
             }
+        encoded_compact = _json(compact) if should_snapshot else None
+        encoded_mutation = _json(mutation) if not should_snapshot else None
         next_run_sequences: dict[str, int] = {}
         failure: Exception | None = None
+        started_at = time.perf_counter()
         async with self._writer_connection() as connection:
             try:
                 async with connection.cursor() as cursor:
@@ -437,7 +442,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                                 int(session_row["last_sequence"]),
                                 _datetime(session_row["created_at"]),
                                 _datetime(session_row["updated_at"]),
-                                _json(compact),
+                                encoded_compact,
                             ),
                         )
                     else:
@@ -455,7 +460,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                                     new_revision,
                                     int(session_row["last_sequence"]),
                                     _datetime(session_row["updated_at"]),
-                                    _json(compact),
+                                    encoded_compact,
                                     session_id,
                                     expected_revision,
                                 ),
@@ -497,7 +502,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                                 (session_id, revision, mutation)
                             VALUES (%s, %s, CAST(%s AS JSON))
                             """,
-                            (session_id, new_revision, _json(mutation)),
+                            (session_id, new_revision, encoded_mutation),
                         )
                     await self._sync_locations(cursor, session_id, location_rows)
                     await self._sync_start_idempotency(cursor, session_id, start_rows)
@@ -519,6 +524,16 @@ class _MysqlSessionState(SessionStoreCoordinator):
             start_rows,
             0 if should_snapshot else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug(
+                "mysql session commit session=%s revision=%s snapshot=%s payload_bytes=%s event_count=%s duration_ms=%.2f",
+                session_id,
+                new_revision,
+                should_snapshot,
+                len((encoded_compact or encoded_mutation or "").encode("utf-8")),
+                sum(len(rows) for rows in events.values()),
+                (time.perf_counter() - started_at) * 1000,
+            )
 
     async def _persist_events(
         self, cursor, session_id, events, *, event_totals=None
@@ -841,6 +856,14 @@ class _MysqlSessionState(SessionStoreCoordinator):
     async def read_events(self, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_events(run_id, **kwargs)
+
+    async def read_stream_previews(self, run_id, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().read_stream_previews(run_id, **kwargs)
+
+    async def publish_stream_preview(self, *, run_id, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().publish_stream_preview(run_id=run_id, **kwargs)
 
     async def read_fork_base_events(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)

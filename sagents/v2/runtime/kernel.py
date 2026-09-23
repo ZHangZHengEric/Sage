@@ -108,6 +108,7 @@ class HarnessRuntime:
 
         root = await self.session_store.get_session(session_id)
         positions = dict(cursors or {})
+        preview_positions: dict[str, int] = {}
         announced_runs: set[str] = set()
         while True:
             descendants = await self.session_store.list_descendant_sessions(
@@ -146,6 +147,18 @@ class HarnessRuntime:
                 )
                 for event in events:
                     positions[run.run_id] = event.run_sequence
+                    yield RuntimeSessionTreeEvent(
+                        kind="session.event",
+                        session=session,
+                        run=run,
+                        start_command=command,
+                        event=event,
+                    )
+                for event in await self.session_store.read_stream_previews(
+                    run.run_id,
+                    after_preview_sequence=preview_positions.get(run.run_id, 0),
+                ):
+                    preview_positions[run.run_id] = event.preview_sequence or 0
                     yield RuntimeSessionTreeEvent(
                         kind="session.event",
                         session=session,

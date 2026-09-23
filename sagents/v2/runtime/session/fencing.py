@@ -59,6 +59,13 @@ class LeaseFencedSessionStore:
             lambda: self.session_store.commit_run(*args, **kwargs),
         )
 
+    async def publish_stream_preview(self, *args, **kwargs):
+        run_id = kwargs.get("run_id") or (args[0] if args else None)
+        return await self._execute_fenced(
+            run_id,
+            lambda: self.session_store.publish_stream_preview(*args, **kwargs),
+        )
+
     async def commit_execution_resource(self, *args, **kwargs):
         record = kwargs.get("record") or (args[0] if args else None)
         run_id = getattr(record, "run_id", None)

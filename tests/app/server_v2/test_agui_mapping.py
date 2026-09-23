@@ -7,12 +7,28 @@ from ag_ui.core import RunAgentInput
 
 from app.server_v2.adapters.agui.mapping import to_start_run
 from app.server_v2.adapters.agui.sse import (
+    CanonicalSseCursor,
     ClientOwnedUserTextFilter,
     canonical_agui_sse,
     frame_to_agui_event,
 )
 from app.server_v2.core.errors import ServerV2Error
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
+
+
+def test_agui_preview_cursor_stays_after_canonical_boundary():
+    canonical = CanonicalSseCursor(run_sequence=7, frame_index=1)
+    preview = CanonicalSseCursor(
+        run_sequence=7,
+        frame_index=0,
+        preview_sequence=3,
+        preview_epoch="preview_one",
+    )
+    assert preview.follows(canonical)
+    parsed = CanonicalSseCursor.parse(preview.encode())
+    assert parsed == preview
+    assert parsed.preview_epoch == "preview_one"
+    assert CanonicalSseCursor(run_sequence=8, frame_index=0).follows(preview)
 
 
 def _input(**overrides) -> RunAgentInput:

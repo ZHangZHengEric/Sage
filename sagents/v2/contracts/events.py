@@ -203,6 +203,7 @@ class ProtocolEventData(StrictModel):
     from_sequence: int | None = Field(default=None, ge=0)
     to_sequence: int | None = Field(default=None, ge=0)
     snapshot_ref: Identifier | None = None
+    partial_items: dict[str, str] | None = None
     capabilities: dict[str, Any] | None = None
 
 
@@ -496,9 +497,9 @@ EVENT_CATALOG.update(
 class RuntimeEvent(StrictModel):
     """Canonical, transport-neutral fact emitted by the v2 runtime.
 
-    Sequence numbers are assigned only by SessionStore during commit.
-    Providers and downstream adapters preserve these identities and must not
-    invent a second ordering.
+    Canonical sequence numbers are assigned by SessionStore during commit.
+    A live-only stream preview carries a separate preview_sequence and keeps
+    the last canonical run_sequence as its reconnect boundary.
     """
 
     protocol_version: Literal["sage.runtime/v2"] = "sage.runtime/v2"
@@ -511,6 +512,8 @@ class RuntimeEvent(StrictModel):
     run_id: Identifier
     session_sequence: int | None = Field(default=None, ge=1)
     run_sequence: int = Field(ge=1)
+    preview_sequence: int | None = Field(default=None, ge=1)
+    preview_epoch: Identifier | None = None
     turn_id: Identifier | None = None
     step_id: Identifier | None = None
     item_id: Identifier | None = None
@@ -547,6 +550,13 @@ class RuntimeEvent(StrictModel):
                 raise ValueError("durable events require session_sequence")
         elif self.session_sequence is not None:
             raise ValueError("non-durable events must not have session_sequence")
+        if (
+            self.preview_sequence is not None
+            and self.durability != EventDurability.REPLAY_BUFFERED
+        ):
+            raise ValueError("stream previews must be replay-buffered events")
+        if (self.preview_sequence is None) != (self.preview_epoch is None):
+            raise ValueError("stream preview sequence and epoch must be paired")
         if self.job_id is not None and isinstance(self.data, JobEventData):
             if self.job_id != self.data.job_id:
                 raise ValueError("job_id must match data.job_id")

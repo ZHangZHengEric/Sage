@@ -434,6 +434,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_events(run_id, **kwargs)
 
+    async def read_stream_previews(self, run_id, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().read_stream_previews(run_id, **kwargs)
+
     async def read_fork_base_events(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_fork_base_events(run_id)

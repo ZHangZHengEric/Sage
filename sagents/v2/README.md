@@ -309,6 +309,14 @@ revision check rejects conflicting writes, but cross-process cache and
 subscriptions are not synchronized (`multi_process_writes: False`). There is
 no global Session index.
 
+For MySQL, model text deltas are live-only stream previews. They carry a
+`preview_sequence` and `preview_epoch` alongside the last canonical
+`run_sequence`, and are buffered in process for short reconnects. Completed
+messages, tool boundaries, suspensions, and terminal states remain durable.
+After a process restart, an unfinished preview may be lost; the next durable
+event still resumes from the unchanged canonical Run cursor. A subscriber that
+falls behind the bounded preview buffer receives `stream.gap`.
+
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
 workers, stores, diagnostics, and protocol adapters until `close()`.

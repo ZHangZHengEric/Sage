@@ -60,8 +60,12 @@ class EventCursor(StrictModel):
     """Exclusive replay cursor for one Run event stream."""
 
     run_id: Identifier
-    # Subscribers receive events whose sequence is strictly greater than this.
+    # Canonical events have a strictly greater sequence. Live previews use
+    # preview_sequence within the last canonical Run boundary.
     run_sequence: int = Field(default=0, ge=0)
+    # Live previews do not advance the canonical Run sequence.
+    preview_sequence: int = Field(default=0, ge=0)
+    preview_epoch: Identifier | None = None
 
 
 class RunHandle(StrictModel):

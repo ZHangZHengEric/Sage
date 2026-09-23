@@ -240,9 +240,22 @@ class SessionStore(Protocol):
         self, run_id: str, *, after_sequence: int = 0, limit: int | None = None
     ) -> tuple[RuntimeEvent, ...]: ...
 
+    async def read_stream_previews(
+        self, run_id: str, *, after_preview_sequence: int = 0
+    ) -> tuple[RuntimeEvent, ...]: ...
+
     async def read_fork_base_events(self, run_id: str) -> tuple[RuntimeEvent, ...]: ...
 
     def subscribe_events(self, cursor: EventCursor) -> AsyncIterator[RuntimeEvent]: ...
+
+    async def publish_stream_preview(
+        self,
+        *,
+        run_id: str,
+        expected_revision: int,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+    ) -> RunSnapshot: ...
 
     async def commit_run(
         self,
