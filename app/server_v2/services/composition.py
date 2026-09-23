@@ -20,7 +20,12 @@ from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 from app.server_v2.core.errors import ServerV2Error
-from app.server_v2.domain.catalog import AgentRecord, McpServerRecord, UserCatalog
+from app.server_v2.domain.catalog import (
+    A2AAgentRecord,
+    AgentRecord,
+    McpServerRecord,
+    UserCatalog,
+)
 from app.server_v2.domain.skills import (
     SkillRecord,
     artifact_relative_path,
@@ -37,6 +42,8 @@ class RunComposition:
     agent: AgentRecord
     skills: tuple[SkillRecord, ...]
     mcp_servers: tuple[str, ...]
+    a2a_agents: tuple[str, ...] = ()
+    call_depth: int = 0
 
 
 def composition_metadata(
@@ -44,6 +51,8 @@ def composition_metadata(
     agent: AgentRecord,
     skills: tuple[SkillRecord, ...],
     mcp_servers: tuple[str, ...],
+    a2a_agents: tuple[str, ...] = (),
+    call_depth: int = 0,
 ) -> dict[str, object]:
     """Serialize the composition admitted with a Run into Run metadata."""
 
@@ -52,6 +61,12 @@ def composition_metadata(
             "agent": agent.model_dump(mode="json"),
             "skills": [asdict(record) for record in skills],
             "mcp_servers": list(mcp_servers),
+            "a2a_agents": list(a2a_agents),
+            # How many agents deep this Run already is. It belongs to the
+            # frozen composition rather than to the request that resumes a
+            # suspended Run, because a hop budget that could be re-read from a
+            # later request would reset itself halfway through a delegation.
+            "call_depth": call_depth,
         }
     }
 
@@ -67,7 +82,9 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
     try:
         agent = AgentRecord.model_validate(raw.get("agent"))
         skills = _skills(raw.get("skills"), user_id=user_id)
-        mcp_servers = _names(raw.get("mcp_servers"))
+        mcp_servers = _names(raw.get("mcp_servers"), field="mcp server")
+        a2a_agents = _names(raw.get("a2a_agents"), field="a2a agent")
+        call_depth = _depth(raw.get("call_depth"))
     except (ServerV2Error, TypeError, ValueError) as exc:
         raise _invalid(str(exc)) from exc
     if agent.id != command.agent_id:
@@ -75,7 +92,13 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
     enabled = command.config.enabled_skills
     if enabled is None or tuple(record.name for record in skills) != tuple(enabled):
         raise _invalid("run composition does not match the Run Skill grant")
-    return RunComposition(agent=agent, skills=skills, mcp_servers=mcp_servers)
+    return RunComposition(
+        agent=agent,
+        skills=skills,
+        mcp_servers=mcp_servers,
+        a2a_agents=a2a_agents,
+        call_depth=call_depth,
+    )
 
 
 def selected_mcp_servers(
@@ -93,6 +116,17 @@ def selected_mcp_servers(
         item
         for item in catalog.mcp_servers
         if not item.disabled and item.name in wanted
+    ]
+
+
+def selected_a2a_agents(
+    catalog: UserCatalog, names: tuple[str, ...]
+) -> list[A2AAgentRecord]:
+    """Resolve frozen peer names against the live catalog, for credentials."""
+
+    wanted = set(names)
+    return [
+        item for item in catalog.a2a_agents if not item.disabled and item.name in wanted
     ]
 
 
@@ -121,12 +155,20 @@ def _skills(raw: object, *, user_id: str) -> tuple[SkillRecord, ...]:
     return tuple(records)
 
 
-def _names(raw: object) -> tuple[str, ...]:
+def _names(raw: object, *, field: str = "mcp server") -> tuple[str, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
-        raise TypeError("mcp server snapshot must be a list of names")
+        raise TypeError(f"{field} snapshot must be a list of names")
     return tuple(raw)
+
+
+def _depth(raw: object) -> int:
+    if raw is None:
+        return 0
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 0:
+        raise TypeError("call depth must be a non-negative integer")
+    return raw
 
 
 def _invalid(message: str) -> SageV2Error:

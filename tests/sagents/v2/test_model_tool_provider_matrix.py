@@ -289,6 +289,102 @@ async def test_invocation_grant_catalog_honors_explicit_per_run_tool_grant():
     assert denied.value.info.code == "tool.not_enabled"
 
 
+def _normal_run(enabled_tools=None):
+    config = type("Config", (), {"enabled_tools": enabled_tools})()
+
+    async def command_reader(run_id):
+        del run_id
+        return type("Command", (), {"invocation_mode": "normal", "config": config})()
+
+    return command_reader
+
+
+class _BrokenCatalog:
+    """An external provider that is configured but cannot be reached."""
+
+    async def list_tools(self, *, run_id: str):
+        raise ConnectionError("no route to host")
+
+    async def get_tool(self, name: str, *, run_id: str):
+        raise ConnectionError("no route to host")
+
+
+@pytest.mark.asyncio
+async def test_a_wholly_granted_catalog_needs_no_name_on_the_agent():
+    """An external provider declares its Tools at runtime; nothing can list them.
+
+    Composing such a catalog into a Run without granting it produces Tools the
+    model can see and then cannot call, which reads as a silently broken
+    integration rather than as a denied one.
+    """
+
+    external = TOOL.model_copy(update={"name": "mcp_search"})
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL, external)),
+        ("sum",),
+        _normal_run(),
+        granted_catalogs=(InMemoryToolCatalog((external,)),),
+    )
+
+    assert {
+        value.name for value in await catalog.list_tools(run_id="run_1")
+    } == {"sum", "mcp_search"}
+    assert (await catalog.get_tool("mcp_search", run_id="run_1")).name == "mcp_search"
+
+
+@pytest.mark.asyncio
+async def test_a_wholly_granted_catalog_outlives_a_narrowed_per_run_grant():
+    """``enabled_tools`` narrows the Agent's own Tools and cannot name these."""
+
+    external = TOOL.model_copy(update={"name": "mcp_search"})
+    hidden = TOOL.model_copy(update={"name": "hidden"})
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL, hidden, external)),
+        ("sum", "hidden"),
+        _normal_run(enabled_tools=("sum",)),
+        granted_catalogs=(InMemoryToolCatalog((external,)),),
+    )
+
+    assert {
+        value.name for value in await catalog.list_tools(run_id="run_1")
+    } == {"sum", "mcp_search"}
+
+
+@pytest.mark.asyncio
+async def test_a_granted_catalog_that_is_down_costs_only_its_own_tools():
+    """Discovery degrades per provider, so a Run still starts without it."""
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL,)),
+        ("sum",),
+        _normal_run(),
+        granted_catalogs=(_BrokenCatalog(),),
+    )
+
+    assert await catalog.list_tools(run_id="run_1") == (TOOL,)
+
+
+@pytest.mark.asyncio
+async def test_a_granted_catalog_cannot_hand_itself_the_goal_controls():
+    """Otherwise any configured external provider could end a goal Run."""
+
+    control = TOOL.model_copy(update={"name": "goal_complete"})
+
+    catalog = InvocationGrantToolCatalog(
+        InMemoryToolCatalog((TOOL, control)),
+        ("sum",),
+        _normal_run(),
+        granted_catalogs=(InMemoryToolCatalog((control,)),),
+    )
+
+    assert await catalog.list_tools(run_id="run_1") == (TOOL,)
+    with pytest.raises(SageV2Error) as denied:
+        await catalog.get_tool("goal_complete", run_id="run_1")
+    assert denied.value.info.code == "tool.not_enabled"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "arguments",

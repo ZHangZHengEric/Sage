@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 from sagents.v2.contracts.commands import StartRun
@@ -84,9 +83,11 @@ def official_tool_catalog() -> list[dict[str, object]]:
 def workspace_sandbox_spec(
     host_workspace: Path, *, resources: ResourceLimits | None = None
 ) -> ResolvedSandboxSpec:
-    resources = resources or ResourceLimits(
-        require_hard_limits=sys.platform != "darwin"
-    )
+    # Kernel hard limits come from a delegated cgroup subtree and an XFS
+    # project mount that an administrator prepares and hands to the provider.
+    # This host does not take that configuration, so it never asserts limits it
+    # has no way to obtain; the sandbox still isolates, and meters by sampling.
+    resources = resources or ResourceLimits(require_hard_limits=False)
     root = str(Path(host_workspace).resolve())
     fingerprint = hashlib.sha256(
         json.dumps(

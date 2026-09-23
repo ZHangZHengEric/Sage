@@ -60,6 +60,11 @@ class ServerV2Settings:
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
+    # The address clients reach this server at. Only A2A needs it: an Agent
+    # Card must publish an absolute URL, and behind a proxy the request's own
+    # host header is the proxy's, not the one a peer agent can call back on.
+    # Empty means "trust the request", which is right for direct deployments.
+    public_base_url: str = ""
 
     max_concurrent_runs: int = 8
     max_concurrent_runs_per_user: int = 2
@@ -132,4 +137,5 @@ class ServerV2Settings:
                 "SAGE_SERVER_JAEGER_PUBLIC_URL",
                 "http://127.0.0.1:16686/jaeger",
             ),
+            public_base_url=_env("SAGE_SERVER_PUBLIC_URL", "").rstrip("/"),
         )

@@ -973,6 +973,7 @@ async def test_reply_retries_survive_resume_failure_and_never_answer_next_questi
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
 async def test_concurrent_managed_runs_are_isolated_and_duplicate_admission_is_once(
     tmp_path,
 ):

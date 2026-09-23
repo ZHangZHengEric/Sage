@@ -87,6 +87,52 @@ class McpPublic(BaseModel):
     has_api_key: bool = False
 
 
+class A2AAgentBody(BaseModel):
+    """A remote A2A agent this tenant's Agents may delegate to.
+
+    ``url`` is the peer's base URL. Its Agent Card, fetched from the well-known
+    path under that base, is what names the skills and the RPC endpoint — so
+    there is nothing else to configure and nothing here to keep in sync when
+    the peer changes.
+    """
+
+    name: str
+    url: str | None = None
+    api_key: str = ""
+    disabled: bool = False
+    description: str = ""
+
+
+class A2AAgentPublic(BaseModel):
+    name: str
+    url: str | None = None
+    disabled: bool = False
+    description: str = ""
+    skills: list[str] = Field(default_factory=list)
+    has_api_key: bool = False
+
+
+class ApiKeyBody(BaseModel):
+    agent_id: str = ""
+    name: str = ""
+    scopes: list[str] | None = None
+
+
+class ApiKeyPublic(BaseModel):
+    key_id: str
+    agent_id: str = ""
+    name: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    created_at: str
+    revoked_at: str | None = None
+
+
+class ApiKeyCreated(ApiKeyPublic):
+    """The only response that carries the token; it is not stored anywhere."""
+
+    api_key: str
+
+
 class AgentRunBody(BaseModel):
     threadId: str
     runId: str
@@ -98,6 +144,21 @@ class AgentRunBody(BaseModel):
 
     def to_agui(self) -> RunAgentInput:
         return RunAgentInput.model_validate(self.model_dump())
+
+
+class ThreadResumeBody(BaseModel):
+    """One answer to the question a thread is waiting on.
+
+    There is no ``threadId``/``runId`` pair identifying the *suspended* Run: the
+    thread already knows which of its Runs is waiting, and letting a client name
+    it would let a stale tab answer a question that has since been resolved.
+    ``runId`` names the AG-UI run identity of the stream this starts, which is
+    the client's to choose exactly as it is when starting a Run.
+    """
+
+    runId: str
+    decision: str
+    payload: dict = Field(default_factory=dict)
 
 
 class HealthPayload(BaseModel):

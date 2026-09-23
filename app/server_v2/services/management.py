@@ -12,7 +12,7 @@ from sagents.v2.runtime.execution import RunExecutionBinding
 from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
 from app.server_v2.core.errors import ServerV2Error
-from app.server_v2.domain.catalog import enabled_mcp_servers
+from app.server_v2.domain.catalog import enabled_a2a_agents, enabled_mcp_servers
 from app.server_v2.services.official import (
     official_tool_catalog,
     resolve_agent_tools,
@@ -212,6 +212,11 @@ class ServerAgentManagement(AgentManagementService):
                     for server in enabled_mcp_servers(catalog)
                     for name in server.tools
                 ],
+                *[
+                    {"name": name, "source": peer.name}
+                    for peer in enabled_a2a_agents(catalog)
+                    for name in peer.skills
+                ],
             ],
             "skills": [
                 {"name": item.name, "version_id": item.version_id} for item in skills
@@ -272,6 +277,9 @@ class ServerAgentManagement(AgentManagementService):
         known.add("load_skill")
         known.update(
             name for server in enabled_mcp_servers(catalog) for name in server.tools
+        )
+        known.update(
+            name for peer in enabled_a2a_agents(catalog) for name in peer.skills
         )
         visible = await self.host.skills.list_visible(user_id=user_id, role="user")
         skills = {item.name for item in visible}
@@ -339,6 +347,12 @@ class ServerAgentManagement(AgentManagementService):
         mcp = self.host.mcp_plugins.get(user_id, enabled_mcp_servers(catalog))
         if mcp:
             builder.with_additional_tools(mcp, mcp)
+        # A managed package is composed from the live catalog, not from a
+        # frozen Run, so there is no inherited hop count to read: a package
+        # task is always the first hop.
+        peers = self.host.a2a_plugins.get(user_id, enabled_a2a_agents(catalog))
+        if peers:
+            builder.with_additional_tools(peers, peers)
         return builder
 
     async def template(self, context, agent_id=None):

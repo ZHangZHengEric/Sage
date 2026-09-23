@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { api } from '../api.js'
-import { createAguiAgent, runAgui } from '../agui/session.js'
-import { messagesFromEvents } from '../agui/replay.js'
+import { createAguiAgent, resumeAgui, runAgui } from '../agui/session.js'
+import { messagesBeforeLastRun, messagesFromEvents, pendingInteraction } from '../agui/replay.js'
 import AguiTranscript from '../components/AguiTranscript.vue'
+import InteractionPrompt from '../components/InteractionPrompt.vue'
 import ThreadList from '../components/ThreadList.vue'
 
 const threads = ref([])
@@ -14,6 +15,10 @@ const pending = ref(false)
 const error = ref('')
 const hasModel = ref(true)
 const agents = ref([])
+const interaction = ref(null)
+// Where the Run in flight began. A resumed Run replays from its first event,
+// so answering a question means rewinding the transcript back to here first.
+const baseline = ref([])
 const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
 const scroller = ref(null)
 const input = ref(null)
@@ -35,6 +40,9 @@ function bindAgent() {
     onMessages(next) {
       messages.value = next
       nextTick(() => scroller.value?.scrollTo(0, scroller.value.scrollHeight))
+    },
+    onInteraction(next) {
+      interaction.value = next
     },
     onError(message) {
       error.value = message
@@ -87,8 +95,11 @@ async function openThread(id) {
   error.value = ''
   applyThreadAgent(id)
   const page = await api.threadEvents(id)
-  const history = messagesFromEvents(page?.events || [])
+  const events = page?.events || []
+  const history = messagesFromEvents(events)
   messages.value = history
+  interaction.value = pendingInteraction(events)
+  baseline.value = messagesBeforeLastRun(events) || history
   agent.value.threadId = id
   agent.value.setMessages(history)
   await nextTick()
@@ -98,6 +109,8 @@ async function openThread(id) {
 function startNew() {
   threadId.value = newId('thread')
   messages.value = []
+  interaction.value = null
+  baseline.value = []
   error.value = ''
   agent.value.threadId = threadId.value
   agent.value.setMessages([])
@@ -106,17 +119,19 @@ function startNew() {
 
 async function send() {
   const content = text.value.trim()
-  if (!content || pending.value) return
+  if (!content || pending.value || interaction.value) return
   if (!threadId.value) threadId.value = newId('thread')
   text.value = ''
   nextTick(resizeInput)
   pending.value = true
   error.value = ''
+  const message = { id: crypto.randomUUID(), role: 'user', content }
+  baseline.value = [...messages.value, message]
   try {
     await runAgui(agent.value, {
       threadId: threadId.value,
       runId: newId('run'),
-      content,
+      message,
       agentId: selectedAgentId.value,
     })
     await loadThreads()
@@ -127,6 +142,36 @@ async function send() {
     await nextTick()
     scroller.value?.scrollTo(0, scroller.value.scrollHeight)
     input.value?.focus()
+  }
+}
+
+async function decide({ decision, payload }) {
+  if (pending.value || !interaction.value) return
+  const asked = interaction.value
+  interaction.value = null
+  pending.value = true
+  error.value = ''
+  try {
+    // The resumed stream replays the Run from its first event so the client
+    // rebuilds item state exactly; rewinding first is what keeps that replay
+    // from doubling everything already on screen.
+    agent.value.setMessages(baseline.value)
+    await resumeAgui(agent.value, {
+      threadId: threadId.value,
+      runId: newId('run'),
+      decision,
+      payload,
+    })
+    await loadThreads()
+  } catch (exc) {
+    error.value = exc.message
+    // The question outlived the answer, so it has to come back — otherwise the
+    // thread is left waiting with nothing on screen to answer it.
+    interaction.value = asked
+  } finally {
+    pending.value = false
+    await nextTick()
+    scroller.value?.scrollTo(0, scroller.value.scrollHeight)
   }
 }
 
@@ -184,6 +229,7 @@ onUnmounted(() => {
       </p>
       <p v-if="error" class="error thread-error" role="alert">{{ error }}</p>
       <footer class="thread-footer">
+        <InteractionPrompt :interaction="interaction" :busy="pending" @decide="decide" />
         <form class="composer" @submit.prevent="send">
           <label class="sr-only" for="chat-input">消息</label>
           <textarea
@@ -191,8 +237,8 @@ onUnmounted(() => {
             ref="input"
             v-model="text"
             rows="1"
-            placeholder="输入消息…"
-            :disabled="pending"
+            :placeholder="interaction ? '先回答上面的问题，再继续对话' : '输入消息…'"
+            :disabled="pending || Boolean(interaction)"
             @input="resizeInput"
             @keydown.enter.exact.prevent="send"
             @keydown.meta.enter.prevent="send"
@@ -200,7 +246,7 @@ onUnmounted(() => {
           <button
             class="send"
             type="submit"
-            :disabled="pending || !text.trim()"
+            :disabled="pending || Boolean(interaction) || !text.trim()"
             aria-label="发送"
           >
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">

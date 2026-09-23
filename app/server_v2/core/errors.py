@@ -72,7 +72,19 @@ def error_response(
 
 
 def map_sage_error(exc: SageV2Error) -> ServerV2Error:
-    info = exc.info
+    return map_error_info(exc.info)
+
+
+def map_error_info(info) -> ServerV2Error:
+    """Classify one runtime error, however it reached us.
+
+    Commands report failure as a ``CommandReceipt`` carrying a
+    ``RuntimeErrorInfo`` rather than by raising, so the same classification has
+    to be reachable without an exception to unwrap. Keeping one implementation
+    means a rejected command and a raised error of the same category cannot be
+    reported to a client as two different things.
+    """
+
     if info.code.endswith("not_found"):
         reason = "not_found"
     elif info.category == ErrorCategory.RATE_LIMITED:

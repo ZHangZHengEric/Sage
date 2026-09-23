@@ -49,9 +49,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # A2A routes stay unmounted without this extra, and the app suite
+          # covers them. Keep it off the other suites (protobuf).
+          if [ "${{ matrix.suite }}" = "app" ]; then
+            pip install 'a2a-sdk[fastapi]>=1.1.4,<2'
+          fi
 
       - name: Run Pytest Suite
-        run: python -m pytest ${{ matrix.path }} -v
+        # The Linux sandbox binds the workspace at its own workspace_root, and
+        # /tmp is where the sandbox mounts its scratch. A default pytest tmp_path
+        # therefore cannot be a host-path workspace; put temporaries elsewhere.
+        run: python -m pytest ${{ matrix.path }} -v --basetemp="${{ runner.temp }}/pytest"
 
   web-tests:
     name: Web Vitest

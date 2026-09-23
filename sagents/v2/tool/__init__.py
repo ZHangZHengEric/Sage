@@ -63,6 +63,8 @@ _LAZY_EXPORTS = {
         "sagents.v2.tool.plugins.selection_lexical",
         "LexicalToolSelectionPolicy",
     ),
+    "A2AAgentConfig": ("sagents.v2.tool.plugins.a2a", "A2AAgentConfig"),
+    "A2AToolPlugin": ("sagents.v2.tool.plugins.a2a", "A2AToolPlugin"),
     "McpServerConfig": ("sagents.v2.tool.plugins.mcp", "McpServerConfig"),
     "McpToolPlugin": ("sagents.v2.tool.plugins.mcp", "McpToolPlugin"),
     "RecentToolSelectionPolicy": (
@@ -100,6 +102,8 @@ __all__ = [
     "ToolInvocation",
     "decorated_tool_definition",
     "tool",
+    "A2AAgentConfig",
+    "A2AToolPlugin",
     "McpServerConfig",
     "McpToolPlugin",
     "localize_tool_definition",
