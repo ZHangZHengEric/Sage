@@ -29,7 +29,7 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 
 CPU 的 100% 表示一个逻辑核心的计算配额，200% 表示两个核心；不是进程累计 CPU 秒数，也不是整台机器的百分比。内存和磁盘单位为 MiB。CPU、内存、进程数限制覆盖沙箱执行进程及其后代，磁盘范围包括工作区、临时目录和共享内存文件。宿主 Sage 控制进程不属于执行 cgroup。
 
-协议默认要求硬限制；Desktop 在原生 macOS 上明确使用 `require_hard_limits=false`，设置界面显示其能力限制，并可切换为严格拒绝模式。Linux 不会因为这个字段为 false 而回退成普通宿主 subprocess。资源参数进入 Desktop 的配置解析、策略指纹和持久化 spec。非法、零值、负数、无穷大不被接受。
+协议默认要求硬限制；`require_hard_limits=false` 表示"本次不要求内核级硬限制"，两个平台含义相同：macOS 用 Seatbelt 隔离、按采样计量，Linux 用 bubblewrap 隔离、同样按采样计量。隔离那一半在 Linux 上不可协商——命名空间、能力清空、seccomp、无网络、系统只读始终强制，不存在退回普通宿主 subprocess 的路径。硬限制那一半来自管理员准备的 cgroup 子树与 XFS project 挂载：没有配置时 provider 的 capabilities 如实报告 cpu/memory/disk/process_count 不可用，`require_hard_limits=true` 的 spec 在 admission 阶段就以 `sandbox.resource_limits_unsupported` 拒绝，而不是等到 provisioning 才发现。资源参数进入 Desktop 的配置解析、策略指纹和持久化 spec。非法、零值、负数、无穷大不被接受。
 
 `filesystem.max_file_bytes` 和 `filesystem.max_total_bytes` 仍是额外的文件接口限制，不能代替操作系统配额。单文件还通过继承的 `RLIMIT_FSIZE` 限制；完整磁盘限制以以下平台行为为准。
 
@@ -55,7 +55,7 @@ CPU 的 100% 表示一个逻辑核心的计算配额，200% 表示两个核心�
 }
 ```
 
-以上项传给 LocalWorkspaceSandboxProvider 构造函数；Desktop 放在 `execution.sandbox` 配置的顶层。要求 Linux 5.14+、提供 `quotactl_fd` 的 libc、支持 `--bind-fd`、`--ro-bind-fd`、`--disable-userns`、`--seccomp` 的 bubblewrap、xfsprogs、libseccomp2、允许用户命名空间，且 cgroup 子树已启用 `cpu memory pids` 控制器。启动时检查 bubblewrap 实际提供的参数；缺少 FD 挂载支持的旧版本会被拒绝。`quotactl_fd` 的 project 查询需要宿主具备相应权限；可由有权限的 Sage 宿主完成验证，但执行 UID/GID 必须非 root，工作区须属于执行 UID，且目录上级允许该用户进入。
+以上项传给 LocalWorkspaceSandboxProvider 构造函数；Desktop 放在 `execution.sandbox` 配置的顶层。**没有提供 `linux_cgroup_root` / `linux_quota_mount` 时不创建 cgroup、不做 project 配额校验**，隔离照常，计量退回到与 macOS 相同的进程树采样；这也是 server_v2、CLI 和未配置的 Desktop 的默认状态。要求 Linux 5.14+、提供 `quotactl_fd` 的 libc、支持 `--bind-fd`、`--ro-bind-fd`、`--disable-userns`、`--seccomp` 的 bubblewrap、xfsprogs、libseccomp2、允许用户命名空间，且 cgroup 子树已启用 `cpu memory pids` 控制器。启动时检查 bubblewrap 实际提供的参数；缺少 FD 挂载支持的旧版本会被拒绝。`quotactl_fd` 的 project 查询需要宿主具备相应权限；可由有权限的 Sage 宿主完成验证，但执行 UID/GID 必须非 root，工作区须属于执行 UID，且目录上级允许该用户进入。
 
 管理员在**专用 XFS 测试卷和专用目录**上准备配额的示例（不要直接用于未核对的现有项目）：
 
@@ -65,7 +65,9 @@ xfs_quota -x -c 'project -s -p /srv/sage-xfs/workspace 1001' /srv/sage-xfs
 xfs_quota -x -c 'limit -p bhard=4096m ihard=1048576 1001' /srv/sage-xfs
 ```
 
-缺少控制器、未启用 quota、实际额度大于请求、工作区不符合要求、内核不支持清理时，均拒绝运行，不回退到无隔离执行。CPU 和内存限制按 sandbox 计；主动共享同一工作区的 Run 共享该项目的磁盘容量，彼此的文件不是保密边界。
+配置了 cgroup 与 quota 之后，缺少控制器、未启用 quota、实际额度大于请求、工作区不符合要求、内核不支持清理时，均拒绝运行，不回退到无隔离执行——配了一半比没配更危险，所以不容忍半成品。CPU 和内存限制按 sandbox 计；主动共享同一工作区的 Run 共享该项目的磁盘容量，彼此的文件不是保密边界。
+
+`workspace_root` 是工作区在沙箱内的路径。它不能落在 `/usr`、`/bin`、`/sbin`、`/lib`、`/lib64`、`/dev`、`/proc`、`/sys`、`/tmp` 之下：这些是沙箱自己的运行时挂载点，`/tmp` 还是沙箱 scratch 的挂载点，绑在它们下面会和沙箱自身的挂载顺序相撞。把宿主真实路径直接当作沙箱内路径的宿主（CLI、Desktop 的 host 路径模式）因此不能使用 `/tmp` 下的工作区。
 
 ## 原生 macOS
 

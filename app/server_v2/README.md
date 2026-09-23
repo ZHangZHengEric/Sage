@@ -88,6 +88,8 @@ Sage 的"挂起 Run + 待答 Interaction"对应 A2A 的 `input-required` Task，
 
 Web 侧对应 `POST /api/threads/{thread_id}/resume`（body 给 `runId` / `decision` / `payload`），同样以 AG-UI SSE 流回续跑过程。等待中的 Run 由 thread 自己认定而不由客户端指名，否则一个过期的页面可以回答两个 Run 之前的问题。
 
+对话页从 `sage.interaction.requested` 这一条 CUSTOM 事件渲染审批卡片：问的是什么、允许哪几个决策，都由服务端给，客户端不自己编一套词汇。这条事件也落在 thread 事件里，所以关掉标签页再打开，等待中的问题还在，不用指望当时那条流。含 `submit` 的问题是自由问答，回答落进 `payload.text`。回答前会先把记录回退到本轮 Run 开始处——续跑的流是从 Run 的第一条事件重放的，不回退就会把已经在屏幕上的内容再叠一遍。用户自己那条消息排在 `RUN_STARTED` 之前，所以回退不会把它一起抹掉。
+
 `CancelTask` 用调用方读到的 revision 做 compare-and-set，已经结束的 Run 报 `TaskNotCancelable`（-32002）而不是 `TaskNotFound`（-32001）——它存在，只是不能取消了。Sage 的 Run 索引挂在 Session 上而非租户上，所以 `ListTasks` 是按 owner 的 thread 再逐个 Session 走 Run，page token 是不透明的 `v1:<session_index>:<run_index>`，一页的成本只与这一页有关。
 
 鉴权失败不出现在 JSON-RPC 错误表里：A2A 没有对应错误码，所以 scope 在 HTTP 层结算（403），跨租户读不到的 Task 报 `TaskNotFound`。流式请求若在第一个事件之前就被拒（例如订阅别人的 Task），SDK 返回的是普通 JSON-RPC 错误响应而非 SSE——此时还没有流可以放错误帧。

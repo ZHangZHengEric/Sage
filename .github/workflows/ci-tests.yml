@@ -51,7 +51,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Pytest Suite
-        run: python -m pytest ${{ matrix.path }} -v
+        # The Linux sandbox binds the workspace at its own workspace_root, and
+        # /tmp is where the sandbox mounts its scratch. A default pytest tmp_path
+        # therefore cannot be a host-path workspace; put temporaries elsewhere.
+        run: python -m pytest ${{ matrix.path }} -v --basetemp="${{ runner.temp }}/pytest"
 
   web-tests:
     name: Web Vitest

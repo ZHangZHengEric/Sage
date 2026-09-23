@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,10 +56,11 @@ DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (".git/hooks", ".git/config")
 class WorkspaceSandboxSettings:
     """CLI 本地 workspace 沙箱的策略参数。"""
 
+    # 内核硬限制来自管理员委派的 cgroup 子树与 XFS project 挂载，由宿主配置
+    # 交给 provider。CLI 不接受这份配置，所以不声称自己拥有这些限制；沙箱
+    # 仍然隔离，只是按采样计量。
     resources: ResourceLimits = field(
-        default_factory=lambda: ResourceLimits(
-            require_hard_limits=sys.platform != "darwin"
-        )
+        default_factory=lambda: ResourceLimits(require_hard_limits=False)
     )
     process_enabled: bool = True
     read_only: bool = False
