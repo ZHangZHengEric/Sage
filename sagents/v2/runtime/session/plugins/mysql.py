@@ -1,9 +1,8 @@
-"""Optional single-process MySQL SessionStore.
+"""Optional MySQL SessionStore.
 
 The coordinator still owns sequencing, idempotency, and legal transitions.
-This adapter persists one Session tree at a time, appends Run events, and
-rejects a second writer with GET_LOCK. There is no global Session index and
-no cross-process subscribe.
+This adapter persists one Session tree at a time and appends Run events.
+There is no global Session index or cross-process subscribe.
 """
 
 from __future__ import annotations
@@ -23,16 +22,17 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
+from sagents.v2.runtime.session.aggregate import SessionAggregate
+from sagents.v2.runtime.session.journal import (
+    SessionAggregateSnapshotV2,
+    SessionStateDeltaMutation,
+)
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
 def _principal_lookup_key(principal_type: str, principal_id: str) -> str:
     identity = f"{principal_type}\0{principal_id}".encode("utf-8")
     return f"typed:{hashlib.sha256(identity).hexdigest()}"
-
-
-class StoreInUseError(SageV2Error):
-    """Raised when another writer already owns the same MySQL prefix."""
 
 
 class SessionStoreCorruptionError(SageV2Error):
@@ -64,6 +64,7 @@ _LOCATION_KINDS = (
 )
 _SCHEMA_TABLES = (
     "sessions",
+    "session_mutations",
     "run_events",
     "locations",
     "start_idempotency",
@@ -124,14 +125,14 @@ def parse_mysql_dsn(dsn: str) -> dict[str, Any]:
 class _MysqlSessionState(SessionStoreCoordinator):
     """Single-process MySQL adapter around the shared state coordinator."""
 
-    format_version = "sage.session.mysql/v1"
+    format_version = "sage.session.mysql/v2"
+    snapshot_interval = 256
 
     def __init__(
         self,
         dsn: str,
         *,
         table_prefix: str | None = None,
-        pool_maxsize: int = 16,
         **kwargs: Any,
     ) -> None:
         resolved = dsn.strip()
@@ -145,21 +146,17 @@ class _MysqlSessionState(SessionStoreCoordinator):
             prefix = table_prefix.strip()
         if prefix and not _PREFIX.fullmatch(prefix):
             raise ValueError("mysql SessionStore table_prefix is invalid")
-        if pool_maxsize < 1:
-            raise ValueError("mysql SessionStore pool_maxsize must be positive")
         self.dsn = resolved
         self.table_prefix = prefix
-        self.pool_maxsize = pool_maxsize
         self._connect_kwargs = parse_mysql_dsn(resolved)
         self._pool = None
-        self._lock_conn = None
         self._init_lock = asyncio.Lock()
-        self._writer_lock_lost = False
         self._load_lock = asyncio.Lock()
         self._loaded_session_ids: set[str] = set()
         self._persisted_run_sequences: dict[str, int] = {}
         self._persisted_session_runs: dict[str, set[str]] = {}
         self._persisted_session_revisions: dict[str, int] = {}
+        self._persisted_mutation_counts: dict[str, int] = {}
         self._persisted_locations: dict[str, set[tuple[str, str, str]]] = {}
         self._persisted_start_keys: dict[str, set[tuple[str, ...]]] = {}
         self._closed = False
@@ -176,12 +173,6 @@ class _MysqlSessionState(SessionStoreCoordinator):
             "derived_state_authoritative": False,
             "cross_process_subscribe": False,
         }
-
-    @property
-    def lock_name(self) -> str:
-        scope = f"{self._connect_kwargs['db']}:{self.table_prefix}"
-        digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:24]
-        return f"sage_sess_mysql_{digest}"
 
     def composition_identity(self) -> dict[str, str]:
         return {
@@ -200,20 +191,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
         return f"{self.table_prefix}_{name}" if self.table_prefix else name
 
     async def _ensure_ready(self) -> None:
-        if self._writer_lock_lost:
-            raise self._writer_lock_lost_error()
         if self._pool is not None:
-            if self._lock_conn is None or self._lock_conn.closed:
-                self._writer_lock_lost = True
-                raise self._writer_lock_lost_error()
             return
         async with self._init_lock:
-            if self._writer_lock_lost:
-                raise self._writer_lock_lost_error()
             if self._pool is not None:
-                if self._lock_conn is None or self._lock_conn.closed:
-                    self._writer_lock_lost = True
-                    raise self._writer_lock_lost_error()
                 return
             if self._closed:
                 raise SageV2Error(
@@ -225,35 +206,24 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     )
                 )
             aiomysql = _require_aiomysql()
-            lock_conn = await aiomysql.connect(**self._connect_kwargs)
+            pool = await aiomysql.create_pool(
+                minsize=0,
+                maxsize=0,
+                **self._connect_kwargs,
+            )
             try:
-                await self._acquire_writer_lock(lock_conn)
-                created = await self._bootstrap(lock_conn)
-                pool = await aiomysql.create_pool(
-                    minsize=1,
-                    maxsize=self.pool_maxsize,
-                    **self._connect_kwargs,
-                )
+                async with pool.acquire() as connection:
+                    created = await self._bootstrap(connection)
                 LOGGER.info(
                     "mysql session store ready prefix=%s created=%s",
                     self.table_prefix,
                     created,
                 )
             except Exception:
-                await self._close_lock_conn(lock_conn)
+                pool.close()
+                await pool.wait_closed()
                 raise
-            self._lock_conn = lock_conn
             self._pool = pool
-
-    def _writer_lock_lost_error(self) -> SageV2Error:
-        return SageV2Error(
-            RuntimeErrorInfo(
-                code="session_store.writer_lock_lost",
-                category=ErrorCategory.RESOURCE_LOST,
-                message="mysql SessionStore lost its single-writer lock connection",
-                safe_to_resume=True,
-            )
-        )
 
     @asynccontextmanager
     async def _writer_connection(self):
@@ -261,29 +231,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         pool = self._pool
         assert pool is not None
         async with pool.acquire() as connection:
-            try:
-                yield connection
-            except BaseException:
-                if self._lock_conn is None or self._lock_conn.closed:
-                    self._writer_lock_lost = True
-                raise
-
-    async def _acquire_writer_lock(self, connection) -> None:
-        async with connection.cursor() as cursor:
-            await cursor.execute("SELECT GET_LOCK(%s, 0)", (self.lock_name,))
-            row = await cursor.fetchone()
-        if not row or int(row[0] or 0) != 1:
-            raise StoreInUseError(
-                RuntimeErrorInfo(
-                    code="session_store.in_use",
-                    category=ErrorCategory.CONFLICT,
-                    message=(
-                        "mysql SessionStore prefix is already owned: "
-                        f"{self.table_prefix}"
-                    ),
-                    safe_to_resume=True,
-                )
-            )
+            yield connection
 
     async def _existing_tables(self, connection) -> set[str]:
         names = tuple(self._physical_table(name) for name in _SCHEMA_TABLES)
@@ -306,7 +254,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             (
                 "sessions",
                 f"""
-            CREATE TABLE {self._table("sessions")} (
+            CREATE TABLE IF NOT EXISTS {self._table("sessions")} (
                 session_id VARCHAR(128) NOT NULL,
                 parent_session_id VARCHAR(128) NULL,
                 revision BIGINT NOT NULL,
@@ -319,9 +267,24 @@ class _MysqlSessionState(SessionStoreCoordinator):
             """,
             ),
             (
+                "session_mutations",
+                f"""
+            CREATE TABLE IF NOT EXISTS {self._table("session_mutations")} (
+                session_id VARCHAR(128) NOT NULL,
+                revision BIGINT NOT NULL,
+                mutation JSON NOT NULL,
+                PRIMARY KEY (session_id, revision),
+                CONSTRAINT {self._constraint("session_mutations_session")}
+                    FOREIGN KEY (session_id)
+                    REFERENCES {self._table("sessions")} (session_id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            ),
+            (
                 "run_events",
                 f"""
-            CREATE TABLE {self._table("run_events")} (
+            CREATE TABLE IF NOT EXISTS {self._table("run_events")} (
                 session_id VARCHAR(128) NOT NULL,
                 run_id VARCHAR(128) NOT NULL,
                 run_sequence BIGINT NOT NULL,
@@ -339,7 +302,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             (
                 "locations",
                 f"""
-            CREATE TABLE {self._table("locations")} (
+            CREATE TABLE IF NOT EXISTS {self._table("locations")} (
                 kind VARCHAR(64) NOT NULL,
                 identity VARCHAR(128) NOT NULL,
                 session_id VARCHAR(128) NOT NULL,
@@ -354,7 +317,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             (
                 "start_idempotency",
                 f"""
-            CREATE TABLE {self._table("start_idempotency")} (
+            CREATE TABLE IF NOT EXISTS {self._table("start_idempotency")} (
                 tenant_id VARCHAR(128) NOT NULL DEFAULT '',
                 principal_id VARCHAR(128) NOT NULL,
                 idempotency_key VARCHAR(128) NOT NULL,
@@ -372,7 +335,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             (
                 "derived_state",
                 f"""
-            CREATE TABLE {self._table("derived_state")} (
+            CREATE TABLE IF NOT EXISTS {self._table("derived_state")} (
                 session_id VARCHAR(128) NOT NULL,
                 namespace VARCHAR(128) NOT NULL,
                 `key` VARCHAR(128) NOT NULL,
@@ -402,39 +365,46 @@ class _MysqlSessionState(SessionStoreCoordinator):
             return
         self._closed = True
         pool = self._pool
-        lock_conn = self._lock_conn
         self._pool = None
-        self._lock_conn = None
         if pool is not None:
             pool.close()
             await pool.wait_closed()
-        await self._close_lock_conn(lock_conn)
-
-    async def _close_lock_conn(self, connection) -> None:
-        if connection is None or connection.closed:
-            return
-        try:
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT RELEASE_LOCK(%s)", (self.lock_name,))
-        finally:
-            connection.close()
 
     async def _commit_storage_locked(self, session_id: str) -> None:
         await self._ensure_ready()
-        state = self._dump_session_state_locked(
-            session_id, event_offsets=self._persisted_run_sequences
-        )
+        mutation = self._session_mutation_locked().model_dump(mode="json", exclude={"kind"})
+        location_rows = self._location_rows_after_mutation(session_id, mutation)
+        start_rows = self._start_rows_after_mutation(session_id, mutation)
+        appended = mutation["appends"].pop("run_events", {})
+        replaced = mutation["replacements"].pop("run_events", {})
+        mutation["map_deletes"].pop("run_events", None)
+        run_ids = self._session_run_ids_locked(session_id)
         event_totals = {
-            run_id: len(self._run_events[run_id]) for run_id in state["run_events"]
+            run_id: len(self._run_events[run_id]) for run_id in run_ids
         }
-        compact = self._compact_state(state)
-        session_row = compact["sessions"][0]
         events = {
-            run_id: list(rows)
-            for run_id, rows in state.get("run_events", {}).items()
+            run_id: list(replaced.get(run_id, appended.get(run_id, ())))
+            for run_id in run_ids
         }
         expected_revision = self._persisted_session_revisions.get(session_id)
+        should_snapshot = (
+            expected_revision is None
+            or self._persisted_mutation_counts.get(session_id, 0) + 1
+            >= self.snapshot_interval
+        )
+        compact = (
+            self._compact_state(
+                self._dump_session_state_locked(session_id, event_offsets=event_totals)
+            )
+            if should_snapshot
+            else None
+        )
+        session_row = mutation["upserts"]["sessions"][0]
         new_revision = int(session_row["revision"])
+        if not should_snapshot:
+            session_row["revision_sequences"] = {
+                str(new_revision): int(session_row["last_sequence"])
+            }
         next_run_sequences: dict[str, int] = {}
         failure: Exception | None = None
         async with self._writer_connection() as connection:
@@ -460,24 +430,42 @@ class _MysqlSessionState(SessionStoreCoordinator):
                             ),
                         )
                     else:
-                        await cursor.execute(
-                            f"""
+                        if should_snapshot:
+                            await cursor.execute(
+                                f"""
                             UPDATE {self._table("sessions")} SET
                                 parent_session_id = %s, revision = %s,
                                 last_sequence = %s, updated_at = %s,
                                 compact_state = CAST(%s AS JSON)
                             WHERE session_id = %s AND revision = %s
                             """,
-                            (
-                                session_row.get("parent_session_id"),
-                                new_revision,
-                                int(session_row["last_sequence"]),
-                                _datetime(session_row["updated_at"]),
-                                _json(compact),
-                                session_id,
-                                expected_revision,
-                            ),
-                        )
+                                (
+                                    session_row.get("parent_session_id"),
+                                    new_revision,
+                                    int(session_row["last_sequence"]),
+                                    _datetime(session_row["updated_at"]),
+                                    _json(compact),
+                                    session_id,
+                                    expected_revision,
+                                ),
+                            )
+                        else:
+                            await cursor.execute(
+                                f"""
+                                UPDATE {self._table("sessions")} SET
+                                    parent_session_id = %s, revision = %s,
+                                    last_sequence = %s, updated_at = %s
+                                WHERE session_id = %s AND revision = %s
+                                """,
+                                (
+                                    session_row.get("parent_session_id"),
+                                    new_revision,
+                                    int(session_row["last_sequence"]),
+                                    _datetime(session_row["updated_at"]),
+                                    session_id,
+                                    expected_revision,
+                                ),
+                            )
                         if cursor.rowcount != 1:
                             raise self._conflict(
                                 "session.revision_conflict",
@@ -486,20 +474,39 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     next_run_sequences = await self._persist_events(
                         cursor, session_id, events, event_totals=event_totals
                     )
-                    await self._sync_locations(cursor, session_id, compact)
-                    await self._sync_start_idempotency(cursor, session_id, compact)
+                    if should_snapshot:
+                        await cursor.execute(
+                            f"DELETE FROM {self._table('session_mutations')} WHERE session_id = %s",
+                            (session_id,),
+                        )
+                    else:
+                        await cursor.execute(
+                            f"""
+                            INSERT INTO {self._table('session_mutations')}
+                                (session_id, revision, mutation)
+                            VALUES (%s, %s, CAST(%s AS JSON))
+                            """,
+                            (session_id, new_revision, _json(mutation)),
+                        )
+                    await self._sync_locations(cursor, session_id, location_rows)
+                    await self._sync_start_idempotency(cursor, session_id, start_rows)
                 await connection.commit()
             except Exception as exc:
                 try:
                     await connection.rollback()
                 except Exception:
-                    self._writer_lock_lost = True
+                    LOGGER.exception("mysql session rollback failed")
                 failure = exc
         if failure is not None:
             await self._reload_session_from_storage_locked(session_id)
             raise failure
         self._remember_persisted_session(
-            session_id, new_revision, next_run_sequences, compact
+            session_id,
+            new_revision,
+            next_run_sequences,
+            location_rows,
+            start_rows,
+            0 if should_snapshot else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
 
     async def _persist_events(
@@ -557,9 +564,22 @@ class _MysqlSessionState(SessionStoreCoordinator):
             if value.get(key)
         }
 
-    async def _sync_locations(self, cursor, session_id, compact) -> None:
+    def _location_rows_after_mutation(self, session_id, mutation):
+        current = {
+            (kind, identity): (kind, identity, session_id)
+            for kind, identity, _ in self._persisted_locations.get(session_id, set())
+        }
+        for collection, key in _LOCATION_KINDS:
+            for identity in mutation["deletes"].get(collection, ()):
+                current.pop((key, str(identity[0])), None)
+            for row in mutation["upserts"].get(collection, ()):
+                if row.get(key):
+                    identity = str(row[key])
+                    current[(key, identity)] = (key, identity, session_id)
+        return set(current.values())
+
+    async def _sync_locations(self, cursor, session_id, current) -> None:
         previous = self._persisted_locations.get(session_id, set())
-        current = self._location_rows(session_id, compact)
         removed = sorted(previous - current)
         added = sorted(current - previous)
         if removed:
@@ -593,9 +613,29 @@ class _MysqlSessionState(SessionStoreCoordinator):
             for entry in compact.get("start_idempotency", ())
         }
 
-    async def _sync_start_idempotency(self, cursor, session_id, compact) -> None:
+    def _start_rows_after_mutation(self, session_id, mutation):
+        current = {
+            row[:3]: row
+            for row in self._persisted_start_keys.get(session_id, set())
+        }
+        for tenant_id, principal_type, principal_id, key in mutation["deletes"].get(
+            "start_idempotency", ()
+        ):
+            lookup = (
+                str(tenant_id or ""),
+                _principal_lookup_key(str(principal_type or ""), str(principal_id)),
+                str(key),
+            )
+            current.pop(lookup, None)
+        for row in self._start_key_rows(
+            session_id,
+            {"start_idempotency": mutation["upserts"].get("start_idempotency", ())},
+        ):
+            current[row[:3]] = row
+        return set(current.values())
+
+    async def _sync_start_idempotency(self, cursor, session_id, current) -> None:
         previous = self._persisted_start_keys.get(session_id, set())
-        current = self._start_key_rows(session_id, compact)
         removed = sorted(previous - current)
         added = sorted(current - previous)
         if removed:
@@ -640,7 +680,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 try:
                     await connection.rollback()
                 except Exception:
-                    self._writer_lock_lost = True
+                    LOGGER.exception("mysql session rollback failed")
                 raise
         for value in deleted_session_ids:
             self._forget_persisted_session(value)
@@ -688,7 +728,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 try:
                     await connection.rollback()
                 except Exception:
-                    self._writer_lock_lost = True
+                    LOGGER.exception("mysql session rollback failed")
                 raise
 
     async def delete_derived_state(
@@ -712,7 +752,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 try:
                     await connection.rollback()
                 except Exception:
-                    self._writer_lock_lost = True
+                    LOGGER.exception("mysql session rollback failed")
                 raise
 
     async def forget_session(self, session_id: str) -> None:
@@ -730,7 +770,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 try:
                     await connection.rollback()
                 except Exception:
-                    self._writer_lock_lost = True
+                    LOGGER.exception("mysql session rollback failed")
                 raise
 
     async def create_run(self, command, context):
@@ -990,7 +1030,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"""
-                    SELECT compact_state FROM {self._table("sessions")}
+                    SELECT compact_state, revision, last_sequence
+                    FROM {self._table("sessions")}
                     WHERE session_id = %s
                     """,
                     (session_id,),
@@ -1000,6 +1041,14 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     return None
                 await cursor.execute(
                     f"""
+                    SELECT revision, mutation FROM {self._table("session_mutations")}
+                    WHERE session_id = %s ORDER BY revision
+                    """,
+                    (session_id,),
+                )
+                mutation_rows = await cursor.fetchall()
+                await cursor.execute(
+                    f"""
                     SELECT run_id, event FROM {self._table("run_events")}
                     WHERE session_id = %s
                     ORDER BY run_id, run_sequence
@@ -1007,12 +1056,49 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     (session_id,),
                 )
                 event_rows = await cursor.fetchall()
-        payload = dict(_decode_json(row[0]))
+        payload = self._replay_mutations(
+            dict(_decode_json(row[0])), mutation_rows, int(row[1]), int(row[2])
+        )
+        payload["_mutation_count"] = len(mutation_rows)
         run_events: dict[str, list[dict[str, Any]]] = {}
         for run_id, event in event_rows:
             run_events.setdefault(run_id, []).append(_decode_json(event))
         payload["run_events"] = run_events
         return payload
+
+    @staticmethod
+    def _replay_mutations(compact, mutation_rows, revision, last_sequence):
+        try:
+            aggregate = SessionAggregate(SessionAggregateSnapshotV2.model_validate(compact))
+            current_revision = aggregate.revision
+            for next_revision, encoded in mutation_rows:
+                if int(next_revision) != current_revision + 1:
+                    raise ValueError("non-contiguous Session mutation revisions")
+                delta = dict(_decode_json(encoded))
+                session_rows = delta.get("upserts", {}).get("sessions", ())
+                if len(session_rows) != 1 or int(session_rows[0]["revision"]) != int(next_revision):
+                    raise ValueError("Session mutation has an invalid head")
+                head = dict(session_rows[0])
+                head["revision_sequences"] = {
+                    **aggregate.snapshot.sessions[0].revision_sequences,
+                    **head["revision_sequences"],
+                }
+                delta["upserts"]["sessions"] = [head]
+                aggregate = aggregate.apply(SessionStateDeltaMutation(**delta))
+                current_revision = int(next_revision)
+            state = aggregate.snapshot.model_dump(mode="json")
+            if current_revision != revision or state["sessions"][0]["last_sequence"] != last_sequence:
+                raise ValueError("Session head disagrees with its mutations")
+            return state
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SessionStoreCorruptionError(
+                RuntimeErrorInfo(
+                    code="session_store.aggregate_corrupt",
+                    category=ErrorCategory.CORRUPT_STATE,
+                    message=f"mysql Session mutations are invalid: {exc}",
+                    safe_to_resume=False,
+                )
+            ) from exc
 
     async def _reload_session_from_storage_locked(self, session_id: str) -> None:
         if session_id in self._sessions:
@@ -1033,6 +1119,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
     def _forget_persisted_session(self, session_id: str) -> None:
         self._loaded_session_ids.discard(session_id)
         self._persisted_session_revisions.pop(session_id, None)
+        self._persisted_mutation_counts.pop(session_id, None)
         self._persisted_locations.pop(session_id, None)
         self._persisted_start_keys.pop(session_id, None)
         for run_id in self._persisted_session_runs.pop(session_id, set()):
@@ -1043,17 +1130,20 @@ class _MysqlSessionState(SessionStoreCoordinator):
         session_id: str,
         revision: int,
         run_sequences: dict[str, int],
-        compact: dict[str, Any],
+        location_rows: set[tuple[str, str, str]],
+        start_rows: set[tuple[str, ...]],
+        mutation_count: int,
     ) -> None:
         previous = self._persisted_session_runs.get(session_id, set())
         for run_id in previous - set(run_sequences):
             self._persisted_run_sequences.pop(run_id, None)
         self._loaded_session_ids.add(session_id)
         self._persisted_session_revisions[session_id] = revision
+        self._persisted_mutation_counts[session_id] = mutation_count
         self._persisted_session_runs[session_id] = set(run_sequences)
         self._persisted_run_sequences.update(run_sequences)
-        self._persisted_locations[session_id] = self._location_rows(session_id, compact)
-        self._persisted_start_keys[session_id] = self._start_key_rows(session_id, compact)
+        self._persisted_locations[session_id] = location_rows
+        self._persisted_start_keys[session_id] = start_rows
 
     def _install_session_locked(self, payload: dict[str, Any]) -> None:
         session_rows = payload.get("sessions", ())
@@ -1091,7 +1181,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 run_id: len(events)
                 for run_id, events in payload.get("run_events", {}).items()
             },
-            payload,
+            self._location_rows(session_id, payload),
+            self._start_key_rows(session_id, payload),
+            int(payload.get("_mutation_count", 0)),
         )
 
     @staticmethod
@@ -1222,7 +1314,7 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
     name = "MySQL SessionStore"
     description = (
         "Durable per-Session MySQL store with appended Run events. "
-        "Single-process writers; no global Session index."
+        "No global Session index."
     )
 
     def __init__(self, *args, **kwargs) -> None:
@@ -1246,6 +1338,5 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
 __all__ = [
     "MysqlSessionStore",
     "SessionStoreCorruptionError",
-    "StoreInUseError",
     "parse_mysql_dsn",
 ]
