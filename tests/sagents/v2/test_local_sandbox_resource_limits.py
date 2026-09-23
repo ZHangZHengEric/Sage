@@ -364,6 +364,7 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(tmp_path, monke
         assert str(job) == command[4]
         assert command[2] == "-c"  # No mutable workspace helper before isolation.
         assert "--unshare-all" in command and "--cap-drop" in command
+        assert command.index("--unshare-user") < command.index("--disable-userns")
         assert "--disable-userns" in command
         assert "--seccomp" in command
         assert command.count("--bind-fd") == 3

@@ -505,6 +505,10 @@ class LocalResourceBoundary:
             command = [
                 bwrap,
                 "--unshare-all",
+                # --unshare-all only sets --unshare-user-try. bubblewrap rejects
+                # --disable-userns unless --unshare-user itself is present; the
+                # later non-root DWIM that implies a user namespace runs too late.
+                "--unshare-user",
                 "--disable-userns",
                 "--die-with-parent",
                 "--new-session",

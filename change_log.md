@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-23 12:10** Linux 沙箱补 `--unshare-user`，否则新版 bwrap 拒绝 `--disable-userns`；CI 安装 a2a extra，并放宽并发 admission 超时。
+
 - **2026-09-21 13:35** v2 analyze_image 回 v1 回执：成功只回短 JSON 并注入隐藏 user 图；失败回可读 JSON（缺文件等），不再抛成套话。
 
 - **2026-09-10** 文件工具 v1/v2 对齐空改动、换行和区间冲突处理；修复 v2 全量替换与批量改行恢复，无法确认的写入保留 UNKNOWN；YAML 校验保留合并键兼容性，v2 独立校验写入结果。
