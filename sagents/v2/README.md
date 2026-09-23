@@ -298,12 +298,16 @@ inject `PostgresSessionStore(dsn=...)` through
 `SAgentBuilder.with_session_store(...)`.
 
 `sage.session.mysql` is a second optional durable plugin (`pip install sage[mysql]`
-or `aiomysql`). It also reuses the coordinator, upserts compact Session
-metadata, and appends Run events. `dsn` must be a `mysql://` URL that includes
-a database; tables use the same `sagent_` prefix. Optional `table_prefix`
-isolates a second store in a shared database. A process-held `GET_LOCK`
-rejects a second writer (`multi_process_writes: False`). Subscribers stay
-in-process. There is no global Session index.
+or `aiomysql`). It reuses the coordinator, appends Run events and Session
+mutations, and periodically compacts them into a Session snapshot. Location and
+start-idempotency indexes write only changed rows. `dsn` must be a `mysql://`
+URL that includes a database; tables use the same `sagent_` prefix. Optional
+`table_prefix` isolates a second store in a shared database. Reads and writes
+borrow connections from one pool with no client-side size cap or reserved
+writer connection. Concurrent sessions can commit independently. A Session
+revision check rejects conflicting writes, but cross-process cache and
+subscriptions are not synchronized (`multi_process_writes: False`). There is
+no global Session index.
 
 `SAgentApplication` is the application-level ownership boundary. It exposes
 logical Agents and typed services while owning extension scopes, Scheduler,
