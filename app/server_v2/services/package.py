@@ -95,7 +95,11 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
                 plugin="sage.protocol.ag-ui",
                 enabled=True,
                 config={"enable_sage_extensions": True},
-            )
+            ),
+            "a2a": InterfaceDeclaration(
+                plugin="sage.protocol.a2a",
+                enabled=True,
+            ),
         },
     )
 

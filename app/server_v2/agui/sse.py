@@ -74,6 +74,7 @@ async def canonical_agui_sse(
     thread_id: str,
     run_id: str,
     last_event_id: str | None,
+    restarted_after: int = 0,
     heartbeat_seconds: float = 20.0,
 ) -> AsyncIterator[str]:
     """Project one canonical Run log into a resumable AG-UI SSE stream.
@@ -81,6 +82,12 @@ async def canonical_agui_sse(
     Replaying from the beginning is intentional: the AG-UI adapter has small
     item-lifecycle state, so rebuilding it makes a cursor inside a multi-frame
     RuntimeEvent exact without introducing a second persisted projection log.
+
+    ``restarted_after`` is where the Run's log stood when this request put it
+    back in flight, and is zero for a Run that was merely started. It exists
+    because a resumed Run has already recorded the suspension that stopped it:
+    replaying that far would otherwise close the stream on the very pause this
+    request just ended.
     """
 
     cursor = CanonicalSseCursor.parse(last_event_id)
@@ -121,7 +128,7 @@ async def canonical_agui_sse(
             "run.completed",
             "run.failed",
             "run.cancelled",
-        }:
+        } and event.run_sequence > restarted_after:
             return
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from contextlib import AsyncExitStack
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -31,6 +32,7 @@ from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from app.server_v2.core.errors import ServerV2Error
 from app.server_v2.domain.catalog import (
     catalog_model,
+    enabled_a2a_agents,
     enabled_mcp_servers,
     require_agent,
 )
@@ -46,11 +48,14 @@ from app.server_v2.domain.skills import (
 from app.server_v2.services.composition import (
     RunComposition,
     load_composition,
+    selected_a2a_agents,
     selected_mcp_servers,
 )
 from app.server_v2.services.models import create_catalog_provider, close_model_provider
 from app.server_v2.services.official import attach_official_tools, resolve_agent_tools
 from app.server_v2.services.package import server_v2_run_manifest
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CatalogSkillProvider:
@@ -241,6 +246,22 @@ class CatalogRunDriver:
                     stack.push_async_callback(closer)
 
 
+async def _tool_names(catalog, run_id: str) -> tuple[str, ...]:
+    """Name what a tenant catalog is offering this Run, tolerating a bad one.
+
+    Discovery already degrades per server rather than per Run — an unreachable
+    MCP server or A2A peer costs its own Tools and nothing else. Letting an
+    exception out here would undo that by turning a peer that is merely down
+    into a Run that cannot start.
+    """
+
+    try:
+        return tuple(item.name for item in await catalog.list_tools(run_id=run_id))
+    except Exception:
+        _LOGGER.warning("tool discovery failed for %r", catalog, exc_info=True)
+        return ()
+
+
 async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
     catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
@@ -313,12 +334,28 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             skill_tool = SkillToolPlugin(loader, language=service.settings.language)
             catalogs.append(skill_tool.catalog)
             executors.append(skill_tool.executor)
+        # Tools from the tenant's own catalogs are granted per catalog rather
+        # than per Agent: the Agent's ``tools`` list names official tools, which
+        # is all the product lets it choose from. Without this they would be
+        # composed into the Run and then refused at call time, so configuring a
+        # peer or an MCP server would look like it worked and never do anything.
+        external: list[str] = []
         mcp = service.mcp_plugins.get(
             user_id, selected_mcp_servers(catalog, frozen.mcp_servers)
         )
         if mcp is not None:
             catalogs.append(mcp)
             executors.append(mcp)
+            external.extend(await _tool_names(mcp, command.idempotency_key))
+        peers = service.a2a_plugins.get(
+            user_id,
+            selected_a2a_agents(catalog, frozen.a2a_agents),
+            call_depth=frozen.call_depth,
+        )
+        if peers is not None:
+            catalogs.append(peers)
+            executors.append(peers)
+            external.extend(await _tool_names(peers, command.idempotency_key))
         from app.server_v2.services.tool_policy import server_tool_policy
         loop = factory.create_loop(
             resolved,
@@ -326,6 +363,7 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             model=model,
             tool_catalog=CompositeToolCatalog(tuple(catalogs)),
             tool_executor=CompositeToolExecutor(tuple(executors)),
+            additional_runtime_tools=tuple(dict.fromkeys(external)),
             skill_loader=loader if names else None,
             tool_policy=server_tool_policy(service.agent_management) if service.agent_management is not None else None,
             continuation_policy=ports.continuation_policy,
@@ -377,6 +415,7 @@ async def _composition(service, command: StartRun, catalog, *, user_id: str):
         agent=agent,
         skills=records,
         mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
+        a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
     )
 
 

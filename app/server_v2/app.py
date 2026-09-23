@@ -115,11 +115,16 @@ def _mount_spa(app: FastAPI) -> None:
         return
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
 
+    # Prefixes owned by the backend. A machine protocol swallowed by the SPA
+    # fallback answers 200 with HTML instead of 404, which a client reports as
+    # an unparseable response rather than a missing route.
+    reserved = ("api/", "a2a/", ".well-known/")
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
         root = WEB_DIST.resolve()
         candidate = (root / full_path).resolve()
-        if not candidate.is_relative_to(root) or full_path.startswith("api/"):
+        if not candidate.is_relative_to(root) or full_path.startswith(reserved):
             raise HTTPException(status_code=404, detail="not found")
         if full_path and candidate.is_file():
             return FileResponse(candidate)

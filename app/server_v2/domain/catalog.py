@@ -139,10 +139,74 @@ class McpServerRecord(BaseModel):
         }
 
 
+class A2AAgentRecord(BaseModel):
+    """A remote A2A agent this tenant's Agents may delegate work to.
+
+    ``url`` is the peer's base URL rather than its JSON-RPC endpoint: A2A
+    publishes the endpoint inside the Agent Card, so pinning it here would make
+    the record wrong the moment the peer moved it. The host is still pinned,
+    because the host is what the tenant vouched for and what this server sends
+    their credential to.
+    """
+
+    name: str
+    url: str | None = None
+    api_key: SecretStr | None = None
+    disabled: bool = False
+    description: str = ""
+    skills: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self) -> A2AAgentRecord:
+        parsed = urlsplit(self.url or "")
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("A2A agent requires an absolute http(s) URL")
+        return self
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "url": self.url,
+            "disabled": self.disabled,
+            "description": self.description,
+            "skills": list(self.skills),
+            "has_api_key": self.api_key is not None
+            and bool(self.api_key.get_secret_value()),
+        }
+
+
 class UserCatalog(BaseModel):
     agents: list[AgentRecord] = Field(default_factory=list)
     models: list[ModelRecord] = Field(default_factory=list)
     mcp_servers: list[McpServerRecord] = Field(default_factory=list)
+    a2a_agents: list[A2AAgentRecord] = Field(default_factory=list)
+
+    @field_validator("a2a_agents", mode="before")
+    @classmethod
+    def drop_unreachable_peers(cls, value: object) -> object:
+        """Ignore persisted peers this deployment cannot call.
+
+        Same reasoning as the MCP validator below: one unusable row costs that
+        peer's Tools, while rejecting the record would lock the tenant out of
+        every Agent and model too.
+        """
+
+        if not isinstance(value, list):
+            return value
+        kept: list[object] = []
+        for item in value:
+            if not isinstance(item, dict):
+                kept.append(item)
+                continue
+            try:
+                kept.append(A2AAgentRecord.model_validate(item))
+            except ValidationError:
+                _LOGGER.warning(
+                    "dropping unusable a2a agent %r (url=%r)",
+                    item.get("name"),
+                    item.get("url"),
+                )
+        return kept
 
     @field_validator("mcp_servers", mode="before")
     @classmethod
@@ -190,6 +254,10 @@ def catalog_payload(catalog: UserCatalog) -> dict[str, object]:
     for item, record in zip(payload.get("models", []), catalog.models):
         item["api_key"] = record.api_key.get_secret_value()
     for item, record in zip(payload.get("mcp_servers", []), catalog.mcp_servers):
+        item["api_key"] = (
+            record.api_key.get_secret_value() if record.api_key is not None else None
+        )
+    for item, record in zip(payload.get("a2a_agents", []), catalog.a2a_agents):
         item["api_key"] = (
             record.api_key.get_secret_value() if record.api_key is not None else None
         )
@@ -285,11 +353,56 @@ def upsert_mcp(
     return record, catalog
 
 
-def _first_error(exc: ValidationError) -> str:
+def upsert_a2a_agent(
+    catalog: UserCatalog, payload: dict[str, object]
+) -> tuple[A2AAgentRecord, UserCatalog]:
+    name = str(payload.get("name") or "").strip()
+    if not _AGENT_ID.fullmatch(name):
+        raise ServerV2Error("validation", f"invalid a2a agent name: {name!r}")
+    existing = next((item for item in catalog.a2a_agents if item.name == name), None)
+    api_key = str(payload.get("api_key") or "")
+    secret = existing.api_key if existing is not None else None
+    if api_key:
+        secret = SecretStr(api_key)
+    skills = payload.get("skills")
+    try:
+        record = A2AAgentRecord(
+            name=name,
+            url=str(payload.get("url") or "").strip() or None,
+            api_key=secret,
+            disabled=bool(payload.get("disabled", False)),
+            description=str(payload.get("description") or "")[:500],
+            skills=_unique_names(
+                skills
+                if skills is not None
+                else (existing.skills if existing is not None else [])
+            ),
+        )
+    except ValidationError as exc:
+        raise ServerV2Error("validation", _first_error(exc, "invalid a2a agent")) from exc
+    peers = [item for item in catalog.a2a_agents if item.name != name]
+    peers.append(record)
+    catalog.a2a_agents = peers
+    return record, catalog
+
+
+def delete_a2a_agent(catalog: UserCatalog, name: str) -> UserCatalog:
+    remaining = [item for item in catalog.a2a_agents if item.name != name]
+    if len(remaining) == len(catalog.a2a_agents):
+        raise ServerV2Error("not_found", "a2a agent not found")
+    catalog.a2a_agents = remaining
+    return catalog
+
+
+def enabled_a2a_agents(catalog: UserCatalog) -> list[A2AAgentRecord]:
+    return [item for item in catalog.a2a_agents if not item.disabled]
+
+
+def _first_error(exc: ValidationError, fallback: str = "invalid mcp server") -> str:
     for item in exc.errors():
         message = str(item.get("msg") or "").removeprefix("Value error, ").strip()
-        return message or "invalid mcp server"
-    return "invalid mcp server"
+        return message or fallback
+    return fallback
 
 
 def delete_mcp(catalog: UserCatalog, name: str) -> UserCatalog:

@@ -344,11 +344,12 @@ def test_questionnaire_survives_a2a_and_mcp_projection():
         ),
     )
 
-    a2a = A2AProtocolAdapter().translate(source).frames[0].payload["status"]
+    a2a = A2AProtocolAdapter().translate(source).frames[0].payload
     mcp = McpProtocolAdapter().translate(source).frames[0].payload
 
-    assert a2a["allowedDecisions"] == ["submit", "cancel"]
-    assert a2a["payload"]["questions"][0]["id"] == "target"
+    assert a2a["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert a2a["metadata"]["sage.allowedDecisions"] == ["submit", "cancel"]
+    assert a2a["metadata"]["sage.payload"]["questions"][0]["id"] == "target"
     assert mcp["requestedSchema"]["properties"]["target"] == {
         "type": "array",
         "title": "Targets",
@@ -357,7 +358,7 @@ def test_questionnaire_survives_a2a_and_mcp_projection():
     assert mcp["sageInteraction"]["payload"] == source.data.payload
 
 
-@pytest.mark.parametrize("adapter", [AcpProtocolAdapter(), A2AProtocolAdapter()])
+@pytest.mark.parametrize("adapter", [AcpProtocolAdapter()])
 def test_terminal_error_message_and_code_survive_protocol_projection(adapter):
     source = event(
         "run.failed",
@@ -376,6 +377,28 @@ def test_terminal_error_message_and_code_survive_protocol_projection(adapter):
     assert status["errorCode"] == "model.provider_error"
 
 
+def test_a2a_terminal_error_survives_as_status_message_and_metadata():
+    """A2A 1.0 has no error code on TaskStatus, so the code rides metadata."""
+
+    source = event(
+        "run.failed",
+        data=RunEventData(
+            state="failed",
+            error=RuntimeErrorInfo(
+                code="model.provider_error",
+                category=ErrorCategory.PROVIDER_TRANSIENT,
+                message="模型服务暂时不可用，请稍后重试。",
+            ),
+        ),
+    )
+    payload = A2AProtocolAdapter().translate(source).frames[0].payload
+    assert payload["status"]["state"] == "TASK_STATE_FAILED"
+    assert payload["status"]["message"]["parts"][0]["text"] == (
+        "模型服务暂时不可用，请稍后重试。"
+    )
+    assert payload["metadata"]["sage.errorCode"] == "model.provider_error"
+
+
 def test_mcp_explicitly_refuses_to_masquerade_as_run_protocol():
     result = McpProtocolAdapter().translate(event("run.started"))
     assert result.frames == ()
@@ -385,12 +408,12 @@ def test_mcp_explicitly_refuses_to_masquerade_as_run_protocol():
 @pytest.mark.parametrize(
     ("event_type", "state"),
     [
-        ("run.queued", "submitted"),
-        ("run.started", "working"),
-        ("run.suspended", "input-required"),
-        ("run.completed", "completed"),
-        ("run.failed", "failed"),
-        ("run.cancelled", "canceled"),
+        ("run.queued", "TASK_STATE_SUBMITTED"),
+        ("run.started", "TASK_STATE_WORKING"),
+        ("run.suspended", "TASK_STATE_INPUT_REQUIRED"),
+        ("run.completed", "TASK_STATE_COMPLETED"),
+        ("run.failed", "TASK_STATE_FAILED"),
+        ("run.cancelled", "TASK_STATE_CANCELED"),
     ],
 )
 def test_a2a_task_status_mapping_matrix(event_type, state):
