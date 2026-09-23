@@ -23,6 +23,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
+from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     SessionAggregateSnapshotV2,
@@ -173,7 +174,6 @@ class _MysqlSessionState(SessionStoreCoordinator):
             "global_session_index": False,
             "derived_state_authoritative": False,
             "cross_process_subscribe": False,
-            "volatile_stream_previews": True,
         }
 
     def composition_identity(self) -> dict[str, str]:
@@ -864,6 +864,52 @@ class _MysqlSessionState(SessionStoreCoordinator):
     async def publish_stream_preview(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().publish_stream_preview(run_id=run_id, **kwargs)
+
+    async def commit_model_stream_batch(
+        self, *, run, drafts, context, idempotency_key
+    ):
+        """Persist item starts; send model deltas from the in-process buffer."""
+
+        started = tuple(
+            draft for draft in drafts
+            if draft.type in {"message.started", "reasoning.started"}
+        )
+        previews = tuple(
+            draft for draft in drafts
+            if draft.type in {"message.delta", "reasoning.delta"}
+        )
+        if started:
+            run = await self._commit_model_stream_drafts(
+                run=run,
+                drafts=started,
+                context=context,
+                idempotency_key=idempotency_key,
+                expected_states={run.state},
+                return_terminal_on_conflict=False,
+            )
+        if not previews:
+            return run
+        try:
+            return await self.publish_stream_preview(
+                run_id=run.run_id,
+                expected_revision=run.revision,
+                drafts=previews,
+                context=context,
+            )
+        except SageV2Error as exc:
+            if exc.info.category != ErrorCategory.CONFLICT:
+                raise
+            latest = await self.get_run(run.run_id)
+            if latest.state in TERMINAL_RUN_STATES:
+                return latest
+            if latest.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                raise
+            return await self.publish_stream_preview(
+                run_id=latest.run_id,
+                expected_revision=latest.revision,
+                drafts=previews,
+                context=context,
+            )
 
     async def read_fork_base_events(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)

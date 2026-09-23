@@ -1845,6 +1845,65 @@ class SessionStoreCoordinator:
             self._fanout_locked(run_id, events)
             return result
 
+    async def commit_model_stream_batch(
+        self,
+        *,
+        run: RunSnapshot,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+        idempotency_key: str,
+    ) -> RunSnapshot:
+        """Commit one model stream batch using the store's durable policy."""
+
+        return await self._commit_model_stream_drafts(
+            run=run,
+            drafts=drafts,
+            context=context,
+            idempotency_key=idempotency_key,
+            expected_states={RunState.RUNNING},
+            return_terminal_on_conflict=True,
+        )
+
+    async def _commit_model_stream_drafts(
+        self,
+        *,
+        run: RunSnapshot,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+        idempotency_key: str,
+        expected_states: Collection[RunState],
+        return_terminal_on_conflict: bool,
+    ) -> RunSnapshot:
+        try:
+            result = await self.commit_run(
+                run_id=run.run_id,
+                expected_revision=run.revision,
+                expected_states=expected_states,
+                new_state=run.state,
+                drafts=drafts,
+                context=context,
+                idempotency_key=idempotency_key,
+            )
+            return result.run
+        except SageV2Error as exc:
+            if exc.info.category != ErrorCategory.CONFLICT:
+                raise
+            latest = await self.get_run(run.run_id)
+            if return_terminal_on_conflict and latest.state in TERMINAL_RUN_STATES:
+                return latest
+            if latest.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                raise
+            result = await self.commit_run(
+                run_id=latest.run_id,
+                expected_revision=latest.revision,
+                expected_states={latest.state},
+                new_state=latest.state,
+                drafts=drafts,
+                context=context,
+                idempotency_key=idempotency_key,
+            )
+            return result.run
+
     async def publish_stream_preview(
         self,
         *,

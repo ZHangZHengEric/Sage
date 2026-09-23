@@ -257,6 +257,15 @@ class SessionStore(Protocol):
         context: RequestContext,
     ) -> RunSnapshot: ...
 
+    async def commit_model_stream_batch(
+        self,
+        *,
+        run: RunSnapshot,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+        idempotency_key: str,
+    ) -> RunSnapshot: ...
+
     async def commit_run(
         self,
         *,
