@@ -27,7 +27,12 @@ from sagents.v2.contracts.interactions import (
     InteractionRequest,
     InteractionType,
 )
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import (
+    ItemSnapshot,
+    ItemStatus,
+    MessageItemData,
+    TextBlock,
+)
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
@@ -134,6 +139,94 @@ async def test_live_preview_does_not_advance_canonical_run_cursor():
         idempotency_key="after_preview",
     )
     assert committed.events[0].run_sequence == run.last_run_sequence + 1
+
+
+@pytest.mark.asyncio
+async def test_long_preview_remains_replayable_until_item_completion():
+    runtime, _, run_id = await running_runtime()
+    store = runtime.session_store
+    run = await store.get_run(run_id)
+    drafts = tuple(
+        EventDraft(
+            type="message.delta",
+            item_id="item_preview",
+            data=ItemEventData(operation="delta", delta="x"),
+        )
+        for _ in range(1025)
+    )
+    await store.publish_stream_preview(
+        run_id=run_id,
+        expected_revision=run.revision,
+        drafts=drafts,
+        context=CONTEXT,
+    )
+    previews = await store.read_stream_previews(run_id)
+    assert len(previews) == 1025
+    assert [event.preview_sequence for event in previews] == list(range(1, 1026))
+    await store.publish_stream_preview(
+        run_id=run_id,
+        expected_revision=run.revision,
+        drafts=drafts[:1],
+        context=CONTEXT,
+    )
+    assert [
+        event.preview_sequence
+        for event in await store.read_stream_previews(
+            run_id, after_preview_sequence=1024
+        )
+    ] == [1025, 1026]
+    observer = store.subscribe_events(
+        EventCursor(run_id=run_id, run_sequence=run.last_run_sequence)
+    )
+    try:
+        assert (await anext(observer)).preview_sequence == 1
+    finally:
+        await observer.aclose()
+    await store.commit_run(
+        run_id=run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.RUNNING},
+        new_state=RunState.RUNNING,
+        drafts=(
+            EventDraft(
+                type="message.completed",
+                item_id="item_preview",
+                data=ItemEventData(
+                    operation="completed",
+                    item=ItemSnapshot(
+                        item_id="item_preview",
+                        run_id=run_id,
+                        status=ItemStatus.COMPLETED,
+                        data=MessageItemData(
+                            role="assistant",
+                            content=(TextBlock(text="x" * 1026),),
+                        ),
+                        created_at=NOW,
+                        updated_at=NOW,
+                    ),
+                ),
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="complete_preview",
+    )
+    resumed_run = await store.get_run(run_id)
+    await store.publish_stream_preview(
+        run_id=run_id,
+        expected_revision=resumed_run.revision,
+        drafts=(
+            EventDraft(
+                type="message.delta",
+                item_id="item_next",
+                data=ItemEventData(operation="delta", delta="next"),
+            ),
+        ),
+        context=CONTEXT,
+    )
+    next_previews = await store.read_stream_previews(run_id)
+    assert len(next_previews) == 1
+    assert next_previews[0].type == "message.delta"
+    assert next_previews[0].preview_sequence == 1027
 
 
 def test_session_store_distributed_capabilities_are_explicit():
