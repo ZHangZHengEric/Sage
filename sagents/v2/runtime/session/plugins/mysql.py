@@ -233,6 +233,17 @@ class _MysqlSessionState(SessionStoreCoordinator):
         async with pool.acquire() as connection:
             yield connection
 
+    @asynccontextmanager
+    async def _reader_connection(self):
+        await self._ensure_ready()
+        pool = self._pool
+        assert pool is not None
+        async with pool.acquire() as connection:
+            try:
+                yield connection
+            finally:
+                await connection.rollback()
+
     async def _existing_tables(self, connection) -> set[str]:
         names = tuple(self._physical_table(name) for name in _SCHEMA_TABLES)
         placeholders = ", ".join(["%s"] * len(names))
@@ -691,7 +702,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         await super().get_session(session_id)
         assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"""
@@ -937,7 +948,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         found: list[str] = []
         frontier = [session_id]
         seen = {session_id}
-        async with self._pool.acquire() as connection:
+        async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 while frontier:
                     current = frontier.pop()
@@ -989,7 +1000,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         if identity_key == "run_id" and identity in self._runs:
             return self._runs[identity].session_id
         assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"""
@@ -1003,7 +1014,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     async def _read_start_lookup(self, command, context) -> str | None:
         assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"""
@@ -1026,7 +1037,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     async def _fetch_session(self, session_id: str) -> dict[str, Any] | None:
         assert self._pool is not None
-        async with self._pool.acquire() as connection:
+        async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"""
