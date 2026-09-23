@@ -44,22 +44,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
-          # Ubuntu 24.04 sets apparmor_restrict_unprivileged_userns=1. bubblewrap
-          # then dies with "setting up uid map: Permission denied", and
-          # --disable-userns cannot run without that user namespace. The packaged
-          # AppArmor profile is not enough on GitHub-hosted runners.
-          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-          if [ -f /etc/apparmor.d/bwrap ]; then
-            sudo apparmor_parser -r /etc/apparmor.d/bwrap
-          fi
-          bwrap --unshare-user --disable-userns \
-            --ro-bind /usr /usr \
-            --ro-bind-try /bin /bin \
-            --ro-bind-try /lib /lib \
-            --ro-bind-try /lib64 /lib64 \
-            -- /usr/bin/true
 
       - name: Install Python Dependencies
         run: |
