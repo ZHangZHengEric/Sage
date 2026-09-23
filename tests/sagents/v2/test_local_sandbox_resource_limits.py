@@ -278,6 +278,31 @@ def test_workspace_cannot_supply_an_unsandboxed_launch_utility(tmp_path, monkeyp
         resources._trusted_utility("bwrap", tmp_path)
 
 
+def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
+    from sagents.v2.runtime.execution.sandbox.local_support.resources import (
+        _macos_developer_read_roots,
+    )
+
+    missing = tmp_path / "missing-xcode-select"
+    selected = tmp_path / "xcode_select_link"
+    selected.symlink_to("/Custom/Xcode.app/Contents/Developer")
+    roots = _macos_developer_read_roots(
+        environ={"DEVELOPER_DIR": "/opt/Xcode.app/Contents/Developer"},
+        selected_link=selected,
+    )
+    assert "/Applications/Xcode.app/Contents/Developer" in roots
+    assert "/Library/Developer/CommandLineTools" in roots
+    assert "/opt/Xcode.app/Contents/Developer" in roots
+    assert "/Custom/Xcode.app/Contents/Developer" in roots
+    assert _macos_developer_read_roots(
+        environ={}, selected_link=missing
+    ) == (
+        "/Library/Developer/CommandLineTools",
+        "/Applications/Xcode.app/Contents/Developer",
+        "/Applications/Xcode-beta.app/Contents/Developer",
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "darwin", reason="native Seatbelt")
 async def test_preexisting_hard_link_is_rejected_before_execution(tmp_path):
