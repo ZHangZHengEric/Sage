@@ -30,20 +30,15 @@ class AvailableSkillsContextProvider:
         lines = ["<available_skills>"]
         used = 0
         for index, value in enumerate(sorted(values, key=lambda item: item.name)):
-            used += len(value.name) + min(53, len(value.description)) + 100
+            used += len(value.name) + len(value.description) + 100
             if index >= 128 or used > 12_000:
                 lines.append("[More skills omitted from this catalog excerpt.]")
                 break
-            description = (
-                value.description[:50] + "..."
-                if len(value.description) > 50
-                else value.description
-            )
             lines.extend(
                 (
                     "<skill>",
                     f"<skill_name>{escape(value.name)}</skill_name>",
-                    f"<skill_description>{escape(description)}</skill_description>",
+                    f"<skill_description>{escape(value.description)}</skill_description>",
                     "</skill>",
                 )
             )
