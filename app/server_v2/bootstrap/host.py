@@ -17,6 +17,7 @@ from sagents.v2.runtime.observability import StructuredLogger
 
 from app.server_v2.application.admin import AdminService
 from app.server_v2.application.admission import RunAdmission
+from app.server_v2.application.a2a import A2AService
 from app.server_v2.application.execution import ProcessExecution
 from app.server_v2.application.catalog import CatalogService
 from app.server_v2.application.conversations import ConversationService
@@ -25,6 +26,8 @@ from app.server_v2.application.identity import IdentityService
 from app.server_v2.application.manifest import server_v2_manifest
 from app.server_v2.application.official import install_sandbox
 from app.server_v2.application.runs import RunService
+from app.server_v2.application.runtime_port import AgentRuntime
+from app.server_v2.application.sessions import SessionLog
 from app.server_v2.application.skill_runtime import install_skill_driver
 from app.server_v2.application.skills import SkillCatalogService
 from app.server_v2.core.errors import ServerV2Error
@@ -111,22 +114,59 @@ class ServerV2Service:
             skills=self.skill_catalog,
         )
         self.credentials = CredentialService(self.api_keys, self.catalog)
-        self.execution = ProcessExecution(self)
-        self.admission = RunAdmission(self)
-        self.runs = RunService(self)
-        self.conversations = ConversationService(self)
-        self.admin = AdminService(self)
+        self.execution = ProcessExecution(model_missing=self._model_missing_message())
         self._fallback_model = model_provider
+        install_sandbox(self.execution)
+        self.sessions = SessionLog(lambda: self.application.service("session.access"))
+        self.runtime = AgentRuntime(lambda: self._application)
+        self.admission = RunAdmission(
+            threads=self.threads,
+            catalog=self.catalog,
+            skills=self.skill_catalog,
+            execution=self.execution,
+        )
+        self.runs = RunService(
+            runtime=self.runtime,
+            sessions=self.sessions,
+            execution=self.execution,
+        )
+        self.conversations = ConversationService(
+            threads=self.threads,
+            admission=self.admission,
+            sessions=self.sessions,
+            runs=self.runs,
+            execution=self.execution,
+            runtime=self.runtime,
+            context_for=self.request_context,
+        )
+        self.admin = AdminService(
+            users=self.users,
+            threads=self.threads,
+            catalog=self.catalog,
+            conversations=self.conversations,
+            username_for=self.username_for,
+        )
+        self.a2a = A2AService(
+            threads=self.threads,
+            catalog=self.catalog,
+            admission=self.admission,
+            runs=self.runs,
+            sessions=self.sessions,
+            execution=self.execution,
+            runtime=self.runtime,
+            context_for=self.a2a_request_context,
+        )
         self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-        # Runs being driven on a background task, keyed by native run id. One
-        # dict for every interface: a run id identifies a Run, not a protocol,
-        # and driving the same Run twice would race two writers on its log.
-        self._drives: dict[str, asyncio.Task[None]] = {}
-        self._sandbox_grant_issuer = None
-        self._sandbox_provider = None
-        install_sandbox(self)
+
+    @property
+    def _fallback_model(self):
+        return self.execution.fallback_model
+
+    @_fallback_model.setter
+    def _fallback_model(self, value) -> None:
+        self.execution._fallback = value
 
     @property
     def application(self) -> SAgentApplication:
@@ -150,6 +190,7 @@ class ServerV2Service:
             session_for_run=self._session_id_for_run,
             max_clients=self.settings.max_model_clients,
         )
+        self.execution.attach_models(self._host_models)
         self._application = await (
             SAgentBuilder()
             .with_defaults(session_root=self.paths.sessions_root)
@@ -163,10 +204,12 @@ class ServerV2Service:
         self.agent_management = ServerAgentManagement(
             self, DatabasePackageStore(self.database) if self.database is not None else None)
         install_skill_driver(self)
+        self.execution.attach_logger(self._sagents_logger())
         self._log_sagents_registration()
         self._track(asyncio.create_task(self.agent_management.recover_pending(), name="managed-recovery"))
 
     async def close(self) -> None:
+        await self.execution.close()
         for task in tuple(self._tasks):
             task.cancel()
         if self._tasks:
@@ -185,6 +228,8 @@ class ServerV2Service:
         if self._host_models is not None:
             await self._host_models.close()
             self._host_models = None
+        self.execution.attach_models(None)
+        self.execution.attach_logger(None)
 
     def backends(self) -> dict[str, str]:
         report = {

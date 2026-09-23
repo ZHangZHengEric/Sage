@@ -45,14 +45,22 @@ DEFAULT_OFFICIAL_TOOLS = (
 )
 
 
-def install_sandbox(service) -> None:
+def install_sandbox(execution) -> None:
     """One issuer and one local-workspace provider for the process."""
 
-    if getattr(service, "_sandbox_grant_issuer", None) is not None:
+    if execution.sandbox_grant_issuer is not None:
         return
     issuer = SandboxGrantIssuer()
-    service._sandbox_grant_issuer = issuer
-    service._sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    execution.sandbox_grant_issuer = issuer
+    execution.sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+
+
+async def provision_workspace(execution, workspace: Path, context, *, run_id: str):
+    """Map this user's workspace into one Run's sandbox."""
+
+    return await execution.sandbox_provider.provision(
+        workspace_sandbox_spec(workspace), context, run_id=run_id
+    )
 
 
 def resolve_agent_tools(
@@ -134,10 +142,10 @@ def workspace_sandbox_spec(
 async def attach_official_tools(service, command: StartRun, *, user_id: str):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
-    install_sandbox(service)
-    host_workspace = service.paths.workspace_dir(user_id)
-    handle = await service.execution.sandbox_provider.provision(
-        workspace_sandbox_spec(host_workspace),
+    install_sandbox(service.execution)
+    handle = await provision_workspace(
+        service.execution,
+        service.paths.workspace_dir(user_id),
         service.request_context(user_id),
         run_id=command.idempotency_key,
     )

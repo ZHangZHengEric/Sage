@@ -38,7 +38,11 @@ async def admin_thread_events(
     user: AdminUser,
     admin: AdminDep,
     limit: int = Query(default=500, ge=1, le=2000),
-    offset: int | None = Query(default=None, ge=0),
+    offset: int | None = Query(
+        default=None,
+        ge=0,
+        description="Session sequence already delivered. Omit for the newest page.",
+    ),
 ):
     return success(
         await admin.thread_events(

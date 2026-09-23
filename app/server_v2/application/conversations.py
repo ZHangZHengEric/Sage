@@ -18,11 +18,17 @@ from app.server_v2.core.observability.context import get_request_id
 
 
 class ConversationService:
-    def __init__(self, host) -> None:
-        self.host = host
+    def __init__(self, *, threads, admission, sessions, runs, execution, runtime, context_for) -> None:
+        self.threads = threads
+        self.admission = admission
+        self.sessions = sessions
+        self.runs = runs
+        self.execution = execution
+        self.runtime = runtime
+        self.context_for = context_for
 
     async def list_for(self, user_id: str):
-        return await self.host.threads.list_for(user_id)
+        return await self.threads.list_for(user_id)
 
     async def events(
         self,
@@ -33,26 +39,22 @@ class ConversationService:
         offset,
         admin: bool = False,
     ):
-        record = await self.host.threads.find(thread_id)
+        record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
             raise ServerV2Error("not_found", "thread not found")
         limit = max(1, min(int(limit), 2000))
+        context = self.context_for(record.user_id)
         try:
-            events = await self.host.application.service(
-                "session.access"
-            ).read_session_events(
-                thread_id, self.host.request_context(record.user_id)
+            page = await self.sessions.page(
+                thread_id, context, limit=limit, after_sequence=offset
             )
         except SageV2Error as exc:
             if not exc.info.code.endswith("not_found"):
                 raise map_sage_error(exc) from exc
-            events = []
-        total = len(events)
-        start = max(0, total - limit) if offset is None else max(0, int(offset))
-        page = events[start : start + limit]
+            return {"events": [], "total": 0, "offset": 0, "limit": limit}
         adapter = AgUiProtocolAdapter(enable_sage_extensions=True)
         frames: list[dict] = []
-        for event in page:
+        for event in page.events:
             result = adapter.translate(event)
             for frame in result.frames:
                 frames.append(
@@ -60,8 +62,8 @@ class ConversationService:
                 )
         return {
             "events": frames,
-            "total": total,
-            "offset": start,
+            "total": page.total,
+            "offset": page.after_sequence,
             "limit": limit,
         }
 
@@ -71,7 +73,7 @@ class ConversationService:
         )
         requested_agent = str(props.get("agentId") or "").strip()
         thread_id = validate_agui_id(request.thread_id, field="threadId")
-        admitted = await self.host.admission.prepare(
+        admitted = await self.admission.prepare(
             user_id=user_id,
             session_id=thread_id,
             agent_id=requested_agent,
@@ -80,7 +82,7 @@ class ConversationService:
         enabled = tuple(item.name for item in admitted.skills)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
-            composition_hash=self.host.application.composition_hash,
+            composition_hash=self.runtime.composition_hash,
             default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
             metadata=admitted.metadata,
@@ -88,20 +90,20 @@ class ConversationService:
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id
-        await self.host.admission.remember(
+        await self.admission.remember(
             thread_id, user_id, title="", agent_id=admitted.agent_id
         )
         if not admitted.model_ready:
             return single_error_sse(
-                self.host.execution.model_missing_message(),
+                self.execution.model_missing_message(),
                 code="server.model_not_configured",
             )
 
         correlation_id = get_request_id()
-        context = self.host.request_context(user_id, correlation_id=correlation_id)
+        context = self.context_for(user_id, correlation_id=correlation_id)
         try:
             with structured_log_context(correlation_id=correlation_id):
-                native_run_id = await self.host.runs.start_detached_run(
+                native_run_id = await self.runs.start_detached_run(
                     "ag_ui",
                     command,
                     context,
@@ -116,7 +118,7 @@ class ConversationService:
                         agent_id=agent_id,
                     ),
                 )
-                events = self.host.application.service("session.access").subscribe_events(
+                events = self.sessions.subscribe(
                     EventCursor(run_id=native_run_id, run_sequence=0),
                     context,
                 )
@@ -150,15 +152,14 @@ class ConversationService:
 
         thread_id = validate_agui_id(thread_id, field="threadId")
         run_id = validate_agui_id(run_id, field="runId")
-        thread = await self.host.threads.find(thread_id)
+        thread = await self.threads.find(thread_id)
         if thread is None or thread.user_id != user_id:
             raise ServerV2Error("not_found", "thread not found")
 
         correlation_id = get_request_id()
-        context = self.host.request_context(user_id, correlation_id=correlation_id)
-        access = self.host.application.service("session.access")
+        context = self.context_for(user_id, correlation_id=correlation_id)
         try:
-            runs = await access.list_session_runs(thread_id, context)
+            runs = await self.sessions.list_runs(thread_id, context)
         except SageV2Error as exc:
             raise map_sage_error(exc) from exc
         waiting = [item for item in runs if item.state == RunState.SUSPENDED]
@@ -168,7 +169,7 @@ class ConversationService:
         restarted_after = native.last_run_sequence
 
         with structured_log_context(correlation_id=correlation_id):
-            await self.host.runs.resume_detached_run(
+            await self.runs.resume_detached_run(
                 native.run_id,
                 context,
                 user_id=user_id,
@@ -180,7 +181,7 @@ class ConversationService:
                     else None
                 ),
             )
-            events = access.subscribe_events(
+            events = self.sessions.subscribe(
                 EventCursor(run_id=native.run_id, run_sequence=0), context
             )
             return canonical_agui_sse(
@@ -192,17 +193,15 @@ class ConversationService:
             )
 
     async def delete(self, thread_id: str, user_id: str, *, admin: bool = False) -> None:
-        record = await self.host.threads.find(thread_id)
+        record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
             raise ServerV2Error("not_found", "thread not found")
         try:
-            await self.host.application.service("session.access").delete_session(
-                thread_id, self.host.request_context(record.user_id)
-            )
+            await self.sessions.delete(thread_id, self.context_for(record.user_id))
         except SageV2Error as exc:
             if not exc.info.code.endswith("not_found"):
                 raise map_sage_error(exc) from exc
-        await self.host.threads.remove(thread_id, record.user_id)
+        await self.threads.remove(thread_id, record.user_id)
 
     def _agui_finished(
         self,
@@ -213,7 +212,7 @@ class ConversationService:
         user_id: str,
         agent_id: str,
     ):
-        logger = self.host.execution.sagents_logger().bind(
+        logger = self.execution.sagents_logger().bind(
             thread_id=thread_id, run_id=client_run_id
         )
         logger.info(
@@ -227,7 +226,7 @@ class ConversationService:
             if command.input:
                 first = command.input[0].content[0]
                 title = getattr(first, "text", "")[:80]
-            await self.host.threads.upsert(
+            await self.threads.upsert(
                 thread_id, user_id, title=title, agent_id=agent_id
             )
             status = snapshot.state.value
