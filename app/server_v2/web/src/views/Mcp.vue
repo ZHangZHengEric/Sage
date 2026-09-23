@@ -122,7 +122,7 @@ onMounted(async () => {
     </form>
     <div class="panel stack">
       <h2>已连接</h2>
-      <p v-if="!hasServers" class="empty">还没有 MCP。添加后可在智能体页勾选工具。</p>
+      <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
       <table v-else>
         <thead>
           <tr><th>名称</th><th>协议</th><th>工具</th><th></th></tr>
