@@ -3683,3 +3683,103 @@ async def test_reported_usage_calibrates_next_tool_step_in_live_loop():
     assert budget["estimated_input_tokens"] == (
         2000 + 128 + loop.step_request_builder.token_estimator.estimate(added)
     )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["zh", "en", "pt"])
+@pytest.mark.parametrize(
+    "failure", ["missing", "permission", "validation", "empty", "structured"]
+)
+async def test_tool_failure_details_reach_model_and_durable_history(language, failure):
+    from sagents.v2.context.session_history import SessionEventModelProjector
+    from sagents.v2.i18n import localize_error
+
+    path = "/workspace/yiii-motion-studio/assets/index.json"
+    detail = f"File not found: {path}"
+    structured = (
+        JsonBlock(value={"path": path, "reason": "missing"}),
+        TextBlock(text="Check the workspace-relative path."),
+    )
+
+    class FailedExecutor:
+        async def execute(self, call, context):
+            if failure == "missing":
+                raise FileNotFoundError(path)
+            if failure == "permission":
+                raise PermissionError(f"Read denied: {path}")
+            error = RuntimeErrorInfo(
+                code="tool.arguments_invalid",
+                category=ErrorCategory.VALIDATION,
+                message=detail,
+                metadata={"side_effect_state": "not_applied"},
+            )
+            if failure == "validation":
+                raise SageV2Error(error)
+            return ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                error=localize_error(error, language),
+                content=structured if failure == "structured" else (),
+            )
+
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+            ScriptedModelStep(events=(completed("handled"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model, response_language=language)
+    loop.tool_executor = FailedExecutor()
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    persisted = persisted_tool_result(events, "call_1")
+    live = next(
+        message for message in model.requests[1].messages if message.role == "tool"
+    )
+    replay = next(
+        message
+        for message in SessionEventModelProjector().project(events)
+        if message.role == "tool"
+    )
+    assert result.state == RunState.COMPLETED
+    assert live.content == persisted.data.content == replay.content
+    assert path not in persisted.data.error.message
+    if failure == "structured":
+        assert live.content == structured
+    else:
+        assert path in live.content[0].text
+        if failure in {"missing", "permission"}:
+            assert (
+                "FileNotFoundError" if failure == "missing" else "PermissionError"
+            ) in live.content[0].text
+
+    if failure == "missing":
+        for legacy_content in [(), (TextBlock(text=persisted.data.error.message),)]:
+            legacy_events = tuple(
+                event.model_copy(
+                    update={
+                        "data": event.data.model_copy(
+                            update={
+                                "item": event.data.item.model_copy(
+                                    update={
+                                        "data": event.data.item.data.model_copy(
+                                            update={"content": legacy_content}
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+                if isinstance(event.data, ItemEventData)
+                and event.data.item is not None
+                and event.data.item.item_id == persisted.item_id
+                else event
+                for event in events
+            )
+            restored = next(
+                message
+                for message in SessionEventModelProjector().project(legacy_events)
+                if message.role == "tool"
+            )
+            assert path in restored.content[0].text
+            assert "FileNotFoundError" in restored.content[0].text

@@ -82,6 +82,8 @@ from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
+    error_diagnostic_message,
+    exception_diagnostic_message,
 )
 from sagents.v2.contracts.events import (
     ContinuationEventData,
@@ -2257,7 +2259,7 @@ class AgentLoopEngine:
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
                 operation_id=call.operation_id,
-                content=(TextBlock(text=localized.message),),
+                content=(TextBlock(text=error_diagnostic_message(localized)),),
                 error=localized,
             )
         except Exception as exc:
@@ -2265,7 +2267,7 @@ class AgentLoopEngine:
                 RuntimeErrorInfo(
                     code="tool.provider_error",
                     category=ErrorCategory.PROVIDER_PERMANENT,
-                    message=str(exc),
+                    message=exception_diagnostic_message(exc),
                     safe_to_resume=True,
                 ),
                 context.language,
@@ -2273,7 +2275,7 @@ class AgentLoopEngine:
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
                 operation_id=call.operation_id,
-                content=(TextBlock(text=localized.message),),
+                content=(TextBlock(text=error_diagnostic_message(localized)),),
                 error=localized,
             )
         if result.error is not None:
@@ -2292,18 +2294,10 @@ class AgentLoopEngine:
                     state,
                     uncertainty,
                 )
-            # A Tool may return a structured, model-actionable failure (MCP
-            # ``isError`` is one example). Preserve that authoritative content,
-            # while the persisted error remains localized for host/UI use.
-            if result.metadata.get("tool_result_received") is True:
-                result = result.model_copy(update={"error": localized})
-            else:
-                result = result.model_copy(
-                    update={
-                        "error": localized,
-                        "content": (TextBlock(text=localized.message),),
-                    }
-                )
+            # Content belongs to the Tool, including structured failure output.
+            # Localization only owns the host/UI summary. The receipt marker
+            # controls side-effect certainty, not whether content is retained.
+            result = result.model_copy(update={"error": localized})
         elif call.tool_name == "tool_expand_tools":
             requested_names = call.arguments.get("tool_names")
             if requested_names is None:
@@ -2758,16 +2752,18 @@ class AgentLoopEngine:
             localized = localize_error(result.error, context.language)
             content = result.content
             if not content:
-                content = (TextBlock(text=localized.message),)
+                content = (TextBlock(text=error_diagnostic_message(localized)),)
             elif (
                 result.metadata.get("tool_result_received") is not True
                 and isinstance(content[0], TextBlock)
                 and content[0].text == result.error.message
             ):
-                # Translate the generated error text without discarding
-                # provider content or additional user feedback blocks.
+                # Recover details from generated summaries (also on resume),
+                # preserving additional provider/user feedback blocks.
                 content = (
-                    content[0].model_copy(update={"text": localized.message}),
+                    content[0].model_copy(
+                        update={"text": error_diagnostic_message(localized)}
+                    ),
                     *content[1:],
                 )
             result = result.model_copy(
@@ -3491,7 +3487,7 @@ class AgentLoopEngine:
     def _tool_result_message(result):
         content = result.content
         if not content and result.error is not None:
-            content = (TextBlock(text=result.error.message),)
+            content = (TextBlock(text=error_diagnostic_message(result.error)),)
         metadata = dict(result.metadata)
         metadata.pop("followup_user_message", None)
         return ModelMessage(

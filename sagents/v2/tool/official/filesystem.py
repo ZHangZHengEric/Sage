@@ -14,6 +14,7 @@ from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
+    exception_diagnostic_message,
 )
 from sagents.v2.contracts.items import JsonBlock
 from sagents.v2.contracts.principals import RequestContext
@@ -211,7 +212,7 @@ def _known_not_applied(exc: Exception) -> SageV2Error:
         info = RuntimeErrorInfo(
             code="tool.file_update_not_applied",
             category=ErrorCategory.VALIDATION,
-            message=str(exc),
+            message=exception_diagnostic_message(exc),
             safe_to_resume=True,
             metadata={"side_effect_state": "not_applied"},
         )

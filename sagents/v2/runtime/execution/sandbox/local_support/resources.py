@@ -44,6 +44,11 @@ def _macos_developer_read_roots(
     seen: set[str] = set()
     unique: list[str] = []
     for path in roots:
+        # Xcode's command shims load frameworks and resources beside Developer
+        # (for example Contents/SharedFrameworks), not only inside that tree.
+        developer = Path(path)
+        if developer.name == "Developer" and developer.parent.name == "Contents":
+            path = str(developer.parent)
         if path and path not in seen:
             seen.add(path)
             unique.append(path)
@@ -615,6 +620,9 @@ class LocalResourceBoundary:
 
             reads = [
                 "/System/Library",
+                # Apple-installed frameworks can be symlinked here from
+                # /System/Library (e.g. Xcode's MobileDevice dependency).
+                "/Library/Apple/System/Library",
                 "/usr/bin",
                 "/usr/sbin",
                 "/usr/lib",
@@ -645,6 +653,9 @@ class LocalResourceBoundary:
                 + " ".join(f"(subpath {quote(p)})" for p in reads)
                 + ")",
                 '(allow file-read* (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random") (literal "/var/db/xcode_select_link"))',
+                # xcodebuild checks the host's accepted license before the
+                # system Python shim can resolve its interpreter.
+                '(allow file-read* (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))',
                 '(allow file-write* (literal "/dev/null"))',
             ]
             if not spec.process.read_only and spec.filesystem.allowed_operations & {

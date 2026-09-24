@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import yaml
 from collections import OrderedDict
 from sagents.v2._concurrency import bounded_to_thread
 from pathlib import Path
@@ -15,6 +16,7 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
+from sagents.v2.package.strict_yaml import load_unique_yaml
 
 
 class FilesystemSkillProvider:
@@ -163,45 +165,39 @@ class FilesystemSkillProvider:
 
     @staticmethod
     def _description(skill_file: Path) -> str:
+        # Read only front matter (or the first prose line), without truncating
+        # metadata or loading the Skill body. Preserve multiline YAML scalars.
         try:
-            text = FilesystemSkillProvider._read_bounded(
-                skill_file,
-                remaining=64 * 1024,
-                truncate=True,
-            ).decode("utf-8")
-        except (OSError, UnicodeDecodeError, SageV2Error):
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(skill_file, flags)
+            with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+                first = stream.readline()
+                if first.strip() == "---":
+                    header = []
+                    for line in stream:
+                        if line.strip() in {"---", "..."}:
+                            break
+                        header.append(line)
+                    else:
+                        return ""
+                    try:
+                        metadata = load_unique_yaml("".join(header))
+                    except (ValueError, yaml.YAMLError):
+                        metadata = None
+                    if isinstance(metadata, dict):
+                        description = metadata.get("description")
+                        if isinstance(description, str):
+                            return description
+                else:
+                    value = first.strip().lstrip("#").strip()
+                    if value:
+                        return value
+                for line in stream:
+                    value = line.strip().lstrip("#").strip()
+                    if value and not value.startswith("---"):
+                        return value
+        except (OSError, UnicodeDecodeError):
             return ""
-
-        # A Skill's user-facing description belongs to its YAML front matter.
-        # Parsing this single scalar locally keeps the provider dependency-free;
-        # quoted values are handled without attempting to interpret arbitrary YAML.
-        lines = text.splitlines()
-        if lines and lines[0].strip() == "---":
-            for line in lines[1:]:
-                stripped = line.strip()
-                if stripped == "---":
-                    break
-                key, separator, value = stripped.partition(":")
-                if separator and key.strip() == "description":
-                    return value.strip().strip("'\"")[:500]
-
-        # Skills without front matter remain discoverable. Use the first heading
-        # or prose line as a conservative fallback instead of exposing `name:`.
-        body = lines
-        if lines and lines[0].strip() == "---":
-            closing = next(
-                (
-                    index
-                    for index, line in enumerate(lines[1:], start=1)
-                    if line.strip() == "---"
-                ),
-                len(lines) - 1,
-            )
-            body = lines[closing + 1 :]
-        for line in body:
-            stripped = line.strip().lstrip("#").strip()
-            if stripped and not stripped.startswith("---"):
-                return stripped[:500]
         return ""
 
     @staticmethod

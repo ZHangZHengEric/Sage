@@ -28,12 +28,9 @@ class AvailableSkillsContextProvider:
         if not values:
             return ()
         lines = ["<available_skills>"]
-        used = 0
-        for index, value in enumerate(sorted(values, key=lambda item: item.name)):
-            used += len(value.name) + len(value.description) + 100
-            if index >= 128 or used > 12_000:
-                lines.append("[More skills omitted from this catalog excerpt.]")
-                break
+        # This is the discovery catalog: dropping entries makes enabled skills
+        # unreachable by name. Keep full metadata; skill bodies load separately.
+        for value in sorted(values, key=lambda item: item.name):
             lines.extend(
                 (
                     "<skill>",
