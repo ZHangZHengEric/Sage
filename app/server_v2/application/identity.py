@@ -17,9 +17,6 @@ class IdentityService:
     def __init__(self, users) -> None:
         self.users = users
 
-    async def get_by_id(self, user_id: str) -> UserRecord | None:
-        return await self.users.get_by_id(user_id)
-
     async def register(self, username: str, password: str) -> UserRecord:
         return await self._create(username, password, role="user")
 

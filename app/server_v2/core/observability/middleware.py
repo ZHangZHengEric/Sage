@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from app.server_v2.core.observability.context import create_request_id, request_context
+from sagents.v2.runtime.observability import structured_log_context
 
 Send = Callable[[dict], Awaitable[None]]
 
@@ -35,4 +36,5 @@ class RequestIdMiddleware:
             path=scope.get("path", ""),
             method=scope.get("method", ""),
         ):
-            await self.app(scope, receive, send_with_request_id)
+            with structured_log_context(request_id=request_id, correlation_id=request_id):
+                await self.app(scope, receive, send_with_request_id)

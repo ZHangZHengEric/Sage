@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from collections.abc import Awaitable, Callable
@@ -25,9 +24,10 @@ from sagents.v2.runtime.execution.scheduler import (
     WorkItem,
     WorkerLease,
 )
+from sagents.v2.runtime.observability.logs import get_logger
 
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 @dataclass
@@ -297,10 +297,16 @@ class LocalWorkerDispatcher:
                             if not request.result.done():
                                 request.result.set_exception(exc)
                             requests.pop(key, None)
-                    _LOGGER.error("scheduler claim failed permanently", exc_info=True)
+                    _LOGGER.exception(
+                        "scheduler.claim.failed",
+                        "scheduler claim failed permanently",
+                        exc,
+                    )
                     return
                 _LOGGER.warning(
-                    "scheduler claim failed; retrying in %.2fs", retry_delay
+                    "scheduler.claim.retry",
+                    "scheduler claim failed; retrying",
+                    retry_delay_seconds=retry_delay,
                 )
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 5.0)
@@ -321,10 +327,15 @@ class LocalWorkerDispatcher:
                         await self.scheduler.release(
                             lease, LeaseReleaseReason.CANCELLED, requeue=False
                         )
-                    except Exception:
+                    except Exception as exc:
                         # No execution started. An unreleased orphan can expire,
                         # but must not take a worker out of the pool.
-                        _LOGGER.warning("failed to release orphan work", exc_info=True)
+                        _LOGGER.exception(
+                            "scheduler.orphan_release.failed",
+                            "failed to release orphan work",
+                            exc,
+                            run_id=lease.work.run_id,
+                        )
                     continue
                 self._requests[lease.work.run_id] = request
             request.claimed = True
@@ -599,7 +610,10 @@ class LocalWorkerDispatcher:
         try:
             context = RequestContext.model_validate(raw_context)
         except (TypeError, ValueError):
-            _LOGGER.warning("cannot recover work with invalid request context")
+            _LOGGER.warning(
+                "scheduler.recovery.invalid_context",
+                "cannot recover work with invalid request context",
+            )
             return None
         result = asyncio.get_running_loop().create_future()
         # Recovered work has no in-process caller awaiting this Future.

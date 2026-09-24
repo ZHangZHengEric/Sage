@@ -4,11 +4,10 @@ from __future__ import annotations
 
 
 class AdminService:
-    def __init__(self, *, users, threads, catalog, conversations) -> None:
+    def __init__(self, *, users, threads, catalog) -> None:
         self.users = users
         self.threads = threads
         self.catalog = catalog
-        self.conversations = conversations
 
     async def list_users(self) -> list[dict]:
         return [user.public_dict() for user in await self.users.list_users()]
@@ -33,12 +32,7 @@ class AdminService:
                 "user_id": user_id,
                 "username": names.get(user_id, user_id),
             }
-            for user_id, model in await self.catalog.list_all_models(
+            for user_id, model in await self.catalog.store.list_all_models(
                 [user.user_id for user in users]
             )
         ]
-
-    async def thread_events(self, thread_id: str, admin_id: str, *, limit: int, offset):
-        return await self.conversations.events(
-            thread_id, admin_id, limit=limit, offset=offset, admin=True
-        )

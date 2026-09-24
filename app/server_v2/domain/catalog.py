@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from typing import Literal
 from urllib.parse import urlsplit
@@ -14,17 +13,13 @@ from pydantic import (
     model_validator,
 )
 from sagents.v2.contracts.common import new_id
-from sagents.v2.model.protocols import (
-    create_registered_model_provider,
-    resolve_model_protocol,
-)
-from sagents.v2.model.provider import ModelProvider
-from sagents.v2.package.manifest.models import ModelRoute
-from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.model.protocols import resolve_model_protocol
 
 from app.server_v2.core.errors import ServerError
 
-_LOGGER = logging.getLogger(__name__)
+from app.server_v2.core.observability.logging import get_logger
+
+_LOGGER = get_logger(__name__)
 
 
 class ModelRecord(BaseModel):
@@ -54,20 +49,6 @@ class ModelRecord(BaseModel):
             "model": self.model,
             "is_default": self.is_default,
         }
-
-    def to_provider(self) -> ModelProvider:
-        route = ModelRoute(
-            provider=resolve_model_protocol(self.protocol).value,
-            base_url=self.base_url,
-            model=self.model,
-        )
-        credential = CredentialMaterial(
-            credential_id=f"catalog-{self.id}",
-            secret=self.api_key,
-            source="host",
-        )
-        return create_registered_model_provider(route, credential)
-
 
 class AgentRecord(BaseModel):
     id: str
@@ -202,9 +183,9 @@ class UserCatalog(BaseModel):
                 kept.append(A2AAgentRecord.model_validate(item))
             except ValidationError:
                 _LOGGER.warning(
-                    "dropping unusable a2a agent %r (url=%r)",
-                    item.get("name"),
-                    item.get("url"),
+                    "catalog.a2a_agent.skipped",
+                    "dropping unusable a2a agent",
+                    attributes={"name": item.get("name"), "url": item.get("url")},
                 )
         return kept
 
@@ -230,9 +211,9 @@ class UserCatalog(BaseModel):
                 kept.append(McpServerRecord.model_validate(item))
             except ValidationError:
                 _LOGGER.warning(
-                    "dropping unsupported mcp server %r (protocol=%r)",
-                    item.get("name"),
-                    item.get("protocol"),
+                    "catalog.mcp_server.skipped",
+                    "dropping unsupported mcp server",
+                    attributes={"name": item.get("name"), "protocol": item.get("protocol")},
                 )
         return kept
 

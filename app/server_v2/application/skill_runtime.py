@@ -222,11 +222,6 @@ class CatalogRunDriver:
                     stack.push_async_callback(closer)
 
 
-def install_skill_driver(service) -> None:
-    agent = service.application.entrypoint()
-    agent.driver_factory = lambda run_id: CatalogRunDriver(service, run_id)
-
-
 def _descriptor(record: SkillRecord) -> SkillDescriptor:
     return SkillDescriptor(
         name=record.name,

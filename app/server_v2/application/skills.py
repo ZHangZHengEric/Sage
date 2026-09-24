@@ -38,17 +38,6 @@ class SkillCatalogService:
         self.store = store
         self.data_root = Path(data_root)
 
-    async def list_visible(
-        self,
-        *,
-        user_id: str,
-        role: str,
-        dimension: SkillDimension | None = None,
-    ) -> list[SkillRecord]:
-        return await self.store.list_visible(
-            user_id=user_id, role=role, dimension=dimension
-        )
-
     async def get(self, skill_id: str, *, user_id: str, role: str) -> SkillRecord:
         record = await self.store.get(skill_id)
         if record is None or not _can_see(record, user_id=user_id, role=role):

@@ -1,4 +1,4 @@
-"""Official structured-log sink: rotating local JSONL files."""
+"""Official structured-log sink: rotating local JSONL or text files."""
 
 from __future__ import annotations
 
@@ -9,16 +9,17 @@ from pathlib import Path
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord
 from sagents.v2.runtime.observability.logs import (
     encode_log_record,
+    format_log_record,
     record_reaches_min_level,
 )
 
 
 class FilesystemLogSink:
-    """Append redacted JSONL records with bounded local file rotation."""
+    """Append redacted records with bounded local file rotation."""
 
     plugin_id = "sage.logging.filesystem"
     name = "Rotating filesystem structured log sink"
-    description = "Writes rotating JSONL operational logs to disk."
+    description = "Writes rotating structured operational logs to disk."
     format_version = "sage.log/v1"
 
     def __init__(
@@ -29,11 +30,14 @@ class FilesystemLogSink:
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
         min_level: LogLevel | str = LogLevel.INFO,
+        format: str = "json",
     ) -> None:
         if max_bytes < 1024:
             raise ValueError("max_bytes must be at least 1024")
         if backup_count < 1:
             raise ValueError("backup_count must be positive")
+        if format not in {"json", "text"}:
+            raise ValueError("format must be 'json' or 'text'")
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.root.chmod(0o700)
@@ -41,12 +45,15 @@ class FilesystemLogSink:
         self.max_bytes = max_bytes
         self.backup_count = backup_count
         self.min_level = LogLevel(min_level)
+        self.format = format
         self._write_lock = threading.Lock()
 
     def write(self, record: LogRecord) -> None:
         if not record_reaches_min_level(record.level, self.min_level):
             return
-        encoded = encode_log_record(record).encode("utf-8")
+        encoded = (
+            format_log_record(record) if self.format == "text" else encode_log_record(record)
+        ).encode("utf-8")
         with self._write_lock:
             self._rotate_if_needed(len(encoded))
             descriptor = os.open(

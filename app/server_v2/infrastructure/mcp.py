@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import logging
 from collections import OrderedDict
 from collections.abc import Iterable
 
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
 
 from app.server_v2.core.errors import ServerError
+from app.server_v2.core.observability.logging import get_logger
 from app.server_v2.domain.catalog import McpServerRecord
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 def to_mcp_config(record: McpServerRecord, *, required: bool = False) -> McpServerConfig:
@@ -54,7 +54,9 @@ def mcp_server_configs(
         try:
             configs.append(to_mcp_config(item, required=False))
         except ServerError:
-            _LOGGER.warning("skipping unusable mcp server %r", item.name)
+            _LOGGER.warning(
+                "mcp.server.skipped", "skipping unusable mcp server", name=item.name
+            )
     return tuple(configs)
 
 

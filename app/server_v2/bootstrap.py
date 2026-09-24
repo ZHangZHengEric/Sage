@@ -1,36 +1,39 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 
-from sagents.v2 import SAgentApplication, SAgentBuilder
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.application import SAgentApplication
+from sagents.v2.builder import SAgentBuilder
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
     RequestContext,
     TraceContext,
 )
+from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
 from sagents.v2.model.provider import ModelProvider
-from sagents.v2.runtime.observability import StructuredLogger
+from sagents.v2.runtime.observability.contracts import LogSink
+from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
+    InMemoryScheduler,
+    SchedulerQuotaGroup,
+)
 
 from app.server_v2.application.admin import AdminService
 from app.server_v2.application.admission import RunAdmission
-from app.server_v2.application.a2a import A2AService
 from app.server_v2.application.execution import ProcessExecution
 from app.server_v2.application.catalog import CatalogService
-from app.server_v2.application.conversations import ConversationService
+from app.server_v2.adapters.a2a.service import A2AService
+from app.server_v2.adapters.agui.service import ConversationService
 from app.server_v2.application.credentials import CredentialService
 from app.server_v2.application.identity import IdentityService
 from app.server_v2.application.manifest import server_v2_manifest
 from app.server_v2.application.official import install_sandbox
 from app.server_v2.application.runs import RunService
-from app.server_v2.application.runtime_port import AgentRuntime
-from app.server_v2.application.sessions import SessionLog
-from app.server_v2.application.skill_runtime import install_skill_driver
+from app.server_v2.application.skill_runtime import CatalogRunDriver
 from app.server_v2.application.skills import SkillCatalogService
 from app.server_v2.core.settings import ServerSettings
+from app.server_v2.core.observability.logging import get_logger
 from app.server_v2.domain.api_keys import ApiKeyRecord
 from app.server_v2.infrastructure.a2a_client import A2APluginCache
 from app.server_v2.infrastructure.database import Database
@@ -50,7 +53,7 @@ from app.server_v2.infrastructure.persistence import (
 )
 from app.server_v2.infrastructure.storage import prepare_server_v2_storage
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 TOOL_SCOPES = (
     "tool.read",
@@ -116,28 +119,25 @@ class ServerHost:
         settings: ServerSettings,
         *,
         model_provider: ModelProvider | None = None,
-        database: Database | None = None,
+        database: Database,
         repositories: HostRepositories | None = None,
         package_authorizer=None,
         package_extensions=(),
     ) -> None:
-        if database is not None and repositories is not None:
-            raise ValueError("provide database or repositories, not both")
+        if database is None:
+            raise RuntimeError("database is required")
         self.settings = settings
+        self.log_sink: LogSink | None = None
         self.contexts = RequestContexts(settings.language)
-        from sagents.v2.model import ModelConcurrencyBudget
-        self.model_budget = ModelConcurrencyBudget(settings.max_concurrent_runs, max_waiting=settings.max_pending_runs)
         self.package_authorizer = package_authorizer
         self.package_extensions = tuple(package_extensions)
         self.agent_management = None
-        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import SchedulerQuotaGroup, InMemoryScheduler
-        self.run_quota = SchedulerQuotaGroup(settings.max_concurrent_runs, settings.max_concurrent_runs_per_user, settings.max_pending_runs)
-        self._scheduler = InMemoryScheduler(quota_group=self.run_quota, max_pending_items=settings.max_pending_runs)
-        self.paths = prepare_server_v2_storage(settings.data_root)
+        self.package_queries = None
         self.database = database
+
+        self.paths = prepare_server_v2_storage(settings.data_root)
+
         if repositories is None:
-            if database is None:
-                raise RuntimeError("MySQL is required")
             repositories = HostRepositories(
                 users=DatabaseUserStore(database),
                 catalog=DatabaseCatalogStore(database),
@@ -146,72 +146,34 @@ class ServerHost:
                 api_keys=DatabaseApiKeyStore(database),
             )
         self.users = repositories.users
-        self.threads = repositories.threads
+        self.catalog_store = repositories.catalog
         self.skills = repositories.skills
-        self.api_keys = repositories.api_keys
+        self.threads = repositories.threads
         self.identity = IdentityService(self.users)
         self.skill_catalog = SkillCatalogService(self.skills, self.paths.data_root)
         self.mcp_plugins = McpPluginCache()
         self.a2a_plugins = A2APluginCache()
         self.catalog = CatalogService(
-            repositories.catalog,
+            self.catalog_store,
             mcp_plugins=self.mcp_plugins,
             a2a_plugins=self.a2a_plugins,
             skills=self.skill_catalog,
         )
-        self.credentials = CredentialService(self.api_keys, self.catalog)
-        self.execution = ProcessExecution(model_missing=self._model_missing_message())
-        self._fallback_model = model_provider
-        install_sandbox(self.execution)
-        self.sessions = SessionLog(lambda: self.application.service("session.access"))
-        self.runtime = AgentRuntime(lambda: self._application)
-        self.admission = RunAdmission(
-            threads=self.threads,
-            catalog=self.catalog,
-            skills=self.skill_catalog,
-            execution=self.execution,
+        self.credentials = CredentialService(repositories.api_keys, self.catalog)
+        self.execution = ProcessExecution(
+            model_missing=(
+                "请先在「模型」页配置模型后再发送"
+                if str(settings.language).lower().startswith("zh")
+                else "Configure a model on the Models page before sending"
+            ),
+            fallback_model=model_provider,
         )
-        self.runs = RunService(
-            runtime=self.runtime,
-            sessions=self.sessions,
-            execution=self.execution,
-        )
-        self.conversations = ConversationService(
-            threads=self.threads,
-            admission=self.admission,
-            sessions=self.sessions,
-            runs=self.runs,
-            execution=self.execution,
-            runtime=self.runtime,
-            context_for=self.contexts.for_user,
-        )
-        self.admin = AdminService(
-            users=self.users,
-            threads=self.threads,
-            catalog=self.catalog,
-            conversations=self.conversations,
-        )
-        self.a2a = A2AService(
-            threads=self.threads,
-            catalog=self.catalog,
-            admission=self.admission,
-            runs=self.runs,
-            sessions=self.sessions,
-            execution=self.execution,
-            runtime=self.runtime,
-            context_for=self.contexts.for_a2a_key,
-        )
-        self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-
-    @property
-    def _fallback_model(self):
-        return self.execution.fallback_model
-
-    @_fallback_model.setter
-    def _fallback_model(self, value) -> None:
-        self.execution._fallback = value
+        install_sandbox(self.execution)
+        self.conversations: ConversationService | None = None
+        self.admin: AdminService | None = None
+        self.a2a: A2AService | None = None
 
     @property
     def application(self) -> SAgentApplication:
@@ -219,39 +181,186 @@ class ServerHost:
             raise RuntimeError("Server v2 runtime is not started")
         return self._application
 
+    async def ready(self) -> bool:
+        if self._application is None or self.agent_management is None:
+            return False
+        try:
+            return await asyncio.wait_for(self.database.ready(), timeout=1.0)
+        except TimeoutError:
+            return False
+
     async def start(self) -> None:
         if self._application is not None:
             return
-        if self.database is not None:
-            from app.server_v2.infrastructure.database.schema import create_host_schema
+        if self.log_sink is None:
+            from app.server_v2.core.observability.logging import LoggingSettings, init_logging
 
-            await create_host_schema(self.database)
+            self.log_sink = init_logging(
+                LoggingSettings(
+                    level=self.settings.log_level,
+                    format=self.settings.log_format,
+                    directory=self.settings.log_directory,
+                ),
+                service_name="sage-server",
+            )
+        from app.server_v2.infrastructure.database.schema import create_host_schema
+
+        await create_host_schema(self.database)
         await self.identity.ensure_admin(
             self.settings.admin_username, self.settings.admin_password
         )
-        self._host_models = HostModelProvider(
-            self.catalog,
-            fallback=self._fallback_model,
-            session_for_run=self._session_id_for_run,
-            max_clients=self.settings.max_model_clients,
+        model_budget = ModelConcurrencyBudget(
+            self.settings.max_concurrent_runs,
+            max_waiting=self.settings.max_pending_runs,
         )
-        self.execution.attach_models(self._host_models)
-        self._application = await (
-            SAgentBuilder()
-            .with_defaults(session_root=self.paths.sessions_root)
-            .with_model_provider(self._host_models)
-            .with_model_budget(self.model_budget)
-            .with_scheduler(self._scheduler)
-            .build(server_v2_manifest(self.settings))
+        run_quota = SchedulerQuotaGroup(
+            self.settings.max_concurrent_runs,
+            self.settings.max_concurrent_runs_per_user,
+            self.settings.max_pending_runs,
         )
-        from app.server_v2.application.packages import ServerAgentManagement
-        from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
-        self.agent_management = ServerAgentManagement(
-            self, DatabasePackageStore(self.database) if self.database is not None else None)
-        install_skill_driver(self)
-        self.execution.attach_logger(self._sagents_logger())
-        self._log_sagents_registration()
-        self._track(asyncio.create_task(self.agent_management.recover_pending(), name="managed-recovery"))
+        scheduler = InMemoryScheduler(
+            quota_group=run_quota,
+            max_pending_items=self.settings.max_pending_runs,
+        )
+        host_models: HostModelProvider | None = None
+        try:
+            self.execution.model_budget = model_budget
+            host_models = HostModelProvider(
+                self.catalog_store,
+                fallback=self.execution.fallback_model,
+                max_clients=self.settings.max_model_clients,
+            )
+            self.execution.model_pool = host_models
+            self._application = await (
+                SAgentBuilder()
+                .with_defaults(session_root=self.paths.sessions_root)
+                .with_model_provider(host_models)
+                .with_log_sink(self.log_sink)
+                .with_model_budget(model_budget)
+                .with_scheduler(scheduler)
+                .with_run_driver_factory(lambda run_id: CatalogRunDriver(self, run_id))
+                .with_owned_resources(scheduler, host_models)
+                .build(server_v2_manifest(self.settings))
+            )
+            host_models.session_store = self._application.entrypoint().runtime.session_store
+            session_access = self._application.service("session.access")
+            admission = RunAdmission(
+                threads=self.threads,
+                catalog=self.catalog,
+                skills=self.skill_catalog,
+                execution=self.execution,
+            )
+            runs = RunService(
+                application=self._application,
+                session_access=session_access,
+                execution=self.execution,
+            )
+            self.conversations = ConversationService(
+                threads=self.threads,
+                admission=admission,
+                runs=runs,
+                execution=self.execution,
+                application=self._application,
+                session_access=session_access,
+                log_sink=self.log_sink,
+                context_for=self.contexts.for_user,
+            )
+            self.admin = AdminService(
+                users=self.users,
+                threads=self.threads,
+                catalog=self.catalog,
+            )
+            self.a2a = A2AService(
+                threads=self.threads,
+                catalog=self.catalog,
+                admission=admission,
+                runs=runs,
+                execution=self.execution,
+                application=self._application,
+                session_access=session_access,
+                context_for=self.contexts.for_a2a_key,
+            )
+            from app.server_v2.application.package_builder import (
+                ServerPackageBuilderFactory,
+            )
+            from app.server_v2.application.package_policy import ServerPackagePolicy
+            from app.server_v2.application.package_queries import ServerPackageQueries
+            from app.server_v2.application.package_recovery import (
+                recover_pending_packages,
+            )
+            from app.server_v2.application.packages import ServerAgentManagement
+
+            policy = ServerPackagePolicy(
+                users=self.users,
+                catalog=self.catalog,
+                skills=self.skills,
+                package_authorizer=self.package_authorizer,
+                extensions=self.package_extensions,
+            )
+            builder_factory = ServerPackageBuilderFactory(
+                settings=self.settings,
+                paths=self.paths,
+                catalog=self.catalog,
+                skills=self.skills,
+                execution=self.execution,
+                mcp_plugins=self.mcp_plugins,
+                a2a_plugins=self.a2a_plugins,
+                extensions=self.package_extensions,
+                run_quota=run_quota,
+                policy=policy,
+                log_sink=self.log_sink,
+            )
+            queries = ServerPackageQueries(
+                users=self.users,
+                catalog=self.catalog,
+                skills=self.skills,
+                skill_catalog=self.skill_catalog,
+                model_budget=model_budget,
+                run_quota=run_quota,
+            )
+            self.package_queries = queries
+            self.agent_management = ServerAgentManagement(
+                self.paths.data_root / "managed",
+                database=self.database,
+                policy=policy,
+                builder_factory=builder_factory,
+                queries=queries,
+                max_applications=self.settings.max_managed_applications,
+                max_concurrent_builds=self.settings.max_managed_builds,
+                model_budget=model_budget,
+                job_runtime=self.application.service("execution.job-runtime"),
+                allow_source_plugins=self.package_authorizer is not None,
+                inventory=tuple(
+                    {
+                        "id": item.descriptor.plugin_id,
+                        "version": item.descriptor.version,
+                    }
+                    for item in self.package_extensions
+                ),
+            )
+            self._track(
+                asyncio.create_task(
+                    recover_pending_packages(
+                        self.agent_management, self.users, self.contexts
+                    ),
+                    name="managed-recovery",
+                )
+            )
+        except BaseException as exc:
+            try:
+                await self.close()
+            except BaseException as close_exc:
+                exc.add_note(f"server startup cleanup also failed: {close_exc}")
+            try:
+                await scheduler.close()
+            except BaseException as close_exc:
+                exc.add_note(f"scheduler cleanup also failed: {close_exc}")
+            if host_models is not None:
+                try:
+                    await host_models.close()
+                except BaseException as close_exc:
+                    exc.add_note(f"model pool cleanup also failed: {close_exc}")
+            raise
 
     async def close(self) -> None:
         await self.execution.close()
@@ -264,78 +373,17 @@ class ServerHost:
         if self.agent_management is not None:
             await self.agent_management.close()
             self.agent_management = None
+        self.package_queries = None
+        self.conversations = None
+        self.admin = None
+        self.a2a = None
         if self._application is not None:
             await self._application.close()
             self._application = None
-        await self._scheduler.close()
         self.mcp_plugins.clear()
         self.a2a_plugins.clear()
-        if self._host_models is not None:
-            await self._host_models.close()
-            self._host_models = None
-        self.execution.attach_models(None)
-        self.execution.attach_logger(None)
-
-    def backends(self) -> dict[str, str]:
-        report = {
-            "host_store": "mysql" if self.database is not None else "memory",
-            "session_store": "mysql" if self.settings.mysql_url else "filesystem",
-            "agui_replay": "session-store",
-            "log": "stdout",
-            # Run ownership lives in this process (driver registry + in-memory
-            # scheduler). A shared MySQL does NOT make the deployment
-            # multi-node: two instances on one database would both drive the
-            # same Run. Horizontal scaling needs an owner lease first.
-            "run_ownership": "single-process",
-        }
-        if self.settings.jaeger_url:
-            report["trace"] = "otlp"
-        return report
-
-    async def _session_id_for_run(self, run_id: str) -> str | None:
-        if self._application is None:
-            return None
-        try:
-            run = await self._application.entrypoint().runtime.session_store.get_run(
-                run_id
-            )
-        except SageV2Error:
-            return None
-        return run.session_id
-
-    def _model_missing_message(self) -> str:
-        if str(self.settings.language).lower().startswith("zh"):
-            return "请先在「模型」页配置模型后再发送"
-        return "Configure a model on the Models page before sending"
-
-    def _sagents_logger(self) -> StructuredLogger:
-        return StructuredLogger(
-            self.application.service("observability.log-sink"),
-            "server_v2.sagents",
-        )
-
-    def _log_sagents_registration(self) -> None:
-        plan = self.application.resolved_plan
-        plugins = sorted(
-            {
-                (binding.capability, binding.plugin_id)
-                for binding in plan.providers
-                if binding.plugin_id
-            }
-        )
-        self._sagents_logger().info(
-            "sagents.registered",
-            "sagents plugins registered",
-            attributes={
-                "package_id": plan.package_id,
-                "entrypoint": plan.entrypoint_agent_id,
-                "composition_hash": plan.composition_hash,
-                "plugins": [
-                    {"capability": capability, "plugin": plugin_id}
-                    for capability, plugin_id in plugins
-                ],
-            },
-        )
+        self.execution.model_pool = None
+        self.execution.model_budget = None
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
@@ -346,6 +394,8 @@ class ServerHost:
                 return
             error = completed.exception()
             if error is not None:
-                LOGGER.error("background task failed", exc_info=error)
+                LOGGER.exception(
+                    "server.background.failed", "background task failed", error
+                )
 
         task.add_done_callback(_done)

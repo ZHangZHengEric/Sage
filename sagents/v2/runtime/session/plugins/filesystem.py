@@ -12,7 +12,6 @@ import asyncio
 import hashlib
 import itertools
 import json
-import logging
 import os
 import shutil
 import threading
@@ -28,6 +27,7 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover - Windows hosts need a dedicated lock ad
     fcntl = None  # type: ignore[assignment]
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 SESSION_LAYOUT_FORMAT = "sage.filesystem-session-layout/v1"
 JOURNAL_COMPACT_COMMITS = 256
 JOURNAL_COMPACT_BYTES = 8 * 1024 * 1024
@@ -823,8 +823,13 @@ class _FilesystemSessionState(SessionStoreCoordinator):
 
         try:
             self._materialize_session_views(session_id, state)
-        except Exception:
-            LOGGER.exception("failed to refresh Session file views for %s", session_id)
+        except Exception as exc:
+            LOGGER.exception(
+                "session.filesystem.view_refresh_failed",
+                "failed to refresh Session file views",
+                exc,
+                session_id=session_id,
+            )
 
     def _materialize_session_views(
         self, session_id: str, state: dict[str, Any]
@@ -1414,7 +1419,9 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             if not getattr(self, "_history_read_only", False):
                 self._atomic_json_write(snapshot, payload)
             LOGGER.warning(
-                "normalized legacy unordered-collection checksum for decoding: %s", snapshot
+                "session.filesystem.checksum_normalized",
+                "normalized legacy unordered-collection checksum for decoding",
+                snapshot=str(snapshot),
             )
         return payload
 
@@ -1472,7 +1479,11 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                         "session_store.journal_corrupt",
                         f"journal {journal} contains an incomplete middle record",
                     )
-                LOGGER.warning("ignoring incomplete Session journal tail: %s", journal)
+                LOGGER.warning(
+                    "session.filesystem.incomplete_journal_tail",
+                    "ignoring incomplete Session journal tail",
+                    journal=str(journal),
+                )
                 break
             complete_count += 1
             try:

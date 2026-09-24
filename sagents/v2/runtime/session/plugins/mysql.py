@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import re
 import time
 from contextlib import asynccontextmanager
@@ -30,6 +29,7 @@ from sagents.v2.runtime.session.journal import (
     SessionStateDeltaMutation,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.observability.logs import get_logger
 
 
 def _principal_lookup_key(principal_type: str, principal_id: str) -> str:
@@ -72,7 +72,7 @@ _SCHEMA_TABLES = (
     "start_idempotency",
     "derived_state",
 )
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 def _require_aiomysql():
@@ -217,9 +217,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 async with pool.acquire() as connection:
                     created = await self._bootstrap(connection)
                 LOGGER.info(
-                    "mysql session store ready prefix=%s created=%s",
-                    self.table_prefix,
-                    created,
+                    "session.mysql.ready",
+                    "mysql session store ready",
+                    prefix=self.table_prefix,
+                    created=created,
                 )
             except Exception:
                 pool.close()
@@ -510,8 +511,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
             except Exception as exc:
                 try:
                     await connection.rollback()
-                except Exception:
-                    LOGGER.exception("mysql session rollback failed")
+                except Exception as rollback_error:
+                    LOGGER.exception(
+                        "session.mysql.rollback_failed",
+                        "mysql session rollback failed",
+                        rollback_error,
+                    )
                 failure = exc
         if failure is not None:
             await self._reload_session_from_storage_locked(session_id)
@@ -524,16 +529,16 @@ class _MysqlSessionState(SessionStoreCoordinator):
             start_rows,
             0 if should_snapshot else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
-        if LOGGER.isEnabledFor(logging.DEBUG):
-            LOGGER.debug(
-                "mysql session commit session=%s revision=%s snapshot=%s payload_bytes=%s event_count=%s duration_ms=%.2f",
-                session_id,
-                new_revision,
-                should_snapshot,
-                len((encoded_compact or encoded_mutation or "").encode("utf-8")),
-                sum(len(rows) for rows in events.values()),
-                (time.perf_counter() - started_at) * 1000,
-            )
+        LOGGER.debug(
+            "session.mysql.commit",
+            "mysql session committed",
+            session_id=session_id,
+            revision=new_revision,
+            snapshot=should_snapshot,
+            payload_bytes=len((encoded_compact or encoded_mutation or "").encode("utf-8")),
+            event_count=sum(len(rows) for rows in events.values()),
+            duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
+        )
 
     async def _persist_events(
         self, cursor, session_id, events, *, event_totals=None
@@ -705,8 +710,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
             except Exception:
                 try:
                     await connection.rollback()
-                except Exception:
-                    LOGGER.exception("mysql session rollback failed")
+                except Exception as rollback_error:
+                    LOGGER.exception(
+                        "session.mysql.rollback_failed",
+                        "mysql session rollback failed",
+                        rollback_error,
+                    )
                 raise
         for value in deleted_session_ids:
             self._forget_persisted_session(value)
@@ -753,8 +762,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
             except Exception:
                 try:
                     await connection.rollback()
-                except Exception:
-                    LOGGER.exception("mysql session rollback failed")
+                except Exception as rollback_error:
+                    LOGGER.exception(
+                        "session.mysql.rollback_failed",
+                        "mysql session rollback failed",
+                        rollback_error,
+                    )
                 raise
 
     async def delete_derived_state(
@@ -777,8 +790,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
             except Exception:
                 try:
                     await connection.rollback()
-                except Exception:
-                    LOGGER.exception("mysql session rollback failed")
+                except Exception as rollback_error:
+                    LOGGER.exception(
+                        "session.mysql.rollback_failed",
+                        "mysql session rollback failed",
+                        rollback_error,
+                    )
                 raise
 
     async def forget_session(self, session_id: str) -> None:
@@ -795,8 +812,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
             except Exception:
                 try:
                     await connection.rollback()
-                except Exception:
-                    LOGGER.exception("mysql session rollback failed")
+                except Exception as rollback_error:
+                    LOGGER.exception(
+                        "session.mysql.rollback_failed",
+                        "mysql session rollback failed",
+                        rollback_error,
+                    )
                 raise
 
     async def create_run(self, command, context):

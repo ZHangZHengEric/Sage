@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
-LOGGER = logging.getLogger(__name__)
+from app.server_v2.core.observability.logging import get_logger
+
+LOGGER = get_logger(__name__)
 
 DEFAULT_JWT_SECRET = "dev-only-change-me-sage-server-jwt-secret"
 
@@ -28,10 +29,11 @@ def _jwt_secret() -> str:
     secret = _env("SAGE_SERVER_JWT_SECRET", DEFAULT_JWT_SECRET)
     if secret == DEFAULT_JWT_SECRET:
         LOGGER.warning(
+            "server.jwt.default_secret",
             "using built-in JWT secret; set SAGE_SERVER_JWT_SECRET in production"
         )
     elif len(secret.encode()) < 32:
-        LOGGER.warning("SAGE_SERVER_JWT_SECRET is shorter than 32 bytes")
+        LOGGER.warning("server.jwt.short_secret", "SAGE_SERVER_JWT_SECRET is shorter than 32 bytes")
     return secret
 
 

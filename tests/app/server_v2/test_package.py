@@ -1,10 +1,13 @@
+import json
+import logging
 from pathlib import Path
 
 import pytest
-from sagents.v2.runtime.observability import StdoutLogSink
+from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
 
 from app.server_v2.main import create_app
 from app.server_v2.application.manifest import server_v2_manifest
+from app.server_v2.core.observability.logging import ServerLogSink, get_logger
 from tests.app.server_v2.conftest import make_settings, make_test_service
 
 
@@ -110,13 +113,13 @@ async def test_lifespan_closes_runtime_when_runtime_start_fails(
 
 
 async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsys):
-    service = make_test_service(tmp_path)
+    service = make_test_service(tmp_path, log_directory=str(tmp_path / "logs"))
     await service.start()
     try:
         sink = service.application.service("observability.log-sink")
-        assert isinstance(sink, StdoutLogSink)
-        assert sink.stream == "stdout"
-        assert service.backends()["log"] == "stdout"
+        assert isinstance(sink, ServerLogSink)
+        assert sink.stdout.stream == "stdout"
+        assert service.agent_management.package_builder_factory.log_sink is sink
         rows = [
             __import__("json").loads(line)
             for line in capsys.readouterr().out.splitlines()
@@ -124,7 +127,58 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
         ]
         registered = next(row for row in rows if row["event"] == "sagents.registered")
         assert registered["attributes"]["plugins"]
-        assert sink.format == "json"
+        assert sink.stdout.format == "json"
+    finally:
+        await service.close()
+
+
+async def test_host_and_sagents_logs_share_record_and_outputs(tmp_path: Path, capsys):
+    service = make_test_service(tmp_path, log_directory=str(tmp_path / "logs"))
+    await service.start()
+    try:
+        sink = service.application.service("observability.log-sink")
+        capsys.readouterr()
+        with structured_log_context(request_id="request-123"):
+            logging.getLogger("test.host").info("host message")
+            get_logger("test.server").info("server.event", "server message")
+            get_logger("sagents.v2.test").info("runtime.event", "runtime message")
+            StructuredLogger(sink, "test.agent").info("agent.event", "agent message")
+        stdout = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        file_rows = [
+            json.loads(line)
+            for line in (tmp_path / "logs" / "sage-server.log").read_text().splitlines()
+        ]
+        for event in ("python.log", "server.event", "runtime.event", "agent.event"):
+            row = next(item for item in stdout if item["event"] == event)
+            assert row in file_rows
+            assert row["format_version"] == "sage.log/v1"
+            assert row["request_id"] == "request-123"
+    finally:
+        await service.close()
+
+
+async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, capsys):
+    service = make_test_service(
+        tmp_path,
+        log_level="warning",
+        log_format="text",
+        log_directory=str(tmp_path / "logs"),
+    )
+    await service.start()
+    try:
+        sink = service.application.service("observability.log-sink")
+        capsys.readouterr()
+        logging.getLogger("test.host").info("filtered host message")
+        logging.getLogger("test.host").warning("host warning")
+        StructuredLogger(sink, "test.agent").info("agent.filtered", "filtered agent message")
+        StructuredLogger(sink, "test.agent").warning("agent.warning", "agent warning")
+        stdout = capsys.readouterr().out
+        file_text = (tmp_path / "logs" / "sage-server.log").read_text()
+        assert stdout == file_text
+        assert "host warning" in stdout
+        assert "agent warning" in stdout
+        assert "filtered host message" not in stdout
+        assert "filtered agent message" not in stdout
     finally:
         await service.close()
 
@@ -149,7 +203,7 @@ async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
     await service.start()
     try:
         dispatcher = service.application.service("execution.dispatcher")
-        assert (await service._host_models._pool.snapshot())["max_clients"] == 16
+        assert (await service.execution.model_pool.pool.snapshot())["max_clients"] == 16
         assert dispatcher.max_concurrent_runs == 24
         assert dispatcher.max_concurrent_runs_per_tenant == 6
         assert (await dispatcher.scheduler.capabilities()).max_pending_items == 128

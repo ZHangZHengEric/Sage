@@ -33,7 +33,7 @@ from a2a.utils.errors import (
 )
 
 from app.server_v2.adapters.a2a.context import key_from
-from app.server_v2.application.a2a import A2AService
+from app.server_v2.adapters.a2a.service import A2AService
 from app.server_v2.core.errors import ServerError
 
 _ERRORS: dict[str, type[A2AError]] = {

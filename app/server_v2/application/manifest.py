@@ -65,9 +65,9 @@ def server_v2_manifest(settings: ServerSettings | None = None) -> SageManifest:
     """In-process package: no yaml, no env credentials, no model routes.
 
     The live model is injected by ``SAgentBuilder.with_model_provider``.
-    Host backends (stdout logs, MySQL session, Jaeger OTLP) are selected here
-    and passed as plugin config; plugins themselves do not read environment
-    variables.
+    Host backends (default stdout logs, MySQL session, Jaeger OTLP) are selected
+    here and passed as plugin config. ServerHost injects its shared log sink in
+    place of the default stdout sink. Plugins do not read environment variables.
     """
 
     return SageManifest(

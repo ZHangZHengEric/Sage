@@ -6,12 +6,15 @@ from contextlib import asynccontextmanager
 
 from sagents.v2._concurrency import auxiliary_capacity
 
-from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model.contracts import ModelCapabilities, ModelRequest
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.protocols import create_registered_model_provider, resolve_model_protocol
+from sagents.v2.package.manifest.models import ModelRoute
+from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.runtime.session.contracts import SessionStore
 
 from app.server_v2.infrastructure.persistence.catalog import CatalogStore
 from app.server_v2.infrastructure.model_pool import ModelClientPool
@@ -37,14 +40,14 @@ class HostModelProvider:
         catalog: CatalogStore,
         *,
         fallback: ModelProvider | None = None,
-        session_for_run: Callable[[str], Awaitable[str | None]] | None = None,
+        session_store: SessionStore | None = None,
         max_clients: int = 64,
     ) -> None:
         self._catalog = catalog
         self._fallback = fallback
-        self._session_for_run = session_for_run
+        self.session_store = session_store
         self._session_users: dict[str, str] = {}
-        self._pool = ModelClientPool(
+        self.pool = ModelClientPool(
             create_catalog_provider, close_model_provider, max_clients=max_clients
         )
         self._session_bindings: dict[str, int] = {}
@@ -86,21 +89,24 @@ class HostModelProvider:
                     await closer()
 
     async def _user_id(self, run_id: str | None = None) -> str | None:
-        if run_id and self._session_for_run is not None:
+        if run_id:
             # A long-lived worker may inherit an earlier caller's ContextVar.
             # An explicit Run identity is authoritative; never guess another
             # user's model if its Session cannot be resolved.
-            session_id = await self._session_for_run(run_id)
-            return self._session_users.get(session_id) if session_id else None
+            if self.session_store is None:
+                raise RuntimeError("session store is not attached")
+            try:
+                run = await self.session_store.get_run(run_id)
+            except SageV2Error:
+                return None
+            return self._session_users.get(run.session_id)
         return _current_user_id.get()
 
-    async def acquire_model(self, user_id, record):
-        return await self._pool.acquire(user_id, record)
-
     async def close(self) -> None:
-        await self._pool.close()
+        await self.pool.close()
         self._session_users.clear()
         self._session_bindings.clear()
+        self.session_store = None
 
     @asynccontextmanager
     async def _borrow(self, run_id: str | None = None):
@@ -108,7 +114,7 @@ class HostModelProvider:
         if user_id:
             record = await self._catalog.default_model(user_id)
             if record is not None:
-                lease = await self.acquire_model(user_id, record)
+                lease = await self.pool.acquire(user_id, record)
                 try:
                     yield lease.provider
                 finally:
@@ -137,7 +143,7 @@ async def close_model_provider(provider) -> None:
 async def create_catalog_provider(record):
     """Bound synchronous SDK setup and settle ownership if its caller cancels."""
     async with auxiliary_capacity("model-init"):
-        building = asyncio.create_task(asyncio.to_thread(record.to_provider))
+        building = asyncio.create_task(asyncio.to_thread(_build_catalog_provider, record))
         try:
             return await asyncio.shield(building)
         except asyncio.CancelledError:
@@ -150,3 +156,17 @@ async def create_catalog_provider(record):
                     pass
             await close_model_provider(building.result())
             raise
+
+
+def _build_catalog_provider(record):
+    route = ModelRoute(
+        provider=resolve_model_protocol(record.protocol).value,
+        base_url=record.base_url,
+        model=record.model,
+    )
+    credential = CredentialMaterial(
+        credential_id=f"catalog-{record.id}",
+        secret=record.api_key,
+        source="host",
+    )
+    return create_registered_model_provider(route, credential)

@@ -7,8 +7,13 @@ from pydantic import BaseModel, Field
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import SageV2Error
-from app.server_v2.api.deps import AdminUser, CurrentUser, PackageDep
-from app.server_v2.core.errors import ServerError, map_sage_error, success
+from app.server_v2.api.deps import (
+    AdminUser,
+    PackageContextDep,
+    PackageDep,
+    PackageQueriesDep,
+)
+from app.server_v2.core.errors import ServerError, map_error_info, success
 
 router = APIRouter(prefix="/api/agent-packages", tags=["agent-packages"])
 
@@ -34,9 +39,11 @@ async def result(operation):
         )
         raise ServerError(reason, str(exc)) from exc
     except SyntaxError as exc:
-        raise ServerError("validation", f"plugin syntax error at line {exc.lineno}: {exc.msg}") from exc
+        raise ServerError(
+            "validation", f"plugin syntax error at line {exc.lineno}: {exc.msg}"
+        ) from exc
     except SageV2Error as exc:
-        raise map_sage_error(exc) from exc
+        raise map_error_info(exc.info) from exc
 
 
 class Validation(BaseModel):
@@ -69,102 +76,86 @@ class Control(BaseModel):
 
 
 @router.get("/schema")
-async def schema(user: CurrentUser, packages: PackageDep):
+async def schema(context: PackageContextDep, packages: PackageDep):
     return success(packages.schema())
 
 
 @router.get("/capacity")
-async def capacity(user: AdminUser, packages: PackageDep):
-    return success(packages.capacity_snapshot())
+async def capacity(user: AdminUser, packages: PackageDep, queries: PackageQueriesDep):
+    return success(queries.capacity_snapshot(packages.capacity()))
 
 
 @router.get("/resources")
-async def resources(user: CurrentUser, packages: PackageDep):
-    return await result(
-        packages.resources(packages.context_for(user.user_id))
-    )
+async def resources(context: PackageContextDep, packages: PackageDep):
+    return await result(packages.resources(context))
 
 
 @router.get("/template")
-async def template(user: CurrentUser, packages: PackageDep, agent_id: str | None = None):
-    return await result(
-        packages.template(
-            packages.context_for(user.user_id), agent_id
-        )
-    )
+async def template(
+    context: PackageContextDep,
+    queries: PackageQueriesDep,
+    agent_id: str | None = None,
+):
+    return await result(queries.template(context, agent_id))
 
 
 @router.get("")
 async def inventory(
-    user: CurrentUser,
+    context: PackageContextDep,
     packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    return await result(
-        packages.list(
-            packages.context_for(user.user_id), limit=limit, offset=offset
-        )
-    )
+    return await result(packages.list(context, limit=limit, offset=offset))
 
 
 @router.post("/validate")
-async def validate(body: Validation, user: CurrentUser, packages: PackageDep):
+async def validate(body: Validation, context: PackageContextDep, packages: PackageDep):
     return await result(
-        packages.validate(
-            body.bundle, packages.context_for(user.user_id), readiness=body.readiness
-        )
+        packages.validate(body.bundle, context, readiness=body.readiness)
     )
 
 
 @router.post("")
-async def save(body: AgentPackageBundle, user: CurrentUser, packages: PackageDep):
-    return await result(
-        packages.save(body, packages.context_for(user.user_id))
-    )
+async def save(
+    body: AgentPackageBundle, context: PackageContextDep, packages: PackageDep
+):
+    return await result(packages.save(body, context))
 
 
 @router.get("/runs")
 async def runs(
-    user: CurrentUser,
+    context: PackageContextDep,
     packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    return await result(
-        packages.list_runs(
-            packages.context_for(user.user_id), limit=limit, offset=offset
-        )
-    )
+    return await result(packages.list_runs(context, limit=limit, offset=offset))
 
 
 @router.post("/runs")
-async def run(body: Invocation, user: CurrentUser, packages: PackageDep):
+async def run(body: Invocation, context: PackageContextDep, packages: PackageDep):
     return await result(
         packages.run(
             body.ref,
             body.agent_id,
             body.content,
             body.operation,
-            packages.context_for(user.user_id),
+            context,
             session_id=body.session_id,
         )
     )
 
 
 @router.get("/runs/{operation}")
-async def status(operation: str, user: CurrentUser, packages: PackageDep):
-    return await result(
-        packages.status(
-            operation, packages.context_for(user.user_id)
-        )
-    )
+async def status(operation: str, context: PackageContextDep, packages: PackageDep):
+    return await result(packages.status(operation, context))
 
 
 @router.get("/runs/{operation}/events")
 async def events(
     operation: str,
-    user: CurrentUser,
+    context: PackageContextDep,
     packages: PackageDep,
     after_sequence: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=200),
@@ -172,7 +163,7 @@ async def events(
     return await result(
         packages.events(
             operation,
-            packages.context_for(user.user_id),
+            context,
             after_sequence=after_sequence,
             limit=limit,
         )
@@ -181,13 +172,13 @@ async def events(
 
 @router.post("/runs/{operation}/control")
 async def control(
-    operation: str, body: Control, user: CurrentUser, packages: PackageDep
+    operation: str, body: Control, context: PackageContextDep, packages: PackageDep
 ):
     return await result(
         packages.control(
             operation,
             "reply" if body.action == "approve" else body.action,
-            packages.context_for(user.user_id),
+            context,
             decision=body.decision,
             interaction_id=body.interaction_id,
             payload=body.payload,
@@ -197,30 +188,20 @@ async def control(
 
 
 @router.get("/{ref}")
-async def get(ref: str, user: CurrentUser, packages: PackageDep):
+async def get(ref: str, context: PackageContextDep, packages: PackageDep):
     async def read():
-        return (
-            await packages.get(
-                ref, packages.context_for(user.user_id)
-            )
-        ).model_dump(mode="json")
+        return (await packages.get(ref, context)).model_dump(mode="json")
 
     return await result(read())
 
 
 @router.post("/{ref}/activate")
-async def activate(ref: str, body: Activation, user: CurrentUser, packages: PackageDep):
-    return await result(
-        packages.activate(
-            ref, body.expected_ref, packages.context_for(user.user_id)
-        )
-    )
+async def activate(
+    ref: str, body: Activation, context: PackageContextDep, packages: PackageDep
+):
+    return await result(packages.activate(ref, body.expected_ref, context))
 
 
 @router.post("/{ref}/fork")
-async def fork(ref: str, body: Fork, user: CurrentUser, packages: PackageDep):
-    return await result(
-        packages.fork(
-            ref, body.package_id, body.version, packages.context_for(user.user_id)
-        )
-    )
+async def fork(ref: str, body: Fork, context: PackageContextDep, packages: PackageDep):
+    return await result(packages.fork(ref, body.package_id, body.version, context))

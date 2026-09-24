@@ -47,7 +47,7 @@ class RunAdmission:
         existing = await self.threads.find(session_id)
         if existing is not None and existing.user_id != user_id:
             raise ServerError("not_found", absent)
-        catalog = await self.catalog.get(user_id)
+        catalog = await self.catalog.store.get(user_id)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id
         )
@@ -69,11 +69,4 @@ class RunAdmission:
                 call_depth=call_depth,
             ),
             model_ready=self.execution.has_model(catalog),
-        )
-
-    async def remember(
-        self, session_id: str, user_id: str, *, title: str, agent_id: str
-    ) -> None:
-        await self.threads.upsert(
-            session_id, user_id, title=title, agent_id=agent_id
         )

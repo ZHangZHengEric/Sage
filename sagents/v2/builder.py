@@ -105,8 +105,9 @@ from sagents.v2.session_memory import (
     SessionMemoryService,
     SqliteBm25SessionMemoryProvider,
 )
-from sagents.v2.sagent import SAgent
+from sagents.v2.sagent import DriverFactory, SAgent
 from sagents.v2.application import (
+    ApplicationResource,
     MaterializedAgentPorts,
     ResolvedApplicationPlan,
     ResolvedProviderBinding,
@@ -123,6 +124,7 @@ from sagents.v2.runtime.observability import (
     NoopDiagnosticSink,
     NoopLogSink,
     NoopTraceSink,
+    StructuredLogger,
 )
 
 
@@ -360,6 +362,8 @@ class SAgentBuilder:
         self._skill_provider = None
         self._model_budget = None
         self._job_runtime = None
+        self._run_driver_factory: DriverFactory | None = None
+        self._owned_resources: list[ApplicationResource] = []
         self._check_readiness = False
 
     def with_scheduler(self, scheduler) -> "SAgentBuilder":
@@ -370,6 +374,24 @@ class SAgentBuilder:
     def with_job_runtime(self, runtime) -> "SAgentBuilder":
         """Use a host-owned JobRuntime shared across Applications; host closes it."""
         self._job_runtime = runtime
+        return self
+
+    def with_run_driver_factory(self, factory: DriverFactory) -> "SAgentBuilder":
+        """Select the entrypoint Run driver before the Application is built."""
+        self._run_driver_factory = factory
+        return self
+
+    def with_owned_resources(
+        self, *resources: ApplicationResource
+    ) -> "SAgentBuilder":
+        """Close a host-created resource after the Application's own resources.
+
+        Resources are closed in registration order after the dispatcher.
+        Ownership transfers when the Application is built successfully.
+        """
+        for resource in resources:
+            if not any(value is resource for value in self._owned_resources):
+                self._owned_resources.append(resource)
         return self
 
     def with_model_budget(self, budget) -> "SAgentBuilder":
@@ -1307,7 +1329,7 @@ class SAgentBuilder:
         )
         agent = SAgent(
             runtime=control_runtime,
-            driver_factory=driver_factory,
+            driver_factory=self._run_driver_factory or driver_factory,
             memory_service=(
                 memory_service
                 if memory_enabled and memory_behavior.auto_write
@@ -1433,7 +1455,7 @@ class SAgentBuilder:
             adapters=adapters,
             composition_hash=composition_hash,
             resolved_plan=resolved_plan,
-            owned_resources=(dispatcher,),
+            owned_resources=(*reversed(self._owned_resources), dispatcher),
             resource_readiness=readiness,
         )
         application._attach_composer(
@@ -1448,6 +1470,26 @@ class SAgentBuilder:
                 default_tenant_id=tenant_id,
                 deployment_profile=runtime_config.deployment_profile,
             )
+        )
+        plugins = sorted(
+            {
+                (binding.capability, binding.plugin_id)
+                for binding in resolved_plan.providers
+                if binding.plugin_id
+            }
+        )
+        StructuredLogger(log_sink, "sagents.application").info(
+            "sagents.registered",
+            "sagents plugins registered",
+            attributes={
+                "package_id": resolved_plan.package_id,
+                "entrypoint": resolved_plan.entrypoint_agent_id,
+                "composition_hash": resolved_plan.composition_hash,
+                "plugins": [
+                    {"capability": capability, "plugin": plugin_id}
+                    for capability, plugin_id in plugins
+                ],
+            },
         )
         return application
 

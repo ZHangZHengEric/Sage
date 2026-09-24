@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections import OrderedDict
 from collections.abc import Iterable
 
@@ -12,9 +11,10 @@ from sagents.v2.tool.plugins.a2a import (
 )
 
 from app.server_v2.core.errors import ServerError
+from app.server_v2.core.observability.logging import get_logger
 from app.server_v2.domain.catalog import A2AAgentRecord
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 def to_a2a_config(record: A2AAgentRecord, *, required: bool = False) -> A2AAgentConfig:
@@ -57,7 +57,9 @@ def a2a_agent_configs(
         try:
             configs.append(to_a2a_config(item, required=False))
         except ServerError:
-            _LOGGER.warning("skipping unusable a2a agent %r", item.name)
+            _LOGGER.warning(
+                "a2a.agent.skipped", "skipping unusable a2a agent", name=item.name
+            )
     return tuple(configs)
 
 

@@ -44,9 +44,11 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected_error(_request: Request, error: Exception):
-        from loguru import logger
+        from app.server_v2.core.observability.logging import get_logger
 
-        logger.opt(exception=error).error("unhandled application exception")
+        get_logger(__name__).exception(
+            "http.unhandled_exception", "unhandled application exception", error
+        )
         return error_response(
             status_code=500,
             message="internal server error",

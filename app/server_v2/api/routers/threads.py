@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.server_v2.api.deps import ConversationDep, CurrentUser, ServiceDep
+from app.server_v2.api.deps import ServiceDep, CurrentUser
 from app.server_v2.api.schemas import (
     AUTH_ERRORS,
     ApiResponse,
@@ -22,9 +22,9 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[ThreadPublic]])
-async def list_threads(user: CurrentUser, conversations: ConversationDep):
+async def list_threads(user: CurrentUser, service: ServiceDep):
     return success(
-        [item.model_dump(mode="json") for item in await conversations.list_for(user.user_id)]
+        [item.model_dump(mode="json") for item in await service.threads.list_for(user.user_id)]
     )
 
 
@@ -32,7 +32,7 @@ async def list_threads(user: CurrentUser, conversations: ConversationDep):
 async def get_thread_events(
     thread_id: str,
     user: CurrentUser,
-    conversations: ConversationDep,
+    service: ServiceDep,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int | None = Query(
         default=None,
@@ -41,7 +41,7 @@ async def get_thread_events(
     ),
 ):
     return success(
-        await conversations.events(
+        await service.conversations.events(
             thread_id, user.user_id, limit=limit, offset=offset
         )
     )
@@ -64,7 +64,6 @@ async def resume_thread(
     body: ThreadResumeBody,
     request: Request,
     user: CurrentUser,
-    conversations: ConversationDep,
     service: ServiceDep,
 ):
     """Answer a waiting thread and stream the work the answer releases.
@@ -75,7 +74,7 @@ async def resume_thread(
     """
 
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
-    stream = await conversations.resume(
+    stream = await service.conversations.resume(
         thread_id,
         run_id=body.runId,
         user_id=user.user_id,
@@ -89,12 +88,12 @@ async def resume_thread(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "X-Sage-AG-UI-Replay": service.backends()["agui_replay"],
+            "X-Sage-AG-UI-Replay": "session-store",
         },
     )
 
 
 @router.delete("/{thread_id}", response_model=ApiResponse[None])
-async def delete_thread(thread_id: str, user: CurrentUser, conversations: ConversationDep):
-    await conversations.delete(thread_id, user.user_id, admin=user.role == "admin")
+async def delete_thread(thread_id: str, user: CurrentUser, service: ServiceDep):
+    await service.conversations.delete(thread_id, user.user_id, admin=user.role == "admin")
     return success()

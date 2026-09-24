@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi.responses import JSONResponse
-from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory
 
 from app.server_v2.core.observability.context import get_request_id
 
@@ -29,16 +29,12 @@ class ServerError(Exception):
         return REASON_STATUS.get(self.reason, 400)
 
 
-def current_request_id() -> str:
-    return get_request_id()
-
-
 def success(data: object = None) -> dict[str, object]:
     return {
         "code": 0,
         "message": "success",
         "data": data,
-        "request_id": current_request_id(),
+        "request_id": get_request_id(),
     }
 
 
@@ -53,7 +49,7 @@ def error_payload(
         "message": message,
         "data": None,
         "error_detail": detail,
-        "request_id": current_request_id(),
+        "request_id": get_request_id(),
     }
 
 
@@ -69,10 +65,6 @@ def error_response(
             status_code=status_code, message=message, detail=detail
         ),
     )
-
-
-def map_sage_error(exc: SageV2Error) -> ServerError:
-    return map_error_info(exc.info)
 
 
 def map_error_info(info) -> ServerError:
