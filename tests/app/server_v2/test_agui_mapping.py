@@ -5,14 +5,14 @@ import asyncio
 import pytest
 from ag_ui.core import RunAgentInput
 
-from app.server_v2.adapters.agui.mapping import to_start_run
-from app.server_v2.adapters.agui.sse import (
+from app.server_v2.conversations.agui.mapping import to_start_run
+from app.server_v2.conversations.agui.sse import (
     CanonicalSseCursor,
     ClientOwnedUserTextFilter,
     canonical_agui_sse,
     frame_to_agui_event,
 )
-from app.server_v2.core.errors import ServerError
+from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
 
 
@@ -97,7 +97,7 @@ def test_maps_trusted_run_metadata_with_composition_snapshot():
 
 
 def test_rejects_invalid_run_id():
-    with pytest.raises(ServerError):
+    with pytest.raises(SageV2Error):
         to_start_run(
             _input(runId="r" * 200),
             composition_hash="sha256:test",

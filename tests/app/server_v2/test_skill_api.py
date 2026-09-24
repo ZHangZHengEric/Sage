@@ -4,8 +4,8 @@ import zipfile
 from fastapi.testclient import TestClient
 
 from app.server_v2.main import create_app
-from app.server_v2.core.errors import ServerError
-from app.server_v2.infrastructure.skill_files import inspect_skill_zip
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+from app.server_v2.skills.files import inspect_skill_zip
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
 
@@ -99,8 +99,8 @@ def test_inspect_zip_unwraps_wrapper_folder_and_rejects_traversal():
         archive.writestr("../SKILL.md", "---\nname: evil\ndescription: no\n---\n")
     try:
         inspect_skill_zip(sneaky.getvalue(), filename="evil.zip")
-    except ServerError as exc:
-        assert exc.reason == "validation"
+    except SageV2Error as exc:
+        assert exc.info.category == ErrorCategory.VALIDATION
     else:
         raise AssertionError("zip slip should be rejected")
 

@@ -193,7 +193,7 @@ def test_catalog_model_is_used_when_dispatcher_drops_contextvar(tmp_path, monkey
     from tests.app.server_v2.conftest import scripted_hello
 
     monkeypatch.setattr(
-        "app.server_v2.infrastructure.models._build_catalog_provider",
+        "app.server_v2.runtime.models._build_catalog_provider",
         lambda record: scripted_hello(),
     )
     service = make_test_service(tmp_path, fallback=False)

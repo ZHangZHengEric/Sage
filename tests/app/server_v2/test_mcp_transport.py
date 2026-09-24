@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.server_v2.core.errors import ServerError
-from app.server_v2.domain.catalog import (
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+from app.server_v2.catalog.records import (
     McpServerRecord,
     UserCatalog,
     empty_catalog,
     upsert_mcp,
 )
-from app.server_v2.infrastructure.mcp import mcp_server_configs
+from app.server_v2.runtime.integrations.mcp import mcp_server_configs
 
 
 def _payload(**overrides) -> dict[str, object]:
@@ -28,17 +28,17 @@ def _payload(**overrides) -> dict[str, object]:
 
 
 def test_stdio_is_not_a_registrable_transport():
-    with pytest.raises(ServerError) as exc:
+    with pytest.raises(SageV2Error) as exc:
         upsert_mcp(empty_catalog(), _payload(protocol="stdio", url=None))
 
-    assert exc.value.reason == "validation"
+    assert exc.value.info.category == ErrorCategory.VALIDATION
 
 
 def test_a_network_server_without_a_url_is_rejected_at_save():
     for url in (None, "", "   ", "not-a-url", "file:///etc/passwd"):
-        with pytest.raises(ServerError) as exc:
+        with pytest.raises(SageV2Error) as exc:
             upsert_mcp(empty_catalog(), _payload(url=url))
-        assert exc.value.reason == "validation"
+        assert exc.value.info.category == ErrorCategory.VALIDATION
 
 
 def test_a_valid_server_keeps_its_transport():

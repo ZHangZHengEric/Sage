@@ -6,8 +6,8 @@ import pytest
 from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
 
 from app.server_v2.main import create_app
-from app.server_v2.application.manifest import server_v2_manifest
-from app.server_v2.core.observability.logging import ServerLogSink, get_logger
+from app.server_v2.config.manifest import server_v2_manifest
+from app.server_v2.observability.logging import ServerLogSink, get_logger
 from tests.app.server_v2.conftest import make_settings, make_test_service
 
 
@@ -185,7 +185,7 @@ async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, c
 
 @pytest.mark.asyncio
 async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
-    from app.server_v2.core.settings import ServerSettings
+    from app.server_v2.config.settings import ServerSettings
 
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/test")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS", "24")

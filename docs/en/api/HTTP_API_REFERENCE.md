@@ -102,4 +102,4 @@ Host infrastructure also exposes `GET /livez`, `GET /readyz`, and `GET /metrics`
 
 Success and error JSON carry `request_id`; the server also returns `X-Request-ID`. Streaming responses follow AG-UI event framing.
 
-[Router source](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/api/routers/) · [Server setup](../applications/WEB.md)
+[Router source](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/routers/) · [Server setup](../applications/WEB.md)

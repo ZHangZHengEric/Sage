@@ -1,4 +1,4 @@
-from app.server_v2.domain.catalog import (
+from app.server_v2.catalog.records import (
     empty_catalog,
     require_agent,
     upsert_agent,

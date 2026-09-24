@@ -102,4 +102,4 @@ parent: API
 
 成功与失败的 JSON 都包含 `request_id`，服务端同时返回 `X-Request-ID`。流式响应使用 AG-UI 事件格式。
 
-[路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/api/routers/) · [服务端启动](../applications/WEB.md)
+[路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/routers/) · [服务端启动](../applications/WEB.md)

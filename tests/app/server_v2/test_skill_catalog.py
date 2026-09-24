@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from app.server_v2.core.errors import ServerError
-from app.server_v2.domain.skills import resolve_artifact_path
-from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
-from app.server_v2.application.skills import SkillCatalogService
+from sagents.v2.contracts.errors import SageV2Error
+from app.server_v2.skills.records import resolve_artifact_path
+from app.server_v2.skills.repository import MemorySkillStore
+from app.server_v2.skills.service import SkillCatalogService
 
 
 def _service(tmp_path: Path) -> SkillCatalogService:
@@ -72,7 +72,7 @@ async def test_user_skill_wins_over_system_and_disabled_source_does_not_fall_bac
 @pytest.mark.asyncio
 async def test_unknown_bind_name_is_rejected(tmp_path: Path):
     service = _service(tmp_path)
-    with pytest.raises(ServerError, match="unknown skill"):
+    with pytest.raises(SageV2Error, match="unknown skill"):
         await service.bind_agent_skills(
             owner_user_id="user_1", agent_id="main", names=["missing"]
         )

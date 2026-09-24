@@ -12,7 +12,7 @@ ref: v2-ENV_VARS
 
 ## Server v2
 
-`python -m app.server_v2` 读取 `app/server_v2/.env`，进程环境变量优先。默认值以 [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/core/settings.py) 为准。
+`python -m app.server_v2` 读取 `app/server_v2/.env`，进程环境变量优先。默认值以 [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/config/settings.py) 为准。
 
 | 变量 | 默认值 / 用途 |
 | --- | --- |

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from sagents.v2.model.contracts import ModelEventKind, ModelRequest
 
-from app.server_v2.infrastructure.models import HostModelProvider
+from app.server_v2.runtime.models import HostModelProvider
 from tests.app.server_v2.conftest import scripted_hello
 from tests.app.server_v2.fakes import MemoryCatalogStore
 
@@ -28,7 +28,7 @@ async def test_host_provider_uses_session_bind_when_contextvar_empty(monkeypatch
     catalog = MemoryCatalogStore()
     await _save_demo_model(catalog)
     monkeypatch.setattr(
-        "app.server_v2.infrastructure.models._build_catalog_provider",
+        "app.server_v2.runtime.models._build_catalog_provider",
         lambda record: scripted_hello(),
     )
 

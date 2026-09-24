@@ -11,17 +11,17 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.server_v2.api import register_routers
+from app.server_v2.routers import register_routers
 from app.server_v2.bootstrap import ServerHost
-from app.server_v2.core.http import register_exception_handlers
-from app.server_v2.core.observability import (
+from app.server_v2.routers.exceptions import register_exception_handlers
+from app.server_v2.observability import (
     LoggingSettings,
     MetricsRegistry,
     RequestIdMiddleware,
     build_observability_router,
     init_logging,
 )
-from app.server_v2.core.settings import ServerSettings
+from app.server_v2.config.settings import ServerSettings
 
 
 def create_app(service: ServerHost) -> FastAPI:
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host or settings.host,
         port=args.port or settings.port,
     )
-    from app.server_v2.infrastructure.database import Database, DatabaseSettings
+    from app.server_v2.database import Database, DatabaseSettings
 
     database = Database(DatabaseSettings(url=settings.database_url()))
     service = ServerHost(settings, database=database)

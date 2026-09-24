@@ -530,7 +530,7 @@ def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
     from sagents.v2.testing.plugins import ScriptedModelProvider
 
     from app.server_v2.main import create_app
-    from app.server_v2.infrastructure.a2a_client import A2APluginCache
+    from app.server_v2.runtime.integrations.a2a import A2APluginCache
     from tests.app.server_v2.conftest import make_test_service
     from tests.app.server_v2.test_a2a_resume import _step
     from tests.sagents.v2.test_a2a_tool_bridge_matrix import FakePeer

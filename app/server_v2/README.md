@@ -1,20 +1,26 @@
 # Sage Server v2
 
-多用户 AG-UI 宿主。代码直接在 `app/server_v2/`，前端在 `web/`。
+多用户 AG-UI 服务。后端代码在 `app/server_v2/`，前端在 `web/`。
 
 ```text
-api/            HTTP 路由、鉴权、请求响应；简单列表直接读取宿主仓储
-application/    用例与共享运行编排：identity、catalog、skills、admission、runs、packages、sessions、loop
-domain/         记录和纯规则，不读库
-infrastructure/ MySQL 客户端与表、仓储、工作区、模型池、MCP/A2A 客户端
-adapters/       agui/、a2a/ 的协议服务、映射与流转换
-bootstrap.py    进程宿主（ServerHost、请求上下文）
-main.py         应用装配与启动入口
-core/           配置、错误、JWT、HTTP、观测
+routers/        对外 HTTP 路由、鉴权依赖、请求响应模型
+config/         服务配置与运行 manifest
+identity/       用户和 API Key、认证与仓储
+catalog/        Agent、模型、MCP 和 A2A 目录
+skills/         Skill 目录、文件与运行时加载
+conversations/  会话、Run、AG-UI 与 A2A 协议
+packages/       托管 Agent 包、版本和运行管理
+runtime/        执行编排、模型池及外部工具集成
+admin/          管理服务
+database/       数据库连接、共享 Base 和建表注册
+storage/        工作区路径
+observability/  请求上下文、日志和指标
+bootstrap.py    进程资源和服务装配
+main.py         应用启动入口
 web/            前端
 ```
 
-新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。HTTP 写入走用例；简单只读列表可直接访问 `ServerHost` 暴露的仓储，不加透传用例。AG-UI 与 A2A 的协议服务分别在 `adapters/agui/service.py` 和 `adapters/a2a/service.py`，共用 `application/admission.py` 受理 Run，Session 读取在 `application/sessions.py`，对话与包任务的技能、MCP、A2A 和模型租约在 `application/loop.py`。运行时创建后，由宿主将 Application、Session access 和日志 sink 显式传入协议服务及 RunService。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
+业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 写入调用所属业务服务；简单只读列表可以直接访问已装配的仓储，不增加纯转发用例。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 

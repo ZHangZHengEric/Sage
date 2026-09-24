@@ -13,10 +13,10 @@ from sagents.v2.model.contracts import (
 from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 
 from app.server_v2.main import create_app
-from app.server_v2.core.settings import ServerSettings
+from app.server_v2.config.settings import ServerSettings
 from app.server_v2.bootstrap import HostRepositories, ServerHost
-from app.server_v2.infrastructure.database import Database, DatabaseSettings
-from app.server_v2.infrastructure.persistence import MemoryApiKeyStore
+from app.server_v2.database import Database, DatabaseSettings
+from app.server_v2.identity.key_repository import MemoryApiKeyStore
 from tests.app.server_v2.fakes import (
     MemoryCatalogStore,
     MemorySkillStore,
