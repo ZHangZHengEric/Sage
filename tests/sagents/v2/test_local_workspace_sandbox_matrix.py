@@ -54,6 +54,7 @@ async def provision(
     protected_paths: tuple[str, ...] = (),
     allow_symlinks: bool = False,
     max_output_bytes: int = 32,
+    max_wall_time_seconds: float = 2,
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -75,7 +76,7 @@ async def provision(
                 read_only=process_read_only,
                 allowed_executables=allowed_executables,
                 allow_shell=True,
-                max_wall_time_seconds=2,
+                max_wall_time_seconds=max_wall_time_seconds,
                 max_output_bytes=max_output_bytes,
             ),
             policy_hash="sha256:policy",
@@ -507,6 +508,7 @@ async def test_read_only_process_honours_the_executable_allowlist(tmp_path: Path
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 @pytest.mark.asyncio
 @_SKIP_SANDBOX_PROCESS_IN_CI
+@pytest.mark.timeout(30)
 async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path):
     """仓库配置里的 fsmonitor / external diff / hooks 都不会被只读 git 执行。"""
 
@@ -556,14 +558,19 @@ async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path
     (tmp_path / "tracked.txt").write_text("two\n", encoding="utf-8")
     marker.unlink(missing_ok=True)
 
+    # Apple's git shim may initialize Xcode before reaching git. This test
+    # checks repository helper isolation, not toolchain cold-start latency.
     status = await run_read_only(
-        tmp_path, ("bash", "-c", "git status --short"), max_output_bytes=4096
+        tmp_path, ("bash", "-c", "git status --short"), max_output_bytes=4096,
+        max_wall_time_seconds=8,
     )
     diff = await run_read_only(
-        tmp_path, ("bash", "-c", "git diff"), max_output_bytes=4096
+        tmp_path, ("bash", "-c", "git diff"), max_output_bytes=4096,
+        max_wall_time_seconds=8,
     )
     log = await run_read_only(
-        tmp_path, ("bash", "-c", "git log --oneline | head -n 1"), max_output_bytes=4096
+        tmp_path, ("bash", "-c", "git log --oneline | head -n 1"), max_output_bytes=4096,
+        max_wall_time_seconds=8,
     )
 
     assert status.exit_code == 0

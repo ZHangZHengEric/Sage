@@ -9,6 +9,7 @@ from typing import Protocol
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import ItemEventData, RuntimeEvent
+from sagents.v2.contracts.errors import error_diagnostic_message
 from sagents.v2.contracts.items import (
     ItemStatus,
     MessageItemData,
@@ -162,7 +163,20 @@ class SessionEventModelProjector:
             elif isinstance(source, ToolResultItemData):
                 content = source.content
                 if not content and source.error is not None:
-                    content = (TextBlock(text=source.error.message),)
+                    content = (TextBlock(text=error_diagnostic_message(source.error)),)
+                elif (
+                    source.error is not None
+                    and source.metadata.get("tool_result_received") is not True
+                    and isinstance(content[0], TextBlock)
+                    and content[0].text == source.error.message
+                    and source.error.metadata.get("diagnostic_message")
+                ):
+                    # Older sessions persisted only the UI summary in content.
+                    # Restore their model-facing details without rewriting disk.
+                    content = (
+                        TextBlock(text=error_diagnostic_message(source.error)),
+                        *content[1:],
+                    )
                 projected.append(
                     _ProjectedMessage(
                         message=ModelMessage(

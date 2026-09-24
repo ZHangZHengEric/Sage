@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from sagents.v2.contracts.errors import errors_before_side_effect
 
 from sagents.v2.tool import CancelSemantics, SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
@@ -43,14 +44,15 @@ class ShellTools:
     ) -> dict[str, Any]:
         del approval_id, sandbox_approval_mode, command_policy, session_id
         environment: dict[str, str] = {}
-        if env_vars:
-            parsed = json.loads(env_vars)
-            if not isinstance(parsed, dict) or not all(
-                isinstance(key, str) and isinstance(value, str)
-                for key, value in parsed.items()
-            ):
-                raise ValueError("env_vars must be a JSON object of string values")
-            environment = parsed
+        with errors_before_side_effect("tool.arguments_invalid"):
+            if env_vars:
+                parsed = json.loads(env_vars)
+                if not isinstance(parsed, dict) or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in parsed.items()
+                ):
+                    raise ValueError("env_vars must be a JSON object of string values")
+                environment = parsed
         return await self.runtime.shell(
             command,
             invocation,

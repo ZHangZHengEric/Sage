@@ -1031,3 +1031,91 @@ async def test_analyze_image_text_only_model_does_not_read_or_attach(resolved):
     )
     assert result.content[0].value["data"]["reason"] == "multimodal_unsupported"
     assert "followup_user_message" not in result.metadata
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("environment", ["{broken", "[]", '{"KEY": 3}'])
+async def test_shell_environment_validation_fails_before_job_submission(
+    tmp_path, environment
+):
+    plugin = await plugin_for(tmp_path)
+    with pytest.raises(SageV2Error) as failure:
+        await plugin.executor.execute(
+            call(
+                "execute_shell_command",
+                {
+                    "command": "printf should-not-run",
+                    "env_vars": environment,
+                },
+            ),
+            CONTEXT,
+        )
+    assert failure.value.info.code == "tool.arguments_invalid"
+    assert failure.value.info.metadata["side_effect_state"] == "not_applied"
+    assert await plugin.runtime.job_runtime.list_run_jobs("run_1") == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statuses", [(404,), (503,), (503, None), (503, 200)])
+async def test_web_fetch_never_treats_failed_http_response_as_success(
+    statuses, monkeypatch
+):
+    from sagents.v2.runtime.execution.sandbox import NetworkResult
+    from sagents.v2.tool.official.web import WebTools
+
+    class NetworkRuntime:
+        def __init__(self):
+            self.statuses = iter(statuses)
+
+        async def network_request(self, url, invocation, **kwargs):
+            status = next(self.statuses)
+            if status is None:
+                raise TimeoutError("network timeout")
+            return NetworkResult(
+                request_id="request_1",
+                status_code=status,
+                final_url=url,
+                headers={"content-type": "text/plain"},
+                body=b"response body",
+            )
+
+        async def write_bytes(self, *args):
+            pytest.fail("an HTTP error body must not be downloaded")
+
+    async def no_wait(delay):
+        pass
+
+    monkeypatch.setattr("sagents.v2.tool.official.web.asyncio.sleep", no_wait)
+    result = await WebTools(NetworkRuntime()).fetch_webpages(
+        ["https://example.test/resource"], None, retries=len(statuses) - 1
+    )
+    expected = "success" if statuses[-1] == 200 else "error"
+    assert result["status"] == expected
+    assert result["results"][0]["status"] == expected
+    if expected == "error":
+        assert "content" not in result["results"][0]
+        expected_error = (
+            "network timeout" if statuses[-1] is None else f"HTTP {statuses[-1]}"
+        )
+        assert expected_error in result["results"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_reports_partial_batch_failure():
+    from sagents.v2.runtime.execution.sandbox import NetworkResult
+    from sagents.v2.tool.official.web import WebTools
+
+    class NetworkRuntime:
+        async def network_request(self, url, invocation, **kwargs):
+            return NetworkResult(
+                request_id="request_1",
+                status_code=404 if url.endswith("missing") else 200,
+                final_url=url,
+                headers={"content-type": "text/plain"},
+                body=b"body",
+            )
+
+    result = await WebTools(NetworkRuntime()).fetch_webpages(
+        ["https://example.test/missing", "https://example.test/ok"], None, retries=0
+    )
+    assert result["status"] == "partial"
+    assert [row["status"] for row in result["results"]] == ["error", "success"]

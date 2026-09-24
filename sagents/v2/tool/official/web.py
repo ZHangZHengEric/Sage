@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from sagents.v2.contracts.errors import exception_diagnostic_message
 from sagents.v2.runtime.execution.sandbox import NetworkResult
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
@@ -56,7 +57,10 @@ class WebTools:
                         raise RuntimeError(f"HTTP {response.status_code}")
                     break
                 except Exception as exc:  # policy/provider errors are per URL
-                    error = str(exc)
+                    error = exception_diagnostic_message(exc)
+                    # A received HTTP error is not a usable response. Clear it
+                    # also when a later retry raises before returning a value.
+                    response = None
                     if attempt < retries:
                         await asyncio.sleep(min(2**attempt, 4))
             if response is None:
@@ -90,7 +94,13 @@ class WebTools:
                         "content_type": content_type,
                     }
                 )
-        return {"status": "success", "results": results}
+        failures = sum(value["status"] == "error" for value in results)
+        status = (
+            "success" if not failures
+            else "error" if failures == len(results)
+            else "partial"
+        )
+        return {"status": status, "results": results}
 
 
 def _html_to_text(value: str) -> str:
