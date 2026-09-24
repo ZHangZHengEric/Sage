@@ -1,60 +1,103 @@
 from __future__ import annotations
 
 import argparse
-import socket
 import sys
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from sagents.v2.compat import require_python
+from app.server_v2.api import register_routers
+from app.server_v2.bootstrap import ServerHost
+from app.server_v2.core.http import register_exception_handlers
+from app.server_v2.core.lifecycle import ResourceRegistry
+from app.server_v2.core.observability import (
+    LoggingSettings,
+    MetricsRegistry,
+    RequestIdMiddleware,
+    build_observability_router,
+    init_logging,
+)
+from app.server_v2.core.settings import ServerSettings
 
-ENV_FILE = Path(__file__).resolve().parent / ".env"
 
+def create_app(service: ServerHost) -> FastAPI:
+    settings = service.settings
+    database = service.database
+    init_logging(
+        LoggingSettings(
+            level=settings.log_level,
+            format=settings.log_format,
+            directory=settings.log_directory,
+        ),
+        service_name="sage-server",
+    )
+    registry = ResourceRegistry(
+        (database,) if database is not None else (),
+        probe_timeout_seconds=1.0,
+        stop_timeout_seconds=10.0,
+    )
+    metrics = MetricsRegistry("sage-server")
 
-def load_env_file(path: Path | None = None) -> Path | None:
-    candidate = path or ENV_FILE
-    if not candidate.is_file():
-        return None
-    load_dotenv(candidate, override=False)
-    return candidate
-
-
-def _pick_port(host: str, port: int) -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await registry.start()
         try:
-            listener.bind((host, port))
-        except OSError:
-            listener.bind((host, 0))
-        return int(listener.getsockname()[1])
+            await service.start()
+            yield
+        finally:
+            try:
+                await service.close()
+            finally:
+                await registry.stop()
+
+    app = FastAPI(
+        title="Sage Server v2",
+        version="0.1.0",
+        lifespan=lifespan,
+        description="Multi-user AG-UI host for sagents.v2.",
+    )
+    app.state.service = service
+    app.state.resources = registry
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(RequestIdMiddleware)
+    register_exception_handlers(app)
+    app.include_router(build_observability_router(resources=registry, metrics=metrics))
+    register_routers(app, jaeger=bool(settings.jaeger_url))
+    return app
 
 
 def main(argv: list[str] | None = None) -> int:
-    require_python()
-    load_env_file()
     parser = argparse.ArgumentParser(description="Sage Server v2")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--data-root", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    from app.server_v2.bootstrap.app import create_app
-    from app.server_v2.core.settings import ServerV2Settings
+    load_dotenv(Path(__file__).with_name(".env"), override=False)
+    settings = ServerSettings.from_env(data_root=args.data_root)
+    settings = replace(
+        settings,
+        host=args.host or settings.host,
+        port=args.port or settings.port,
+    )
+    from app.server_v2.infrastructure.database import Database, DatabaseSettings
 
-    settings = ServerV2Settings.from_env(data_root=args.data_root)
-    host = args.host or settings.host
-    requested = args.port or settings.port
-    port = _pick_port(host, requested)
-    if port != requested:
-        print(f"port {requested} is busy, switching to {port}", flush=True)
-    application = create_app(settings=replace(settings, host=host, port=port))
+    database = Database(DatabaseSettings(url=settings.database_url()))
+    service = ServerHost(settings, database=database)
     uvicorn.run(
-        application,
-        host=host,
-        port=port,
+        create_app(service),
+        host=settings.host,
+        port=settings.port,
         log_level=settings.log_level,
         log_config=None,
     )

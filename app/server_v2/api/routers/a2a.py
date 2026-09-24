@@ -12,8 +12,8 @@ from google.protobuf.json_format import MessageToDict
 from app.server_v2.adapters.a2a.card import RPC_PATH
 from app.server_v2.adapters.a2a.context import REQUEST_ATTR, SageCallContextBuilder
 from app.server_v2.adapters.a2a.handler import SageRequestHandler
-from app.server_v2.api.deps import CredentialDep, ServiceDep
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.api.deps import A2ADep, CredentialDep, ServiceDep
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.api_keys import (
     SCOPE_INVOKE,
     SCOPE_READ,
@@ -58,7 +58,7 @@ async def a2a_key(
 
     token = (bearer.credentials.strip() if bearer is not None else "")
     if not token:
-        raise ServerV2Error("unauthenticated", "api key required")
+        raise ServerError("unauthenticated", "api key required")
     key = await keys.authenticate(token)
     setattr(request.state, REQUEST_ATTR, key)
     return key
@@ -68,10 +68,10 @@ KeyDep = Annotated[ApiKeyRecord, Depends(a2a_key)]
 
 
 @router.post(RPC_PATH)
-async def jsonrpc(request: Request, key: KeyDep, service: ServiceDep) -> Response:
+async def jsonrpc(request: Request, key: KeyDep, a2a: A2ADep) -> Response:
     await _authorize_method(request, key)
     dispatcher = JsonRpcDispatcher(
-        SageRequestHandler(service.a2a),
+        SageRequestHandler(a2a),
         context_builder=SageCallContextBuilder(),
     )
     return await dispatcher.handle_requests(request)
@@ -79,7 +79,9 @@ async def jsonrpc(request: Request, key: KeyDep, service: ServiceDep) -> Respons
 
 @router.get("/.well-known/agent-card.json")
 @router.get(f"{RPC_PATH}/card")
-async def agent_card(request: Request, key: KeyDep, service: ServiceDep) -> Response:
+async def agent_card(
+    request: Request, key: KeyDep, a2a: A2ADep, service: ServiceDep
+) -> Response:
     """Serve the card for the Agent this key is bound to.
 
     A2A puts the card at a well-known unauthenticated path, which assumes one
@@ -89,7 +91,7 @@ async def agent_card(request: Request, key: KeyDep, service: ServiceDep) -> Resp
     """
 
     require_scope(key, SCOPE_READ)
-    card = await service.a2a.card(key, base_url=_base_url(request, service))
+    card = await a2a.card(key, base_url=_base_url(request, service))
     return JSONResponse(MessageToDict(card, preserving_proto_field_name=False))
 
 

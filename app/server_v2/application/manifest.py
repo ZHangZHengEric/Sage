@@ -12,13 +12,13 @@ from sagents.v2.package.manifest.root import (
 )
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 
-from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.core.settings import ServerSettings
 from app.server_v2.domain.catalog import AgentRecord
 from app.server_v2.application.official import resolve_agent_tools
 
 
 def server_v2_run_manifest(
-    settings: ServerV2Settings | None = None,
+    settings: ServerSettings | None = None,
     *,
     agent: AgentRecord | None = None,
     agent_id: str = "main",
@@ -61,7 +61,7 @@ def server_v2_run_manifest(
     )
 
 
-def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest:
+def server_v2_manifest(settings: ServerSettings | None = None) -> SageManifest:
     """In-process package: no yaml, no env credentials, no model routes.
 
     The live model is injected by ``SAgentBuilder.with_model_provider``.
@@ -105,7 +105,7 @@ def server_v2_manifest(settings: ServerV2Settings | None = None) -> SageManifest
 
 
 def _required_guarantees(
-    settings: ServerV2Settings | None,
+    settings: ServerSettings | None,
 ) -> dict[str, dict[str, object]]:
     """Assert what the Server actually depends on, so a swap fails at build.
 
@@ -127,7 +127,7 @@ def _required_guarantees(
 
 
 def _runtime_capabilities(
-    settings: ServerV2Settings | None,
+    settings: ServerSettings | None,
 ) -> dict[str, CapabilitySelection]:
     log_level = settings.log_level if settings is not None else "info"
     log_format = settings.log_format if settings is not None else "json"

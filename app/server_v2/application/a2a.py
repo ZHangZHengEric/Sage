@@ -20,7 +20,7 @@ from app.server_v2.adapters.a2a.card import agent_card
 from app.server_v2.adapters.a2a.mapping import context_id, to_start_run
 from app.server_v2.adapters.a2a.stream import task_stream
 from app.server_v2.adapters.a2a.task import TaskReducer
-from app.server_v2.core.errors import ServerV2Error, map_sage_error
+from app.server_v2.core.errors import ServerError, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.domain.api_keys import (
     SCOPE_INVOKE,
@@ -168,7 +168,7 @@ class A2AService:
         if run.state in TERMINAL_RUN_STATES:
             # A2A distinguishes "cannot be cancelled" from "does not exist", and
             # a Run that already finished is the former.
-            raise ServerV2Error("conflict", f"task is already {run.state.value}")
+            raise ServerError("conflict", f"task is already {run.state.value}")
         try:
             await self._runs.cancel_run(
                 task_id, context, expected_revision=run.revision
@@ -249,7 +249,7 @@ class A2AService:
             absent="context not found",
         )
         if not admitted.model_ready:
-            raise ServerV2Error("validation", self._execution.model_missing_message())
+            raise ServerError("validation", self._execution.model_missing_message())
         command = to_start_run(
             message,
             session_id=session_id,
@@ -300,7 +300,7 @@ class A2AService:
             # Continuing a finished conversation is a new Task in the same
             # context, not a message to the old one, so this is the client
             # describing a Task that does not exist in the state it assumed.
-            raise ServerV2Error(
+            raise ServerError(
                 "validation", f"task is {run.state.value} and is not waiting for input"
             )
         try:
@@ -314,7 +314,7 @@ class A2AService:
             )
         except SageV2Error as exc:
             raise _absent(exc) from exc
-        except ServerV2Error as exc:
+        except ServerError as exc:
             raise _stale(exc) from exc
         return _Started(
             run_id=task_id,
@@ -451,13 +451,13 @@ class _Page:
             decoded = base64.urlsafe_b64decode(value.encode()).decode()
             marker, session_index, run_index = decoded.split(":")
         except (ValueError, UnicodeDecodeError):
-            raise ServerV2Error("validation", "malformed page token") from None
+            raise ServerError("validation", "malformed page token") from None
         if marker != "v1":
-            raise ServerV2Error("validation", "unsupported page token")
+            raise ServerError("validation", "unsupported page token")
         try:
             return cls(int(session_index), int(run_index))
         except ValueError:
-            raise ServerV2Error("validation", "malformed page token") from None
+            raise ServerError("validation", "malformed page token") from None
 
 
 def _state_of(run) -> int:
@@ -528,13 +528,13 @@ def _call_depth(message: Message) -> int:
     try:
         depth = int(float(raw))
     except (TypeError, ValueError):
-        raise ServerV2Error(
+        raise ServerError(
             "validation", f"{CALL_DEPTH_KEY} must be a number"
         ) from None
     if depth < 0:
-        raise ServerV2Error("validation", f"{CALL_DEPTH_KEY} must not be negative")
+        raise ServerError("validation", f"{CALL_DEPTH_KEY} must not be negative")
     if depth > MAX_CALL_DEPTH:
-        raise ServerV2Error(
+        raise ServerError(
             "validation",
             f"this request is {depth} agents deep, which is past the "
             f"{MAX_CALL_DEPTH}-hop limit",
@@ -542,7 +542,7 @@ def _call_depth(message: Message) -> int:
     return depth
 
 
-def _stale(exc: ServerV2Error) -> ServerV2Error:
+def _stale(exc: ServerError) -> ServerError:
     """Report a lost race over one Task as bad params rather than as -32002.
 
     A2A has no error for "the Task moved under you". -32002 is reserved for a
@@ -553,10 +553,10 @@ def _stale(exc: ServerV2Error) -> ServerV2Error:
 
     if exc.reason in {"not_found", "validation"}:
         return exc
-    return ServerV2Error("validation", exc.message, detail=exc.detail)
+    return ServerError("validation", exc.message, detail=exc.detail)
 
 
-def _absent(exc: SageV2Error) -> ServerV2Error:
+def _absent(exc: SageV2Error) -> ServerError:
     """Report a Task another tenant owns as missing, not as forbidden.
 
     Task ids are guessable enough to enumerate. Answering "denied" for ids that
@@ -565,5 +565,5 @@ def _absent(exc: SageV2Error) -> ServerV2Error:
     """
 
     if exc.info.category == ErrorCategory.AUTHORIZATION:
-        return ServerV2Error("not_found", "task not found")
+        return ServerError("not_found", "task not found")
     return map_sage_error(exc)

@@ -25,8 +25,8 @@ projections are replaceable implementations.
 
 ## Source dependency boundary
 
-`sagents.v2` requires Python 3.12 or newer. The version floor is enforced at
-import time; the legacy Sage runtime remains Python 3.10+.
+`sagents.v2` requires Python 3.12 or newer. The legacy Sage runtime remains
+Python 3.10+.
 
 Production code under `sagents/v2/` may import only:
 

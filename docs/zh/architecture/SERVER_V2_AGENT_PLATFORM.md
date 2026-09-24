@@ -34,7 +34,7 @@ Studio 提供完整 JSON 定义编辑、Schema/宿主能力检查、资源验证
 
 ## 标准插件与资源绑定
 
-默认不开启源码执行。宿主通过 `ServerV2Service(package_extensions=..., package_authorizer=...)` 注册扩展并设置准入函数。启用源码时，`extensions/<plugin_id>.py` 导出标准 ExtensionRegistration，内容计入包哈希；ID/API/版本校验与关闭清理由核心负责。
+默认不开启源码执行。宿主通过 `ServerHost(package_extensions=..., package_authorizer=...)` 注册扩展并设置准入函数。启用源码时，`extensions/<plugin_id>.py` 导出标准 ExtensionRegistration，内容计入包哈希；ID/API/版本校验与关闭清理由核心负责。
 
 包可选择已声明且授权的 `flow.node`、`tool.catalog` 和 `memory.provider`。其他运行基础设施由宿主固定。自定义工具的名称、配置和行为必须由 package_authorizer 核验。已注册 Flow 节点和源码 Tool 插件均有实际运行回归。
 

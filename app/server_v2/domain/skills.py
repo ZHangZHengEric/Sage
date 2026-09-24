@@ -13,7 +13,7 @@ from typing import Literal
 
 from sagents.v2.contracts.common import new_id
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 SkillDimension = Literal["system", "user"]
 
@@ -24,7 +24,7 @@ _UNSAFE_RELATIVE = re.compile(r"(^|/)\.\.(/|$)")
 def normalize_skill_name(name: str) -> str:
     value = str(name or "").strip()
     if not SKILL_NAME.fullmatch(value):
-        raise ServerV2Error("validation", f"invalid skill name: {name!r}")
+        raise ServerError("validation", f"invalid skill name: {name!r}")
     return value
 
 
@@ -44,23 +44,23 @@ def artifact_relative_path(
     skill_name = normalize_skill_name(name)
     version = str(version_id or "").strip()
     if not version or "/" in version or "\\" in version or version in {".", ".."}:
-        raise ServerV2Error("validation", "invalid skill version id")
+        raise ServerError("validation", "invalid skill version id")
     if dimension == "system":
         return f"system/{skill_name}/{version}"
     owner = str(owner_user_id or "").strip()
     if not owner or "/" in owner or "\\" in owner:
-        raise ServerV2Error("validation", "user skills require owner_user_id")
+        raise ServerError("validation", "user skills require owner_user_id")
     return f"users/{owner}/{skill_name}/{version}"
 
 
 def reject_absolute_artifact_path(relative: str) -> str:
     value = str(relative or "").strip().replace("\\", "/")
     if not value:
-        raise ServerV2Error("validation", "artifact path is required")
+        raise ServerError("validation", "artifact path is required")
     if value.startswith("/") or (len(value) > 1 and value[1] == ":"):
-        raise ServerV2Error("validation", "artifact path must be relative")
+        raise ServerError("validation", "artifact path must be relative")
     if _UNSAFE_RELATIVE.search(value) or value.startswith("../"):
-        raise ServerV2Error("validation", "artifact path escapes the skill root")
+        raise ServerError("validation", "artifact path escapes the skill root")
     return value
 
 
@@ -73,7 +73,7 @@ def resolve_artifact_path(data_root: Path, relative: str) -> Path:
     try:
         target.relative_to(root)
     except ValueError as exc:
-        raise ServerV2Error("validation", "artifact path escapes the skill root") from exc
+        raise ServerError("validation", "artifact path escapes the skill root") from exc
     return target
 
 
@@ -84,7 +84,7 @@ def workspace_skill_path(data_root: Path, user_id: str, name: str) -> Path:
     try:
         target.relative_to(root)
     except ValueError as exc:
-        raise ServerV2Error("validation", "workspace skill path is invalid") from exc
+        raise ServerError("validation", "workspace skill path is invalid") from exc
     return target
 
 

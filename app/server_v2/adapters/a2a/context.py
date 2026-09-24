@@ -6,7 +6,7 @@ from a2a.server.context import ServerCallContext
 from a2a.server.routes.common import ServerCallContextBuilder
 from starlette.requests import Request
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.api_keys import ApiKeyRecord
 
 # Where the authenticated credential lives on the request and on the context.
@@ -45,7 +45,7 @@ class SageCallContextBuilder(ServerCallContextBuilder):
     def build(self, request: Request) -> ServerCallContext:
         key = getattr(request.state, REQUEST_ATTR, None)
         if not isinstance(key, ApiKeyRecord):
-            raise ServerV2Error("unauthenticated", "authentication required")
+            raise ServerError("unauthenticated", "authentication required")
         return ServerCallContext(
             user=ApiKeyUser(key),
             state={
@@ -70,7 +70,7 @@ def key_from(context: ServerCallContext | None) -> ApiKeyRecord:
 
     key = None if context is None else context.state.get(STATE_KEY)
     if not isinstance(key, ApiKeyRecord):
-        raise ServerV2Error("unauthenticated", "authentication required")
+        raise ServerError("unauthenticated", "authentication required")
     return key
 
 

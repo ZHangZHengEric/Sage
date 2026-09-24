@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from sagents.v2 import SAgentApplication, SAgentBuilder
 from sagents.v2.contracts.errors import SageV2Error
@@ -30,26 +30,28 @@ from app.server_v2.application.runtime_port import AgentRuntime
 from app.server_v2.application.sessions import SessionLog
 from app.server_v2.application.skill_runtime import install_skill_driver
 from app.server_v2.application.skills import SkillCatalogService
-from app.server_v2.core.errors import ServerV2Error
-from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.core.settings import ServerSettings
 from app.server_v2.domain.api_keys import ApiKeyRecord
 from app.server_v2.infrastructure.a2a_client import A2APluginCache
+from app.server_v2.infrastructure.database import Database
 from app.server_v2.infrastructure.mcp import McpPluginCache
-from app.server_v2.infrastructure.models import (
-    HostModelProvider,
-    bind_model_user,
-    reset_model_user,
+from app.server_v2.infrastructure.models import HostModelProvider
+from app.server_v2.infrastructure.persistence import (
+    ApiKeyStore,
+    CatalogStore,
+    DatabaseApiKeyStore,
+    DatabaseCatalogStore,
+    DatabaseSkillStore,
+    DatabaseThreadIndex,
+    DatabaseUserStore,
+    SkillStore,
+    ThreadIndex,
+    UserStore,
 )
 from app.server_v2.infrastructure.storage import prepare_server_v2_storage
 
 LOGGER = logging.getLogger(__name__)
 
-# What a Run of this tenant's own Agents may reach for. These are Tool-layer
-# scopes and are a different namespace from the ``agent.*`` scopes stored on an
-# API key, which gate the HTTP surface instead. Tools that need one of these
-# are still gated twice per call — by the Run's Tool grant and by the approval
-# policy — so withholding them here would not add a check, it would only make a
-# tenant's own MCP servers and A2A peers unusable from their own session.
 TOOL_SCOPES = (
     "tool.read",
     "tool.write",
@@ -63,52 +65,96 @@ TOOL_SCOPES = (
 )
 
 
-class ServerV2Service:
+@dataclass(frozen=True, slots=True)
+class HostRepositories:
+    users: UserStore
+    catalog: CatalogStore
+    threads: ThreadIndex
+    skills: SkillStore
+    api_keys: ApiKeyStore
+
+
+class RequestContexts:
+    def __init__(self, language: str) -> None:
+        self.language = language
+
+    def for_user(
+        self, user_id: str, *, correlation_id: str | None = None
+    ) -> RequestContext:
+        return RequestContext(
+            actor=ActorRef(
+                principal_id=user_id,
+                principal_type=PrincipalType.USER,
+                tenant_id=user_id,
+                scopes=TOOL_SCOPES,
+            ),
+            trace=TraceContext(correlation_id=correlation_id),
+            language=self.language,
+        )
+
+    def for_a2a_key(
+        self, key: ApiKeyRecord, *, correlation_id: str | None = None
+    ) -> RequestContext:
+        # The owner remains the principal so their A2A threads are accessible
+        # from the web UI and other keys. Keep the credential in delegated_by.
+        return RequestContext(
+            actor=ActorRef(
+                principal_id=key.owner_user_id,
+                principal_type=PrincipalType.USER,
+                tenant_id=key.owner_user_id,
+                delegated_by=key.key_id,
+                scopes=(*key.scopes, *TOOL_SCOPES),
+            ),
+            trace=TraceContext(correlation_id=correlation_id),
+            language=self.language,
+        )
+
+
+class ServerHost:
     def __init__(
         self,
-        settings: ServerV2Settings,
+        settings: ServerSettings,
         *,
         model_provider: ModelProvider | None = None,
-        database=None,
-        users=None,
-        catalog=None,
-        threads=None,
-        skills=None,
-        api_keys=None,
+        database: Database | None = None,
+        repositories: HostRepositories | None = None,
         package_authorizer=None,
         package_extensions=(),
     ) -> None:
+        if database is not None and repositories is not None:
+            raise ValueError("provide database or repositories, not both")
         self.settings = settings
+        self.contexts = RequestContexts(settings.language)
         from sagents.v2.model import ModelConcurrencyBudget
         self.model_budget = ModelConcurrencyBudget(settings.max_concurrent_runs, max_waiting=settings.max_pending_runs)
         self.package_authorizer = package_authorizer
         self.package_extensions = tuple(package_extensions)
-        self.catalog_locks = tuple(asyncio.Lock() for _ in range(64))
         self.agent_management = None
         from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import SchedulerQuotaGroup, InMemoryScheduler
         self.run_quota = SchedulerQuotaGroup(settings.max_concurrent_runs, settings.max_concurrent_runs_per_user, settings.max_pending_runs)
         self._scheduler = InMemoryScheduler(quota_group=self.run_quota, max_pending_items=settings.max_pending_runs)
         self.paths = prepare_server_v2_storage(settings.data_root)
         self.database = database
-        injected = users is not None and catalog is not None and threads is not None
-        if injected:
-            self.users, catalog_store, self.threads = users, catalog, threads
-            from app.server_v2.infrastructure.persistence.skills import MemorySkillStore
-
-            self.skills = skills if skills is not None else MemorySkillStore()
-        else:
-            self.users, catalog_store, self.threads = _mysql_repositories(database)
-            from app.server_v2.infrastructure.persistence.skills import DatabaseSkillStore
-
-            self.skills = skills if skills is not None else DatabaseSkillStore(database)
-        self.api_keys = api_keys if api_keys is not None else _api_key_store(database)
+        if repositories is None:
+            if database is None:
+                raise RuntimeError("MySQL is required")
+            repositories = HostRepositories(
+                users=DatabaseUserStore(database),
+                catalog=DatabaseCatalogStore(database),
+                threads=DatabaseThreadIndex(database),
+                skills=DatabaseSkillStore(database),
+                api_keys=DatabaseApiKeyStore(database),
+            )
+        self.users = repositories.users
+        self.threads = repositories.threads
+        self.skills = repositories.skills
+        self.api_keys = repositories.api_keys
         self.identity = IdentityService(self.users)
         self.skill_catalog = SkillCatalogService(self.skills, self.paths.data_root)
         self.mcp_plugins = McpPluginCache()
         self.a2a_plugins = A2APluginCache()
         self.catalog = CatalogService(
-            catalog_store,
-            self.catalog_locks,
+            repositories.catalog,
             mcp_plugins=self.mcp_plugins,
             a2a_plugins=self.a2a_plugins,
             skills=self.skill_catalog,
@@ -137,14 +183,13 @@ class ServerV2Service:
             runs=self.runs,
             execution=self.execution,
             runtime=self.runtime,
-            context_for=self.request_context,
+            context_for=self.contexts.for_user,
         )
         self.admin = AdminService(
             users=self.users,
             threads=self.threads,
             catalog=self.catalog,
             conversations=self.conversations,
-            username_for=self.username_for,
         )
         self.a2a = A2AService(
             threads=self.threads,
@@ -154,7 +199,7 @@ class ServerV2Service:
             sessions=self.sessions,
             execution=self.execution,
             runtime=self.runtime,
-            context_for=self.a2a_request_context,
+            context_for=self.contexts.for_a2a_key,
         )
         self._host_models: HostModelProvider | None = None
         self._application: SAgentApplication | None = None
@@ -247,85 +292,6 @@ class ServerV2Service:
             report["trace"] = "otlp"
         return report
 
-    def request_context(
-        self, user_id: str, *, correlation_id: str | None = None
-    ) -> RequestContext:
-        return RequestContext(
-            actor=ActorRef(
-                principal_id=user_id,
-                principal_type=PrincipalType.USER,
-                tenant_id=user_id,
-                scopes=TOOL_SCOPES,
-            ),
-            trace=TraceContext(correlation_id=correlation_id),
-            language=self.settings.language,
-        )
-
-    async def username_for(self, user_id: str) -> str:
-        user = await self.users.get_by_id(user_id)
-        return user.username if user is not None else user_id
-
-    def a2a_request_context(
-        self, key: ApiKeyRecord, *, correlation_id: str | None = None
-    ) -> RequestContext:
-        """Build the actor for an inbound A2A call.
-
-        The actor is the key's *owner*, identically to a browser request. The
-        session store authorizes on the full triple
-        ``(tenant_id, principal_type, principal_id)``, so giving the key its own
-        principal identity would make every A2A thread unreadable from the web
-        UI — and unreadable from a second key of the same user. The credential
-        is recorded in ``delegated_by`` instead, which keeps it in the audit
-        trail without partitioning the tenant's own data. Scopes come from the
-        stored key, so a request body can never widen them.
-        """
-
-        return RequestContext(
-            actor=ActorRef(
-                principal_id=key.owner_user_id,
-                principal_type=PrincipalType.USER,
-                tenant_id=key.owner_user_id,
-                delegated_by=key.key_id,
-                # The key's own scopes gate this HTTP surface; the Tool-layer
-                # ones are what the Agent behind it runs with, and are the same
-                # either way because it is the same Agent the tenant configured.
-                scopes=(*key.scopes, *TOOL_SCOPES),
-            ),
-            trace=TraceContext(correlation_id=correlation_id),
-            language=self.settings.language,
-        )
-
-    def ensure_model_configured(self, catalog) -> None:
-        """Fail a Run that has no model before it reaches the runtime."""
-
-        if not self._has_configured_model(catalog):
-            raise ServerV2Error(
-                "validation",
-                self._model_missing_message(),
-            )
-
-    @asynccontextmanager
-    async def bound_model_session(self, *, user_id: str, session_id: str):
-        """Scope a Run's model identity to one caller for the block's lifetime.
-
-        Two bindings are needed and neither is redundant: the ContextVar covers
-        calls made on this task, and the session binding covers calls the
-        runtime makes from its own tasks, which resolve the user through the
-        Run's Session instead.
-        """
-
-        token = bind_model_user(user_id)
-        bound = False
-        try:
-            if self._host_models is not None:
-                self._host_models.bind_session_user(session_id, user_id)
-                bound = True
-            yield
-        finally:
-            if bound and self._host_models is not None:
-                self._host_models.unbind_session_user(session_id)
-            reset_model_user(token)
-
     async def _session_id_for_run(self, run_id: str) -> str | None:
         if self._application is None:
             return None
@@ -336,11 +302,6 @@ class ServerV2Service:
         except SageV2Error:
             return None
         return run.session_id
-
-    def _has_configured_model(self, catalog) -> bool:
-        if self._fallback_model is not None:
-            return True
-        return bool(catalog.models)
 
     def _model_missing_message(self) -> str:
         if str(self.settings.language).lower().startswith("zh"):
@@ -388,28 +349,3 @@ class ServerV2Service:
                 LOGGER.error("background task failed", exc_info=error)
 
         task.add_done_callback(_done)
-
-
-def _api_key_store(database):
-    from app.server_v2.infrastructure.persistence.api_keys import (
-        DatabaseApiKeyStore,
-        MemoryApiKeyStore,
-    )
-
-    return MemoryApiKeyStore() if database is None else DatabaseApiKeyStore(database)
-
-
-def _mysql_repositories(database):
-    if database is None:
-        raise RuntimeError("MySQL is required")
-    from app.server_v2.infrastructure.persistence import (
-        DatabaseCatalogStore,
-        DatabaseThreadIndex,
-        DatabaseUserStore,
-    )
-
-    return (
-        DatabaseUserStore(database),
-        DatabaseCatalogStore(database),
-        DatabaseThreadIndex(database),
-    )

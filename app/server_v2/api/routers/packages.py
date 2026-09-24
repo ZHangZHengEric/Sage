@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import SageV2Error
 from app.server_v2.api.deps import AdminUser, CurrentUser, PackageDep
-from app.server_v2.core.errors import ServerV2Error, map_sage_error, success
+from app.server_v2.core.errors import ServerError, map_sage_error, success
 
 router = APIRouter(prefix="/api/agent-packages", tags=["agent-packages"])
 
@@ -17,7 +17,7 @@ async def result(operation):
     try:
         return success(await operation)
     except PermissionError as exc:
-        raise ServerV2Error("forbidden", str(exc)) from exc
+        raise ServerError("forbidden", str(exc)) from exc
     except ValueError as exc:
         reason = (
             "rate_limited"
@@ -32,9 +32,9 @@ async def result(operation):
             )
             else "validation"
         )
-        raise ServerV2Error(reason, str(exc)) from exc
+        raise ServerError(reason, str(exc)) from exc
     except SyntaxError as exc:
-        raise ServerV2Error("validation", f"plugin syntax error at line {exc.lineno}: {exc.msg}") from exc
+        raise ServerError("validation", f"plugin syntax error at line {exc.lineno}: {exc.msg}") from exc
     except SageV2Error as exc:
         raise map_sage_error(exc) from exc
 

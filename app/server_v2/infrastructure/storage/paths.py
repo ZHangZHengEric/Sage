@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
-class ServerV2Paths:
+class ServerPaths:
     data_root: Path
     runtime_root: Path
     sessions_root: Path
@@ -22,7 +22,7 @@ class ServerV2Paths:
         return path
 
 
-def prepare_server_v2_storage(data_root: Path) -> ServerV2Paths:
+def prepare_server_v2_storage(data_root: Path) -> ServerPaths:
     root = data_root.expanduser().resolve()
     runtime = root / "runtime"
     sessions = runtime / "sessions"
@@ -30,7 +30,7 @@ def prepare_server_v2_storage(data_root: Path) -> ServerV2Paths:
     skills = root / "skills"
     for path in (root, runtime, sessions, tenants, skills):
         path.mkdir(parents=True, exist_ok=True)
-    return ServerV2Paths(
+    return ServerPaths(
         data_root=root,
         runtime_root=runtime,
         sessions_root=sessions,

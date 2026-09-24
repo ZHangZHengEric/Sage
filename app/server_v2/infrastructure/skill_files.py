@@ -9,24 +9,24 @@ import stat
 import zipfile
 from pathlib import Path
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.skills import SkillPackage, normalize_skill_name
 
 
 def inspect_skill_directory(source: Path) -> SkillPackage:
     root = Path(source)
     if not root.is_dir():
-        raise ServerV2Error("validation", "skill package directory does not exist")
+        raise ServerError("validation", "skill package directory does not exist")
     skill_md = root / "SKILL.md"
     if not skill_md.is_file() or skill_md.is_symlink():
-        raise ServerV2Error("validation", "skill package must contain SKILL.md")
+        raise ServerError("validation", "skill package must contain SKILL.md")
     files: dict[str, bytes] = {}
     total = 0
     for candidate in sorted(root.rglob("*")):
         if any(part in {"__pycache__", "node_modules"} for part in candidate.parts):
             continue
         if candidate.is_symlink():
-            raise ServerV2Error("validation", "skill package cannot contain symbolic links")
+            raise ServerError("validation", "skill package cannot contain symbolic links")
         if not candidate.is_file():
             continue
         relative = candidate.relative_to(root).as_posix()
@@ -34,7 +34,7 @@ def inspect_skill_directory(source: Path) -> SkillPackage:
             continue
         content = candidate.read_bytes()
         if len(files) >= 2_000 or total + len(content) > 64 * 1024 * 1024:
-            raise ServerV2Error("validation", "skill package exceeds size limits")
+            raise ServerError("validation", "skill package exceeds size limits")
         files[relative] = content
         total += len(content)
     return _package_from_files(files, fallback_name=root.name)
@@ -44,13 +44,13 @@ def inspect_skill_zip(payload: bytes, *, filename: str = "") -> SkillPackage:
     """Read one skill ZIP in memory. A wrapper folder around SKILL.md is allowed."""
 
     if not payload:
-        raise ServerV2Error("validation", "zip is empty")
+        raise ServerError("validation", "zip is empty")
     if len(payload) > 32 * 1024 * 1024:
-        raise ServerV2Error("validation", "zip exceeds size limits")
+        raise ServerError("validation", "zip exceeds size limits")
     try:
         archive = zipfile.ZipFile(io.BytesIO(payload))
     except zipfile.BadZipFile as exc:
-        raise ServerV2Error("validation", "invalid zip file") from exc
+        raise ServerError("validation", "invalid zip file") from exc
     files: dict[str, bytes] = {}
     total = 0
     with archive:
@@ -61,10 +61,10 @@ def inspect_skill_zip(payload: bytes, *, filename: str = "") -> SkillPackage:
             if relative is None:
                 continue
             if info.file_size > 64 * 1024 * 1024:
-                raise ServerV2Error("validation", "skill package exceeds size limits")
+                raise ServerError("validation", "skill package exceeds size limits")
             content = archive.read(info)
             if len(files) >= 2_000 or total + len(content) > 64 * 1024 * 1024:
-                raise ServerV2Error("validation", "skill package exceeds size limits")
+                raise ServerError("validation", "skill package exceeds size limits")
             files[relative] = content
             total += len(content)
     files = _unwrap_zip_root(files)
@@ -93,7 +93,7 @@ def inspect_skill_markdown(*, name: str, content: str) -> SkillPackage:
 def write_skill_package(destination: Path, package: SkillPackage) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
-        raise ServerV2Error("conflict", "skill artifact already exists")
+        raise ServerError("conflict", "skill artifact already exists")
     staging = destination.parent / f".{destination.name}.staging"
     if staging.exists():
         _rmtree(staging)
@@ -111,7 +111,7 @@ def write_skill_package(destination: Path, package: SkillPackage) -> None:
 
 def copy_skill_tree(source: Path, destination: Path) -> None:
     if destination.exists():
-        raise ServerV2Error("conflict", "workspace skill already exists")
+        raise ServerError("conflict", "workspace skill already exists")
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = destination.parent / f".{destination.name}.staging"
     if staging.exists():
@@ -137,10 +137,10 @@ def _safe_zip_path(filename: str) -> str | None:
         return None
     if any(part in {"__pycache__", "node_modules", ".."} for part in parts):
         if ".." in parts:
-            raise ServerV2Error("validation", f"unsafe path in zip: {filename!r}")
+            raise ServerError("validation", f"unsafe path in zip: {filename!r}")
         return None
     if relative.startswith("/") or (len(relative) > 1 and relative[1] == ":"):
-        raise ServerV2Error("validation", f"unsafe path in zip: {filename!r}")
+        raise ServerError("validation", f"unsafe path in zip: {filename!r}")
     if relative in {".skill-manifest.json", ".materialized-skill.json"}:
         return None
     return "/".join(parts)
@@ -164,7 +164,7 @@ def _unwrap_zip_root(files: dict[str, bytes]) -> dict[str, bytes]:
 
 def _package_from_files(files: dict[str, bytes], *, fallback_name: str) -> SkillPackage:
     if "SKILL.md" not in files:
-        raise ServerV2Error("validation", "skill package must contain SKILL.md")
+        raise ServerError("validation", "skill package must contain SKILL.md")
     digest = hashlib.sha256()
     total = 0
     for relative, content in sorted(files.items()):
@@ -190,7 +190,7 @@ def _description(skill_md: bytes) -> str:
     try:
         text = skill_md.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ServerV2Error("validation", "SKILL.md must be UTF-8") from exc
+        raise ServerError("validation", "SKILL.md must be UTF-8") from exc
     lines = text.splitlines()
     if lines and lines[0].strip() == "---":
         for line in lines[1:]:
@@ -240,7 +240,7 @@ def _copytree(source: Path, destination: Path) -> None:
     destination.mkdir(parents=True)
     for candidate in sorted(source.rglob("*")):
         if candidate.is_symlink():
-            raise ServerV2Error("validation", "skill package cannot contain symbolic links")
+            raise ServerError("validation", "skill package cannot contain symbolic links")
         relative = candidate.relative_to(source)
         target = destination / relative
         if candidate.is_dir():

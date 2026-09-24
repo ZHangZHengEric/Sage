@@ -17,7 +17,7 @@ REASON_STATUS = {
 }
 
 
-class ServerV2Error(Exception):
+class ServerError(Exception):
     def __init__(self, reason: str, message: str, *, detail: str = "") -> None:
         super().__init__(message)
         self.reason = reason
@@ -71,11 +71,11 @@ def error_response(
     )
 
 
-def map_sage_error(exc: SageV2Error) -> ServerV2Error:
+def map_sage_error(exc: SageV2Error) -> ServerError:
     return map_error_info(exc.info)
 
 
-def map_error_info(info) -> ServerV2Error:
+def map_error_info(info) -> ServerError:
     """Classify one runtime error, however it reached us.
 
     Commands report failure as a ``CommandReceipt`` carrying a
@@ -97,4 +97,4 @@ def map_error_info(info) -> ServerV2Error:
         reason = "forbidden"
     else:
         reason = "validation"
-    return ServerV2Error(reason, info.message, detail=info.code)
+    return ServerError(reason, info.message, detail=info.code)

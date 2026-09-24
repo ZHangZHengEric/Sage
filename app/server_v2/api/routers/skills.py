@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, UploadFile
 
 from app.server_v2.api.deps import CatalogDep, CurrentUser, SkillDep
-from app.server_v2.core.errors import ServerV2Error, success
+from app.server_v2.core.errors import ServerError, success
 from app.server_v2.api.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.server_v2.api.schemas.http import (
     SkillBindBody,
@@ -28,7 +28,7 @@ async def upload_skills(
     files: list[UploadFile] = File(...),
 ):
     if not files:
-        raise ServerV2Error("validation", "select at least one zip")
+        raise ServerError("validation", "select at least one zip")
     payloads: list[tuple[str, bytes]] = []
     for item in files:
         filename = item.filename or "unknown.zip"

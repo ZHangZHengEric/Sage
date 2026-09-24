@@ -22,7 +22,7 @@ from sagents.v2.model.provider import ModelProvider
 from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ def require_agent(catalog: UserCatalog, agent_id: str | None) -> AgentRecord:
     if requested:
         match = next((item for item in catalog.agents if item.id == requested), None)
         if match is None:
-            raise ServerV2Error("not_found", f"unknown agent {requested}")
+            raise ServerError("not_found", f"unknown agent {requested}")
         return match
     return next(
         (item for item in catalog.agents if item.id == "main"),
@@ -282,10 +282,10 @@ def upsert_agent(
 ) -> tuple[AgentRecord, UserCatalog]:
     agent_id = str(payload.get("id") or "").strip() or new_id("agent")
     if not _AGENT_ID.fullmatch(agent_id):
-        raise ServerV2Error("validation", f"invalid agent id: {agent_id!r}")
+        raise ServerError("validation", f"invalid agent id: {agent_id!r}")
     name = str(payload.get("name") or "").strip()
     if not name:
-        raise ServerV2Error("validation", "agent name is required")
+        raise ServerError("validation", "agent name is required")
     existing = next((item for item in catalog.agents if item.id == agent_id), None)
     record = AgentRecord(
         id=agent_id,
@@ -299,7 +299,7 @@ def upsert_agent(
         ),
     )
     if record.model_id and not any(item.id == record.model_id for item in catalog.models):
-        raise ServerV2Error("validation", f"unknown model {record.model_id}")
+        raise ServerError("validation", f"unknown model {record.model_id}")
     agents = [item for item in catalog.agents if item.id != agent_id]
     agents.append(record)
     catalog.agents = agents
@@ -309,9 +309,9 @@ def upsert_agent(
 def delete_agent(catalog: UserCatalog, agent_id: str) -> UserCatalog:
     remaining = [item for item in catalog.agents if item.id != agent_id]
     if len(remaining) == len(catalog.agents):
-        raise ServerV2Error("not_found", "agent not found")
+        raise ServerError("not_found", "agent not found")
     if not remaining:
-        raise ServerV2Error("validation", "at least one agent is required")
+        raise ServerError("validation", "at least one agent is required")
     catalog.agents = remaining
     return catalog
 
@@ -321,10 +321,10 @@ def upsert_mcp(
 ) -> tuple[McpServerRecord, UserCatalog]:
     name = str(payload.get("name") or "").strip()
     if not _AGENT_ID.fullmatch(name):
-        raise ServerV2Error("validation", f"invalid mcp name: {name!r}")
+        raise ServerError("validation", f"invalid mcp name: {name!r}")
     protocol = str(payload.get("protocol") or "streamable_http").strip()
     if protocol not in SUPPORTED_MCP_PROTOCOLS:
-        raise ServerV2Error("validation", f"unsupported mcp protocol: {protocol}")
+        raise ServerError("validation", f"unsupported mcp protocol: {protocol}")
     existing = next((item for item in catalog.mcp_servers if item.name == name), None)
     api_key = str(payload.get("api_key") or "")
     secret = existing.api_key if existing is not None else None
@@ -346,7 +346,7 @@ def upsert_mcp(
             ),
         )
     except ValidationError as exc:
-        raise ServerV2Error("validation", _first_error(exc)) from exc
+        raise ServerError("validation", _first_error(exc)) from exc
     servers = [item for item in catalog.mcp_servers if item.name != name]
     servers.append(record)
     catalog.mcp_servers = servers
@@ -358,7 +358,7 @@ def upsert_a2a_agent(
 ) -> tuple[A2AAgentRecord, UserCatalog]:
     name = str(payload.get("name") or "").strip()
     if not _AGENT_ID.fullmatch(name):
-        raise ServerV2Error("validation", f"invalid a2a agent name: {name!r}")
+        raise ServerError("validation", f"invalid a2a agent name: {name!r}")
     existing = next((item for item in catalog.a2a_agents if item.name == name), None)
     api_key = str(payload.get("api_key") or "")
     secret = existing.api_key if existing is not None else None
@@ -379,7 +379,7 @@ def upsert_a2a_agent(
             ),
         )
     except ValidationError as exc:
-        raise ServerV2Error("validation", _first_error(exc, "invalid a2a agent")) from exc
+        raise ServerError("validation", _first_error(exc, "invalid a2a agent")) from exc
     peers = [item for item in catalog.a2a_agents if item.name != name]
     peers.append(record)
     catalog.a2a_agents = peers
@@ -389,7 +389,7 @@ def upsert_a2a_agent(
 def delete_a2a_agent(catalog: UserCatalog, name: str) -> UserCatalog:
     remaining = [item for item in catalog.a2a_agents if item.name != name]
     if len(remaining) == len(catalog.a2a_agents):
-        raise ServerV2Error("not_found", "a2a agent not found")
+        raise ServerError("not_found", "a2a agent not found")
     catalog.a2a_agents = remaining
     return catalog
 
@@ -408,7 +408,7 @@ def _first_error(exc: ValidationError, fallback: str = "invalid mcp server") -> 
 def delete_mcp(catalog: UserCatalog, name: str) -> UserCatalog:
     remaining = [item for item in catalog.mcp_servers if item.name != name]
     if len(remaining) == len(catalog.mcp_servers):
-        raise ServerV2Error("not_found", "mcp server not found")
+        raise ServerError("not_found", "mcp server not found")
     catalog.mcp_servers = remaining
     return catalog
 
@@ -455,11 +455,11 @@ def apply_upsert(
         is_default=bool(payload.get("is_default", False) or not catalog.models),
     )
     if not record.model:
-        raise ServerV2Error("validation", "model is required")
+        raise ServerError("validation", "model is required")
     if not record.api_key.get_secret_value():
         existing = next((item for item in catalog.models if item.id == model_id), None)
         if existing is None:
-            raise ServerV2Error("validation", "api_key is required")
+            raise ServerError("validation", "api_key is required")
         record = record.model_copy(update={"api_key": existing.api_key})
     models = [
         item.model_copy(update={"is_default": False}) if record.is_default else item
@@ -474,7 +474,7 @@ def apply_upsert(
 def apply_delete(catalog: UserCatalog, model_id: str) -> UserCatalog:
     remaining = [item for item in catalog.models if item.id != model_id]
     if len(remaining) == len(catalog.models):
-        raise ServerV2Error("not_found", "model not found")
+        raise ServerError("not_found", "model not found")
     if remaining and not any(item.is_default for item in remaining):
         remaining[0] = remaining[0].model_copy(update={"is_default": True})
     catalog.models = remaining

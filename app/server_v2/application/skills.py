@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import AgentRecord, UserCatalog
 from app.server_v2.domain.skills import (
     AgentSkillBinding,
@@ -52,7 +52,7 @@ class SkillCatalogService:
     async def get(self, skill_id: str, *, user_id: str, role: str) -> SkillRecord:
         record = await self.store.get(skill_id)
         if record is None or not _can_see(record, user_id=user_id, role=role):
-            raise ServerV2Error("not_found", "skill not found")
+            raise ServerError("not_found", "skill not found")
         return record
 
     async def publish_markdown(
@@ -65,7 +65,7 @@ class SkillCatalogService:
         dimension: SkillDimension = "user",
     ) -> SkillRecord:
         if dimension == "system" and role != "admin":
-            raise ServerV2Error("forbidden", "only admin can publish system skills")
+            raise ServerError("forbidden", "only admin can publish system skills")
         package = inspect_skill_markdown(name=name, content=content)
         return await self._publish_package(
             package,
@@ -83,7 +83,7 @@ class SkillCatalogService:
         dimension: SkillDimension = "user",
     ) -> SkillRecord:
         if dimension == "system" and role != "admin":
-            raise ServerV2Error("forbidden", "only admin can publish system skills")
+            raise ServerError("forbidden", "only admin can publish system skills")
         package = inspect_skill_zip(payload, filename=filename)
         return await self._publish_package(
             package,
@@ -104,7 +104,7 @@ class SkillCatalogService:
         for filename, payload in items:
             try:
                 if not str(filename).lower().endswith(".zip"):
-                    raise ServerV2Error("validation", "仅支持 ZIP 文件")
+                    raise ServerError("validation", "仅支持 ZIP 文件")
                 record = await self.publish_zip(
                     payload,
                     filename=filename,
@@ -121,7 +121,7 @@ class SkillCatalogService:
                         "skill": record.public_dict(),
                     }
                 )
-            except ServerV2Error as exc:
+            except ServerError as exc:
                 results.append(
                     {
                         "filename": filename,
@@ -146,7 +146,7 @@ class SkillCatalogService:
         dimension: SkillDimension = "user",
     ) -> SkillRecord:
         if dimension == "system" and role != "admin":
-            raise ServerV2Error("forbidden", "only admin can publish system skills")
+            raise ServerError("forbidden", "only admin can publish system skills")
         package = inspect_skill_directory(source)
         return await self._publish_package(
             package,
@@ -159,12 +159,12 @@ class SkillCatalogService:
     ) -> SkillRecord:
         current = await self.get(skill_id, user_id=user_id, role=role)
         if current.dimension == "system" and role != "admin":
-            raise ServerV2Error("forbidden", "only admin can edit system skills")
+            raise ServerError("forbidden", "only admin can edit system skills")
         if current.dimension == "user" and current.owner_user_id != user_id and role != "admin":
-            raise ServerV2Error("forbidden", "skill not found")
+            raise ServerError("forbidden", "skill not found")
         package = inspect_skill_markdown(name=current.name, content=content)
         if package.name != current.name:
-            raise ServerV2Error("validation", "skill name cannot be changed")
+            raise ServerError("validation", "skill name cannot be changed")
         source = current.absolute_path(self.data_root)
         if source.is_dir():
             files = dict(inspect_skill_directory(source).files)
@@ -185,9 +185,9 @@ class SkillCatalogService:
     async def disable(self, skill_id: str, *, user_id: str, role: str) -> None:
         current = await self.get(skill_id, user_id=user_id, role=role)
         if current.dimension == "system" and role != "admin":
-            raise ServerV2Error("forbidden", "only admin can delete system skills")
+            raise ServerError("forbidden", "only admin can delete system skills")
         if current.dimension == "user" and current.owner_user_id != user_id and role != "admin":
-            raise ServerV2Error("forbidden", "skill not found")
+            raise ServerError("forbidden", "skill not found")
         await self.store.disable(skill_id)
 
     async def bind_agent_skills(
@@ -205,7 +205,7 @@ class SkillCatalogService:
         for position, name in enumerate(ordered):
             match = pick_visible_skill(visible, name=name, user_id=owner_user_id)
             if match is None:
-                raise ServerV2Error("validation", f"unknown skill: {name}")
+                raise ServerError("validation", f"unknown skill: {name}")
             resolved.append(match)
             bindings.append(
                 AgentSkillBinding(
@@ -242,7 +242,7 @@ class SkillCatalogService:
         record = await self.get(skill_id, user_id=user_id, role=role)
         skill_md = record.absolute_path(self.data_root) / "SKILL.md"
         if not skill_md.is_file():
-            raise ServerV2Error("not_found", "skill artifact is missing")
+            raise ServerError("not_found", "skill artifact is missing")
         return skill_md.read_text(encoding="utf-8")
 
     async def write_workspace_skill(
@@ -255,7 +255,7 @@ class SkillCatalogService:
         if not target.is_dir():
             source = await self._catalog_source(user_id, skill_name)
             if source is None:
-                raise ServerV2Error("not_found", f"skill {skill_name!r} is not bound")
+                raise ServerError("not_found", f"skill {skill_name!r} is not bound")
             copy_skill_tree(source, target)
         skill_md = target / "SKILL.md"
         inspect_skill_markdown(name=skill_name, content=content)
@@ -272,7 +272,7 @@ class SkillCatalogService:
         try:
             current = package_sha256_of(target)
             expected = package_sha256_of(source)
-        except ServerV2Error:
+        except ServerError:
             return "local"
         return "current" if current == expected else "modified"
 

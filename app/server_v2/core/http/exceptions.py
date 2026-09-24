@@ -3,13 +3,13 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 
-from app.server_v2.core.errors import ServerV2Error, error_response
+from app.server_v2.core.errors import ServerError, error_response
 from app.server_v2.core.failures import DependencyUnavailableError
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    @app.exception_handler(ServerV2Error)
-    async def handle_server_error(_request: Request, error: ServerV2Error):
+    @app.exception_handler(ServerError)
+    async def handle_server_error(_request: Request, error: ServerError):
         return error_response(
             status_code=error.status_code,
             message=error.message,

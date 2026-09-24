@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.server_v2.api.deps import CatalogDep, CurrentUser, ServiceDep
+from app.server_v2.api.deps import CatalogDep, CurrentUser, PackageDep
 from app.server_v2.application.official import official_tool_catalog
 from app.server_v2.core.errors import success
 from app.server_v2.api.schemas import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
@@ -10,9 +10,9 @@ router = APIRouter(tags=["agents"], responses={**AUTH_ERRORS, **VALIDATION_ERROR
 
 
 @router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])
-async def list_tools(_: CurrentUser, service: ServiceDep):
+async def list_tools(_: CurrentUser, packages: PackageDep):
     from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
-    definitions = AgentManagementToolPlugin(service.agent_management).definitions
+    definitions = AgentManagementToolPlugin(packages).definitions
     return success([*official_tool_catalog(), *[
         dict(name=item.name, category="agent-management", source="host", default=False)
         for item in definitions]])

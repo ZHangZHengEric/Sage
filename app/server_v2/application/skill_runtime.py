@@ -20,7 +20,7 @@ from sagents.v2.skill import (
 )
 
 from app.server_v2.application.loop import compose_catalog_loop
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.skills import (
     SkillPackage,
     SkillRecord,
@@ -159,7 +159,7 @@ class ReadThroughSkillWorkspace:
             await bounded_to_thread(
                 "skill-io", lambda: write_skill_package(host_cache, package)
             )
-        except ServerV2Error as exc:
+        except ServerError as exc:
             if exc.reason != "conflict" or not host_cache.is_dir():
                 raise
         current_hash = await bounded_to_thread(

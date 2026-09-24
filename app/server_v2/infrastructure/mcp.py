@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import McpServerRecord
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ def to_mcp_config(record: McpServerRecord, *, required: bool = False) -> McpServ
             required=required,
         )
     except Exception as exc:
-        raise ServerV2Error("validation", f"invalid mcp {record.name}: {exc}") from exc
+        raise ServerError("validation", f"invalid mcp {record.name}: {exc}") from exc
 
 
 async def discover_mcp_tools(config: McpServerConfig) -> list[str]:
@@ -31,7 +31,7 @@ async def discover_mcp_tools(config: McpServerConfig) -> list[str]:
     errors = plugin.discovery_errors()
     if config.name in errors:
         info = errors[config.name]
-        raise ServerV2Error("validation", info.message)
+        raise ServerError("validation", info.message)
     return [item.name for item in definitions]
 
 
@@ -53,7 +53,7 @@ def mcp_server_configs(
             continue
         try:
             configs.append(to_mcp_config(item, required=False))
-        except ServerV2Error:
+        except ServerError:
             _LOGGER.warning("skipping unusable mcp server %r", item.name)
     return tuple(configs)
 

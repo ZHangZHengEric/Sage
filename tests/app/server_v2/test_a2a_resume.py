@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import pytest
 from fastapi.testclient import TestClient
 
-from app.server_v2.bootstrap.app import create_app
+from app.server_v2.main import create_app
 from sagents.v2.contracts.items import UsageSummary
 from sagents.v2.model.contracts import (
     ModelEventKind,

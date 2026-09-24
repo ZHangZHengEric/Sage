@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.skills import (
     artifact_relative_path,
     reject_absolute_artifact_path,
@@ -33,9 +33,9 @@ def test_artifact_relative_path_is_dimension_scoped():
 
 
 def test_mysql_path_helpers_reject_absolute_paths():
-    with pytest.raises(ServerV2Error, match="relative"):
+    with pytest.raises(ServerError, match="relative"):
         reject_absolute_artifact_path("/var/sage/skills/system/demo/v1")
-    with pytest.raises(ServerV2Error, match="escapes"):
+    with pytest.raises(ServerError, match="escapes"):
         reject_absolute_artifact_path("../etc/passwd")
 
 

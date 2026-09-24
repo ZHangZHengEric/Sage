@@ -10,21 +10,13 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_JWT_SECRET = "dev-only-change-me-sage-server-jwt-secret"
 
 
-def _env(name: str, default: str) -> str:
-    value = os.environ.get(name)
-    return default if value is None or not value.strip() else value.strip()
-
-
-def _optional_env(name: str) -> str | None:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return None
-    return value.strip()
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, "").strip() or default
 
 
 def _choice_env(name: str, default: str, choices: frozenset[str]) -> str:
     value = _env(name, default).lower()
-    if value == "warn" and "warning" in choices:
+    if value == "warn":
         value = "warning"
     if value not in choices:
         expected = ", ".join(sorted(choices))
@@ -44,7 +36,7 @@ def _jwt_secret() -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class ServerV2Settings:
+class ServerSettings:
     host: str
     port: int
     data_root: Path
@@ -55,7 +47,7 @@ class ServerV2Settings:
     admin_password: str
     log_level: str = "info"
     log_format: str = "json"
-    log_directory: str | None = None
+    log_directory: str = "./logs"
     mysql_url: str | None = None
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
@@ -88,17 +80,17 @@ class ServerV2Settings:
         ):
             raise ValueError("server run concurrency and queue limits must be positive")
 
-    def database_url(self) -> str | None:
+    def database_url(self) -> str:
         if not self.mysql_url:
-            return None
+            raise ValueError("MySQL URL is required")
         url = self.mysql_url
         if url.startswith("mysql://"):
             return "mysql+aiomysql://" + url[len("mysql://") :]
         return url
 
     @classmethod
-    def from_env(cls, *, data_root: Path | None = None) -> ServerV2Settings:
-        mysql_url = _optional_env("SAGE_SERVER_MYSQL_URL")
+    def from_env(cls, *, data_root: Path | None = None) -> ServerSettings:
+        mysql_url = _env("SAGE_SERVER_MYSQL_URL")
         if not mysql_url:
             raise ValueError("SAGE_SERVER_MYSQL_URL is required")
         root = data_root or Path(_env("SAGE_SERVER_DATA", "data/server_v2"))
@@ -121,7 +113,7 @@ class ServerV2Settings:
                 "json",
                 frozenset({"json", "text"}),
             ),
-            log_directory=_optional_env("SAGE_SERVER_LOG_DIRECTORY"),
+            log_directory=_env("SAGE_SERVER_LOG_DIRECTORY", "./logs"),
             max_concurrent_runs=int(_env("SAGE_SERVER_MAX_CONCURRENT_RUNS", "8")),
             max_concurrent_runs_per_user=int(
                 _env("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "2")
@@ -131,7 +123,7 @@ class ServerV2Settings:
             max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             mysql_url=mysql_url,
-            jaeger_url=_optional_env("SAGE_SERVER_JAEGER_URL"),
+            jaeger_url=_env("SAGE_SERVER_JAEGER_URL") or None,
             jaeger_service_name=_env("SAGE_SERVER_JAEGER_SERVICE_NAME", "sage-server"),
             jaeger_public_url=_env(
                 "SAGE_SERVER_JAEGER_PUBLIC_URL",

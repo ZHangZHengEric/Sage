@@ -11,7 +11,7 @@ from sagents.v2.tool.plugins.a2a import (
     A2ATransport,
 )
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import A2AAgentRecord
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def to_a2a_config(record: A2AAgentRecord, *, required: bool = False) -> A2AAgent
             required=required,
         )
     except Exception as exc:
-        raise ServerV2Error(
+        raise ServerError(
             "validation", f"invalid a2a agent {record.name}: {exc}"
         ) from exc
 
@@ -36,7 +36,7 @@ async def discover_a2a_skills(config: A2AAgentConfig) -> list[str]:
     definitions = await plugin.list_tools(run_id="discover")
     errors = plugin.discovery_errors()
     if config.name in errors:
-        raise ServerV2Error("validation", errors[config.name].message)
+        raise ServerError("validation", errors[config.name].message)
     return [item.name for item in definitions]
 
 
@@ -56,7 +56,7 @@ def a2a_agent_configs(
             continue
         try:
             configs.append(to_a2a_config(item, required=False))
-        except ServerV2Error:
+        except ServerError:
             _LOGGER.warning("skipping unusable a2a agent %r", item.name)
     return tuple(configs)
 

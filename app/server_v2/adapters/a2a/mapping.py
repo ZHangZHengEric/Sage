@@ -6,7 +6,7 @@ from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 
 from app.server_v2.adapters.agui.mapping import validate_agui_id
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 # A2A identity, expressed in Sage terms:
 #   Task.id        -> run_id      (one A2A Task is one Sage Run)
@@ -31,7 +31,7 @@ def context_id(message: Message) -> str:
 def message_id(message: Message) -> str:
     raw = str(message.message_id or "").strip()
     if not raw:
-        raise ServerV2Error("validation", "messageId is required")
+        raise ServerError("validation", "messageId is required")
     return validate_agui_id(raw, field="messageId")
 
 
@@ -76,9 +76,9 @@ def to_blocks(parts) -> tuple[TextBlock | ImageBlock, ...]:
                 ImageBlock(uri=part.url, mime_type=part.media_type or "image/*")
             )
         else:
-            raise ServerV2Error(
+            raise ServerError(
                 "validation", f"unsupported message part: {field or 'empty'}"
             )
     if not blocks:
-        raise ServerV2Error("validation", "message has no supported content")
+        raise ServerError("validation", "message has no supported content")
     return tuple(blocks)

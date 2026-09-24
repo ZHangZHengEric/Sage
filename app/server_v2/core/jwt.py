@@ -8,7 +8,7 @@ from typing import Any
 
 import jwt
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 
 def hash_password(password: str) -> str:
@@ -61,11 +61,11 @@ def decode_access_token(token: str, *, secret: str) -> dict[str, Any]:
     try:
         claims = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError as exc:
-        raise ServerV2Error(
+        raise ServerError(
             "unauthenticated", "session expired", detail="token expired"
         ) from exc
     except Exception as exc:
-        raise ServerV2Error("unauthenticated", "invalid token") from exc
+        raise ServerError("unauthenticated", "invalid token") from exc
     if not claims.get("userid"):
-        raise ServerV2Error("unauthenticated", "invalid token")
+        raise ServerError("unauthenticated", "invalid token")
     return claims

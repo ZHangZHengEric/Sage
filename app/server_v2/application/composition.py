@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import (
     A2AAgentRecord,
     AgentRecord,
@@ -85,7 +85,7 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
         mcp_servers = _names(raw.get("mcp_servers"), field="mcp server")
         a2a_agents = _names(raw.get("a2a_agents"), field="a2a agent")
         call_depth = _depth(raw.get("call_depth"))
-    except (ServerV2Error, TypeError, ValueError) as exc:
+    except (ServerError, TypeError, ValueError) as exc:
         raise _invalid(str(exc)) from exc
     if agent.id != command.agent_id:
         raise _invalid("run composition does not match the Run agent")

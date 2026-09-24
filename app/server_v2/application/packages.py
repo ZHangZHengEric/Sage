@@ -11,7 +11,7 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.execution import RunExecutionBinding
 from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import enabled_a2a_agents, enabled_mcp_servers
 from app.server_v2.application.official import (
     official_tool_catalog,
@@ -27,24 +27,25 @@ from app.server_v2.application.manifest import server_v2_manifest
 
 
 class CatalogPackageModel:
-    def __init__(self, host, user_id, routes):
-        self.host, self.user_id, self.routes = host, user_id, routes
+    def __init__(self, catalog, execution, user_id, routes):
+        self.catalog, self.execution = catalog, execution
+        self.user_id, self.routes = user_id, routes
 
     @asynccontextmanager
     async def provider(self, binding):
-        catalog = await self.host.catalog.get(self.user_id)
+        catalog = await self.catalog.get(self.user_id)
         route = self.routes.get(binding)
         selected = route.model if route else "default"
         record = package_model_record(catalog, selected)
         if record is None:
-            if selected != "default" or self.host.execution.fallback_model is None:
-                raise ServerV2Error(
+            if selected != "default" or self.execution.fallback_model is None:
+                raise ServerError(
                     "validation", "package model is unavailable in caller catalog"
                 )
-            yield self.host.execution.fallback_model
+            yield self.execution.fallback_model
             return
         _provider, scope = await open_model_lease(
-            self.host.execution, self.user_id, record
+            self.execution, self.user_id, record
         )
         try:
             yield scope.provider
@@ -70,8 +71,8 @@ class CatalogPackageModel:
 
 
 class PackageBindings:
-    def __init__(self, host, user_id):
-        self.host, self.user_id = host, user_id
+    def __init__(self, paths, execution, user_id):
+        self.paths, self.execution, self.user_id = paths, execution, user_id
 
     async def acquire(self, request):
         if (
@@ -80,7 +81,7 @@ class PackageBindings:
         ):
             raise PermissionError("execution identity does not match package owner")
         policy = getattr(request.workspace_policy, "value", request.workspace_policy)
-        workspace = self.host.paths.workspace_dir(self.user_id)
+        workspace = self.paths.workspace_dir(self.user_id)
         if policy == "private_child":
             workspace = (
                 workspace
@@ -91,7 +92,7 @@ class PackageBindings:
             raise ValueError("unsupported workspace policy")
         workspace.mkdir(parents=True, exist_ok=True)
         handle = await provision_workspace(
-            self.host.execution, workspace, request.context, run_id=request.run_id
+            self.execution, workspace, request.context, run_id=request.run_id
         )
         return RunExecutionBinding(
             run_id=request.run_id,
@@ -100,19 +101,19 @@ class PackageBindings:
             workspace_root="/workspace",
             workspace_policy=request.workspace_policy,
             sandbox=handle,
-            grant_issuer=self.host.execution.sandbox_grant_issuer,
+            grant_issuer=self.execution.sandbox_grant_issuer,
             lifecycle=request.lifecycle,
         )
 
 
 class PackageBuilder(SAgentBuilder):
-    def __init__(self, host, root):
+    def __init__(self, settings, run_quota, root):
         super().__init__()
-        self.host, self.root = host, root
+        self.settings, self.run_quota, self.root = settings, run_quota, root
 
     async def build(self, manifest, **kwargs):
         # Temporary validation never creates permanent MySQL table families.
-        settings = self.host.settings
+        settings = self.settings
         if self.root.name.startswith("validate-"):
             settings = replace(settings, mysql_url=None)
         runtime = server_v2_manifest(settings).runtime
@@ -144,8 +145,8 @@ class PackageBuilder(SAgentBuilder):
         )
 
         scheduler = InMemoryScheduler(
-            quota_group=self.host.run_quota,
-            max_pending_items=self.host.settings.max_pending_runs,
+            quota_group=self.run_quota,
+            max_pending_items=self.settings.max_pending_runs,
         )
         self.with_scheduler(scheduler)
         try:
@@ -177,7 +178,7 @@ class ServerAgentManagement(AgentManagementService):
         )
 
     def context_for(self, user_id: str):
-        return self.host.request_context(user_id)
+        return self.host.contexts.for_user(user_id)
 
     def capacity_snapshot(self) -> dict:
         group = self.host.run_quota
@@ -340,12 +341,19 @@ class ServerAgentManagement(AgentManagementService):
 
         user_id = context.actor.principal_id
         builder = (
-            PackageBuilder(self.host, root)
+            PackageBuilder(self.host.settings, self.host.run_quota, root)
             .with_defaults(session_root=root)
             .with_model_provider(
-                CatalogPackageModel(self.host, user_id, bundle.manifest.models)
+                CatalogPackageModel(
+                    self.host.catalog,
+                    self.host.execution,
+                    user_id,
+                    bundle.manifest.models,
+                )
             )
-            .with_execution_binding_provider(PackageBindings(self.host, user_id))
+            .with_execution_binding_provider(
+                PackageBindings(self.host.paths, self.host.execution, user_id)
+            )
             .with_agent_management(self)
             .with_tool_policy(server_tool_policy(self))
         )
@@ -416,7 +424,7 @@ class ServerAgentManagement(AgentManagementService):
         import logging
 
         for user in await self.host.users.list_users():
-            context = self.host.request_context(user.user_id)
+            context = self.host.contexts.for_user(user.user_id)
             offset = 0
             while True:
                 rows = await self.list_runs(context, limit=100, offset=offset)
